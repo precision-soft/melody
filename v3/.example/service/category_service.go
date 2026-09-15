@@ -61,7 +61,7 @@ func (instance *CategoryService) List() ([]*entity.Category, error) {
 }
 
 func (instance *CategoryService) FindById(id string) (*entity.Category, bool, error) {
-    /* an identifier the cache-key grammar refuses names a row no write door admits, so it is answered as absent instead of asked of a cache that would refuse the question with a 500 */
+
     if false == CacheSafeIdentifier(id) {
         return nil, false, nil
     }
@@ -141,7 +141,6 @@ func (instance *CategoryService) Update(
         return nil, false, nil
     }
 
-    /* the loaded entity is the repository's own stored value under the in-memory configuration, shared with every concurrent reader, so the change lands on a copy: a refused update leaves the stored entity exactly as it was */
     modified := *category
     modified.Name = name
 

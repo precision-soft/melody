@@ -36,9 +36,8 @@ type EventDispatcherAdapter struct {
     listenerRegistrations   map[string][]adapterListenerRegistration
     subscriberRegistrations map[uint64][]eventcontract.ListenerRegistration
 
-    /* nextSubscriberId issues the identity AddSubscriber answers with, this bookkeeping's own — the wrapped dispatcher issues its own for the same installation, and neither is read through the other. */
     nextSubscriberId uint64
-    /* subscriberMutex serializes whole subscriber installations and removals against each other; it is always taken before mutex and never inside it. The per-step mutex keeps each individual record consistent, but a subscriber spans several of them: without this outer section, a RemoveSubscriber interleaved with the AddSubscriber that issued its registration removes the half already installed while the rest keeps arriving under a record the remover was just told is gone. */
+
     subscriberMutex sync.Mutex
 }
 
@@ -73,7 +72,6 @@ func (instance *EventDispatcherAdapter) AddListener(eventName string, listener e
 func (instance *EventDispatcherAdapter) RemoveListener(registration eventcontract.ListenerRegistration) bool {
     removed := instance.eventDispatcher.RemoveListener(registration)
 
-    /* the bookkeeping is scrubbed whether or not the wrapped dispatcher still held the listener. Returning early on false left the adapter's own record of a listener that no longer exists — reported by RegisteredEvents forever and removable by nothing, since every retry takes the same early return */
     instance.mutex.Lock()
     listenerList, exists := instance.listenerRegistrations[registration.EventName]
     if true == exists {
@@ -148,7 +146,6 @@ func (instance *EventDispatcherAdapter) AddSubscriber(subscriber eventcontract.E
         instance.mutex.Unlock()
     }
 
-    /* the wrapped dispatcher is NOT asked to install the subscriber — the listeners were installed through it one by one above, so it holds them already. The registration answered is this bookkeeping's, and it is the one RemoveSubscriber takes. */
     return eventcontract.SubscriberRegistration{SubscriberId: subscriberId}
 }
 
@@ -237,9 +234,7 @@ func (instance *EventDispatcherAdapter) markListenerRegistration(
     }
 }
 
-/* RegisteredEvents reports a point-in-time view: a registration or removal running concurrently is observed mid-step — a listener already live in the wrapped dispatcher whose record here is not written yet, or the reverse during removal. The view settles the moment the concurrent (un)installation finishes; dispatch correctness never depends on it.
-
-   The view covers what was registered THROUGH the adapter: a listener added directly on the wrapped dispatcher is live for dispatch but absent here, and a mark applied through the adapter for such a registration arms the wrapped dispatcher's guarantee while this bookkeeping — inspection only — has nothing to record it on. One registration surface per dispatcher keeps the inspection truthful. */
+/* RegisteredEvents is an inspection snapshot of registrations made through this adapter. Concurrent changes can temporarily differ from the wrapped dispatcher, and direct registrations bypass this bookkeeping. Dispatch correctness does not depend on the snapshot. */
 func (instance *EventDispatcherAdapter) RegisteredEvents() []eventcontract.RegisteredEvent {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
@@ -254,12 +249,11 @@ func (instance *EventDispatcherAdapter) RegisteredEvents() []eventcontract.Regis
     registeredEvents := make([]eventcontract.RegisteredEvent, 0, len(eventNameList))
 
     for _, eventName := range eventNameList {
-        /* sort a copy: the map-owned slice is shared, and RLock permits concurrent readers that would otherwise race sorting the same backing array */
+
         registeredSlice := instance.listenerRegistrations[eventName]
         listenerList := make([]adapterListenerRegistration, len(registeredSlice))
         copy(listenerList, registeredSlice)
 
-        /* equal priorities break the tie by the wrapped dispatcher's listener id, the same tiebreak dispatch uses: any adapter-side counter is issued under a different lock than the id, so two concurrent registrations can receive two counters in opposite orders and the inspector would report an execution order the dispatch never uses — permanently. */
         sort.SliceStable(
             listenerList,
             func(i int, j int) bool {
@@ -317,7 +311,6 @@ func (instance *EventDispatcherAdapter) addListenerRegistration(
 ) eventcontract.ListenerRegistration {
     listenerProgramCounter := reflect.ValueOf(listener).Pointer()
 
-    /* the original event travels to the listener, not a reconstruction of it: the adapter is a drop-in for the plain dispatcher, which hands the listener the dispatched value itself, so a custom event type stays type-assertable and a field a listener writes is seen by the caller. Reconstructing through NewEventFromEvent discarded the concrete type and every non-propagation field, so the same listener saw a different object through the adapter than through the dispatcher. The wrapper stays only to carry the inspection metadata the registration records. */
     wrappedListener := func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
         return listener(runtimeInstance, eventValue)
     }

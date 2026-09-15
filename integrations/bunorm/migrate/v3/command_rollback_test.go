@@ -55,7 +55,6 @@ func TestRollbackCommand_RollsBackLastGroupUnderLock(t *testing.T) {
     }
 }
 
-/* a rollback that fails part way names the group it was walking on the way out: bun hands the group back beside the failure, and reporting nothing left the operator with only the failing migration — which schema changes were already undone could only be reconstructed from the migrations table by hand */
 func TestRollbackCommand_AFailedRollbackNamesTheGroupItWasWalking(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = appliedMigrationRowsHook("20240101000000")
@@ -90,7 +89,6 @@ func TestRollbackCommand_AFailedRollbackNamesTheGroupItWasWalking(t *testing.T) 
     }
 }
 
-/* the count of the group a failed rollback was walking is promised on BOTH renderings, and the text block draws a fixed set of keys: a key of the caller's own naming reaches the machine document and is dropped from the block a person reads, silently and with no fallthrough. */
 func TestRollbackCommand_TheFailedGroupCountRendersOnBothRenderings(t *testing.T) {
     newFailingRollback := func(t *testing.T) (runtimecontract.Runtime, *migrate.Migrations) {
         t.Helper()
@@ -198,7 +196,6 @@ func TestRollbackCommand_FailedUnlockFailsTheCommand(t *testing.T) {
     }
 }
 
-/* the same remedy-naming refusal the migrate sibling proves: bun's bare lock error names neither the database nor db:unlock, and rollback used to return it as it came */
 func TestRollbackCommand_LockFailureNamesTheRemedy(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.execHook = func(query string) error {
@@ -252,7 +249,6 @@ func TestRollbackCommand_LockFailureNamesTheRemedy(t *testing.T) {
     }
 }
 
-/* the rollback command hands its posture to the migrations the same way the migrate command does: through the context, with the process-wide fallback installed only for the length of the run */
 func TestRollbackCommand_HandsItsPostureToTheMigrationsThroughTheContext(t *testing.T) {
     t.Cleanup(func() {
         processRunnerOption.Store(nil)
@@ -295,7 +291,6 @@ func TestRollbackCommand_HandsItsPostureToTheMigrationsThroughTheContext(t *test
         t.Fatalf("the per-query line reached the process-wide fallback instead: %q", elsewhere.String())
     }
 
-    /* the context is the channel, not the fallback: with the fallback installed for the run, a migration handed the plain runtime context would still print on the command's writer, so what separates the two is the option the context carries */
     if false == carriedByTheContext {
         t.Fatal("the migration was not handed the context carrying the command's posture")
     }

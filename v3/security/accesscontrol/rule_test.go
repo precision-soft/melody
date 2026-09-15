@@ -4,7 +4,6 @@ import (
     "testing"
 )
 
-/* the four modes are the whole point of the package, and each one answers differently for the same set of paths. The table is the specification: a reader who wants to know which constructor to reach for reads the columns, and a change that blurs two modes into one fails here. */
 func TestTheFourMatchingModesGovernDifferentPaths(t *testing.T) {
     paths := []string{"/admin", "/admin/panel", "/administrator", "/x/admin", "/a/admin/b"}
 
@@ -51,7 +50,6 @@ func TestTheFourMatchingModesGovernDifferentPaths(t *testing.T) {
     }
 }
 
-/* NewRule is the door for a mode chosen by a variable, so it must answer exactly what the mode-specific constructor answers — otherwise the two doors drift and the wrapper becomes a second implementation. */
 func TestNewRuleAnswersTheSameAsTheModeSpecificConstructor(t *testing.T) {
     config := RuleConfig{Attributes: []string{"ROLE_ADMIN"}}
 
@@ -83,7 +81,6 @@ func TestNewRuleAnswersTheSameAsTheModeSpecificConstructor(t *testing.T) {
     }
 }
 
-/* the zero value is refused rather than defaulted: the reach is what an access control rule IS, and a caller who omits it would inherit one they never chose — which is how a rule silently stops governing a path it used to. */
 func TestNewRuleRefusesAnUnspecifiedMatching(t *testing.T) {
     defer func() {
         if nil == recover() {
@@ -94,7 +91,6 @@ func TestNewRuleRefusesAnUnspecifiedMatching(t *testing.T) {
     _ = NewRule("/admin", MatchingUnspecified, RuleConfig{Attributes: []string{"ROLE_ADMIN"}})
 }
 
-/* a raw public rule is the longest match wherever it reaches, so it opens every path merely beginning with the prefix and shadows a bounded denial that would have refused. */
 func TestNewRawPrefixRuleRefusesPublicAccess(t *testing.T) {
     defer func() {
         if nil == recover() {
@@ -105,7 +101,6 @@ func TestNewRawPrefixRuleRefusesPublicAccess(t *testing.T) {
     _ = NewRawPrefixRule("/health", RuleConfig{Attributes: []string{"PUBLIC_ACCESS"}})
 }
 
-/* the same attribute is allowed on the bounded reaches, where it cannot claim a path outside the one it names. */
 func TestPublicAccessIsAllowedOnTheBoundedReaches(t *testing.T) {
     defer func() {
         if recovered := recover(); nil != recovered {
@@ -117,7 +112,6 @@ func TestPublicAccessIsAllowedOnTheBoundedReaches(t *testing.T) {
     _ = NewExactRule("/health", RuleConfig{Attributes: []string{"PUBLIC_ACCESS"}})
 }
 
-/* an empty segment prefix would normalize to "" and answer for every path no other rule claimed, so a rule declared for one section would silently govern the whole application. */
 func TestNewSegmentPrefixRuleRefusesAnEmptyPath(t *testing.T) {
     defer func() {
         if nil == recover() {
@@ -128,7 +122,6 @@ func TestNewSegmentPrefixRuleRefusesAnEmptyPath(t *testing.T) {
     _ = NewSegmentPrefixRule("", RuleConfig{Attributes: []string{"ROLE_ADMIN"}})
 }
 
-/* the raw reach keeps the empty spelling: it is the declared catch-all fallback, which answers only when no other rule did. */
 func TestNewRawPrefixRuleKeepsTheEmptyPathAsTheFallback(t *testing.T) {
     control := NewControl(
         NewSegmentPrefixRule("/admin", RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
@@ -166,7 +159,6 @@ func TestPublicAccessMayNotBeCombinedWithAnotherAttribute(t *testing.T) {
     _ = NewSegmentPrefixRule("/admin", RuleConfig{Attributes: []string{"PUBLIC_ACCESS", "ROLE_ADMIN"}})
 }
 
-/* Attributes answers a copy: a caller that writes into the slice it is handed must not change the compiled policy. */
 func TestAttributesAnswersACopy(t *testing.T) {
     rule := NewSegmentPrefixRule("/admin", RuleConfig{Attributes: []string{"ROLE_ADMIN"}})
 
@@ -178,7 +170,6 @@ func TestAttributesAnswersACopy(t *testing.T) {
     }
 }
 
-/* the caller's rule slice is copied too, so a later write to it does not change the compiled control. */
 func TestNewControlCopiesTheCallersRules(t *testing.T) {
     rules := []Rule{NewSegmentPrefixRule("/admin", RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}
 

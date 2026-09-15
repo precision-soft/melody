@@ -116,7 +116,6 @@ func TestEncryptedString_MasksPlaintextWhenFormatted(t *testing.T) {
     }
 }
 
-/* the column read path is where a truncated ciphertext actually surfaces: Scan must refuse it rather than hand the model a marker and half a base64 blob as though the application had stored them. */
 func TestEncryptedString_ScanReportsATruncatedCiphertext(t *testing.T) {
     provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(7)})
     cipherInstance := NewCipher(provider)
@@ -140,7 +139,6 @@ func TestEncryptedString_ScanReportsATruncatedCiphertext(t *testing.T) {
     }
 }
 
-/* a column still holding unconverted rows must keep reading while it is encrypted one write at a time. */
 func TestEncryptedString_ScanStillPassesGenuinePlaintextThrough(t *testing.T) {
     provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(7)})
     UseCipher(NewCipher(provider))
@@ -281,5 +279,12 @@ func TestEncryptedString_FormatRedactsNumericVerbs(t *testing.T) {
         if redactedPlaceholder != rendered {
             t.Fatalf("verb %s expected the redacted placeholder, got %q", verb, rendered)
         }
+    }
+}
+
+func TestEncryptedStringUnmarshalJSONWhitespaceNullKeepsValue(t *testing.T) {
+    value := EncryptedString("unchanged")
+    if err := value.UnmarshalJSON([]byte(" \n null \t")); nil != err || "unchanged" != string(value) {
+        t.Fatalf("null changed the value: value=%q error=%v", string(value), err)
     }
 }

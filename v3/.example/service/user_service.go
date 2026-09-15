@@ -63,7 +63,7 @@ func (instance *UserService) List() ([]*entity.User, error) {
 }
 
 func (instance *UserService) FindById(id string) (*entity.User, bool, error) {
-    /* an identifier the cache-key grammar refuses names a row no write door admits, so it is answered as absent instead of asked of a cache that would refuse the question with a 500 */
+
     if false == CacheSafeIdentifier(id) {
         return nil, false, nil
     }
@@ -103,7 +103,7 @@ func (instance *UserService) FindById(id string) (*entity.User, bool, error) {
 }
 
 func (instance *UserService) FindByUsername(username string) (*entity.User, bool, error) {
-    /* CacheSafeIdentifier also refuses the empty spelling, so the blank-username answer travels through the same door; a name longer than the user table holds is a name this application does not have, answered as absent on the anonymous login door instead of as a 500 from a cache key over its ceiling */
+
     normalizedUsername := repository.NormalizedUsername(username)
     if false == CacheSafeIdentifier(normalizedUsername) {
         return nil, false, nil
@@ -188,7 +188,6 @@ func (instance *UserService) Update(
         return nil, false, nil
     }
 
-    /* the loaded entity is the repository's own stored value under the in-memory configuration, shared with every concurrent reader, so the changes land on a copy: written in place, a rename the repository then REFUSED ("username already exists") had already renamed the stored account — the directory held two accounts folding onto one username while the caller was told the update failed */
     previousUsername := user.Username
 
     modified := *user
@@ -271,7 +270,7 @@ func (instance *UserService) AuthenticateByUsernameAndPassword(
         return nil, false, findErr
     }
     if false == found {
-        /* spend a bcrypt comparison on an absent username too: the found path below runs one, and returning here without it would answer an unknown username faster than a wrong password, an existence oracle an attacker times to enumerate usernames */
+
         security.DummyPasswordMatch(password)
 
         return nil, false, nil
@@ -294,7 +293,6 @@ func MustGetUserService(resolver melodycontainercontract.Resolver) *UserService 
         ServiceUserService,
     )
 }
-
 
 /* GrantRole uses an atomic repository operation so a cached account cannot restore an older password or role set. */
 func (instance *UserService) GrantRole(runtimeInstance melodyruntimecontract.Runtime, username string, role string) (*entity.User, bool, error) {

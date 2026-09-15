@@ -9,7 +9,6 @@ import (
     "github.com/precision-soft/melody/v3/.example/entity"
 )
 
-/* the create door holds the same line the update door holds: a role carrying a comma would come back as several roles on the next read, among them an administrator nobody granted, and an account that reads as an administrator is then shielded from every other administrator by protectsAnotherAdmin */
 func TestApiCreateHandlerRefusesARoleCarryingAComma(t *testing.T) {
     userRepository := newRecordingUserRepository(administrator("admin-1"))
     runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})
@@ -37,7 +36,6 @@ func TestApiCreateHandlerRefusesARoleCarryingAComma(t *testing.T) {
     }
 }
 
-/* a username longer than the 255-byte column, and than the cache key grammar admits once escaped, is turned away at the door as the caller's mistake instead of landing as a driver error, or as a row the lookup doors could never ask the cache about */
 func TestApiCreateHandlerRefusesAUsernameTheTableCannotHold(t *testing.T) {
     userRepository := newRecordingUserRepository(administrator("admin-1"))
     runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})
@@ -67,7 +65,6 @@ func TestApiCreateHandlerRefusesAUsernameTheTableCannotHold(t *testing.T) {
     }
 }
 
-/* the same door accepts a plain role list, so the refusal above is the comma and not the door */
 func TestApiCreateHandlerAcceptsAPlainRoleList(t *testing.T) {
     userRepository := newRecordingUserRepository(administrator("admin-1"))
     runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})

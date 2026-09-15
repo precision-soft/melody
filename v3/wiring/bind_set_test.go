@@ -4,7 +4,6 @@ import (
     "testing"
 )
 
-/* the declaration ORDER is what the generator reports an unmatched bind by, and a map has none: re-binding a name already declared must keep its first position rather than move it to the end, or the report would reorder between runs over the same declaration */
 func TestBindSet_NameKeepsTheDeclarationOrderAndTheLastValue(t *testing.T) {
     bindSet := NewBindSet()
 
@@ -29,7 +28,6 @@ func TestBindSet_NameKeepsTheDeclarationOrderAndTheLastValue(t *testing.T) {
     }
 }
 
-/* every reader hands out a copy: the generator walks these lists while it renders, and a caller that reordered or truncated what it read would be rewriting the declaration the report is measured against */
 func TestBindSet_ReadersHandOutCopies(t *testing.T) {
     bindSet := NewBindSet()
     bindSet.Name("address", "parameter.address")
@@ -63,7 +61,6 @@ func TestBindSet_PackageDeclaresAScannedPackageInOrder(t *testing.T) {
         t.Fatalf("expected the import path and directory to be carried, got %q %q", domain.ImportPath(), domain.Directory())
     }
 
-    /* a fresh package binding declares nothing, and the readers must answer empty rather than nil so the generator can range over them without guarding */
     if nil == domain.BindNames() || 0 != len(domain.BindNames()) {
         t.Fatalf("expected no binds on a fresh package, got %v", domain.BindNames())
     }

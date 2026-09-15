@@ -60,7 +60,6 @@ func (instance *GenerateCommand) Run(
         info = InfoFromResolver(runtimeInstance.Container())
         registry = RegistryMustFromResolver(runtimeInstance.Container())
 
-        /* the auto-registration gate reads the registry service alone, so a container carrying it without the info service reaches this command and the tolerant resolver answers an empty Info — a document whose required title and version are empty strings. The document is still written, since the info is declared optional metadata, but the run says what the success would otherwise conceal. */
         if false == runtimeInstance.Container().Has(ServiceOpenApiInfo) {
             fmt.Fprint(commandContext.Writer(), "no openapi info service is registered; the document's info block is empty\n")
         }
@@ -85,13 +84,11 @@ func (instance *GenerateCommand) Run(
         return nil
     }
 
-    /* a relative path is anchored at the project directory, exactly as the wiring command anchors its own --out: the documented invocation is relative, and anchoring it at whatever directory the process happened to start in writes the document into a different tree per launcher while reporting success */
     if false == filepath.IsAbs(out) {
         applicationConfiguration := config.ConfigMustFromContainer(runtimeInstance.Container())
         out = filepath.Join(applicationConfiguration.MustGet(config.KernelProjectDir).MustString(), out)
     }
 
-    /* the write below replaces the file whole; an existing file that is not a JSON document is someone's source a mistyped --out points at, not a previous output of this command */
     if refusalErr := internal.RefuseNonJsonOutputTarget(out, "openapi document"); nil != refusalErr {
         return refusalErr
     }

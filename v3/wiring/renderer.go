@@ -9,7 +9,6 @@ import (
     "unicode"
 )
 
-/* the provider bodies spell these identifiers — the closure parameters, the fixed locals, the conversion type names, the scalar element types a pointer argument renders verbatim, the error of every signature, the string and any of every guard's error context, and the nil/true/false literals; an import alias or a generated local claiming one would shadow it inside every closure, so the alias suffix loop and the variable namer both step over them. */
 var emittedBodyIdentifiers = []string{
     "resolver",
     "registrar",
@@ -38,7 +37,6 @@ var emittedBodyIdentifiers = []string{
     "false",
 }
 
-/* importAliasTable assigns every import path a unique alias. Two scanned packages routinely share a base name — a "contract" package under each domain — so the alias written into the generated file cannot simply be the package name. A path is reserved so its alias is fixed before any other path can claim it, but only a path an emitted expression actually asked for (through alias) is written into the import block: an unused import does not compile. */
 func newImportAliasTable() *importAliasTable {
     table := &importAliasTable{
         aliasByPath: make(map[string]string),
@@ -53,7 +51,6 @@ func newImportAliasTable() *importAliasTable {
     return table
 }
 
-/* reserveIdentifier withholds a bare identifier — the generated function's own name — from the alias suffix loop without binding it to an import path. */
 func (instance *importAliasTable) reserveIdentifier(identifier string) {
     instance.takenAlias[identifier] = true
 }
@@ -84,7 +81,6 @@ func (instance *importAliasTable) alias(importPath string) string {
 
     candidate := sanitizeAlias(path.Base(importPath))
 
-    /* a directory may be named after a Go keyword (app/interface); the keyword check pushes the alias into the suffixed form the import clause can parse */
     alias := candidate
     for suffix := 2; true == instance.takenAlias[alias] || true == token.IsKeyword(alias); suffix = suffix + 1 {
         alias = candidate + strconv.Itoa(suffix)
@@ -133,7 +129,6 @@ func sanitizeAlias(value string) string {
     return alias
 }
 
-/* renderType rewrites a type as the generated file must spell it, swapping the qualifier the source used for the alias the generated file imports it under. */
 func renderType(typeReference *TypeReference, importAliases *importAliasTable) string {
     if "" == typeReference.ImportPath {
         return typeReference.Expression
@@ -152,7 +147,6 @@ func renderType(typeReference *TypeReference, importAliases *importAliasTable) s
     return prefix + alias + "." + strings.TrimPrefix(expression, typeReference.Qualifier+".")
 }
 
-/* assignVariableNames renames the generated locals away from everything else the provider body references — the closure parameters, the fixed helper names, the import aliases of the types it spells, and one another's derived Err/Value forms. An argument named after its package qualifier (repository repository.ProductRepository) is idiomatic Go and would otherwise shadow the alias. */
 func assignVariableNames(
     constructor *Constructor,
     resolvedArguments []*resolvedArgument,
@@ -177,7 +171,7 @@ func assignVariableNames(
     }
 
     for _, resolved := range resolvedArguments {
-        /* a scalar never renders its type, so asking for its alias would drag an unused import into the file */
+
         if true == resolved.argument.IsScalar {
             continue
         }
@@ -221,7 +215,6 @@ func renderProvider(
     builder.WriteString(indent)
     builder.WriteString(containerAlias)
 
-    /* the lifetime is spelled in the verb, exactly as a hand-written registration spells it: a scoped constructor registers through MustRegisterScoped and is built once per scope, and the two registrar interfaces share no method, so the emitted call only compiles against the registrar its own function is handed */
     registerByType := ".MustRegisterType(\n"
     registerByName := ".MustRegister(\n"
     if true == constructor.IsScoped {
@@ -229,7 +222,6 @@ func renderProvider(
         registerByName = ".MustRegisterScoped(\n"
     }
 
-    /* a constructor whose package declares a service name is registered under it as well as under its type, so the name-based lookups the package already exposes keep resolving; the name is referenced as the constant rather than copied, leaving its definition in one place */
     if "" == constructor.ServiceNameIdentifier {
         builder.WriteString(registerByType)
         builder.WriteString(indent + indent + "registrar,\n")
@@ -258,7 +250,6 @@ func renderProvider(
         }
     }
 
-    /* nil is not a value of a struct or of a named scalar type, and the source alone cannot tell a non-pointer named type apart from an interface, so an error path out of a non-pointer provider returns a declared zero value, which is valid for every kind of type */
     errorReturnExpression := "nil"
     if true == hasFallibleArgument && false == constructor.ReturnType.IsPointer {
         errorReturnExpression = "zeroValue"
@@ -301,7 +292,6 @@ func renderProvider(
 
     builder.WriteString(indent + indent + "},\n")
 
-    /* a scoped registration whose name or type the container already claims declares WithReplacesContainerService, so the container admits the deliberate shadow rather than refusing it at boot */
     if true == replacesContainerService {
         builder.WriteString(indent + indent + containerAlias + ".WithReplacesContainerService(),\n")
     }
@@ -343,7 +333,6 @@ func renderArgument(
         return builder.String()
     }
 
-    /* the accessor returns the widest type of its family, so only a narrower argument needs a conversion; naming the variable directly otherwise keeps the generated provider free of a pointless intermediate */
     if false == scalarNeedsConversion(resolved.argument.Type) {
         builder.WriteString(body + resolved.variableName + ", " + errorVariable + " := " + parameterExpression + "." + accessor + "\n")
         builder.WriteString(body + "if nil != " + errorVariable + " {\n")
@@ -365,7 +354,6 @@ func renderArgument(
     return builder.String()
 }
 
-/* renderNarrowingGuard emits the range check in front of a conversion that narrows the accessor's widest type. A Go conversion wraps silently, so a parameter of -1 handed to a uint argument would become the largest value the type holds — the guard turns it into an error naming the parameter and the argument instead. */
 func renderNarrowingGuard(
     resolved *resolvedArgument,
     importAliases *importAliasTable,
@@ -413,11 +401,10 @@ func renderNarrowingGuard(
 type scalarNarrowingBounds struct {
     lowerBound string
     upperBound string
-    /* math.MaxUint32 overflows a 32-bit int, so that comparison runs through int64 */
+
     upperBoundValueConversion string
 }
 
-/* scalarNarrowingRange yields the bounds of a scalar type narrower than the widest type its accessor returns. An empty upper bound means the accessor value cannot exceed it, so only the lower one is checked. The float32 bounds catch the magnitudes a conversion would silently turn into an infinity. */
 func scalarNarrowingRange(typeExpression string) (*scalarNarrowingBounds, bool) {
     mathQualifier := mathImportAlias + "."
 
@@ -443,7 +430,6 @@ func scalarNarrowingRange(typeExpression string) (*scalarNarrowingBounds, bool) 
     }
 }
 
-/* scalarAccessor maps a scalar argument onto the parameter accessor that reads it, and reports whether that accessor returns an error. The stdlib duration is recognized by the import path its qualifier resolves to, so an aliased time import keeps its accessor. A string is read through MustString: the generator has already verified the parameter is declared, so the only remaining failure is a declaration holding a non-string, which is a wiring mistake rather than a runtime condition. */
 func scalarAccessor(typeReference *TypeReference) (string, bool) {
     if true == isStandardDuration(typeReference) {
         return "Duration()", true
@@ -482,7 +468,7 @@ func renderFile(
     providerBlocks []string,
     scopedProviderBlocks []string,
 ) string {
-    /* the signature references the contract package whatever the scan found, so it is asked for before the import block is written */
+
     containerContractAlias := importAliases.alias(containerContractImportPath)
 
     var builder strings.Builder
@@ -508,7 +494,6 @@ func renderFile(
         builder.WriteString("}\n")
     }
 
-    /* the scoped function is emitted only when something is scoped: the two registrars arrive at two different module hooks and neither satisfies the other, so one combined function could not be called from either, and a project that declares nothing scoped must keep regenerating the file it had */
     if 0 == len(scopedProviderBlocks) {
         return builder.String()
     }

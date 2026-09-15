@@ -100,7 +100,6 @@ func TestExitError_NilReceiverAccessorsAnswerInsteadOfDereferencing(t *testing.T
         t.Fatalf("expected a nil receiver to answer no error value")
     }
 
-    /* the shape that reaches it: a typed-nil wrapper found through the chain by errors.As */
     wrapped := NewError("command failed", nil, typedNil)
 
     var found *ExitError

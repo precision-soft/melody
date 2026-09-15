@@ -62,7 +62,6 @@ func SecurityContextFromRuntime(runtimeInstance runtimecontract.Runtime) (*Secur
         return nil, false
     }
 
-    /* absence answers not-found rather than panicking, for the same reason the resolution failure below does: IsGranted reaches here from goroutines no recover covers, so the refusal has to be a denial the caller can act on */
     scope := runtimeInstance.Scope()
     if true == internal.IsNilInterface(scope) {
         return nil, false
@@ -76,7 +75,7 @@ func SecurityContextFromRuntime(runtimeInstance runtimecontract.Runtime) (*Secur
     securityContext, err := container.FromResolver[*SecurityContext](scope, securitycontract.ServiceSecurityContext)
 
     if nil != err {
-        /* resolve the logger without panicking: this runs from IsGranted, which a handler can call from a goroutine that outlives the request, and the kernel closes the scope on the way out; LoggerMustFromRuntime would turn a closed-scope read into a fatal panic in a goroutine no recover covers */
+
         logger := logging.LoggerFromRuntime(runtimeInstance)
         if nil != logger {
             logger.Error(

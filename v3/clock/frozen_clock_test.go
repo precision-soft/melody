@@ -76,7 +76,6 @@ func TestFrozenClockNewTicker_ReflectsTravelToOnNextTick(t *testing.T) {
 
     clockInstance.TravelTo(targetTime)
 
-    /* Drain ticks buffered before TravelTo before checking the new timestamp. */
     deadline := time.After(250 * time.Millisecond)
     for {
         select {
@@ -163,7 +162,6 @@ func TestFrozenTickerStop_NoTickMintedAfterStop(t *testing.T) {
     }
 }
 
-/* Fill the relay buffer so the done channel observes the blocked-send teardown path. */
 func TestFrozenTickerStop_WaitsForTheRelayGoroutine(t *testing.T) {
     for round := 0; round < 100; round++ {
         clockInstance := NewFrozenClock(time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC))

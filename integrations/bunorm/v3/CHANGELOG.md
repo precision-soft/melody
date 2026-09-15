@@ -42,6 +42,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- encrypt: share JSON decoding across encrypted string types, preserve whitespace-padded null values, and compute type names only for failures. Named cipher isolation requires distinct keys; names are registry routing, not authenticated ciphertext metadata.
+- audit: share drain waiting with completed-drain priority and use the common typed-nil-safe panic cause helper.
+
+
+- Prevent a provider open still in flight from rerouting bun diagnostics to a retired registry logger after shutdown or logger replacement.
+
+- Clarify formatting redaction boundaries and distinguish failed audit attempts from committed changes; document partial batch acceptance by asynchronous and file storage.
+
 - Missing required PostgreSQL connection fields expose the ConnectionParametersInvalid error capability; replica reads refuse this permanent configuration error instead of silently opening the primary.
 
 - Derive audit drain diagnostics from failed entries instead of assuming that cancellation lost data.

@@ -16,7 +16,6 @@ func routeRegistryTestHandler() httpcontract.Handler {
     }
 }
 
-/* registration was the single channel with no duplicate handling: two unnamed routes on one method and pattern were both stored and the later one could never be dispatched — the tie falls to the first registered — so the shadowing was invisible everywhere. */
 func TestRouteRegistry_RefusesAnExactDispatchDuplicate(t *testing.T) {
     router := NewRouter()
 
@@ -27,7 +26,6 @@ func TestRouteRegistry_RefusesAnExactDispatchDuplicate(t *testing.T) {
     }, "route already registered")
 }
 
-/* the name stays out of the dispatch identity on purpose: two differently named routes the matcher cannot tell apart are still one route at dispatch, and the later one is still dead. */
 func TestRouteRegistry_RefusesADuplicateThatDiffersOnlyInName(t *testing.T) {
     router := NewRouter()
 
@@ -38,7 +36,6 @@ func TestRouteRegistry_RefusesADuplicateThatDiffersOnlyInName(t *testing.T) {
     }, "route already registered")
 }
 
-/* with a recorder armed, a dispatch duplicate is deferred to the aggregated boot report — the first registration wins — and disarming restores the immediate refusal */
 func TestRouteRegistry_ARecorderDefersTheDispatchDuplicateAndTheFirstRegistrationWins(t *testing.T) {
     registry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(registry)
@@ -74,7 +71,6 @@ func TestRouteRegistry_ARecorderDefersTheDispatchDuplicateAndTheFirstRegistratio
     }, "route already registered")
 }
 
-/* a name claimed by two dispatch-distinct routes is recorded under its own kind: both routes stay dispatchable — only the name collided — and the name keeps pointing at the first claimant */
 func TestRouteRegistry_ARecorderDefersTheNameDuplicateAndBothRoutesStayDispatchable(t *testing.T) {
     registry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(registry)
@@ -113,7 +109,6 @@ func TestRouteRegistry_ARecorderDefersTheNameDuplicateAndBothRoutesStayDispatcha
     }
 }
 
-/* the word Accepts is the claim: the second registration is kept AND stays reachable. Without an assertion the only failure a test like this can report is a panic, so it reads as green for a registry that silently dropped the second route. */
 func TestRouteRegistry_AcceptsTheSamePatternUnderAnotherMethod(t *testing.T) {
     registry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(registry)
@@ -187,7 +182,6 @@ func TestRouteRegistry_AcceptsTheSamePatternUnderAnotherRequirement(t *testing.T
         t.Fatalf("expected both requirements to stay registered, got %d routes", len(registry.RouteDefinitions()))
     }
 
-    /* each registration owns the spelling the other one refuses, so a dropped second route shows up as one of these two going unmatched */
     for _, identifier := range []string{"7", "abc"} {
         routeMatch, matched := router.Match(nethttp.MethodGet, "/item/"+identifier, "", "")
         if false == matched {
@@ -233,7 +227,6 @@ func TestRouteRegistry_AcceptsTheSamePatternUnderAnotherPriority(t *testing.T) {
         t.Fatalf("expected /ranked to be reachable")
     }
 
-    /* priority outranks registration order, so the route declared second is the one that answers — which is also what tells the two registrations apart */
     response, handlerErr := routeMatch.Handler(nil, nil, nil)
     if nil != handlerErr {
         t.Fatalf("unexpected handler error: %v", handlerErr)

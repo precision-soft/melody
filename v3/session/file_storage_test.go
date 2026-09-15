@@ -186,7 +186,6 @@ func TestFileStorage_Save_PersistsAcrossInstances_ByInjectedFile(t *testing.T) {
     }
 }
 
-/* expireStoredEntry rewinds a stored entry's expiry so it lapses without waiting for the wall clock. FileStorage reads time.Now directly, and Save purges anything already lapsed before it returns, so a ttl short enough to expire on its own never leaves an entry for Load to find. */
 func expireStoredEntry(t *testing.T, storage *FileStorage, sessionId string) {
     t.Helper()
 
@@ -212,7 +211,6 @@ func TestFileStorage_Load_ExpiredEntryIsDeleted(t *testing.T) {
     }
     defer storage.Close()
 
-    /* a ttl that outlives Save, so both entries reach the file and stay in the map */
     if saveErr := storage.Save("expired", map[string]any{"k": "v"}, time.Hour); nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
@@ -248,7 +246,6 @@ func TestFileStorage_Load_ExpiredEntryIsDeleted(t *testing.T) {
         t.Fatalf("expected the unexpired sibling to survive, got exists=%v data=%v", liveExists, liveData)
     }
 
-    /* the file still carried the entry with its original future expiry, so a reader that sees it gone proves Load rewrote the snapshot rather than merely reporting the entry as absent */
     storage2, err := NewFileStorageFromPath(path)
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
@@ -274,7 +271,6 @@ func TestFileStorage_Load_ExpiredEntryIsDeleted(t *testing.T) {
     }
 }
 
-/* an entry nobody loads is only ever dropped by the purge every flush runs; without it the map and the snapshot grow with everything that ever expired */
 func TestFileStorage_Save_PurgesEntriesThatLapsedWithoutBeingLoaded(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
@@ -295,7 +291,6 @@ func TestFileStorage_Save_PurgesEntriesThatLapsedWithoutBeingLoaded(t *testing.T
 
     expireStoredEntry(t, storage, "lapsed")
 
-    /* an unrelated Save is the only thing that happens: nothing ever names the lapsed entry */
     if saveErr := storage.Save("keeper", map[string]any{"k": "keeper"}, time.Hour); nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
@@ -319,7 +314,6 @@ func TestFileStorage_Save_PurgesEntriesThatLapsedWithoutBeingLoaded(t *testing.T
     }
 }
 
-/* Delete refuses an empty id the way Load and Save do — the id is what names the entry, and an empty one would otherwise reach the map as a real key */
 func TestFileStorage_Delete_RefusesAnEmptySessionId(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
@@ -340,7 +334,6 @@ func TestFileStorage_Delete_RefusesAnEmptySessionId(t *testing.T) {
     }
 }
 
-/* a closed storage refuses to delete, exactly as it refuses to load and to save: the file is gone and the map is no longer authoritative, so a delete that reported success would tell a caller a session was dropped when nothing was written */
 func TestFileStorage_Delete_AfterCloseReturnsError(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
@@ -366,9 +359,6 @@ func TestFileStorage_Delete_AfterCloseReturnsError(t *testing.T) {
     }
 }
 
-/* Delete takes the entry out of the map and out of the file, and a delete of an id the storage does not hold answers success without writing anything.
-
-   The absent id is proved on a storage whose flush cannot write: the read-only handle turns any flush into an error, so a delete that skipped the early return would surface it. That distinguishes "returned nil because nothing was there" from "returned nil after rewriting the snapshot". */
 func TestFileStorage_Delete_RemovesTheEntryAndSkipsTheFlushForAnAbsentId(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
@@ -438,7 +428,6 @@ func TestFileStorage_Delete_RemovesTheEntryAndSkipsTheFlushForAnAbsentId(t *test
     }
 }
 
-/* a Delete whose flush fails must put the entry back: the session is still in the file, and dropping it from the map as well would make the storage answer "no such session" for something a reader reopening the file still finds */
 func TestFileStorage_Delete_RestoresTheEntryWhenTheFlushFails(t *testing.T) {
     fileInstance, err := os.CreateTemp("", "melody_session_delete_rollback_*.json")
     if nil != err {
@@ -461,7 +450,6 @@ func TestFileStorage_Delete_RestoresTheEntryWhenTheFlushFails(t *testing.T) {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
-    /* the handle the storage writes through is closed under it, so the flush the delete triggers cannot write */
     if closeErr := fileInstance.Close(); nil != closeErr {
         t.Fatalf("unexpected error closing the handle: %s", closeErr.Error())
     }
@@ -494,7 +482,6 @@ func TestFileStorage_Close_IsIdempotent(t *testing.T) {
     }
 }
 
-/* the storage directory is created at construction, and a path whose directory cannot exist is refused there rather than on the first flush — the boot is where a bad path is fixable */
 func TestNewFileStorageFromPath_RefusesAPathWhoseDirectoryCannotBeCreated(t *testing.T) {
     directory := t.TempDir()
 
@@ -517,7 +504,6 @@ func TestNewFileStorageFromPath_RefusesAPathWhoseDirectoryCannotBeCreated(t *tes
     }
 }
 
-/* a closed storage refuses to load as well as to save and delete: the map it still holds is no longer authoritative, and answering from it would serve a session the file may no longer carry */
 func TestFileStorage_Load_AfterCloseReturnsError(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
@@ -547,9 +533,6 @@ func TestFileStorage_Load_AfterCloseReturnsError(t *testing.T) {
     }
 }
 
-/* a file that cannot be opened for a reason other than "it is not there yet" is reported: the absent file is the ordinary first-boot case and answers an empty store, while anything else — a path that is not reachable at all — must not be read as "no sessions yet" and then overwritten by the first flush.
-
-   The state is built by calling the reader directly, because the constructor above it creates the directory first and would fail before this line. */
 func TestReadSessionFileAtPath_ReportsAnOpenFailureThatIsNotAMissingFile(t *testing.T) {
     directory := t.TempDir()
 
@@ -571,7 +554,6 @@ func TestReadSessionFileAtPath_ReportsAnOpenFailureThatIsNotAMissingFile(t *test
         t.Fatalf("expected the open refusal, got %q", readErr.Error())
     }
 
-    /* the missing file itself is the ordinary case and answers an empty store */
     empty, missingErr := readSessionFileAtPath(filepath.Join(directory, "never-written.json"))
     if nil != missingErr {
         t.Fatalf("expected a missing file to answer an empty store, got %s", missingErr.Error())
@@ -581,7 +563,6 @@ func TestReadSessionFileAtPath_ReportsAnOpenFailureThatIsNotAMissingFile(t *test
     }
 }
 
-/* a storage that does not own its file has nothing to write through once the handle is gone, and the flush says so instead of reporting success over a write that never happened. The constructors never produce this state — the injecting one refuses a nil handle — so it is built here; the guard is what keeps the invariant from being the only thing between a lost write and a caller that was told it succeeded. */
 func TestFileStorage_FlushLocked_RefusesWhenTheInjectedHandleIsGone(t *testing.T) {
     fileInstance, err := os.CreateTemp("", "melody_session_handle_gone_*.json")
     if nil != err {
@@ -610,7 +591,6 @@ func TestFileStorage_FlushLocked_RefusesWhenTheInjectedHandleIsGone(t *testing.T
     }
 }
 
-/* a storage that owns its file reports a failing close instead of swallowing it, because that failure is where a buffered write is lost. The two constructors never produce this state — the one that owns the file opens it per write and never holds a handle — so the state is built here directly; the guard is what keeps the invariant from being the only thing holding the report up. */
 func TestFileStorage_Close_ReportsAFailingCloseOfTheOwnedFile(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
@@ -625,7 +605,6 @@ func TestFileStorage_Close_ReportsAFailingCloseOfTheOwnedFile(t *testing.T) {
         t.Fatalf("unexpected create error: %s", createErr.Error())
     }
 
-    /* closing it here is what makes the storage's own close fail */
     if closeErr := ownedFile.Close(); nil != closeErr {
         t.Fatalf("unexpected error closing the handle: %s", closeErr.Error())
     }
@@ -695,9 +674,6 @@ func TestFileStorage_AtomicWrite_DoesNotLeaveTempFiles(t *testing.T) {
     }
 }
 
-/* the snapshot is written to a temp file and moved into place, so a failed move must take the temp file with it: the directory the sessions live in would otherwise collect one orphan per failed write, and each orphan holds a full copy of every live session on disk.
-
-   The move is made to fail structurally — the destination is a non-empty directory, which rename can never replace — because the test runs as root, where permissions refuse nothing. */
 func TestWriteSessionFileAtomically_RemovesTheTempFileWhenTheReplaceFails(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
@@ -731,7 +707,6 @@ func TestWriteSessionFileAtomically_RemovesTheTempFileWhenTheReplaceFails(t *tes
     }
 }
 
-/* a storage directory that cannot be created is named as such rather than surfacing as a temp-file failure one line below, because the path an operator has to fix is the directory */
 func TestWriteSessionFileAtomically_RefusesWhenTheDirectoryCannotBeCreated(t *testing.T) {
     directory := t.TempDir()
 
@@ -750,7 +725,6 @@ func TestWriteSessionFileAtomically_RefusesWhenTheDirectoryCannotBeCreated(t *te
     }
 }
 
-/* the injected handle is read from the start, and a handle that cannot be positioned is refused at construction rather than decoded from wherever it happened to stand: a storage built over it would answer with whatever the tail of the file parsed into. */
 func TestNewFileStorageFromFile_RefusesAHandleThatCannotBeSeeked(t *testing.T) {
     fileInstance, err := os.CreateTemp("", "melody_session_unseekable_*.json")
     if nil != err {
@@ -781,7 +755,6 @@ func TestNewFileStorageFromFile_RefusesAHandleThatCannotBeSeeked(t *testing.T) {
     }
 }
 
-/* an appending handle ignores every seek, so each snapshot landed after the document it was replacing and the truncation then cut the pair to the new length. Refusing it at construction is the only place the operator can still be told: the saves that follow report success. */
 func TestNewFileStorageFromFile_RefusesAHandleOpenedForAppending(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
@@ -813,7 +786,6 @@ func TestNewFileStorageFromFile_RefusesAHandleOpenedForAppending(t *testing.T) {
     }
 }
 
-/* the refusal above is a door, not the guarantee: the write itself names its offset, so even a handle that reached the storage another way cannot land a snapshot at the end of the file. */
 func TestFileStorage_InPlaceWrite_RefusesToLandAnywhereButTheStartOfTheFile(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
@@ -858,7 +830,6 @@ func TestFileStorage_InPlaceWrite_RefusesToLandAnywhereButTheStartOfTheFile(t *t
     }
 }
 
-/* a snapshot file whose content is not the map the storage wrote is refused at construction: decoding it into a zero-value map would present an empty session store as a healthy one and silently log every user out, and the next write would overwrite whatever was really there. */
 func TestNewFileStorageFromPath_RefusesAFileThatIsNotASnapshot(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
@@ -881,7 +852,6 @@ func TestNewFileStorageFromPath_RefusesAFileThatIsNotASnapshot(t *testing.T) {
     }
 }
 
-/* the path is what names the file the sessions live in, so a path that names nothing is refused at construction instead of writing a snapshot into the working directory */
 func TestNewFileStorageFromPath_RefusesAnEmptyPath(t *testing.T) {
     for _, path := range []string{"", ".", "./"} {
         storage, storageErr := NewFileStorageFromPath(path)
@@ -899,7 +869,6 @@ func TestNewFileStorageFromPath_RefusesAnEmptyPath(t *testing.T) {
     }
 }
 
-/* a nil handle is refused where a nil path is refused: the storage would otherwise construct successfully and fail on the first flush, long after the wiring mistake */
 func TestNewFileStorageFromFile_RefusesANilHandle(t *testing.T) {
     storage, storageErr := NewFileStorageFromFile(nil)
     if nil == storageErr {
@@ -1003,7 +972,6 @@ func TestFileStorage_Save_FailedEncodeDoesNotDestroyPersistedSessions(t *testing
         t.Fatalf("expected the persisted session file to be non-empty after a successful save")
     }
 
-    /* a Save whose value cannot be JSON-encoded (here a channel) must fail without truncating the live file and destroying the already-persisted "keep" session — the in-place writer must encode before it truncates, mirroring the atomic writer */
     badSaveErr := storage.Save("bad", map[string]any{"ch": make(chan int)}, 0)
     if nil == badSaveErr {
         t.Fatalf("expected a non-marshalable session value to fail the save")
@@ -1054,7 +1022,6 @@ func TestFileStorage_Save_RollsBackInMemoryEntryWhenFlushFails(t *testing.T) {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
-    /* a failed Save of a NEW id must roll the in-memory entry back so Load does not surface a session that was never persisted */
     if newErr := storage.Save("fresh", map[string]any{"ch": make(chan int)}, 0); nil == newErr {
         t.Fatalf("expected the non-marshalable save to fail")
     }
@@ -1064,7 +1031,6 @@ func TestFileStorage_Save_RollsBackInMemoryEntryWhenFlushFails(t *testing.T) {
         t.Fatalf("a failed Save of a new id must not be observable via Load")
     }
 
-    /* a failed Save that updates an EXISTING id must restore the previous in-memory value */
     if updErr := storage.Save("existing", map[string]any{"ch": make(chan int)}, 0); nil == updErr {
         t.Fatalf("expected the non-marshalable update to fail")
     }
@@ -1077,7 +1043,6 @@ func TestFileStorage_Save_RollsBackInMemoryEntryWhenFlushFails(t *testing.T) {
     }
 }
 
-/* a flush that fails only past the persisted write keeps the NEW in-memory state: the document already sits on disk in full, so rolling back would make memory disagree with what was persisted — the divergence the rollback exists to prevent, inverted. A character device accepts the write at offset zero and refuses the truncation, which is exactly the after-the-persist failure. */
 func TestFileStorage_Save_KeepsTheNewEntryWhenTheFlushFailsAfterThePersist(t *testing.T) {
     devNull, openErr := os.OpenFile(os.DevNull, os.O_RDWR, 0)
     if nil != openErr {
@@ -1112,7 +1077,6 @@ func TestFileStorage_Save_KeepsTheNewEntryWhenTheFlushFailsAfterThePersist(t *te
     }
 }
 
-/* the deletion twin of the kept-entry rule: the document without the session already sits on disk when the flush failure strikes, so restoring the entry in memory would resurrect a session the persisted state no longer holds. */
 func TestFileStorage_Delete_KeepsTheEntryDeletedWhenTheFlushFailsAfterThePersist(t *testing.T) {
     devNull, openErr := os.OpenFile(os.DevNull, os.O_RDWR, 0)
     if nil != openErr {
@@ -1158,7 +1122,6 @@ func TestFileStorage_Save_TtlBeyondYear2262IsKeptNotPurged(t *testing.T) {
     }
     defer storage.Close()
 
-    /* a ttl that pushes the expiry past 2262-04-11 overflows time.Time.UnixNano to a negative int64; the session must be kept with a saturated far-future expiry exactly as InMemoryStorage keeps it, not treated as already expired and purged on the same Save */
     if saveErr := storage.Save("forever", map[string]any{"k": "v"}, time.Duration(math.MaxInt64)); nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
@@ -1174,7 +1137,6 @@ func TestFileStorage_Save_TtlBeyondYear2262IsKeptNotPurged(t *testing.T) {
         t.Fatalf("expected the persisted session data to survive, got %v", data)
     }
 
-    /* it must also survive a reload from disk — an overflowed negative expiry would have been dropped from the snapshot on the same Save and never written to the file */
     reader, err := NewFileStorageFromPath(path)
     if nil != err {
         t.Fatalf("unexpected reader storage error: %s", err.Error())
@@ -1190,9 +1152,6 @@ func TestFileStorage_Save_TtlBeyondYear2262IsKeptNotPurged(t *testing.T) {
     }
 }
 
-/* Loading an expired session must remove it from the map and from the file, and the flush inside Load is the only thing that does it: purgeExpiredLocked runs inside flushLocked against the same clock and the same predicate, so Load names no session of its own. This pins that mechanism — if the purge ever stops covering a lapsed entry, the explicit delete has to come back.
-
-   Both sessions are stored with a lifetime that cannot lapse while they are being written, and the one under test is aged afterwards by rewriting its stored instant rather than by sleeping. A short ttl plus a sleep does not pin this: the second Save flushes too, and the purge inside that flush drops an entry the first Save aged past its lifetime while the file was being written, so Load is handed a session that is already gone and the branch this test names is never entered. It stayed green with the flush removed from Load entirely. */
 func TestFileStorage_LoadingAnExpiredSessionRemovesItFromTheFile(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "sessions.json")
@@ -1243,7 +1202,6 @@ func TestFileStorage_LoadingAnExpiredSessionRemovesItFromTheFile(t *testing.T) {
     }
 }
 
-/* The answer to a load of a lapsed entry — no such session — is settled before the housekeeping flush is attempted, so that flush failing must not change it. Returning its error instead would make Manager.Session panic, so an expired cookie on a store that cannot be written would answer 500 where a client holding no cookie at all is served a fresh session. */
 func TestFileStorage_LoadOfALapsedEntryAnswersAbsentWhenTheFlushCannotWrite(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "sessions.json")
@@ -1288,9 +1246,6 @@ func TestFileStorage_LoadOfALapsedEntryAnswersAbsentWhenTheFlushCannotWrite(t *t
 
 const fileStorageWriteWindowProbeMarker = "MELODY_SESSION_WRITE_WINDOW_PROBE"
 
-/* the in-place writer must never leave the file empty: the order was a truncation to zero followed by the write, so a process killed between the two — an OOM kill, a docker kill, a deploy with no grace period — left a zero-length file that the next boot reads as "no sessions at all" and answers by logging every user out with no error anywhere.
-
-   The kill is stood in for by a file size limit of zero, which is the only injection that reproduces it deterministically: a truncation to zero stays inside the limit and succeeds, while the write that follows fails at its first byte. The limit is process-wide, so this runs in a child of its own. */
 func TestFileStorage_InPlaceWrite_ARefusedWriteLeavesThePersistedSessionsIntact(t *testing.T) {
     if "1" == os.Getenv(fileStorageWriteWindowProbeMarker) {
         runFileStorageWriteWindowChild()
@@ -1313,9 +1268,6 @@ func TestFileStorage_InPlaceWrite_ARefusedWriteLeavesThePersistedSessionsIntact(
         t.Fatalf("the refused write left the file empty, destroying every persisted session: %q", string(output))
     }
 
-    /* the child answers a distinct token per exit, so a run that never applied the limit cannot be read as
-    a pass: the earlier form wrote "intact" on three paths where nothing had been injected, and the parent
-    asked only whether that word appeared anywhere. */
     if true == strings.Contains(string(output), "probe-unavailable") {
         t.Skipf("the environment refused the file size limit this probe injects with: %q", string(output))
     }
@@ -1332,9 +1284,6 @@ func TestFileStorage_InPlaceWrite_ARefusedWriteLeavesThePersistedSessionsIntact(
 func runFileStorageWriteWindowChild() {
     signal.Ignore(syscall.SIGXFSZ)
 
-    /* a directory of its own, not a fixed name under os.TempDir: the three majors share one temp directory
-    and their suites run concurrently, so a fixed name had the children of two majors seed and remove the
-    same file and one of them report a failed seed. */
     directory, directoryErr := os.MkdirTemp("", "melody_session_write_window")
     if nil != directoryErr {
         _, _ = os.Stdout.WriteString("temp-directory-failed\n")
@@ -1414,7 +1363,6 @@ func runFileStorageWriteWindowChild() {
     _, _ = os.Stdout.WriteString("intact\n")
 }
 
-/* the truncation cuts to the length just written rather than to zero, so a snapshot that shrinks — a session deleted, a value removed — leaves no tail of the previous document behind for the next decode to choke on */
 func TestFileStorage_InPlaceWrite_AShrinkingSnapshotLeavesNoTailBehind(t *testing.T) {
     path := filepath.Join(t.TempDir(), "sessions.json")
 
@@ -1469,7 +1417,6 @@ func TestFileStorage_InPlaceWrite_AShrinkingSnapshotLeavesNoTailBehind(t *testin
     }
 }
 
-/* a hard kill between CreateTemp and the rename skips every cleanup path, and each orphan is a complete snapshot of every live session; the sweep runs at construction, where the per-process ownership the session documentation states means nothing else can be mid-rename over this path */
 func TestNewFileStorageFromPath_SweepsTheOrphanTemporaryFiles(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
@@ -1518,7 +1465,6 @@ func TestSyncSessionDirectory_AnswersTheDirectoryItCouldNotOpen(t *testing.T) {
     }
 }
 
-/* fsync of a character device is refused, which is the directory flush failing after the open succeeded — the branch the missing directory never reaches. It carries the same mark for the same reason: the rename that preceded it already put the document at its path. */
 func TestSyncSessionDirectory_MarksTheRefusedFlushAsPersisted(t *testing.T) {
     syncErr := syncSessionDirectory(os.DevNull)
     if nil == syncErr {
@@ -1536,7 +1482,6 @@ func TestSyncSessionDirectory_AcceptsARealDirectory(t *testing.T) {
     }
 }
 
-/* the file storage persists the WALL reading of the injected clock, and compares against the same clock: frozen, nothing lapses; travelled past the ttl, the entry is gone — with no sleep and no dependence on the process clock */
 func TestFileStorage_ExpiryFollowsTheInjectedClock(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Date(2026, time.August, 26, 12, 0, 0, 0, time.UTC))
 
@@ -1567,7 +1512,6 @@ func TestFileStorage_ExpiryFollowsTheInjectedClock(t *testing.T) {
     }
 }
 
-/* the purge reads the INJECTED clock, and nothing proved it: no fixture ever ran the purge under a clock that disagrees with the wall clock. The frozen instant here is far in the WALL-CLOCK past, so a purge reading time.Now instead drops a session the injected clock says is still live — and because the purge is the ONE place a lapsed entry is removed, that loss is silent and permanent. */
 func TestFileStorage_ThePurgeReadsTheInjectedClockNotTheWallClock(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC))
 
@@ -1583,7 +1527,6 @@ func TestFileStorage_ThePurgeReadsTheInjectedClockNotTheWallClock(t *testing.T) 
         t.Fatalf("save error: %v", saveErr)
     }
 
-    /* a second Save is what reaches the purge on every path, and it rewrites the whole snapshot */
     if saveErr := storage.Save("session-2", map[string]any{"user": "admin"}, time.Hour); nil != saveErr {
         t.Fatalf("save error: %v", saveErr)
     }
@@ -1598,7 +1541,6 @@ func TestFileStorage_ThePurgeReadsTheInjectedClockNotTheWallClock(t *testing.T) 
     }
 }
 
-/* the expiry instant ITSELF is lapsed, and no fixture reached it: every other one ages a session by an hour, where the comparison answers the same whether it is > or >=. The two halves below sit one nanosecond apart around the exact instant Save wrote. */
 func TestFileStorage_TreatsTheExpiryInstantItselfAsLapsedAtTheDoor(t *testing.T) {
     frozenTime := time.Date(2026, time.August, 28, 12, 0, 0, 0, time.UTC)
     frozenClock := clock.NewFrozenClock(frozenTime)

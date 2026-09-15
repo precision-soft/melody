@@ -26,7 +26,7 @@ func LevelEnabled(logger loggingcontract.Logger, level loggingcontract.Level) bo
     return levelReporter.Enabled(level)
 }
 
-/* LogError writes one record for the error it is given, or none when the error is nil — including a typed nil, which would otherwise panic on the very lines that render it — or when the error was already logged. The mark is read at the depth exception.MarkLogged writes it, the nearest AlreadyLogged implementer in the chain, so marking a wrapping http exception suppresses this record the way the mark promises; the previous read searched for the nearest *exception.Error instead and disagreed with the writer on every chain whose markable link is not that type. The record is anchored on the error the caller handed over: a top-level *exception.Error contributes its own level, message and enriched context, while any other error — a wrapper included — is logged at error level under its full message, with the context of the nearest provider and the cause chain walked from its own wrap link; anchoring on the nearest *exception.Error buried in the chain logged that error's message at that error's level, which dropped the wrapper's framing entirely and let a low-level cause file the whole record below the logger's threshold. A nil logger falls back to the process default logger under the same rules. */
+/* LogError ignores nil, typed-nil and already-logged errors. It anchors the record on the supplied error: a direct melody error supplies its level and context, while other errors retain their complete outer message at error level with available context and causes. Nil logger uses the process default. */
 func LogError(logger loggingcontract.Logger, err error) {
     if nil == err || true == internal.IsNilInterface(err) {
         return
@@ -45,7 +45,7 @@ func LogError(logger loggingcontract.Logger, err error) {
         enrichedContext := enrichContextWithCause(exceptionValue)
 
         if nil == logger || true == internal.IsNilInterface(logger) {
-            /* the same one-record-one-line guarantee the default logger holds: this fallback writes through the raw standard logger, so the escaping is its own duty */
+
             if 0 < len(enrichedContext) {
                 log.Printf("[%s] %s context=%v", levelUpper, internal.EscapeControlCharacters(exceptionValue.Message()), internal.EscapeControlCharacters(fmt.Sprintf("%v", enrichedContext)))
             } else {
@@ -59,7 +59,6 @@ func LogError(logger loggingcontract.Logger, err error) {
         return
     }
 
-    /* the message is taken from the same assembly as the context, because that is where it is rendered under a recover: this path is reached from inside the recovery handlers, where the error is whatever a panic carried, and an Error() that dereferences the very nil field that made it panic-worthy would take the record down with it — the one record written to explain the failure. */
     enrichedContext := exception.LogContext(err)
     renderedMessage, isRendered := enrichedContext["error"].(string)
     if false == isRendered || "" == renderedMessage {
@@ -112,7 +111,6 @@ func enrichContextWithCause(exceptionValue *exception.Error) exceptioncontract.C
         context = exceptioncontract.Context{}
     }
 
-    /* a typed-nil cause is the nil its producer meant: BuildCauseChain refuses it at the entry and returns an empty chain, which routed it into the else branch below — the only input that ever reached that branch — where causeErr.Error() dereferenced the nil receiver on the line that renders a failure */
     causeErr := exceptionValue.CauseErr()
     if nil == causeErr || true == internal.IsNilInterface(causeErr) {
         return context
@@ -143,4 +141,3 @@ func enrichContextWithCause(exceptionValue *exception.Error) exceptioncontract.C
 
     return context
 }
-

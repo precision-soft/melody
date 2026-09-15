@@ -105,7 +105,6 @@ func (instance *StringSliceFlag) Definition() FlagDefinition {
     }
 }
 
-/* Preserve nil validators; installing an always-successful hook can change validation of defaults. */
 func neutralValidator[T any](kind FlagKind, flagName string, validator func(value T) error) func(value any) error {
     if nil == validator {
         return nil

@@ -139,7 +139,6 @@ type bindAndValidateSubject struct {
     Name  string `json:"name" validate:"notBlank,min=3"`
 }
 
-/* the exception listener is what turns an HttpException a handler returned into the status and body a client receives; an application registers it at boot, so a test asserting the response rather than the error value has to register it too. */
 func newHttpTestContainerWithValidator() containercontract.Container {
     serviceContainer := newHttpTestContainer()
 
@@ -155,7 +154,6 @@ func newHttpTestContainerWithValidator() containercontract.Container {
     return serviceContainer
 }
 
-/* bindAndValidateOutcome drives one request through the kernel and reports what BindJsonAndValidate answered inside the handler, where the body is still open — reading it after ServeHttp returned would test a closed body rather than the binding. */
 func bindAndValidateOutcome(body string) (error, int, string) {
     var bindErr error
 

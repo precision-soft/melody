@@ -49,7 +49,6 @@ func TestPathPrefixMatcher_NilRequestDoesNotMatch(t *testing.T) {
     }
 }
 
-/* the router reads "/admin/" and "/admin" as the same route, so a prefix written with the trailing slash must claim the bare spelling too — without it, the unwritten spelling escaped the firewall that named the other. The negative half pins the surgical scope: only the exact bare spelling is added, never a wider segment. */
 func TestPathPrefixMatcher_ATrailingSlashPrefixClaimsTheBareSpelling(t *testing.T) {
     matcher := NewPathPrefixMatcher("/admin/")
 
@@ -74,7 +73,6 @@ func TestPathPrefixMatcher_ATrailingSlashPrefixClaimsTheBareSpelling(t *testing.
     }
 }
 
-/* the matcher reads the spelling the router reads: "/admin%2Fusers" is one segment the router never routes under "/admin", so a firewall written for "/admin/" does not claim it, while "/admin/caf%C3%A9" reads "/admin/café" and is claimed */
 func TestPathPrefixMatcher_ReadsThePathTheRouterRoutes(t *testing.T) {
     matcher := NewPathPrefixMatcher("/admin/")
 
@@ -92,9 +90,6 @@ func TestPathPrefixMatcher_ReadsThePathTheRouterRoutes(t *testing.T) {
     }
 }
 
-/* The request is an application-implementable contract, so a nil pointer of a request type reaches the
-matcher as a non-nil interface and HttpRequest() below dereferences it. The untyped literal the sibling
-probe passes is the only shape a bare comparison catches. */
 func TestPathPrefixMatcher_ATypedNilRequestDoesNotMatch(t *testing.T) {
     matcher := NewPathPrefixMatcher("/admin")
 

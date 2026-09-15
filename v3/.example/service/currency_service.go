@@ -39,9 +39,7 @@ func NewCurrencyService(
     }
 }
 
-/* CurrencyService stamps the instant a rate was quoted with the injected clock rather than the wall, the
-   rule ProductService states for its own timestamps: a frozen clock lets a test name the exact instant a
-   currency carries, which cannot be written against time.Now. */
+/* CurrencyService uses the injected clock for locally created quote timestamps and preserves provider timestamps on rate refresh. */
 type CurrencyService struct {
     currencyRepository repository.CurrencyRepository
     cache              melodycachecontract.Cache
@@ -49,10 +47,6 @@ type CurrencyService struct {
     clock              melodyclockcontract.Clock
 }
 
-/* refuseNonPositiveRate is the one spelling of the rule, read by both write doors. A conversion divides by
-   the source rate, so a zero divides by zero and a negative flips the price's sign; and the column is NOT
-   NULL, so there is no "not quoted yet" to fall back on — a currency enters the catalogue with a quote or
-   it does not enter it. */
 func refuseNonPositiveRate(currencyId string, rate float64) error {
     if 0 < rate && false == math.IsInf(rate, 0) && false == math.IsNaN(rate) {
         return nil
@@ -91,7 +85,7 @@ func (instance *CurrencyService) List() ([]*entity.Currency, error) {
 }
 
 func (instance *CurrencyService) FindById(id string) (*entity.Currency, bool, error) {
-    /* an identifier the cache-key grammar refuses names a row no write door admits, so it is answered as absent instead of asked of a cache that would refuse the question with a 500 */
+
     if false == CacheSafeIdentifier(id) {
         return nil, false, nil
     }
@@ -181,7 +175,6 @@ func (instance *CurrencyService) Update(
         return nil, false, nil
     }
 
-    /* the loaded entity is the repository's own stored value under the in-memory configuration, shared with every concurrent reader, so the changes land on a copy: a refused update leaves the stored entity exactly as it was */
     modified := *currency
     modified.Code = code
     modified.Name = name
@@ -207,15 +200,7 @@ func (instance *CurrencyService) Update(
     return &modified, true, nil
 }
 
-/* UpdateRate is the door the rate refresh writes through, and it goes through the service rather than
-   straight to the repository for one reason: the currency list and every currency by id are cached, and
-   the listeners that drop those entries are subscribed to the updated event this dispatches. A rate written
-   behind the cache is a rate no reader ever sees — in the process that dispatched, which is the refresh's
-   own; the http server sees the drop through the shared cache alone, and on the in-process fallback it
-   serves what it cached until it restarts.
-
-   The rate is judged by refuseNonPositiveRate, the spelling Create reads too, and the refusal names the
-   currency so a caller sweeping a whole document can say which quote was bad. */
+/* UpdateRate validates the quote and dispatches the update event that invalidates currency caches in this process. Other processes observe invalidation only through a shared cache. */
 func (instance *CurrencyService) UpdateRate(
     runtimeInstance melodyruntimecontract.Runtime,
     currencyId string,
@@ -246,7 +231,6 @@ func (instance *CurrencyService) UpdateRate(
         return nil, false, fmt.Errorf("the quote is older than the stored rate")
     }
 
-    /* the loaded entity is the repository's own stored value under the in-memory configuration, shared with every concurrent reader, so the changes land on a copy */
     modified := *currency
     modified.Rate = rate
     modified.RateAsOf = rateAsOf

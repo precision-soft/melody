@@ -58,7 +58,6 @@ func (instance *VersionCommand) Run(
             []string{"component", "version"},
         )
 
-        /* the rows read the meta, where NewMeta already applied the fallback chain: the command's explicit value, then the process-wide declaration, then nothing */
         if "" != envelope.Meta.Version.Application {
             block.AddRow("application", envelope.Meta.Version.Application)
         } else {

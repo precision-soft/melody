@@ -97,7 +97,6 @@ func (instance *Store) ClaimDueMessages(ctx context.Context, limit int, visibili
         return nil, tokenErr
     }
 
-    /* the limit is only an allocation HINT here, capped on its own: a claim within the clamp can still ask for a hundred thousand rows, and the query's own LIMIT below carries the clamped value. */
     rows := make([]Message, 0, min(limit, 1024))
 
     claimErr := instance.database.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
@@ -124,7 +123,6 @@ func (instance *Store) ClaimDueMessages(ctx context.Context, limit int, visibili
             ids = append(ids, row.Id)
         }
 
-        /* stamp this claim's fencing token on every claimed row so the resolution/record writes below can pin themselves to this claim. A later re-claim (after the visibility timeout) overwrites the token, which is what makes a stale run's guarded writes match no row. */
         _, updateErr := tx.NewUpdate().
             Model((*Message)(nil)).
             Set("status = ?", StatusInFlight).
@@ -154,7 +152,6 @@ func (instance *Store) ClaimDueMessages(ctx context.Context, limit int, visibili
     return pending, nil
 }
 
-/* claimLimit holds a claim's limit to what the query can carry: bun writes no LIMIT clause for a non-positive value and narrows the value to int32 first, so zero, a negative and a value past the int32 range — where the narrowing wraps to zero or below — all claimed the whole table through this public door, while the relay above it clamps its own BatchSize. A non-positive limit is refused by name, a caller asking for no rows being a defect of the call, and a value past maximumBatchSize is cut to it, the clamp the relay applies. */
 func claimLimit(limit int) (int, error) {
     if 0 >= limit {
         return 0, exception.NewError("outbox claim limit must be positive", map[string]any{"limit": limit}, nil)
@@ -167,7 +164,6 @@ func claimLimit(limit int) (int, error) {
     return limit, nil
 }
 
-/* newClaimToken returns a fresh, unguessable fencing token for one claim of due messages. Every claim gets a distinct token so that a row re-claimed after its visibility lapsed no longer matches the token a stale run still holds. */
 func newClaimToken() (string, error) {
     raw := make([]byte, 16)
     if _, readErr := rand.Read(raw); nil != readErr {
@@ -177,7 +173,7 @@ func newClaimToken() (string, error) {
     return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
-/* RecordDeliveryAttempt increments a single in-flight row's delivery_attempts and returns the post-increment count. Called per row at delivery time (not for the batch at claim time), it charges a delivery attempt only to a row the relay actually reached: a batch-mate behind a row that crashes the relay is never incremented and so is never falsely dead-lettered as poison. The read and write run in one transaction with a row lock (FOR UPDATE) so a concurrent post-visibility claimer cannot lose an increment. A row that is no longer held by this claim — its claim lapsed and another instance re-claimed it (so its claim_token no longer matches), or it was already resolved out of the in-flight state — returns claimed=false so the relay skips it instead of publishing alongside the new owner. Matching on the fencing token, not status alone, is what distinguishes "still mine" from "re-claimed by another run", since a re-claim returns the row to the same in-flight state. */
+/* RecordDeliveryAttempt increments one in-flight row under a transaction and row lock. The claim token fences the write against reclamation; a resolved or differently claimed row returns claimed=false. Call it per attempted row, not for an entire claimed batch. */
 func (instance *Store) RecordDeliveryAttempt(ctx context.Context, id int64, claimToken string) (int, bool, error) {
     deliveryAttempts := 0
     claimed := false
@@ -222,7 +218,7 @@ func (instance *Store) RecordDeliveryAttempt(ctx context.Context, id int64, clai
     return deliveryAttempts, claimed, nil
 }
 
-/* the resolution writes are guarded on both status = in-flight AND the claim's fencing token so only the run whose claim is still current can transition the row. Status alone is insufficient: after a slow run's claim lapsed (visibility timeout) another instance can re-claim the row back to the in-flight state and be actively delivering it, so a status-only write would clobber that new owner (for example reviving a row it already marked sent, or dead-lettering a row it is mid-delivery). Guarding on claim_token makes a stale run's write match no row — a harmless no-op — because the re-claim overwrote the token. */
+/* MarkSent fences resolution by in-flight status and claim token. A stale claim matches no row and cannot overwrite a later owner’s state. */
 func (instance *Store) MarkSent(ctx context.Context, id int64, claimToken string) error {
     _, updateErr := instance.database.NewUpdate().
         Model((*Message)(nil)).
@@ -246,7 +242,7 @@ func (instance *Store) Reschedule(
     lastError string,
     claimToken string,
 ) error {
-    /* a rescheduled row was claimed (in-flight); return it to pending so it is eligible again once available_at arrives, rather than waiting out the visibility timeout. Guarded on in-flight AND the claim token so a stale run whose claim already lapsed cannot revive a row another instance has since re-claimed, marked sent or dead. */
+
     _, updateErr := instance.database.NewUpdate().
         Model((*Message)(nil)).
         Set("status = ?", StatusPending).

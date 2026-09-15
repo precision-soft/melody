@@ -1,19 +1,58 @@
 package repository
 
 import (
-    "database/sql"
-
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect"
     "github.com/uptrace/bun/dialect/feature"
     "github.com/uptrace/bun/schema"
+    "database/sql"
+    "testing"
+    "time"
 )
 
-/* renderingDialect is the least a bun handle needs in order to RENDER a statement: the mysql dialect asks
-   the connection for its version as it is installed, so a handle built on it cannot be made without a
-   database, while what these tests read is the statement bun composes, not the answer a server would give.
-   Nothing here executes, so the handle carries no driver at all. The migration package keeps a fuller twin
-   of this shape, which also records what was executed. */
+type sqlStateError struct {
+    state string
+}
+
+func (instance *sqlStateError) Error() string {
+    return "some server error"
+}
+
+func (instance *sqlStateError) SQLState() string {
+    return instance.state
+}
+
+type stubResult struct {
+    affected    int64
+    affectedErr error
+}
+
+func (instance stubResult) LastInsertId() (int64, error) {
+    return 0, nil
+}
+
+func (instance stubResult) RowsAffected() (int64, error) {
+    return instance.affected, instance.affectedErr
+}
+
+var _ sql.Result = stubResult{}
+
+func renderedUserByUsernameQuery(t *testing.T, wanted string) string {
+    t.Helper()
+
+    repositoryInstance := &bunUserRepository{database: newRenderingDatabase()}
+
+    return repositoryInstance.userByUsernameQuery(&userRow{}, wanted).String()
+}
+
+func renderedUsernameTakenByAnotherQuery(t *testing.T, wanted string, excludedId string) string {
+    t.Helper()
+
+    repositoryInstance := &bunUserRepository{database: newRenderingDatabase()}
+
+    return repositoryInstance.usernameTakenByAnotherQuery(wanted, excludedId).String()
+}
+
 type renderingDialect struct {
     schema.BaseDialect
 
@@ -61,9 +100,12 @@ func (instance *renderingDialect) DefaultSchema() string {
     return "main"
 }
 
-/* newRenderingDatabase answers a handle that can compose a statement and cannot run one. */
 func newRenderingDatabase() *bun.DB {
     return bun.NewDB(nil, newRenderingDialect())
 }
 
 var _ schema.Dialect = (*renderingDialect)(nil)
+
+var currencyProbeQuoteInstant = time.Date(2026, time.September, 7, 9, 0, 0, 0, time.UTC)
+
+const concurrentRounds = 500

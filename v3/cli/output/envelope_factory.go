@@ -25,7 +25,6 @@ func NewMeta(
         version.Application = getApplicationVersion()
     }
 
-    /* the same fallback shape as the two fields above: the caller's value wins when present, the running binary's answers otherwise — the field used to be silently discarded */
     if "" == version.Go {
         version.Go = runtime.Version()
     }

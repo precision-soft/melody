@@ -56,7 +56,6 @@ func TestVersionCommand_TableFormat_NamesAnUnknownApplicationVersion(t *testing.
     }
 }
 
-/* the application row reads the process-wide declaration the composition root makes through output.SetApplicationVersion; an explicit value on the command still wins over it */
 func TestVersionCommand_ReadsTheProcessWideApplicationVersion(t *testing.T) {
     output.SetApplicationVersion("7.7.7-declared")
     defer output.SetApplicationVersion("")
@@ -135,7 +134,6 @@ func TestVersionCommand_NameAndDescriptionAndFlags(t *testing.T) {
     }
 }
 
-/* the siblings above read the whole rendering, which the META header shadows: the header prints the application version off the same meta, so a details row reading the command's own field instead of the resolved chain still leaves the declared value in the output and every Contains assertion passes. This one reads the ROW, which is the only place the two answers differ. The frozen majors assert on the rendering alone, so the row is unpinned there too. */
 func TestVersionCommand_TheDetailsRowCarriesTheResolvedApplicationVersion(t *testing.T) {
     output.SetApplicationVersion("9.9.9-process-wide")
     defer output.SetApplicationVersion("")

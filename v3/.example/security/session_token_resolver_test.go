@@ -7,23 +7,10 @@ import (
     "path/filepath"
     "testing"
     "time"
-
     melodysecuritycontract "github.com/precision-soft/melody/v3/security/contract"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodysession "github.com/precision-soft/melody/v3/session"
 )
-
-/* signedIn supplies a session and the current account behind it. */
-func signedIn(t *testing.T, userId string, roles []string) melodysecuritycontract.Token {
-    t.Helper()
-
-    request, sessionInstance := requestCarryingSession(t)
-    sessionInstance.Set(SessionKeySecurityUserId, userId)
-    sessionInstance.Set(SessionKeySecurityCredentialVersion, SessionCredentialVersion("test-password-hash"))
-    sessionInstance.Set(SessionKeySecurityRoles, roles)
-
-    return SessionTokenResolver(testSessionUserLookup)(request)
-}
 
 func TestSessionTokenResolverAnswersTheSignedInIdentity(t *testing.T) {
     token := signedIn(t, "user-3", []string{"ROLE_USER", "ROLE_ADMIN"})
@@ -41,7 +28,6 @@ func TestSessionTokenResolverAnswersTheSignedInIdentity(t *testing.T) {
     }
 }
 
-/* The producer is driven rather than imitated: a real file-backed storage is written, closed and read again by a second storage, which is what a process restart is. The role list comes back as []any because the snapshot round-trips through json — session.FileStorage says so in its own GoDoc — and a resolver that accepted only []string would leave every signed-in visitor anonymous from the first restart onwards, on the very storage the boot warning asks an operator to register. */
 func TestSessionTokenResolverKeepsAnIdentityAcrossARestart(t *testing.T) {
     path := filepath.Join(t.TempDir(), "sessions.json")
 
@@ -99,7 +85,6 @@ func TestSessionTokenResolverKeepsAnIdentityAcrossARestart(t *testing.T) {
     }
 }
 
-/* the same shape, written directly, so the acceptance is pinned without a filesystem under it */
 func TestSessionTokenResolverAcceptsARestoredRoleList(t *testing.T) {
     request, sessionInstance := requestCarryingSession(t)
     sessionInstance.Set(SessionKeySecurityUserId, "user-2")
@@ -117,7 +102,6 @@ func TestSessionTokenResolverAcceptsARestoredRoleList(t *testing.T) {
     }
 }
 
-/* Every guard below answers the SAME anonymous token, so each is driven on its own: a table that fused them would let one guard cover for a sibling that had been disarmed. Together they are the whole fail-closed surface between a request and an identity — anything the session cannot supply exactly leaves the request anonymous rather than partly authenticated. */
 func TestSessionTokenResolverFailsClosed(t *testing.T) {
     for name, resolve := range map[string]func(*testing.T) melodysecuritycontract.Token{
         "no request at all": func(t *testing.T) melodysecuritycontract.Token {

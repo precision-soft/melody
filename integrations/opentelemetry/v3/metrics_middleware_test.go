@@ -143,7 +143,6 @@ func TestMetricsMiddleware_ReadsTheStatusADirectWriterCommitted(t *testing.T) {
     }
 }
 
-/* typedNilProneResponse exists so a test can hand the middleware the typed-nil shape a userland error branch produces. Its accessors DEREFERENCE the receiver, like every real response's do: a method body that ignores the receiver would run happily on a nil pointer, and the guard's mutant would survive against a fixture that cannot reproduce the panic it guards against. */
 type typedNilProneResponse struct {
     statusCode int
     headers    nethttp.Header

@@ -1,34 +1,11 @@
 package cache
 
 import (
-    "reflect"
     "regexp"
-    "strings"
     "testing"
-    "time"
-
     "github.com/precision-soft/melody/v3/.example/entity"
 )
 
-type layoutProbeBefore struct {
-    Id   string
-    Code string
-}
-
-type layoutProbeAfter struct {
-    Id   string
-    Code string
-    Rate float64
-}
-
-type layoutProbeHolder struct {
-    Nested   layoutProbeBefore
-    Stamped  time.Time
-    Pointers []*layoutProbeAfter
-    hidden   int
-}
-
-/* the token is what the prefix carries, so it has to be the same on every call of the same build and short enough to sit in every key */
 func TestLayoutToken_IsStableAndTwelveHexCharacters(t *testing.T) {
     first := LayoutToken()
     second := LayoutToken()
@@ -42,7 +19,6 @@ func TestLayoutToken_IsStableAndTwelveHexCharacters(t *testing.T) {
     }
 }
 
-/* a field added to a cached struct is exactly the change gob decodes silently to zero, so it is the change the token has to see */
 func TestLayoutTokenOf_MovesWhenAFieldIsAdded(t *testing.T) {
     before := layoutTokenOf([]any{&layoutProbeBefore{}})
     after := layoutTokenOf([]any{&layoutProbeAfter{}})
@@ -52,7 +28,6 @@ func TestLayoutTokenOf_MovesWhenAFieldIsAdded(t *testing.T) {
     }
 }
 
-/* a field of a NESTED struct is decoded by the same rule, so the description looks through pointers and slices into the structs they hold, names each exported field, and leaves the unexported ones — which gob does not encode — out */
 func TestLayoutDescriptionOf_LooksIntoTheStructsAFieldHolds(t *testing.T) {
     description := layoutDescriptionOf(reflectTypeOf(&layoutProbeHolder{}), map[reflectType]bool{})
 
@@ -67,7 +42,6 @@ func TestLayoutDescriptionOf_LooksIntoTheStructsAFieldHolds(t *testing.T) {
     }
 }
 
-/* the list the serializer registers is the list the token is computed over: every entity the application caches is on it, so a type cached but not tokened cannot exist */
 func TestCachedValueList_CarriesEveryCachedEntity(t *testing.T) {
     expected := map[string]bool{}
     for _, value := range []any{&entity.Product{}, &entity.Category{}, &entity.Currency{}, &entity.User{}} {
@@ -83,15 +57,4 @@ func TestCachedValueList_CarriesEveryCachedEntity(t *testing.T) {
             t.Fatalf("expected %s on the cached value list", name)
         }
     }
-}
-
-/* small spellings so the tests above read as sentences */
-type reflectType = reflect.Type
-
-func reflectTypeOf(value any) reflect.Type {
-    return reflect.TypeOf(value)
-}
-
-func contains(haystack string, needle string) bool {
-    return strings.Contains(haystack, needle)
 }

@@ -25,7 +25,6 @@ func hmacEnvelopeProbe() hmacEnvelope {
     }
 }
 
-/* an empty body hashes deterministically rather than being skipped: a signature that covered no body for an empty request would let a body be added to a captured envelope */
 func TestHashBody_HashesTheEmptyBodyToo(t *testing.T) {
     if "" == hashBody(nil) {
         t.Fatal("expected an empty body to hash to something")
@@ -70,7 +69,6 @@ func TestEncodeHmacHeaderValue_RoundTripsThroughTheDecoder(t *testing.T) {
     }
 }
 
-/* the decoder fails closed on every structural problem: each of these would otherwise reach the signature comparison or past it with a half-read envelope */
 func TestDecodeHmacHeaderValue_RefusesEveryStructuralDamage(t *testing.T) {
     secret, _ := hmacEnvelopeProbeSecrets().Secret("key-current")
     valid, _ := encodeHmacHeaderValue("key-current", hmacEnvelopeProbe(), secret)
@@ -94,7 +92,6 @@ func TestDecodeHmacHeaderValue_RefusesEveryStructuralDamage(t *testing.T) {
     }
 }
 
-/* the algorithm and the type are the domain separation: a JSON web token is byte-identical in shape and signs through the same primitive, so without a type of its own the only thing keeping one credential from verifying as the other is the two secrets happening to differ */
 func TestDecodeHmacHeaderValue_RefusesAnyOtherAlgorithmOrType(t *testing.T) {
     secret, _ := hmacEnvelopeProbeSecrets().Secret("key-current")
 
@@ -122,7 +119,6 @@ func TestDecodeHmacHeaderValue_RefusesAnyOtherAlgorithmOrType(t *testing.T) {
     }
 }
 
-/* the migration window admits exactly the envelopes a signer that predates the typ can mint, and nothing else: an envelope carrying NO typ verifies, while one carrying a WRONG typ is refused whether or not the window is open. Without the second half the window would let a JSON web token through on its type as well as on its absence. */
 func TestDecodeHmacHeaderValue_TheMigrationWindowAcceptsAnAbsentTypeAndStillRefusesAWrongOne(t *testing.T) {
     secret, _ := hmacEnvelopeProbeSecrets().Secret("key-current")
 

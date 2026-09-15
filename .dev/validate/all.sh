@@ -141,6 +141,10 @@ run_live_go_suites() {
         BATCH_COMMAND_LIST+=("${LIVE_ENVIRONMENT_EXPORT_STRING} && cd ${CONTAINER_ROOT_PATH}/${LIVE_MODULE_RELATIVE_PATH_STRING} && go test -race -count=1 ./...")
     done < <(get_integration_module_directory_list)
 
+    BATCH_COMMAND_LIST+=("${LIVE_ENVIRONMENT_EXPORT_STRING} && cd ${CONTAINER_ROOT_PATH}/v3/.example && go test -race -count=1 -run TestStoreReenrollmentOnMySQL ./twofactor")
+    BATCH_COMMAND_LIST+=("${LIVE_ENVIRONMENT_EXPORT_STRING} && cd ${CONTAINER_ROOT_PATH}/v3/.example && go test -race -count=1 -run TestTwoFactorHandlersUseAuthenticatedIdentityOnMySQL ./handler/twofactor")
+    BATCH_COMMAND_LIST+=("${LIVE_ENVIRONMENT_EXPORT_STRING} && cd ${CONTAINER_ROOT_PATH}/v3/.example && go test -race -count=1 -run TestInitializeMigrationBookkeepingConcurrentPostgres ./migration")
+
     run_section "melody live integration suites (mirrors the ci live job)" "${TAG_VALIDATE}" "go" -- \
         run_batch_in_service_shell "${SERVICE_NAME_STRING}" "${BATCH_COMMAND_LIST[@]}"
 }

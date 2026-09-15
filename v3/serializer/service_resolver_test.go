@@ -30,7 +30,6 @@ func TestSoftResolvers_AnswerNilWhenTheLoggerIsMissingToo(t *testing.T) {
     }
 }
 
-/* The container rejects typed-nil providers; this exercises the full path, not the resolver’s latent nil branch. */
 func TestSerializerFromRuntime_RefusesATypedNilSerializer(t *testing.T) {
     serviceContainer := container.NewContainer()
 

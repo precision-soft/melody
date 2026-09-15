@@ -9,7 +9,7 @@ import (
 
 type Error struct {
     message string
-    /* stateMutex guards context and alreadyLogged, the two fields written after construction. Error handling stays single-threaded within one request by design, but a creation failure memoized by the container is reachable from the owner request and from every waiter request at once — the resolver hands each waiter a wrapper whose cause is the same instance, and the container's own Close returns one memoized error to every concurrent caller — so the mutable fields are locked rather than trusted to a premise that sharing already broke: an unlocked map write against a map iteration is a fatal runtime error no recover reaches. The immutable fields need no lock. */
+
     stateMutex    sync.RWMutex
     context       exceptioncontract.Context
     causeErr      error
@@ -47,7 +47,6 @@ func (instance *Error) SetContextValue(key string, value any) {
     instance.stateMutex.Lock()
     defer instance.stateMutex.Unlock()
 
-    /* the zero value is constructible outside the constructors and carries a nil map; the first write allocates it instead of panicking on the assignment */
     if nil == instance.context {
         instance.context = make(exceptioncontract.Context)
     }

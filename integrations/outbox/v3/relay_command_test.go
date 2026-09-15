@@ -230,7 +230,6 @@ func TestNewRelayCommandFromResolver_DefersResolution(t *testing.T) {
     }
 }
 
-/* nilYieldingResolver models a userland decorating resolver that answers nil with no error — the shape the container's own door refuses, which is exactly why the command carries its own guard as latent defense, mirroring lazyRepository.resolveStore. */
 type nilYieldingResolver struct{}
 
 func (instance nilYieldingResolver) Get(serviceName string) (any, error) {
@@ -290,7 +289,6 @@ func TestRelayCommand_ACancellationExplainedErrorStillExitsClean(t *testing.T) {
     }
 }
 
-/* cancellationEchoRepository answers the claim with the context's own cancellation, the way a driver does mid-drain. */
 type cancellationEchoRepository struct {
     fakeRepository
 }
@@ -303,7 +301,6 @@ func (instance *cancellationEchoRepository) ClaimDueMessages(ctx context.Context
     return instance.fakeRepository.ClaimDueMessages(ctx, limit, visibility)
 }
 
-/* capturingCommand delegates to the command under test and keeps its error, so a test can tell a refused command line — which the dispatch answers — from the command's own failure, which is what it is asserting. */
 type capturingCommand struct {
     clicontract.Command
     runtimeInstance runtimecontract.Runtime

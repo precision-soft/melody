@@ -10,7 +10,6 @@ import (
     "github.com/precision-soft/melody/v3/runtime"
 )
 
-/* the container itself refuses a factory handing back a typed nil, so the resolver's own typed-nil branch is LATENT: this pins the whole path, not that branch. */
 func TestLoggerFromRuntime_RefusesATypedNilLogger(t *testing.T) {
     serviceContainer := container.NewContainer()
 

@@ -45,7 +45,6 @@ func TestParameter_Duration_RejectsUnparsableAndUnsetValues(t *testing.T) {
     }{
         {"unparsableString", "not-a-duration"},
         {"bareNumberString", "30"},
-        /* a bare integer is refused for the same missing unit as the bare number string — it used to be read as nanoseconds, a timeout that fired instantly with no error anywhere */
         {"bareInt", int(5)},
         {"bareInt64", int64(5)},
         {"unset", nil},
@@ -114,7 +113,6 @@ func TestParameter_Float_RejectsUnparsableAndUnsetValues(t *testing.T) {
     }
 }
 
-/* parameters routinely hold inline credentials, so a failed conversion must identify the parameter by its environment key alone; embedding the offending value would carry the secret into logs through the exception cause-context chain */
 func TestParameter_ConversionErrorsOmitTheRawValue(t *testing.T) {
     secretValue := "P4ssPhrase"
 
@@ -145,7 +143,6 @@ func TestParameter_ConversionErrorsOmitTheRawValue(t *testing.T) {
     }
 }
 
-/* Resolve rewrites every parameter's value, while a service handed the *Parameter reads it through the accessors without ever touching the configuration. The write was covered by the configuration lock and the read by nothing, which is two locks around one field — the race detector reported the write at the resolve loop against the read in Value(). */
 func TestParameter_ValueDoesNotRaceResolve(t *testing.T) {
     configuration, newConfigurationErr := NewConfiguration(
         &Environment{
@@ -159,7 +156,6 @@ func TestParameter_ValueDoesNotRaceResolve(t *testing.T) {
         t.Fatalf("expected the configuration to build, got %v", newConfigurationErr)
     }
 
-    /* a plain value, not a template: a pre-boot templated registration is deferred and refuses to be read until boot, so it cannot exercise the value/valueMutex race this test measures — Resolve still rewrites this parameter's value under the write lock, which is the write side the read races. */
     configuration.RegisterRuntime("app.tag", "tag")
 
     parameter := configuration.Get("app.tag")
@@ -196,7 +192,6 @@ func TestParameter_ValueDoesNotRaceResolve(t *testing.T) {
     waitGroup.Wait()
 }
 
-/* a secret parameter's conversion failure withholds the cause: the strconv text quotes the value it refused, which is the right diagnostic for a pool size and the wrong log line for a credential; an ordinary parameter keeps the full cause */
 func TestParameter_SecretConversionWithholdsTheValue(t *testing.T) {
     secretParameter := NewParameter("APP_TOKEN", "sk_live_51H", "sk_live_51H", false)
     secretParameter.isSecret.Store(true)
@@ -228,7 +223,6 @@ func TestParameter_SecretConversionWithholdsTheValue(t *testing.T) {
     }
 }
 
-/* a deferred parameter still holds its raw template, and every accessor funnels through loadValue: the read refuses loudly instead of serving %app.user% as though it were the value, and the refusal names the parameter the way every diagnostic here does */
 func TestParameter_ReadingADeferredParameterRefusesLoudly(t *testing.T) {
     parameter := NewParameter("APP_GREETING", "%app.user%", "%app.user%", false)
     parameter.deferred.Store(true)
@@ -256,7 +250,6 @@ func TestParameter_ReadingADeferredParameterRefusesLoudly(t *testing.T) {
     _ = parameter.String()
 }
 
-/* the settled side of the deferral: once the boot resolution stores a value and clears the flag, the accessors answer as they always did */
 func TestParameter_ASettledDeferredParameterReadsNormally(t *testing.T) {
     parameter := NewParameter("APP_GREETING", "%app.user%", "%app.user%", false)
     parameter.deferred.Store(true)
@@ -269,7 +262,6 @@ func TestParameter_ASettledDeferredParameterReadsNormally(t *testing.T) {
     }
 }
 
-/* MustString is the accessor wiring code reaches for when a missing string is a boot failure, so its refusal has to name what it refused: the environment key, the registration name of a runtime parameter that has no key, and the type it actually found — the value itself stays out, the way every other conversion diagnostic here does. */
 func TestParameter_MustString_PanicRefusalNamesTheParameterAndTheTypeItFound(t *testing.T) {
     parameter := NewParameter("APP_POOL_SIZE", 12, 12, false)
     parameter.name = "app.pool.size"
@@ -311,7 +303,6 @@ func TestParameter_MustString_PanicRefusalNamesTheParameterAndTheTypeItFound(t *
     _ = parameter.MustString()
 }
 
-/* a parameter that really holds a string is handed back by MustString without any refusal — the panic above is the refusal path, not the ordinary one */
 func TestParameter_MustString_ReturnsTheStoredString(t *testing.T) {
     parameter := NewParameter("APP_NAME", "melody", "melody", false)
 
@@ -320,7 +311,6 @@ func TestParameter_MustString_ReturnsTheStoredString(t *testing.T) {
     }
 }
 
-/* a runtime parameter has no environment key, and passing the empty key into the shared parsers put a nameless parameterName inside the cause of an error whose outer context names the parameter — the operator reading the cause chain concluded the parameter was anonymous */
 func TestParameter_ConversionCauseNamesTheRuntimeParameter(t *testing.T) {
     parameter := NewParameter("", "not-a-duration", "not-a-duration", false)
     parameter.name = "app.timeout"
@@ -345,7 +335,6 @@ func TestParameter_ConversionCauseNamesTheRuntimeParameter(t *testing.T) {
     }
 }
 
-/* Bool reads a native bool as itself and a string through the shared parser, and refuses everything else by name: a parameter that decides whether a feature is on must never answer false because it happened to hold a number, and the value of a secret never reaches the diagnostic */
 func TestParameter_Bool_ReadsBothShapesAndRefusesTheRest(t *testing.T) {
     nativeParameter := NewParameter("APP_FEATURE", true, true, false)
 
@@ -388,7 +377,6 @@ func TestParameter_Bool_ReadsBothShapesAndRefusesTheRest(t *testing.T) {
         t.Fatalf("expected an exception error")
     }
 
-    /* the cause is the parser's, and it names what the refusal is about: the outer message says only that a conversion failed, which told an operator holding a parameter registered as a number that something went wrong and nothing about what */
     foreignCause := foreignExceptionErr.CauseErr()
     if nil == foreignCause {
         t.Fatalf("expected the shared parser's cause to be carried")
@@ -411,7 +399,6 @@ func TestParameter_Bool_ReadsBothShapesAndRefusesTheRest(t *testing.T) {
     }
 }
 
-/* a secret keeps its value out of the diagnostic on this door too: the shared parser stamps the value it refused into the cause context, and delegating to it would have published a secret's contents through the very chain that exists to explain the refusal */
 func TestParameter_Bool_KeepsASecretValueOutOfTheCause(t *testing.T) {
     secretParameter := NewParameter("APP_SECRET", 12, 12, false)
     secretParameter.isSecret.Store(true)

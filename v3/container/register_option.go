@@ -26,18 +26,14 @@ func WithCollectionPriority(priority int) containercontract.RegisterOption {
     }
 }
 
-/* Replacing admits a SCOPED registration whose name — or whose registered type — the container already holds. Without it the collision is refused where it is made, because a name that means two things depending on where it is asked from is the ambiguity the two lifetimes exist to keep apart. It is read only by the scoped registration paths: a container registration declaring it gains nothing, and takes a scoped-owned name only when the scoped side itself was declared Replacing.
-
-   Declaring it where nothing collides is not inert: the waiver is remembered, and a container registration of the same name arriving later is admitted without a declaration of its own. The waiver likewise covers the name and the registered type together — a scoped registration admitted for its name also shadows, inside every scope, the type-keyed resolution of whichever container service shares the type; a registration that means only the name opts out of the type with WithoutTypeRegistration. */
+/* Replacing permits scoped registration to shadow a container name or registered type. The waiver also admits a later container registration and is controlled by the scoped side. Use WithoutTypeRegistration when only name shadowing is intended. */
 func Replacing() containercontract.RegisterOption {
     return func(option *containercontract.RegisterOptions) {
         option.ReplacesContainerService = true
     }
 }
 
-/* WithTeardownDependency declares that this registration closes before the named container services. Prefer resolving collaborators through the provider's resolver, which records dependencies automatically; declarations cover captured instances that perform no resolution.
-
-   Calls append dependencies. They neither create services nor affect resolution-cycle detection. Registration rejects empty names and self-dependencies; RegisterScoped rejects this option. The default teardown drops uncreated targets. ArmParallelTeardown and subsequent registrations reject unknown or scoped targets with ErrTeardownDependencyWasNeverRegistered or ErrTeardownDependencyIsScoped; registered but uncreated collaborators remain valid. */
+/* WithTeardownDependency appends close-before edges for named container services. It does not create targets or affect resolution-cycle checks. Empty names, self-dependencies and scoped registrations are refused. Sequential teardown omits uncreated targets; parallel arming and later registrations reject unknown or scoped targets while allowing registered but unbuilt collaborators. */
 func WithTeardownDependency(serviceNames ...string) containercontract.RegisterOption {
     return func(option *containercontract.RegisterOptions) {
         option.TeardownDependencyNames = append(option.TeardownDependencyNames, serviceNames...)

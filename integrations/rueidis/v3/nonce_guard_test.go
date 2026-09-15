@@ -14,7 +14,6 @@ func TestRedisNonceGuard_FirstUseThenReplay(t *testing.T) {
     client := newTokenStoreClient(t)
     guard := NewNonceGuardWithPrefix(client, "melody:nonce:test")
 
-    /* the nonce carries the clock so two runs of this package inside the remembered window cannot collide: the guard is doing its job when it reports a fixed nonce as already seen, and a test that reads that as a failure is testing the previous run */
     nonce := fmt.Sprintf("nonce-replay-%d", time.Now().UnixNano())
 
     seenFirst, firstErr := guard.Remember(newTokenStoreRuntime(), nonce, 5*time.Second)
@@ -50,7 +49,6 @@ func TestRedisNonceGuard_NonPositiveTtlIsNotStored(t *testing.T) {
     }
 }
 
-/* newWedgedNonceGuard hands back a guard over a client whose replies stop arriving from here on, so both round trips of Remember — the Lua record and the read-only existence check — run against a store that accepts the command and never answers */
 func newWedgedNonceGuard(t *testing.T, options ...NonceGuardOption) (*NonceGuard, *gate) {
     t.Helper()
 
@@ -79,7 +77,6 @@ func TestRedisNonceGuard_RememberIsBoundedByTheCallTimeout(t *testing.T) {
     }))
 }
 
-/* the existence check behind a non-positive ttl is an EXISTS, a read-only command the client retries on a fresh connection for as long as the context allows — measured, on a request without deadline it had not returned after fifteen seconds where the Lua record was ended by the client's own ceiling at five. It is called directly: the authenticators refuse a non-positive ttl before they reach the guard, so this door is the contract's own */
 func TestRedisNonceGuard_ExistenceCheckIsBoundedByTheCallTimeout(t *testing.T) {
     guard, _ := newWedgedNonceGuard(t)
 
@@ -90,7 +87,6 @@ func TestRedisNonceGuard_ExistenceCheckIsBoundedByTheCallTimeout(t *testing.T) {
     }))
 }
 
-/* a request that already carries a deadline TIGHTER than the call timeout keeps it: with the call timeout at a second, a runtime carrying ten milliseconds is refused in tens of milliseconds, where a cap that replaced the request context would wait the full second */
 func TestRedisNonceGuard_RememberKeepsATighterRequestDeadline(t *testing.T) {
     guard, _ := newWedgedNonceGuard(t, WithNonceGuardCallTimeout(time.Second))
 
@@ -113,7 +109,6 @@ func TestRedisNonceGuard_RememberKeepsATighterRequestDeadline(t *testing.T) {
 }
 
 func TestWithNonceGuardCallTimeout_NonPositiveFallsBackToTheDefault(t *testing.T) {
-    /* a non-positive call timeout must not survive verbatim: context.WithTimeout(ctx, 0) is born cancelled, and every envelope would be refused forever */
     cases := map[string]time.Duration{
         "zero":     0,
         "negative": -1 * time.Second,

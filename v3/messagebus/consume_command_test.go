@@ -186,7 +186,6 @@ func TestConsume_ExhaustedWithoutFailureTransportDropsMessage(t *testing.T) {
     }
 }
 
-/* configurable dead-letter bound: requeue forever by default, give up after N when set */
 
 type recordingNackTransport struct {
     nackCount    int
@@ -262,7 +261,6 @@ func TestConsume_BoundedDeadLetterStopsRequeueAfterMax(t *testing.T) {
 
     source := &recordingNackTransport{}
 
-    /* still under the bound: the failed dead-letter routing must requeue and bump the attempt counter */
     command.newConsumeSession(runtimeInstance).consume(runtimeInstance, source, NewEnvelope(consumeTestMessage{Value: 1}).WithStamp(DeadLetterAttemptStamp{Count: 0}))
     if 1 != source.nackCount || false == source.nackRequeue {
         t.Fatalf("expected the first failed dead-letter routing to requeue, got nackCount=%d requeue=%v", source.nackCount, source.nackRequeue)
@@ -271,7 +269,6 @@ func TestConsume_BoundedDeadLetterStopsRequeueAfterMax(t *testing.T) {
         t.Fatalf("expected the requeued envelope to carry dead-letter attempt 1, got %d", DeadLetterAttemptCount(source.nackEnvelope))
     }
 
-    /* at the bound: stop requeueing and nack without requeue so a transport-native dead-letter can claim it instead of looping forever */
     source.nackCount = 0
     command.newConsumeSession(runtimeInstance).consume(runtimeInstance, source, NewEnvelope(consumeTestMessage{Value: 1}).WithStamp(DeadLetterAttemptStamp{Count: 1}))
     if 1 != source.nackCount || true == source.nackRequeue {
@@ -287,7 +284,6 @@ func TestConsume_UnboundedDeadLetterRequeuesByDefault(t *testing.T) {
 
     source := &recordingNackTransport{}
 
-    /* the default policy (MaxDeadLetterAttempts 0) keeps requeueing regardless of how many attempts have accrued, preserving the documented no-loss behavior */
     command.newConsumeSession(runtimeInstance).consume(runtimeInstance, source, NewEnvelope(consumeTestMessage{Value: 1}).WithStamp(DeadLetterAttemptStamp{Count: 99}))
     if 1 != source.nackCount || false == source.nackRequeue {
         t.Fatalf("expected the default policy to keep requeueing (no message loss), got nackCount=%d requeue=%v", source.nackCount, source.nackRequeue)
@@ -651,7 +647,6 @@ func TestConsume_MessagesGetIsolatedScopes(t *testing.T) {
     var leaked int64
     locator := NewHandlerLocator()
     RegisterHandler(locator, func(handlerRuntime runtimecontract.Runtime, message consumeTestMessage) error {
-        /* each delivery must see its own scope: an override written for one message must not be visible while handling another */
         if true == handlerRuntime.Scope().Has("service.ambient") {
             atomic.AddInt64(&leaked, 1)
         }
@@ -742,7 +737,6 @@ func TestConsume_MessageScopeCarriesMessageIdLogger(t *testing.T) {
     }
 }
 
-/* the in-process cron runner overlaps a run with itself whenever an entry outruns its interval, so two concurrent Runs of the single auto-registered command are a supported deployment shape — before the run-local session, the second Run's container hydration wrote the singleton's bus, transports and retryPolicy fields while the first Run's workers were reading them, a data race the -race band fails on. */
 func TestRun_OverlappingRunsShareNoMutableState(t *testing.T) {
     serviceContainer := container.NewContainer()
 

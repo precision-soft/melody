@@ -69,7 +69,6 @@ func (instance *ImpersonationToken) Roles() []string {
     return append([]string{}, roles...)
 }
 
-/* effectiveRoles is the role set this token authorizes with: the admin's own under RoleModeImpersonator, otherwise the impersonated user's. */
 func (instance *ImpersonationToken) effectiveRoles() []string {
     if RoleModeImpersonator == instance.roleMode {
         return instance.impersonator.Roles()

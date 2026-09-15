@@ -17,7 +17,7 @@ func NewControl(rules ...Rule) *Control {
     }
 }
 
-/* Rules answers a copy of the rules the control was built with, in declaration order. */
+/* Rules returns a copy of the configured rules in declaration order. */
 func (instance *Control) Rules() []Rule {
     return append([]Rule{}, instance.rules...)
 }
@@ -100,7 +100,6 @@ func (instance *Control) MatchRuleIndex(path string) (int, bool) {
     return -1, false
 }
 
-/* claimsPath answers whether a prefix rule — raw or segment-bounded — reaches the path. */
 func (instance Rule) claimsPath(normalizedPath string) bool {
     if false == strings.HasPrefix(normalizedPath, instance.pathPrefix) {
         return false

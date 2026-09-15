@@ -39,7 +39,7 @@ type InMemoryTokenStore struct {
     revocationEpochRetention time.Duration
 }
 
-/* WithRevocationEpochRetention bounds how long PurgeExpired keeps a published revocation boundary after its instant, mirroring the rueidis store's option of the same name. Zero — the default — keeps boundaries forever: a boundary is what refuses every token issued before it, stateless JWTs above all, so its life may not depend on anything else the store holds. A negative retention is refused rather than silently ignored, because a boundary dropped early is a revocation bypass. Chainable; call it at boot, before the store is shared. */
+/* WithRevocationEpochRetention limits retention of revocation boundaries after their instant. Zero retains them forever; negative values are refused. The retention must cover tokens still subject to revocation. Configure it before sharing the store. */
 func (instance *InMemoryTokenStore) WithRevocationEpochRetention(retention time.Duration) *InMemoryTokenStore {
     if 0 > retention {
         exception.Panic(exception.NewError(
@@ -81,7 +81,7 @@ func (instance *InMemoryTokenStore) Put(tokenString string, claims securitycontr
 }
 
 func (instance *InMemoryTokenStore) PutWithTtl(tokenString string, claims securitycontract.Claims, ttl time.Duration) {
-    /* a non-positive ttl is refused instead of falling through to the never-expires sentinel: the likeliest caller of a ttl <= 0 computed a remaining lifetime that had already elapsed, and storing that token FOREVER is the exact inversion of what was asked. The token string never joins the context — it is the credential. */
+
     if 0 >= ttl {
         exception.Panic(exception.NewError(
             "token store ttl must be positive",
@@ -138,7 +138,6 @@ func (instance *InMemoryTokenStore) PurgeExpired() int {
         }
     }
 
-    /* a revocation boundary's life is bound to the configured retention window ALONE, never to whether the user still holds stored tokens: stateless JWTs are validated against these boundaries without ever being stored, so the previous token-linked eviction meant the first purge after a RevokeBefore silently un-revoked every outstanding JWT of a user with no stored tokens. With the default zero retention boundaries are kept forever. */
     if 0 < instance.revocationEpochRetention {
         horizon := now.Add(-instance.revocationEpochRetention)
         for userIdentifier, boundaries := range instance.epochsByUser {
@@ -177,10 +176,8 @@ func cloneClaims(claims securitycontract.Claims) securitycontract.Claims {
     return cloned
 }
 
-/* maxActorImpersonationDepth bounds the impersonator-chain deep-copy recursion so a cyclic ActorData — an in-process caller can point actor.Impersonator back into the chain through the exported field and Put/Lookup it — cannot recurse until the goroutine stack overflows, a fatal error no deferred recover() can catch and which takes down the whole process. A real impersonation chain (a subject acted for by an operator) is a handful of links deep, far below this bound; a JSON-decoded actor is additionally capped by encoding/json's own nesting limit. Mirrors internal.maxCopyDepth. */
 const maxActorImpersonationDepth = 10000
 
-/* cloneActorData deep-copies an originating actor, including its nested Impersonator subtree, so a stored or returned actor never aliases the caller's mutable ActorData (its Roles, Attributes, or the accountable impersonator behind it). Recurses through the impersonator chain; a nil carrier clones to nil. */
 func cloneActorData(actor *securitycontract.ActorData) *securitycontract.ActorData {
     return cloneActorDataAtDepth(actor, 0)
 }
@@ -198,7 +195,6 @@ func cloneActorDataAtDepth(actor *securitycontract.ActorData, depth int) *securi
         actorCopy.Attributes = internal.CopyStringMap(actor.Attributes)
     }
 
-    /* at the depth bound stop following the impersonator chain rather than recurse further: this halts a cyclic chain before the stack overflows while leaving every realistically-shallow chain fully deep-copied. The truncated link is dropped (nil), never aliased, so no caller-mutable ActorData leaks into the store. */
     if depth >= maxActorImpersonationDepth {
         actorCopy.Impersonator = nil
 
@@ -304,7 +300,6 @@ func (instance *InMemoryTokenStore) put(tokenString string, claims securitycontr
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    /* the IssuedAt stamp is read under the same critical section that inserts the entry, so a RevokeBefore can no longer be published between the stamp and the insert: without this, a token stamped before a concurrent revocation but inserted after it was born already revoked, and a "revoke everything, then log in again" sequence bounced the fresh login. The ttl-derived expiry reads the same instant for the same reason. */
     now := instance.clock.Now()
 
     claims.IssuedAt = now

@@ -72,10 +72,6 @@ func (instance *Store) Enroll(
     return secret, uri, recoveryCodes, nil
 }
 
-/* enrollmentUpsert is the write kept as a query, so the clause that makes a second enrollment a REPLACEMENT
-   rather than a collision is readable on its own. All three columns are written, not merely the secret: the
-   recovery codes belong to the secret they were minted beside, and a set left from the previous enrollment
-   would keep opening an account whose second factor was just replaced. */
 func (instance *Store) enrollmentUpsert(enrollment *Enrollment) *bun.InsertQuery {
     return instance.database.
         NewInsert().
@@ -86,7 +82,7 @@ func (instance *Store) enrollmentUpsert(enrollment *Enrollment) *bun.InsertQuery
         Set("created_at = VALUES(created_at)")
 }
 
-/* DeleteEnrollment removes the second factor an account was enrolled with — the secret and the recovery codes together, since both answer for the same account. The example mints identifiers as the highest suffix plus one, so a deleted account's identifier is the next account's: an enrollment left behind would have started that account enrolled, with the secret and the recovery codes of whoever held the previous one. Deleting nothing is not a failure — an account without a second factor has no row. */
+/* DeleteEnrollment removes both the secret and recovery codes for an account. Missing enrollment is a successful no-op. */
 func (instance *Store) DeleteEnrollment(
     runtimeInstance melodyruntimecontract.Runtime,
     userIdentifier string,
@@ -124,7 +120,7 @@ func (instance *Store) FindTotpSecret(
         Limit(1).
         Scan(runtimeInstance.Context())
     if nil != selectErr {
-        /* a missing row means the user has no second factor; any other error must fail closed (be returned) rather than be mistaken for "not enrolled", which would silently let primary authentication stand on its own */
+
         if true == errors.Is(selectErr, sql.ErrNoRows) {
             return "", false, nil
         }
@@ -160,7 +156,7 @@ func (instance *Store) RedeemRecoveryCode(
                 Limit(1).
                 Scan(ctx)
             if nil != selectErr {
-                /* a missing row means the user has no second factor; treat it as nothing-to-redeem rather than an error, matching FindTotpSecret */
+
                 if true == errors.Is(selectErr, sql.ErrNoRows) {
                     return nil
                 }
@@ -175,7 +171,7 @@ func (instance *Store) RedeemRecoveryCode(
 
             remaining := make([]string, 0, len(codes))
             for _, candidate := range codes {
-                /* constant-time compare so a redemption attempt does not leak, through timing, how much of a recovery code matched */
+
                 if 1 == subtle.ConstantTimeCompare([]byte(candidate), []byte(code)) {
                     redeemed = true
 

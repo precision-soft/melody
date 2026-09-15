@@ -924,7 +924,6 @@ func TestInMemoryBackend_TheTickerDrivesTheSweep(t *testing.T) {
 
     clockInstance.setNow(time.Unix(20, 0))
 
-    /* the tick is delivered on an unbuffered channel, so the send returns only once the loop has received it; the sweep it drives is still in flight, which is what the poll below waits out */
     clockInstance.tick()
 
     deadline := time.Now().Add(2 * time.Second)
@@ -948,7 +947,6 @@ func TestInMemoryBackend_TheTickerDrivesTheSweep(t *testing.T) {
     t.Fatalf("expected the ticker to drive the sweep that reclaims the lapsed entry")
 }
 
-/* the sweep-driving clock is separate from cacheTestClock on purpose: once ticks actually fire, the backend goroutine reads the clock while the test advances it, so the time behind this one is guarded — the shared fixture is written by its tests as a plain field and is safe only because no tick ever reaches it. */
 func newCacheTickableTestClock(now time.Time) *cacheTickableTestClock {
     return &cacheTickableTestClock{
         now:           now,
@@ -1052,7 +1050,6 @@ func TestInMemoryBackend_EvictionToleratesARecencyListThatLostAgreementWithTheMa
             t.Fatalf("unexpected set error: %v", err)
         }
 
-        /* two intruders in a row: the walk removes the first and its Prev is cleared by the removal, so the walk ends with the second still at the back */
         backend.mutex.Lock()
         backend.lruList.PushBack(1)
         backend.lruList.PushBack(2)
@@ -1181,7 +1178,6 @@ func TestInMemoryBackend_ReadsToleratePlacementChangingUnderThem(t *testing.T) {
     }
 }
 
-/* the key grammar is the contract's, enforced identically by every implementation: a caller must not be able to tell the backends apart by which keys they refuse. */
 func TestInMemoryBackend_RefusesTheContractKeyGrammar(t *testing.T) {
     backend := NewInMemoryBackend(
         10,
@@ -1219,7 +1215,6 @@ func TestInMemoryBackend_RefusesTheContractKeyGrammar(t *testing.T) {
     }
 }
 
-/* the refusal order is part of the shared contract, the redis backend's order: the closed answer wins over the key judgment, and a batch write judges the ttl before its keys, so a call that is wrong in more than one way is refused with the same answer whichever implementation it hit. */
 func TestInMemoryBackend_RefusalOrderMatchesTheRedisBackend(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -1264,7 +1259,6 @@ func TestInMemoryBackend_ANilPayloadReadsBackEmptyNonNil(t *testing.T) {
     }
 }
 
-/* the batch refusal names the sorted-first malformed key, never a map-iteration choice: the same wrong batch answers the same refusal on every call — the rule the redis backend's batch reporting follows. */
 func TestInMemoryBackend_SetMultipleNamesTheSortedFirstMalformedKey(t *testing.T) {
     backend := NewInMemoryBackend(10, time.Hour, &cacheTestClock{now: time.Unix(10, 0)})
     defer backend.Close()

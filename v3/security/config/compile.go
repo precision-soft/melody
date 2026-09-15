@@ -10,10 +10,10 @@ import (
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
-/* Compile turns a Configuration into the compiled form the runtime reads. The argument is the thing to know about this door: Configuration carries only unexported fields and no constructor, and Builder never hands one out, so no caller outside this package can build a non-empty one — a composition root calling Compile from outside gets the empty configuration's answer, which is a nil compiled configuration and a nil error, meaning "no security was declared". That is the ordinary case and not a hidden failure: the application installs security through the module hook, which is the only writer of the field the runtime reads, and a nil there simply means no module registered any. The public path from a declaration to the runtime is Builder.BuildAndCompile. */
+/* Compile compiles a Configuration. External callers cannot populate its private fields and should use Builder.BuildAndCompile. An empty configuration returns nil, nil to represent absent security configuration. */
 func Compile(configuration Configuration) (*security.CompiledConfiguration, error) {
     if 0 == len(configuration.firewalls) {
-        /* a global access control declared without any firewall still enforces: the resolution listener matches no firewall and sets no context, the access control listener falls back to this global control and denies unauthenticated access, which is the behaviour the runtime is built and tested for. Dropping it here would silently disable every declared global rule. */
+
         if nil != configuration.global.accessControl {
             return security.NewCompiledConfiguration(nil, configuration.global.accessControl), nil
         }
@@ -239,9 +239,6 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
     ), nil
 }
 
-/* refuseTypedNilDependency refuses a dependency that reads as declared and holds a typed nil. The three interfaces an override carries — the decision manager, the entry point, the denied handler — are the ones the plain comparison above cannot judge: `var manager *myManager` handed to the setter is not nil as an interface, so the fallback to the global one is skipped, the firewall compiles green, and the first request behind it dereferences a nil receiver inside the listener. The matcher, the token source and the login and logout handlers are refused by name in this same loop; the three that are not include the one that decides access, so the silence fell on the security-critical dependency and on no other.
-
-   The refusal names the source, because a typed nil that arrived through the global configuration and one that arrived through this firewall's own override are two different mistakes in two different files. */
 func refuseTypedNilDependency(firewallName string, dependencyName string, source security.Source, dependency any) error {
     if nil == dependency {
         return nil

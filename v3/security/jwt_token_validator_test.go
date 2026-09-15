@@ -651,7 +651,6 @@ func TestNewJwtTokenValidator_RefusesANegativeRevocationEpochSkew(t *testing.T) 
     }, "jwt revocation epoch skew may not be negative")
 }
 
-/* the validator must keep its own copy of the secret: retained by reference, the caller's slice stays mutable under every later signature check, so zeroing or rotating it in place silently changes what the validator verifies against. */
 func TestJwtTokenValidator_CopiesTheSecret(t *testing.T) {
     secret := []byte("copy-me-before-i-change")
     tokenString := signJwtHs256(append([]byte{}, secret...), map[string]any{
@@ -670,7 +669,6 @@ func TestJwtTokenValidator_CopiesTheSecret(t *testing.T) {
     }
 }
 
-/* domain separation: the internal-auth envelope signs under its own typ through the same HS256 primitive, so under a shared or reused secret it must be refused HERE by type, not merely by which claims it happens to carry. */
 func TestJwtTokenValidator_RefusesTheInternalAuthEnvelopeType(t *testing.T) {
     secret := []byte("shared-secret")
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret, SubjectClaim: "app", AllowWithoutExpiry: true})
@@ -712,7 +710,6 @@ func TestJwtTokenValidator_AcceptsAbsentAndLowerCaseJwtType(t *testing.T) {
     }
 }
 
-/* the frozen instant sits decades away from the real clock, so a token expiring shortly after it verifies ONLY if the validator reads the injected clock — and stops verifying when that clock alone advances. */
 func TestJwtTokenValidator_VerifiesTimeClaimsAgainstTheInjectedClock(t *testing.T) {
     secret := []byte("secret")
     frozen := clock.NewFrozenClock(time.Unix(1000, 0))
@@ -753,7 +750,6 @@ func TestJwtTokenValidator_MarksAnEpochStoreFailureAsInfrastructure(t *testing.T
     }
 }
 
-/* the acceptance above is the only nbf case the suite had, so the whole not-before block could be deleted with it still green — a token that says it is not usable yet would have validated. This is the refusal half: no leeway, activation an hour out. */
 func TestJwtTokenValidator_RefusesANotBeforeBeyondTheLeeway(t *testing.T) {
     secret := []byte("super-secret-value")
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret, Leeway: 0})

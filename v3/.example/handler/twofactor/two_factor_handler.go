@@ -13,9 +13,6 @@ import (
     "github.com/precision-soft/melody/v3/security/totp"
 )
 
-/* enrolledIdentifier answers the account both doors act on: the identifier of the authenticated token, never a name the request chose.
-
-   The two doors used to read a `user` query parameter, and the route was public. That pair let anyone bind a second factor they held to any identifier they liked and read back whether a code satisfied it, and — the insert being a plain one — left the named account unable to enroll ever after. Taken from the token, the enrollment door writes the caller's own row and the verification door reads it, so replacing an enrollment is the account's own doing. */
 func enrolledIdentifier(runtimeInstance melodyruntimecontract.Runtime) (string, bool) {
     securityContext, exists := melodysecurity.SecurityContextFromRuntime(runtimeInstance)
     if false == exists {
@@ -120,7 +117,6 @@ func VerifyHandler(store *store2fa.Store) melodyhttpcontract.Handler {
     }
 }
 
-/* totpCodeValidityWindow is the span an accepted code stays verifiable — (2*skew+1) periods — and therefore how long a spent code must stay burned. It resolves through the totp package so it can never drift from what Verify honours. */
 func totpCodeValidityWindow() time.Duration {
     resolved := totp.Config{}.Resolve()
 

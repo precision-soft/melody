@@ -10,7 +10,6 @@ import (
     "github.com/precision-soft/melody/v3/httpclient"
 )
 
-/* the export client is the one the exporter posts a reading through, and a redirect followed there turns the POST into a GET without its body: the 200 of whatever page the sink pointed at read as the sink having received the reading. The client the composition root registers hands the 3xx back instead, so the exporter can refuse it by name. */
 func TestRegisterReportExportHttpClientService_TheClientDoesNotFollowARedirect(t *testing.T) {
     sinkPosts := 0
     pageGets := 0
@@ -31,7 +30,7 @@ func TestRegisterReportExportHttpClientService_TheClientDoesNotFollowARedirect(t
     containerInstance := melodycontainer.NewContainer()
     t.Cleanup(func() { _ = containerInstance.Close() })
 
-    moduleWithEnvironment(t, map[string]string{parameterReportExportEndpoint: server.URL + "/sink"}).
+    moduleWithRegisteredParameters(t, map[string]string{environmentKeyReportExportEndpoint: server.URL + "/sink"}).
         registerReportExportHttpClientService(containerRegistrar{Container: containerInstance})
 
     client, resolveErr := melodycontainer.FromResolver[*httpclient.HttpClient](containerInstance, service.ServiceReportExportHttpClient)
@@ -46,5 +45,38 @@ func TestRegisterReportExportHttpClientService_TheClientDoesNotFollowARedirect(t
 
     if nethttp.StatusFound != response.StatusCode() || 1 != sinkPosts || 0 != pageGets {
         t.Fatalf("expected the 302 back after one post and no read of the page, got %d after %d posts and %d reads", response.StatusCode(), sinkPosts, pageGets)
+    }
+}
+
+func TestOutboundClientsFollowRegisteredEnvironmentParameters(t *testing.T) {
+    for _, testCase := range []struct {
+        name string
+        values map[string]string
+        rates bool
+        export bool
+    }{
+        {name: "neither", values: map[string]string{}},
+        {name: "rates", values: map[string]string{environmentKeyRatesBaseUrl: "https://rates.example.test/v1/"}, rates: true},
+        {name: "export", values: map[string]string{environmentKeyReportExportEndpoint: "https://sink.example.test/report"}, export: true},
+        {name: "both", values: map[string]string{environmentKeyRatesBaseUrl: "https://rates.example.test/v1/", environmentKeyReportExportEndpoint: "https://sink.example.test/report"}, rates: true, export: true},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            moduleInstance := moduleWithRegisteredParameters(t, testCase.values)
+            containerInstance := melodycontainer.NewContainer()
+            defer containerInstance.Close()
+            registrar := containerRegistrar{Container: containerInstance}
+            moduleInstance.registerRatesHttpClientService(registrar)
+            moduleInstance.registerReportExportHttpClientService(registrar)
+            if testCase.rates != containerInstance.Has(service.ServiceRatesHttpClient) || testCase.export != containerInstance.Has(service.ServiceReportExportHttpClient) {
+                t.Fatal("outbound client wiring differs from environment")
+            }
+            for _, entry := range []struct { name string; enabled bool }{{service.ServiceRatesHttpClient, testCase.rates}, {service.ServiceReportExportHttpClient, testCase.export}} {
+                if true == entry.enabled {
+                    if _, err := melodycontainer.FromResolver[*httpclient.HttpClient](containerInstance, entry.name); nil != err {
+                        t.Fatalf("resolve %s: %v", entry.name, err)
+                    }
+                }
+            }
+        })
     }
 }

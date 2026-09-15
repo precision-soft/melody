@@ -21,7 +21,7 @@ func (instance *PlainTextSerializer) Serialize(value any) ([]byte, error) {
     case string:
         return []byte(typedValue), nil
     case []byte:
-        /* Serialized bytes must outlive the caller’s buffer. */
+
         copied := make([]byte, len(typedValue))
         copy(copied, typedValue)
 
@@ -42,7 +42,7 @@ func (instance *PlainTextSerializer) Deserialize(payload []byte, target any) err
         *typedTarget = string(payload)
         return nil
     case *[]byte:
-        /* The target owns its bytes independently of the input buffer. */
+
         copied := make([]byte, len(payload))
         copy(copied, payload)
         *typedTarget = copied

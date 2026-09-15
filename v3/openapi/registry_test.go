@@ -10,7 +10,6 @@ type registryProbePayload struct {
     Name string `json:"name"`
 }
 
-/* TypeOf is the door every Describe call names its request and response shapes through, and it must answer the ELEMENT type: handing back the pointer type would make every descriptor describe a pointer, which the generator has no schema for */
 func TestTypeOf_AnswersTheElementTypeForEveryShape(t *testing.T) {
     if reflect.TypeOf(registryProbePayload{}) != TypeOf[registryProbePayload]() {
         t.Fatalf("expected the struct type, got %v", TypeOf[registryProbePayload]())
@@ -24,7 +23,6 @@ func TestTypeOf_AnswersTheElementTypeForEveryShape(t *testing.T) {
         t.Fatalf("expected a slice type, got %v", TypeOf[[]registryProbePayload]().Kind())
     }
 
-    /* an interface type is the shape a generic reflect.TypeOf(value) cannot produce at all: reflect.TypeOf on an interface value answers the dynamic type, so the Elem() form is what makes an interface describable */
     if reflect.Interface != TypeOf[error]().Kind() {
         t.Fatalf("expected an interface type to be answered as an interface, got %v", TypeOf[error]().Kind())
     }
@@ -69,7 +67,6 @@ func TestRegistry_DescribeRecordsTheDescriptorUnderItsRouteName(t *testing.T) {
     }
 }
 
-/* Describe answers the registry so a module can chain its whole surface in one expression, and the last description of a route name wins rather than being refused — a module re-describing its own route is how an override is expressed */
 func TestRegistry_DescribeChainsAndTheLastDescriptionWins(t *testing.T) {
     registry := NewRegistry()
 

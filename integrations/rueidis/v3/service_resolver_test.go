@@ -68,7 +68,6 @@ func (instance *closeSpyClient) Close() {
     instance.closed = true
 }
 
-/* containerRegistrar adapts the raw container to this package's registrar interface, so the teardown proof runs against the real ordered close rather than a spy */
 type containerRegistrar struct {
     target containercontract.Container
 }
@@ -85,7 +84,6 @@ func (instance *containerRegistrar) MustRegister(serviceName string, provider an
     instance.target.MustRegister(serviceName, provider, options...)
 }
 
-/* E6-15: the raw client's Close returns nothing, so registered alone it could never join the container's teardown and the connection lived exactly as long as the process; through the owning Connection and the dependency edge, whichever run resolves a client-backed service closes the connection after it */
 func TestRegisterConnectionService_TeardownClosesTheClientOnceTheClientWasResolved(t *testing.T) {
     client := &closeSpyClient{}
     serviceContainer := container.NewContainer()
@@ -108,7 +106,6 @@ func TestRegisterConnectionService_TeardownClosesTheClientOnceTheClientWasResolv
     }
 }
 
-/* the guarantee's declared boundary: a run that resolves no client-backed service leaves the connection unresolved, and the container closes only what was resolved at least once */
 func TestRegisterConnectionService_TeardownLeavesAnUnresolvedConnectionOpen(t *testing.T) {
     client := &closeSpyClient{}
     serviceContainer := container.NewContainer()
@@ -142,7 +139,6 @@ func TestRegisterLockerServiceWithOptions_HandsTheOptionsToTheLocker(t *testing.
     }
 }
 
-/* PIN of the door's contract, not a guard: the option-less registration builds the locker at its defaults, the bounded one */
 func TestRegisterLockerService_KeepsTheDefaultCallTimeout(t *testing.T) {
     serviceContainer := container.NewContainer()
     registrar := &containerRegistrar{target: serviceContainer}

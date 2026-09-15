@@ -7,7 +7,6 @@ import (
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
-/* one case named both dependencies and supplied only the first as nil, asserting nothing but that something panicked — so the delegate's own guard had no test at all, and either refusal would have satisfied it. Each is asked for separately, and the message says which answered. */
 func TestRoleHierarchyVoter_PanicsOnANilRoleHierarchy(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
         _ = NewRoleHierarchyVoter(nil, NewRoleVoter())
@@ -49,8 +48,6 @@ func TestRoleHierarchyVoter_DeniesWhenTokenNotAuthenticated(t *testing.T) {
     }
 }
 
-/* The same typed nil the sibling voter refuses: read as live, IsAuthenticated answers true and the
-ExpandRoles call below dereferences the nil receiver inside Roles(). */
 func TestRoleHierarchyVoter_DeniesATypedNilToken(t *testing.T) {
     voter := NewRoleHierarchyVoter(NewRoleHierarchy(map[string][]string{"ROLE_ADMIN": {"ROLE_USER"}}), NewRoleVoter())
 

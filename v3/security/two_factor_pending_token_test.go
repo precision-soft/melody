@@ -18,7 +18,6 @@ func TestNewTwoFactorPendingToken_RefusesANilPrincipal(t *testing.T) {
     }, "can not build a two-factor pending token from nil")
 }
 
-/* the whole point of the pending token is that authorization sees nothing: the primary credential was accepted, but until the second factor arrives the principal must read as unauthenticated with no identity and no rights, or a half-logged-in caller would be granted whatever the first factor alone earns */
 func TestTwoFactorPendingToken_ShowsNoPrincipalToAuthorization(t *testing.T) {
     pending := NewTwoFactorPendingToken(NewAuthenticatedToken("u1", []string{"ROLE_ADMIN"}))
 
@@ -43,7 +42,6 @@ func TestTwoFactorPendingToken_ShowsNoPrincipalToAuthorization(t *testing.T) {
     }
 }
 
-/* the principal stays readable behind the challenge so the application can name whom it is prompting */
 func TestTwoFactorPendingToken_KeepsThePendingPrincipalReadable(t *testing.T) {
     pending := NewTwoFactorPendingToken(NewAuthenticatedToken("u1", []string{"ROLE_ADMIN"}))
 

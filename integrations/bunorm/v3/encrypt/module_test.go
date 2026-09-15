@@ -164,7 +164,6 @@ func (instance *fakeKernel) Clock() clockcontract.Clock {
 
 var _ kernelcontract.Kernel = (*fakeKernel)(nil)
 
-/* runEncryptCommand drives one command Run through a parsed cli context with the command's own flag defaults and returns the error the command's Run reported. */
 func runEncryptCommand(t *testing.T, command clicontract.Command, arguments []string) error {
     t.Helper()
 
@@ -423,7 +422,6 @@ func (instance *factoryError) Error() string {
     return "factory failed"
 }
 
-/* a kernel answering no service container used to be captured silently into the closure and explode at the first command run, far from the registration that produced it */
 func TestModule_RefusesAKernelWithoutAServiceContainer(t *testing.T) {
     defer func() {
         recovered := recover()

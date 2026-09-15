@@ -7,12 +7,10 @@ import (
     "github.com/precision-soft/melody/v3/exception"
 )
 
-/* referenceResolutionChecker is implemented by the resolver a provider receives, which knows what it is in the middle of creating. It stays internal: the exclusion below is a property of collecting from inside a provider, not part of the public resolver surface. */
 type referenceResolutionChecker interface {
     isResolvingReference(reference containercontract.ServiceReference) bool
 }
 
-/* closedScopeChecker is implemented by the request scope. A closed scope enumerates nothing, which a collection cannot tell apart from an application with nothing registered — and its Get deliberately errors for the request-outliving goroutine, so the collection has to refuse the same way instead of handing that goroutine a silently empty set to dispatch to. */
 type closedScopeChecker interface {
     isScopeClosed() bool
 }
@@ -52,7 +50,6 @@ func AllImplementing[T any](resolver containercontract.Resolver) ([]T, error) {
 
     references := typeLister.ReferencesImplementing(interfaceType)
 
-    /* the closed check runs after the gather: a scope closing in between would have enumerated nothing, and returning that as success would hand a request-outliving goroutine a silently empty set — the very thing the refusal exists for. References gathered while the scope was still open fail loudly in the Gets below if the close lands later. */
     if closedChecker, isClosedChecker := resolver.(closedScopeChecker); true == isClosedChecker && true == closedChecker.isScopeClosed() {
         return nil, exception.NewError(
             "scope is closed",
@@ -93,7 +90,6 @@ func AllImplementing[T any](resolver containercontract.Resolver) ([]T, error) {
                 "serviceType": reference.ServiceType.String(),
             }
 
-            /* the registration's canonical pointer type carries the method set that matched, but the stored instance is a value and does not: name the cause, or the report reads like a type-system contradiction */
             if nil != reference.ServiceType && reflect.Ptr == reference.ServiceType.Kind() && reflect.Ptr != reflect.ValueOf(value).Kind() {
                 context["hint"] = "the service was registered from a value provider, so the stored instance does not carry the pointer method set that satisfies the interface"
             }

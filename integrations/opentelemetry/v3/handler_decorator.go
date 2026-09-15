@@ -67,7 +67,6 @@ func NewHandlerDecorator(config HandlerDecoratorConfig) (applicationcontract.Htt
         return nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
             parentContext := propagator.Extract(request.Context(), propagation.HeaderCarrier(request.Header))
 
-            /* the route is not resolved yet at this seam, so the span name follows the OTel semantic convention for an unmatched route: the method alone; the path travels as an attribute instead of the name to keep cardinality bounded */
             spanContext, span := config.Tracer.Start(
                 parentContext,
                 normalizedMethod(request.Method),
@@ -87,7 +86,6 @@ func NewHandlerDecorator(config HandlerDecoratorConfig) (applicationcontract.Htt
 
                 statusCode := recorder.statusCode
 
-                /* a hijacked connection left the request/response model at the upgrade, so recording it as the constructor's default 200 puts a connection that lives for hours in the same duration series as an ordinary request and destroys the latency distribution */
                 if true == recorder.hijacked {
                     statusCode = nethttp.StatusSwitchingProtocols
                 }
@@ -122,7 +120,6 @@ func NewHandlerDecorator(config HandlerDecoratorConfig) (applicationcontract.Htt
     }, nil
 }
 
-/* statusRecordingResponseWriter captures the committed status code while optimistically forwarding the streaming/upgrade capabilities, mirroring the http kernel's recording writer: the kernel probes its raw writer for Flusher/Hijacker, so this wrapper must keep satisfying them and delegate with a runtime probe of its own. */
 type statusRecordingResponseWriter struct {
     nethttp.ResponseWriter
     statusCode  int

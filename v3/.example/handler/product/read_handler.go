@@ -18,7 +18,6 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/* the query parameter a caller names the currency they want the price in */
 const convertedCurrencyQueryParameter = "currency"
 
 var errConversionRequest = errors.New("invalid conversion request")
@@ -97,7 +96,7 @@ func ApiReadHandler() melodyhttpcontract.Handler {
     }
 }
 
-/* bound by the openapi descriptor in config; keep it exported */
+
 type ProductResponse struct {
     Id          string  `json:"id"`
     Name        string  `json:"name"`
@@ -117,14 +116,12 @@ type readResponse struct {
     Categories []category.CategoryResponse `json:"categories"`
     Currencies []currency.CurrencyResponse `json:"currencies"`
 
-    /* a POINTER with omitempty, so a read that did not ask for a conversion carries no key at all rather
-       than an object of zeroes a client would have to know to ignore */
+    /* Converted is omitted when the request does not ask for currency conversion. */
     Converted *ConvertedPriceResponse `json:"converted,omitempty"`
 }
 
 /* ConvertedPriceResponse is the product's price restated in the currency the caller named. It carries the
-   instant of the quote it was computed from, because a converted price is only as current as the rate
-   behind it and a client cannot tell that from the number. */
+   older timestamp of the two input quotes, so a conversion cannot report fresher data than either rate it uses. */
 type ConvertedPriceResponse struct {
     CurrencyId string  `json:"currencyId"`
     Code       string  `json:"code"`
@@ -132,17 +129,6 @@ type ConvertedPriceResponse struct {
     RateAsOf   string  `json:"rateAsOf"`
 }
 
-/* convertedPriceFor answers the conversion the caller asked for, or nothing at all when they asked for none.
-
-   The parameter is read with StringAt rather than with the String accessor beside it, and the reason is that
-   the SHAPE of a query parameter is chosen by the client: the request bags keep a single key and a repeated
-   one apart by type, and the string accessor refuses a slice by panicking — correct where the key is the
-   programmer's, a five-hundred at a distance here, since anyone may send ?currency=USD&currency=RON. Reading
-   the first value is the answer the framework's own Input door settled on for the same reason.
-
-   An unknown code is a four-hundred and not an empty conversion: a caller who asked for a currency this
-   catalogue does not carry has made a request that cannot be satisfied, and answering the unconverted
-   document would look like the conversion succeeded. */
 func convertedPriceFor(
     request melodyhttpcontract.Request,
     product *entity.Product,
@@ -172,11 +158,16 @@ func convertedPriceFor(
         return nil, convertErr
     }
 
+    rateAsOf := target.RateAsOf
+    if source.RateAsOf.Before(rateAsOf) {
+        rateAsOf = source.RateAsOf
+    }
+
     return &ConvertedPriceResponse{
         CurrencyId: target.Id,
         Code:       target.Code,
         Price:      price,
-        RateAsOf:   target.RateAsOf.UTC().Format(time.RFC3339),
+        RateAsOf:   rateAsOf.UTC().Format(time.RFC3339),
     }, nil
 }
 
@@ -205,12 +196,11 @@ func mapProduct(product *entity.Product) ProductResponse {
         Price:       priceRounded,
         CurrencyId:  product.CurrencyId,
         Stock:       product.Stock,
-        /* http.TimeFormat spells a literal GMT suffix, so the instant is converted first: formatted as the local wall time it was stamped in, the rendered string misstated the instant by the process zone's whole offset and a client parsing it read a moment hours away */
+
         CreatedAt:   product.CreatedAt.UTC().Format(nethttp.TimeFormat),
         UpdatedAt:   product.UpdatedAt.UTC().Format(nethttp.TimeFormat),
     }
 }
-
 
 func conversionErrorResponse(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, err error) melodyhttpcontract.Response {
     if errors.Is(err, errConversionRequest) {

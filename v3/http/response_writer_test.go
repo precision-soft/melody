@@ -85,7 +85,6 @@ func TestRecordingResponseWriter_UnwrapReturnsUnderlying(t *testing.T) {
     }
 }
 
-/* WriteToHttpResponseWriter is a public door, so a nil pointer of a response type boxed into the contract reaches it and passes a plain comparison. */
 func TestWriteToHttpResponseWriter_ReadsATypedNilResponseAsAbsent(t *testing.T) {
     var unassignedResponse *Response
 
@@ -145,7 +144,6 @@ func TestRecordingResponseWriter_APanickingDelegateLeavesTheCommitFlagFalse(t *t
     }
 }
 
-/* the guard of the ReadFrom convention: a source that fails before the first byte has committed nothing, and a flag raised anyway classified exactly that failure as a committed stream — the recovery skipped its 500 and the client received an implicit empty 200. */
 func TestRecordingResponseWriter_ReadFromLeavesTheCommitFlagFalseWhenTheSourceFailsBeforeTheFirstByte(t *testing.T) {
     recorder := httptest.NewRecorder()
     writer := newRecordingResponseWriter(recorder)
@@ -180,7 +178,6 @@ func TestRecordingResponseWriter_CommittedStatusCodeAnswersTheExplicitStatus(t *
     }
 }
 
-/* the first byte commits net/http's implicit 200; the recorder answers it so the access log can name the status the wire actually carries for a handler that streamed without an explicit WriteHeader. */
 func TestRecordingResponseWriter_CommittedStatusCodeAnswersTheImplicitTwoHundredOnFirstWrite(t *testing.T) {
     writer := newRecordingResponseWriter(httptest.NewRecorder())
 
@@ -194,7 +191,6 @@ func TestRecordingResponseWriter_CommittedStatusCodeAnswersTheImplicitTwoHundred
     }
 }
 
-/* Flush records the commit after the delegate returns, the convention every commit recording in the type follows: a delegate that panics mid-flush has not proven a commit, and the flag must not say otherwise. */
 func TestRecordingResponseWriter_APanickingFlushLeavesTheCommitFlagFalse(t *testing.T) {
     writer := newRecordingResponseWriter(&panickingFlushWriter{httptest.NewRecorder()})
 
@@ -216,7 +212,6 @@ func (instance *panickingFlushWriter) Flush() {
     panic("flush died before committing")
 }
 
-/* the public door refuses the out-of-range status by name instead of letting the delegate panic deep inside the response path: this signature promises an error return, and an external caller's arithmetic mistake deserved that error, not a connection reset. */
 func TestWriteToHttpResponseWriter_RefusesAStatusOutsideTheWritableRangeByName(t *testing.T) {
     recorder := httptest.NewRecorder()
 
@@ -236,7 +231,6 @@ func TestWriteToHttpResponseWriter_RefusesAStatusOutsideTheWritableRangeByName(t
     }
 }
 
-/* the refusal runs ahead of the first mutation, headers included: the response's headers used to be copied onto the writer before the status was judged, so a caller that handled the returned error and wrote its own response sent it carrying the refused response's Set-Cookie on top of its own. */
 func TestWriteToHttpResponseWriter_ARefusedStatusLeavesNoHeaderOnTheWriter(t *testing.T) {
     recorder := httptest.NewRecorder()
 
@@ -258,7 +252,6 @@ func TestWriteToHttpResponseWriter_ARefusedStatusLeavesNoHeaderOnTheWriter(t *te
     }
 }
 
-/* the writable range is refused at both ends, and the refusal answers before the headers either way */
 func TestWriteToHttpResponseWriter_RefusesAStatusBelowTheWritableRange(t *testing.T) {
     recorder := httptest.NewRecorder()
 
@@ -275,7 +268,6 @@ func TestWriteToHttpResponseWriter_RefusesAStatusBelowTheWritableRange(t *testin
     }
 }
 
-/* an accepted status still carries its headers to the writer: the refusal moved ahead of the copy, it did not replace it */
 func TestWriteToHttpResponseWriter_AnAcceptedStatusStillCarriesItsHeaders(t *testing.T) {
     recorder := httptest.NewRecorder()
 
@@ -296,7 +288,6 @@ func TestWriteToHttpResponseWriter_AnAcceptedStatusStillCarriesItsHeaders(t *tes
     }
 }
 
-/* Set-Cookie is the one field the response cannot own: its lines are separate cookies, so replacing the writer's values with the response's deleted the cookie the handler wrote on the writer its own contract handed it, and the client simply never received it */
 func TestWriteToHttpResponseWriter_KeepsACookieTheHandlerWroteOnTheWriter(t *testing.T) {
     recorder := httptest.NewRecorder()
     nethttp.SetCookie(recorder, &nethttp.Cookie{Name: "handler_cookie", Value: "kept", Path: "/"})
@@ -334,7 +325,6 @@ func TestWriteToHttpResponseWriter_KeepsACookieTheHandlerWroteOnTheWriter(t *tes
     }
 }
 
-/* a key the response does name is still owned by it, so the request id the kernel puts on the raw writer reaches the client once */
 func TestWriteToHttpResponseWriter_StillReplacesANonCookieHeaderTheResponseNames(t *testing.T) {
     recorder := httptest.NewRecorder()
     recorder.Header().Set(HeaderRequestId, "from-the-writer")
@@ -353,7 +343,6 @@ func TestWriteToHttpResponseWriter_StillReplacesANonCookieHeaderTheResponseNames
     }
 }
 
-/* the shape an operator's own net/http middleware takes when it wraps the writer for ResponseController compatibility and forwards no Flush of its own */
 type intermediateResponseWriterWrapper struct {
     nethttp.ResponseWriter
 }
@@ -372,7 +361,6 @@ func (instance *flushCountingResponseRecorder) Flush() {
     instance.ResponseRecorder.Flush()
 }
 
-/* the flush is forwarded through the whole wrapper chain, not to the immediate delegate: a wrapper between the kernel's recorder and the connection that carries Unwrap but no Flush turned every flush a streaming handler issued into a silent no-op, with the frames sitting in the buffer and no error anywhere */
 func TestRecordingResponseWriter_FlushReachesTheConnectionThroughAnIntermediateWrapper(t *testing.T) {
     connection := &flushCountingResponseRecorder{ResponseRecorder: httptest.NewRecorder()}
     writer := newRecordingResponseWriter(&intermediateResponseWriterWrapper{ResponseWriter: connection})

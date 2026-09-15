@@ -198,7 +198,6 @@ func TestMysqlLock_AcquireAfterAKilledSessionTakesTheLockAfresh(t *testing.T) {
         t.Fatalf("expected acquire to succeed: %v %v", acquired, acquireErr)
     }
 
-    /* induce a GENUINE verify error by killing the pinned session; a canceled request context must NOT do this (see TestMysqlLock_AcquireCanceledRuntimeContextKeepsHeldLock) */
     var ownerId sql.NullInt64
     if ownerErr := sqldb.QueryRowContext(context.Background(), "SELECT IS_USED_LOCK(?)", name).Scan(&ownerId); nil != ownerErr {
         t.Fatalf("read lock owner: %v", ownerErr)
@@ -210,7 +209,6 @@ func TestMysqlLock_AcquireAfterAKilledSessionTakesTheLockAfresh(t *testing.T) {
         t.Logf("kill returned (tolerated): %v", killErr)
     }
 
-    /* the verify now fails for real: the lock object must drop the dead connection and take the lock afresh. KILL is asynchronous — the server flags the thread and only releases its locks once that thread notices — so a single immediate attempt races the cleanup and reads GET_LOCK as 0 (held, no error). Retry until the dead session lets go. */
     var reacquired bool
     var reacquireErr error
 
@@ -244,7 +242,6 @@ func TestMysqlLock_AcquireAfterAKilledSessionTakesTheLockAfresh(t *testing.T) {
     }
 }
 
-/* Mirrors TestMysqlLock_RefreshCanceledRuntimeContextKeepsHeldLock: a canceled request context is a transient caller-side condition, not a lost lock. Re-acquiring under one must not be mistaken for a verify error and must not RELEASE_LOCK a lock this process still holds. */
 func TestMysqlLock_AcquireCanceledRuntimeContextKeepsHeldLock(t *testing.T) {
     dsn := os.Getenv("MYSQL_DSN")
     if "" == dsn {
@@ -377,7 +374,6 @@ func TestMysqlLock_ReentrantAcquireDetectsLostLockWithoutRefresh(t *testing.T) {
         t.Logf("kill returned (tolerated): %v", killErr)
     }
 
-    /* KILL only flags the session; the GET_LOCK stays held until that session actually ends. Acquire probes with GET_LOCK(?, 0), which never waits, so the competitor below must not run before the kill has landed. */
     lockFreed := false
     for attempt := 0; attempt < 100; attempt++ {
         var free sql.NullInt64
@@ -481,7 +477,6 @@ func TestBoundedLockName_ShortNamePassesThrough(t *testing.T) {
     }
 }
 
-/* A lock name longer than MySQL's 64-character user-level-lock limit would make GET_LOCK error on every Acquire, so RunExclusive fails closed forever and the wrapped job never runs. boundedLockName must fold such a name onto a form MySQL accepts. */
 func TestBoundedLockName_LongNameFitsMysqlLimit(t *testing.T) {
     name := "melody:command:" + strings.Repeat("a", 80)
 
@@ -546,10 +541,6 @@ func TestNewLocker_ReleaseTimeoutOverridePropagatesToLock(t *testing.T) {
     }
 }
 
-/* poisonProbeSelect makes every row-returning statement on the lock's own pinned session answer no
-   rows, so the refresh probe's Scan fails while the session — and the GET_LOCK it holds — live on.
-   It is the shape of a server stall past the probe budget or a KILL QUERY: the probe cannot answer,
-   and the lock is nonetheless still held. */
 func poisonProbeSelect(t *testing.T, lock *mysqlLock) {
     t.Helper()
 
@@ -560,12 +551,6 @@ func poisonProbeSelect(t *testing.T, lock *mysqlLock) {
     }
 }
 
-/* observeLockHolder answers the id of the session MySQL reports as holding the named lock, or zero
-   when nobody holds it, read on a pool the test has not poisoned: a probe that reports on the
-   resource it broke reports nothing. A read error fails the test rather than being folded into a
-   zero. The IDENTITY and not merely the presence is the observable, because a locker that drops the
-   lock and takes it again on a fresh session ends in the same place as one that never let go — the
-   difference between them is the window in between, and the session id is what names it. */
 func observeLockHolder(t *testing.T, database *sql.DB, name string) int64 {
     t.Helper()
 
@@ -583,11 +568,6 @@ func observeLockHolder(t *testing.T, database *sql.DB, name string) int64 {
     return holder.Int64
 }
 
-/* A refresh probe that could not be ANSWERED is not a probe that answered "lost". MySQL holds a
-   named lock for exactly as long as the session that took it, so a live session still holds its
-   lock however the probe fared; releasing on it handed the lock away while the caller — which reads
-   a failed refresh as "another instance may hold it now" — stopped the callback, putting a second
-   holder inside an exclusive section this one had never left. */
 func TestMysqlLock_RefreshOnAnUnansweredProbeKeepsHeldLock(t *testing.T) {
     dsn := os.Getenv("MYSQL_DSN")
     if "" == dsn {
@@ -653,8 +633,6 @@ func TestMysqlLock_RefreshOnAnUnansweredProbeKeepsHeldLock(t *testing.T) {
     }
 }
 
-/* The same distinction on the re-acquire path: a verify that could not be answered must not release
-   the lock and report (false, nil), which told the caller it never held a lock it was holding. */
 func TestMysqlLock_AcquireOnAnUnansweredVerifyKeepsHeldLock(t *testing.T) {
     dsn := os.Getenv("MYSQL_DSN")
     if "" == dsn {
@@ -702,9 +680,6 @@ func TestMysqlLock_AcquireOnAnUnansweredVerifyKeepsHeldLock(t *testing.T) {
         t.Fatalf("the holder was told it does not hold a lock it is holding")
     }
 
-    /* the session id is the observable, not the presence of a lock: a locker that released and took
-       it again on a fresh session also ends up holding it, having opened a window a competitor could
-       have walked through. Only an unchanged holder proves the lock was never let go. */
     holderAfter := observeLockHolder(t, competitorDb, name)
     if holderBefore != holderAfter {
         t.Fatalf(
@@ -720,8 +695,6 @@ func TestMysqlLock_AcquireOnAnUnansweredVerifyKeepsHeldLock(t *testing.T) {
     }
 }
 
-/* The negative half, so the liveness branch above cannot pass by abstaining: a session that is
-   genuinely gone HAS lost its lock, and the refresh must say so and drop the pin. */
 func TestMysqlLock_RefreshOnADeadSessionReportsTheLockLost(t *testing.T) {
     dsn := os.Getenv("MYSQL_DSN")
     if "" == dsn {
@@ -767,7 +740,6 @@ func TestMysqlLock_RefreshOnADeadSessionReportsTheLockLost(t *testing.T) {
         t.Logf("kill returned (tolerated): %v", killErr)
     }
 
-    /* KILL is asynchronous: the server flags the thread and the session goes only once it notices */
     deadline := time.Now().Add(10 * time.Second)
     var refreshErr error
     for {
@@ -787,7 +759,6 @@ func TestMysqlLock_RefreshOnADeadSessionReportsTheLockLost(t *testing.T) {
     }
 }
 
-/* every lock failure names both spellings: the caller's name and the folded form the server was actually asked for — a name past the limit is folded to a hash-suffixed form, and a diagnostic that showed only the caller's spelling sent the operator to look for a lock the server had never heard of */
 func TestMysqlLock_FailuresNameTheFoldedLockNameBesideTheName(t *testing.T) {
     sqldb, openErr := sql.Open("mysql", "melody:melody@tcp(127.0.0.1:1)/melody")
     if nil != openErr {

@@ -19,7 +19,6 @@ import (
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
-/* newTokenSourceTestRuntime builds a runtime whose container carries the event dispatcher the authenticator token source reaches for, plus the logger the dispatcher's own failure path needs. The dispatcher is handed back so a test can plant a listener on it. */
 func newTokenSourceTestRuntime(t *testing.T) (runtimecontract.Runtime, eventcontract.EventDispatcher) {
     t.Helper()
 
@@ -71,7 +70,6 @@ func TestResolverTokenSource_NameIdentifiesTheSource(t *testing.T) {
     }
 }
 
-/* a resolver that finds nobody answers an anonymous token rather than a nil one: the listener that stores the context would otherwise carry nil into the request, and every downstream nil check would have to repeat the decision */
 func TestResolverTokenSource_ResolveAnswersAnonymousWhenTheResolverFindsNobody(t *testing.T) {
     runtimeInstance, _ := newTokenSourceTestRuntime(t)
 
@@ -116,7 +114,6 @@ func TestResolverTokenSource_ResolveAnswersTheResolvedToken(t *testing.T) {
     }
 }
 
-/* the resolver reads the request it is handed, which is what makes a cookie or header based resolver possible at all */
 func TestResolverTokenSource_ResolveHandsTheRequestToTheResolver(t *testing.T) {
     runtimeInstance, _ := newTokenSourceTestRuntime(t)
 
@@ -159,7 +156,6 @@ func TestAuthenticatorTokenSource_NameIdentifiesTheSource(t *testing.T) {
     }
 }
 
-/* nobody supported the request, so nobody authenticated: an anonymous token, no login event, and no error */
 func TestAuthenticatorTokenSource_ResolveAnswersAnonymousWhenNoAuthenticatorSupports(t *testing.T) {
     runtimeInstance, dispatcher := newTokenSourceTestRuntime(t)
 
@@ -192,7 +188,6 @@ func TestAuthenticatorTokenSource_ResolveAnswersAnonymousWhenNoAuthenticatorSupp
     }
 }
 
-/* a successful authentication emits the login success event once */
 func TestAuthenticatorTokenSource_ResolveEmitsLoginSuccess(t *testing.T) {
     runtimeInstance, dispatcher := newTokenSourceTestRuntime(t)
 
@@ -223,7 +218,6 @@ func TestAuthenticatorTokenSource_ResolveEmitsLoginSuccess(t *testing.T) {
     }
 }
 
-/* an authenticator that answers a nil token without an error yields an anonymous token and NO success event: nobody logged in, so nothing announces that somebody did */
 func TestAuthenticatorTokenSource_ResolveDoesNotAnnounceAnAnonymousToken(t *testing.T) {
     runtimeInstance, dispatcher := newTokenSourceTestRuntime(t)
 
@@ -254,7 +248,6 @@ func TestAuthenticatorTokenSource_ResolveDoesNotAnnounceAnAnonymousToken(t *test
     }
 }
 
-/* a failed authentication emits the failure event and hands the authentication error back untouched */
 func TestAuthenticatorTokenSource_ResolveEmitsLoginFailureAndKeepsTheError(t *testing.T) {
     runtimeInstance, dispatcher := newTokenSourceTestRuntime(t)
 
@@ -283,7 +276,6 @@ func TestAuthenticatorTokenSource_ResolveEmitsLoginFailureAndKeepsTheError(t *te
     }
 }
 
-/* when the failure event dispatch ITSELF fails, the authentication error survives as the cause: it carries the 401 the client should see, which a bare dispatch error would replace with a 500 while dropping the reason from the log */
 func TestAuthenticatorTokenSource_ResolveKeepsTheAuthenticationErrorWhenTheFailureDispatchFails(t *testing.T) {
     runtimeInstance, dispatcher := newTokenSourceTestRuntime(t)
 
@@ -314,7 +306,6 @@ func TestAuthenticatorTokenSource_ResolveKeepsTheAuthenticationErrorWhenTheFailu
     }
 }
 
-/* a success event whose listener fails refuses the resolution: the login already happened, and a listener that could not run is not something to serve the request past */
 func TestAuthenticatorTokenSource_ResolveFailsWhenTheSuccessDispatchFails(t *testing.T) {
     runtimeInstance, dispatcher := newTokenSourceTestRuntime(t)
 
@@ -349,7 +340,6 @@ func TestAuthenticatorTokenSource_ResolveFailsWhenTheSuccessDispatchFails(t *tes
     }
 }
 
-/* recordSecurityLoginEvents plants a listener on both login events and hands back the slice of names it observed, in order. */
 func recordSecurityLoginEvents(dispatcher eventcontract.EventDispatcher) *[]string {
     dispatchedNameList := make([]string, 0)
 
@@ -375,7 +365,6 @@ func recordSecurityLoginEvents(dispatcher eventcontract.EventDispatcher) *[]stri
     return &dispatchedNameList
 }
 
-/* The resolver is the application's function; a nil pointer of its own token type reaches here as a non-nil interface and, read as a live token, is published into the security context every voter then reads. */
 func TestResolverTokenSource_ResolveReadsATypedNilTokenAsAbsent(t *testing.T) {
     tokenSource := NewResolverTokenSource(
         func(request httpcontract.Request) securitycontract.Token {

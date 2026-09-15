@@ -57,7 +57,6 @@ func TestFileStorage_AppendsJsonLines(t *testing.T) {
     }
 }
 
-/* a tracker-made binding is atomicity within one database, not a routing decision: a storage over a separate audit database must keep its own handle, or a split-database deployment finds its audit rows in the business database — while the caller's explicit WithDatabase stays honoured unconditionally */
 func TestDatabaseFromContext_TrackerBindingIsIgnoredByAnotherDatabase(t *testing.T) {
     businessDatabase := newTestDatabase()
     auditDatabase := newTestDatabase()
@@ -79,7 +78,6 @@ func TestDatabaseFromContext_TrackerBindingIsIgnoredByAnotherDatabase(t *testing
     }
 }
 
-/* Save is a public door and the table flows unquoted through ModelTableExpr as raw SQL; a direct caller bypasses the Registry's validation entirely, and the silent ""-to-default substitution hid the caller that forgot which table it was writing */
 func TestBunStorage_SaveRefusesATableTheGrammarDoesNotAllow(t *testing.T) {
     storage := NewBunStorage(newTestDatabase())
 

@@ -302,7 +302,6 @@ func TestInMemoryStorage_LoadDoesNotDeleteConcurrentlySavedEntry(t *testing.T) {
     }
 }
 
-/* A closed storage refuses the operation the way FileStorage does. Serving one would be worse than the error: the cleanup goroutine is stopped by then, so an entry saved after Close is reclaimed by nothing except a Load that happens to name it, and the map grows for the rest of the process. The two storages the framework ships have to answer the same way here, or an application that swaps one for the other inherits a different failure. */
 func TestInMemoryStorage_RefusesEveryOperationAfterClose(t *testing.T) {
     storage := NewInMemoryStorage()
 
@@ -327,7 +326,6 @@ func TestInMemoryStorage_RefusesEveryOperationAfterClose(t *testing.T) {
     }
 }
 
-/* the id is what names the entry, so an empty one is refused on every operation rather than reaching the map as a real key — where a single shared entry would be handed to every request whose id was lost on the way in */
 func TestInMemoryStorage_RefusesAnEmptySessionIdOnEveryOperation(t *testing.T) {
     storage := NewInMemoryStorage()
     defer storage.Close()
@@ -354,7 +352,6 @@ func TestInMemoryStorage_RefusesAnEmptySessionIdOnEveryOperation(t *testing.T) {
     }
 }
 
-/* Clear drops every session at once — what a "log everybody out" command does — and leaves the storage usable afterwards, unlike Close */
 func TestInMemoryStorage_Clear_DropsEverySessionAndLeavesTheStorageUsable(t *testing.T) {
     storage := NewInMemoryStorage()
     defer storage.Close()
@@ -389,7 +386,6 @@ func TestInMemoryStorage_Clear_DropsEverySessionAndLeavesTheStorageUsable(t *tes
     }
 }
 
-/* The sweep drops exactly the lapsed entries: one whose instant has passed goes, one whose instant is still ahead stays, and one stored without a ttl at all has no instant to compare and must survive every sweep for the life of the process. */
 func TestInMemoryStorage_CleanupExpired_DropsOnlyTheLapsedEntries(t *testing.T) {
     storage := NewInMemoryStorage()
     defer storage.Close()
@@ -430,7 +426,6 @@ func TestInMemoryStorage_CleanupExpired_DropsOnlyTheLapsedEntries(t *testing.T) 
     }
 }
 
-/* the sweep releases the lock between chunks, so the ids it walks were read before that gap and the entry behind one of them may have been saved again since. The deletion reads the entry a second time, under the lock the chunk itself holds, and that reading is what keeps a session refreshed mid-sweep from being signed out: the first reading said lapsed, the second says the user came back. */
 func TestInMemoryStorage_TheSweepDoesNotDropASessionRefreshedSinceTheIdsWereRead(t *testing.T) {
     storage := NewInMemoryStorage()
     defer storage.Close()
@@ -445,7 +440,6 @@ func TestInMemoryStorage_TheSweepDoesNotDropASessionRefreshedSinceTheIdsWereRead
     }
     storage.mutex.Unlock()
 
-    /* the gap between chunks, stood in for by the save that lands in it */
     if saveErr := storage.Save("refreshed", map[string]any{"k": "v"}, time.Hour); nil != saveErr {
         t.Fatalf("unexpected error refreshing the session: %v", saveErr)
     }
@@ -463,7 +457,6 @@ func TestInMemoryStorage_TheSweepDoesNotDropASessionRefreshedSinceTheIdsWereRead
     }
 }
 
-/* The sweep is what reclaims a session nobody ever loads again: without the ticker branch calling it, a lapsed entry is only dropped when a Load happens to name it, and a session whose owner never comes back holds its memory for the rest of the process. */
 func TestInMemoryStorage_CleanupLoop_ReclaimsALapsedEntryNobodyLoads(t *testing.T) {
     storage := NewInMemoryStorageWithCleanupInterval(5 * time.Millisecond)
     defer storage.Close()
@@ -496,7 +489,6 @@ func TestInMemoryStorage_CleanupLoop_ReclaimsALapsedEntryNobodyLoads(t *testing.
     }
 }
 
-/* The sweep goroutine ends on a cancelled context as well as on Close, and that second exit is what keeps a storage whose owner cancels the boot context from leaving a ticker running for the life of the process. It is proved on its own here: Close closes stopCleanup too, so a test that only calls Close never tells the two apart. */
 func TestInMemoryStorage_CleanupLoop_EndsOnACancelledContext(t *testing.T) {
     storage := NewInMemoryStorageWithCleanupInterval(time.Hour)
 
@@ -508,13 +500,11 @@ func TestInMemoryStorage_CleanupLoop_EndsOnACancelledContext(t *testing.T) {
         t.Fatalf("expected the sweep goroutine to end when its context is cancelled")
     }
 
-    /* Close still answers on a loop that already ended — it waits on the same channel, which is closed by now */
     if closeErr := storage.Close(); nil != closeErr {
         t.Fatalf("unexpected close error after the loop ended on its own: %v", closeErr)
     }
 }
 
-/* The instant an entry expires counts as lapsed, the same boundary FileStorage draws with `now >= ExpiresAt`. A session stored with a one second lifetime is gone exactly one second later in both storages, rather than living one instant longer in this one — an application that moves between the two must not find the boundary moving with it. */
 func TestInMemoryStorage_TreatsTheExpiryInstantItselfAsLapsed(t *testing.T) {
     storage := NewInMemoryStorage()
 
@@ -536,7 +526,6 @@ func TestInMemoryStorage_TreatsTheExpiryInstantItselfAsLapsed(t *testing.T) {
     }
 }
 
-/* the expiry follows the INJECTED clock: frozen, a session outlives any real time the test takes, and travelling past the ttl lapses it without a sleep — which is also the proof that no time.Now() is left inside the comparison */
 func TestInMemoryStorage_ExpiryFollowsTheInjectedClock(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Date(2026, time.August, 26, 12, 0, 0, 0, time.UTC))
 
@@ -564,7 +553,6 @@ func TestInMemoryStorage_ExpiryFollowsTheInjectedClock(t *testing.T) {
     }
 }
 
-/* the sweep reads the INJECTED clock, and nothing proved it: the two tests that reach cleanupExpired build the storage with NewInMemoryStorage, so they run on the wall clock either way, and the one test with a frozen clock never reaches the sweep — its ticker interval is a minute, and FrozenClock.NewTicker delegates to a real time.NewTicker, so Advance does not fire a tick. The frozen instant here is far in the WALL-CLOCK past, so a sweep reading time.Now instead drops a session the injected clock says is still live. */
 func TestInMemoryStorage_TheSweepReadsTheInjectedClockNotTheWallClock(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC))
 
@@ -575,7 +563,6 @@ func TestInMemoryStorage_TheSweepReadsTheInjectedClockNotTheWallClock(t *testing
         t.Fatalf("save error: %v", saveErr)
     }
 
-    /* called directly rather than waited for: the ticker is real even on a frozen clock, so a wait would prove the interval and not the reading */
     storage.cleanupExpired()
 
     _, exists, loadErr := storage.Load("session-1")
@@ -588,7 +575,6 @@ func TestInMemoryStorage_TheSweepReadsTheInjectedClockNotTheWallClock(t *testing
     }
 }
 
-/* the expiry instant ITSELF is lapsed, and no fixture reached it: every other one ages a session by an hour, where the comparison answers the same whether it is > or >=. The two halves below sit one nanosecond apart around the exact instant Save wrote. */
 func TestInMemoryStorage_TreatsTheExpiryInstantItselfAsLapsedAtTheDoor(t *testing.T) {
     frozenTime := time.Date(2026, time.August, 28, 12, 0, 0, 0, time.UTC)
     frozenClock := clock.NewFrozenClock(frozenTime)

@@ -453,7 +453,6 @@ func TestManager_DecrementCountsDownAndLeavesACounterGetCounterCanRead(t *testin
         t.Fatalf("expected the stored counter to be 7, got %d", storedValue)
     }
 
-    /* a counter written by Decrement crosses zero into the negatives rather than clamping: a remaining-quota counter that stopped at zero would report the same value for "exactly used up" and "overdrawn by a thousand" */
     newValue, decrementErr = manager.Decrement("remaining", 10)
     if nil != decrementErr {
         t.Fatalf("unexpected decrement error: %v", decrementErr)
@@ -576,7 +575,6 @@ func (instance *cacheTestCountingSerializer) Deserialize(payload []byte) (any, e
     return instance.inner.Deserialize(payload)
 }
 
-/* typedNilBackend and typedNilSerializer embed their interfaces, so a nil pointer of either is a typed nil that still satisfies the contract the constructor is handed */
 type typedNilBackend struct {
     cachecontract.Backend
 }
@@ -585,7 +583,6 @@ type typedNilSerializer struct {
     cachecontract.Serializer
 }
 
-/* a typed nil passes the plain comparison, is stored as a live collaborator and dereferences its nil receiver on the first cache call — on the request path, in place of the construction-time refusal. The refusal above is pinned with an UNTYPED nil on every major, which a plain comparison answers identically, so the interface-aware half was unpinned until here. */
 func TestNewManager_RefusesATypedNilBackendAndATypedNilSerializer(t *testing.T) {
     var nilBackend *typedNilBackend
     var nilSerializer *typedNilSerializer

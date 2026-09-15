@@ -9,7 +9,6 @@ import (
     melodyopenapi "github.com/precision-soft/melody/v3/openapi"
 )
 
-/* the descriptors below bind the handler types themselves, never a hand-written copy of them: a copy drifts from the validation rules and the published document then documents a body the route rejects. */
 func (instance *Module) buildOpenApi() {
     instance.openApiInfo = melodyopenapi.Info{
         Title:   "Melody Example API",

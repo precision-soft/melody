@@ -26,7 +26,7 @@ type EntityOptions struct {
     CaptureDeleteBeforeImage bool
 }
 
-/* Registry is safe for concurrent use: Register is ordinarily a boot-time call, but it is public, returns the registry for chaining and is reachable through Recorder.Registry() for the life of the process, while every recorded write reads the same map from a request goroutine — an unguarded late Register was a fatal concurrent map read and write, not an error any recovery could catch. */
+/* Registry supports concurrent registration and recording. */
 type Registry struct {
     mutex               sync.RWMutex
     defaultTable        string
@@ -43,7 +43,7 @@ func NewRegistry(defaultTable string, globalIgnoredFields ...string) *Registry {
 
     return &Registry{
         defaultTable: defaultTable,
-        /* copied rather than aliased: the variadic call form shares the caller's backing array, and a caller reusing that slice after boot would mutate what request goroutines read */
+
         globalIgnoredFields: append([]string{}, globalIgnoredFields...),
         optionsByEntity:     make(map[string]EntityOptions),
     }
@@ -135,7 +135,6 @@ func (instance *Registry) distinctTables() []string {
         extra = append(extra, options.Table)
     }
 
-    /* sorted so EnsureSchema issues its DDL in one order across runs: the map walk is random, and a failure naming "the third table" would otherwise name a different table on every retry */
     sort.Strings(extra)
 
     return append(tables, extra...)

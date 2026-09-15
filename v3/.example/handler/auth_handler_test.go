@@ -1,130 +1,24 @@
 package handler
 
 import (
-    "bytes"
     "context"
     "encoding/json"
-    "errors"
     "io"
     nethttp "net/http"
     "net/http/httptest"
     "strings"
     "testing"
     "time"
-    "github.com/precision-soft/melody/v3/.example/repository"
     "github.com/precision-soft/melody/v3/.example/security"
     "github.com/precision-soft/melody/v3/.example/service"
-    "github.com/precision-soft/melody/v3/.example/entity"
     melodyconfig "github.com/precision-soft/melody/v3/config"
-    melodyconfigcontract "github.com/precision-soft/melody/v3/config/contract"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyruntime "github.com/precision-soft/melody/v3/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     melodysession "github.com/precision-soft/melody/v3/session"
 )
 
-/* the cause the login door can really reach names internals: a repository error carries the schema and table, and the endpoint is unauthenticated */
-const authenticationCauseSecret = "dial tcp 10.0.0.7:3306: connect: connection refused"
-
-type stubAuthenticationEnvironmentSource struct {
-    values map[string]string
-}
-
-func (instance *stubAuthenticationEnvironmentSource) Load() (map[string]string, error) {
-    return instance.values, nil
-}
-
-type refusingAuthenticationRepository struct {
-    repository.UserRepository
-}
-
-func (instance *refusingAuthenticationRepository) FindByUsername(ctx context.Context, username string) (*entity.User, bool, error) {
-    return nil, false, errors.New(authenticationCauseSecret)
-}
-
-
-func loginRuntimeForEnvironment(t *testing.T, environmentName string) melodyruntimecontract.Runtime {
-    t.Helper()
-
-    source := &stubAuthenticationEnvironmentSource{
-        values: map[string]string{
-            melodyconfig.EnvKey: environmentName,
-        },
-    }
-
-    environment, environmentErr := melodyconfig.NewEnvironment(source)
-    if nil != environmentErr {
-        t.Fatalf("new environment: %v", environmentErr)
-    }
-
-    configuration, configurationErr := melodyconfig.NewConfiguration(environment, t.TempDir())
-    if nil != configurationErr {
-        t.Fatalf("new configuration: %v", configurationErr)
-    }
-
-    containerInstance := melodycontainer.NewContainer()
-
-    registerConfigurationErr := melodycontainer.Register[melodyconfigcontract.Configuration](
-        containerInstance,
-        melodyconfig.ServiceConfig,
-        func(resolver melodycontainercontract.Resolver) (melodyconfigcontract.Configuration, error) {
-            return configuration, nil
-        },
-    )
-    if nil != registerConfigurationErr {
-        t.Fatalf("register configuration: %v", registerConfigurationErr)
-    }
-
-    registerServiceErr := melodycontainer.Register[*service.UserService](
-        containerInstance,
-        service.ServiceUserService,
-        func(resolver melodycontainercontract.Resolver) (*service.UserService, error) {
-            return service.NewUserService(&refusingAuthenticationRepository{}, nil, nil), nil
-        },
-    )
-    if nil != registerServiceErr {
-        t.Fatalf("register user service: %v", registerServiceErr)
-    }
-
-    return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
-}
-
-func loginResponseBody(t *testing.T, runtimeInstance melodyruntimecontract.Runtime) (int, string) {
-    t.Helper()
-
-    httpRequest := httptest.NewRequest(
-        nethttp.MethodPost,
-        "/login",
-        bytes.NewBufferString(`{"username":"admin","password":"secret"}`),
-    )
-    httpRequest.Header.Set("Content-Type", "application/json")
-
-    request := melodyhttp.NewRequest(
-        httpRequest,
-        nil,
-        runtimeInstance,
-        melodyhttp.NewRequestContext("login-test", time.Now()),
-    )
-
-    response, handlerErr := LoginHandler()(runtimeInstance, httptest.NewRecorder(), request)
-    if nil != handlerErr {
-        t.Fatalf("login handler: %v", handlerErr)
-    }
-    if nil == response {
-        t.Fatalf("expected a response from the login handler")
-    }
-
-    bodyBytes, readErr := io.ReadAll(response.BodyReader())
-    if nil != readErr {
-        t.Fatalf("read response body: %v", readErr)
-    }
-
-    return response.StatusCode(), string(bodyBytes)
-}
-
-/* the login door is unauthenticated, so an authentication failure must answer a public message and nothing else: the errors list is written into the response with no debug gate at all, and the causes this call can really reach — a driver error naming the schema and the host — would be handed to anonymous callers verbatim. ApiErrorWithErr is the door that keeps the cause behind the debug gates instead. */
 func TestLoginHandler_KeepsTheAuthenticationCauseOutOfTheResponseWithoutDebug(t *testing.T) {
     runtimeInstance := loginRuntimeForEnvironment(t, melodyconfig.EnvProduction)
 
@@ -161,7 +55,6 @@ func TestLoginHandler_KeepsTheAuthenticationCauseOutOfTheResponseWithoutDebug(t 
     }
 }
 
-/* the cause is not discarded, it is gated: under the development kernel environment the same call carries it in the debug-gated context and trace, which is what makes the public message safe to keep bare */
 func TestLoginHandler_CarriesTheAuthenticationCauseUnderDebug(t *testing.T) {
     runtimeInstance := loginRuntimeForEnvironment(t, melodyconfig.EnvDevelopment)
 
@@ -200,7 +93,6 @@ func TestLoginHandler_CarriesTheAuthenticationCauseUnderDebug(t *testing.T) {
     }
 }
 
-/* The logout doors are asked what the STORAGE holds afterwards, not what the session object says: deleting the two identity keys leaves the entry modified, so the response path saves it back under the same id and re-issues the cookie, and only a cleared session routes that path to DeleteSession. The response path is run here exactly as the kernel runs it, through SaveSession. */
 func TestLogoutHandlerEndsTheSessionRatherThanEmptyingIt(t *testing.T) {
     storage := melodysession.NewInMemoryStorage()
     defer storage.Close()
@@ -252,7 +144,6 @@ func TestLogoutHandlerEndsTheSessionRatherThanEmptyingIt(t *testing.T) {
     }
 }
 
-/* a logout that arrives without a session is not an error: the door answers the same redirect, and nothing is left behind to end */
 func TestLogoutHandlerToleratesARequestCarryingNoSession(t *testing.T) {
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/logout/", nil)
     request := melodyhttp.NewRequest(httpRequest, nil, nil, nil)
@@ -267,7 +158,6 @@ func TestLogoutHandlerToleratesARequestCarryingNoSession(t *testing.T) {
     }
 }
 
-
 func TestLoginDecoderDiagnosticRemainsAvailableInDebug(t *testing.T) {
     runtimeInstance := loginRuntimeForEnvironment(t, melodyconfig.EnvDevelopment)
     incoming := httptest.NewRequest(nethttp.MethodPost, "/login", strings.NewReader("{"))
@@ -279,18 +169,6 @@ func TestLoginDecoderDiagnosticRemainsAvailableInDebug(t *testing.T) {
     if nil != err || false == strings.Contains(string(body), "unexpected EOF") { t.Fatalf("decoder diagnosis disappeared: %s err=%v", body, err) }
 }
 
-
-type loginBodyRepository struct {
-    repository.UserRepository
-    usernames []string
-}
-
-func (instance *loginBodyRepository) FindByUsername(ctx context.Context, username string) (*entity.User, bool, error) {
-    instance.usernames = append(instance.usernames, username)
-    return nil, false, nil
-}
-
-/* Query credentials must never reach authentication, including when they fill a missing body field. */
 func TestLoginHandlerRequiresCredentialsInBody(t *testing.T) {
     for _, testCase := range []struct {
         name, query, body, contentType string

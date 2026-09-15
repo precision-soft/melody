@@ -40,7 +40,6 @@ func TestModule_NameAndDescription(t *testing.T) {
     }
 }
 
-/* inverted from the old skip-silently pin: an unregistered route has no later consumer to fail loudly — clients get 404 while boot reads healthy — so the missing hub or path is refused at boot instead. The nil hub is refused by NewStreamHandler's own guard, which registration reaches at this same boot moment; the module deliberately carries no shadowed sister in front of it. */
 func TestModule_RegisterHttpRoutesRefusesAMissingHubAtBoot(t *testing.T) {
     kernel := &spyKernel{router: &spyRouter{}}
 
@@ -53,7 +52,6 @@ func TestModule_RegisterHttpRoutesRefusesAMissingHubAtBoot(t *testing.T) {
     NewModule(ModuleConfig{Path: "/stream"}).RegisterHttpRoutes(kernel)
 }
 
-/* the options carry a VALID IdleTimeout deliberately: with the zero value, NewStreamHandler's own panic would answer for a disarmed path guard and the mutant would survive shadowed — the empty path must be the only refusal candidate. */
 func TestModule_RegisterHttpRoutesRefusesAnEmptyPathAtBoot(t *testing.T) {
     kernel := &spyKernel{router: &spyRouter{}}
 
@@ -104,7 +102,6 @@ func TestModule_RegisterHttpRoutesHonoursCustomName(t *testing.T) {
     }
 }
 
-/* the module hands Options straight through, so a module wired with a zero IdleTimeout must fail its route registration at boot rather than serve connections nothing can reap. */
 func TestModule_RegisterHttpRoutesRefusesAZeroIdleTimeout(t *testing.T) {
     defer func() {
         recovered := recover()

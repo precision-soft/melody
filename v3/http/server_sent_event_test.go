@@ -97,7 +97,6 @@ func TestServerSentEventWriter_CarriageReturnDataCannotInjectControlLine(t *test
 
     body := recorder.Body.String()
 
-    /* the injection vector is the carriage return itself, and a reader that splits on "\n" alone never sees it start a line: the assertion below is satisfied identically with the sanitisation in place and with it gone. A client splits on CR, LF and CRLF alike, so the wire must carry no CR at all. */
     if true == strings.Contains(body, "\r") {
         t.Fatalf("expected no carriage return to survive onto the wire, got %q", body)
     }
@@ -205,7 +204,6 @@ func TestServerSentEventWriter_StripsNulFromId(t *testing.T) {
     }
 }
 
-/* a writer that cannot flush its way to the connection must be refused BEFORE the response is committed. The probe used to be made at the kernel's recording writer, which always carries a Flush method and forwards it only when its own delegate can flush — so the refusal was dead code for every in-framework caller and the handler went on to write events into a buffer nothing would ever flush. nonFlushingResponseWriter is the shared fixture in fixture_test.go. */
 func TestNewServerSentEventWriter_RefusesADelegateThatCannotFlushThroughTheRecordingWriter(t *testing.T) {
     delegate := &nonFlushingResponseWriter{}
     recorder := newRecordingResponseWriter(delegate)
@@ -251,7 +249,6 @@ func TestServerSentEventWriter_RefusesAnEventNameWithNoData(t *testing.T) {
         t.Fatalf("new sse writer: %v", writerErr)
     }
 
-    /* the grammar returns from dispatch the moment the data buffer is empty, so the listener the caller named would never have fired and the caller had no way to find out */
     sendErr := writer.Send(ServerSentEvent{Event: "heartbeat"})
     if nil == sendErr {
         t.Fatalf("expected an event name with no data to be refused")
@@ -284,7 +281,6 @@ func TestServerSentEventWriter_RefusesAnIdThatIsEmptyOnceItsControlBytesAreRemov
         t.Fatalf("new sse writer: %v", writerErr)
     }
 
-    /* emitted, "id: " with an empty value resets the client's resume cursor on the next reconnect */
     sendErr := writer.Send(ServerSentEvent{Id: "\n", Data: "payload"})
     if nil == sendErr {
         t.Fatalf("expected an id that sanitizes to empty to be refused")
@@ -297,7 +293,6 @@ func TestServerSentEventWriter_RefusesAnEventNameThatIsEmptyOnceItsControlBytesA
         t.Fatalf("new sse writer: %v", writerErr)
     }
 
-    /* emitted, "event: " with an empty value makes the browser fire the DEFAULT message type instead of the one the caller named */
     sendErr := writer.Send(ServerSentEvent{Event: "\r", Data: "payload"})
     if nil == sendErr {
         t.Fatalf("expected an event name that sanitizes to empty to be refused")
@@ -316,13 +311,11 @@ func TestServerSentEventWriter_CommentEndsTheFrameSoAKeepaliveIsObservable(t *te
         t.Fatalf("comment: %v", commentErr)
     }
 
-    /* the blank line is what makes a comment-only keepalive observable to a client reading frame by frame — the preamble a stream flushes at subscription time exists precisely so a client can tell a live stream from a hung one. Send composes every frame whole under the lock, so a comment can never dispatch a half-built event */
     if ": keepalive\n\n" != recorder.Body.String() {
         t.Fatalf("unexpected comment bytes: %q", recorder.Body.String())
     }
 }
 
-/* a failing writer that has already put bytes on the wire */
 type partialFailingResponseWriter struct {
     header nethttp.Header
 }
@@ -358,7 +351,6 @@ func TestServerSentEventWriter_RefusesEveryFrameAfterAPartialWrite(t *testing.T)
         t.Fatalf("expected the partial write to surface")
     }
 
-    /* the torn frame is on the wire and no later frame can repair it; a well-formed frame appended onto it is read by the client as one corrupt event */
     secondErr := writer.Send(ServerSentEvent{Data: "two"})
     if nil == secondErr {
         t.Fatalf("expected the writer to refuse after a partial write")
@@ -377,7 +369,6 @@ func TestServerSentEventWriter_SerializesConcurrentFrames(t *testing.T) {
         t.Fatalf("new sse writer: %v", writerErr)
     }
 
-    /* the documented shape of a stream is a handler emitting events beside a ticker emitting keepalives; a net/http ResponseWriter is not safe for concurrent use, so unsynchronized frames interleave into one corrupt frame with no error anywhere */
     var waitGroup sync.WaitGroup
     for index := 0; index < 32; index++ {
         waitGroup.Add(2)
@@ -422,7 +413,6 @@ func TestServerSentEventWriter_SerializesConcurrentFrames(t *testing.T) {
         t.Fatalf("interleaved frame line: %q", line)
     }
 
-    /* the walk above only refuses a line it does not recognise, so a writer that emitted nothing at all walks zero lines and reports success; the counts are what say all sixty-four frames arrived whole */
     if 32 != dataFrames || 32 != pingFrames {
         t.Fatalf("expected every frame to arrive whole, got %d data and %d keepalive frames", dataFrames, pingFrames)
     }
@@ -436,7 +426,6 @@ func TestServerSentEventWriter_ZeroValueRefusesInsteadOfDereferencingNothing(t *
     }
 }
 
-/* the frames are flushed through the outermost writer so every wrapper records the commit it exists to record, and that flush has to reach the connection: with a wrapper between the kernel's recorder and the connection that carries Unwrap but no Flush, the capability probe answered yes and every flush was a silent no-op — the handler subscribed, wrote its events, and the client received nothing until the response ended */
 func TestNewServerSentEventWriter_FlushesThroughAnIntermediateWrapper(t *testing.T) {
     connection := &flushCountingResponseRecorder{ResponseRecorder: httptest.NewRecorder()}
     writer := newRecordingResponseWriter(&intermediateResponseWriterWrapper{ResponseWriter: connection})

@@ -42,7 +42,6 @@ type TransportConfig struct {
     ResponseHeaderTimeout *time.Duration
 }
 
-/* resolvedTransportConfig is the concrete-value form the constructor reads; TransportConfig is the overlay over it, where nil means unset. */
 type resolvedTransportConfig struct {
     DialTimeout           time.Duration
     KeepAlive             time.Duration
@@ -83,7 +82,6 @@ func resolveTransportConfig(override *TransportConfig) resolvedTransportConfig {
     if nil != override.MaxIdleConns {
         resolved.MaxIdleConns = *override.MaxIdleConns
 
-        /* the per-host pool follows the total unless the caller pins it, so raising MaxIdleConns alone is never silently capped at net/http's per-host default of two */
         resolved.MaxIdleConnsPerHost = *override.MaxIdleConns
     }
 

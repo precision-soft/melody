@@ -58,7 +58,6 @@ func (instance *Application) Register(
         return nil
     }
 
-    /* duplicates are recorded for the aggregated boot report instead of panicking one at a time (the first registration wins until the guaranteed panic ends the boot); any other registration failure stays fail-fast */
     if true == errors.Is(registerErr, container.ErrServiceIdAlreadyRegistered) {
         instance.recordBootCollision(bootCollisionKindService, serviceName)
         return nil
@@ -69,7 +68,6 @@ func (instance *Application) Register(
         return nil
     }
 
-    /* the name — or the type — is already claimed at the scoped lifetime. The collision is the same wiring mistake reported from the other side, so it joins the same report rather than ending the boot on its own */
     if true == errors.Is(registerErr, container.ErrScopedServiceIdAlreadyRegistered) {
         instance.recordBootCollision(bootCollisionKindScopedService, serviceName)
         return nil
@@ -160,7 +158,6 @@ func (instance *Application) bootContainer() {
 
     serviceContainer := kernelInstance.ServiceContainer()
 
-    /* gated like the cache, session and firewall registrations below: the logger was the one default service the application or a module could never substitute, because its second registration was a guaranteed boot collision */
     if false == serviceContainer.Has(logging.ServiceLogger) {
         instance.RegisterService(
             logging.ServiceLogger,
@@ -206,8 +203,6 @@ func (instance *Application) bootContainer() {
         )
     }
 
-    /* the router, the dispatcher, the clock, the config, the route registry and the process role are deliberately NOT gated: they hand back objects the kernel owns and the request path reads directly, so a gate would promise a substitution the framework would then ignore — the honest answer for those is the document, not a door that lies. The gates below stand where a replacement built outside is a whole answer: the logger, the cache, the session, the firewall manager, and the three the boot used to make unsubstitutable. */
-
     instance.RegisterService(
         http.ServiceRouter,
         func(resolver containercontract.Resolver) (httpcontract.Router, error) {
@@ -222,7 +217,6 @@ func (instance *Application) bootContainer() {
         },
     )
 
-    /* the manager is the door content negotiation reads, and it was registered unconditionally: a module registering the same id to add a media type — xml, msgpack, cbor, application/vnd.api+json — got the boot's duplicate-registration exit, code 1, instead of a substitution, so the whole negotiation was closed to everything but a fork. NewSerializerManager is exported and takes the map, so a replacement built outside is a whole answer */
     if false == serviceContainer.Has(serializer.ServiceSerializerManager) {
         instance.RegisterService(
             serializer.ServiceSerializerManager,
@@ -237,7 +231,6 @@ func (instance *Application) bootContainer() {
         )
     }
 
-    /* the default serializer answers the two documented resolvers, SerializerFromRuntime and SerializerMustFromRuntime, which named an id nothing ever registered: the Must door panicked for every caller and the soft one answered nil, both by construction. This is the default serializer alone — content negotiation runs through the manager above, and registering another serializer here changes what those two resolvers answer, not what a request is served */
     if false == serviceContainer.Has(serializer.ServiceSerializer) {
         instance.RegisterService(
             serializer.ServiceSerializer,
@@ -272,7 +265,6 @@ func (instance *Application) bootContainer() {
         exception.Panic(exception.FromError(securityErr))
     }
 
-    /* the logger is resolved once, eagerly, whoever registered it: its provider is the one whose failure bootLogger otherwise swallows — the container recovers the provider panic into an error, the fallback answers the emergency logger, and the boot reported success for a process whose next logger resolution could only panic, attributed to the run instead of to the configuration that broke it. Failing here names the boot step that owns the failure, and the container memoizes the built logger, so nothing opens the log file a second time. */
     _, loggerProbeErr := logging.LoggerFromContainer(serviceContainer)
     if nil != loggerProbeErr {
         exception.Panic(
@@ -285,9 +277,6 @@ func (instance *Application) bootContainer() {
     }
 }
 
-/* newContainerLogger builds the logger the container serves. The module configuration is read before the descriptor is acquired, because it panics on a configuration registered under the supported name with a type that does not implement the interface: a file opened above that would be left with no owner at all — the container stores only what a provider returned, so nothing would ever close it, and a creation failure is not memoized, so each later resolution opens another one.
-
-   The file journal is a reopenable writer, and the serving process arms it on SIGHUP: rename-based rotation moves the file away under the descriptor, so without the reopen the journal keeps flowing into the renamed inode and the fresh file stays empty. Two callers deliberately do not arm it. The exit-path logger exists for a process that is dying, whose descriptor is surrendered to os.Exit, and a watcher armed there would outlive nothing and own nothing. A cli process does not arm it either: arming is signal.Notify, which takes SIGHUP away from its default disposition of terminating the process, so a command whose terminal hung up stopped dying and stayed alive as an orphan, having rotated a journal it was about to close anyway — the same line the environment refusal draws, where a command takes its configuration with it when it exits. */
 func newContainerLogger(
     logPath string,
     logLevel loggingcontract.Level,
@@ -300,7 +289,7 @@ func newContainerLogger(
     var writer io.Writer = os.Stdout
 
     if "" != logPath {
-        /* the directory is guaranteed the way ensureRuntimeDirectories guarantees the logs directory: only the default log path lives inside it, and an operator-supplied MELODY_LOG_PATH pointing anywhere else had no owner to create its parent */
+
         mkdirErr := os.MkdirAll(filepath.Dir(logPath), 0o755)
         if nil != mkdirErr {
             exception.Panic(
@@ -330,7 +319,7 @@ func newContainerLogger(
         if true == armRotationReopen {
             armErr := fileWriter.ArmReopenOnSignal(syscall.SIGHUP)
             if nil != armErr {
-                /* the descriptor opened above is closed before the panic: the container stores only what a provider returns, so a file left open here has no owner and a creation failure is not memoized — each later resolution would open another. This is the same orphan the module configuration is read before the open to avoid. */
+
                 _ = fileWriter.Close()
 
                 exception.Panic(
@@ -364,7 +353,7 @@ func (instance *Application) registerCache() {
     }
 
     if false == serviceContainer.Has(cache.ServiceCacheBackend) {
-        /* the fallback backend is deliberately left unarmed in both dimensions — an item ceiling melody picked would evict an application's entries behind its back, and an expiry melody picked would drop them early — so what it costs is carried to the http path as a warning instead of being decided here */
+
         instance.unboundedDefaultCacheBackend = true
 
         instance.RegisterService(
@@ -401,7 +390,7 @@ func (instance *Application) registerHttpSession() {
     serviceContainer := instance.kernel.ServiceContainer()
 
     if false == serviceContainer.Has(session.ServiceSessionStorage) {
-        /* the fallback storage keeps its entries in this process and nothing outside it can expire them, so what it costs is carried to the http path as a warning rather than being decided here — the same shape the fallback cache backend uses, and for the same reason: a lifetime melody picked would end sessions the application never agreed to end */
+
         instance.defaultInMemorySessionStorage = true
 
         instance.RegisterService(
@@ -418,7 +407,6 @@ func (instance *Application) registerHttpSession() {
             func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
                 storage := session.SessionStorageMustFromResolver(resolver)
 
-                /* the manager reads the kernel's clock for the same reason the storage above does: the tombstone record and the entry expiry are two halves of one lifetime, and a manager left on the wall clock would keep a second timeline that a fixed-clock deployment cannot move */
                 return session.NewManagerWithClock(
                     storage,
                     instance.configuration.Http().SessionTtl(),
@@ -430,7 +418,6 @@ func (instance *Application) registerHttpSession() {
     }
 }
 
-/* registerSecurity wires what a compiled security configuration means for this process. The firewall manager is registered whatever the mode: it is a plain view of the compiled configuration with no request in it, and gating it on the mode sent a console process asking for it to a "service is not registered" panic that reads as a wiring mistake when the actual difference was the process shape — configured means resolvable. The two kernel listeners remain http-only: they are the enforcement, they listen for requests, and a console process has no request to guard. */
 func (instance *Application) registerSecurity() error {
     if nil == instance.securityConfiguration {
         return nil
@@ -461,13 +448,6 @@ func (instance *Application) registerSecurity() error {
     return nil
 }
 
-/* buildMessageBusTransportsCloser builds the closer that joins the registered message bus transports to the container's ordered teardown, for every process that never resolves the transports map itself.
-
-   RegisterTransports resolves the closer from the map's own provider, which is enough for the consume command and for nothing else. The container closes what it BUILT, and an http process routes its messages through a routing that holds the transport VALUE directly: it asks the container for the transports map never, so the closer is never built and the broker connection lives exactly as long as the process. That is the very defect the Close() signature was changed to repair, left repaired only on the one process that was already reaching it.
-
-   Built here the closer is one of the earliest nodes in the container, and the teardown closes the later-created services first, so it is reached after everything that could still be publishing through a transport. The consume command resolving the map afterwards still records its edge, which is recorded on the resolution and not on the creation, so the ordering that path relies on is unchanged.
-
-   A failure is warned about rather than raised: the transports are an optional feature, the name is the framework's own, and an application that rewired it should not lose its boot over a teardown convenience. */
 func (instance *Application) buildMessageBusTransportsCloser() {
     serviceContainer := instance.kernel.ServiceContainer()
 

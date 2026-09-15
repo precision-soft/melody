@@ -22,7 +22,7 @@ const (
 
 type BackendOption func(*Backend)
 
-/* WithMaxKeyLength moves the bound a key is refused against. It is measured on the key the CALLER hands in, before the prefix is put in front of it: the prefix is the operator's, chosen once per application, and a bound that counted it would refuse different keys under different prefixes. A non-positive value keeps the default. */
+/* WithMaxKeyLength bounds the caller-supplied key before the configured prefix is added. Non-positive values keep the default. */
 func WithMaxKeyLength(maxKeyLength int) BackendOption {
     return func(instance *Backend) {
         instance.maxKeyLength = maxKeyLength
@@ -101,11 +101,10 @@ type Backend struct {
     maxKeyLength   int
     commandTimeout time.Duration
     closed         atomic.Bool
-    /* ownerClosed is the closed flag of the backend this handle was derived from, nil on a backend built directly: a context-bound handle minted by WithContext lives exactly as long as its owner, so the owner's Close must reach it — otherwise the refuse-after-Close guarantee would hold only for the one stored instance while the runtime door mints a fresh, open handle per request. A sibling backend built over the same client stays independent on purpose; the client belongs to whoever built it. */
+
     ownerClosed *atomic.Bool
 }
 
-/* operationContext bounds an operation dispatched without a caller context: the constructor's context plus the command timeout when one is configured, the constructor's context alone otherwise. */
 func (instance *Backend) operationContext() (context.Context, context.CancelFunc) {
     if 0 < instance.commandTimeout {
         return context.WithTimeout(instance.ctx, instance.commandTimeout)
@@ -114,7 +113,6 @@ func (instance *Backend) operationContext() (context.Context, context.CancelFunc
     return instance.ctx, func() {}
 }
 
-/* refuseWhenClosed answers the refusal every operation gives after Close, the answer the in-memory backend behind the same contract gives: a teardown-ordering bug surfaces immediately instead of quietly serving through a client whose owner already ended this backend. A derived handle also reads its owner's flag, so the owner's Close reaches every handle WithContext minted from it. */
 func (instance *Backend) refuseWhenClosed() error {
     if true == instance.closed.Load() {
         return exception.NewError(
@@ -390,7 +388,6 @@ func (instance *Backend) SetMultipleCtx(ctx context.Context, items map[string][]
         return closedErr
     }
 
-    /* the ttl is judged before the empty early-return, the order the in-memory backend judges it in: an already-invalid ttl is refused whether or not this particular batch happens to be empty */
     if 0 > ttl {
         return negativeTtlError(ttl)
     }
@@ -399,7 +396,6 @@ func (instance *Backend) SetMultipleCtx(ctx context.Context, items map[string][]
         return nil
     }
 
-    /* the batch is walked over sorted keys, never map order: the validation refusal below names the first key it rejects, and a map-ordered walk named a different key for the same wrong batch on every call — the exact nondeterminism the response reporting further down already refuses. The keys are carried alongside the commands because a failing response is identified by position only. */
     sortedKeys := make([]string, 0, len(items))
     for key := range items {
         sortedKeys = append(sortedKeys, key)
@@ -427,7 +423,6 @@ func (instance *Backend) SetMultipleCtx(ctx context.Context, items map[string][]
         cmds = append(cmds, command)
     }
 
-    /* every failing response is collected before one is reported, the delete sibling's rule: returning on the first failure of a map-ordered walk named a different key for the same failing batch on every call, and hid that the entries after it also failed */
     setErrors := make(map[string]error, len(commandKeys))
     for index, response := range instance.client.DoMulti(ctx, cmds...) {
         if err := response.Error(); nil != err {
@@ -438,7 +433,6 @@ func (instance *Backend) SetMultipleCtx(ctx context.Context, items map[string][]
     return instance.firstSetFailure(setErrors, len(commandKeys))
 }
 
-/* firstSetFailure names the key that failed, chosen by sorting rather than by map iteration — the firstDeleteFailure convention — so two identical failures report identically, and the counts tell the caller how much of the batch they describe. */
 func (instance *Backend) firstSetFailure(setErrors map[string]error, requestedCount int) error {
     if 0 == len(setErrors) {
         return nil
@@ -597,9 +591,6 @@ func counterError(key string, causeErr error) error {
     )
 }
 
-/* counterRefusalMessages maps redis's own wording onto the message the in-memory backend answers for the same mistake. The match is on a fragment rather than the whole line because a redis error carries a prefix that varies by server version and by whether the command travelled through a script.
-
-   The order is load-bearing and the list is walked in it: redis answers a DECRBY that cannot be negated with "decrement would overflow" and a counter driven past the int64 ceiling with "increment or decrement would overflow", and the first of those two is a substring of the second. Written the other way round every ceiling overflow would be reported as a delta that cannot be negated. */
 var counterRefusalMessages = []struct {
     fragment string
     message  string
@@ -626,7 +617,6 @@ func counterErrorMessage(causeErr error) string {
 
 const counterStoreFailureMessage = "cache counter operation failed"
 
-/* negativeTtlError refuses the already-lapsed duration the in-memory backend refuses too. Without it a negative ttl falls into the branch that writes no expiry at all, so the one value the caller meant to be unreadable is the one value stored forever. Zero keeps meaning no expiry, as both backends document. */
 func negativeTtlError(ttl time.Duration) error {
     return exception.NewError(
         "cache ttl is negative",
@@ -637,7 +627,6 @@ func negativeTtlError(ttl time.Duration) error {
     )
 }
 
-/* normalizeKey names the offending key in every refusal: a batch call validates keys the caller handed in as a set, and a refusal that does not say which of them is malformed leaves nothing to act on. */
 func (instance *Backend) normalizeKey(key string) (string, error) {
     if "" == key {
         return "", exception.NewError(
@@ -701,7 +690,6 @@ func escapeRedisGlobMeta(value string) string {
     return builder.String()
 }
 
-/* scanKeys walks every node of the client rather than the one connection a single Do reaches: against a cluster, a scan issued on one node reports only that node's slice of the keyspace, so a prefix wipe would silently leave behind everything hashed elsewhere and report success. Nodes answers a single-node client with itself, so the standalone case is the one-element case of the same walk. */
 func (instance *Backend) scanKeys(ctx context.Context, pattern string) ([]string, error) {
     keys := make([]string, 0)
 
@@ -795,7 +783,7 @@ func (instance *Backend) deleteKeysInBatches(ctx context.Context, keys []string)
 
         batch := keys[startIndex:endIndex]
         if batchErr := instance.firstDeleteFailure(rueidis.MDel(instance.client, ctx, batch)); nil != batchErr {
-            /* a multi-batch wipe that fails part-way is described at the operation's own extent, not the batch's: the batches before this one are irreversibly gone, and an error whose counts covered only the failing batch could not say whether the wipe destroyed nothing or nearly everything — a cancellation mid-clear left exactly that ambiguity. A single-batch operation keeps the batch report, whose counts already are the operation's. */
+
             if len(keys) <= instance.deleteBatch {
                 return batchErr
             }
@@ -814,7 +802,6 @@ func (instance *Backend) deleteKeysInBatches(ctx context.Context, keys []string)
     return nil
 }
 
-/* firstDeleteFailure names the key that failed, chosen by sorting rather than by map iteration, so two identical failures report identically, and the counts tell the caller how much of the batch they describe. */
 func (instance *Backend) firstDeleteFailure(deleteErrors map[string]error) error {
     failedKeys := make([]string, 0, len(deleteErrors))
     for key, deleteErr := range deleteErrors {

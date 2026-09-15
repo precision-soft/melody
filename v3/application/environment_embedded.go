@@ -17,7 +17,6 @@ func newEnvironmentSource(
 ) configcontract.EnvironmentSource {
     _ = projectDirectory
 
-    /* the guard reads through the interface: a typed-nil fs.FS passes the plain comparison and dies later as an anonymous nil dereference inside fs.Stat, instead of this refusal that names the argument */
     if true == internal.IsNilInterface(embeddedEnvFiles) {
         exception.Panic(
             exception.NewError(
@@ -31,7 +30,6 @@ func newEnvironmentSource(
     return config.NewEnvironmentSource(embeddedEnvFiles, ".")
 }
 
-/* missingEnvironmentFileHint has no on-disk .env to point at in the embedded build: the environment is read from the embedded fs (a nil fs already fails loudly in newEnvironmentSource), so a resolution failure here is never a missing-file-beside-the-binary problem. */
 func missingEnvironmentFileHint(projectDirectory string) string {
     _ = projectDirectory
 

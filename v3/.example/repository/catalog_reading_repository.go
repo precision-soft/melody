@@ -13,9 +13,7 @@ import (
 
 const ServiceCatalogReadingRepository = "service.example.catalog.reading.repository"
 
-/* CatalogReadingRecord is one reading of the catalogue as the archive holds it.
-
-   It is deliberately not reporting.CatalogReading, which carries FromCache: that field says how an answer was SERVED and belongs to the request that asked, while the archive records what was READ and when. A row that remembered whether the reading it came from happened to be cached would be recording a fact about a process that has since exited. */
+/* CatalogReadingRecord stores a catalogue observation and its instant. It excludes response-specific cache metadata. */
 type CatalogReadingRecord struct {
     TakenAt      time.Time
     Headline     string
@@ -40,9 +38,7 @@ func MustGetCatalogReadingRepository(resolver melodycontainercontract.Resolver) 
     return melodycontainer.MustFromResolver[CatalogReadingRepository](resolver, ServiceCatalogReadingRepository)
 }
 
-/* NewCatalogReadingRepository hands back the archive the environment can actually support: the postgres-backed one when an archive connection was configured, and the in-memory one otherwise — the same choice, made the same way, as the four nomenclature repositories beside it.
-
-   The archive's migration set is applied on the way out, so the first caller finds a table rather than a missing relation. There is no seeding: an archive of readings has no nomenclature to start from, and an empty archive is the honest state of an application that has not taken a reading yet. */
+/* NewCatalogReadingRepository selects PostgreSQL or in-memory storage, applying the archive migration set before returning a persistent repository. The archive starts empty and is not seeded. */
 //melody:service ServiceCatalogReadingRepository
 func NewCatalogReadingRepository(storage *persistence.ArchiveStorage) (CatalogReadingRepository, error) {
     if false == storage.IsPersistent() {
@@ -57,7 +53,6 @@ func NewCatalogReadingRepository(storage *persistence.ArchiveStorage) (CatalogRe
     return newBunCatalogReadingRepository(storage.Database()), nil
 }
 
-/* validateCatalogReading reports the first field the reading fails on, shared by both implementations so a bad append is refused with the same words whichever one the environment picked. The instant is required because it is the row's identity; the counts are refused when negative because a count is a size. */
 func validateCatalogReading(reading *CatalogReadingRecord) error {
     if nil == reading {
         return fmt.Errorf("reading is required")

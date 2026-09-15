@@ -5,14 +5,8 @@ import (
     "sync"
     "testing"
     "time"
-
     "github.com/precision-soft/melody/v3/.example/entity"
 )
-
-/* concurrentRounds is shared by the four in-memory suites in this package. */
-const concurrentRounds = 500
-
-/* every repository is a process-wide singleton and net/http serves each request on its own goroutine, so a listing request and a deleting request overlap; the writer here always removes a non-terminal element, which is what makes DeleteById compact the backing array under the reader */
 
 func TestInMemoryProductRepositoryConcurrentReadAndDelete(t *testing.T) {
     ctx := context.Background()
@@ -88,8 +82,6 @@ func TestInMemoryProductRepositoryConcurrentReadAndDelete(t *testing.T) {
     }
 }
 
-/* All() must hand back a copy: mutating the returned slice may not reach the repository */
-
 func TestInMemoryProductRepositoryAllReturnsCopy(t *testing.T) {
     ctx := context.Background()
     repositoryInstance := newInMemoryProductRepository()
@@ -114,8 +106,6 @@ func TestInMemoryProductRepositoryAllReturnsCopy(t *testing.T) {
         t.Fatalf("expected the repository slice to be unaffected by a caller write")
     }
 }
-
-/* the two implementations share one validation, so a write the in-memory catalogue refuses is refused by the database-backed one with the same words */
 
 func TestInMemoryProductRepositoryCreateRefusesAnIncompleteProduct(t *testing.T) {
     ctx := context.Background()

@@ -15,7 +15,6 @@ import (
     "github.com/precision-soft/melody/v3/exception"
 )
 
-/* the in-process cron runner dispatches overlapping executions of one command, so concurrent first runs must share one memoized migrator and run the database resolver exactly once — an unsynchronized memo races, and every loser opens a connection pool nothing ever closes. */
 func TestEncryptDatabaseCommand_ConcurrentRunsShareOneResolvedMigrator(t *testing.T) {
     var resolveCount atomic.Int32
 
@@ -79,7 +78,6 @@ func runEncryptDatabaseCommand(t *testing.T, command *EncryptDatabaseCommand, ex
     )
 }
 
-/* a negative batch silently became the default of 500, so the operator who believed they had throttled the run had not */
 func TestEncryptDatabaseCommand_RefusesANegativeBatch(t *testing.T) {
     command := NewEncryptDatabaseCommand(newMysqlDatabase(), NewFakeCipher())
 
@@ -93,7 +91,6 @@ func TestEncryptDatabaseCommand_RefusesANegativeBatch(t *testing.T) {
     }
 }
 
-/* a run that stops halfway leaves the column mixed; the rows already converted are the one number that says what a re-run costs */
 func TestEncryptDatabaseCommand_CarriesTheProcessedCountOnFailure(t *testing.T) {
     command := NewEncryptDatabaseCommand(newMysqlDatabase(), NewFakeCipher())
 

@@ -6,149 +6,17 @@ import (
     melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     "errors"
     "fmt"
-    "io"
     nethttp "net/http"
-    "net/http/httptest"
     "testing"
-    "time"
     "strings"
-
     melodyconfig "github.com/precision-soft/melody/v3/config"
-    melodyconfigcontract "github.com/precision-soft/melody/v3/config/contract"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
     melodyexception "github.com/precision-soft/melody/v3/exception"
     melodyruntime "github.com/precision-soft/melody/v3/runtime"
-    melodyserializercontract "github.com/precision-soft/melody/v3/serializer/contract"
     melodyvalidation "github.com/precision-soft/melody/v3/validation"
-    melodyserializer "github.com/precision-soft/melody/v3/serializer"
-    melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
-    melodyhttp "github.com/precision-soft/melody/v3/http"
-    melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-const causeSecret = "connection to 10.0.0.7 refused: password=hunter2"
-
-type stubEnvironmentSource struct {
-    values map[string]string
-}
-
-func (instance *stubEnvironmentSource) Load() (map[string]string, error) {
-    return instance.values, nil
-}
-
-func runtimeForEnvironment(t *testing.T, environmentName string) melodyruntimecontract.Runtime {
-    t.Helper()
-
-    source := &stubEnvironmentSource{
-        values: map[string]string{
-            melodyconfig.EnvKey: environmentName,
-        },
-    }
-
-    environment, environmentErr := melodyconfig.NewEnvironment(source)
-    if nil != environmentErr {
-        t.Fatalf("new environment: %v", environmentErr)
-    }
-
-    configuration, configurationErr := melodyconfig.NewConfiguration(environment, "/tmp/melody")
-    if nil != configurationErr {
-        t.Fatalf("new configuration: %v", configurationErr)
-    }
-
-    containerInstance := melodycontainer.NewContainer()
-
-    registerErr := melodycontainer.Register[melodyconfigcontract.Configuration](
-        containerInstance,
-        melodyconfig.ServiceConfig,
-        func(resolver melodycontainercontract.Resolver) (melodyconfigcontract.Configuration, error) {
-            return configuration, nil
-        },
-    )
-    if nil != registerErr {
-        t.Fatalf("register configuration: %v", registerErr)
-    }
-
-    return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
-}
-
-/* the presenter must reach the same decision the framework exception listener reaches, and must reach "no debug material" whenever the environment cannot be read at all */
-
-/* runtimeRefusingEveryMediaType builds a request whose Accept header refuses every type the manager can produce — the only header that reaches ErrNotAcceptable, since a type the header simply does not name is a preference rather than a refusal. */
-func runtimeRefusingEveryMediaType(t *testing.T) (melodyruntimecontract.Runtime, melodyhttpcontract.Request) {
-    t.Helper()
-
-    containerInstance := melodycontainer.NewContainer()
-
-    registerErr := melodycontainer.Register[*melodyserializer.SerializerManager](
-        containerInstance,
-        melodyserializer.ServiceSerializerManager,
-        func(resolver melodycontainercontract.Resolver) (*melodyserializer.SerializerManager, error) {
-            return melodyserializer.NewSerializerManager(
-                map[string]melodyserializercontract.Serializer{
-                    melodyserializer.MimeApplicationJson: melodyserializer.NewJsonSerializer(),
-                },
-            )
-        },
-    )
-    if nil != registerErr {
-        t.Fatalf("register serializer manager: %v", registerErr)
-    }
-
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
-
-    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/refused", nil)
-    httpRequest.Header.Set("Accept", "*/*;q=0")
-
-    request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("test", time.Now()))
-
-    return runtimeInstance, request
-}
-
-/* runtimeRefusingNothing is the ordinary case: a client that takes json, which is what makes the body assertable. */
-func runtimeRefusingNothing(t *testing.T) (melodyruntimecontract.Runtime, melodyhttpcontract.Request) {
-    t.Helper()
-
-    containerInstance := melodycontainer.NewContainer()
-
-    registerErr := melodycontainer.Register[*melodyserializer.SerializerManager](
-        containerInstance,
-        melodyserializer.ServiceSerializerManager,
-        func(resolver melodycontainercontract.Resolver) (*melodyserializer.SerializerManager, error) {
-            return melodyserializer.NewSerializerManager(
-                map[string]melodyserializercontract.Serializer{
-                    melodyserializer.MimeApplicationJson: melodyserializer.NewJsonSerializer(),
-                },
-            )
-        },
-    )
-    if nil != registerErr {
-        t.Fatalf("register serializer manager: %v", registerErr)
-    }
-
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
-
-    httpRequest := httptest.NewRequest(nethttp.MethodPost, "/refused", nil)
-    httpRequest.Header.Set("Accept", "application/json")
-
-    request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("test", time.Now()))
-
-    return runtimeInstance, request
-}
-
-/* requestAcceptingLines builds a request whose Accept field is spelled over several lines, the way a client that adds the header rather than replacing it sends it. */
-func requestAcceptingLines(t *testing.T, runtimeInstance melodyruntimecontract.Runtime, acceptLineList ...string) melodyhttpcontract.Request {
-    t.Helper()
-
-    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/refused", nil)
-    for _, acceptLine := range acceptLineList {
-        httpRequest.Header.Add("Accept", acceptLine)
-    }
-
-    return melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("test", time.Now()))
-}
-
-/* the Accept field is list-typed and a client may spell it over several lines; Header.Get answers only the first, so a blanket refusal sent on line one used to hide an available type named on line two. The probe drives the SUCCESS path deliberately: it is the only path where a refused negotiation still shows, because a refusal keeps the status it earned whatever the header says, and therefore cannot tell the two readings apart. The first line has to REFUSE rather than merely miss — an unmatched type falls back to the default serializer, so a pair like "application/xml" then "application/json" would pass under either reading. */
 func TestBuildApiResponseReadsEveryAcceptLine(t *testing.T) {
     runtimeInstance, _ := runtimeRefusingEveryMediaType(t)
 
@@ -172,24 +40,6 @@ func TestBuildApiResponseReadsEveryAcceptLine(t *testing.T) {
         t.Fatalf("expected the success path to serve the type named on the second line, got %d", response.StatusCode())
     }
 }
-
-func responseBodyOf(t *testing.T, response melodyhttpcontract.Response) string {
-    t.Helper()
-
-    reader := response.BodyReader()
-    if nil == reader {
-        return ""
-    }
-
-    body, readErr := io.ReadAll(reader)
-    if nil != readErr {
-        t.Fatalf("read body: %v", readErr)
-    }
-
-    return string(body)
-}
-
-/* the success path and the error path answer an unreadable Accept header differently, and each direction needs a probe of its own: on a success there is nothing to say except in a representation the client rejected, while a refusal that answered 406 would hide the status it earned — the framework's own error renderer states the same asymmetry and falls back for every resolution failure alike. */
 
 func TestBuildApiResponseKeepsTheStatusOfARefusalTheClientRefusesToRead(t *testing.T) {
     runtimeInstance, request := runtimeRefusingEveryMediaType(t)
@@ -235,8 +85,6 @@ func TestBuildApiResponseAnswersNotAcceptableOnTheSuccessPath(t *testing.T) {
         t.Fatalf("expected an empty body, got %q", responseBodyOf(t, response))
     }
 }
-
-/* ApiRefusal is the door JsonHandler's responder answers through, so the two kinds of refusal it sees are pinned separately: the validator's collection is public by contract and must reach the client field by field, and everything else must keep its cause out of the errors list — the generic message is all an unauthenticated caller is owed. */
 
 func TestApiRefusalRendersOneEntryPerViolatedField(t *testing.T) {
     runtimeInstance, request := runtimeRefusingNothing(t)
@@ -289,9 +137,6 @@ func TestApiRefusalKeepsTheCauseOfANonValidationRefusalOutOfTheErrorsList(t *tes
     }
 }
 
-/* an exception that carries the key with an EMPTY collection is not a validation failure: rendering it
-   field by field would answer an errors list with nothing in it, where the generic message at least
-   names what was refused. */
 func TestApiRefusalAnswersTheGenericMessageForAnEmptyCollection(t *testing.T) {
     runtimeInstance, request := runtimeRefusingNothing(t)
 
@@ -306,7 +151,6 @@ func TestApiRefusalAnswersTheGenericMessageForAnEmptyCollection(t *testing.T) {
     }
 }
 
-/* a collection handed directly as the error is read too, so a door that validates by hand renders the same way as one that binds through the framework. */
 func TestApiRefusalReadsACollectionHandedDirectly(t *testing.T) {
     runtimeInstance, request := runtimeRefusingNothing(t)
 
@@ -395,14 +239,6 @@ func TestBuildErrorTraceIsEmptyWithoutDebug(t *testing.T) {
         t.Fatalf("expected the whole unwrap chain under debug, got %d", len(buildErrorTrace(causeErr, true)))
     }
 }
-
-
-type causeRecordingLogger struct {
-    melodyloggingcontract.Logger
-    errors []melodyloggingcontract.Context
-    wanted error
-}
-func (instance *causeRecordingLogger) Error(message string, fields melodyloggingcontract.Context) { if instance.wanted == fields["error"] { instance.errors = append(instance.errors, fields) } }
 
 func TestApiServerErrorLogsCauseWithoutPublishingIt(t *testing.T) {
     runtimeInstance := runtimeForEnvironment(t, melodyconfig.EnvProduction)

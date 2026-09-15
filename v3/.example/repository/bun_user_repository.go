@@ -15,13 +15,12 @@ import (
     "github.com/uptrace/bun"
 )
 
-/* userRow is the directory as the database holds it. Roles are stored as one comma-separated column rather than a second table: they are a short fixed vocabulary with no commas in it, and the example is a nomenclature rather than a lesson in normalisation. */
 type userRow struct {
     bun.BaseModel `bun:"table:melody_example_v3_user,alias:example_user"`
 
     Id       string `bun:"id,pk"`
     Username string `bun:"username,notnull"`
-    /* the trail records THAT the password changed and never what it changed to or from: a history of credentials is the one thing an audit trail must not become, and a reader of the trail has no business the plaintext would serve */
+    /* Password audit records only that the credential changes; it omits both old and new secret values. */
     Password string `bun:"password,notnull" audit:"redact"`
     Roles    string `bun:"roles,notnull"`
 }
@@ -54,14 +53,12 @@ func newBunUserRepository(storage *persistence.CatalogStorage) *bunUserRepositor
     return &bunUserRepository{database: storage.Database(), tracker: storage.Tracker(), recorder: storage.Recorder()}
 }
 
-/* bunUserRepository keeps the directory in the database and its history beside it. Every write goes through the audit tracker, so who was granted which role, and when, is answerable after the fact — and the password column is recorded as changed without its value ever entering the trail. */
 type bunUserRepository struct {
     database *bun.DB
     tracker  *melodyaudit.Tracker
     recorder *melodyaudit.Recorder
 }
 
-/* seedIfEmpty writes the opening directory into an empty table; the table itself belongs to the migration set the constructor has already applied. The insert ignores duplicate keys because several example applications may reach an empty table at the same time, and losing that race is not a failure. */
 func (instance *bunUserRepository) seedIfEmpty(ctx context.Context) error {
     count, countErr := instance.database.
         NewSelect().
@@ -143,7 +140,6 @@ func (instance *bunUserRepository) FindByUsername(ctx context.Context, username 
     return row.toEntity(), true, nil
 }
 
-/* findRowById separates a row that is not there from a query that could not run: only sql.ErrNoRows is an answer, and every other failure is reported. */
 func (instance *bunUserRepository) findRowById(ctx context.Context, id string) (*userRow, bool, error) {
     row := &userRow{}
 
@@ -188,11 +184,6 @@ func (instance *bunUserRepository) Create(ctx context.Context, user *entity.User
         user.Id = nextUserId(identifierList)
     }
 
-    /* the same guard the product, category and currency repositories carry, and the one the identifier
-       ceiling's own rationale promises: without it an occupied id reaches the insert, where the primary
-       key answers the driver's raw duplicate-key text through a 500, and two callers that mint the same
-       id concurrently — the ordinary case, since the mint reads a list that neither has committed to
-       yet — see that instead of "id already exists". */
     _, occupied, occupiedErr := instance.findRowById(ctx, user.Id)
     if nil != occupiedErr {
         return occupiedErr
@@ -250,7 +241,6 @@ func (instance *bunUserRepository) DeleteById(ctx context.Context, id string) (b
         return false, fmt.Errorf("id is required")
     }
 
-    /* the account is opted into a captured before-image, so the tracker loads and locks the row before removing it and the trail keeps which roles it held; an account that is not there is not an error, it is an answer the caller asked for */
     _, found, findErr := instance.findRowById(ctx, trimmedId)
     if nil != findErr {
         return false, findErr
@@ -273,13 +263,6 @@ func (instance *bunUserRepository) DeleteById(ctx context.Context, id string) (b
     return true, nil
 }
 
-/* the check that precedes the write is a read, so two callers can both pass it before either has written;
-   the unique index the migration set adds is what actually holds the name, and this is where its refusal
-   is given the message the door already answers when the check catches the name in time. The match is on
-   the index's own name — this application's identifier, not the driver's wording — because the driver
-   spells the refusal as `Duplicate entry '<value>' for key '<table>.<index>'`, measured on the running
-   server; any other failure is handed back untouched, so a duplicate on the primary key stays the
-   diagnosis it is rather than being reported as a name that is taken. */
 func asUsernameAlreadyExists(writeErr error) error {
     if nil == writeErr {
         return nil
@@ -314,9 +297,6 @@ func (instance *bunUserRepository) usernameTakenByAnother(ctx context.Context, u
     return 0 < count, nil
 }
 
-/* the comparison is forced onto the binary collation because the column's own (utf8mb4_0900_ai_ci) folds accents — 'café' = 'cafe' is true under it — while NormalizedUsername, the one spelling the cache keys and the invalidation listeners agree on, folds case alone; left to the column, this door matched users the invalidation could never address, and a deleted user kept authenticating from the ttl-less cache under the collation-only spelling.
-
-   Both doors are kept as queries so the clause that decides which rows they may match is readable — and provable — on its own. */
 func (instance *bunUserRepository) userByUsernameQuery(row *userRow, wanted string) *bun.SelectQuery {
     return instance.database.
         NewSelect().
@@ -325,7 +305,6 @@ func (instance *bunUserRepository) userByUsernameQuery(row *userRow, wanted stri
         Limit(1)
 }
 
-/* the same binary collation as userByUsernameQuery, so the uniqueness door and the lookup door refuse and admit the exact same spellings */
 func (instance *bunUserRepository) usernameTakenByAnotherQuery(wanted string, excludedId string) *bun.SelectQuery {
     return instance.database.
         NewSelect().
@@ -350,7 +329,6 @@ func (instance *bunUserRepository) identifierList(ctx context.Context) ([]string
 }
 
 var _ UserRepository = (*bunUserRepository)(nil)
-
 
 /* GrantRole reads the current row under the same transaction that writes only its roles and records the audit. */
 func (instance *bunUserRepository) GrantRole(ctx context.Context, username string, role string) (*entity.User, bool, error) {

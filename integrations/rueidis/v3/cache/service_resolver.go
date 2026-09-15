@@ -23,7 +23,7 @@ func RegisterBackendServiceWithOptions(registrar ServiceRegistrar, client rueidi
     registrar.RegisterService(
         melodycache.ServiceCacheBackend,
         func(resolver containercontract.Resolver) (cachecontract.Backend, error) {
-            /* the backend borrows the client and declines to close it; resolving the owning Connection — when one is registered — records the dependency edge that closes the client AFTER this backend at teardown */
+
             if true == resolver.Has(melodyrueidis.ServiceConnection) {
                 container.MustFromResolver[*melodyrueidis.Connection](resolver, melodyrueidis.ServiceConnection)
             }

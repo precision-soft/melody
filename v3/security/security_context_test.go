@@ -23,11 +23,6 @@ func TestSecurityContext_IsGranted_TypedNilTokenAnswersFalse(t *testing.T) {
     }
 }
 
-/* the two doors that answer "may this token do X" have to answer alike. The voters refuse a token that
-reports roles while answering IsAuthenticated false — the shape a remembered or half-logged-in token takes —
-and IsGranted, which the application calls directly from a handler to branch on privilege, has to refuse it
-for the same reason. Without this the firewall denies the route and a handler that branches on IsGranted
-renders the privileged content behind it. */
 func TestSecurityContext_IsGranted_RefusesAnUnauthenticatedTokenTheVotersRefuse(t *testing.T) {
     token := &unauthenticatedRoledToken{roles: []string{"ROLE_ADMIN"}}
 

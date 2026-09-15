@@ -48,7 +48,6 @@ func NewStaticHmacSecretProvider(currentKeyId string, keysByKeyId map[string]Hma
             )
         }
 
-        /* the key-id↔app binding only isolates apps if their secret material is distinct: the key id is attacker-visible, so a secret shared across two apps would let a holder sign under either app's key id and defeat the binding. Reject cross-app secret reuse at construction rather than silently re-opening that escalation. */
         if owner, reused := appBySecret[string(key.Secret)]; true == reused && owner != key.App {
             exception.Panic(
                 exception.NewError(

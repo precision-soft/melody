@@ -11,7 +11,6 @@ func NewExitError(exitCode int, err *Error) *ExitError {
         )
     }
 
-    /* the operating system keeps only the low 8 bits of the code: 256 would report success from a dying process and a negative would read as 255, while 0 contradicts the error this constructor requires */
     if 1 > exitCode || 255 < exitCode {
         Panic(
             NewEmergency(
@@ -36,7 +35,7 @@ type ExitError struct {
 }
 
 func (instance *ExitError) Error() string {
-    /* the zero value is constructible outside the constructor that refuses a nil error */
+
     if nil == instance.err {
         return "exit error carries no error value"
     }
@@ -45,7 +44,7 @@ func (instance *ExitError) Error() string {
 }
 
 func (instance *ExitError) Unwrap() error {
-    /* returning the nil field through the interface would box a typed nil that passes every nil comparison downstream */
+
     if nil == instance.err {
         return nil
     }

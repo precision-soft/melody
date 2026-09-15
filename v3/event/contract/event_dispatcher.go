@@ -29,7 +29,7 @@ type EventDispatcher interface {
     /* AddSubscriber installs every listener the subscriber declares and answers the registration that owns them. Hold the registration to remove them: the subscriber value is not accepted back, because it cannot identify which installation to undo. */
     AddSubscriber(subscriber EventSubscriber) SubscriberRegistration
 
-    /* RemoveSubscriber removes the listeners installed by one AddSubscriber call and answers how many were removed. An unknown registration removes nothing and answers zero. */
+    /* RemoveSubscriber removes listeners belonging to one AddSubscriber registration and returns their count. Unknown registrations return zero. */
     RemoveSubscriber(registration SubscriberRegistration) int
 
     /* Dispatch runs the listeners registered for the event's name in descending priority order. The first listener error aborts the remaining listeners and is returned alongside the (partially dispatched) event; callers decide the policy for partial dispatch. */

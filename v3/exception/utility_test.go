@@ -330,7 +330,6 @@ func TestLogContext_TypedNilErrorWithExtra_ReturnsMergedExtras(t *testing.T) {
     }
 }
 
-/* nilProviderWrapper unwraps to a typed-nil provider, the shape errors.As matches and then hands over as a nil receiver */
 type nilProviderWrapper struct {
 }
 
@@ -407,7 +406,6 @@ func TestFromError_TypedNil_ReturnsNil(t *testing.T) {
         t.Fatalf("expected nil for a typed-nil *Error")
     }
 
-    /* the http exception variant is the one that used to panic: the assertion to *Error fails, so the walk reached err.Error() through the nil receiver */
     typedNilHttpException := (*HttpException)(nil)
 
     if nil != FromError(typedNilHttpException) {
@@ -527,7 +525,6 @@ func TestBuildCauseContextChain_ProviderWithEmptyContext_KeepsItsPositionAsNil(t
     }
 }
 
-/* valueError is an error whose concrete type is a struct value, not a pointer: it cannot be nil, and the typed-nil detection has to answer that from the kind alone instead of asking a value that has no IsNil */
 type valueError struct {
     message string
 }
@@ -813,7 +810,6 @@ func TestIsAlreadyLogged_TypedNilCarriesNoMarkAndDoesNotPanic(t *testing.T) {
         t.Fatalf("expected a nil error to carry no mark")
     }
 
-    /* an *Error is matched by errors.As at the top node, so the post-search guard answers it and the entry guard is never the only thing standing. An *ExitError implements no AlreadyLogged, so the search has to walk it through Unwrap, which reads a field off the nil receiver. */
     var typedNilExit *ExitError
 
     var exitAsError error = typedNilExit
@@ -823,7 +819,6 @@ func TestIsAlreadyLogged_TypedNilCarriesNoMarkAndDoesNotPanic(t *testing.T) {
     }
 }
 
-/* LogContext runs inside recovery defers: a value whose Error() panics — often on the very nil field that made it panic-worthy — must cost its text, never the record or the connection. */
 func TestLogContext_ContainsAPanickingErrorMessage(t *testing.T) {
     logContext := LogContext(&panickingTextError{})
 
@@ -837,7 +832,6 @@ func TestLogContext_ContainsAPanickingErrorMessage(t *testing.T) {
     }
 }
 
-/* the cause chain renders every link's text under the same containment: a panicking cause buried in the chain took the whole record down from inside the recovery that was writing it. */
 func TestBuildCauseChain_ContainsAPanickingLink(t *testing.T) {
     chain := BuildCauseChain(&panickingTextError{}, 8)
 
@@ -906,7 +900,6 @@ func TestLogged_AnHttpExceptionKeepsItsStatusThroughTheCarrier(t *testing.T) {
     }
 }
 
-/* the wrapped shape is what the early return is for: on a bare melody error FromError is the identity, so only a foreign wrapper around a marked error can tell a return from a rewrap — and that is the shape a second writer meets, every writer between it and the failure having added its own context */
 func TestLogged_AnAlreadyLoggedErrorIsNotWrappedAgain(t *testing.T) {
     original := MarkLogged(NewError("melody failure", nil, nil))
 
@@ -927,7 +920,6 @@ func TestLogged_ANilErrorStaysNil(t *testing.T) {
     }
 }
 
-/* an error-shaped panic value belongs in the cause slot: kept only in a context slot it collapses to its bare message at the render boundary, so the context and the cause chain of the very error that was raised reach no record. */
 func TestPanicCause_AnErrorShapedPanicTravelsAsTheCause(t *testing.T) {
     rootCause := errors.New("connection refused")
     panicValue := NewError("config parameter is not defined", nil, rootCause)
@@ -942,7 +934,6 @@ func TestPanicCause_AnErrorShapedPanicTravelsAsTheCause(t *testing.T) {
     }
 }
 
-/* a typed nil answers no cause: its Error() dereferences a nil receiver, so a cause slot holding it would detonate at the first render of the record the boundary exists to write. */
 func TestPanicCause_ATypedNilAnswersNoCause(t *testing.T) {
     var typedNil *Error
 
@@ -951,7 +942,6 @@ func TestPanicCause_ATypedNilAnswersNoCause(t *testing.T) {
     }
 }
 
-/* a panic value that is not an error has no cause to give; the recovery boundary still renders it into the context. */
 func TestPanicCause_ANonErrorPanicAnswersNoCause(t *testing.T) {
     if nil != PanicCause("scheduled command panicked on purpose") {
         t.Fatal("expected a non-error panic value to answer no cause")
@@ -962,7 +952,6 @@ func TestPanicCause_ANonErrorPanicAnswersNoCause(t *testing.T) {
     }
 }
 
-/* TestLogContext_AJoinedCauseReachesTheRecord pins the readers against the second unwrap shape the standard library defines. Every walk here anchored on the single-valued errors.Unwrap, which answers nothing at all for an errors.Join: a failure that gathered what several replicas had to say arrived as one flattened line of text, with the context of every branch — the host that refused, the destination that timed out — reaching no record. The writers this framework repaired are one producer of the shape; a join can arrive from any dependency and from any application. */
 func TestLogContext_AJoinedCauseReachesTheRecord(t *testing.T) {
     firstCause := NewError(
         "the primary replica refused the write",
@@ -1010,7 +999,6 @@ func TestLogContext_AJoinedCauseReachesTheRecord(t *testing.T) {
     }
 }
 
-/* a join handed straight to the reader, with nothing wrapping it, is the shape an application produces when it gathers failures and returns them as they are */
 func TestLogContext_ABareJoinIsWalkedAsItsBranches(t *testing.T) {
     joined := errors.Join(
         NewError("the first destination refused", exceptioncontract.Context{"destination": "a"}, nil),
@@ -1034,7 +1022,6 @@ func TestLogContext_ABareJoinIsWalkedAsItsBranches(t *testing.T) {
     }
 }
 
-/* the depth budget counts LINKS, not levels: a join of many branches must not cost more than a deep chain of the same length */
 func TestBuildCauseChain_TheDepthBudgetBoundsAWideJoin(t *testing.T) {
     branches := make([]error, 0, 12)
     for index := 0; index < 12; index++ {
@@ -1048,7 +1035,6 @@ func TestBuildCauseChain_TheDepthBudgetBoundsAWideJoin(t *testing.T) {
     }
 }
 
-/* a single-wrap chain keeps exactly the sequence it always produced: the walk changed shape, and nothing that was already right may move */
 func TestBuildCauseChain_ASingleWrapChainIsUnchanged(t *testing.T) {
     deepest := NewError("deepest", nil, nil)
     middle := NewError("middle", nil, deepest)
@@ -1071,7 +1057,6 @@ func (instance *contextPanicProviderError) Context() exceptioncontract.Context {
     panic("context rendering gave up")
 }
 
-/* renderErrorText already keeps a panicking Error() from unwinding through the recovery defer LogContext runs inside of, but a foreign Context() ran bare — at the top provider, in the cause-context walk, and in the From* constructors that run on the same recovery paths. The record survives with the panic value in the context's place instead of the process unwinding on a second panic. */
 func TestLogContext_AProviderWhoseContextPanicsIsContained(t *testing.T) {
     foreignErr := &contextPanicProviderError{}
 

@@ -34,7 +34,7 @@ func (instance *FrozenClock) TravelTo(targetTime time.Time) {
 }
 
 func (instance *FrozenClock) Advance(duration time.Duration) {
-    /* Advance permits only forward motion; use TravelTo to move backwards. */
+
     if 0 > duration {
         exception.Panic(
             exception.NewError("invalid advance duration", map[string]any{"duration": duration}, nil),
@@ -72,7 +72,6 @@ func newFrozenTicker(clockInstance *FrozenClock, ticker *time.Ticker) *frozenTic
         doneChannel:   doneChannel,
     }
 
-    /* Leave the channel open so consumers cannot spin on zero-value ticks after Stop. */
     go func() {
         defer close(doneChannel)
 
@@ -109,7 +108,7 @@ func (instance *frozenTicker) Channel() <-chan time.Time {
     return instance.channel
 }
 
-/* Wait for the relay to exit so Stop cannot be followed by newly sampled ticks. Previously buffered ticks remain readable. */
+/* Stop waits for the relay to exit, preventing newly sampled ticks after return. Buffered ticks remain readable. */
 func (instance *frozenTicker) Stop() {
     instance.stopOnce.Do(func() {
         instance.ticker.Stop()

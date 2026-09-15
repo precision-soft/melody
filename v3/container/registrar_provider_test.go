@@ -2,21 +2,8 @@ package container
 
 import (
     "testing"
-
     containercontract "github.com/precision-soft/melody/v3/container/contract"
 )
-
-type providerContractProbe struct {
-    value string
-}
-
-type providerConcreteError struct {
-    detail string
-}
-
-func (instance *providerConcreteError) Error() string {
-    return instance.detail
-}
 
 func TestReflectedProvider_TypedNilProviderRefused(t *testing.T) {
     serviceContainer := NewContainer()

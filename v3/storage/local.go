@@ -40,7 +40,6 @@ func (instance *LocalStorage) Put(
         return keyErr
     }
 
-    /* OpenRoot pins the lazily created directory and confines subsequent key operations. */
     if mkdirErr := os.MkdirAll(instance.baseDirectory, 0o750); nil != mkdirErr {
         return exception.NewError("could not create the storage directory", map[string]any{"key": key}, mkdirErr)
     }
@@ -57,12 +56,10 @@ func (instance *LocalStorage) Put(
         }
     }
 
-    /* Refuse an existing leaf symlink even though rename would replace the link without traversing it. */
     if info, lstatErr := root.Lstat(relativeKey); nil == lstatErr && 0 != info.Mode()&os.ModeSymlink {
         return exception.NewError("storage key resolves to a symlink", map[string]any{"key": key}, nil)
     }
 
-    /* Publish only after a complete, flushed write so failed overwrites preserve the previous object. */
     tempKey, file, createErr := createStorageTempFile(root, relativeKey)
     if nil != createErr {
         return exception.NewError("could not create the storage object", map[string]any{"key": key}, createErr)
@@ -72,7 +69,7 @@ func (instance *LocalStorage) Put(
     if nil != copyErr {
         _ = file.Close()
         _ = root.Remove(tempKey)
-        /* io.Copy failures may come from either the source reader or the destination. */
+
         return exception.NewError("could not copy the payload into the storage object", map[string]any{"key": key}, copyErr)
     }
 
@@ -101,7 +98,6 @@ func (instance *LocalStorage) Put(
     return nil
 }
 
-/* Use the target directory for a same-filesystem rename and O_EXCL to avoid overwriting another writer’s temporary object. */
 func createStorageTempFile(root *os.Root, relativeKey string) (string, *os.File, error) {
     directory := filepath.Dir(relativeKey)
     base := filepath.Base(relativeKey)
@@ -201,7 +197,6 @@ func (instance *LocalStorage) Exists(
     }
     defer root.Close()
 
-    /* Root.Stat confines lookup; missing objects are absent, while escaping symlinks remain errors. */
     info, statErr := root.Stat(relativeKey)
     if nil == statErr {
         if true == info.IsDir() {

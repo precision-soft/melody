@@ -16,7 +16,7 @@ import (
 const (
     ServiceCatalogJournalService = "service.example.catalog.journal.service"
 
-    /* the parts of the nomenclature a journal entry can be about */
+
     CatalogJournalSubjectProduct  = "product"
     CatalogJournalSubjectCategory = "category"
     CatalogJournalSubjectCurrency = "currency"
@@ -42,7 +42,7 @@ func NewCatalogJournalService(
     }
 }
 
-/* Record writes one entry, stamped by the injected clock and attributed to whoever the request was authenticated as. */
+/* Record writes an entry with the injected clock and the request’s authenticated actor. */
 func (instance *CatalogJournalService) Record(
     runtimeInstance melodyruntimecontract.Runtime,
     action string,

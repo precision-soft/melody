@@ -1,56 +1,11 @@
 package service
 
 import (
-    "context"
     "math"
     "testing"
     "time"
-
     "github.com/precision-soft/melody/v3/.example/event"
-    "github.com/precision-soft/melody/v3/.example/persistence"
-    "github.com/precision-soft/melody/v3/.example/repository"
-    melodycontainer "github.com/precision-soft/melody/v3/container"
-    melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
-    melodylogging "github.com/precision-soft/melody/v3/logging"
-    melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
-    melodyruntime "github.com/precision-soft/melody/v3/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
-
-var currencyQuoteInstant = time.Date(2026, time.September, 7, 9, 0, 0, 0, time.UTC)
-
-/* the currency doors under test write through a repository, a cache and a dispatcher. All three are the real
-   ones: the storage without a database hands back the in-memory repository the application itself uses when
-   it is configured without one, the cache keeps values as they are because these probes are not about
-   serialization, and the dispatcher carries a listener so "the event was dispatched" means it arrived. */
-func currencyServiceUnderTest(t *testing.T) (*CurrencyService, *recordingDispatcher, melodyruntimecontract.Runtime) {
-    t.Helper()
-
-    currencyRepository, repositoryErr := repository.NewCurrencyRepository(persistence.NewCatalogStorage(nil))
-    if nil != repositoryErr {
-        t.Fatalf("building the repository failed: %v", repositoryErr)
-    }
-
-    clockInstance := &frozenClock{instant: currencyQuoteInstant}
-    dispatcher := newRecordingDispatcher(clockInstance, event.CurrencyUpdatedEventName)
-
-    containerInstance := melodycontainer.NewContainer()
-    t.Cleanup(func() { _ = containerInstance.Close() })
-
-    /* the framework's dispatcher resolves the logger from the runtime before it runs a listener, so a
-       container without one turns every dispatch into a refusal that looks like the door's */
-    melodycontainer.MustRegister(
-        containerInstance,
-        melodylogging.ServiceLogger,
-        func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
-            return melodylogging.NewNopLogger(), nil
-        },
-    )
-
-    return NewCurrencyService(currencyRepository, newTtlRecordingCache(), dispatcher.dispatcher, clockInstance),
-        dispatcher,
-        melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
-}
 
 func TestCurrencyServiceUpdateRate_WritesTheQuoteAndTellsTheListeners(t *testing.T) {
     currencyService, dispatcher, runtimeInstance := currencyServiceUnderTest(t)
@@ -75,8 +30,6 @@ func TestCurrencyServiceUpdateRate_WritesTheQuoteAndTellsTheListeners(t *testing
         t.Errorf("cur-usd is stamped %s, wanted the instant the quote was taken at", updated.RateAsOf.UTC())
     }
 
-    /* the listener is what drops the cached list and the cached currency, so a write that skipped the
-       dispatch would leave every reader on the old rate */
     dispatched := dispatcher.names()
     if 1 != len(dispatched) || event.CurrencyUpdatedEventName != dispatched[0] {
         t.Errorf("the update dispatched %v, wanted one %s", dispatched, event.CurrencyUpdatedEventName)
@@ -92,8 +45,6 @@ func TestCurrencyServiceUpdateRate_WritesTheQuoteAndTellsTheListeners(t *testing
     }
 }
 
-/* the refusal comes before anything is written, which is what the second half asserts: a guard that refused
-   after the write would leave the catalogue holding a rate it had just called impossible */
 func TestCurrencyServiceUpdateRate_RefusesAQuoteThatIsNotPositive(t *testing.T) {
     for _, rate := range []float64{0, -1.0842} {
         currencyService, dispatcher, runtimeInstance := currencyServiceUnderTest(t)
@@ -129,8 +80,6 @@ func TestCurrencyServiceUpdateRate_AnswersNotFoundForACurrencyTheCatalogueDoesNo
     }
 }
 
-/* Create stamps the instant from the injected clock, which is the half a wall-clock read could not be
-   asserted on at all */
 func TestCurrencyServiceCreate_StampsTheQuoteWithTheInjectedClock(t *testing.T) {
     currencyService, _, runtimeInstance := currencyServiceUnderTest(t)
 
@@ -159,7 +108,6 @@ func TestCurrencyServiceCreate_RefusesAQuoteThatIsNotPositive(t *testing.T) {
         t.Error("a refused create left the currency in the catalogue")
     }
 }
-
 
 func TestUpdateRateRejectsInvalidInstantsAndNonFiniteRates(t *testing.T) {
     for _, testCase := range []struct { name string; rate float64; stamp time.Time }{

@@ -6,7 +6,7 @@ import (
 
 const shellMetacharacters = " \t\n'\"$`;&|()<>\\*?[]{}~#"
 
-/* ShellQuoteIfNeeded renders token as ONE shell word: unchanged when it carries no shell metacharacter, single-quoted (with an embedded quote escaped) when it does, and '' when it is empty — so the shell behind a crontab line hands the process exactly the argument that was configured. A custom template whose dialect ends in a shell command line — ansible.builtin.cron's job does — quotes every token through it, or through JoinShellTokens, rather than joining the tokens on a space: joined raw, an argument carrying a space arrives as two, and one carrying ; or | is read by the shell as its own. */
+/* ShellQuoteIfNeeded renders one shell word, including embedded quotes and an empty token. Use it or JoinShellTokens when building a shell command line. */
 func ShellQuoteIfNeeded(token string) string {
     if "" == token {
         return "''"

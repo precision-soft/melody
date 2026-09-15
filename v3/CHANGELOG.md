@@ -314,6 +314,16 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ### Fixed
 
+- example: scheduled product/tick output uses the command writer; product relationship lookup and table write failures are returned. Concurrent PostgreSQL bookkeeping initialization retries catalog-name collisions, and failed resets invalidate migration memoization. Live MySQL probes cover token-owned 2FA enrollment and recovery. Test helpers are grouped in fixture files; reporting reads the cache once and documents snapshot, role and retry limits.
+- container: remove the redundant visited-type map from finite by-value identity inspection.
+
+
+- Product conversion reports the older of its two input quote timestamps, including when only the target rate has refreshed.
+
+- The example in-memory reading archive rejects duplicate instants across time zones and monotonic-clock representations, preserving the original record.
+
+- The example attempts second-factor enrollment cleanup even when user-cache invalidation fails; both failures remain available in the returned error chain. Re-enrollment, recovery-code replacement and account isolation are verified against live MySQL.
+
 - Report raw provider errors as resolution failures while preserving their causes.
 
 - Preserve registration lifetime in debug build sweeps and filter teardown rows by lifetime.

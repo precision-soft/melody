@@ -30,10 +30,8 @@ type ServerSentEventHub struct {
     backplane          ServerSentEventBackplane
     logger             loggingcontract.Logger
 
-    /* the publishes that have passed the closed check and not yet returned. Shutdown waits on it before it closes the backplane, and the clear path of SetBackplane waits on it before handing the caller a backplane to close, which is what makes the contract sentence — a broadcast during a graceful stop is not pushed — true rather than merely intended. The counter is incremented under the read lock, so neither a shutdown nor a clear can start between the check and the increment. */
     publishesInFlight sync.WaitGroup
 
-    /* publishesOutstanding is the same count as the group above, in a form that can be READ. A WaitGroup can only be waited on, and waiting needs a goroutine that has to be scheduled before it can answer — which is the one thing a shutdown reached with its deadline already spent cannot afford, so it was told "still in flight" over a hub where nothing was. Raised and lowered exactly where the group is, under the same read lock that reads the closed flag, so once that flag is set this count can only fall. */
     publishesOutstanding atomic.Int64
 
     dropped           atomic.Uint64
@@ -44,7 +42,6 @@ type ServerSentEventSubscriber struct {
     topic   string
     channel chan ServerSentEvent
 
-    /* atomic.Uint64 rather than a bare uint64: a 64-bit atomic on a bare field requires 64-bit alignment, and this field lands at offset 12 on a 32-bit build (string 8 + chan 4), where atomic.AddUint64 panics with "unaligned 64-bit atomic operation". The wrapper type carries its own alignment guarantee on every architecture. */
     dropped atomic.Uint64
 }
 
@@ -60,7 +57,7 @@ func (instance *ServerSentEventSubscriber) Topic() string {
     return instance.topic
 }
 
-/* SetLogger installs the journal the hub files its own failures into. Without it the hub is the one component in the framework that observes a failure and cannot report it: a backplane whose publish fails and a subscriber whose buffer overflows were both counted into a private atomic nobody polls, so a redis outage silenced cross-node delivery on every node while each node kept serving its own subscribers and nothing above nothing at all was recorded anywhere. */
+/* SetLogger installs the logger for backplane failures and subscriber-buffer overflows. */
 func (instance *ServerSentEventHub) SetLogger(logger loggingcontract.Logger) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -103,7 +100,6 @@ func (instance *ServerSentEventHub) Subscribe(topic string, bufferSize int) *Ser
         return subscriber
     }
 
-    /* the zero value of the hub is reachable — the struct is exported and every field is unexported, so a composition root that writes &ServerSentEventHub{} compiles, boots, shuts down and reports a subscriber count, and then panics on an assignment to a nil map inside the first request that connects. Built here, under the lock that owns it. */
     if nil == instance.subscribersByTopic {
         instance.subscribersByTopic = make(map[string]map[*ServerSentEventSubscriber]struct{})
     }
@@ -157,7 +153,6 @@ func (instance *ServerSentEventHub) SetBackplane(backplane ServerSentEventBackpl
         instance.backplane = nil
         instance.mutex.Unlock()
 
-        /* the same discipline Shutdown keeps, for the same reason and outside the lock the publish itself needs: a publish that read the reference under the read lock counted itself in before this write lock could be taken, so when the clear returns nothing is left inside the backplane the caller is about to close. Returning while one was still in there closed it under the call — a cancelled context on one shipped backplane, a shut channel on the other, both filed as a backplane outage that never happened, and the event that was in flight lost to the other nodes. The wait is on publishes, so the clear a backplane performs belongs in its Close, where the shipped ones put it and where nothing of its own is in flight; issued from inside its own Publish it would wait on itself. */
         instance.publishesInFlight.Wait()
 
         return
@@ -215,7 +210,6 @@ func (instance *ServerSentEventHub) DeliverLocal(topic string, event ServerSentE
         default:
             instance.dropped.Add(1)
 
-            /* the record is filed on a subscriber's FIRST drop and not on every one: a consumer that has stopped reading drops every event from then on, so a record per drop would bury the journal under the same fault, while silence made a whole class of outage — the slow consumer — invisible by construction, the client seeing a gap-free stream with a hole in it. */
             if 1 == subscriber.dropped.Add(1) {
                 overflowed = append(overflowed, subscriber)
             }
@@ -252,7 +246,7 @@ func (instance *ServerSentEventHub) SubscriberCount(topic string) int {
     return len(instance.subscribersByTopic[topic])
 }
 
-/* IsClosed reports whether the hub was shut down. Subscribe on a shut-down hub hands back a subscriber whose channel is already closed, which a caller's range cannot tell from an ordinary end of stream: during the drain window a fresh connection was answered with a successful, instantly empty event stream and neither the client nor the journal learned why. */
+/* IsClosed reports shutdown. Subscribe after shutdown returns an already-closed subscriber channel. */
 func (instance *ServerSentEventHub) IsClosed() bool {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
@@ -260,7 +254,7 @@ func (instance *ServerSentEventHub) IsClosed() bool {
     return instance.closed
 }
 
-/* Shutdown closes every subscriber channel and the backplane the hub owns. The backplane half was missing: the interface declares Close for a reason — the shipped implementations hold a goroutine, a cancel func and a live subscription — and nothing else in the process holds the reference, so a hub that shut down without it left them running for the life of the process while its own replicate had already stopped publishing through them. */
+/* Shutdown closes subscriber channels and the backplane owned by the hub. */
 func (instance *ServerSentEventHub) Shutdown() {
     _ = instance.shutdownWithin(context.Background())
 }
@@ -303,9 +297,6 @@ func (instance *ServerSentEventHub) shutdownWithin(closeContext context.Context)
         return nil
     }
 
-    /* the publishes that were already past the closed check finish before the backplane they hold is closed under them.
-
-       A hub with NOTHING past that check is not waited for at all. The count is readable and the group is not, and that is the whole difference: the wait needs a goroutine to be scheduled before it can answer, and a shutdown reached with its deadline already spent — the normal state when an earlier component ate the budget — selects on a Done() that is ready before that goroutine has run. Measured, such a shutdown reported publishes in flight over a hub where there were none 300 times out of 300, handed the backplane to a detached closer 300 times out of 300, and returned an error that put the hub in the operator's failure map and the process on exit 1; with no deadline, the same call closed in place and answered nil. */
     publishesEnded := 0 == instance.publishesOutstanding.Load()
 
     if false == publishesEnded {
@@ -329,11 +320,6 @@ func (instance *ServerSentEventHub) shutdownWithin(closeContext context.Context)
     return nil
 }
 
-/* closeBackplaneWhenPublishesEnd is where the backplane goes when the teardown's deadline runs out before the publishes holding it do. The hub is its only holder and the shut flag has already made every later close answer nil, so a branch that returned without it left the connection, both channels and the listen goroutine unreachable for the life of the process — filed, on every close after the first, as a success.
-
-   It runs detached because the thing it waits for is precisely what the caller could not wait for, and it closes under no deadline of its own because the backplane bounds each stretch of its own close with its package constants; the caller's context is spent by construction on this path. The wait is safe to leave running: the shut flag is set under the write lock before this, and a publish counts itself in under the read lock only after reading that same flag, so nothing can join the group once this branch is reached. A process that exits first leaves what any crash leaves.
-
-   The recover is the shape a bare goroutine needs: the close below contains its own panic and reports it, but the reporting itself runs through a logger the application supplied, and a panic there would take the process down for a caller that has already been answered. */
 func (instance *ServerSentEventHub) closeBackplaneWhenPublishesEnd(backplane ServerSentEventBackplane, logger loggingcontract.Logger) {
     go func() {
         defer func() {
@@ -346,7 +332,6 @@ func (instance *ServerSentEventHub) closeBackplaneWhenPublishesEnd(backplane Ser
     }()
 }
 
-/* awaitPublishesInFlight waits for the replicates already past the closed check, up to the deadline the teardown carries, and answers whether they all ended. The wait runs on a goroutine because a WaitGroup cannot be selected on; the goroutine ends with the last publish whether anybody is still listening or not. */
 func awaitPublishesInFlight(closeContext context.Context, publishesInFlight *sync.WaitGroup) bool {
     waited := make(chan struct{})
 
@@ -362,7 +347,6 @@ func awaitPublishesInFlight(closeContext context.Context, publishesInFlight *syn
     case <-closeContext.Done():
     }
 
-    /* a wait that ended in the same instant the deadline did ended: both channels are then ready and a select between them picks at random, which would report publishes that had finished as publishes still in flight */
     select {
     case <-waited:
         return true
@@ -372,7 +356,7 @@ func awaitPublishesInFlight(closeContext context.Context, publishesInFlight *syn
     return false
 }
 
-/* Close is Shutdown under the one name the framework's teardown recognises. The container closes a service by asserting Close() error on it, so a hub named only Shutdown was the single component in the framework its own ordered teardown could not see: it was skipped in silence, and the only thing that stopped it was a composition root remembering to register an http shutdown hook by hand — which an application running as a worker or a cli command never reaches at all. */
+/* Close exposes hub shutdown to container teardown. */
 func (instance *ServerSentEventHub) Close() error {
     return instance.CloseWithContext(context.Background())
 }
@@ -403,7 +387,6 @@ func recoverServerSentEventBackplaneClose(closeContext context.Context, backplan
         closeErr = RecoverToError(recoveredValue)
     }()
 
-    /* the backplane's own context-taking door is preferred when it carries one, so the teardown's deadline reaches the amqp and redis stretches underneath instead of stopping at the hub that owns them */
     contextCloseable, isContextCloseable := backplane.(interface {
         CloseWithContext(closeContext context.Context) error
     })
@@ -414,9 +397,6 @@ func recoverServerSentEventBackplaneClose(closeContext context.Context, backplan
     return backplane.Close()
 }
 
-/* replicate pushes the event to the other nodes. The publish runs OUTSIDE the lock — it is a network round trip, and holding the lock across it would block every shutdown behind the slowest broker and deadlock a backplane that delivers back into the hub — so the window between reading the closed flag and publishing is closed the other way: the in-flight counter is raised under the same read lock that reads the flag, and Shutdown waits on it before closing the backplane. Read and acted on with nothing between them, a shutdown landed in that window and the hub published through a backplane it had already reported closed, which a backplane whose Close shuts an internal channel answers with a send on a closed channel.
-
-   The publish itself runs under a guard because it is third-party code called from framework internals, on whatever goroutine broadcast — a message-bus consumer's, commonly, where a panic ends the process — and its failure is recorded rather than counted away. */
 func (instance *ServerSentEventHub) replicate(topic string, event ServerSentEvent) {
     instance.mutex.RLock()
 
@@ -439,7 +419,6 @@ func (instance *ServerSentEventHub) replicate(topic string, event ServerSentEven
     instance.publishesOutstanding.Add(1)
     instance.mutex.RUnlock()
 
-    /* the count is lowered AFTER the group, deliberately: defers run last-registered-first, so this order keeps the readable count the MORE conservative of the two and nobody can read zero while the group is still holding a waiter */
     defer instance.publishesOutstanding.Add(-1)
     defer instance.publishesInFlight.Done()
 

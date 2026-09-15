@@ -32,7 +32,7 @@ func EnqueueHandler(database *bun.DB, store *melodycontainer.LazyService[*outbox
         }
 
         enqueueErr := database.RunInTx(runtimeInstance.Context(), nil, func(ctx context.Context, tx bun.Tx) error {
-            /* a real handler performs its business write on tx here; the outbox write shares the same transaction so the two commit atomically */
+
             return storeInstance.Enqueue(ctx, tx, message.OutboxNotice{Reference: reference, Text: text})
         })
         if nil != enqueueErr {
@@ -46,7 +46,7 @@ func EnqueueHandler(database *bun.DB, store *melodycontainer.LazyService[*outbox
     }
 }
 
-/* RelayHandler drains one batch of due outbox rows to the transport and reports how many were published, standing in for the relay loop a scheduler (cron) or the outbox:relay command would run continuously. The relay arrives as a container.Lazy handle: the transport is opened at the first request, not at boot. */
+/* RelayHandler lazily resolves the relay, drains one due batch and reports successful publications. */
 func RelayHandler(relay *melodycontainer.LazyService[*outboxintegration.Relay]) melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         relayInstance, resolveErr := relay.Resolve()
@@ -65,7 +65,7 @@ func RelayHandler(relay *melodycontainer.LazyService[*outboxintegration.Relay]) 
     }
 }
 
-/* StatusHandler reports the outbox row counts by status so the pending → sent (or dead) transition the relay drives is observable. It resolves the lazy store first so the outbox schema exists before the count query even when no message was enqueued yet. */
+/* StatusHandler resolves the lazy outbox store before counting rows by status, ensuring the schema exists. */
 func StatusHandler(database *bun.DB, store *melodycontainer.LazyService[*outboxintegration.Store]) melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         if _, resolveErr := store.Resolve(); nil != resolveErr {
@@ -89,7 +89,6 @@ func StatusHandler(database *bun.DB, store *melodycontainer.LazyService[*outboxi
             counts[status] = count
         }
 
-        /* an iteration error ends the loop exactly like exhaustion does, with the failure parked on the rows: unread, a connection dropped after the first row served a truncated counts map as a 200 — an existing dead count silently reading as no dead rows */
         if rowsErr := rows.Err(); nil != rowsErr {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "could not read the outbox status"), nil
         }
@@ -98,7 +97,6 @@ func StatusHandler(database *bun.DB, store *melodycontainer.LazyService[*outboxi
     }
 }
 
-/* queryString reads a query parameter as a string, handling the bag's []string storage. */
 func queryString(request melodyhttpcontract.Request, name string) string {
     value, exists := request.Query().Get(name)
     if false == exists {

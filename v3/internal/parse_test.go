@@ -9,7 +9,6 @@ import (
     "github.com/precision-soft/melody/v3/exception"
 )
 
-/* the framework renders an error's message alone through Error(); the reason for a refusal travels as the cause, so the tests read it there */
 func parseTestCauseMessage(t *testing.T, err error) string {
     t.Helper()
 
@@ -67,7 +66,6 @@ func TestDuration_RefusesUnparseableString(t *testing.T) {
     }
 }
 
-/* the typed branches are where the finiteness guard is the only wall; the string spellings of the same values are refused one step earlier, by the decimal grammar, and both refusals are asserted so neither guard can silently absorb the other's job */
 func TestFloat64_RefusesNonFinite(t *testing.T) {
     nonFiniteTypedValues := []any{
         math.NaN(), math.Inf(1), math.Inf(-1),
@@ -300,7 +298,6 @@ func TestMapStringString_RefusesAnUnsupportedShape(t *testing.T) {
     }
 }
 
-/* the float grammar is decimal on purpose: strconv.ParseFloat also reads underscores, hexadecimal floats and exponents, spellings the strict base-10 Int beside it refuses — a value refused as an int must not be silently accepted as a float */
 func TestFloat64_TheStringGrammarIsDecimal(t *testing.T) {
     refused := []string{"1_000.5", "0x1p10", "1e3", "1E3", "NaN", "Inf", "Infinity", "-Inf", "", ".", "+", "-", "1.2.3", "1p3"}
     for _, value := range refused {

@@ -193,7 +193,7 @@ func JsonErrorResponse(statusCode int, message string) *Response {
     }
 }
 
-/* FileResponse opens path exactly as given and streams it as the response body — it applies no folding, no root and no containment check, so it must never be handed a path built from client input without the caller confining it first. `os.Open("storage/invoices/" + request.Input("name"))` reads "../../../../etc/passwd" as readily as an invoice. Confine the name to a known directory before the call (reject "..", resolve symlinks and check the result stays under the root — the static file server does this for the paths it serves), or serve a fixed set of files by a lookup the client cannot steer. The returned body is the open file; the kernel closes it after the response is written. */
+/* FileResponse opens the supplied path without normalization, a root or containment checks. Callers must confine client-controlled paths, including symlinks, or select from fixed trusted paths. The kernel closes the returned file body after writing the response. */
 func FileResponse(statusCode int, path string) (*Response, error) {
     file, err := os.Open(path)
     if nil != err {
@@ -271,7 +271,6 @@ func confineFileToRoot(rootDirectory string, name string) (string, error) {
         )
     }
 
-    /* the climb is refused rather than folded away: a folded "../secret" quietly becomes a valid name, and the caller never learns a client probed the boundary */
     cleanedName := filepath.Clean(trimmedName)
     if ".." == cleanedName || true == strings.HasPrefix(cleanedName, ".."+string(os.PathSeparator)) {
         return "", exception.NewError(
@@ -426,9 +425,6 @@ func RedirectExternalResponse(location string, statusCode int) *Response {
     }
 }
 
-/* isExternalRedirectLocation reads the location the way a browser will: a scheme ("https:", "mailto:", "javascript:") or a leading "//" leaves the origin, and a backslash is treated as leaving too, because several browsers fold "\" to "/" while net/url does not — the disagreement is the exploit.
-
-The reading runs on the location the header writer will emit rather than on the one the caller passed. net/textproto folds away leading and trailing spaces and tabs as it writes the field, so " //evil.example.com" reaches the browser as "//evil.example.com" while the untrimmed spelling carries neither the scheme-relative prefix nor a scheme for the checks below to find. */
 func isExternalRedirectLocation(location string) bool {
     emittedLocation := textproto.TrimString(location)
 

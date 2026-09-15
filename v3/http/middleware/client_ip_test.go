@@ -38,7 +38,6 @@ func TestForwardedClientIpResolver_ResolvesClientBehindTrustedProxy(t *testing.T
 func TestForwardedClientIpResolver_SkipsTrustedInfixHops(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8", "192.168.0.10"))
 
-    /* client, then two trusted proxies appended by the infrastructure: walk right-to-left past both */
     ip := resolver(forwardedRequest("10.0.0.1:5555", "203.0.113.7, 192.168.0.10, 10.0.0.9"))
     if "203.0.113.7" != ip {
         t.Fatalf("expected the first untrusted hop from the right, got: %s", ip)
@@ -48,7 +47,6 @@ func TestForwardedClientIpResolver_SkipsTrustedInfixHops(t *testing.T) {
 func TestForwardedClientIpResolver_DoesNotBelieveSpoofedExtraEntries(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
 
-    /* the client sent its own X-Forwarded-For with a victim address; the proxy appended the real client — the rightmost untrusted entry wins, not the spoofed one */
     ip := resolver(forwardedRequest("10.0.0.1:5555", "198.51.100.99, 203.0.113.7"))
     if "203.0.113.7" != ip {
         t.Fatalf("expected the proxy-attested client, got: %s", ip)
@@ -58,7 +56,6 @@ func TestForwardedClientIpResolver_DoesNotBelieveSpoofedExtraEntries(t *testing.
 func TestForwardedClientIpResolver_FallsBackWhenPeerIsUntrusted(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
 
-    /* the direct peer is not a trusted proxy, so the header is attacker-controlled */
     ip := resolver(forwardedRequest("203.0.113.50:5555", "198.51.100.99"))
     if "203.0.113.50" != ip {
         t.Fatalf("expected the direct peer, got: %s", ip)
@@ -134,7 +131,6 @@ func TestForwardedClientIpResolver_MatchesCidrAndExactEntries(t *testing.T) {
     }
 }
 
-/* a proxy may write the same client as 1.2.3.4 or as ::ffff:1.2.3.4; left mapped, the two forms key two different rate limit buckets and an IPv4 CIDR never matches a 4-in-6 peer */
 func TestForwardedClientIpResolver_UnmapsIpv4MappedAddresses(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
 
@@ -149,7 +145,6 @@ func TestForwardedClientIpResolver_UnmapsIpv4MappedAddresses(t *testing.T) {
     }
 }
 
-/* proxies such as IIS/ARR and Azure Application Gateway append host:port to X-Forwarded-For, so the untrusted client hop resolves to its bare address rather than being refused as garbage */
 func TestForwardedClientIpResolver_ResolvesPortedForwardedHop(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
 
@@ -159,7 +154,6 @@ func TestForwardedClientIpResolver_ResolvesPortedForwardedHop(t *testing.T) {
     }
 }
 
-/* a dual-stack proxy may write its hop as an IPv4-mapped address and the operator lists that literal as trusted, so the mapped entry has to match the unmapped hop */
 func TestForwardedClientIpResolver_MatchesMappedTrustedExactEntry(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8", "::ffff:192.168.1.1"))
 
@@ -169,7 +163,6 @@ func TestForwardedClientIpResolver_MatchesMappedTrustedExactEntry(t *testing.T) 
     }
 }
 
-/* a trusted proxy CIDR written in IPv4-mapped form (::ffff:192.168.0.0/120) still contains the unmapped direct peer */
 func TestForwardedClientIpResolver_MatchesMappedTrustedPrefix(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("::ffff:192.168.0.0/120"))
 
@@ -179,7 +172,6 @@ func TestForwardedClientIpResolver_MatchesMappedTrustedPrefix(t *testing.T) {
     }
 }
 
-/* A trusted edge may write an IPv6 hop as a bracketed literal with no port. net.SplitHostPort rejects that shape and netip.ParseAddr rejects the brackets it still carries, so the hop read as garbage and the resolver fell back to the direct peer — every IPv6 client behind such an edge collapsed onto the proxy's single rate limit bucket while IPv4 clients kept their own. */
 func TestForwardedClientIpResolver_ResolvesBracketedIpv6HopWithoutPort(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
 
@@ -189,7 +181,6 @@ func TestForwardedClientIpResolver_ResolvesBracketedIpv6HopWithoutPort(t *testin
     }
 }
 
-/* The bracketed form must also be recognized as a trusted hop, otherwise a bracketed proxy is walked as if it were the client and the chain behind it is never reached. */
 func TestForwardedClientIpResolver_TrustsBracketedIpv6Proxy(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8", "2001:db8:aaaa::/48"))
 
@@ -199,7 +190,6 @@ func TestForwardedClientIpResolver_TrustsBracketedIpv6Proxy(t *testing.T) {
     }
 }
 
-/* Bracketed and bare forms of one address name one client, so they must key one bucket. */
 func TestForwardedClientIpResolver_BracketedAndBareIpv6KeyTheSameClient(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
 
@@ -215,7 +205,6 @@ func TestForwardedClientIpResolver_BracketedAndBareIpv6KeyTheSameClient(t *testi
     }
 }
 
-/* the closure reads the trusted list on every request: retained live, a caller reusing its slice rewrote the trust decision mid-serving — the same rule Kernel.SetForwardedHeadersPolicy applies to the same list. */
 func TestForwardedClientIpResolver_CopiesTheTrustedProxyListAtConstruction(t *testing.T) {
     trustedProxyList := []string{"10.0.0.0/8"}
     resolver := NewForwardedClientIpResolver(httpcontract.ForwardedHeadersPolicy{
@@ -231,7 +220,6 @@ func TestForwardedClientIpResolver_CopiesTheTrustedProxyListAtConstruction(t *te
     }
 }
 
-/* an entry that parses as neither a CIDR prefix nor an address used to be skipped on every request, which narrowed the trusted list in silence: the hop it named stopped being believed, the framework fell back to the direct peer, and every client behind that proxy collapsed onto one rate-limit bucket with no record anywhere. */
 func TestNewForwardedClientIpResolver_RefusesAMalformedTrustedProxyEntry(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
@@ -246,7 +234,6 @@ func TestNewForwardedClientIpResolver_RefusesAMalformedTrustedProxyEntry(t *test
 }
 
 func TestNewForwardedClientIpResolver_KeepsAcceptingAnEmptyEntry(t *testing.T) {
-    /* a list assembled by splitting an environment variable carries a trailing empty field for a trailing separator, and both readers already treat it as absent */
     resolver := NewForwardedClientIpResolver(httpcontract.ForwardedHeadersPolicy{
         TrustForwardedHeaders: true,
         TrustedProxyList:      []string{"10.0.0.0/8", ""},
@@ -257,7 +244,6 @@ func TestNewForwardedClientIpResolver_KeepsAcceptingAnEmptyEntry(t *testing.T) {
     }
 }
 
-/* net/http keeps a repeated field as separate values, and that is the shape the chain arrives in when a client sent its own X-Forwarded-For and the trusted edge appended the peer it saw as a new line instead of extending the first one. Reading only the first line ends the right-to-left walk inside the half the client wrote, so the limiter keys on whatever address the client chose to put there and every such client shares one bucket with the victim it names. */
 func TestForwardedClientIpResolver_ReadsEveryForwardedForLine(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
 

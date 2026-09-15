@@ -22,7 +22,6 @@ import (
 const (
     defaultPollInterval = 1 * time.Second
 
-    /* defaultMaxErrorBackoff caps the doubling delay between RunOnce retries after consecutive failures, so a persistent repository outage neither tight-loops the relay nor pushes the retry horizon out indefinitely. */
     defaultMaxErrorBackoff = 1 * time.Minute
 )
 
@@ -48,7 +47,6 @@ type RelayCommand struct {
     relayLazy *container.LazyService[*Relay]
 }
 
-/* resolveRelay returns the prebuilt relay, or resolves the lazy one — a successful resolution is memoized, a failed one is reported so the run loop treats it like a failed batch, backs off and retries instead of exiting. The nil-yield guard mirrors lazyRepository.resolveStore: LazyService.Resolve passes a nil yield through with a nil error, and the run loop would then dereference it and panic the relay process on what should have been one more retried failure. */
 func (instance *RelayCommand) resolveRelay() (*Relay, error) {
     if nil != instance.relayLazy {
         relay, resolveErr := instance.relayLazy.Resolve()
@@ -107,7 +105,6 @@ func (instance *RelayCommand) Run(
 
     limit := commandContext.Int("limit")
 
-    /* stop on SIGINT/SIGTERM: the cancelled context aborts an in-flight batch mid-drain (RunOnce threads it through every repository and transport call), and whatever stayed claimed re-surfaces once its VisibilityTimeout lapses; a signal that lands between batches exits before the next claim. */
     runContext, stop := signal.NotifyContext(runtimeInstance.Context(), os.Interrupt, syscall.SIGTERM)
     defer stop()
 
@@ -119,7 +116,7 @@ func (instance *RelayCommand) Run(
     errorBackoff := interval
 
     for {
-        /* the relay is resolved inside the loop: with a lazy relay a store outage at start-up surfaces here as an error that follows the same backoff-and-retry path as a failed batch, and a later successful resolution proceeds normally. */
+
         published := 0
         relay, runErr := instance.resolveRelay()
         if nil == runErr {
@@ -130,7 +127,7 @@ func (instance *RelayCommand) Run(
 
         if nil != runErr {
             if nil != runContext.Err() {
-                /* a cancellation — signal or parent context — interrupted the batch mid-drain; the visibility timeout re-surfaces whatever stayed claimed, so exit cleanly rather than report the cancellation as a failure. Only an error the cancellation EXPLAINS is swallowed though: a genuine repository failure that merely coincided with a lapsing parent deadline used to ride this branch into exit 0, and a supervisor read the failed drain as success. */
+
                 if true == errors.Is(runErr, context.Canceled) || true == errors.Is(runErr, context.DeadlineExceeded) {
                     return nil
                 }
@@ -144,7 +141,6 @@ func (instance *RelayCommand) Run(
 
             instance.logRunError(logger, runErr, published)
 
-            /* double the delay on consecutive failures so a persistent outage does not tight-loop, clamped to the cap; any successful run resets it below. */
             if false == sleepInterruptible(runContext, errorBackoff) {
                 return nil
             }
@@ -163,7 +159,6 @@ func (instance *RelayCommand) Run(
             return nil
         }
 
-        /* a full drain suggests more rows are due: poll again after the interval; an empty batch waits the idle backoff instead. */
         delay := interval
         if 0 == published {
             delay = idleBackoff

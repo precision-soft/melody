@@ -11,7 +11,6 @@ func TestTableBuilder_RowsSurviveALaterAddBlock(t *testing.T) {
 
     first := builder.AddBlock("first", []string{"a"})
 
-    /* force the Blocks slice to grow past its initial capacity */
     for index := 0; index < 8; index++ {
         builder.AddBlock("filler", []string{"a"})
     }

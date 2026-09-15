@@ -19,7 +19,7 @@ func WriteToHttpResponseWriter(
     responseWriter nethttp.ResponseWriter,
     response httpcontract.Response,
 ) error {
-    /* the interface is read through, not compared: this is a public door, and a nil pointer of a response type boxed into the contract passes a plain comparison and dereferences on Headers() below */
+
     if true == internal.IsNilInterface(response) {
         return nil
     }
@@ -29,7 +29,6 @@ func WriteToHttpResponseWriter(
         statusCode = nethttp.StatusOK
     }
 
-    /* a status outside net/http's [100, 999] is refused by name before anything is written, the headers included: this is a public door, and handing the code to WriteHeader panics deep inside the response path, turning a caller's arithmetic mistake into a connection reset instead of the error return this signature promises. The whole validation runs ahead of the first mutation because a caller that handles the returned error and writes its own response would otherwise send it with the refused response's Set-Cookie on top — the internal write path refuses the same range before it renders anything. */
     if 100 > statusCode || 999 < statusCode {
         return exception.NewError(
             "response status code is out of range",
@@ -42,9 +41,7 @@ func WriteToHttpResponseWriter(
 
     headers := response.Headers()
     if nil != headers {
-        /* a key the response names is owned by the response: the writer's values for it are replaced rather than appended to, so a header both sides set — the request id the kernel puts on the raw writer, and any header a kernel.response listener sets on the response — reaches the client once instead of twice. Keys the response does not name keep whatever the writer already carries.
 
-           Set-Cookie is the one field the response cannot own, because its lines are not a list one side may restate: each line is a separate cookie, so "both sides set Set-Cookie" means two DIFFERENT cookies, not one header twice. A handler writes cookies on the writer its own contract hands it, and the framework writes the session cookie on the response — replacing there deleted the handler's cookie in silence, and the client simply never received it. */
         for key, values := range headers {
             if "Set-Cookie" != nethttp.CanonicalHeaderKey(key) {
                 responseWriter.Header().Del(key)
@@ -90,23 +87,19 @@ func WriteToHttpResponseWriter(
     return nil
 }
 
-/* headerCommitRecorder reports whether the response headers were already committed, so writeResponse can skip writing over a stream a handler committed itself. */
 type headerCommitRecorder interface {
     HeadersWritten() bool
 }
 
-/* sessionPersistenceRecorder lets writeResponse persist the session at most once per request, so the panic-recovery path re-entering writeResponse does not save it a second time. */
 type sessionPersistenceRecorder interface {
     SessionPersisted() bool
     MarkSessionPersisted()
 }
 
-/* committedStatusRecorder reports the status code actually committed on the connection, so the terminate event and the access log can name the status the client received when a handler streamed its own response instead of the synthetic response the kernel substituted for it. Zero means no status was committed through the recorder — nothing was written, or the connection was hijacked and left http entirely. */
 type committedStatusRecorder interface {
     CommittedStatusCode() int
 }
 
-/* recordingResponseWriter records what the delegate committed so the kernel can tell a response it still owns from one already on the wire. Its fields are written and read on the SERVING goroutine only — the kernel's recovery defer runs there too — so they carry no lock. A handler that hands the raw writer to a second goroutine, which is the documented shape of a stream, is outside that guarantee: the server-sent-event writer serializes its own frames under its own mutex, and it is the only writer of that connection while it runs. */
 type recordingResponseWriter struct {
     nethttp.ResponseWriter
     wroteHeader      bool
@@ -135,9 +128,7 @@ func (instance *recordingResponseWriter) Write(data []byte) (int, error) {
     return written, writeErr
 }
 
-/* Flush is forwarded so the wrapper keeps satisfying http.Flusher, which streaming handlers rely on; a flush commits the response, so it also records that the headers were written — after the delegate returns, the convention every commit recording in this type follows.
-
-   It is forwarded through a ResponseController rather than by asserting on the immediate delegate, because the delegate is whatever wrapped the connection before the kernel did: an operator's own net/http middleware that implements Unwrap for ResponseController compatibility but forwards no Flush of its own left this assertion failing, and every flush a streaming handler issued became a silent no-op — the frames sat in the buffer, the handler saw no error, and the client received nothing until the response ended. The controller unwraps the chain the way the standard library does, so the flush reaches the connection whatever sits between. */
+/* Flush forwards through http.ResponseController, including delegate Unwrap chains, and records header commitment after the delegate returns. */
 func (instance *recordingResponseWriter) Flush() {
     flushErr := nethttp.NewResponseController(instance.ResponseWriter).Flush()
     if nil == flushErr {
@@ -145,7 +136,6 @@ func (instance *recordingResponseWriter) Flush() {
     }
 }
 
-/* recordImplicitCommit records a commit that reached the connection without an explicit WriteHeader: net/http writes an implicit 200 ahead of the first byte, so the recorded status is 200 unless an earlier explicit call already named one. */
 func (instance *recordingResponseWriter) recordImplicitCommit() {
     instance.wroteHeader = true
     if 0 == instance.statusCode {
@@ -157,12 +147,12 @@ func (instance *recordingResponseWriter) HeadersWritten() bool {
     return instance.wroteHeader
 }
 
-/* CommittedStatusCode answers the status the connection actually carries: the explicitly written one, or the implicit 200 recorded with the first byte. Zero means nothing was committed through this recorder — a hijacked connection included, whose bytes leave http entirely. */
+/* CommittedStatusCode returns the explicit status or the implicit 200 recorded on the first byte. Zero means no commitment through this recorder, including a hijacked connection. */
 func (instance *recordingResponseWriter) CommittedStatusCode() int {
     return instance.statusCode
 }
 
-/* SessionPersisted reports whether the session for this request was already persisted by an earlier writeResponse call, so a second call (for example the panic-recovery path re-entering writeResponse after the first write committed the session but then failed) does not save the session a second time. */
+/* SessionPersisted reports a completed session persistence step so a reentrant response-write path does not save it twice. */
 func (instance *recordingResponseWriter) SessionPersisted() bool {
     return instance.sessionPersisted
 }
@@ -186,7 +176,7 @@ func (instance *recordingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, 
     return connection, readWriter, hijackErr
 }
 
-/* ReadFrom is forwarded so the wrapper keeps satisfying io.ReaderFrom, preserving the underlying writer's sendfile fast path for file responses. The commit is recorded only after the copy and only when a byte actually reached the delegate: a source that fails before the first byte has committed nothing, and a flag raised ahead of the copy classified exactly that failure as a committed stream, so the recovery skipped its 500 and the client received an implicit empty 200. The recording rides a defer so a source that panics mid-copy unwinds through it; the copy's own count is then still zero, and the recovery's rewrite over the partially committed stream is absorbed by the delegate's superfluous-WriteHeader guard. */
+/* ReadFrom delegates copying to preserve io.ReaderFrom fast paths and records commitment only when the copy reports written bytes. A panic inside the copy can prevent its byte count from returning; the underlying writer still controls its actual committed response. */
 func (instance *recordingResponseWriter) ReadFrom(reader io.Reader) (written int64, copyErr error) {
     defer func() {
         if 0 < written {

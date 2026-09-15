@@ -21,7 +21,6 @@ func (instance *Configuration) registerDefaultParameters(
     instance.setDefaultParameter(HttpAddressKey, ":8080")
     instance.setDefaultParameter(HttpMaxRequestBodyBytesKey, 1048576)
 
-    /* the default is zero — no expiry — because that is what every deployment predating the setting already had, and picking a bound here would start logging users out at a lifetime nobody chose; the unbounded-growth hazard of the in-memory storage is answered by the boot warning, not by a quiet default. The full reasoning lives on DefaultSessionTtl. */
     instance.setDefaultParameter(HttpSessionTtlKey, DefaultSessionTtl.String())
 
     instance.setDefaultParameter(HttpSessionTombstoneRetentionKey, DefaultSessionTombstoneRetention.String())
@@ -45,7 +44,6 @@ func (instance *Configuration) registerDefaultParameters(
     instance.setDefaultParameter(StaticEnableCacheKey, true)
     instance.setDefaultParameter(StaticCacheMaxAgeKey, 3600)
 
-    /* an empty list keeps the built-in file server answering for every path it recognizes, which is what melody has always served */
     instance.setDefaultParameter(StaticExcludedPathsKey, "")
 }
 

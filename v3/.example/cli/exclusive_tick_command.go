@@ -46,19 +46,23 @@ func (instance *ExclusiveTickCommand) Run(
         hold = parsed
     }
 
-    fmt.Println("exclusive tick: started, holding the lock for", hold)
+    writer := commandContext.Writer()
+    if _, writeErr := fmt.Fprintln(writer, "exclusive tick: started, holding the lock for", hold); nil != writeErr {
+        return writeErr
+    }
 
     timer := time.NewTimer(hold)
     defer timer.Stop()
 
     select {
     case <-runtimeInstance.Context().Done():
-        fmt.Println("exclusive tick: interrupted")
+        _, writeErr := fmt.Fprintln(writer, "exclusive tick: interrupted")
+        return writeErr
     case <-timer.C:
-        fmt.Println("exclusive tick: done")
+        _, writeErr := fmt.Fprintln(writer, "exclusive tick: done")
+        return writeErr
     }
 
-    return nil
 }
 
 var _ melodyclicontract.Command = (*ExclusiveTickCommand)(nil)

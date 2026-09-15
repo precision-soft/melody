@@ -29,7 +29,6 @@ type acceptedMime struct {
     qualityValue float64
 }
 
-/* Invalid q-values discard the entire media range. */
 func parseAcceptHeader(acceptHeader string) []acceptedMime {
     parts := internal.SplitOutsideQuotes(acceptHeader, ',')
     result := make([]acceptedMime, 0, len(parts))
@@ -125,7 +124,6 @@ func matchWildcardSubtype(wildcardMime string, candidateMime string) bool {
     return true == strings.HasPrefix(candidateMime, prefix)
 }
 
-/* Keep q=0 ranges so fallback cannot serve an explicitly refused type. */
 func acceptMatchSpecificity(acceptedMimeValue string, candidateMime string) int {
     acceptedMimeValue = normalizeMime(acceptedMimeValue)
     candidateMime = normalizeMime(candidateMime)

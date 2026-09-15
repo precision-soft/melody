@@ -56,7 +56,6 @@ func (instance *StaticContext) Writer() io.Writer {
     return instance.WriterValue
 }
 
-/* copyStringValues keeps the contract the parsed context keeps: what a command is handed is its own, so a command that sorts or truncates it does not rewrite the values every later reader sees */
 func copyStringValues(values []string) []string {
     if nil == values {
         return nil

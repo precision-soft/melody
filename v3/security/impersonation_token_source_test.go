@@ -14,7 +14,6 @@ import (
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
-/* fixedTokenSource resolves a preset token, standing in for any primary source. */
 type fixedTokenSource struct {
     token securitycontract.Token
 }
@@ -30,7 +29,6 @@ func (instance *fixedTokenSource) Resolve(
     return instance.token, nil
 }
 
-/* mapUserResolver resolves impersonated users from a fixed table. */
 type mapUserResolver struct {
     usersById map[string]securitycontract.Token
 }
@@ -87,7 +85,6 @@ func TestImpersonation_AdminWithSwitchRoleImpersonates(t *testing.T) {
     }
 }
 
-/* negative control: an admin lacking the switch role is not allowed to impersonate. */
 func TestImpersonation_WithoutSwitchRoleStaysAdmin(t *testing.T) {
     admin := NewAuthenticatedToken("admin-1", []string{"ROLE_ADMIN"})
 
@@ -112,7 +109,6 @@ func TestImpersonation_NoHeaderReturnsInnerToken(t *testing.T) {
     }
 }
 
-/* a switch the caller WAS authorized to make (it holds the switch role) but that fails because the target is unknown must fail closed to an anonymous token, not silently keep the admin's own (broader) roles: the request was meant to run narrowed to the target, so continuing as the admin would execute it with privileges the operator believed were constrained to the target. This is distinct from the without-switch-role case above, where no narrowing was ever going to happen and the caller correctly passes through unchanged. */
 func TestImpersonation_UnknownTargetFailsClosedToAnonymous(t *testing.T) {
     admin := NewAuthenticatedToken("admin-1", []string{securitycontract.RoleAllowedToSwitch})
 
@@ -127,7 +123,6 @@ func TestImpersonation_UnknownTargetFailsClosedToAnonymous(t *testing.T) {
     }
 }
 
-/* under RoleModeImpersonator the admin keeps their own roles while still acting in the target's context (visible principal stays the impersonated user), so they can view as the user without losing their own rights. */
 func TestImpersonation_RoleModeImpersonatorKeepsAdminRoles(t *testing.T) {
     admin := NewAuthenticatedToken("admin-1", []string{"ROLE_ADMIN", securitycontract.RoleAllowedToSwitch})
 
@@ -154,7 +149,6 @@ func TestImpersonation_RoleModeImpersonatorKeepsAdminRoles(t *testing.T) {
     }
 }
 
-/* the impersonation token's originating actor names the impersonated user but carries the accountable admin (and the admin's roles) as its impersonator, so an impersonation stays auditable as it flows on. */
 func TestImpersonation_OnBehalfOfPropagatesImpersonator(t *testing.T) {
     admin := NewAuthenticatedToken("admin-1", []string{"ROLE_ADMIN", securitycontract.RoleAllowedToSwitch})
 
@@ -180,7 +174,6 @@ func TestImpersonation_OnBehalfOfPropagatesImpersonator(t *testing.T) {
     }
 }
 
-/* end-to-end: the impersonation's originating actor — impersonated user plus accountable admin — survives serialization into the HMAC envelope and rebuild at the callee, so the admin behind a switch stays auditable across a service boundary. */
 func TestImpersonation_PropagatesImpersonatorBetweenServicesOverHmac(t *testing.T) {
     admin := NewAuthenticatedToken("admin-1", []string{"ROLE_ADMIN", securitycontract.RoleAllowedToSwitch})
     upstream, _ := impersonationSource(admin).Resolve(testRuntime(), switchRequest("user-7"))
@@ -232,7 +225,6 @@ func TestImpersonation_AnonymousCanNotSwitch(t *testing.T) {
     }
 }
 
-/* the resolver's error used to be dropped: the journal said only "could not resolve", indistinguishable from a mistyped target, and the failure's cause survived nowhere. */
 func TestImpersonation_ResolverErrorCarriesItsCauseIntoTheJournal(t *testing.T) {
     admin := NewAuthenticatedToken("admin-1", []string{securitycontract.RoleAllowedToSwitch})
     source := NewImpersonationTokenSource(ImpersonationTokenSourceConfig{
@@ -262,7 +254,6 @@ func TestImpersonation_ResolverErrorCarriesItsCauseIntoTheJournal(t *testing.T) 
     }
 }
 
-/* failingUserResolver answers a marked infrastructure failure — the user store being down, not a denial. */
 type failingUserResolver struct{}
 
 func (instance *failingUserResolver) ResolveImpersonatedUser(

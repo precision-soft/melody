@@ -77,9 +77,7 @@ func (instance *Session) Delete(key string) {
     instance.mutex.Unlock()
 }
 
-/* Clear ends the session, and the ending latches: a later Set puts a value back and marks the session modified, but it cannot make the session look live again. Without the latch a logout handler that clears the session and is followed by anything writing to the same object — a middleware or an event listener leaving a farewell message — had the response path take the save branch instead of the delete branch, so the values were overwritten but the pre-logout id stayed alive in the storage and was re-issued to the browser under the same cookie. A caller that wants a usable session after clearing one asks the manager for a new session.
-
-   A Clear must land before the handler returns to be guaranteed effective: the response path decides the session's fate from one Snapshot, and a Clear arriving from a goroutine that outlives the handler can land after that snapshot was taken — the save it raced then persists the pre-logout state and the live cookie is re-issued, with the latch only reaching the NEXT request that loads this session. */
+/* Clear permanently marks this session ended; later Set calls cannot revive it. Ask the manager for a new session when needed. Clear must complete before the handler returns: a late goroutine can miss the response path’s session snapshot. */
 func (instance *Session) Clear() {
     instance.mutex.Lock()
     instance.values = make(map[string]any)

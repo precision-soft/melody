@@ -55,7 +55,6 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
         return resolveErr
     }
 
-    /* the archive is resolved BEFORE the plan is printed, not before it is used: the plan has to name the archive's tables when there is an archive, and a plan that named what it would not touch — or stayed silent about what it would — is the one thing this refusal exists to prevent. */
     archiveStorage, archiveResolveErr := melodycontainer.FromResolver[*persistence.ArchiveStorage](
         runtimeInstance.Container(),
         persistence.ServiceArchiveStorage,
@@ -64,7 +63,6 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
         return archiveResolveErr
     }
 
-    /* the command is registered whether or not a database is configured, so the command surface does not change between environments; without one it fails with the reason instead of being quietly absent. The two databases are two switches, so the refusal is for the environment that wired NEITHER: an archive wired alone is reset alone, the way a catalogue wired alone is. */
     if false == storage.IsPersistent() && false == archiveStorage.IsPersistent() {
         return exception.NewError(
             "the example has no database configured, so there is nothing to reset",
@@ -73,7 +71,6 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
         )
     }
 
-    /* a nil writer falls back to stdout rather than to the io.Discard the framework's own banner uses: what this command prints is the list of what it is about to destroy, and a plan nobody sees is worse than no plan. */
     writer := commandContext.Writer()
     if nil == writer {
         writer = os.Stdout
@@ -87,14 +84,12 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
         return nil
     }
 
-    /* the runtime's context, not a background one: the drops run under the same signal every other command of this application honours, so an operator's interrupt is not the one thing a reset ignores */
     finishCache, cacheErr := prepareDatabaseResetCache(runtimeInstance, writer)
     if nil != cacheErr { return cacheErr }
     defer finishCache(&runErr)
 
     ctx := runtimeInstance.Context()
 
-    /* the catalogue is brought whole — dropped, recreated, its trail emptied and reseeded — BEFORE the archive is touched: the archive is a second, independent database, and a refusal of it that returned between the catalogue's drop and its reseed left an empty catalogue behind a non-zero exit, with nobody able to log in until a second run. Each step reports itself as it completes, so what the operator reads after a failure is what HAPPENED, not only what was planned. */
     if true == storage.IsPersistent() {
         if resetErr := migration.Reset(ctx, storage.Database()); nil != resetErr {
             return databaseResetStepFailure("dropping and recreating the schema", "catalogue", storage.Location(), resetErr)
@@ -115,7 +110,6 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
         fmt.Fprintln(writer, "catalogue reset: the nomenclature was reseeded")
     }
 
-    /* the archive is a set of its own on a database of its own, so it is reset through its own door — and it is SKIPPED rather than refused when this environment wired no archive, the way the catalogue half is skipped when only the archive is wired. An operator who never configured postgres is not told their reset failed over a database they never asked for. */
     if true == archiveStorage.IsPersistent() {
         if archiveResetErr := migration.ResetArchive(ctx, archiveStorage.Database()); nil != archiveResetErr {
             return databaseResetStepFailure("dropping and recreating the reading archive", "archive", archiveStorage.Location(), archiveResetErr)
@@ -124,11 +118,9 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
         fmt.Fprintln(writer, "archive reset: the reading archive was dropped and recreated on "+archiveStorage.Location())
     }
 
-
     return nil
 }
 
-/* databaseResetStepFailure names the step that did not complete and the database it did not complete on. The cli engine echoes the error's message alone, so the message carries both: a dial refusal that read "connection refused" over a host name told the operator neither that the catalogue had already been dropped nor which of the two databases had refused. */
 func databaseResetStepFailure(step string, database string, location string, cause error) error {
     return exception.NewError(
         "database reset: "+step+" did not complete on the "+database+" database at "+location,
@@ -137,9 +129,6 @@ func databaseResetStepFailure(step string, database string, location string, cau
     )
 }
 
-/* databaseResetPlanLineList names what the reset reaches, and WHERE. It is a list rather than a series of prints so that what the command SAYS it will destroy is readable by a test without capturing a stream, and it is printed on both paths on purpose: the refusal has to say what the flag would have unleashed, and the run has to leave the same lines in the log of whoever ran it.
-
-   Each half names its database as the connection was declared — host, port and schema — because the tables alone do not: with MYSQL_DATABASE pointed at another major's schema the table list reads the same, the drops are no-ops there and the reseed creates this major's tables inside that database. The location is the one line that separates a reset of this example's volume from a reset of whatever the host happens to point at. */
 func databaseResetPlanLineList(storage *persistence.CatalogStorage, archiveStorage *persistence.ArchiveStorage) []string {
     lineList := []string{"example:db:reset would drop and recreate:"}
 
@@ -158,7 +147,6 @@ func databaseResetPlanLineList(storage *persistence.CatalogStorage, archiveStora
         )
     }
 
-    /* the archive's tables are read from the archive set's own list, the way the catalogue's are read from the catalogue's: a table added to either schema cannot be left out of the plan by a second copy nobody updated. They are named only when there is an archive, because a plan that promised to drop a table on a database this environment never wired would be a lie in the one direction that matters. */
     if true == archiveStorage.IsPersistent() {
         lineList = append(lineList, "on the archive database at "+databaseLocationLabel(archiveStorage.Location())+":")
 
@@ -170,7 +158,6 @@ func databaseResetPlanLineList(storage *persistence.CatalogStorage, archiveStora
     return append(lineList, "and then clear the cache")
 }
 
-/* databaseLocationLabel is what the plan prints for a handle nobody located: the composition root locates both handles, so the fallback is a test's, and it is spelled as an absence rather than left blank so a blank in a plan is never mistaken for a database with no name. */
 func databaseLocationLabel(location string) string {
     if "" == location {
         return "an unnamed location"
@@ -185,9 +172,6 @@ func printDatabaseResetPlan(writer io.Writer, storage *persistence.CatalogStorag
     }
 }
 
-/* clearAuditTrail empties the two tables the audit registry keeps for this application. It deletes rows rather than dropping tables: the schema is the registry's, opened through its own door, and a reset of the application's state has no business taking it away.
-
-   It asks that door to open the schema first. On this major the composition root is eager, so a repository has already created both tables by the time a command runs and the call is a no-op — but a delete that depends on that ordering would fail on the day it changes, over an application whose schema the reset has just restored, and EnsureSchema is the same door the storage itself calls. */
 func clearAuditTrail(ctx context.Context, storage *persistence.CatalogStorage) error {
     if schemaErr := storage.EnsureAuditSchema(ctx); nil != schemaErr {
         return schemaErr

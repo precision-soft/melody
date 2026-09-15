@@ -90,7 +90,6 @@ func TestNextServerSentEventBackplaneBackoff_GrowsAndCaps(t *testing.T) {
     }
 }
 
-/* an extreme factor overflows the product into a negative duration; the growth function collapses both ends onto the cap so the resubscribe loop never spins with a zero delay */
 func TestNextServerSentEventBackplaneBackoff_ExtremeFactorCollapsesOntoTheCap(t *testing.T) {
     instance := &ServerSentEventBackplane{reconnect: resolveReconnectConfig(&ReconnectConfig{InitialBackoff: time.Second, MaxBackoff: 30 * time.Second, BackoffFactor: math.Inf(1)})}
 
@@ -100,7 +99,6 @@ func TestNextServerSentEventBackplaneBackoff_ExtremeFactorCollapsesOntoTheCap(t 
 }
 
 func TestWithServerSentEventBackplaneCallTimeout_NonPositiveFallsBackToTheDefault(t *testing.T) {
-    /* a non-positive call timeout must not survive verbatim: context.WithTimeout(ctx, 0) is born cancelled, forcing every publish onto the failure path forever */
     cases := map[string]time.Duration{
         "zero":     0,
         "negative": -1 * time.Second,

@@ -36,7 +36,6 @@ func outboxTestStore(t *testing.T) *Store {
         t.Fatalf("ensure schema: %v", schemaErr)
     }
 
-    /* start from a clean table so counts are deterministic across runs */
     if _, deleteErr := database.NewDelete().Model((*Message)(nil)).Where("1 = 1").Exec(ctx); nil != deleteErr {
         t.Fatalf("clear table: %v", deleteErr)
     }
@@ -69,7 +68,6 @@ func TestStore_ClaimMarksInFlightAndHidesFromNextClaim(t *testing.T) {
         t.Fatalf("expected to claim all three due rows, got %d", len(claimed))
     }
 
-    /* the same rows are now in-flight with a future visibility, so an immediate second claim sees nothing */
     again, againErr := store.ClaimDueMessages(ctx, 10, time.Minute)
     if nil != againErr {
         t.Fatalf("second claim: %v", againErr)
@@ -79,7 +77,6 @@ func TestStore_ClaimMarksInFlightAndHidesFromNextClaim(t *testing.T) {
     }
 }
 
-/* the heart of the no-Locker double-publish fix: a row another transaction is already working (holding a row lock on) must be skipped by a concurrent claim, never handed out a second time and never blocked on. Holding the lock in an open transaction makes the contention deterministic — without FOR UPDATE SKIP LOCKED the claim would either block on the held row (and hit the deadline) or hand it out again. */
 func TestStore_ClaimSkipsRowLockedByAnotherTransaction(t *testing.T) {
     store := outboxTestStore(t)
     ctx := context.Background()
@@ -92,7 +89,6 @@ func TestStore_ClaimSkipsRowLockedByAnotherTransaction(t *testing.T) {
         t.Fatalf("find lowest id: %v", scanErr)
     }
 
-    /* hold a row lock on the lowest id in an open transaction, simulating another instance mid-claim */
     holdTx, beginErr := store.database.BeginTx(ctx, nil)
     if nil != beginErr {
         t.Fatalf("begin holding tx: %v", beginErr)
@@ -104,7 +100,6 @@ func TestStore_ClaimSkipsRowLockedByAnotherTransaction(t *testing.T) {
         t.Fatalf("lock row: %v", lockErr)
     }
 
-    /* bound the claim so a blocking (non-skip-locked) implementation fails on the deadline instead of hanging */
     claimCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
     defer cancel()
 
@@ -124,7 +119,6 @@ func TestStore_ClaimSkipsRowLockedByAnotherTransaction(t *testing.T) {
     }
 }
 
-/* a stale run whose claim has lapsed must not clobber a row another instance already resolved: the resolution writes are guarded on status = in-flight, so a Reschedule arriving after the row was marked sent is a harmless no-op rather than reviving a delivered message. */
 func TestStore_StaleResolveDoesNotClobberResolvedRow(t *testing.T) {
     store := outboxTestStore(t)
     ctx := context.Background()
@@ -137,12 +131,10 @@ func TestStore_StaleResolveDoesNotClobberResolvedRow(t *testing.T) {
     }
     id := claimed[0].Id
 
-    /* the current owner resolves the row as sent */
     if sentErr := store.MarkSent(ctx, id, claimed[0].ClaimToken); nil != sentErr {
         t.Fatalf("mark sent: %v", sentErr)
     }
 
-    /* a stale run (its claim long lapsed) tries to reschedule the same id under its old fencing token; both the in-flight guard and the token guard must make it a no-op */
     if rescheduleErr := store.Reschedule(ctx, id, 1, time.Now(), "stale", "stale-claim-token"); nil != rescheduleErr {
         t.Fatalf("stale reschedule: %v", rescheduleErr)
     }
@@ -157,7 +149,6 @@ func TestStore_StaleResolveDoesNotClobberResolvedRow(t *testing.T) {
     }
 }
 
-/* claiming must NOT touch delivery_attempts; the relay charges an attempt per row at delivery time via RecordDeliveryAttempt, and the post-increment count drives the crash-poison cap. Charging per delivery (not per batch claim) keeps a batch-mate the relay never reached from being falsely climbed toward the poison cap. */
 func TestStore_RecordDeliveryAttemptIncrementsPerRowNotClaim(t *testing.T) {
     store := outboxTestStore(t)
     ctx := context.Background()
@@ -190,7 +181,6 @@ func TestStore_RecordDeliveryAttemptIncrementsPerRowNotClaim(t *testing.T) {
     }
 }
 
-/* a row that is no longer in-flight (already resolved, or its claim lapsed and another instance owns it) must report claimed=false so the relay skips it instead of publishing alongside the new owner. */
 func TestStore_RecordDeliveryAttemptReportsUnclaimedWhenNotInFlight(t *testing.T) {
     store := outboxTestStore(t)
     ctx := context.Background()
@@ -216,7 +206,6 @@ func TestStore_RecordDeliveryAttemptReportsUnclaimedWhenNotInFlight(t *testing.T
     }
 }
 
-/* the fencing token stops a stale run whose claim lapsed from clobbering a row another instance has re-claimed: once a re-claim rewrites claim_token, the original claim's RecordDeliveryAttempt/MarkSent must no-op while the current owner's still transition the row. */
 func TestStore_StaleClaimTokenCannotClobberReclaimedRow(t *testing.T) {
     store := outboxTestStore(t)
     ctx := context.Background()
@@ -228,7 +217,6 @@ func TestStore_StaleClaimTokenCannotClobberReclaimedRow(t *testing.T) {
         t.Fatalf("first claim: %v (got %d)", firstErr, len(firstClaim))
     }
 
-    /* let the visibility window lapse so the row is due again, then re-claim it under a fresh token */
     time.Sleep(10 * time.Millisecond)
 
     secondClaim, secondErr := store.ClaimDueMessages(ctx, 10, time.Minute)
@@ -249,7 +237,6 @@ func TestStore_StaleClaimTokenCannotClobberReclaimedRow(t *testing.T) {
         t.Fatal("expected the stale claim's RecordDeliveryAttempt to report claimed=false after re-claim")
     }
 
-    /* a stale resolution must not clobber the new owner: this MarkSent matches no row */
     if sentErr := store.MarkSent(ctx, id, firstClaim[0].ClaimToken); nil != sentErr {
         t.Fatalf("stale mark sent: %v", sentErr)
     }
@@ -263,7 +250,6 @@ func TestStore_StaleClaimTokenCannotClobberReclaimedRow(t *testing.T) {
     }
 }
 
-/* a row claimed by an instance that crashed before resolving it must become claimable again once its visibility timeout lapses. */
 func TestStore_InFlightRowResurfacesAfterVisibility(t *testing.T) {
     store := outboxTestStore(t)
     ctx := context.Background()
@@ -289,7 +275,6 @@ func TestStore_InFlightRowResurfacesAfterVisibility(t *testing.T) {
     }
 }
 
-/* bun writes no LIMIT clause for a non-positive limit and narrows the value to int32 first, so zero, a negative and a value past the int32 range all claimed the whole table through this public door. */
 func TestClaimLimit_RefusesANonPositiveLimitAndCapsAboveTheMaximum(t *testing.T) {
     for _, refused := range []int{0, -1, math.MinInt} {
         if _, limitErr := claimLimit(refused); nil == limitErr {
@@ -308,7 +293,6 @@ func TestClaimLimit_RefusesANonPositiveLimitAndCapsAboveTheMaximum(t *testing.T)
     }
 }
 
-/* the refusal precedes every query: the store below is built over a connector nothing can reach, so a query would have failed with a dial error rather than the refusal asserted here. */
 func TestStore_ClaimDueMessagesRefusesANonPositiveLimitBeforeAnyQuery(t *testing.T) {
     sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN("postgres://nobody:nothing@127.0.0.1:1/nowhere?sslmode=disable")))
     t.Cleanup(func() {

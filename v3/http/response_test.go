@@ -313,7 +313,6 @@ func TestJsonErrorResponse_ContainsErrorField(t *testing.T) {
     }
 }
 
-/* JsonErrorResponse is the constructor the security entry points and every fallback answer through, so its body is the standardized envelope: the status inside the body the way the status line carries it outside, the moment, and the error object with the message */
 func TestJsonErrorResponse_CarriesTheStandardizedEnvelope(t *testing.T) {
     response := JsonErrorResponse(429, "too many requests")
 
@@ -358,7 +357,6 @@ func TestContentTypeByExtension_ResolvesIcoAndIsCaseInsensitive(t *testing.T) {
     }
 }
 
-/* the refusal is what makes the unsafe composition fail at the first probe: a location built from client input is how an open redirect is minted, and each of the three shapes below is a way a browser leaves the origin — a scheme, a scheme-relative slash pair, and the backslash several browsers fold to a slash while net/url does not */
 func TestRedirectResponse_RefusesTheLocationsThatLeaveTheApplication(t *testing.T) {
     for _, location := range []string{
         "https://evil.example.com/",
@@ -382,7 +380,6 @@ func TestRedirectResponse_RefusesTheLocationsThatLeaveTheApplication(t *testing.
     }
 }
 
-/* the guard runs before net/http writes the field, and the writer folds away leading spaces and tabs — so a padded spelling reaches the browser as the bare scheme-relative target while an untrimmed reading sees a relative path. Each case below is asserted twice: the constructor refuses it, and net/http is shown emitting the external location that makes the refusal necessary. */
 func TestRedirectResponse_RefusesALocationThePaddingWouldHideFromTheGuard(t *testing.T) {
     for _, testCase := range []struct {
         location string
@@ -434,7 +431,6 @@ func TestRedirectResponse_AnswersTheRelativeLocations(t *testing.T) {
     }
 }
 
-/* the external door is the caller's assertion, so it must answer exactly what the guarded one refuses */
 func TestRedirectExternalResponse_AnswersAnAbsoluteLocation(t *testing.T) {
     response := RedirectExternalResponse("https://partner.example.com/checkout", 0)
 
@@ -479,7 +475,6 @@ func TestConfinedFileResponse_ServesANameUnderTheRootAndNothingOutsideIt(t *test
         }
     }
 
-    /* every name above is caught by a guard that runs before the mode is ever asked — containment, or the empty name — so the last refusal in the chain has no input of its own. A name that resolves INSIDE the root and is not a regular file is the only one that reaches it, and a directory is the shape a deployment produces by accident. */
     if mkdirErr := os.Mkdir(rootDirectory+"/archive", 0o755); nil != mkdirErr {
         t.Fatalf("mkdir error: %v", mkdirErr)
     }
@@ -494,7 +489,6 @@ func TestConfinedFileResponse_ServesANameUnderTheRootAndNothingOutsideIt(t *test
     }
 }
 
-/* the symlink is the escape the textual checks cannot see: the name is clean, the join is under the root, and the target is not */
 func TestConfinedFileResponse_ASymlinkPointingOutsideTheRootIsRefused(t *testing.T) {
     rootDirectory := t.TempDir()
     outsideDirectory := t.TempDir()

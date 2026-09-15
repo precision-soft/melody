@@ -8,7 +8,6 @@ import (
     "github.com/precision-soft/melody/v3/exception"
 )
 
-/* fakeSqlStateError plays the pgdriver error shape: the driver exports no constructor for its type, so the typed path is proved through the same interface production matches. */
 type fakeSqlStateError struct {
     sqlState string
 }
@@ -47,7 +46,6 @@ func TestIsDuplicateKey(t *testing.T) {
             isDuplicate: true,
         },
         {
-            /* the exception wrapper's message never renders its cause, so any probe of the rendered text alone would answer false here; the typed match must see through the wrapping */
             name:        "typed sqlstate 23505 wrapped in an exception is a duplicate key",
             inputErr:    exception.NewError("insert widget failed", nil, &fakeSqlStateError{sqlState: "23505"}),
             isDuplicate: true,
@@ -58,7 +56,6 @@ func TestIsDuplicateKey(t *testing.T) {
             isDuplicate: false,
         },
         {
-            /* the verdict is pinned to the typed SQLSTATE: a message that merely contains the digits — a quoted value, a constraint name — carries no protocol error and must not be read as one */
             name:        "untyped message containing the digits is not a duplicate key",
             inputErr:    errors.New("ERROR: value (1235051) violates check constraint \"widget_check\""),
             isDuplicate: false,
@@ -79,7 +76,6 @@ func TestIsDuplicateKey(t *testing.T) {
     }
 }
 
-/* fakeSqlStateReporter plays the shape pgx and lib/pq give the same protocol error: the SQLSTATE through SQLState(), and no Field */
 type fakeSqlStateReporter struct {
     sqlState string
 }
@@ -92,7 +88,6 @@ func (instance *fakeSqlStateReporter) SQLState() string {
     return instance.sqlState
 }
 
-/* a consumer running bun over pgx or lib/pq reaches this door with a typed error that carries its SQLSTATE through SQLState() rather than Field: read through that shape too, a collision on such a driver answers true, and the message stays no identity */
 func TestIsDuplicateKey_ReadsTheSqlStateTheOtherDriversReport(t *testing.T) {
     if false == IsDuplicateKey(&fakeSqlStateReporter{sqlState: "23505"}) {
         t.Fatal("expected a SQLState() 23505 to be a duplicate key")

@@ -43,7 +43,6 @@ func TestBackendServiceWithNilContextFallsBackToStoredBackend(t *testing.T) {
     }
 }
 
-/* liveService answers a service over the redis the validation lane starts, under a prefix unique to the calling test. */
 func liveService(t *testing.T) *BackendService {
     t.Helper()
 
@@ -55,7 +54,6 @@ func liveService(t *testing.T) *BackendService {
     }
 
     t.Cleanup(func() {
-        /* the cleanup clears through its own backend: a test that closed the service under test would otherwise leave its keys behind, since a closed backend refuses Clear like every other operation */
         cleaner, cleanerErr := NewBackend(client, context.Background(), "melody:test:service:"+t.Name()+":", 0, 0)
         if nil != cleanerErr {
             t.Logf("could not build the cleanup backend: %v", cleanerErr)
@@ -77,7 +75,6 @@ func TestNewBackendService_RefusesANilClient(t *testing.T) {
     }
 }
 
-/* every method of the service is a delegate, so they are driven together: a delegate wired to the wrong operation is the defect this shape can carry, and only running each one shows it. */
 func TestBackendService_DelegatesEveryOperationToItsBackend(t *testing.T) {
     service := liveService(t)
 
@@ -148,7 +145,6 @@ func TestBackendService_DelegatesEveryOperationToItsBackend(t *testing.T) {
     }
 }
 
-/* Close ends the service and leaves the provider-owned client alone: every later call refuses — the in-memory backend's answer behind the same contract — while the client keeps serving its other borrowers, proven through a sibling backend over it. */
 func TestBackendService_CloseRefusesLaterCallsAndLeavesTheClientOpen(t *testing.T) {
     service := liveService(t)
 
@@ -227,7 +223,6 @@ func TestBackendFromRuntime_BindsTheRequestContextToTheRegisteredService(t *test
     }
 }
 
-/* the service's Close reaches the handles WithContext minted: the runtime door mints one per request over the same client, and a handle that ignored the close would quietly keep serving through a client whose owner already ended this backend — the exact scenario the closed flag exists to surface. The sibling-backend half of the contract — a backend built directly over the same client stays open — is pinned by TestBackendService_CloseRefusesLaterCallsAndLeavesTheClientOpen. */
 func TestBackendService_CloseReachesTheWithContextHandles(t *testing.T) {
     service := liveService(t)
 

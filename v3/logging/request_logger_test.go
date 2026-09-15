@@ -9,7 +9,6 @@ import (
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
-/* the decorator dereferences its base on every single call, so a missing base is refused where the wiring mistake is, not on the first record of the first request. The assertion is on the message: a value-blind one passes over any panic, including one thrown for an unrelated reason */
 func TestNewRequestLogger_PanicsWhenBaseLoggerIsNil(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
@@ -20,7 +19,6 @@ func TestNewRequestLogger_PanicsWhenBaseLoggerIsNil(t *testing.T) {
     )
 }
 
-/* a typed-nil base passes the plain nil comparison and dereferences the nil receiver on the first record — the same shape the package refuses everywhere else, and the reason the guard reads through the interface instead of comparing to nil */
 func TestNewRequestLogger_PanicsWhenBaseLoggerIsATypedNil(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
@@ -31,7 +29,6 @@ func TestNewRequestLogger_PanicsWhenBaseLoggerIsATypedNil(t *testing.T) {
     )
 }
 
-/* an empty context key would write the request id under "", where nothing reads it, and the claim-preserving key would become "Claimed" — the correlation the decorator exists to add would be silently unreachable */
 func TestNewRequestLogger_PanicsWhenContextKeyIsEmpty(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
@@ -72,7 +69,6 @@ func TestRequestLogger_AddsRequestIdWhenMissing(t *testing.T) {
     }
 }
 
-/* deliberate contract change: the real request id wins the key unconditionally — a value already under it frequently originates in an error context assembled from request data, and letting it win let client data forge the record's correlation. The displaced claim is kept under the key suffixed "Claimed", so the record carries both the truth and the claim. */
 func TestRequestLogger_RealRequestIdWinsAndKeepsTheClaim(t *testing.T) {
     base := &captureLogger{}
 
@@ -94,7 +90,6 @@ func TestRequestLogger_RealRequestIdWinsAndKeepsTheClaim(t *testing.T) {
     }
 }
 
-/* a claim equal to the real id is not an impersonation and earns no extra key */
 func TestRequestLogger_EqualClaimAddsNoClaimedKey(t *testing.T) {
     base := &captureLogger{}
 
@@ -133,7 +128,6 @@ func TestRequestLogger_OverridesExistingEmptyRequestId(t *testing.T) {
     }
 }
 
-/* the exit handler refuses a logger that reports itself closed; a decorator that cannot answer hid a dead file logger behind a live-looking wrapper, and the final record was handed to it and dropped — the wrapper now forwards the question to the base it decorates */
 func TestRequestLogger_ClosedForwardsToTheBase(t *testing.T) {
     file, createErr := os.CreateTemp(t.TempDir(), "melody-request-logger-*.log")
     if nil != createErr {
@@ -162,7 +156,6 @@ func TestRequestLogger_ClosedForwardsToTheBase(t *testing.T) {
     }
 }
 
-/* all six methods of the decorator merge the id, and each is its own delegation: only Info had ever been entered, so a method wired to the wrong base call — or forgetting the merge — would drop the correlation of every record written through it. The level the base receives says which delegation ran */
 func TestRequestLogger_EveryMethodMergesTheRequestIdAndKeepsTheLevel(t *testing.T) {
     base := &captureLogger{}
 
@@ -202,7 +195,6 @@ func TestRequestLogger_EveryMethodMergesTheRequestIdAndKeepsTheLevel(t *testing.
     }
 }
 
-/* the merge copies rather than writing into the caller's map: the context frequently belongs to an error that outlives the record, and stamping a request id into it would follow that error into every other record it reaches */
 func TestRequestLogger_DoesNotWriteIntoTheCallersContext(t *testing.T) {
     base := &captureLogger{}
 
@@ -217,7 +209,6 @@ func TestRequestLogger_DoesNotWriteIntoTheCallersContext(t *testing.T) {
     }
 }
 
-/* a nil context still receives the id: the record of a failure with no context of its own is exactly the one an operator correlates by id */
 func TestRequestLogger_NilContext_StillCarriesTheRequestId(t *testing.T) {
     base := &captureLogger{}
 
@@ -230,7 +221,6 @@ func TestRequestLogger_NilContext_StillCarriesTheRequestId(t *testing.T) {
     }
 }
 
-/* a claim that is not a string is not a competing request id — it is a value that happens to sit under the key — so it is overwritten without earning the Claimed key that exists to preserve a rival spelling */
 func TestRequestLogger_NonStringClaim_IsReplacedWithoutAClaimedKey(t *testing.T) {
     base := &captureLogger{}
 
@@ -247,7 +237,6 @@ func TestRequestLogger_NonStringClaim_IsReplacedWithoutAClaimedKey(t *testing.T)
     }
 }
 
-/* a base that does not answer the question is reported open, exactly as the exit handler treats such a logger when asked directly */
 func TestRequestLogger_ClosedReportsOpenForABaseWithoutTheQuestion(t *testing.T) {
     wrappedLogger := NewRequestLogger(&captureLogger{}, "request-id", "requestId")
 
@@ -261,7 +250,6 @@ func TestRequestLogger_ClosedReportsOpenForABaseWithoutTheQuestion(t *testing.T)
     }
 }
 
-/* the merge answers the caller's own context untouched for an empty id. The constructor never builds a decorator with one — it hands the base back instead — so the branch is reachable only from a struct built by hand; it is the guard that keeps a decorator assembled outside the constructor from writing an empty correlation over a real one */
 func TestRequestLogger_MergeWithAnEmptyRequestId_LeavesTheContextAlone(t *testing.T) {
     instance := &requestLogger{
         base:       &captureLogger{},
@@ -282,7 +270,6 @@ func TestRequestLogger_MergeWithAnEmptyRequestId_LeavesTheContextAlone(t *testin
     }
 }
 
-/* the console decorator keeps the correlation whole — the generated id wins the key on every record — while the caller's own value survives verbatim under the neutral "Provided" suffix: the console caller is the process's own code, so what it wrote is legitimate data displaced by the correlation, not a claim to be suspected */
 func TestProcessLogger_TheGeneratedIdWinsAndTheCallerValueSurvivesUnderProvided(t *testing.T) {
     base := &captureLogger{}
     wrappedLogger := NewProcessLogger(base, "process-id", "processId")
@@ -302,7 +289,6 @@ func TestProcessLogger_TheGeneratedIdWinsAndTheCallerValueSurvivesUnderProvided(
     }
 }
 
-/* the request path keeps only non-empty string claims because everything else there is request-derived noise; the console caller is trusted, so its value survives whatever its type — the request path's silent drop of a non-string would silently lose console data */
 func TestProcessLogger_PreservesANonStringCallerValueVerbatim(t *testing.T) {
     base := &captureLogger{}
     wrappedLogger := NewProcessLogger(base, "process-id", "processId")
@@ -358,7 +344,6 @@ func TestProcessLogger_AnEmptyProcessIdReturnsTheBaseUndecorated(t *testing.T) {
     }
 }
 
-/* the decorator is what every handler and every listener holds — it is installed as a scope override — so a caller asking the logger it was handed asks THIS one. Answering from here instead of forwarding would report every level enabled for a journal configured at error, which is the exact opposite of the question. */
 func TestRequestLogger_EnabledForwardsToTheBase(t *testing.T) {
     baseLogger := NewJsonLogger(io.Discard, loggingcontract.LevelError)
     wrappedLogger := NewRequestLogger(baseLogger, "request-id", "requestId")
@@ -377,7 +362,6 @@ func TestRequestLogger_EnabledForwardsToTheBase(t *testing.T) {
     }
 }
 
-/* a base that cannot be asked is reported enabled, which is the contract's floor: reporting the other way would silently stop the caller from recording against every logger that does not carry the capability — most of them, an integrator's adapter included */
 func TestRequestLogger_EnabledReportsEnabledOverABaseWithoutTheCapability(t *testing.T) {
     wrappedLogger := NewRequestLogger(&captureLogger{}, "request-id", "requestId")
 

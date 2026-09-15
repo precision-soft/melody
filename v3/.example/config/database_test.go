@@ -33,7 +33,6 @@ func TestDialIsInsecureOnlyOnTheExactSpelling(t *testing.T) {
     }
 }
 
-/* the registry's refusal reads the same for either database — "database connection failed" over a host — so the handle providers name the manager and where it is: the operator reading a console knows WHICH database refused before knowing why, and the registry's refusal stays the cause */
 func TestDatabaseOpenedBy_NamesTheManagerAndItsLocationWhenTheOpenRefuses(t *testing.T) {
     registry, registryErr := melodybunorm.NewManagerRegistryWithContext(
         context.Background(),
@@ -67,7 +66,6 @@ func TestDatabaseOpenedBy_NamesTheManagerAndItsLocationWhenTheOpenRefuses(t *tes
     }
 }
 
-/* the class as the operator met it: the reading repository is resolved BY TYPE through the generated wiring, and a refusal of the archive's database on that first resolution used to reach the console as "service not registered in resolver" — the container's relabelling of any error that is not this application's own. Over an archive handle whose connector refuses, the resolution now names the archive set and its step. */
 func TestArchiveReadingRepositoryResolvedByTypeNamesTheArchiveRatherThanTheWiring(t *testing.T) {
     serviceContainer := melodycontainer.NewContainer()
 
@@ -95,7 +93,6 @@ func TestArchiveReadingRepositoryResolvedByTypeNamesTheArchiveRatherThanTheWirin
     }
 }
 
-/* the registry's lazy opens are bound to the process's context: the archive is opened on a request or a scheduled command, and an open in flight when the process is asked to stop has to end with the signal — under a background context it ran its whole retry budget while the teardown waited behind it and reported the open as still in flight. Cancelled, the open ends at once naming the cancellation, and the registry closes with nothing pending. */
 func TestBuildDatabase_BindsTheArchiveOpenToTheProcessContext(t *testing.T) {
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
@@ -140,7 +137,6 @@ func TestBuildDatabase_BindsTheArchiveOpenToTheProcessContext(t *testing.T) {
     }
 }
 
-/* the archive's open budget is its own and request-sized: against a postgres that refuses, the open gives up in well under three seconds, where the catalogue's budget — ten attempts, one to five seconds apart — kept a request, a daily app:info and a teardown waiting thirty-seven seconds behind it. Measured at 0.75 s; the bound is four times that. */
 func TestBuildDatabase_GivesTheArchiveARequestSizedOpenBudget(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{
         environmentKeyPgsqlHost:     "127.0.0.1",
@@ -155,7 +151,6 @@ func TestBuildDatabase_GivesTheArchiveARequestSizedOpenBudget(t *testing.T) {
     _, openErr := moduleInstance.databaseRegistry.Database(databaseArchiveManagerName)
     elapsed := time.Since(startedAt)
 
-    /* the registry's own headline is "database connection failed"; the attempts spent are in its cause */
     if nil == openErr || false == strings.Contains(openErr.Error(), "database connection failed") {
         t.Fatalf("expected the open to give up after its attempts, got %v", openErr)
     }

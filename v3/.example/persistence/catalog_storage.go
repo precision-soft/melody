@@ -13,14 +13,11 @@ const (
     /* AuditTable is the audit trail of the nomenclature. It is per major, like every other table the example owns, so three applications sharing one database do not write into each other's history. It is named here rather than inline because two doors read it: the registry that opens it, and the reset command that empties it. */
     AuditTable = "melody_example_v3_audit"
 
-    /* the entities whose field-level history is kept, named once so the repositories that write them and anyone reading the trail agree. */
+
     AuditEntityProduct = "product"
     AuditEntityUser    = "user"
 )
 
-/* actorContextKey carries who is making a change from the service layer down to the repository that writes it.
-
-   The repositories take a context rather than a runtime — they know nothing about requests — and the audit trail has to name a person. A key of this package's own is what lets the service put the answer on the context without the service layer having to import an ORM integration to do it. */
 type actorContextKey struct{}
 
 func WithActor(ctx context.Context, actor string) context.Context {
@@ -53,16 +50,15 @@ func NewCatalogStorage(database *bun.DB) *CatalogStorage {
     return NewCatalogStorageAt(database, "")
 }
 
-/* NewCatalogStorageAt is the constructor the composition root uses: it names the database the handle is open on — host, port and schema, as the connection was declared — so a command about to destroy what the handle reaches can say WHICH database that is. A handle without a location is one a test built. */
+/* NewCatalogStorageAt records the declared host, port and schema alongside the handle for operator diagnostics. The location is descriptive; it does not validate the connection. */
 func NewCatalogStorageAt(database *bun.DB, location string) *CatalogStorage {
     if nil == database {
         return &CatalogStorage{}
     }
 
-    /* updated_at moves on every write of a product and says nothing a trail entry does not already carry through its own timestamp, so it is not recorded as a change */
     registry := melodyaudit.NewRegistry(AuditTable, "updated_at").
         Register(AuditEntityProduct, melodyaudit.EntityOptions{}).
-        /* a deleted account has to stay answerable for — which roles it held when it was removed is the question a directory is asked after the fact, and the identifier alone cannot answer it */
+
         Register(AuditEntityUser, melodyaudit.EntityOptions{CaptureDeleteBeforeImage: true})
 
     recorder := melodyaudit.NewRecorderWithStorage(melodyaudit.NewBunStorage(database), registry)
@@ -85,7 +81,7 @@ func (instance *CatalogStorage) IsPersistent() bool {
     return nil != instance.database
 }
 
-/* Location names the database the handle is open on, as the connection was declared, and is empty for a handle nobody located. */
+/* Location returns the declared database location, or an empty string when none is supplied. */
 func (instance *CatalogStorage) Location() string {
     return instance.location
 }
@@ -103,7 +99,6 @@ func (instance *CatalogStorage) EnsureAuditSchema(ctx context.Context) error {
 
     return instance.auditRegistry.EnsureSchema(ctx, instance.database)
 }
-
 
 /* Recorder joins repository-owned transactions that must read and modify a locked row together. */
 func (instance *CatalogStorage) Recorder() *melodyaudit.Recorder { return instance.recorder }

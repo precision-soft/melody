@@ -3,53 +3,13 @@ package service
 import (
     "fmt"
     "net/http"
-    "net/http/httptest"
     "sync/atomic"
     "testing"
     "time"
-
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/httpclient"
 )
-
-const rateDocumentBody = `{"base":"EUR","asOf":"2026-09-07T09:00:00Z","rates":{"EUR":1,"USD":1.0842}}`
-
-/* countingRateProvider answers what the caller asked it to and counts how many exchanges it was given. The
-   count is the whole property the retry has: an attempt that never reached the provider is indistinguishable
-   from one that did, from anywhere else. */
-type countingRateProvider struct {
-    server   *httptest.Server
-    requests atomic.Int64
-}
-
-func newCountingRateProvider(t *testing.T, handler func(writer http.ResponseWriter, request *http.Request)) *countingRateProvider {
-    t.Helper()
-
-    provider := &countingRateProvider{}
-    provider.server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-        provider.requests.Add(1)
-        handler(writer, request)
-    }))
-
-    t.Cleanup(provider.server.Close)
-
-    return provider
-}
-
-/* client builds the client the way the composition root does — a base url carrying its trailing slash, so
-   the relative target the service names resolves under it rather than replacing it. */
-func (instance *countingRateProvider) client(t *testing.T) *httpclient.HttpClient {
-    t.Helper()
-
-    client := httpclient.NewHttpClient(
-        httpclient.NewHttpClientConfig(instance.server.URL+"/v1/", 2*time.Second, nil),
-    )
-
-    t.Cleanup(func() { _ = client.Close() })
-
-    return client
-}
 
 func TestReadRateDocument_ReadsTheDocumentInOneExchangeWhenTheProviderAnswers(t *testing.T) {
     provider := newCountingRateProvider(t, func(writer http.ResponseWriter, request *http.Request) {
@@ -87,8 +47,6 @@ func TestReadRateDocument_ReadsTheDocumentInOneExchangeWhenTheProviderAnswers(t 
     }
 }
 
-/* the number of exchanges is asserted as a VALUE rather than against the constant the code reads: derived
-   from it, both sides would move together and a retry shortened to a single attempt would still pass. */
 func TestReadRateDocument_SpendsEveryAttemptOnAProviderThatKeepsRefusing(t *testing.T) {
     provider := newCountingRateProvider(t, func(writer http.ResponseWriter, request *http.Request) {
         writer.WriteHeader(http.StatusServiceUnavailable)
@@ -141,9 +99,6 @@ func TestReadRateDocument_TakesTheReadingFromAProviderThatRecoversOnTheSecondAtt
     }
 }
 
-/* a 4xx is the request being wrong, so repeating it repeats the mistake. The assertion that carries the
-   property is the EXCHANGE COUNT, not the error: a retried 404 fails in the end too, and only the count
-   tells the two apart. */
 func TestReadRateDocument_DoesNotRepeatARequestTheProviderRefusedAsWrong(t *testing.T) {
     provider := newCountingRateProvider(t, func(writer http.ResponseWriter, request *http.Request) {
         writer.WriteHeader(http.StatusNotFound)
@@ -163,7 +118,6 @@ func TestReadRateDocument_DoesNotRepeatARequestTheProviderRefusedAsWrong(t *test
     }
 }
 
-/* a body that does not decode is not something a working provider sends twice, so it is not retried either */
 func TestReadRateDocument_DoesNotRepeatAnAnswerThatIsNotARateDocument(t *testing.T) {
     provider := newCountingRateProvider(t, func(writer http.ResponseWriter, request *http.Request) {
         writer.Header().Set("Content-Type", "application/json")
@@ -184,9 +138,6 @@ func TestReadRateDocument_DoesNotRepeatAnAnswerThatIsNotARateDocument(t *testing
     }
 }
 
-/* the unconfigured arm answers before it touches the runtime, which is what lets this probe hand it none:
-   a service that reached for the container would panic here instead of answering, so the nil is the
-   assertion as much as the outcome is. */
 func TestRateRefreshServiceRefresh_DoesNothingWithNoProviderConfigured(t *testing.T) {
     outcome, err := NewRateRefreshService(nil, "").Refresh(nil)
     if nil != err {
@@ -255,7 +206,6 @@ func TestRateRefreshService_RefusesForeignBaseWithoutChangingAnyQuote(t *testing
         })
     }
 }
-
 
 func TestRefreshNormalizesCodesAndContinuesAfterBadQuote(t *testing.T) {
     currencyService, dispatcher, runtimeInstance := currencyServiceUnderTest(t)

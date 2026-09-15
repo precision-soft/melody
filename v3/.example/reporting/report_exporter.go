@@ -11,37 +11,24 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/* the instant layout every document of this application publishes; named here so the export and the command
-   that prints the same reading cannot drift apart on it */
 const reportExportInstantLayout = time.RFC3339
 
 func NewCatalogReportExporter(exportEndpoint string) *CatalogReportExporter {
     return &CatalogReportExporter{exportEndpoint: exportEndpoint}
 }
 
-/* CatalogReportExporter pushes a reading to whatever an operator configured to receive it. It is the second
-   shape of outbound call this application makes, and deliberately not the first one repeated: the rate
-   refresh reads a document from a provider it was configured to trust by base url, while this one WRITES to
-   an endpoint whose host the operator chooses, which is why the client it resolves carries no base url and
-   the endpoint travels as a whole absolute url.
-
-   With no endpoint configured it does nothing and says so, the shape every optional door here takes. */
+/* CatalogReportExporter sends readings to an optional absolute endpoint using a client without a base URL. */
 type CatalogReportExporter struct {
     exportEndpoint string
 }
 
-/* exportPayload is what a sink receives. It is the reading's own fields and nothing else — a sink that wants
-   more is asking for a different report, not for a richer envelope. */
 type exportPayload struct {
     RecordedAt string `json:"recordedAt"`
     Headline   string `json:"headline"`
     Payload    string `json:"payload"`
 }
 
-/* Export answers whether it sent anything. A status outside the success class is an error rather than a
-   quiet false: the whole point of an export is that someone downstream received it, so a sink answering
-   anything else has to reach the operator through the command's exit code — the same reason the refresh
-   refuses to exit zero over a provider it could not read. */
+/* Export returns false when no endpoint is configured and an error for any non-2xx response. */
 func (instance *CatalogReportExporter) Export(
     runtimeInstance melodyruntimecontract.Runtime,
     reading *CatalogReading,
@@ -74,7 +61,6 @@ func (instance *CatalogReportExporter) Export(
         return false, requestErr
     }
 
-    /* the client is built without following redirects, so a sink that moved answers here as the 3xx it sent: followed, the POST would have been re-sent as a GET without its body and the 200 of whatever page the sink pointed at would have read as the sink having received the reading. A 307 or 308 keeps the method and the body and would have delivered — it is refused all the same, because the address the operator configured is the one they audited, and a sink that says it moved says so to the operator, not to this process. */
     if true == isRedirection(response.StatusCode()) {
         return false, exception.NewError(
             "the report sink redirected the export instead of receiving it; the sink is not where it was configured",

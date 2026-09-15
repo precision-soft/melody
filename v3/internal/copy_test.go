@@ -5,7 +5,6 @@ import (
     "time"
 )
 
-/* the two defined types below are the only shapes that reach the reflect paths carrying interface elements: the type switch above them matches []any and map[string]any exactly, so a named type with the same underlying type walks past it, and an interface element holding nothing is the untyped nil the zero-value clauses exist for */
 type copyTestAnySlice []any
 
 type copyTestAnyMap map[string]any
@@ -203,7 +202,6 @@ func TestCopyAnyMap_DeepCopiesTypedSliceOfTypedSlices(t *testing.T) {
 }
 
 func TestCopyAnyMap_CyclicValueDoesNotStackOverflow(t *testing.T) {
-    /* the test completing is the assertion: a stack overflow is a fatal error no recover() can catch, so the depth bound cannot be observed any other way */
     cyclic := map[string]any{}
     cyclic["self"] = cyclic
     cyclic["name"] = "value"
@@ -219,7 +217,6 @@ func TestCopyAnyMap_CyclicValueDoesNotStackOverflow(t *testing.T) {
 }
 
 func TestCopyAnySlice_CyclicValueDoesNotStackOverflow(t *testing.T) {
-    /* the test completing is the assertion here too */
     cyclic := make([]any, 2)
     cyclic[0] = cyclic
     cyclic[1] = "value"

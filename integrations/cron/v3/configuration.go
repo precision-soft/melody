@@ -23,7 +23,7 @@ type EntryConfig struct {
     Instances int
     /* Timeout bounds one run of this entry under the in-process runner. Zero takes the runner default, which is no deadline at all, so a run is bounded only where an entry asks to be; a NEGATIVE value says the same thing deliberately rather than by omission. The generated manifests ignore it — an external scheduler bounds its own jobs, a kubernetes CronJob through activeDeadlineSeconds and a crontab line through timeout(1) — so setting it never changes what the generator emits. */
     Timeout time.Duration
-    /* GracefulTimeout is how long this entry's command is given to unwind after Timeout cancelled its context, before the runner stops waiting for it and closes the run's container scope under it. Zero takes the runner default. It is reached only by a command that ignores its cancelled context, and only when Timeout set one; a command that watches it returns well inside the window and reports its own error alongside the timeout. Set it above the default for work whose honest unwind is slower — a large batch to flush, a long transaction to roll back. */
+    /* GracefulTimeout bounds the runner’s wait after Timeout cancels the command. When it expires, the runner closes the scope while uncooperative command code may continue. Zero uses the runner default. */
     GracefulTimeout time.Duration
 }
 
@@ -59,7 +59,7 @@ func (instance *Configuration) TimezoneName() string {
     return instance.timezoneName
 }
 
-/* Schedule copies the entry configuration instead of retaining the caller's pointer: the generator re-reads an entry's fields at every generation, so a caller mutating its own struct after registration changed the manifests emitted afterwards. The in-process runner is not the consumer at risk — it photographs each entry's deadlines into its own run entry at construction, so a mutation landing after that cannot reach a scheduler already running — but a runner built later reads the same fields the generator does. What was registered is what stays in force, for both. */
+/* Schedule copies the entry configuration. Later caller mutations do not change future manifests or runners built from the schedule. */
 func (instance *Configuration) Schedule(commandName string, config *EntryConfig) *Configuration {
     instance.entries = append(instance.entries, &ScheduledCommand{
         CommandName: commandName,
@@ -98,7 +98,7 @@ func copyEntryConfig(config *EntryConfig) *EntryConfig {
     return &copied
 }
 
-/* Entries hands out copies all the way down: the list, each ScheduledCommand and each EntryConfig behind it, schedule included. Copying the list alone was not enough, because ScheduledCommand and EntryConfig are exported structs with exported fields — a caller writing through the pointer it was handed rewrote the registration itself, which is the exact mutation Schedule took a copy to prevent, arriving through the other door. */
+/* Entries returns independent copies of the list, scheduled commands, entry configurations and schedules. */
 func (instance *Configuration) Entries() []*ScheduledCommand {
     copied := make([]*ScheduledCommand, 0, len(instance.entries))
 

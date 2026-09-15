@@ -11,7 +11,6 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/* Resolve before destructive work, then invalidate on every exit: a failed reset may already have changed rows. */
 func prepareDatabaseResetCache(runtimeInstance melodyruntimecontract.Runtime, writer io.Writer) (func(*error), error) {
     cacheInstance, err := melodycontainer.FromResolver[melodycachecontract.Cache](runtimeInstance.Container(), melodycache.ServiceCache)
     if nil != err { return nil, err }

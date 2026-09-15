@@ -49,7 +49,6 @@ func NewFixedWindowLimiterWithClock(clockInstance clockcontract.Clock, rate int,
         )
     }
 
-    /* a non-positive window makes Allow refill to full capacity on every request (window <= elapsed is always true), silently disabling the limiter; a non-positive rate denies all traffic. Normalize both, mirroring CompressionMiddleware's MinSize clamp. */
     if 0 >= rate {
         rate = 1
     }
@@ -125,7 +124,6 @@ func (instance *FixedWindowLimiter) Allow(key string) bool {
         instance.buckets[key] = bucket
     }
 
-    /* the window is fixed, not a token bucket: the allowance is restored whole at the edge rather than proportionally to elapsed time, so up to twice the rate can pass across an instant straddling it. SlidingWindowLimiter holds the rate over every trailing window. */
     elapsed := now.Sub(bucket.lastRefill)
 
     if instance.window <= elapsed {
@@ -168,7 +166,6 @@ func (instance *FixedWindowLimiter) cleanupIfNeededLocked(now time.Time) {
     instance.lastCleanupAt = now
 }
 
-/* pruneAtCeilingLocked reclaims idle entries when the map is full, at most once per window. The prune walks the whole map, and at the ceiling every request under an unseen key would pay that walk while holding the lock all traffic shares — the bound meant to protect memory would become a processing amplifier for the very traffic it exists to survive. An entry only falls idle after twice the window, so a finer cadence cannot free meaningfully more; between prunes an unseen key is denied without a walk. */
 func (instance *FixedWindowLimiter) pruneAtCeilingLocked(now time.Time) {
     if false == instance.lastCeilingPruneAt.IsZero() && instance.window > now.Sub(instance.lastCeilingPruneAt) {
         return
@@ -189,7 +186,6 @@ func (instance *FixedWindowLimiter) pruneIdleLocked(now time.Time) {
     }
 }
 
-/* idlePruneThreshold is twice the window, saturating at the top of the duration range: past the midpoint the doubling would wrap negative, every entry would read as idle, and a budget the window promised to hold would refill at each cleanup. */
 func idlePruneThreshold(window time.Duration) time.Duration {
     if window > math.MaxInt64/2 {
         return math.MaxInt64
@@ -212,7 +208,6 @@ func NewSlidingWindowLimiterWithClock(clockInstance clockcontract.Clock, limit i
         )
     }
 
-    /* a non-positive window prunes every recorded request (windowStart >= now), so the limit is never reached and the limiter is silently disabled; a non-positive limit denies all traffic. Normalize both, mirroring CompressionMiddleware's MinSize clamp. */
     if 0 >= limit {
         limit = 1
     }
@@ -286,9 +281,6 @@ func (instance *SlidingWindowLimiter) Allow(key string) bool {
         instance.windows[key] = window
     }
 
-    /* the marks are appended in clock order, so the expired ones are a contiguous prefix and the window is trimmed by index rather than rebuilt: the whole slice used to be reallocated and copied on every call, admitted or refused alike, under the lock every key shares — at a limit of ten thousand that is a full scan an attacker pays on each of his own refusals while every other client waits behind it. Dropping the prefix leaves the live marks in place; append reclaims the vacated head when it grows the slice, so the compaction is amortized rather than paid per call.
-
-       The search needs the marks to be ordered, and the recorded instant is clamped to the last mark to keep them so. A clock that answers an earlier instant than one already recorded — a fake clock in a test, a wall clock moved under the process — would otherwise append out of order, and a binary search over an unordered slice does not merely keep an expired mark, it can drop a LIVE one: marks at 20, 5 and 30 seconds with the window opening at 8 make the predicate read true, false, true, and the search answers 2, cutting the live mark at 20 away and handing the key part of its budget back. Clamping keeps the ordering the search is entitled to, and it can only hold a mark inside the window longer than the wall clock would, which shortens the caller's own budget and never widens it. */
     liveFrom := sort.Search(
         len(window.requests),
         func(index int) bool {
@@ -343,7 +335,6 @@ func (instance *SlidingWindowLimiter) cleanupIfNeededLocked(now time.Time) {
     instance.lastCleanupAt = now
 }
 
-/* pruneAtCeilingLocked reclaims idle entries when the map is full, at most once per window. The prune walks the whole map, and at the ceiling every request under an unseen key would pay that walk while holding the lock all traffic shares — the bound meant to protect memory would become a processing amplifier for the very traffic it exists to survive. An entry only falls idle after twice the window, so a finer cadence cannot free meaningfully more; between prunes an unseen key is denied without a walk. */
 func (instance *SlidingWindowLimiter) pruneAtCeilingLocked(now time.Time) {
     if false == instance.lastCeilingPruneAt.IsZero() && instance.window > now.Sub(instance.lastCeilingPruneAt) {
         return
@@ -437,7 +428,7 @@ func (instance *RateLimitConfig) clientIp(request httpcontract.Request) string {
 }
 
 func RateLimitMiddleware(config *RateLimitConfig) httpcontract.Middleware {
-    /* the limiter is read through the interface: a typed-nil limiter passes the plain comparison, looks live, and dereferences its nil receiver on the first request the middleware meters — a boot-time refusal by name instead of a per-request panic */
+
     if nil == config || true == internal.IsNilInterface(config.Limiter()) {
         exception.Panic(
             exception.NewError("limiter is required for rate limit middleware", nil, nil),
@@ -463,7 +454,7 @@ func RateLimitMiddleware(config *RateLimitConfig) httpcontract.Middleware {
                 var allowErr error
                 allowed, allowErr = runtimeLimiter.AllowWithRuntime(runtimeInstance, key)
                 if nil != allowErr && false == exception.IsAlreadyLogged(allowErr) {
-                    /* the returned allowed value already reflects the limiter's failure policy; the middleware only reports the store failure. A failure that is the caller's own cancellation — the client disconnected while the limiter's round trip was in flight — is recorded at warning under its own name, because at error it read as a store outage and paged the operator for a client hanging up. A limiter that filed its own record marks it, and then this is the second copy rather than the only one. */
+
                     logger := logging.LoggerFromRuntime(runtimeInstance)
                     if nil != logger {
                         if true == errors.Is(allowErr, context.Canceled) {
@@ -489,7 +480,6 @@ func RateLimitMiddleware(config *RateLimitConfig) httpcontract.Middleware {
                     return response, limitErr
                 }
 
-                /* a limit handler that produced neither response nor error still refused the request, the reading the listener door gives the same outcome: passed through, the nil response would be normalized into an empty 204 and the refused request served as success */
                 if true == internal.IsNilInterface(response) {
                     return http.JsonErrorResponse(nethttp.StatusTooManyRequests, "too many requests"), nil
                 }
@@ -566,7 +556,7 @@ func UserRateLimitWithResolver(
     getUserId KeyExtractor,
     clientIpResolver ClientIpResolver,
 ) httpcontract.Middleware {
-    /* refused at construction, the way the middleware constructor refuses its missing limiter: accepted here, the nil callback dies on the request path, once per request, inside a closure no caller can reach */
+
     if nil == getUserId {
         exception.Panic(
             exception.NewError("get user id callback is required for user rate limit middleware", nil, nil),

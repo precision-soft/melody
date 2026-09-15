@@ -9,7 +9,7 @@ import (
 type Repository interface {
     ClaimDueMessages(ctx context.Context, limit int, visibility time.Duration) ([]Pending, error)
 
-    /* RecordDeliveryAttempt increments and persists a single row's delivery_attempts and returns the post-increment count. It is called for each row at the moment the relay actually attempts to deliver it — not for the whole batch at claim time — so a row that crashes or hangs the relay between here and its resolution advances only its own crash-poison counter and never charges a batch-mate the relay never reached. The claimToken fences the write to the claim that produced this row: the claimed result is false when the row is no longer held by that claim (its claim lapsed and another instance re-claimed it, or it was already resolved), signalling the relay to skip it. */
+    /* RecordDeliveryAttempt atomically increments one row’s delivery count when it is about to be delivered. The claim token fences the write; claimed=false means this run no longer owns the row and must skip it. */
     RecordDeliveryAttempt(ctx context.Context, id int64, claimToken string) (deliveryAttempts int, claimed bool, err error)
 
     MarkSent(ctx context.Context, id int64, claimToken string) error

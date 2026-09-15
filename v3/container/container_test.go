@@ -7,28 +7,11 @@ import (
     "sync"
     "sync/atomic"
     "testing"
-
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     collisionalpha "github.com/precision-soft/melody/v3/container/internal/collisionalpha/contract"
     collisionbeta "github.com/precision-soft/melody/v3/container/internal/collisionbeta/contract"
     "github.com/precision-soft/melody/v3/exception"
 )
-
-type testService struct {
-    Value string
-}
-
-type testInterface interface {
-    Name() string
-}
-
-type testImplementation struct {
-    name string
-}
-
-func (instance *testImplementation) Name() string {
-    return instance.name
-}
 
 func TestContainer_SingletonInstantiation(t *testing.T) {
     serviceContainer := NewContainer()
@@ -286,11 +269,6 @@ func TestContainer_ConcurrentGet_SingleFactoryCall(t *testing.T) {
     }
 }
 
-type hasTypeProbe struct {
-    value string
-}
-
-/* Has and Get have to agree about the same container. A registration made from a provider returning *T is filed under *T, and GetByType canonicalises before it looks — so asking HasType with the value type was answered "no" for a service the very next GetByType resolves happily. A caller that guards a resolution with HasType then took the branch for a service that is registered. */
 func TestHasType_AnswersForTheValueTypeOfAPointerRegistration(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -327,7 +305,6 @@ func TestHasType_AnswersForTheValueTypeOfAPointerRegistration(t *testing.T) {
     }
 }
 
-/* An override installed on a scope is filed under the canonical type of the value, so the scope has to canonicalise before it answers for one too. */
 func TestHasType_AnswersForTheValueTypeOfAScopeOverride(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -343,7 +320,6 @@ func TestHasType_AnswersForTheValueTypeOfAScopeOverride(t *testing.T) {
     }
 }
 
-/* a closed container used to accept registrations and overrides silently: the registration named a service no resolution would ever build, and the override landed in a map the teardown had already swept — served by later lookups, closed by nobody. Both refuse now, the way the scoped registrar always has. */
 func TestContainer_RegisterAndOverrideRefusedAfterClose(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -361,7 +337,6 @@ func TestContainer_RegisterAndOverrideRefusedAfterClose(t *testing.T) {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
-    /* the late registration opts out of the type registration: the pre-close service holds the same type, and the strict duplicate-type refusal would otherwise refuse this registration for a reason that is not the closed container — the guard under test has to be the only thing standing */
     lateRegisterErr := serviceContainer.Register(
         "app.post.close",
         func(resolver containercontract.Resolver) (*testService, error) {
@@ -379,7 +354,6 @@ func TestContainer_RegisterAndOverrideRefusedAfterClose(t *testing.T) {
     }
 }
 
-/* the override propagates to every type its name is registered under, and a type-keyed resolution hands out whatever sits there without a re-check — the provider contract's call-time guard never sees overrides. A value the registered type cannot hold used to ride that hole straight through GetByType, poisoning the type cache with it. */
 func TestContainer_OverrideTypeIncompatibleValueRefused(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -408,7 +382,6 @@ func TestContainer_OverrideTypeIncompatibleValueRefused(t *testing.T) {
     }
 }
 
-/* an override of one name answers the types that name is registered under and not another service's type-keyed resolution: the concrete service keeps answering its own type, and the overridden name's own type answers the override. A container type-keyed resolution prefers the name registration at every door, so this pins the contract; the observable half lives on the scope twin, whose own lookup does read the exposed entry. */
 func TestContainer_OverrideOfOneNameDoesNotAnswerAnotherServicesGetByType(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -454,7 +427,6 @@ func TestContainer_OverrideOfOneNameDoesNotAnswerAnotherServicesGetByType(t *tes
     }
 }
 
-/* the identity key of a pointer-to-unnamed-composite type drops its package path, so two such types from same-short-named packages share one key — one creation-guard entry and one close node for two distinct types, which read as false cycles at resolution and merged nodes at teardown. The second type is refused at the boot line that declares it. */
 func TestContainer_RegisterTypeIdentityKeyCollisionRefused(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -479,7 +451,6 @@ func TestContainer_RegisterTypeIdentityKeyCollisionRefused(t *testing.T) {
     }
 }
 
-/* the panicking by-type door on the container had never been executed: nothing proved it resolves at all, and nothing proved its failure carries the by-type message rather than the by-name one — a caller reading a boot log has only that message to tell which door it came in through. */
 func TestContainer_MustGetByType_AnswersAndNamesItsOwnFailure(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -529,7 +500,6 @@ func TestContainer_MustGetByType_AnswersAndNamesItsOwnFailure(t *testing.T) {
     _ = serviceContainer.MustGetByType(reflect.TypeOf((*testImplementation)(nil)))
 }
 
-/* the panicking override on the container had never been executed either. It has to install the value, and its refusal has to carry its own message rather than the unprotected one it delegates to — the two answer differently and a caller has to be able to tell which verb it called. */
 func TestContainer_MustOverrideInstance_InstallsAndNamesItsOwnFailure(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -574,7 +544,6 @@ func TestContainer_MustOverrideInstance_InstallsAndNamesItsOwnFailure(t *testing
     serviceContainer.MustOverrideInstance("service.protected", &testService{Value: "installed"})
 }
 
-/* the protected namespace is the framework's, and the override door is the one place an application can substitute a service by name — the refusal is what keeps "service." meaning the same thing for the whole process. */
 func TestContainer_OverrideInstance_ProtectedNameRefused(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -603,7 +572,6 @@ func TestContainer_OverrideInstance_ProtectedNameRefused(t *testing.T) {
     }
 }
 
-/* an empty name is refused before anything is written, and the refusal has to be the empty-name one rather than the not-registered one that would answer next: the two describe different mistakes, and a caller whose configuration resolved a name away needs to be told which. */
 func TestContainer_OverrideProtectedInstance_EmptyNameRefused(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -617,7 +585,6 @@ func TestContainer_OverrideProtectedInstance_EmptyNameRefused(t *testing.T) {
     }
 }
 
-/* an override of nil would file a nil under a name every later lookup answers with, so the first caller to use it dereferences it on the request path — and a typed nil boxed into an interface is NOT equal to nil, so the plain comparison lets it straight through. Both spellings are refused with the same message because they are the same mistake. */
 func TestContainer_OverrideProtectedInstance_NilValueRefusedInBothSpellings(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -652,7 +619,6 @@ func TestContainer_OverrideProtectedInstance_NilValueRefusedInBothSpellings(t *t
     }
 }
 
-/* an override of a name the container never declared would install a service no provider backs, reachable by Get and closed by the teardown as though the container had built it — the refusal keeps the override a substitution rather than a second, undeclared registration door. */
 func TestContainer_OverrideProtectedInstance_UnregisteredNameRefused(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -666,7 +632,6 @@ func TestContainer_OverrideProtectedInstance_UnregisteredNameRefused(t *testing.
     }
 }
 
-/* two registrations of one name would make which provider answers depend on the order the modules ran in, and the second write simply wins — the refusal carries a cause of its own so a caller can tell it apart from a collision with the scoped lifetime, which is a different mistake. */
 func TestContainer_Register_RefusesADuplicateName(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -700,7 +665,6 @@ func TestContainer_Register_RefusesADuplicateName(t *testing.T) {
     }
 }
 
-/* strictness is what decides whether two names may share a type at the container lifetime, and it defaults to on: without the refusal, GetByType would answer with whichever of the two the map happened to hold, silently and differently between runs. The non-strict registration is included so the guard is proven to be strictness — not the mere presence of a second name — that refuses. */
 func TestContainer_RegisterType_StrictDuplicateTypeRefused(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -744,7 +708,6 @@ func TestContainer_RegisterType_StrictDuplicateTypeRefused(t *testing.T) {
     }
 }
 
-/* Names is what an introspection command prints and what a boot report enumerates, and nothing called it: it could have returned the empty slice for the whole life of the package without a test noticing. It lists the DECLARED container names, sorted so the output is stable between runs, and it must not leak the scoped registrations — those belong to a lifetime the container never resolves. */
 func TestContainer_Names_ListsTheDeclaredContainerNamesSorted(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -793,7 +756,6 @@ func TestContainer_Names_ListsTheDeclaredContainerNamesSorted(t *testing.T) {
     }
 }
 
-/* Has and HasType answer false for the empty name and the nil type, which is the verdict a caller relies on rather than a panic on the request path. Both refusals are SHADOWED by the lookup underneath them — nothing can ever be filed under the empty name, and canonicalServiceType answers nil for a nil type, so the guard below returns the same false — so this test pins the verdict, not the position of the guard. */
 func TestContainer_HasAndHasType_AnswerFalseForTheEmptyNameAndTheNilType(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -824,7 +786,6 @@ func TestContainer_HasAndHasType_AnswerFalseForTheEmptyNameAndTheNilType(t *test
     }
 }
 
-/* the assignability guard judges the value the way the readers will: a string service is registered under *string, and the values its own provider builds sit raw under that canonical key, so a raw string override occupies exactly the slot a built value occupies — refusing it contradicted the registration's own storage */
 func TestContainerOverride_AcceptsAValueTypedOverrideForAValueTypedService(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -846,8 +807,6 @@ func TestContainerOverride_AcceptsAValueTypedOverrideForAValueTypedService(t *te
         t.Fatalf("expected the override to answer the name")
     }
 }
-
-type containerOverrideOutsideValue struct{}
 
 func TestContainerOverride_RefusesAValueTheRegisteredTypeCannotHold(t *testing.T) {
     serviceContainer := NewContainer()
@@ -872,7 +831,6 @@ func TestContainerOverride_RefusesAValueTheRegisteredTypeCannotHold(t *testing.T
     }
 }
 
-/* the descriptions are what lets an introspection command list a container without building it: both lifetimes answer, and no provider runs while they do */
 func TestServiceDescriptions_DescribesBothLifetimesWithoutBuilding(t *testing.T) {
     buildCount := 0
 
@@ -941,14 +899,11 @@ func TestServiceDescriptions_DescribesBothLifetimesWithoutBuilding(t *testing.T)
         }
     }
 
-    /* without this the loop asserts nothing at all when the report loses the service, which is the very failure the assertion inside it exists to catch */
     if false == describedBuiltService {
         t.Fatalf("expected the built service to be described at all, got %+v", reporter.ServiceDescriptions())
     }
 }
 
-
-/* MustGet delegates to the resolver context so a melody failure panics out WHOLE, with the service name written into its own context — a rebuilt wrapper would shed the log level, the already-logged mark and the capture stack, and the by-type door already keeps this contract. */
 func TestContainer_MustGet_PassesTheOriginalMelodyErrorThroughWhole(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -996,12 +951,6 @@ func TestContainer_MustGet_PassesTheOriginalMelodyErrorThroughWhole(t *testing.T
     _ = serviceContainer.MustGet("app.must.get.failure")
 }
 
-/* armedTypedProbe carries a field so two instances are two allocations: every zero-size allocation shares one address, and the teardown folds services of one address onto one node. */
-type armedTypedProbe struct{ label string }
-
-func (instance *armedTypedProbe) Close() error { return nil }
-
-/* arming validated a snapshot: a declaration registered after it was never checked, and landed in one wave with the service it named. The rule arming asks of every edge is asked of each new edge at the door that declares it. */
 func TestContainer_Register_AfterArmingRefusesADeclaredDependencyOnAServiceThatWasNeverRegistered(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1019,7 +968,6 @@ func TestContainer_Register_AfterArmingRefusesADeclaredDependencyOnAServiceThatW
     }
 }
 
-/* the sibling that keeps the door open for what it exists for: a late declaration on a REGISTERED service is admitted, and orders the teardown. */
 func TestContainer_Register_AfterArmingAdmitsADeclaredDependencyOnARegisteredService(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1067,7 +1015,6 @@ func TestContainer_Register_AfterArmingAdmitsADeclaredDependencyOnARegisteredSer
     }
 }
 
-/* a second name under a type a declaration already names makes that declaration ambiguous — the refusal arming gives it — after arming answered; under the waves the ambiguity is refused where it is created. */
 func TestContainer_Register_AfterArmingRefusesASecondRegistrationUnderADeclaredType(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1125,7 +1072,6 @@ func TestContainer_Register_AfterArmingRefusesASecondRegistrationUnderADeclaredT
     }
 }
 
-/* what an override holds is recorded where a built value's is, under the same node: an armed teardown used to read the override as holding nothing, so its holder shared a wave with what it held. */
 func TestContainer_OverrideProtectedInstance_ArmedRecordsWhatTheOverrideHolds(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1179,7 +1125,6 @@ func TestContainer_OverrideProtectedInstance_ArmedRecordsWhatTheOverrideHolds(t 
     }
 }
 
-/* the record of the value an override evicted does not outlive it: an armed teardown used to keep it, and read what the evicted value held as if the new value held it. */
 func TestContainer_OverrideProtectedInstance_ReplacesTheRecordOfTheValueItEvicted(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1233,7 +1178,6 @@ func TestContainer_OverrideProtectedInstance_ReplacesTheRecordOfTheValueItEvicte
     }
 }
 
-/* the walk's memo of a value an override evicted goes with the value: keyed on its address, the memo kept every collaborator the evicted value held alive until Close — measured, five hundred overrides installed one after the other under the armed teardown kept all five hundred evicted values from collection */
 func TestContainer_OverrideProtectedInstance_ArmedReleasesTheMemoOfTheValueItEvicted(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1276,7 +1220,6 @@ func TestContainer_OverrideProtectedInstance_ArmedReleasesTheMemoOfTheValueItEvi
     }
 }
 
-/* after arming, a declaration keyed by a TYPE the container has registered is admitted at the registration door, and the edge it names is in the plan: the door refuses the type nothing registered and the ambiguous type, and this is the arm that shows it admits the one it should */
 func TestContainer_Register_AfterArmingAdmitsADeclaredDependencyOnARegisteredType(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1319,7 +1262,6 @@ func TestContainer_Register_AfterArmingAdmitsADeclaredDependencyOnARegisteredTyp
     }
 }
 
-/* A declared dependency must not bind to another package's identically spelled slice. */
 func TestContainer_RefusesCollidingDeclaredTypesInEitherRegistrationOrder(t *testing.T) {
     for _, declarationFirst := range []bool{false, true} {
         t.Run(map[bool]string{false: "provider-first", true: "declaration-first"}[declarationFirst], func(t *testing.T) {

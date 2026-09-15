@@ -29,7 +29,6 @@ func (instance *nilMapStorage) Close() error {
     return nil
 }
 
-/* probeFailingStorage answers every existence probe with a failure, which is what the id minting must not swallow: a storage outage while probing would otherwise hand out an id that was never checked against anything. */
 type probeFailingStorage struct{}
 
 func (instance *probeFailingStorage) Load(sessionId string) (map[string]any, bool, error) {
@@ -64,7 +63,6 @@ func TestManager_NewSession_PanicsWhenTheStorageProbeFails(t *testing.T) {
     }, "the probe storage is unavailable")
 }
 
-/* deleteFailingStorage mints ids freely and refuses to delete, which is the outage a rotation has to survive without retiring the id it could not remove */
 type deleteFailingStorage struct{}
 
 func (instance *deleteFailingStorage) Load(sessionId string) (map[string]any, bool, error) {
@@ -573,7 +571,6 @@ func TestManager_ADeletedSessionCannotBeSavedBackByAnInFlightRequest(t *testing.
 
     sessionId := victim.Id()
 
-    /* a second request loaded the same session before the logout ran */
     concurrentView := manager.Session(sessionId)
     if nil == concurrentView {
         t.Fatalf("expected the concurrent request to load the session")
@@ -633,7 +630,6 @@ func TestManager_ARotatedAwayIdCannotBeSavedBackByAnInFlightRequest(t *testing.T
         t.Fatalf("expected the in-flight request to be refused the write to the rotated-away id")
     }
 
-    /* the response path branches on the IDENTITY of the refusal, so "an error came back" is satisfied by the wrong one just as well — the sibling above already reads it this way */
     if false == errors.Is(saveErr, ErrSessionDeleted) {
         t.Fatalf("expected the refusal to carry ErrSessionDeleted, got %v", saveErr)
     }
@@ -649,7 +645,6 @@ func TestManager_TombstonesArePrunedByTheRetentionWindow(t *testing.T) {
     staleId := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     freshId := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
-    /* the burial is seeded through the door that records it, not by writing the map behind it: pruning walks the burials in the order they happened, so a record entry with no burial behind it is a state no caller can produce */
     manager.buryTombstoneAt(staleId, time.Now().Add(-TombstoneRetention-time.Minute))
 
     if true == manager.isTombstoned(staleId) {
@@ -767,7 +762,6 @@ func TestManager_ConcurrentSavesDeletesAndRotationsAreRaceFree(t *testing.T) {
 
     waitGroup.Wait()
 
-    /* whatever the interleaving, a deleted id must not be live again */
     for _, sessionId := range seeded {
         if true == manager.isTombstoned(sessionId) {
             if _, exists, _ := storage.Load(sessionId); true == exists {
@@ -865,7 +859,6 @@ func TestManager_ADeleteCannotInterleaveBetweenTheTombstoneCheckAndTheWrite(t *t
         t.Fatalf("the save never reached the storage")
     }
 
-    /* let the held save finish shortly, so a delete that must wait for the lock is not deadlocked by this test */
     go func() {
         time.Sleep(50 * time.Millisecond)
         close(storage.releaseSave)
@@ -882,7 +875,6 @@ func TestManager_ADeleteCannotInterleaveBetweenTheTombstoneCheckAndTheWrite(t *t
     }
 }
 
-/* the double holds the save of ONE named session open and lets every other one through, announcing each as it arrives: that is what tells a per-session critical section apart from a per-manager one, since only the second makes an unrelated session wait behind this one's round trip */
 type heldSaveStorage struct {
     inner       *InMemoryStorage
     heldId      string
@@ -925,7 +917,6 @@ func TestManager_ASaveDoesNotWaitOnTheSaveOfAnotherSession(t *testing.T) {
     heldSession := manager.NewSession()
     heldSession.Set("userId", "u-1")
 
-    /* the two sessions have to sit on different locks for the question to mean anything; ids are random, so the pair is chosen rather than assumed */
     otherSession := manager.NewSession()
     for attempt := 0; manager.sessionMutexOf(heldSession.Id()) == manager.sessionMutexOf(otherSession.Id()); attempt++ {
         if 64 < attempt {
@@ -974,7 +965,6 @@ func TestManager_ASaveDoesNotWaitOnTheSaveOfAnotherSession(t *testing.T) {
     }
 }
 
-/* the pruning walks the burials in the order they happened and stops at the first one still inside its window, so it has to free exactly the lapsed prefix: one short and the record keeps growing, one long and a tombstone that is still refusing write-backs is forgotten */
 func TestManager_TheBurialPruningStopsAtTheFirstLivingTombstone(t *testing.T) {
     manager := NewManager(NewInMemoryStorage(), time.Minute)
 
@@ -1013,14 +1003,12 @@ func TestManager_TheBurialPruningStopsAtTheFirstLivingTombstone(t *testing.T) {
     }
 }
 
-/* an id buried twice inside one window has two burials in the queue and one entry in the record, and the entry belongs to the later burial: pruning the earlier one must not take it, or the session stops being refused a write-back while it is still inside its window — the exact resurrection the record exists to prevent */
 func TestManager_AReburiedTombstoneSurvivesThePruningOfItsEarlierBurial(t *testing.T) {
     manager := NewManager(NewInMemoryStorage(), time.Minute)
 
     reburiedId := "dddddddddddddddddddddddddddddddd"
     freshId := "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 
-    /* both burials have to be in the queue when the pruning reaches the first one, which is what puts a lapsed queue entry in front of a record entry that belongs to a later burial: the second burial happens while the first is still inside the window, so it prunes nothing */
     now := time.Now()
 
     manager.buryTombstoneAt(reburiedId, now.Add(-TombstoneRetention-time.Minute))
@@ -1063,7 +1051,6 @@ func TestNewManagerWithTombstoneRetention_SizesTheRefusalWindow(t *testing.T) {
     }
 }
 
-/* the divergent fake constructs the interleaving instead of awaiting it: its Snapshot answers a cleared session while IsCleared still answers live — the state a Clear landing mid-decision produces. The manager must follow the snapshot. */
 type snapshotClearedSession struct {
     foreignIdSession
 }
@@ -1092,7 +1079,6 @@ func TestSaveSession_TheBranchDecisionFollowsTheSnapshotNotTheAccessors(t *testi
     }
 }
 
-/* the manager's own refusals name the session through a one-way reference, never the id itself: the refusal travels as an error a caller is free to log, and a raw session id in a log line is a credential a log reader can present as a cookie. The negative half is what pins it — a reference that happened to equal the id would satisfy any assertion written on the reference alone. */
 func TestManager_SaveSession_RefusalNamesTheSessionByAOneWayReferenceNotTheRawId(t *testing.T) {
     manager := NewManager(NewInMemoryStorage(), time.Minute)
 
@@ -1124,7 +1110,6 @@ func TestManager_SaveSession_RefusalNamesTheSessionByAOneWayReferenceNotTheRawId
     }
 }
 
-/* the retention window is a strict comparison, so the instant it names is the first one OUTSIDE it — and no wall-clock manager can be asked about that instant: every test before this one approximated the window with an offset from time.Now and asserted somewhere in its middle, where a boundary written one unit either way answers exactly the same. The frozen clock is what makes the question askable at all. */
 func TestNewManagerWithClock_TheRetentionWindowRefusesUpToItsBoundaryButNotAtIt(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Date(2020, time.March, 1, 12, 0, 0, 0, time.UTC))
 
@@ -1168,11 +1153,6 @@ func TestNewManagerWithClock_RefusesANilClock(t *testing.T) {
     )
 }
 
-/* the two ways an id stops being writable have to be told apart at the save path, because the response path
-answers them differently: a logout ends the identity and the browser cookie is expired, a rotation moves the
-identity to a fresh id the rotating request is handing the client, and expiring the cookie there logs the user
-out immediately after the login that rotated the session. Both refusals still carry ErrSessionDeleted, so a
-caller that only asks whether the write was refused reads the same answer it always did. */
 func TestManager_SaveSession_NamesARotationApartFromADeletion(t *testing.T) {
     manager := NewManager(NewInMemoryStorage(), 30*time.Minute)
 

@@ -36,9 +36,6 @@ func newScopeResolverContext(containerInstance *container, scopeInstance *scope)
     }
 }
 
-/* resolutionStack is the live chain of node keys one resolution is in the middle of building, held apart from the context so a provider's own view of the resolution can carry a different owner while still pushing and popping the one chain the cycle detection reads.
-
-   types runs parallel to keys: the canonical type of a type node, nil for a name node. It lives inside the shared chain rather than beside it on the context, because the view handed to a provider shares the chain and the collection exclusion reads the two together — a type slice held per view would answer for a different depth than the keys it is indexed against. The exclusion compares type identity through it, because two distinct types from same-named packages share a String() and a string comparison would exclude a service that is not on the path at all. */
 type resolutionStack struct {
     keys  []string
     types []reflect.Type
@@ -57,17 +54,12 @@ type resolverContext struct {
     contextId         uint64
     rootRequestedKey  string
     stack             *resolutionStack
-    /* ownerKey is the node whose provider was handed this view of the resolution, and it is what a resolution performed after that provider returned belongs to. The live stack answers the question while the provider is running and is empty the moment it returns, so a service that holds its resolver and reaches through it later — container.Lazy, any replay of deferred work — used to record no dependency edge at all, and the teardown then closed its dependencies in name order instead of after it. A handle built over the container itself has no owner and keeps that behaviour, because there is no node the container could be said to belong to. */
-    ownerKey string
-    /* scopeSuspended is set while a provider registered on the CONTAINER builds its service, and it is what keeps the two apart. The container is request-agnostic: a service it owns is one instance for the whole process, so its construction may read only what the container holds. A request scope layers over the container for the code that runs inside a request, not underneath the container's own wiring, and a factory that reached through it would assemble a process-lifetime singleton out of one request's values.
 
-       Suspension is a refusal, not a substitution. A container provider that asks for something only a scope carries — the request context — is told the service does not exist, which is a wiring mistake reported where it is made; a provider that asks for the logger gets the container's agnostic one, because that is the logger a process-lifetime service should hold. Only the service actually being requested is looked up through the scope, which is the layering a caller means by resolving through a scope at all. */
+    ownerKey string
+
     scopeSuspended bool
 }
 
-/* childOwnedBy is the view of this resolution handed to the provider of one node: the same container, the same scope, the same resolution id and the same live stack, so cycle detection and the wait graph are unchanged, with the owning node written on it. A provider that keeps it and resolves through it after it has returned is then still recorded as depending on what it resolves.
-
-   The suspension rides on the view rather than being set on the shared context and restored afterwards: the caller's own resolution continues above this frame and must keep seeing the scope, and a restore that runs at the wrong moment — after a panic unwound past it, say — would leave the wrong answer behind for everything further up. */
 func (instance *resolverContext) childOwnedBy(nodeKey string, scopeSuspended bool) *resolverContext {
     return &resolverContext{
         containerInstance: instance.containerInstance,
@@ -80,7 +72,6 @@ func (instance *resolverContext) childOwnedBy(nodeKey string, scopeSuspended boo
     }
 }
 
-/* parentNodeKey answers the node a resolution starting here depends on: the node currently being built while a provider is running, and the node that owns this view once it has returned. */
 func (instance *resolverContext) parentNodeKey() string {
     if 0 < len(instance.stack.keys) {
         return instance.stack.keys[len(instance.stack.keys)-1]
@@ -89,7 +80,6 @@ func (instance *resolverContext) parentNodeKey() string {
     return instance.ownerKey
 }
 
-/* scopeVisible reports whether this resolution may read the request scope. */
 func (instance *resolverContext) scopeVisible() bool {
     return nil != instance.scopeInstance && false == instance.scopeSuspended
 }
@@ -105,12 +95,10 @@ func (instance *resolverContext) Closed() bool {
     return instance.containerInstance.resolutionsRefused()
 }
 
-/* isScopeClosed lets a collection refuse through this resolver exactly as it refuses through the scope itself. AllImplementing tells a dispatcher to collect with the resolver its provider received, so without this the refusal the collection promises never fired for the one resolver its own godoc recommends, and a request-outliving goroutine collected a silently empty set from a scope that enumerates nothing once closed. The question is asked of whatever scopeVisible answers for, the same predicate Closed above uses: a resolution the container owns has no scope to be closed and follows the container lifetime, which the Gets below refuse loudly on their own. */
 func (instance *resolverContext) isScopeClosed() bool {
     return true == instance.scopeVisible() && true == instance.scopeInstance.isScopeClosed()
 }
 
-/* containerNameStore keeps a finished service under its name in the container's own maps, and under the canonical type as well when the resolution was type-keyed. It runs under the container mutex. An override that was installed while the provider ran already occupies the name — it answers before anything is built — so the built value is handed back to the guard as the loser, and the name is marked container-built otherwise, which is what tells a later override that the value it evicts is the container's to close. */
 func containerNameStore(
     containerInstance *container,
     serviceName string,
@@ -138,7 +126,6 @@ func containerNameStore(
     }
 }
 
-/* containerTypeStore is containerNameStore's counterpart for a type-keyed registration with no name to file under. */
 func containerTypeStore(
     containerInstance *container,
     canonicalTargetType reflect.Type,
@@ -169,7 +156,6 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
 
     requestedKey := instance.rootRequestedKey
 
-    /* whether the name belongs to this scope decides the node key, and the key has to be settled before it is pushed: the resolution stack is what tells the scope's own dependency graph which of its services depends on which, and a scoped node wearing the container's key would be indistinguishable from a container one. */
     scopedProvider := providerAny(nil)
     scopedProviderExists := false
     if true == instance.scopeVisible() {
@@ -183,16 +169,12 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
 
     parentKey := instance.parentNodeKey()
 
-    /* a resolution that has nothing to write takes the read lock instead of the exclusive one. Every resolution used to take the container's exclusive lock, even one that only reads a singleton built long ago, so dependency injection had a hard ceiling that did not move with the number of cores — the http kernel alone resolves four services per request, and an application cannot route around it without giving up the container.
-
-       Nothing to write means all three at once: no scope layered over this resolution, no node to record an edge for, and the instance already built. The last two are what keep the ordering guarantee intact — a resolution that would record an edge, including one made through a resolver a provider kept, falls through to the exclusive path that writes the graph. */
     if false == instance.scopeVisible() && "" == parentKey {
         instance.containerInstance.mutex.RLock()
         memoizedValue, memoized := instance.containerInstance.instances[serviceName]
         teardownFinished := instance.containerInstance.teardownFinished
         instance.containerInstance.mutex.RUnlock()
 
-        /* the fast path answers out of the map, so it is the path that must ask whether the map still means anything: the creation guard below refuses a closed container, but a memoized instance never reaches it, and a resolution performed after the teardown was answered with a closed service and a nil error */
         if true == teardownFinished {
             return nil, newContainerClosedError(serviceName)
         }
@@ -214,9 +196,8 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
             return nil, lookupInstanceByNameErr
         }
 
-        /* an installed override answers before anything is built, which is what keeps overriding a mechanism of its own rather than a competitor of registration */
         if true == exists {
-            /* the edge is recorded even though nothing is built: a scoped dependent resolving a scoped service the scope ALREADY holds depends on it exactly as hard as the resolution that built it, and without the edge the teardown falls back to closing the two in name order — the graph guarantee would hold only for whichever resolution happened to come first. */
+
             if "" != parentKey && true == isScopedNodeKey(parentKey) && true == isScopedNodeKey(nodeKey) {
                 instance.containerInstance.mutex.Lock()
                 registerScopedDependencyLocked(instance.scopeInstance, parentKey, nodeKey)
@@ -243,7 +224,6 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
     instance.containerInstance.mutex.Lock()
     defer instance.containerInstance.mutex.Unlock()
 
-    /* a scoped parent writes no edge into the container's graph: the teardown walks that graph only over container-created representatives, so a scope-keyed dependent is skipped there, while the scope's own teardown reads only the scope's graph — the entry would never be consulted, and the container's graph is never pruned, so a live-scope registration under a request-derived name would leave one permanent entry per name for the life of the process */
     if "" != parentKey && false == isScopedNodeKey(parentKey) && false == isScopedNodeKey(nodeKey) {
         instance.containerInstance.registerDependencyLocked(
             parentKey,
@@ -251,7 +231,6 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
         )
     }
 
-    /* snapshot the provider under the container mutex before serviceWithCreationGuardLocked releases it; the create closure runs unlocked, so reading the providers map there would race concurrent Register writes. */
     provider, providerExists := instance.containerInstance.providers[serviceName]
 
     return instance.containerInstance.serviceWithCreationGuardLocked(
@@ -306,7 +285,6 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
     )
 }
 
-/* lookupByName is the creation guard's lookup for a named service: an instance this request scope already holds — an installed override, or one the scope itself built — comes before the process-wide one. A scope that closed underneath the resolution reports nothing here; the store is where that failure is raised. */
 func (instance *resolverContext) lookupByName(serviceName string) createWithGuardLookupFunc {
     return func() (any, bool) {
         if true == instance.scopeVisible() {
@@ -322,7 +300,6 @@ func (instance *resolverContext) lookupByName(serviceName string) createWithGuar
     }
 }
 
-/* lookupByType is lookupByName's counterpart for a type-keyed resolution. */
 func (instance *resolverContext) lookupByType(canonicalTargetType reflect.Type) createWithGuardLookupFunc {
     return func() (any, bool) {
         if true == instance.scopeVisible() {
@@ -388,7 +365,6 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
     requestedKey := instance.rootRequestedKey
     typeKey := typeIdentityKey(canonicalTargetType)
 
-    /* the scoped registrations are looked up before the node key is settled, for the reason Get settles its own key early: the key is what the scope's dependency graph is built from. */
     scopedTypeServiceNames := []string(nil)
     scopedTypeNamesExist := false
     scopedTypeProvider := providerAny(nil)
@@ -420,7 +396,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
         }
 
         if true == exists {
-            /* mirror Get: an already-held scoped instance is depended on as hard as one built by this resolution */
+
             if "" != parentKey && true == isScopedNodeKey(parentKey) && true == isScopedNodeKey(nodeKey) {
                 instance.containerInstance.mutex.Lock()
                 registerScopedDependencyLocked(instance.scopeInstance, parentKey, nodeKey)
@@ -468,7 +444,6 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
                 registerScopedDependencyLocked(scopeInstance, parentKey, scopedNameNodeKey(serviceName))
             }
 
-            /* the type resolves through the name it is registered under, so a scoped service reached by name and by type is one instance rather than two */
             return instance.scopedServiceByName(scopeInstance, serviceName, scopedProvider, canonicalTargetType)
         }
 
@@ -489,7 +464,6 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
     instance.containerInstance.mutex.Lock()
     defer instance.containerInstance.mutex.Unlock()
 
-    /* the same parent filter as the by-name path: a scope-keyed dependent is skipped by the container teardown and the entry is never pruned, so recording it would only grow the graph */
     if "" != parentKey && false == isScopedNodeKey(parentKey) && false == isScopedNodeKey(nodeKey) {
         instance.containerInstance.registerDependencyLocked(
             parentKey,
@@ -522,7 +496,6 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
             return value, nil
         }
 
-        /* snapshot the provider under the container mutex before serviceWithCreationGuardLocked releases it; the create closure runs unlocked, so reading the providers map there would race concurrent Register writes. */
         provider, providerExists := instance.containerInstance.providers[serviceName]
 
         return instance.containerInstance.serviceWithCreationGuardLocked(
@@ -577,7 +550,6 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
         )
     }
 
-    /* snapshot the provider under the container mutex before serviceWithCreationGuardLocked releases it; the create closure runs unlocked, so reading the typeProviders map there would race concurrent Register writes. */
     provider, providerExists := instance.containerInstance.typeProviders[canonicalTargetType]
 
     return instance.containerInstance.serviceWithCreationGuardLocked(
@@ -662,7 +634,7 @@ func (instance *resolverContext) MustGetByType(targetType reflect.Type) any {
     return value
 }
 
-/* Has answers under the same suspension Get enforces: a container-owned provider asking about a scope-only name used to hear "yes" from the very entries its Get would refuse, and an existence check that disagrees with the resolution it gates turns into a wiring decision made on one request's substitutes — or a Has-then-MustGet panic. */
+/* Has applies the same scope visibility as Get. Container-owned providers cannot see scope-only substitutions. */
 func (instance *resolverContext) Has(serviceName string) bool {
     if true == instance.scopeVisible() {
         return instance.scopeInstance.Has(serviceName)
@@ -724,7 +696,7 @@ func (instance *resolverContext) stackStringWithRepeat(repeatedKey string) strin
     return strings.Join(parts, " -> ")
 }
 
-/* TypesImplementing lets a provider collect its collaborators through AllImplementing with the resolver it was handed instead of needing the container itself. A resolution that can see its scope collects what the scope can reach — its scoped registrations included — while a container provider, whose scope is suspended for the duration, collects only what the container holds. The two answers differ on purpose: a process singleton must not gather members that live for one request. */
+/* TypesImplementing exposes collaborators visible to this resolution. Scoped resolution includes scoped registrations; container-owned providers collect only container-lifetime services. */
 func (instance *resolverContext) TypesImplementing(interfaceType reflect.Type) []reflect.Type {
     if true == instance.scopeVisible() {
         return instance.scopeInstance.TypesImplementing(interfaceType)
@@ -741,7 +713,6 @@ func (instance *resolverContext) ReferencesImplementing(interfaceType reflect.Ty
     return instance.containerInstance.ReferencesImplementing(interfaceType)
 }
 
-/* isResolvingReference reports whether the reference is the service this context is creating right now — the innermost node of the resolution stack. Only that service is excluded from a collection: it is the composite dispatcher collecting the handlers it belongs to. A reference deeper on the path is not excluded, so collecting it runs into the creation guard and fails loudly as the circular dependency it is — excluding it instead would freeze a collection whose content depends on which service happened to boot first. On a type node the exclusion is narrowed to the name this context actually holds in creation, so a sibling name of the same type — registered while the creation ran — stays collectable; the type comparison itself is reflect.Type identity, never the type's String(), which two types from same-named packages share. */
 func (instance *resolverContext) isResolvingReference(reference containercontract.ServiceReference) bool {
     if 0 == len(instance.stack.keys) {
         return false
@@ -766,7 +737,6 @@ func (instance *resolverContext) isResolvingReference(reference containercontrac
         return state.ownerContextId == instance.contextId
     }
 
-    /* an idle sibling name of the collector's type: the collector's own reference is always pinned by the creation entry above, and a purely type-keyed creation never yields a listed reference, so nothing here is the collector */
     return false
 }
 

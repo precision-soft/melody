@@ -8,7 +8,7 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/* TwoFactorEnrollmentSubscriber ties the life of a second factor to the life of the account it was enrolled for: the enrollment is keyed on the account identifier, the example mints identifiers as the highest suffix plus one, and a deletion that left the row behind handed the next holder of that identifier an account already enrolled with the previous holder's secret and recovery codes. It listens where the deletion is published rather than being called from the delete door, so any door that deletes an account — the admin api today, a command tomorrow — releases the factor with it. */
+/* TwoFactorEnrollmentSubscriber removes enrollment after user deletion. The example’s combined UserEventSubscriber owns this cleanup in the default wiring so a cache failure cannot skip it. */
 type TwoFactorEnrollmentSubscriber struct {
     store *twofactor.Store
 }

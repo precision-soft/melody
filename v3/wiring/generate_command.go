@@ -110,7 +110,6 @@ func (instance *GenerateCommand) Run(
 
     instance.writeReport(commandContext, report)
 
-    /* every strict violation is carried in one refusal: the run is inspected through its exit and its error record, and an error naming only the first violation found would attribute the failure to a bind typo while the lost constructor coverage beside it never crosses the process boundary */
     if true == commandContext.Bool("strict") {
         strictContext := make(map[string]any)
 
@@ -122,7 +121,6 @@ func (instance *GenerateCommand) Run(
             strictContext["excludes"] = strings.Join(report.UnusedExcludes, ", ")
         }
 
-        /* a skipped constructor is coverage the wiring silently lost; strict exists so a loss has to be acknowledged, which is what //melody:ignore is for */
         if 0 < len(report.Skipped) {
             skippedNames := make([]string, 0, len(report.Skipped))
             for _, skipped := range report.Skipped {
@@ -152,7 +150,6 @@ func (instance *GenerateCommand) Run(
         outputPath = filepath.Join(projectDirectory, outputPath)
     }
 
-    /* a generated file inside a scanned directory is read back by the next scan — with a package clause the surrounding sources do not carry, so the package stops compiling and the tool can no longer regenerate its way out; the constructor's own contract says the output package must not be a scanned one, and this is where it is enforceable */
     for _, packageBinding := range instance.bindSet.Packages() {
         scannedDirectory := packageBinding.Directory()
         if false == filepath.IsAbs(scannedDirectory) {
@@ -173,7 +170,6 @@ func (instance *GenerateCommand) Run(
         }
     }
 
-    /* an existing file that does not open with the generated marker is someone's source, and the write below truncates before it writes; a mistyped --out must not be how a hand-written file dies */
     existingContent, readErr := os.ReadFile(outputPath)
     if nil != readErr && false == os.IsNotExist(readErr) {
         return exception.NewError(
@@ -194,7 +190,6 @@ func (instance *GenerateCommand) Run(
         )
     }
 
-    /* the framework's own atomic writer, which this package can import directly: it lands the source through a temp file, a sync, a rename and a directory sync, so a write that dies partway leaves the previous file intact rather than a truncated Go source the compiler and the committed-file diff read as the generator's output */
     writeErr := internal.WriteFileAtomically(outputPath, []byte(source), "generated wiring file")
     if nil != writeErr {
         return writeErr
@@ -205,8 +200,6 @@ func (instance *GenerateCommand) Run(
     return nil
 }
 
-
-/* writeReport prints what the generation covered and, more importantly, what it did not: a skipped constructor and an unmatched bind are both silent losses of coverage unless they are named. */
 func (instance *GenerateCommand) writeReport(
     commandContext clicontract.Context,
     report *GenerateReport,
@@ -228,14 +221,12 @@ func (instance *GenerateCommand) writeReport(
         )
     }
 
-    /* vendor trees cannot contribute services, so naming them is opt-in: on a large project the list is noise, but a user wondering where a constructor went can ask for it */
     if true == commandContext.Bool("report-vendor") {
         for _, vendorDirectory := range report.SkippedVendorDirectories {
             fmt.Fprintf(commandContext.Writer(), "skipped vendor directory: %s\n", vendorDirectory)
         }
     }
 
-    /* a build-excluded file holding a candidate is opt-in for the same reason: a foreign-GOOS variant is legitimate noise, but a user missing a service built under a tag can ask which files the scan left out and pass the tag through --tags */
     if true == commandContext.Bool("report-excluded") {
         for _, excludedFile := range report.ExcludedFiles {
             fmt.Fprintf(commandContext.Writer(), "excluded by build constraints (holds a constructor candidate): %s\n", excludedFile)
@@ -250,7 +241,6 @@ func (instance *GenerateCommand) writeReport(
         fmt.Fprintf(commandContext.Writer(), "exclude %s matched no constructor\n", unused)
     }
 
-    /* the generator's contract is to say when it could not check the bind targets; the command always hands over the running configuration, so this line names the degenerate case where that configuration declares nothing */
     if true == report.BindTargetsUnchecked {
         fmt.Fprint(commandContext.Writer(), "bind targets were not checked: the application declares no parameters\n")
     }
@@ -275,7 +265,6 @@ func (instance *GenerateCommand) writeReport(
     }
 }
 
-/* splitBuildTags parses the comma-separated tag list. A build context carries plain tag identifiers, not constraint expressions: a negation or a space-separated pair reaches it as a tag no file can ever declare, so the scan would silently behave as if nothing had been passed — the tagged files stay excluded, their services stay missing from the generated wiring, and strict still reports success. Reject the malformed entry here instead, where the mistake is still traceable to what was typed. */
 func splitBuildTags(tags string) ([]string, error) {
     if "" == tags {
         return nil, nil
@@ -305,7 +294,6 @@ func splitBuildTags(tags string) ([]string, error) {
     return buildTags, nil
 }
 
-/* isBuildTagIdentifier mirrors go/build's own isValidTag so a tag the go tool would accept is never rejected here: any unicode letter or digit, plus underscore and dot. */
 func isBuildTagIdentifier(tag string) bool {
     for _, character := range tag {
         if true == unicode.IsLetter(character) || true == unicode.IsDigit(character) {

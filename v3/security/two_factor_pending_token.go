@@ -6,7 +6,7 @@ import (
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
-/* NewTwoFactorPendingToken wraps the principal whose primary credential was accepted but who still owes a second factor. The resulting token reports IsAuthenticated()=false and an empty identifier/roles, so authorization treats the request as unauthenticated, while the pending principal stays readable through the TwoFactorPending interface so the application can prompt for a code. */
+/* NewTwoFactorPendingToken retains the primary-authenticated principal through TwoFactorPending while exposing IsAuthenticated=false and no identifier or roles to authorization. */
 func NewTwoFactorPendingToken(pending securitycontract.Token) *TwoFactorPendingToken {
     if true == internal.IsNilInterface(pending) {
         exception.Panic(exception.NewError("can not build a two-factor pending token from nil", nil, nil))

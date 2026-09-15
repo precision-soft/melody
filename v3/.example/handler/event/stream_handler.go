@@ -14,14 +14,11 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/* the hub is RESOLVED here rather than handed in at registration. Handed in, this handler — the one door of an http process that most needs the hub to be reporting — resolved the service zero times, so the provider that installs the logger never ran and the container never learned it had a hub to close. Resolving per request costs a container lookup the request pays anyway for everything else it resolves. */
+/* StreamHandler resolves the registered hub per request so its provider installs logging and teardown ownership. */
 func StreamHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         topic := queryStringOr(request, "topic", CatalogTopic)
 
-        /* the topic is the client's to name, so being allowed to open a stream is not being allowed to read the one asked for: the catalog topic carries the product and user writes made behind RoleEditor.
-
-           The gate stands ahead of the writer because NewServerSentEventWriter COMMITS the response — it sets the event-stream headers, writes 200 and flushes — and the kernel discards whatever a handler returns after the headers are committed. Decided below it, this refusal would reach neither the client, which reads a successful stream that closes at once and reconnects forever, nor the access log, which records the committed 200. */
         if false == topicIsReadableBy(runtimeInstance, topic) {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusForbidden, "not allowed to subscribe to this topic"), nil
         }
@@ -53,7 +50,6 @@ func StreamHandler() melodyhttpcontract.Handler {
             return nil, streamWriteFailure(requestContext, commentErr)
         }
 
-        /* A rolling write budget replaces net/http's absolute request deadline; heartbeats also detect departed clients. */
         heartbeat := time.NewTicker(15*time.Second)
         defer heartbeat.Stop()
 
@@ -79,7 +75,6 @@ func StreamHandler() melodyhttpcontract.Handler {
         }
     }
 }
-
 
 func streamWriteFailure(ctx context.Context, err error) error {
     if nil != ctx.Err() { return nil }

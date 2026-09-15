@@ -20,7 +20,6 @@ func TestCanReflectValueBeNil_AnswersForEveryReferenceKind(t *testing.T) {
         }
     }
 
-    /* an interface kind is only reachable through a reflect.Value built from a pointer's element, because reflect.ValueOf unwraps the interface it is handed */
     var interfaceHolder struct {
         field any
     }

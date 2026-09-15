@@ -253,7 +253,6 @@ func TestConfiguration_ConcurrentRegisterAndReadIsRaceFree(t *testing.T) {
 
     var waitGroup sync.WaitGroup
 
-    /* RegisterRuntime mutates the shared parameters map at runtime, so the readers (Get/Names/Parameters) must take the read lock: under -race an unguarded reader racing the writer reports a data race, and without -race it is Go's non-recoverable "fatal error: concurrent map read and map write" */
     for writerIndex := 0; writerIndex < 8; writerIndex++ {
         waitGroup.Add(1)
         go func(index int) {
@@ -330,7 +329,6 @@ func TestParameterPlaceholderPattern_AcceptsDottedIdentifiers(t *testing.T) {
     }
 }
 
-/* A value that escapes a literal percent with %% resolves to text of the shape %NAME%, which the post-resolution scan then rejected as an "unresolved placeholder" — failing the whole boot for a correctly escaped literal. */
 func TestConfiguration_EscapedPercentLiteralDoesNotFailValidation(t *testing.T) {
     source := &testEnvironmentSource{values: map[string]string{
         CliDescriptionKey: "%%APP_NAME%% stays literal",
@@ -352,7 +350,6 @@ func TestConfiguration_EscapedPercentLiteralDoesNotFailValidation(t *testing.T) 
     }
 }
 
-/* a parameter registered after the boot resolution keeps no raw template: it is resolved on registration against the parameters boot left in place, so a %env(...)% does not reach the consuming service verbatim */
 func TestRegisterRuntime_AfterResolveResolvesTheTemplate(t *testing.T) {
     source := &testEnvironmentSource{values: map[string]string{"MAIL_HOST": "smtp.example.com"}}
 
@@ -377,7 +374,6 @@ func TestRegisterRuntime_AfterResolveResolvesTheTemplate(t *testing.T) {
     }
 }
 
-/* the composition root registers its parameters between construction and boot, so a forward reference there must survive to the boot pass instead of being resolved eagerly against parameters that do not exist yet */
 func TestRegisterRuntime_BeforeBootLeavesAForwardReferenceForTheBootPass(t *testing.T) {
     source := &testEnvironmentSource{values: map[string]string{}}
 
@@ -433,7 +429,6 @@ func TestRegisterRuntimeSecret_MarksOnlyTheDeclaredParameter(t *testing.T) {
     }
 }
 
-/* the marking governs display only: a service that consumes the parameter still receives the credential in full */
 func TestRegisterRuntimeSecret_LeavesTheValueIntact(t *testing.T) {
     configuration := newResolvedConfiguration(
         t,
@@ -448,7 +443,6 @@ func TestRegisterRuntimeSecret_LeavesTheValueIntact(t *testing.T) {
     }
 }
 
-/* a dsn assembled from a declared password holds the credential in full; without propagation the password would be redacted while the dsn beside it printed in clear */
 func TestRegisterRuntimeSecret_PropagatesToParametersThatReadIt(t *testing.T) {
     configuration := newResolvedConfiguration(
         t,
@@ -487,7 +481,6 @@ func TestRegisterRuntime_LeavesAnOrdinaryParameterUnmarked(t *testing.T) {
     }
 }
 
-/* a MarkSecret arriving after the boot resolve travels to the parameters whose templates read the key, exactly as the early marking does: without the retroactive scan the key was redacted while the dsn assembled from it printed in full */
 func TestMarkSecret_PropagatesRetroactivelyToDirectReaders(t *testing.T) {
     environment := &Environment{values: map[string]string{
         "DB_PASSWORD": "hunter2",
@@ -521,7 +514,6 @@ func TestMarkSecret_PropagatesRetroactivelyToDirectReaders(t *testing.T) {
     }
 }
 
-/* a late mark covers the whole derivation chain, not the direct readers alone: the second hop used to keep printing the assembled value while the first was redacted, because the retroactive scan stopped after one step */
 func TestMarkSecret_PropagatesRetroactivelyThroughDerivationChains(t *testing.T) {
     environment := &Environment{values: map[string]string{
         "G6_SECRET": "hunter2",
@@ -555,7 +547,6 @@ func TestMarkSecret_PropagatesRetroactivelyThroughDerivationChains(t *testing.T)
     }
 }
 
-/* the late mark reaches a reader spelled with the kernel.* alias of the marked MELODY_* key: the aliased pair is one parameter under two names, so the propagation seeds every spelling — a scan over the marked spelling alone left the alias-spelled reader printing the derived value in full */
 func TestMarkSecret_ReachesAReaderSpelledWithTheKernelAlias(t *testing.T) {
     environment := &Environment{values: map[string]string{
         LogPathKey: "/var/log/app.log",
@@ -589,7 +580,6 @@ func TestMarkSecret_ReachesAReaderSpelledWithTheKernelAlias(t *testing.T) {
     }
 }
 
-/* a runtime registration that fails to resolve leaves nothing behind: publishing before resolving served the raw template to every reader that outlived the recovered panic and burnt the name for the corrected retry */
 func TestRegisterRuntime_FailedResolutionLeavesNoHalfMadeParameter(t *testing.T) {
     environment := &Environment{values: map[string]string{}}
 
@@ -622,7 +612,6 @@ func TestRegisterRuntime_FailedResolutionLeavesNoHalfMadeParameter(t *testing.T)
     }
 }
 
-/* a name is judged trimmed: the padded spelling would register a parameter no exact-match lookup ever names, and the whitespace-only name passed the empty guard as a phantom */
 func TestRegisterRuntime_RefusesWhitespaceNames(t *testing.T) {
     environment := &Environment{values: map[string]string{}}
 
@@ -638,7 +627,6 @@ func TestRegisterRuntime_RefusesWhitespaceNames(t *testing.T) {
                 t.Fatalf("expected the whitespace-only name to be refused")
             }
 
-            /* the whitespace-only name is refused AS EMPTY, through the guard that names the real problem — the padding guard would also refuse it, with a message that sends the operator hunting for stray spaces around a name that does not exist at all */
             recoveredErr, isError := recoveredValue.(error)
             if false == isError || false == strings.Contains(recoveredErr.Error(), "empty names") {
                 t.Fatalf("expected the empty-name refusal for a whitespace-only name, got: %v", recoveredValue)
@@ -659,7 +647,6 @@ func TestRegisterRuntime_RefusesWhitespaceNames(t *testing.T) {
     }()
 }
 
-/* a runtime parameter is named in its conversion errors: identified only by its empty environmentKey it was anonymous, and "cannot convert" named nothing an operator could find */
 func TestRuntimeParameter_ConversionErrorNamesTheParameter(t *testing.T) {
     environment := &Environment{values: map[string]string{}}
 
@@ -684,13 +671,11 @@ func TestRuntimeParameter_ConversionErrorNamesTheParameter(t *testing.T) {
     }
 }
 
-/* TestMain silences the standard logger for the whole package: the configuration reports through it on several paths, and the output belongs to the code under test rather than to the test run. */
 func TestMain(mainInstance *testing.M) {
     log.SetOutput(io.Discard)
     os.Exit(mainInstance.Run())
 }
 
-/* newResolvedConfiguration builds a configuration over a fixed environment, lets the caller declare its parameters and resolves them, which is the shape almost every test of this file and of the resolve path needs before it can assert anything. */
 func newResolvedConfiguration(
     t *testing.T,
     environmentValues map[string]string,
@@ -716,7 +701,6 @@ func newResolvedConfiguration(
     return configuration
 }
 
-/* a parameter registered after boot inherits the secret marking of the credential its template reads: the propagation marks the reader it finds by name in the parameter map, and a parameter resolved before it was published was absent at the only moment the propagation looks */
 func TestRegisterRuntime_ALateParameterInheritsTheSecretMarkOfTheEnvironmentKeyItReads(t *testing.T) {
     configuration := newLateRegistrationConfiguration(t)
 
@@ -769,7 +753,6 @@ func newLateRegistrationConfiguration(t *testing.T) *Configuration {
     return configuration
 }
 
-/* the retroactive scan reads both placeholder grammars: a reader written as a %NAME% parameter reference is marked exactly as one written through %env(NAME)%. The negative half is what pins the comparison itself — an inverted match over-marks every parameter reference through the fixpoint, so the reader of an unrelated parameter staying unmarked is the assertion that sees it. */
 func TestMarkSecret_PropagatesThroughAParameterReference(t *testing.T) {
     environment := &Environment{values: map[string]string{
         "DB_PASSWORD": "hunter2",
@@ -805,7 +788,6 @@ func TestMarkSecret_PropagatesThroughAParameterReference(t *testing.T) {
     }
 }
 
-/* the teardown budget is read through the same alias pair every kernel parameter is read through, so an operator writes MELODY_TEARDOWN_TIMEOUT and the exit path reads kernel.teardown_timeout */
 func TestConfigurationTeardownTimeoutDefaultsToTenSeconds(t *testing.T) {
     configuration := newTeardownTimeoutConfiguration(t, map[string]string{})
 
@@ -832,7 +814,6 @@ func TestConfigurationTeardownTimeoutIsReadFromTheEnvironment(t *testing.T) {
     }
 }
 
-/* a negative duration means nothing in either reading, so it fails the boot rather than quietly becoming one of the two behaviours */
 func TestConfigurationTeardownTimeoutRejectsANegativeValue(t *testing.T) {
     source := &testEnvironmentSource{values: map[string]string{TeardownTimeoutKey: "-1s"}}
 
@@ -847,7 +828,6 @@ func TestConfigurationTeardownTimeoutRejectsANegativeValue(t *testing.T) {
     }
 }
 
-/* zero is the operator asking for NO deadline, and the sister of the refusal above: it boots, and it reads back as zero rather than as the default, because folding it into the default would answer a question the operator had already answered */
 func TestConfigurationTeardownTimeoutAcceptsZeroAsNoDeadline(t *testing.T) {
     configuration := newTeardownTimeoutConfiguration(t, map[string]string{TeardownTimeoutKey: "0"})
 

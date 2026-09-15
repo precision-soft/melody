@@ -54,7 +54,6 @@ func (instance *Router) AllowedMethods(path string, host string, scheme string) 
             continue
         }
 
-        /* the defaults are merged before the locale gate reads them, exactly as Match does: a route supplying its locale through Defaults is reachable, so the methods it accepts must be advertised rather than filtered out by a gate reading the value before it exists. */
         for key, defaultValue := range routeValue.defaults {
             if _, exists := params[key]; false == exists {
                 params[key] = defaultValue

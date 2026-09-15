@@ -158,7 +158,6 @@ func TestBearerTokenSource_EnrichmentFailureFallsBackToAnonymous(t *testing.T) {
     }
 }
 
-/* failingTokenStore models the token store's backend being down. */
 type failingTokenStore struct {
     failure error
 }
@@ -211,7 +210,6 @@ func TestBearerTokenSource_BadCredentialStaysAtInfo(t *testing.T) {
     }
 }
 
-/* markingEnricher stands in for an enricher built on the framework's stores, whose lookup failure carries the infrastructure mark. */
 type markingEnricher struct{}
 
 func (instance *markingEnricher) Enrich(

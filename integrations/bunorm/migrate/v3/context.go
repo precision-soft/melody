@@ -13,7 +13,6 @@ type ContextConfig struct {
     Options    Options
 }
 
-/* effectiveOptions resolves one context's options: explicit context fields win, then the base options, then DefaultOptions(); CommandPrefix derives from the context name when neither the context nor the base pins it. ManagerName is resolved separately and does NOT inherit the base pin: an explicit per-context Options.ManagerName wins, otherwise it defaults to the context name, so a context always targets its own database rather than the base-pinned one. */
 func effectiveOptions(contextConfig ContextConfig, baseOptions Options) Options {
     defaults := DefaultOptions()
 
@@ -43,7 +42,7 @@ func effectiveOptions(contextConfig ContextConfig, baseOptions Options) Options 
     }
 
     if "" == resolved.ManagerName {
-        /* ManagerName does NOT inherit baseOptions: a migration context must target its own database, so it defaults to the context name unless the context pins its own — inheriting a base pin here would silently route every context's commands at the base-pinned database */
+
         resolved.ManagerName = contextConfig.Name
     }
 

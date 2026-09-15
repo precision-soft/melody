@@ -143,7 +143,6 @@ func TestExclusiveCommand_ShutdownSkipNamesTheShutdownNotAPhantomPeer(t *testing
         t.Fatalf("expected the inner command to be skipped, got %d calls", inner.calls)
     }
 
-    /* the skip log is the single source of truth for "did not run" under the exit-zero design: a SIGTERM during the acquire must not write that another instance is running the work when none is */
     if false == logger.hasMessageContaining("shutdown was requested before the lock was acquired") {
         t.Fatalf("expected the skip record to name the shutdown")
     }

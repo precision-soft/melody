@@ -17,7 +17,6 @@ import (
     urfavecli "github.com/urfave/cli/v3"
 )
 
-/* the boundary this file exists to hold: the flag parsing engine is named in the cli package and nowhere else in the module. Without the guard a catch-up that reaches for an engine type in a command, a module or a contract rebuilds the coupling this layer was built to remove, and nothing else in the tree would say so. */
 func TestAdapter_TheEngineIsNamedOnlyInsideTheCliPackage(t *testing.T) {
     moduleRoot := findModuleRoot(t)
     cliPackageDirectory := filepath.Join(moduleRoot, "cli")
@@ -64,7 +63,6 @@ func TestAdapter_TheEngineIsNamedOnlyInsideTheCliPackage(t *testing.T) {
     }
 }
 
-/* the positive control: the walk above answers nothing only because nothing outside the package imports the engine, not because it never looked — the same walk over the cli package itself must find the sources that do */
 func TestAdapter_TheBoundaryWalkFindsTheEngineWhereItIsAllowed(t *testing.T) {
     moduleRoot := findModuleRoot(t)
     cliPackageDirectory := filepath.Join(moduleRoot, "cli")
@@ -107,7 +105,6 @@ func findModuleRoot(t *testing.T) string {
         t.Fatalf("failed to read the working directory: %v", workingDirectoryErr)
     }
 
-    /* the test runs in the cli package's own directory, and the module root is its parent */
     return filepath.Dir(workingDirectory)
 }
 
@@ -168,7 +165,6 @@ func TestNewEngineFlag_ParsesEachKindUnderItsOwnGrammar(t *testing.T) {
     }
 }
 
-/* the validator has to survive the trip into the engine, installed and consulted on the value the engine parsed: dropped, every declared refusal in the tree becomes decoration */
 func TestNewEngineFlag_CarriesTheDeclaredValidator(t *testing.T) {
     refusal := errors.New("refused by the declared validator")
 
@@ -209,7 +205,6 @@ func (instance *unsupportedKindFlag) Definition() clicontract.FlagDefinition {
     }
 }
 
-/* a flag the engine has no parser for is refused where the command is registered: the alternative to a panic is a command whose flag silently does not exist */
 func TestNewEngineFlag_PanicsOnAKindItCannotBuild(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
         newEngineFlag(&unsupportedKindFlag{})
@@ -226,14 +221,12 @@ func (instance *mistypedDefaultFlag) Definition() clicontract.FlagDefinition {
     }
 }
 
-/* a default of the wrong type is refused where a wrong kind is: dropped, the flag would quietly default to zero and the declaration would read as honoured */
 func TestNewEngineFlag_PanicsOnADefaultOfAnotherType(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
         newEngineFlag(&mistypedDefaultFlag{})
     }, "cli flag default value does not match the flag kind")
 }
 
-/* a flag type written by hand and leaving its default unset means the zero value of its kind, not a refusal */
 func TestNewEngineFlag_ADefinitionWithoutADefaultAnswersTheZeroValue(t *testing.T) {
     engineFlag := newEngineFlag(&noDefaultFlag{})
 
@@ -255,7 +248,6 @@ func (instance *noDefaultFlag) Definition() clicontract.FlagDefinition {
     }
 }
 
-/* a flag declaring no validator must install none: one that always passes would also be run over the declared default, which is not what "no validator" means */
 func TestEngineFlagValidator_AFlagWithoutAValidatorInstallsNone(t *testing.T) {
     engineFlag := newEngineFlag(&clicontract.StringFlag{Name: "format"})
 
@@ -268,7 +260,6 @@ func TestEngineFlagValidator_AFlagWithoutAValidatorInstallsNone(t *testing.T) {
     }
 }
 
-/* the parsed values are the caller's own: a command that sorts or truncates what it was handed would otherwise rewrite the parsed command line under every later reader of the same flag */
 func TestEngineContext_AnswersACopyOfWhatTheEngineHolds(t *testing.T) {
     parsed := runFlagProbe(
         t,
@@ -293,7 +284,6 @@ func TestEngineContext_AnswersACopyOfWhatTheEngineHolds(t *testing.T) {
     }
 }
 
-/* the engine leaves the stream nil on a command that was never given one, and every caller downstream would otherwise repeat the same guard on its first written line */
 func TestNewEngineContext_AnswersADiscardingWriterForACommandWithoutOne(t *testing.T) {
     commandContext := newEngineContext(&urfavecli.Command{Name: "probe"})
 
@@ -311,7 +301,6 @@ func TestNewEngineContext_AnswersTheCommandsOwnWriter(t *testing.T) {
     }
 }
 
-/* runFlagProbe parses one command line against the melody flags handed to it and answers the context a command would have read */
 func runFlagProbe(t *testing.T, flags []clicontract.Flag, arguments ...string) clicontract.Context {
     t.Helper()
 

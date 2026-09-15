@@ -20,7 +20,6 @@ func TestRouteZones_DeclaresEveryZoneAndAnswersInDeclarationOrder(t *testing.T) 
         }
     }
 
-    /* the answer is what a command quotes back in its refusal, so it must be a fresh slice: a caller sorting or truncating it would rewrite the accepted spellings for everyone */
     zones[0] = "rewritten"
     if RouteZonePublic != RouteZones()[0] {
         t.Fatalf("expected RouteZones to hand out its own slice, got %v", RouteZones())
@@ -65,7 +64,6 @@ func TestExposedRouteAttributes_CarriesADeclaredZone(t *testing.T) {
     }
 }
 
-/* a zone that is not declared produces an artifact no filter can ever select: the manifest command compares the requested zone against the route's own string, so a misspelling on the route silently omits it from the zoned export while the unfiltered one still carries it */
 func TestExposedRouteAttributes_RefusesAZoneThatIsNotDeclared(t *testing.T) {
     for _, zone := range []string{"unknown", "Frontend", "frontend "} {
         testhelper.AssertPanicsWithError(t, func() {

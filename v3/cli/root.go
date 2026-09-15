@@ -26,7 +26,7 @@ func NewRoot(applicationName string, applicationDescription string) *Root {
     }
 }
 
-/* SetWriter points the tree's output at a stream — the help and usage the tree itself writes, and the output of every command registered on it, whenever it was registered. The engine defaults each command's stream separately, to the process's standard output, so a writer set only on the tree would leave every command writing somewhere else; this is the door that means what it says. Left unset, the stream is the process's standard output. */
+/* SetWriter redirects help, usage and all registered command output, including commands registered later. The default is process standard output. */
 func (instance *Root) SetWriter(writer io.Writer) {
     instance.writer = writer
     instance.command.Writer = writer

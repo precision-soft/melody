@@ -32,7 +32,6 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "username is required"), nil
         }
 
-        /* the username becomes a cache key component and a 255-byte column, so a spelling longer than either holds is turned away before the row lands */
         if false == service.CacheSafeIdentifier(repository.NormalizedUsername(normalizedUsername)) {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "username must stay within 255 bytes"), nil
         }
@@ -42,7 +41,6 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "password is required"), nil
         }
 
-        /* bcrypt reads at most 72 bytes of the plaintext, so a longer password is refused as the caller's mistake instead of surfacing as a hashing failure */
         if security.PasswordMaximumBytes < len(normalizedPassword) {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "password must not exceed 72 bytes"), nil
         }

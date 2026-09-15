@@ -13,7 +13,6 @@ import (
     "github.com/uptrace/bun/migrate"
 )
 
-/* migrationNamePattern restricts migration names to Bun's filename grammar. */
 var migrationNamePattern = regexp.MustCompile(`^[0-9a-z_\-]+$`)
 
 func NewCreateGoCommand(migrations *migrate.Migrations, options Options) *CreateCommand {
@@ -56,7 +55,6 @@ func (instance *CreateCommand) Run(runtimeInstance runtimecontract.Runtime, comm
         return err
     }
 
-    /* Validate the filename component before invoking the generator. */
     if false == migrationNamePattern.MatchString(migrationName) {
         return exception.NewError(
             "migration name must match "+migrationNamePattern.String(),
@@ -81,10 +79,9 @@ func (instance *CreateCommand) Run(runtimeInstance runtimecontract.Runtime, comm
         return createErr
     }
 
-    /* Finish the generated file with an atomic rewrite and directory sync. */
     if nil != files && "" != files.Path {
         if finishErr := finishFileAtomically(files.Path, []byte(files.Content)); nil != finishErr {
-            /* A directory-sync failure leaves the complete file in place; report the durability warning without prompting another creation. */
+
             if false == errors.Is(finishErr, errDirectorySyncAfterRename) {
                 return finishErr
             }
@@ -113,7 +110,6 @@ func (instance *CreateCommand) Run(runtimeInstance runtimecontract.Runtime, comm
 func (instance *CreateCommand) formatMigrationFiles(file *migrate.MigrationFile) []string {
     lines := make([]string, 0)
 
-    /* A missing file descriptor is represented explicitly in the command output. */
     if nil == file {
         return append(lines, "<unknown>")
     }

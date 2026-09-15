@@ -10,7 +10,6 @@ import (
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
 )
 
-/* pathItemMethods is every verb a path item can carry, in the order the document lists them. A route registered with no method list answers all of them — matchesMethod treats the empty list as a match for every verb — so the document spells that surface out instead of writing an operation-less path item that reads as an endpoint answering nothing. */
 var pathItemMethods = []string{
     nethttp.MethodGet,
     nethttp.MethodPost,
@@ -36,7 +35,6 @@ func Generate(
     components := make(map[string]*Schema)
     componentNames := make(map[reflect.Type]string)
 
-    /* mirrorOwnedSlots remembers which path+method slots were written by the shortened mirror of an optional tail, so a route registered at that path later still displaces the mirror — the mirror may be reached either before or after the route it stands in for */
     mirrorOwnedSlots := make(map[string]bool)
 
     for _, routeDefinition := range routeDefinitions {
@@ -56,7 +54,7 @@ func Generate(
 
             pathItem := document.Paths[path]
             for _, method := range methods {
-                /* a verb outside the eight the format models — the router registers any string — has no slot in a path item; the route stays in the document with the undescribed verb named, instead of the operation being built and dropped without a trace */
+
                 if false == pathItemCarriesMethod(method) {
                     note := "the route also answers " + strings.ToUpper(method) + ", which an OpenAPI path item cannot describe"
                     if false == strings.Contains(pathItem.Description, note) {
@@ -69,7 +67,6 @@ func Generate(
                     continue
                 }
 
-                /* a taken slot is kept by whoever holds it best: the mirror of an optional tail always yields — a route registered at the shortened path itself describes it better, and it may be reached either before or after this route — while a route yields only to another ROUTE, never to a mirror; and two routes whose patterns converge on one converted path — a placeholder against a brace literal — must not silently replace each other's operations, so the earlier registration wins exactly as it does in the router's match order */
                 slotKey := path + " " + strings.ToUpper(method)
                 if nil != operationFor(&pathItem, method) {
                     if true == expansion.omitsParameter || false == mirrorOwnedSlots[slotKey] {
@@ -137,7 +134,6 @@ func buildOperation(
         operation.Summary = descriptor.Summary
         operation.Description = descriptor.Description
 
-        /* the document must not alias registry memory: the descriptor arrives by value but its slice shares the registry's backing array, and a caller post-processing the returned document would write through into every later generation */
         if 0 < len(descriptor.Tags) {
             operation.Tags = append(make([]string, 0, len(descriptor.Tags)), descriptor.Tags...)
         }
@@ -151,7 +147,6 @@ func buildOperation(
             }
         }
 
-        /* the statuses are visited in order: this range is the one unordered driver of first-touch component naming, and iterating the map directly hands the bare name and its numbered siblings to whichever type a given run visits first, so two runs over one registry disagree on every $ref to a colliding name */
         statuses := make([]int, 0, len(descriptor.Responses))
         for status := range descriptor.Responses {
             statuses = append(statuses, status)
@@ -159,7 +154,7 @@ func buildOperation(
         sort.Ints(statuses)
 
         for _, status := range statuses {
-            /* a code outside the registered table answers an empty status text, and the response description is required by the format */
+
             description := nethttp.StatusText(status)
             if "" == description {
                 description = "response"
@@ -187,7 +182,6 @@ type patternExpansion struct {
     omittedParameter string
 }
 
-/* the router serves a trailing optional parameter both ways, so a single path key describes only half of what answers. "in: path" forbids "required: false", which leaves one path item per shape: the pattern without the optional segment, and the pattern with it. Only the final segment can carry the marker, so the shortened form is always the pattern minus its last segment. */
 func expandOptionalTailSegment(pattern string) []patternExpansion {
     segments := strings.Split(pattern, "/")
 
@@ -213,7 +207,6 @@ func expandOptionalTailSegment(pattern string) []patternExpansion {
     }
 }
 
-/* only the ":name?" spelling is expanded into an omitted and a supplied form, because only that spelling is a placeholder to the router: a brace segment is matched literally (http/router.go registers and matches ":" and "*" segments and nothing else), so expanding "{name?}" would mint a shortened path no route answers. convertPattern still renders a brace segment as a path parameter, which keeps the spec's rendering of brace patterns unchanged and wrong in the same pre-existing way rather than inventing an endpoint on top of it. */
 func optionalTailParameterName(segment string) (string, bool) {
     if false == strings.HasPrefix(segment, ":") {
         return "", false
@@ -246,7 +239,6 @@ func convertPattern(pattern string) (string, []Parameter) {
             placeholder = true
             name = segment[1:]
 
-            /* the router reads the "..." suffix — and a trailing bare "*" — as a catch-all, and its registration RETURNS there: every segment written after a catch-all is discarded and never matched. The converted path mirrors that, or the document would advertise a template — "/assets/{rest}/thumbnail" — no request the route answers can ever spell. */
             if true == strings.HasSuffix(name, "...") {
                 name = strings.TrimSuffix(name, "...")
                 catchAll = true
@@ -282,7 +274,6 @@ func convertPattern(pattern string) (string, []Parameter) {
     return strings.Join(segments, "/"), parameters
 }
 
-/* pathItemCarriesMethod reports whether the verb has a slot in a path item — the same eight assignOperation writes and operationFor reads. */
 func pathItemCarriesMethod(method string) bool {
     switch strings.ToUpper(method) {
     case nethttp.MethodGet, nethttp.MethodPost, nethttp.MethodPut, nethttp.MethodPatch,

@@ -45,7 +45,6 @@ func (instance *sessionLoginHandler) Login(
         return nil, fmt.Errorf("authenticated user is unavailable")
     }
 
-    /* rotate the session id before the authenticated identity is written to it: a client that presents a session id chosen before authentication must not keep that id once it carries the identity, or an id an attacker seeded and planted in the victim's browser is authenticated as the victim. RegenerateRequestSession carries the values over under a fresh id and republishes it on the request, so the identity below is written to the id the response emits. */
     rotatedSession, regenerateErr := melodyhttp.RegenerateRequestSession(request)
     if nil != regenerateErr {
         return nil, regenerateErr

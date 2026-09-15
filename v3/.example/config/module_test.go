@@ -2,19 +2,9 @@ package config
 
 import (
     "testing"
-
     melodyconfig "github.com/precision-soft/melody/v3/config"
 )
 
-type stubEnvironmentSource struct {
-    values map[string]string
-}
-
-func (instance *stubEnvironmentSource) Load() (map[string]string, error) {
-    return instance.values, nil
-}
-
-/* environmentValue returns a .env-registered parameter fully resolved — NewConfiguration expands %env(X)%/%name% indirection and unescapes %% at construction (before this composition root runs), so a "pa%%ss" value reads back as "pa%ss" without environmentValue doing anything itself; a missing key returns "" so an unset integration variable keeps its "skip this integration" behaviour. */
 func TestModuleEnvironmentValue(t *testing.T) {
     source := &stubEnvironmentSource{values: map[string]string{
         "APP_PLAIN":   "redis:6379",
@@ -38,10 +28,10 @@ func TestModuleEnvironmentValue(t *testing.T) {
         key      string
         expected string
     }{
-        {key: "APP_PLAIN", expected: "redis:6379"}, /* literal passes through unchanged */
-        {key: "APP_PERCENT", expected: "pa%ss"},    /* %% collapses to a single % */
-        {key: "APP_MULTI", expected: "a%b%c"},      /* every %% pair collapses */
-        {key: "APP_MISSING", expected: ""},         /* absent key -> empty (skip-integration) */
+        {key: "APP_PLAIN", expected: "redis:6379"},
+        {key: "APP_PERCENT", expected: "pa%ss"},
+        {key: "APP_MULTI", expected: "a%b%c"},
+        {key: "APP_MISSING", expected: ""},
     }
 
     for _, testCase := range cases {

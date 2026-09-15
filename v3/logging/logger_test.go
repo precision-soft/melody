@@ -491,7 +491,6 @@ func TestLogError_KeepsCallerSetCauseKeysOnAForeignError(t *testing.T) {
     }
 }
 
-/* LevelEnabled is the single door onto the capability, and its answer for a logger that does not carry it is TRUE: the fallback is the reporting floor, so a site that spelled it the other way would stop recording against most loggers there are. Every caller asks through here rather than writing its own assertion, which is what keeps the rule in one place. */
 func TestLevelEnabled_AnswersTrueForALoggerThatCannotBeAsked(t *testing.T) {
     if false == LevelEnabled(&captureLogger{}, loggingcontract.LevelDebug) {
         t.Fatalf("expected a logger without the capability to be reported enabled")
@@ -510,7 +509,6 @@ func TestLevelEnabled_AnswersTrueForALoggerThatCannotBeAsked(t *testing.T) {
     }
 }
 
-/* the nil-logger fallback writes through the raw standard logger, so the one-record-one-line guarantee the default logger holds is this branch's own duty: an unescaped line break in a message of unknown origin ends the record and starts a fully-formed fake one at whatever level the payload names. No suite on any major pins the escaping here — measured before this test was written — while the default logger's twin is pinned by TestDefaultLogger_KeepsOneRecordOneLine. */
 func TestLogError_NilLogger_KeepsOneRecordOneLine(t *testing.T) {
     var buffer bytes.Buffer
 
@@ -536,7 +534,6 @@ func TestLogError_NilLogger_KeepsOneRecordOneLine(t *testing.T) {
     }
 }
 
-/* the exception branch of the same fallback writes through the same raw standard logger, and a melody error's message is as capable of carrying a line break as a foreign error's. No suite on any major pins this half either. */
 func TestLogError_NilLogger_KeepsOneRecordOneLineForAnException(t *testing.T) {
     var buffer bytes.Buffer
 
@@ -559,7 +556,6 @@ func TestLogError_NilLogger_KeepsOneRecordOneLineForAnException(t *testing.T) {
 }
 
 
-/* an errors.Join answers nothing at all to errors.Unwrap, so a record assembled from the single wrap link carried no cause, no chain, and the context of only whichever branch errors.As reached first — exactly where the failure had gathered what several replicas, several destinations or several rules had to say. */
 func TestLogError_AJoinedErrorCarriesEveryBranchIntoTheRecord(t *testing.T) {
     buffer := &bytes.Buffer{}
     logger := NewJsonLogger(buffer, loggingcontract.LevelDebug)
@@ -578,7 +574,6 @@ func TestLogError_AJoinedErrorCarriesEveryBranchIntoTheRecord(t *testing.T) {
     }
 }
 
-/* LogError is reached from inside the recovery handlers, where the error is whatever a panic carried: an Error() that dereferences the very nil field that made it panic-worthy would take down the one record written to explain the failure. */
 func TestLogError_AnErrorWhoseMessagePanicsStillProducesARecord(t *testing.T) {
     buffer := &bytes.Buffer{}
     logger := NewJsonLogger(buffer, loggingcontract.LevelDebug)
@@ -594,7 +589,6 @@ func TestLogError_AnErrorWhoseMessagePanicsStillProducesARecord(t *testing.T) {
     }
 }
 
-/* panickingMessageError is the shape the recovery handlers meet: an error whose own Error() raises */
 type panickingMessageError struct {
 }
 

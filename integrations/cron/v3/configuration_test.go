@@ -27,7 +27,6 @@ func TestNewConfiguration_StartsEmptyAndNonNil(t *testing.T) {
     }
 }
 
-/* Schedule keeps the order it was called in: the generator renders the entries in that order and the runner parses them in it, so a registry that reordered them would emit a crontab the caller cannot predict. */
 func TestSchedule_KeepsEveryEntryInRegistrationOrder(t *testing.T) {
     configuration := NewConfiguration().
         Schedule("first:command", &EntryConfig{Schedule: &Schedule{Minute: "0"}}).
@@ -55,7 +54,6 @@ func TestSchedule_KeepsEveryEntryInRegistrationOrder(t *testing.T) {
     }
 }
 
-/* Schedule answers the configuration so registrations chain; a copy would drop every entry added after the first. */
 func TestSchedule_AnswersTheSameConfiguration(t *testing.T) {
     configuration := NewConfiguration()
 
@@ -64,7 +62,6 @@ func TestSchedule_AnswersTheSameConfiguration(t *testing.T) {
     }
 }
 
-/* the same command name can be scheduled twice on purpose — two different minutes of the same job — so the registry keeps both rather than folding them. */
 func TestSchedule_KeepsTwoEntriesThatShareOneCommandName(t *testing.T) {
     configuration := NewConfiguration().
         Schedule("backup:run", &EntryConfig{Schedule: &Schedule{Minute: "0"}}).
@@ -80,7 +77,6 @@ func TestSchedule_KeepsTwoEntriesThatShareOneCommandName(t *testing.T) {
     }
 }
 
-/* Schedule copies the caller's struct: the runner reads deadlines at every run and the generator re-reads fields at every generation, so post-registration mutation of the caller's own object must be inert. */
 func TestConfiguration_ScheduleCopiesTheCallersEntryConfig(t *testing.T) {
     entryConfig := &EntryConfig{
         Schedule: &Schedule{Minute: "5"},
@@ -108,7 +104,6 @@ func TestConfiguration_ScheduleCopiesTheCallersEntryConfig(t *testing.T) {
     }
 }
 
-/* Entries hands out a copy of the list, so a caller cannot reorder or extend the registry through the inspector. */
 func TestConfiguration_EntriesHandsOutACopyOfTheList(t *testing.T) {
     configuration := NewConfiguration().Schedule("job:one", &EntryConfig{Schedule: &Schedule{Minute: "*"}})
 
@@ -120,7 +115,6 @@ func TestConfiguration_EntriesHandsOutACopyOfTheList(t *testing.T) {
     }
 }
 
-/* the copy reaches past the list: ScheduledCommand and EntryConfig are exported structs with exported fields, so a caller writing through the pointer it was handed rewrote the registration itself — the very mutation Schedule takes a copy to prevent, arriving through the other door. */
 func TestConfiguration_EntriesHandsOutACopyOfEachRegistration(t *testing.T) {
     configuration := NewConfiguration().Schedule(
         "job:one",
@@ -162,7 +156,6 @@ func TestConfiguration_EntriesHandsOutACopyOfEachRegistration(t *testing.T) {
     }
 }
 
-/* two calls hand out two objects, so a consumer holding an earlier list cannot be reached through a later one either */
 func TestConfiguration_EntriesHandsOutADistinctObjectOnEveryCall(t *testing.T) {
     configuration := NewConfiguration().Schedule("job:one", &EntryConfig{Schedule: &Schedule{Minute: "*"}})
 
@@ -182,7 +175,6 @@ func TestConfiguration_EntriesHandsOutADistinctObjectOnEveryCall(t *testing.T) {
     }
 }
 
-/* the zone is declared once for the whole configuration and read back as it was written: it is a property of the schedule an operator reads, not of one job, and two entries meaning two different three-in-the-mornings is a crontab nobody can read. */
 func TestConfiguration_InTimezoneIsDeclaredOnceAndReadBack(t *testing.T) {
     configuration := NewConfiguration()
 
@@ -201,7 +193,6 @@ func TestConfiguration_InTimezoneIsDeclaredOnceAndReadBack(t *testing.T) {
     }
 }
 
-/* the zone survives the entry registrations that follow it, and does not travel into the entries themselves: Entries hands out copies all the way down, and a zone folded into them would be one declaration per job again. */
 func TestConfiguration_InTimezoneSurvivesTheEntriesRegisteredAfterIt(t *testing.T) {
     configuration := NewConfiguration().
         InTimezone("Europe/Bucharest").

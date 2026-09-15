@@ -54,7 +54,7 @@ func (instance *Manager) HasMessage(messageId string, domain string, locale stri
 }
 
 func (instance *Manager) lookup(messageId string, domain string, locale string) (string, string, bool) {
-    /* Normalize the default domain here; custom catalogs need not normalize it themselves. */
+
     if "" == domain {
         domain = DefaultDomain
     }

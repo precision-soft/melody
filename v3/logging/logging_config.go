@@ -40,7 +40,6 @@ func LoggingConfigurationFromModules(moduleConfigurations map[string]any) loggin
         return &loggingConfiguration{levelLabels: loggingcontract.DefaultLevelLabels()}
     }
 
-    /* the typed nil is refused above the assertion, which would otherwise accept it: the boot then dies inside the logger provider, naming service.logger instead of the configuration that was registered wrong */
     if nil == raw || true == internal.IsNilInterface(raw) {
         actualType := "<nil>"
         if nil != raw {

@@ -48,7 +48,6 @@ func TestContainer_Register_ReturnsErrorOnInvalidArguments(t *testing.T) {
 func TestContainer_MustRegister_PanicsOnInvalidArguments(t *testing.T) {
     serviceContainer := NewContainer()
 
-    /* an unqualified recover accepts any panic at all, including one thrown by a guard three lines away; the message is what names the refusal under test */
     testhelper.AssertPanicsWithError(
         t,
         func() {
@@ -63,7 +62,6 @@ func TestContainer_MustRegister_PanicsOnInvalidArguments(t *testing.T) {
     )
 }
 
-/* the refusal is SHADOWED: the contract gate underneath answers an untyped nil with the identical message and the identical context, so this test pins the verdict rather than the position of the guard. The scoped sibling below is not shadowed — that one spells "scoped service" — which is why the two are asserted separately. */
 func TestContainerRegistrar_UntypedNilProviderIsRefusedByName(t *testing.T) {
     serviceContainer := NewContainer()
 

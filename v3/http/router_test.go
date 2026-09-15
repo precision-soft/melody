@@ -688,13 +688,11 @@ func TestRouter_AllowHeaderRespectsMethodPolicy(t *testing.T) {
         return recorder.Header().Get("Allow")
     }
 
-    /* default policy advertises the synthetic OPTIONS and HEAD it actually honors */
     defaultAllow := allowFor(newGetOnlyKernel())
     if false == strings.Contains(defaultAllow, nethttp.MethodOptions) || false == strings.Contains(defaultAllow, nethttp.MethodHead) {
         t.Fatalf("default policy Allow must advertise OPTIONS and HEAD, got %q", defaultAllow)
     }
 
-    /* with both policy flags off, OPTIONS and HEAD in fact return 405, so Allow must not promise them */
     restricted := newGetOnlyKernel()
     restricted.options.MethodPolicy.AutomaticOptions = false
     restricted.options.MethodPolicy.HeadFallbackToGet = false
@@ -836,7 +834,6 @@ func TestRouter_MatchHandsOutACopyOfTheRouteAttributes(t *testing.T) {
     }
 }
 
-/* a pattern that names one parameter twice is ambiguous by construction: the extraction writes both segments under one map key, so the handler can only ever read one of the two values and cannot tell which, and the openapi document emitted for it is spec-invalid on duplicate path parameters. */
 func TestRouterRegistration_RefusesADuplicateParameterName(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
@@ -853,7 +850,6 @@ func TestRouterRegistration_RefusesADuplicateParameterName(t *testing.T) {
     )
 }
 
-/* a bare ":" binds nothing, so the segment it occupies was matched and then discarded in silence */
 func TestRouterRegistration_RefusesAParameterWithNoName(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
@@ -870,7 +866,6 @@ func TestRouterRegistration_RefusesAParameterWithNoName(t *testing.T) {
     )
 }
 
-/* an unnamed catch-all is the deliberate spelling of "swallow the rest and bind nothing" */
 func TestRouterRegistration_AcceptsAnUnnamedCatchAll(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -1018,7 +1013,6 @@ func TestRouterMatch_AnEncodedSegmentIsUnescapedForTheHandler(t *testing.T) {
     }
 }
 
-/* a route the registry declined is not put in the matching tree. The index the tree receives is the position of the last STORED route, so registering it for a declined duplicate gave the pattern's entry somebody else's route — the invariant every reader of the tree relies on, and the one the priority tie-break reads the index for. */
 func TestRouterAddRoute_ADeclinedDuplicateDoesNotEnterTheMatchingTree(t *testing.T) {
     router := NewRouter()
 
@@ -1052,7 +1046,6 @@ func TestRouterAddRoute_ADeclinedDuplicateDoesNotEnterTheMatchingTree(t *testing
     }
 }
 
-/* splitRequestPath unescapes per segment precisely so an encoded separator stays inside the value the client put it in — a parameter may legitimately carry a slash. The catch-all then rebuilt its value by joining the segments back on "/", which puts the encoded separator back where a segment boundary is: a handler reassembling a storage key or a proxy target could no longer tell the two requests apart. */
 func TestRouter_CatchAllKeepsAnEncodedSeparatorInsideItsSegment(t *testing.T) {
     router := NewRouter()
 

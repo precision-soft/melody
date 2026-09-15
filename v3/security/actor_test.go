@@ -34,7 +34,6 @@ func TestAuthenticatedTokenWithActorExposesActor(t *testing.T) {
     }
 }
 
-/* negative control: a plain authenticated token reports no actor. */
 func TestAuthenticatedTokenWithoutActorReportsAbsent(t *testing.T) {
     token := NewAuthenticatedToken("user-1", []string{"ROLE_USER"})
 
@@ -100,7 +99,6 @@ func TestActorFromTokenReadsActorAwareTokens(t *testing.T) {
     }
 }
 
-/* negative control: ActorFromToken on a non-actor-aware / anonymous token. */
 func TestActorFromTokenOnAnonymousToken(t *testing.T) {
     if _, present := ActorFromToken(NewAnonymousToken()); false != present {
         t.Fatal("expected no actor on an anonymous token")
@@ -111,7 +109,6 @@ func TestActorFromTokenOnAnonymousToken(t *testing.T) {
     }
 }
 
-/* a cyclic ActorData — an in-process caller can point Impersonator back into the chain through the exported field — must not recurse until the goroutine stack overflows; the depth bound truncates it. If unbounded this crashes the test binary rather than failing an assertion. */
 func TestNewActorFromDataBoundsCyclicImpersonatorChain(t *testing.T) {
     data := &securitycontract.ActorData{
         Identifier: "loop",
@@ -143,7 +140,6 @@ func (instance *selfImpersonatingActor) Impersonator() (securitycontract.Actor, 
     return instance, true
 }
 
-/* a cyclic Actor whose Impersonator() returns itself must not recurse until the stack overflows when serialized; the depth bound truncates the chain. */
 func TestActorToDataBoundsCyclicImpersonatorChain(t *testing.T) {
     data := ActorToData(&selfImpersonatingActor{})
     if nil == data {

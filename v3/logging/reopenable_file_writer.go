@@ -56,7 +56,7 @@ func (instance *ReopenableFileWriter) Write(payload []byte) (int, error) {
     return instance.file.Write(payload)
 }
 
-/* Reopen opens the path fresh and swaps the descriptor, closing the one it replaces. A path that cannot be opened keeps the current descriptor and reports the failure, because a journal writing into a renamed file is still a journal, while one whose descriptor was surrendered before the replacement existed is silence. The two failures it can report are different events and are not interchangeable: an open failure means the rotation did not happen, while a descriptor that refuses to close after the swap means it did — the writer is already on the fresh file and healthy. Only the second carries ErrRotatedDescriptorNotClosed, so a caller separates them with errors.Is instead of reading every non-nil result as a journal that failed to rotate. */
+/* Reopen opens a replacement before swapping and closing the old descriptor. Open failure retains the current writer. ErrRotatedDescriptorNotClosed means the swap succeeded but closing the old descriptor failed; the new writer remains active. */
 func (instance *ReopenableFileWriter) Reopen() error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -81,7 +81,7 @@ func (instance *ReopenableFileWriter) Reopen() error {
 
     closeErr := previousFile.Close()
     if nil != closeErr {
-        /* the swap above is already committed and is not rolled back: the fresh descriptor is the one the writer holds, so this reports a rotation that happened and a surrendered descriptor that reported a deferred write on its way out */
+
         return exception.NewError(
             "failed to close the descriptor replaced by the log rotation",
             map[string]any{
@@ -189,7 +189,7 @@ func (instance *ReopenableFileWriter) Close() error {
     }
 
     instance.closed = true
-    /* a watcher armed between the first look and this lock would outlive the writer; the re-check under the same lock that Arm takes makes that window observable */
+
     watcherArmed = instance.watcherArmed
     file := instance.file
 

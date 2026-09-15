@@ -8,7 +8,6 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
 )
 
-/* resolveRuntimePath anchors a relative runtime path to the project directory, so the one location the configuration names is the one location every working directory reads and writes. An absolute path passes through untouched, and so does the empty one — it means something else to each caller. */
 func resolveRuntimePath(projectDirectory string, path string) string {
     if "" == path {
         return path

@@ -97,7 +97,7 @@ type Customer struct {
 ```
 
 The marker parameterizes the generic column types `EncryptedStringFor[R]` and
-`EncryptedDeterministicStringFor[R]`, so the binding lives in the Go type — the only channel available, because `database/sql` gives `Value()`/`Scan()` no context. Compartments are isolated: the `crm` cipher can never decrypt a `billing` ciphertext, and key rotation inside one compartment keeps working through the key id embedded in each ciphertext. The plain `EncryptedString` keeps using the default cipher.
+`EncryptedDeterministicStringFor[R]`, so the binding lives in the Go type — the only channel available, because `database/sql` gives `Value()`/`Scan()` no context. Isolation requires distinct keys in each compartment. Names select a registry entry; they are not authenticated metadata in the ciphertext. Compartments sharing the same key and key id can decrypt each other’s ciphertext. Key rotation uses the key id embedded in each ciphertext. The plain `EncryptedString` keeps using the default cipher.
 
 Two designs were considered and rejected: per-column key ids over one merged `KeyProvider` (the compartments stay merged — either context can decrypt the other's rows, exactly the isolation loss the feature exists to prevent) and a cipher per `bunorm.Manager` (a `driver.Valuer` has no manager context; bun query hooks would miss raw SQL paths).
 
@@ -179,3 +179,7 @@ Registration is **skipped only when `Database`, `DatabaseFactory` and `Cipher` a
 ## Testing / dev
 
 `encrypt.NewFakeCipher()` is an identity cipher (no confidentiality) for tests and local development. Never install it in production.
+
+### Formatting boundaries
+
+Redaction applies when `fmt` invokes the value's `String` or `Format` method. It does not protect a value nested in an unexported field of another struct: reflection can print that field without invoking its methods. Invalid uses of `%p` or `%w` can also include the underlying value in a formatting-error message. Use supported verbs on the encrypted value directly, and do not log containing structs or key material. This formatting policy is not an access-control boundary; explicit conversions still expose plaintext.

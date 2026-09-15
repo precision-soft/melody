@@ -80,13 +80,11 @@ func TestCreateCommand_MissingNameFails(t *testing.T) {
         t.Fatalf("error = %q, want the missing-name message", runErr.Error())
     }
 
-    /* the command no longer pre-prints the failure it returns: the cli runner's [error] line and the full log record already report it */
     if true == strings.Contains(rendered, "ERROR:") {
         t.Fatalf("the returned failure must not be pre-printed by the command, got: %q", rendered)
     }
 }
 
-/* the machine document names the argument the command ran on: built without the arguments it answered an empty list for every command, db:create included, whose one argument is the migration the document reports on */
 func TestCreateCommand_TheMachineDocumentCarriesTheArguments(t *testing.T) {
     database, _ := newFakeBunDatabase()
     runtimeInstance := newRuntimeWithDatabase(t, database)
@@ -111,7 +109,6 @@ func TestCreateCommand_TheMachineDocumentCarriesTheArguments(t *testing.T) {
     }
 }
 
-/* the name is held to the generator's grammar before it reaches bun or the database: a parent reference or a separator in it names a path outside the migrations directory, and the confinement must be this command's rather than the pinned dependency's */
 func TestCreateCommand_RefusesANameOutsideTheGrammarBeforeTouchingAnything(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     runtimeInstance := newRuntimeWithDatabase(t, database)
@@ -146,7 +143,6 @@ func TestCreateCommand_FormatMigrationFilesSurvivesANilFile(t *testing.T) {
     }
 }
 
-/* a directory fsync that fails AFTER the rename leaves a whole file in place: the run succeeds with a warning naming what could not be guaranteed, because a failure verdict sent the operator to run the command again, which created a second migration under a new timestamp beside a perfectly good first one */
 func TestCreateCommand_ADirectorySyncFailureAfterTheRenameIsAWarningNotAFailure(t *testing.T) {
     previous := syncDirectoryAfterRename
     t.Cleanup(func() { syncDirectoryAfterRename = previous })

@@ -16,7 +16,6 @@ import (
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
-/* the two decisions answer separately and each records that it was the one asked: a stub that returns one field for both cannot tell the listener's DecideAll apart from a DecideAny, and every rule in this file carrying a single attribute means the two agree on the input as well. The recorded attributes are the other half — the listener has to hand the rule's whole set to the decision, not the first of them. */
 type accessControlListenerTestAccessDecisionManager struct {
     decideAllErr     error
     decideAnyErr     error
@@ -239,7 +238,6 @@ func TestAccessControlListener_WhenNoSecurityContext_EmitsAuthorizationDeniedAnd
     }
 }
 
-/* the listener reads the spelling the router routes: "/public%2F" is the one-segment resource "public/" for the router, served through the protected catch-all, and the decoded "/public/" it used to read was folded onto the exact public rule of "/public" — an anonymous request served the protected handler. Read as routed, the request is claimed by the closed rule and refused */
 func TestAccessControlListener_ReadsThePathTheRouterRoutes(t *testing.T) {
     for path, denied := range map[string]bool{
         "/public":       false,
@@ -289,7 +287,6 @@ func TestAccessControlListener_ReadsThePathTheRouterRoutes(t *testing.T) {
     }
 }
 
-/* the security context is PUT on the runtime here, carrying a nil token. Without that the listener never reaches the token check at all — it answers from the missing-context branch above, which is a different refusal for a different reason, and the whole nil-token block could be deleted with this test still green. The reason is what tells the two apart, so it is what this asserts. */
 func TestAccessControlListener_WhenSecurityContextHasNilToken_EmitsAuthorizationDeniedAndSets401(t *testing.T) {
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
@@ -565,7 +562,6 @@ func TestAccessControlListener_WhenEntryPointReturnsNoResponse_FailsClosed(t *te
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
 
-    /* an entry point that answers no response must not let the request through: the listener falls through to a fail-closed 401 rather than leaving the response nil, which the kernel reads as "no decision" and proceeds to the handler */
     entryPoint := &accessControlListenerTestEntryPoint{
         response: nil,
         err:      nil,
@@ -599,7 +595,6 @@ func TestAccessControlListener_WhenEntryPointReturnsNoResponse_FailsClosed(t *te
     }
 }
 
-/* the entry point is the application's, so a typed nil of a concrete response type is the shape a hand-written "no response" takes; carried through a bare nil check it is normalized back to nil by SetResponse and the unauthenticated request is served — the guard must read it through IsNilInterface and fall through to the fail-closed 401 */
 func TestAccessControlListener_WhenTheEntryPointAnswersATypedNilResponse_FailsClosed(t *testing.T) {
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
@@ -637,7 +632,6 @@ func TestAccessControlListener_WhenTheEntryPointAnswersATypedNilResponse_FailsCl
     }
 }
 
-/* the handler is the application's, so a typed nil of a concrete response type is the shape a hand-written "no response" takes; through a bare nil check it reads as a live response, SetResponse normalizes it to nil, and the DENIED request is served as granted — the guard must read it through IsNilInterface and answer through the fail-closed denial path instead */
 func TestAccessControlListener_ADeniedHandlerAnsweringATypedNilIsRefusedNotServed(t *testing.T) {
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
@@ -690,7 +684,6 @@ func TestAccessControlListener_WhenExceptionProducesNoResponse_FailsClosed(t *te
     registry := NewFirewallRegistry(NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil))
     RegisterKernelAccessControlListener(kernel, registry)
 
-    /* no kernel.exception listener produces a response, so exceptionEvent.Response() is nil: the listener must write a fail-closed response rather than the nil the kernel reads as "no decision" */
     request := newSecurityTestRequest("GET", "/admin", nil, runtimeInstance)
     requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, request)
 
@@ -704,9 +697,6 @@ func TestAccessControlListener_WhenExceptionProducesNoResponse_FailsClosed(t *te
     }
 }
 
-/* A nil pointer of a request type is a non-nil interface, so the bare comparison this replaces carried it
-past the gate and into the path read below, which dereferences it — inside a kernel listener, where no
-recover covers it. The listener must leave such an event alone, not crash the request. */
 func TestAccessControlListener_ATypedNilRequestIsLeftAlone(t *testing.T) {
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
@@ -735,7 +725,6 @@ func TestAccessControlListener_ATypedNilRequestIsLeftAlone(t *testing.T) {
     }
 }
 
-/* the listener asks for ALL of a rule's attributes, and nothing in this file could tell that apart from ANY: the stub answered one field for both decisions and every rule carried a single attribute, so DecideAny(token, nil, nil) would have satisfied the whole suite. Here the two decisions disagree — all refuses, any accepts — and the rule carries two attributes of which the token holds one, which is exactly the input on which the semantics differ. */
 func TestAccessControlListener_TheDecisionIsDecideAllOverTheWholeAttributeSet(t *testing.T) {
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
@@ -806,7 +795,6 @@ func TestAccessControlListener_TheDecisionIsDecideAllOverTheWholeAttributeSet(t 
     }
 }
 
-/* TestRegisterKernelAccessControlListener_ADispatcherWithoutTheCapabilityIsNamed pins the branch that used to be silent. The required-listener mark is what makes a listener stopping propagation ahead of access control fail the dispatch closed instead of letting the request reach its handler unchecked; a dispatcher that cannot take the mark disarms that guarantee for the whole process, and the framework's own event adapter refuses the very same condition with a panic rather than swallowing it. The record goes to the emergency channel because this runs at boot, before the configured logger is resolvable. */
 func TestRegisterKernelAccessControlListener_ADispatcherWithoutTheCapabilityIsNamed(t *testing.T) {
     readEnd, writeEnd, pipeErr := os.Pipe()
     if nil != pipeErr {
@@ -847,7 +835,6 @@ func TestRegisterKernelAccessControlListener_ADispatcherWithoutTheCapabilityIsNa
     }
 }
 
-/* capabilitylessDispatcher is a dispatcher of the application's own: it forwards every dispatch through the published contract and carries no MarkListenerRequired, which is exactly what an implementation written against the contract looks like */
 type capabilitylessDispatcher struct {
     eventcontract.EventDispatcher
 }

@@ -324,7 +324,6 @@ func readResponseBody(t *testing.T, response httpcontract.Response) string {
     return string(data)
 }
 
-/* the validationErrors context key is the public half of an http exception's context: BindJsonAndValidate attaches the per-field validation errors under it, and without this the client of a failed validation received only the flat message */
 func TestExceptionListener_ValidationErrorsContextReachesTheJsonBody(t *testing.T) {
     clockInstance := clock.NewSystemClock()
     dispatcher := event.NewEventDispatcher(clockInstance)
@@ -365,7 +364,6 @@ func TestExceptionListener_ValidationErrorsContextReachesTheJsonBody(t *testing.
     }
 }
 
-/* an http exception without the validationErrors key keeps today's body: the exposure is opt-in per context key, not a blanket context dump */
 func TestExceptionListener_ContextWithoutValidationErrorsKeyStaysPrivate(t *testing.T) {
     clockInstance := clock.NewSystemClock()
     dispatcher := event.NewEventDispatcher(clockInstance)
@@ -395,7 +393,6 @@ func TestExceptionListener_ContextWithoutValidationErrorsKeyStaysPrivate(t *test
 
     body := readResponseBody(t, response)
 
-    /* the body reader is allowed to be absent, and the helper answers "" for that, so a negative assertion on its own reports success for a response that carries nothing at all. The flat message is what says the envelope was rendered and the refusal below is a real one. */
     if false == strings.Contains(body, "bad request") {
         t.Fatalf("expected the flat message to be rendered, got %s", body)
     }
@@ -405,7 +402,6 @@ func TestExceptionListener_ContextWithoutValidationErrorsKeyStaysPrivate(t *test
     }
 }
 
-/* the standardized error envelope names the answer inside the body the way the header names it outside: status and requestId beside the error object, so every consumer of a framework error reads one shape */
 func TestExceptionListener_TheErrorEnvelopeCarriesStatusRequestIdAndErrorObject(t *testing.T) {
     clockInstance := clock.NewSystemClock()
     dispatcher := event.NewEventDispatcher(clockInstance)
@@ -454,7 +450,6 @@ func TestExceptionListener_TheErrorEnvelopeCarriesStatusRequestIdAndErrorObject(
     }
 }
 
-/* errors.As matches the dynamic type of a typed nil and reports it as found, so reading the status straight off the result dereferenced it; the package's own door refuses the typed nil with the plain one, and the same call three lines below already used it. */
 func TestExceptionListener_AnswersATypedNilHttpExceptionWithoutDereferencingIt(t *testing.T) {
     clockInstance := clock.NewSystemClock()
     dispatcher := event.NewEventDispatcher(clockInstance)
@@ -662,7 +657,6 @@ func TestExceptionListener_A5xxKeepsTheErrorLevel(t *testing.T) {
     }
 }
 
-/* a struct tag naming a rule that does not exist is a program failure wearing a 400: it refuses every request that route will ever serve, and no input a client can send produces it. At warning it sat in the dashboard among the users who mistyped their address, with the route permanently broken and nothing saying so. */
 func TestExceptionListener_AValidationWiringFaultIsRecordedAtErrorRatherThanAsARoutineFourHundred(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
     capture := &exceptionListenerCaptureLogger{}
@@ -690,7 +684,6 @@ func TestExceptionListener_AValidationWiringFaultIsRecordedAtErrorRatherThanAsAR
     }
 }
 
-/* a genuine field refusal keeps the warning level a deliberate 4xx earns: raising every 400 would put the users who mistyped their address back among the incidents, which is the mirror of the defect. */
 func TestExceptionListener_AGenuineFieldRefusalStaysAWarning(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
     capture := &exceptionListenerCaptureLogger{}
@@ -718,7 +711,6 @@ func TestExceptionListener_AGenuineFieldRefusalStaysAWarning(t *testing.T) {
     }
 }
 
-/* the context of a wiring fault names the developer's typo, the parameters the constraint refused and its reason: the operator's material, not the client's. It stays in the record and leaves the response body. */
 func TestExceptionListener_AWiringFaultKeepsItsContextInTheRecordAndOutOfTheResponse(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
     capture := &exceptionListenerCaptureLogger{}
@@ -752,7 +744,6 @@ func TestExceptionListener_AWiringFaultKeepsItsContextInTheRecordAndOutOfTheResp
         t.Fatalf("expected the code to still name the refusal, got %s", body)
     }
 
-    /* a genuine field refusal keeps the context the client needs to correct its request */
     if false == strings.Contains(body, "bound") {
         t.Fatalf("expected an ordinary validation error to keep its context, got %s", body)
     }
@@ -772,7 +763,6 @@ func TestExceptionListener_AWiringFaultKeepsItsContextInTheRecordAndOutOfTheResp
     }
 }
 
-/* an application that put its own shape under the public key owns it: the projection hands back what it cannot read rather than dropping it. */
 func TestExceptionListener_AForeignValidationErrorsPayloadIsHandedBackUntouched(t *testing.T) {
     foreign := []map[string]string{{"field": "email", "detail": "custom"}}
 
@@ -781,7 +771,6 @@ func TestExceptionListener_AForeignValidationErrorsPayloadIsHandedBackUntouched(
     }
 }
 
-/* the debug-mode rendering of the error text runs under the containment its siblings received: a panic value whose own Error() dereferences exactly the nil that produced the panic raised a second panic while the listener was rendering the first, and the dispatcher absorbed it one level up — at the price of the whole debug payload, so the client received the kernel's fallback body instead of the degraded page the listener exists to serve. */
 func TestExceptionListener_DebugModeOn_APanickingErrorTextIsContained(t *testing.T) {
     clockInstance := clock.NewSystemClock()
     dispatcher := event.NewEventDispatcher(clockInstance)
@@ -812,7 +801,6 @@ func TestExceptionListener_DebugModeOn_APanickingErrorTextIsContained(t *testing
     }
 }
 
-/* the same containment covers the cause the debug payload carries: the cause is a second error, rendered by a second call, and only one of the two being contained leaves the same hole. */
 func TestExceptionListener_DebugModeOn_APanickingCauseTextIsContained(t *testing.T) {
     clockInstance := clock.NewSystemClock()
     dispatcher := event.NewEventDispatcher(clockInstance)
@@ -849,7 +837,6 @@ func TestExceptionListener_DebugModeOn_APanickingCauseTextIsContained(t *testing
     }
 }
 
-/* nilMapPanickingError is the shape a recovery boundary actually meets: an error whose Error() dereferences the very nil that produced the panic */
 type nilMapPanickingError struct {
     values map[string]string
 }

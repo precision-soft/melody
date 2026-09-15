@@ -17,7 +17,7 @@ func NewRouteRegistry() *RouteRegistry {
     }
 }
 
-/* the kinds a route collision is recorded under: one for two routes indistinguishable at dispatch, one for two distinct routes claiming the same name */
+
 const (
     BootCollisionKindHttpRoute     = "httpRoute"
     BootCollisionKindHttpRouteName = "httpRouteName"
@@ -27,9 +27,9 @@ const (
 type RouteRegistry struct {
     routes      []route
     routeByName map[string]route
-    /* keyed by everything the matcher discriminates on: two routes behind one key are indistinguishable at dispatch, so the later one could never be selected — the tie falls to the first registered — and would shadow silently. Routes that differ in any discriminator (host, methods, schemes, locales, requirements, priority) are legitimately distinct and stay accepted. */
+
     routeByDispatchIdentity map[string]struct{}
-    /* armed only for the boot window, by the application that owns the aggregated collision report; a registry serving outside that window keeps the immediate refusal */
+
     bootCollisionRecorder func(kind string, name string)
 }
 
@@ -67,9 +67,8 @@ func (instance *RouteRegistry) RouteDefinitionForUrlGeneration(routeName string)
     return NewUrlGenerationRouteDefinition(routeValue), true
 }
 
-/* registerRoute answers whether the route was stored. It is not stored when an aggregating boot records it as a dispatch duplicate instead of panicking over it, and the caller needs that answer: the index it puts in the matching tree is the position of the last stored route, so a route the registry declined left the tree pointing an entry at somebody else's route. */
 func (instance *RouteRegistry) registerRoute(routeValue route) bool {
-    /* an exact dispatch duplicate is refused before anything is stored: registration was the single channel with no collision handling — services, parameters and cli commands all report duplicates — and the second registration is unreachable by construction, which is precisely the silent kind of shadowing an operator cannot see */
+
     dispatchIdentity := routeDispatchIdentity(routeValue)
     if _, exists := instance.routeByDispatchIdentity[dispatchIdentity]; true == exists {
         if nil != instance.bootCollisionRecorder {
@@ -99,7 +98,7 @@ func (instance *RouteRegistry) registerRoute(routeValue route) bool {
     }
 
     if _, exists := instance.routeByName[routeValue.name]; true == exists {
-        /* the route itself stays registered — it is distinct at dispatch, only its name collides — while the name keeps pointing at the first claimant */
+
         if nil != instance.bootCollisionRecorder {
             instance.bootCollisionRecorder(BootCollisionKindHttpRouteName, routeValue.name)
 
@@ -122,7 +121,6 @@ func (instance *RouteRegistry) registerRoute(routeValue route) bool {
     return true
 }
 
-/* routeCollisionName renders the route for the aggregated report: the dispatch identity itself is a NUL-joined machine key, so the report carries the human spelling — the methods and the pattern — that names the route in the application's own code. */
 func routeCollisionName(routeValue route) string {
     methods := append([]string{}, routeValue.methods...)
     sort.Strings(methods)
@@ -134,7 +132,6 @@ func routeCollisionName(routeValue route) string {
     return strings.Join(methods, ",") + " " + routeValue.pattern
 }
 
-/* routeDispatchIdentity renders the parts of a route the matcher can distinguish. The name and the defaults stay out on purpose: neither participates in matching, so two routes differing only there are still the same route at dispatch. */
 func routeDispatchIdentity(routeValue route) string {
     methods := append([]string{}, routeValue.methods...)
     sort.Strings(methods)

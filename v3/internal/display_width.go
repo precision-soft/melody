@@ -4,7 +4,6 @@ import (
     "unicode"
 )
 
-/* wideRuneRangeTable holds the principal East Asian Wide and Fullwidth blocks — CJK, Hangul, Kana, the fullwidth forms, and the emoji planes terminals render at two cells. It is deliberately the principal blocks and not the full Unicode East-Asian-Width database: ambiguous-width characters count as narrow, which is the convention terminals outside legacy CJK locales follow, and the blocks below cover what a table cell realistically carries. */
 var wideRuneRangeTable = &unicode.RangeTable{
     R16: []unicode.Range16{
         {Lo: 0x1100, Hi: 0x115F, Stride: 1},
@@ -43,7 +42,6 @@ var wideRuneRangeTable = &unicode.RangeTable{
     },
 }
 
-/* zeroWidthRuneRangeTable holds what occupies no cell of its own: the Hangul jungseong and jongseong jamo, which compose into the syllable that precedes them. The combining marks and the format characters are matched by category below rather than listed here. */
 var zeroWidthRuneRangeTable = &unicode.RangeTable{
     R16: []unicode.Range16{
         {Lo: 0x1160, Hi: 0x11FF, Stride: 1},
@@ -68,7 +66,7 @@ func RuneDisplayWidth(value rune) int {
     return 1
 }
 
-/* DisplayWidth answers the terminal cells the string occupies — the measure a table's column arithmetic needs, where a rune count reads a CJK ideogram as one cell and renders a column two cells short of where it measured. */
+/* DisplayWidth returns terminal cell width, including wide characters. */
 func DisplayWidth(value string) int {
     width := 0
     for _, runeValue := range value {

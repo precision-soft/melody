@@ -7,7 +7,6 @@ import (
     containercontract "github.com/precision-soft/melody/v3/container/contract"
 )
 
-/* the two listers are what a collection is gathered through, and both must refuse anything that is not an interface: a concrete type reaches Implements() as a question with no answer, and a nil one would panic on the first Kind() call */
 func TestTypeListers_RefuseAnythingThatIsNotAnInterface(t *testing.T) {
     serviceContainer := newCollectionContainer(t).(*container)
 
@@ -32,7 +31,6 @@ func TestTypesImplementing_ListsOnlyTheRegisteredTypesSatisfyingTheInterface(t *
         t.Fatalf("expected the two handlers, got %v", types)
     }
 
-    /* registration order is a map iteration away from being arbitrary, and a collection that reorders between runs turns into an unreproducible bug in whatever consumes it */
     if types[0].String() > types[1].String() {
         t.Fatalf("expected the types in a stable order, got %v", types)
     }
@@ -42,7 +40,6 @@ func TestTypesImplementing_ListsOnlyTheRegisteredTypesSatisfyingTheInterface(t *
     }
 }
 
-/* a type registered under several names is the multi-instance pattern — admitted by the lenient type registration, since the strict one refuses the second name outright — and the reference lister must contribute EVERY name, where a by-type resolution would refuse the ambiguity */
 func TestReferencesImplementing_ContributesOneReferencePerRegisteredName(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -67,7 +64,6 @@ func TestReferencesImplementing_ContributesOneReferencePerRegisteredName(t *test
     }
 }
 
-/* the order a collection is dispatched in: descending priority first, then type, then name — and the name is what breaks a tie between two references of the SAME type, which is where map iteration would otherwise leak into the result */
 func TestSortServiceReferences_OrdersByPriorityThenTypeThenName(t *testing.T) {
     invoiceType := reflect.TypeOf(&invoiceHandler{})
     auditType := reflect.TypeOf(&auditHandler{})

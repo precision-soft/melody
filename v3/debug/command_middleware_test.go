@@ -347,7 +347,6 @@ func TestMiddlewareCommand_ZeroValueProvider_ReturnsANamedError(t *testing.T) {
     }
 }
 
-/* the default listing is a description: nothing is built, so the command has no side effect in the console process that asks — the build is the explicit flag's to run */
 func TestMiddlewareCommand_DefaultListingRunsNoBuild(t *testing.T) {
     buildRuns := 0
 
@@ -392,7 +391,6 @@ func TestMiddlewareCommand_DefaultListingRunsNoBuild(t *testing.T) {
     }
 }
 
-/* an inactive definition is part of the answer: the reason a middleware is off is exactly what the operator lists the pipeline to learn */
 func TestMiddlewareCommand_ListsTheInactiveEntriesWithTheirReason(t *testing.T) {
     command := NewMiddlewareCommand(
         func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
@@ -429,7 +427,6 @@ func TestMiddlewareCommand_ListsTheInactiveEntriesWithTheirReason(t *testing.T) 
     }
 }
 
-/* a factory that panics under --build answers as a rendered failure: the command that asks about the chain must survive the chain's worst answer */
 func TestMiddlewareCommand_BuildRecoversAPanickingFactory(t *testing.T) {
     command := NewMiddlewareCommand(
         func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
@@ -451,7 +448,6 @@ func TestMiddlewareCommand_BuildRecoversAPanickingFactory(t *testing.T) {
     }
 }
 
-/* a pipeline that cannot be assembled — a cycle, a missing reference — refuses the description with the same error the build answers, rendered instead of thrown */
 func TestMiddlewareCommand_RendersTheDescriptionRefusal(t *testing.T) {
     command := NewMiddlewareCommand(
         func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
@@ -518,7 +514,6 @@ func TestMiddlewareCommand_SameNameInactiveEntriesKeepTheReasonOrder(t *testing.
     }
 }
 
-/* the reason appeared and disappeared with the row: omitempty dropped it from every active middleware, so a consumer keying on it could not tell an active entry from a malformed document, and the three shapes this one struct serves — described-active, described-inactive, built — differed in their key set as well as their values. */
 func TestMiddlewareCommand_TheReasonKeyIsPresentOnEveryRow(t *testing.T) {
     rendered, runErr := runDebugCommand(
         NewMiddlewareCommand(

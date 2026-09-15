@@ -7,29 +7,8 @@ import (
     "strings"
     "time"
     "testing"
-
     containercontract "github.com/precision-soft/melody/v3/container/contract"
 )
-
-type scopeContextProbe struct {
-    plainCalls int
-    contexts   []context.Context
-    closeErr   error
-    panicValue any
-}
-
-func (instance *scopeContextProbe) Close() error {
-    instance.plainCalls++
-    return nil
-}
-
-func (instance *scopeContextProbe) CloseWithContext(closeContext context.Context) error {
-    instance.contexts = append(instance.contexts, closeContext)
-    if nil != instance.panicValue {
-        panic(instance.panicValue)
-    }
-    return instance.closeErr
-}
 
 func TestScopeClose_PrefersContextCloser(t *testing.T) {
     serviceContainer := NewContainer()
@@ -94,15 +73,6 @@ func TestScopeCloseWithContext_PreservesCallerContextAndEvictedInstances(t *test
             }
         })
     }
-}
-
-type scopeLegacyContextControl struct {
-    calls int
-}
-
-func (instance *scopeLegacyContextControl) Close() error {
-    instance.calls++
-    return nil
 }
 
 func TestScopeCloseWithContext_ContinuesAfterFailure(t *testing.T) {

@@ -44,7 +44,7 @@ func (instance *JsonDirectoryLoader) Load() ([]translationcontract.Catalog, erro
 
         domain, locale, ok := parseCatalogFileName(name)
         if false == ok {
-            /* Invalid JSON filenames are errors so a typo cannot silently omit a translation catalog. */
+
             return nil, exception.NewError(
                 "translation file name does not match <domain>.<locale>.json",
                 map[string]any{"file": name, "directory": instance.directory},

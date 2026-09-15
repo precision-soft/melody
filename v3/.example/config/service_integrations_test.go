@@ -9,7 +9,6 @@ import (
     melodylockcontract "github.com/precision-soft/melody/v3/lock/contract"
 )
 
-/* without an archive the locker under the archive's name is the in-process one: the in-process archive then has a producer, where a missing locker made the refresh skip the write on every run and the history door answer an empty list for the life of the process */
 func TestRegisterArchiveLockerService_HandsTheInProcessLockerWhenNoArchiveIsWired(t *testing.T) {
     moduleInstance := &Module{}
     serviceContainer := melodycontainer.NewContainer()

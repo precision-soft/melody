@@ -238,7 +238,6 @@ func TestRunQueriesWithOption_EmptySetWarnsInsteadOfReportingSuccess(t *testing.
     }
 }
 
-/* RunQueries reads the installed process default when the migration passes no option of its own: the parsed --no-color posture reaches the per-query lines whose signature bun fixes at (ctx, db). */
 func TestRunQueries_ReadsTheInstalledProcessDefault(t *testing.T) {
     t.Cleanup(func() {
         processRunnerOption.Store(nil)
@@ -261,7 +260,6 @@ func TestRunQueries_ReadsTheInstalledProcessDefault(t *testing.T) {
     }
 }
 
-/* the failure rendering hands the terminal three foreign strings — the query name, the driver's error text and the statement — so each is escaped visibly, and the statement alone keeps its real line breaks, which are the readability of the query block. */
 func TestMigrationPrinter_PrintFailedEscapesForeignTextButKeepsTheQueryLines(t *testing.T) {
     buffer := &bytes.Buffer{}
     printer := &migrationPrinter{writer: buffer, noColor: true}
@@ -296,7 +294,6 @@ func TestMigrationPrinter_PrintFailedEscapesForeignTextButKeepsTheQueryLines(t *
     }
 }
 
-/* the empty and the success lines of a run carry the migration name, which the runner did not write, and they were the two lines of the printer that let it through as sent while the executing, completed and failed lines escaped it; the name is escaped on all five, in both colour modes */
 func TestMigrationPrinter_EscapesTheMigrationNameOnTheEmptyAndSuccessLines(t *testing.T) {
     for _, noColor := range []bool{true, false} {
         buffer := &bytes.Buffer{}
@@ -317,7 +314,6 @@ func TestMigrationPrinter_EscapesTheMigrationNameOnTheEmptyAndSuccessLines(t *te
     }
 }
 
-/* the option a command puts on the context is the one a run prints under, ahead of the process-wide fallback: the fallback is one value for the whole process, and a run reading it printed under whichever command had installed it last */
 func TestRunQueries_ReadsTheOptionCarriedByTheContextBeforeTheProcessDefault(t *testing.T) {
     t.Cleanup(func() {
         processRunnerOption.Store(nil)
@@ -342,7 +338,6 @@ func TestRunQueries_ReadsTheOptionCarriedByTheContextBeforeTheProcessDefault(t *
     }
 }
 
-/* a command puts its posture back on the way out, and only when its own value is still the live one: the value installed for the run does not survive the run, and a command that finished while a later one still runs leaves that one's value where it is */
 func TestRestoreDefaultRunnerOption_PutsBackOnlyOverItsOwnValue(t *testing.T) {
     t.Cleanup(func() {
         processRunnerOption.Store(nil)
@@ -367,11 +362,6 @@ func TestRestoreDefaultRunnerOption_PutsBackOnlyOverItsOwnValue(t *testing.T) {
     }
 
     restoreDefaultRunnerOption(secondInstalled, secondPrevious)
-    if firstInstalled != processRunnerOption.Load() {
-        t.Fatal("expected the second command's restore to put back what it found, the first command's value")
-    }
-
-    restoreDefaultRunnerOption(firstInstalled, firstPrevious)
     if &host != resolveDefaultRunnerOption().Writer {
         t.Fatalf("expected the host's own value back once every command restored, got %v", resolveDefaultRunnerOption().Writer)
     }
@@ -400,4 +390,44 @@ func TestRunnerEscapesUntrustedNamesOnEveryStep(t *testing.T) {
             }
         })
     }
+}
+
+func TestRestoreDefaultRunnerOption_AllCompletionOrders(t *testing.T) {
+    orders := [][]int{{0, 1, 2}, {0, 2, 1}, {1, 0, 2}, {1, 2, 0}, {2, 0, 1}, {2, 1, 0}}
+    for _, order := range orders {
+        var writers [4]bytes.Buffer
+        SetDefaultRunnerOption(RunnerOption{Writer: &writers[0]})
+        var installed, previous [3]*RunnerOption
+        for index := range installed {
+            installed[index], previous[index] = swapDefaultRunnerOption(RunnerOption{Writer: &writers[index+1]})
+        }
+        var completed [3]bool
+        for _, index := range order {
+            completed[index] = true
+            restoreDefaultRunnerOption(installed[index], previous[index])
+            expected := 0
+            for candidate := range completed {
+                if false == completed[candidate] {
+                    expected = candidate + 1
+                }
+            }
+            if &writers[expected] != resolveDefaultRunnerOption().Writer {
+                t.Fatalf("order %v after %d: expected writer %d", order, index, expected)
+            }
+        }
+    }
+    SetDefaultRunnerOption(DefaultRunnerOption())
+}
+
+func TestRestoreDefaultRunnerOption_PreservesNewHostDefault(t *testing.T) {
+    var first, second, host bytes.Buffer
+    SetDefaultRunnerOption(RunnerOption{Writer: &first})
+    installed, previous := swapDefaultRunnerOption(RunnerOption{Writer: &second})
+    SetDefaultRunnerOption(RunnerOption{Writer: &host})
+    restoreDefaultRunnerOption(installed, previous)
+    restoreDefaultRunnerOption(installed, previous)
+    if &host != resolveDefaultRunnerOption().Writer {
+        t.Fatal("command completion replaced the newer host default")
+    }
+    SetDefaultRunnerOption(DefaultRunnerOption())
 }

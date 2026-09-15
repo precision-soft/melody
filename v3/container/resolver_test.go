@@ -5,74 +5,12 @@ import (
     "reflect"
     "strings"
     "testing"
-
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     alpha "github.com/precision-soft/melody/v3/container/internal/collisionalpha/contract"
     beta "github.com/precision-soft/melody/v3/container/internal/collisionbeta/contract"
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/internal/testhelper"
 )
-
-type resolverTestService struct {
-    value string
-}
-
-type resolverTestResolver struct {
-    servicesByName map[string]any
-    servicesByType map[reflect.Type]any
-}
-
-func (instance *resolverTestResolver) Get(serviceName string) (any, error) {
-    value, exists := instance.servicesByName[serviceName]
-    if false == exists {
-        return nil, errors.New("service missing")
-    }
-
-    return value, nil
-}
-
-func (instance *resolverTestResolver) MustGet(serviceName string) any {
-    value, err := instance.Get(serviceName)
-    if nil != err {
-        exception.Panic(
-            exception.FromError(err),
-        )
-    }
-
-    return value
-}
-
-func (instance *resolverTestResolver) GetByType(targetType reflect.Type) (any, error) {
-    value, exists := instance.servicesByType[targetType]
-    if false == exists {
-        return nil, errors.New("service missing")
-    }
-
-    return value, nil
-}
-
-func (instance *resolverTestResolver) MustGetByType(targetType reflect.Type) any {
-    value, err := instance.GetByType(targetType)
-    if nil != err {
-        exception.Panic(
-            exception.FromError(err),
-        )
-    }
-
-    return value
-}
-
-func (instance *resolverTestResolver) Has(serviceName string) bool {
-    _, exists := instance.servicesByName[serviceName]
-
-    return true == exists
-}
-
-func (instance *resolverTestResolver) HasType(targetType reflect.Type) bool {
-    _, exists := instance.servicesByType[targetType]
-
-    return true == exists
-}
 
 func TestFromResolver_HappyPath(t *testing.T) {
     resolver := &resolverTestResolver{
@@ -229,7 +167,6 @@ func TestFromResolverByType_TypeMismatch(t *testing.T) {
 func TestContainer_MustFromResolver_PanicsWhenMissing(t *testing.T) {
     serviceContainer := NewContainer()
 
-    /* an unqualified recover accepts any panic at all, including one thrown by a guard three lines away; the message is what names the refusal under test */
     testhelper.AssertPanicsWithError(
         t,
         func() {
@@ -239,8 +176,6 @@ func TestContainer_MustFromResolver_PanicsWhenMissing(t *testing.T) {
     )
 }
 
-var _ containercontract.Resolver = (*resolverTestResolver)(nil)
-
 func TestResolution_SameStringTypesFromDifferentPackagesDoNotAlias(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -249,7 +184,6 @@ func TestResolution_SameStringTypesFromDifferentPackagesDoNotAlias(t *testing.T)
     }, WithTypeRegistration(true))
 
     MustRegister(serviceContainer, "bus.alpha", func(resolver containercontract.Resolver) (*alpha.Bus, error) {
-        /* the alpha provider resolves the beta bus by type: both nodes key on "contract.Bus" through String(), so a shared key would flag a false cycle here */
         betaBus, betaErr := FromResolverByType[*beta.Bus](resolver)
         if nil != betaErr {
             return nil, betaErr
@@ -279,38 +213,6 @@ func TestResolution_SameStringTypesFromDifferentPackagesDoNotAlias(t *testing.T)
     if closeErr := serviceContainer.Close(); nil != closeErr {
         t.Fatalf("expected the container with same-string types to close cleanly, got %v", closeErr)
     }
-}
-
-type melodyErrorResolver struct {
-    err *exception.Error
-}
-
-func (instance *melodyErrorResolver) Get(serviceName string) (any, error) {
-    return nil, instance.err
-}
-
-func (instance *melodyErrorResolver) MustGet(serviceName string) any {
-    exception.Panic(instance.err)
-
-    return nil
-}
-
-func (instance *melodyErrorResolver) GetByType(targetType reflect.Type) (any, error) {
-    return nil, instance.err
-}
-
-func (instance *melodyErrorResolver) MustGetByType(targetType reflect.Type) any {
-    exception.Panic(instance.err)
-
-    return nil
-}
-
-func (instance *melodyErrorResolver) Has(serviceName string) bool {
-    return false
-}
-
-func (instance *melodyErrorResolver) HasType(targetType reflect.Type) bool {
-    return false
 }
 
 func TestFromResolver_MelodyErrorPassesThroughWithServiceName(t *testing.T) {
@@ -348,40 +250,6 @@ func TestFromResolver_MelodyErrorPassesThroughWithServiceName(t *testing.T) {
     if "kept" != typedError.Context()["detail"] {
         t.Fatalf("expected the original context to survive")
     }
-}
-
-type resolverTestTypedNilError struct{}
-
-func (instance *resolverTestTypedNilError) Error() string {
-    return "never reached on a nil receiver"
-}
-
-type resolverTestTypedNilErrorResolver struct {
-    value any
-}
-
-func (instance *resolverTestTypedNilErrorResolver) Get(serviceName string) (any, error) {
-    var typedNil *resolverTestTypedNilError
-    return instance.value, typedNil
-}
-
-func (instance *resolverTestTypedNilErrorResolver) MustGet(serviceName string) any {
-    return instance.value
-}
-
-func (instance *resolverTestTypedNilErrorResolver) GetByType(targetType reflect.Type) (any, error) {
-    var typedNil *resolverTestTypedNilError
-    return instance.value, typedNil
-}
-
-func (instance *resolverTestTypedNilErrorResolver) MustGetByType(targetType reflect.Type) any {
-    return instance.value
-}
-
-func (instance *resolverTestTypedNilErrorResolver) Has(serviceName string) bool { return true }
-
-func (instance *resolverTestTypedNilErrorResolver) HasType(targetType reflect.Type) bool {
-    return true
 }
 
 func TestFromResolver_TypedNilErrorReadsAsSuccess(t *testing.T) {
@@ -479,7 +347,6 @@ func TestLazy_NilResolverSurfacesAsAnErrorAtFirstUse(t *testing.T) {
     }
 }
 
-/* the type-keyed door dresses its failure the way the name-keyed twin does: a melody error travels out whole with the type written into its context in place, and a foreign error is wrapped naming the type, so the operator reading either record learns which resolution failed. */
 func TestFromResolverByType_EnrichesTheFailureLikeTheNameKeyedTwin(t *testing.T) {
     melodyErr := exception.NewError("service creation failed", nil, nil)
 

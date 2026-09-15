@@ -69,7 +69,6 @@ func TestStatusCommand_NoMigrationsWarns(t *testing.T) {
     }
 }
 
-/* under --format=json the command writes the one machine-readable document the silenced banner promises — the flag was declared and validated here long before it was honoured. */
 func TestStatusCommand_JsonFormatRendersOneMachineReadableDocument(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = appliedMigrationRowsHook("20240101000000")
@@ -106,7 +105,6 @@ func TestStatusCommand_JsonFormatRendersOneMachineReadableDocument(t *testing.T)
     }
 }
 
-/* a failed run reports through the same document: the failure rides in the envelope's error, not as a raw text line that would corrupt the parse. */
 func TestStatusCommand_JsonFormatReportsTheFailureInTheDocument(t *testing.T) {
     runtimeInstance := newRuntimeWithDatabase(t, nil)
 

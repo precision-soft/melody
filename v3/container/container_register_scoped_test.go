@@ -3,17 +3,8 @@ package container
 import (
     "reflect"
     "testing"
-
     containercontract "github.com/precision-soft/melody/v3/container/contract"
 )
-
-type registerScopedProbe struct {
-    value string
-}
-
-type registerScopedOtherProbe struct {
-    value string
-}
 
 func TestRegisterScopedGeneric_RegistersAServiceEveryScopeBuildsOnItsOwn(t *testing.T) {
     serviceContainer := NewContainer()
@@ -64,7 +55,6 @@ func TestRegisterScopedGeneric_NilRegistrarIsRefusedByName(t *testing.T) {
     }
 }
 
-/* the refusal belongs to the type registration and has to be told apart from the provider contract's own refusal of an any-returning provider: opting the type registration out is what reaches that second one. */
 func TestRegisterScopedGeneric_AnyServiceTypeIsRefusedForTheTypeRegistration(t *testing.T) {
     serviceContainer := NewContainer()
 

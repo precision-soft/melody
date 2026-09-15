@@ -45,7 +45,6 @@ func newStaticExclusionTestRuntime() runtimecontract.Runtime {
     return runtime.New(context.Background(), scope, serviceContainer)
 }
 
-/* the pipeline hands back the middlewares outermost first, which is the order the http kernel wraps them in */
 func composeStaticExclusionTestChain(chain httpMiddlewareChain, handler httpcontract.Handler) httpcontract.Handler {
     for index := len(chain) - 1; 0 <= index; index-- {
         handler = chain[index](handler)
@@ -78,7 +77,6 @@ func newStaticExclusionTestPublicDirectory(t *testing.T) string {
 }
 
 func TestNewStaticFileServerOptions_ExcludedPrefixReachesTheMiddlewareRegisteredWithUse(t *testing.T) {
-    /* the built-in file server is the outermost middleware, so a path it answers is a path the application's own chain never sees. The exclusion is the only channel this instance has, because it is built inside the application rather than registered by it. */
     publicDirectory := newStaticExclusionTestPublicDirectory(t)
 
     configuration := newStaticExclusionTestConfiguration(t, map[string]string{

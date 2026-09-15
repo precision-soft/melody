@@ -1,21 +1,18 @@
 package migration
 
-/* Shared test material for the migration package: a fake database/sql driver wrapped in a real *bun.DB, with a recorder observing every statement. The connection honours context cancellation before recording, so a statement in the recorded list is one that really reached the database — the WithoutCancel guard on the unlock is only observable against a driver that refuses a cancelled context. */
-
 import (
+    "github.com/uptrace/bun"
     "context"
-    "database/sql"
+    "github.com/uptrace/bun/dialect"
     "database/sql/driver"
     "errors"
+    "github.com/uptrace/bun/dialect/feature"
     "io"
+    "github.com/uptrace/bun/schema"
+    "database/sql"
     "strings"
     "sync"
     "testing"
-
-    "github.com/uptrace/bun"
-    "github.com/uptrace/bun/dialect"
-    "github.com/uptrace/bun/dialect/feature"
-    "github.com/uptrace/bun/schema"
 )
 
 type queryRecorder struct {
@@ -98,7 +95,6 @@ func isCatalogueCountSelect(query string) bool {
     return strings.Contains(query, "information_schema")
 }
 
-/* appliedStatusRows answers the status select as if every registered migration had already been applied, which is how a process that lost the lock race observes a finished competitor. */
 func appliedStatusRows() ([]string, [][]driver.Value) {
     columns := []string{"id", "name", "group_id"}
 
@@ -160,11 +156,6 @@ func (instance *fakeConnection) QueryContext(ctx context.Context, query string, 
         }
     }
 
-    /* a COUNT select always answers a row on a real server, so a double that answers none turns a step
-       that asks the catalogue a question into "sql: no rows in result set". The steps that ask one are
-       the tolerant ones — they check whether the object they are about to add is already there — and a
-       fixture that could not answer them would make every whole-set run fail on the double. Zero is the
-       answer that means "not there yet", which is what a fresh volume holds. */
     if true == isCatalogueCountSelect(query) {
         return &fakeRows{columns: []string{"count"}, rows: [][]driver.Value{{int64(0)}}}, nil
     }
@@ -281,10 +272,6 @@ var (
     _ schema.Dialect        = (*fakeDialect)(nil)
 )
 
-/* assertQueryOrder pins the SEQUENCE a migration emits, not just its membership: the recorded list must
-   hold exactly as many statements as the expectation, each containing the fragment at the same position.
-   A schema folded into one migration has no step boundaries left to carry the order, so the order is what
-   the test has to say — and the count it replaced could not have seen a set emitted backwards. */
 func assertQueryOrder(t *testing.T, recorded []string, expectedFragmentList []string) {
     t.Helper()
 
@@ -304,9 +291,6 @@ func assertQueryOrder(t *testing.T, recorded []string, expectedFragmentList []st
     }
 }
 
-/* indexOfQueryContaining answers where a statement carrying the fragment was recorded, or -1. The order of
-   the recorded statements is the property the reset tests assert, so they need positions rather than
-   presence. */
 func indexOfQueryContaining(recorded []string, fragment string) int {
     for index, query := range recorded {
         if true == strings.Contains(query, fragment) {
@@ -315,4 +299,24 @@ func indexOfQueryContaining(recorded []string, fragment string) int {
     }
 
     return -1
+}
+
+func indexPresenceRows(present int64) func(query string) ([]string, [][]driver.Value, error) {
+    return func(query string) ([]string, [][]driver.Value, error) {
+        if true == strings.Contains(query, "information_schema.STATISTICS") {
+            return []string{"count"}, [][]driver.Value{{present}}, nil
+        }
+
+        return []string{}, nil, nil
+    }
+}
+
+func isUsernameIndexAdd(query string) bool {
+    return strings.HasPrefix(query, "ALTER TABLE") &&
+        strings.Contains(query, "ADD UNIQUE KEY")
+}
+
+func isUsernameIndexDrop(query string) bool {
+    return strings.HasPrefix(query, "ALTER TABLE") &&
+        strings.Contains(query, "DROP INDEX")
 }

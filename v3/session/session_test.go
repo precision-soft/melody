@@ -289,12 +289,6 @@ func TestSession_SnapshotPairsTheFlagsWithTheValues(t *testing.T) {
     }
 }
 
-/* Set has to take its own copy at the depth the readers copy at. Get, All and Snapshot all hand out a deep
-copy so that a caller mutating what it received cannot change the live session behind Set's back; Set storing
-the caller's map by reference opens the same hole from the other side, and worse — the session then holds
-memory it does not own, so a caller that keeps writing to the map it handed over races the copy the response
-path makes. A concurrent map read and write is a fatal error in Go: it kills the process, and no recover
-reaches it. This runs under -race, which is the only lane that can observe it. */
 func TestSession_SetDoesNotKeepTheCallersMapByReference(t *testing.T) {
     sessionInstance := &Session{id: "0123456789abcdef0123456789abcdef", values: map[string]any{}}
 

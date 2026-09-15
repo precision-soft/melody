@@ -10,7 +10,7 @@ import (
 )
 
 type HandleOptions struct {
-    /* AllowMissingHandler lets a message with no registered handler pass through with a warning instead of failing the dispatch. The default refuses: on the consume path a pass-through is immediately Acked, so a forgotten registration — or the pointer-vs-value keying trap — would silently drain a production queue one warning at a time, with the retry and dead-letter machinery never engaging because the pipeline was told the message was handled. */
+    /* AllowMissingHandler changes an unhandled message from dispatch failure to warning and pass-through. On consumption this can acknowledge the message; the default refusal preserves retry and dead-letter handling. */
     AllowMissingHandler bool
 }
 

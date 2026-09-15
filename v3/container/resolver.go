@@ -23,7 +23,7 @@ func FromResolver[T any](resolver containercontract.Resolver, serviceName string
     }
 
     value, getErr := resolver.Get(serviceName)
-    /* a resolver implemented outside this package can report success with a typed-nil error */
+
     if true == internal.IsNilInterface(getErr) {
         getErr = nil
     }
@@ -33,7 +33,6 @@ func FromResolver[T any](resolver containercontract.Resolver, serviceName string
         var melodyErr *exception.Error
         isMelodyErr := errors.As(getErr, &melodyErr)
 
-        /* the original error travels out whole, with the service name written into its context in place: a rebuilt copy sheds the log level, the already-logged mark, the capture stack and every wrapper above it */
         if true == isMelodyErr && nil != melodyErr {
             melodyErr.SetContextValue("serviceName", serviceName)
 
@@ -103,7 +102,7 @@ func FromResolverByType[T any](resolver containercontract.Resolver) (T, error) {
     }
 
     value, getByTypeErr := resolver.GetByType(canonicalTargetType)
-    /* a resolver implemented outside this package can report success with a typed-nil error */
+
     if true == internal.IsNilInterface(getByTypeErr) {
         getByTypeErr = nil
     }
@@ -113,7 +112,6 @@ func FromResolverByType[T any](resolver containercontract.Resolver) (T, error) {
         var melodyErr *exception.Error
         isMelodyErr := errors.As(getByTypeErr, &melodyErr)
 
-        /* the failure is dressed the way the name-keyed twin dresses it: the original error travels out whole with the type written into its context in place, and a foreign error is wrapped naming the type — a rebuilt copy would shed the log level, the already-logged mark, the capture stack and every wrapper above it */
         if true == isMelodyErr && nil != melodyErr {
             melodyErr.SetContextValue("serviceType", canonicalTargetType.String())
 

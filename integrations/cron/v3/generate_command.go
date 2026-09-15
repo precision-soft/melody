@@ -75,7 +75,6 @@ func (instance *GenerateCommand) Flags() []clicontract.Flag {
     return output.MergeFlags(output.StandardFlags(), instance.ownFlags())
 }
 
-/* ownFlags keeps the generator's flags apart from the standard set every melody command carries: the framework rewrites -v/-vv into --verbosity for every command, so a command without the standard flags dies on the framework's own convention with "flag provided but not defined". */
 func (instance *GenerateCommand) ownFlags() []clicontract.Flag {
     return []clicontract.Flag{
         &clicontract.StringFlag{
@@ -180,7 +179,6 @@ type runOptions struct {
     restartPolicy       string
 }
 
-/* reportWarning is a non-fatal finding the run wants in its report on both branches: a warning line in text mode, an envelope warning under --format=json. */
 type reportWarning struct {
     code    string
     message string
@@ -198,7 +196,6 @@ func (instance *GenerateCommand) runWithConfiguration(
     emptyMessage := ""
     warnings := ([]reportWarning)(nil)
 
-    /* the report is a defer so that no failure path can leave the run without a document: under --format=json every early return used to travel straight out past the one door that builds the envelope, and the cli silences the command's own error line in json mode, so `app melody:cron:generate --format=json | jq …` received an empty stream — indistinguishable from a missing binary — for a malformed schedule or an unwritable directory. The sibling integration's commands have carried this shape since the verdict that gave migrate its machine contract. */
     var missingDestinations []string
     defer func() {
         runErr = instance.reportWrites(commandContext, option, startedAt, writes, pruned, emptyMessage, warnings, runErr, missingDestinations)
@@ -209,7 +206,6 @@ func (instance *GenerateCommand) runWithConfiguration(
         return resolveErr
     }
 
-    /* the k8s template ignores the heartbeat entirely (it logs to stdout and models liveness with a dedicated CronJob), so an explicitly requested one is reported as dropped rather than silently swallowed or hard-failed on a setting the template just declared ignored. */
     if true == options.heartbeatEnabled && TemplateNameK8s == options.template.Name() {
         warnings = append(warnings, reportWarning{
             code:    "cron.heartbeatIgnored",
@@ -247,10 +243,8 @@ func (instance *GenerateCommand) resolveRunOptions(
     }
     options.template = template
 
-    /* the builtin k8s template ignores the heartbeat (it logs to stdout and models liveness with a dedicated CronJob), so a heartbeat path is never auto-derived for it; an explicitly requested heartbeat still flows through so the run can warn that it is dropped */
     isK8s := TemplateNameK8s == template.Name()
 
-    /* a dialect that renders no user column at all (busybox crond, per-user crontabs, a CronJob manifest) never needs a user to place the heartbeat line — demanding one turns a valid configuration into a hard error */
     rendersUserColumn := templateRendersUserColumn(template)
 
     outputPath := resolveDefaultPath(commandContext, configuration, flagNameOutput, ParameterDestinationFile)
@@ -287,7 +281,6 @@ func (instance *GenerateCommand) resolveRunOptions(
         }
         logsDir = absoluteLogsDir
 
-        /* Generation prepares log directories; prune must calculate paths without creating them. */
         if mkdirErr := ensureGenerationLogsDir(logsDir, options.prune); nil != mkdirErr {
             return nil, exception.NewError(
                 "cron: could not create the logs directory",
@@ -298,7 +291,6 @@ func (instance *GenerateCommand) resolveRunOptions(
     }
     options.logsDir = logsDir
 
-    /* the binary is a path like its three siblings, and its parameter is anchored the way theirs are: a relative melody.cron.binary meant "under the project" and was baked into the manifest relative to wherever the generator happened to run from, while a relative --binary keeps the shell's own convention */
     options.binary = resolveDefaultPath(commandContext, configuration, flagNameBinary, ParameterBinary)
     options.defaultUserName = resolveDefault(commandContext, configuration, flagNameDefaultUser, ParameterUser)
 
@@ -309,7 +301,6 @@ func (instance *GenerateCommand) resolveRunOptions(
             return nil, autoEnabledErr
         }
 
-        /* the malformed opt-in fails under every template — a typo is a typo whichever dialect renders — while the derived path stays crontab-only, because the k8s template ignores the heartbeat and deriving one for it would only arm the dropped-heartbeat warning on a setting nobody made */
         if true == autoEnabled && false == isK8s {
             heartbeatPath = filepath.Join(logsDir, "heartbeat.crontab")
         }
@@ -376,7 +367,6 @@ func (instance *GenerateCommand) collectScheduledEntries(options *runOptions) ([
     }
     options.binary = binary
 
-    /* only the crontab template redirects each entry's output to a log file; the k8s template logs to container stdout and never reads Entry.LogPath, so it must not inherit the crontab-only logs-dir requirement */
     requiresLogPath := TemplateNameK8s != options.template.Name()
 
     entries := make([]Entry, 0, len(scheduledCommands))
@@ -403,13 +393,12 @@ type destinationWrite struct {
     HeartbeatOnly bool   `json:"heartbeatOnly"`
 }
 
-/* writeDestinations answers what it wrote, what there was to say about an empty run and what stopped it, leaving the one report door to the caller's defer: reporting from here left the seven failure paths below with no document at all, and the writes accumulated before a failure are exactly what tells the consumer which files a partial run left on disk — the destinations are written one by one with no rollback. */
 func (instance *GenerateCommand) writeDestinations(
     option output.Option,
     options *runOptions,
     entries []Entry,
 ) ([]destinationWrite, []string, string, error) {
-    /* the k8s namespace is a single global option, so resource-name collisions span every destination file; catch them across the whole set before any manifest is rendered or written */
+
     if TemplateNameK8s == options.template.Name() {
         if uniqueErr := ensureK8sNamesUnique(entries); nil != uniqueErr {
             return nil, nil, "", uniqueErr
@@ -421,13 +410,12 @@ func (instance *GenerateCommand) writeDestinations(
         return nil, nil, "", groupErr
     }
 
-    /* An empty generation has no configured destinations to write or remove. */
     if 0 == len(entriesByDestination) && false == options.heartbeatEnabled {
         return nil, nil, "the cron Configuration is empty and no --heartbeat-path or --heartbeat-command was provided; nothing to write", nil
     }
 
     if 0 == len(entriesByDestination) && true == options.heartbeatEnabled {
-        /* The k8s template does not generate heartbeat-only destinations. */
+
         if TemplateNameK8s == options.template.Name() {
             return nil, nil, "the cron Configuration is empty and the k8s template does not emit heartbeat CronJobs; nothing to write", nil
         }
@@ -441,7 +429,6 @@ func (instance *GenerateCommand) writeDestinations(
     }
     sort.Strings(destinationPaths)
 
-    /* the k8s template ignores heartbeat options entirely (see the dropped-heartbeat warning and the crontab-only render); resolving a --heartbeat-destination against the written destinations would hard-fail the command on a setting it just declared ignored, so the requested destinations are dropped for k8s */
     heartbeatRequested := options.heartbeatRequested
     if TemplateNameK8s == options.template.Name() {
         heartbeatRequested = nil
@@ -515,9 +502,6 @@ func (instance *GenerateCommand) writeDestinations(
     return writes, nil, "", nil
 }
 
-/* pruneDestinations receives only paths whose content has already rendered successfully.
-   The configured destinations are the explicit deletion targets; a shared template marker
-   cannot establish which application owns any other file in the directory. */
 func pruneDestinations(options *runOptions, destinations []string) ([]string, error) {
     pruned := make([]string, 0, len(destinations))
     for _, destination := range destinations {
@@ -551,9 +535,6 @@ func ensureGenerationLogsDir(directory string, prune bool) error {
     return os.MkdirAll(directory, 0o755)
 }
 
-/* reportWrites is the generator's one report door, reached from the run's defer on every path: the written summary as text lines, or as the single machine-readable document under --format=json — the failure inside it, beside whatever the run had already written before it stopped. The summary is essential output — the command's whole visible result — so --quiet, which suppresses headers and non-essential output, does not silence it.
-
-   The run's own failure stays the verdict the command returns; a rendering failure becomes one only when the run itself succeeded, which is the rule the sibling integration's exit door states in the same words. In text mode the failure travels alone, as it always has: the cli entry point prints it. */
 func (instance *GenerateCommand) reportWrites(
     commandContext clicontract.Context,
     option output.Option,
@@ -573,7 +554,6 @@ func (instance *GenerateCommand) reportWrites(
             writes = []destinationWrite{}
         }
 
-        /* Keep the JSON result lists non-null on every outcome. */
         if nil == pruned {
             pruned = []string{}
         }
@@ -585,7 +565,6 @@ func (instance *GenerateCommand) reportWrites(
             }
         }
 
-
         for _, warning := range warnings {
             envelope.Warnings = append(envelope.Warnings, output.NewWarning(warning.code, warning.message, nil))
         }
@@ -595,7 +574,7 @@ func (instance *GenerateCommand) reportWrites(
         }
 
         if nil != runErr {
-            /* the details and the cause used to be nil on every failure alike, so the machine document — the one a deploy pipeline reads — was the single rendering that threw away what the error already carried: a failed rename filed the destination and the source in the journal at the same instant and answered `"details":null,"cause":null` on stdout. The details object stays an object when the failure carries no context, so the field keeps its json type on every failure. */
+
             envelope.SetError(
                 "cron.generateFailed",
                 "the cron manifest generation failed",
@@ -622,7 +601,6 @@ func (instance *GenerateCommand) reportWrites(
         }
     }
 
-    /* Report completed writes and deletions even when a later destination fails. */
     if nil != runErr {
         printDestinationWrites(commandContext, writes)
         printPrunedDestinations(commandContext, pruned)
@@ -661,7 +639,6 @@ func printPrunedDestinations(commandContext clicontract.Context, pruned []string
     }
 }
 
-/* atomicWriteFile replaces one destination atomically and cleans up its own temporary file on failure. Crash leftovers are not discovered or removed by --prune. */
 func atomicWriteFile(destination string, content []byte, mode os.FileMode) error {
     if info, statErr := os.Stat(destination); nil == statErr {
         mode = info.Mode().Perm()
@@ -852,7 +829,6 @@ func resolveEntryDestination(entryDestination string, defaultDestination string,
     return joined, nil
 }
 
-/* isWithinDir answers on the cleaned NAMES, deliberately: the guard exists for a DestinationFile whose spelling walks out of dir(--out) with "..", the mistake a configuration can make on paper. A symbolic link inside the directory that points elsewhere is not that mistake — it is the operator's layout, placed there on purpose, and following it here would refuse a destination the operator arranged exactly as an absolute path is allowed to. */
 func isWithinDir(candidate string, parent string) bool {
     if candidate == parent {
         return true
@@ -953,7 +929,6 @@ func expandEntriesForCommand(
             return nil, logPathErr
         }
 
-        /* every entry carries its own schedule: Render is userland, Schedule.Defaults is documented as mutating in place, and a template that calls it on the schedule it was handed would otherwise rewrite the one behind every sibling entry of this command — and, before Entries copied, the registered one for the rest of the process */
         entry := Entry{
             Name:            commandName,
             User:            user,
@@ -974,7 +949,6 @@ func expandEntriesForCommand(
                 )
             }
 
-            /* the entry's own arguments come last, after the instance flags this generator adds, so the manifest line runs the command line the entry declared — the same one the in-process runner hands the child. A Configuration drives both halves, and an argument honoured by only one of them is a divergence nothing would report. */
             args = append(args, config.Arguments...)
 
             entry.Binary = binary
@@ -1000,7 +974,6 @@ func resolveEntryLogPath(
         return "", nil
     }
 
-    /* the active template does not redirect output to a log file (k8s), so there is no log path to resolve and no logs-dir to demand */
     if false == requiresLogPath {
         return "", nil
     }
@@ -1047,7 +1020,6 @@ func resolveEntryLogPath(
         )
     }
 
-    /* a LogFileName carrying a subdirectory ("nightly/report.log") stays within the logs dir and passes the guard above, but nothing else ever creates that subdirectory — and under system cron the shell aborts the whole command when the >> redirection cannot create its file, so the scheduled job silently never runs. The destination side already creates its parent the same way. */
     if mkdirErr := ensureGenerationLogsDir(filepath.Dir(joined), 0 < len(preview) && true == preview[0]); nil != mkdirErr {
         return "", exception.NewError(
             "cron: could not create the log file directory",
@@ -1062,7 +1034,6 @@ func resolveEntryLogPath(
     return joined, nil
 }
 
-/* configurationFromRuntime resolves through the run's scope with the container as the fallback, the way every other command on this seam reads its services: a scope-level substitution of the configuration is honoured here exactly as the framework's own runtime door honours it. */
 func configurationFromRuntime(runtimeInstance runtimecontract.Runtime) (configcontract.Configuration, error) {
     configuration, fromRuntimeErr := runtime.FromRuntime[configcontract.Configuration](runtimeInstance, melodyconfig.ServiceConfig)
     if nil != fromRuntimeErr {
@@ -1099,7 +1070,6 @@ func resolveDefault(
     return ""
 }
 
-/* resolveDefaultPath is resolveDefault for a value that names a path, and it differs in one thing: a relative path that came from a PARAMETER is anchored at the project directory, while one typed as a cli FLAG stays relative to the working directory. The two sources answer to different conventions. A flag is typed in a shell, next to the paths that shell already resolves, and anchoring it elsewhere would surprise every operator. A parameter is part of the application's configuration and belongs to the project: melody resolves MELODY_LOG_PATH, kernel.logs_dir and kernel.cache_dir against the project directory for exactly that reason, and cron was the one place where "melody.cron.logs_dir = var/log/cron" meant a different directory depending on where the binary was invoked from — under a supervisor that starts from /, the generated crontab baked /var/log/cron into itself. The shipped defaults hid it by carrying %kernel.project_dir% themselves. */
 func resolveDefaultPath(
     commandContext clicontract.Context,
     configuration configcontract.Configuration,
@@ -1125,7 +1095,6 @@ func resolveDefaultPath(
     return anchorConfiguredPath(parameter.String(), configuration)
 }
 
-/* anchorConfiguredPath carries locally the rule application/bootstrap.go applies to every other melody runtime path; it cannot call that door, which is unexported and in another module. A configuration that names no project directory keeps the working-directory anchoring, because there is nothing better to anchor to and refusing would turn a generator that works today into a boot failure. */
 func anchorConfiguredPath(value string, configuration configcontract.Configuration) string {
     if "" == value {
         return value
@@ -1148,7 +1117,6 @@ func anchorConfiguredPath(value string, configuration configcontract.Configurati
     return filepath.Join(projectDirectory, value)
 }
 
-/* isHeartbeatAutoEnabled separates an unset opt-in from a malformed one. Reading a value the parameter cannot convert as "not enabled" would generate a crontab without the liveness line the operator asked for and report success — the misspelling would be indistinguishable from never having asked. */
 func isHeartbeatAutoEnabled(configuration configcontract.Configuration) (bool, error) {
     if nil == configuration {
         return false, nil
@@ -1175,12 +1143,11 @@ func isHeartbeatAutoEnabled(configuration configcontract.Configuration) (bool, e
 
 var _ clicontract.Command = (*GenerateCommand)(nil)
 
-/* errorDetailsOf renders the failure's own context as the json envelope's details, an empty object rather than null when it carries none: a field whose json type changes with the outcome cannot be consumed at all. It is written here rather than shared with the migrate integration because the two are separate modules. */
 func errorDetailsOf(runErr error) map[string]any {
     details := map[string]any{}
 
     var provider exceptioncontract.ContextProvider
-    /* the As target is read through the typed-nil door its runner sibling reads through: a typed-nil link in the chain satisfies As and passes a plain nil comparison, and Context() on the nil receiver panics inside the very report that was rendering the failure */
+
     if true == errors.As(runErr, &provider) && false == isNilInterface(provider) {
         for key, value := range provider.Context() {
             details[key] = value
@@ -1190,7 +1157,6 @@ func errorDetailsOf(runErr error) map[string]any {
     return details
 }
 
-/* errorCauseOf answers the failure's text together with the whole chain beneath it. The chain starts at the failure itself rather than one link below, because this envelope's message is a fixed label — "the cron manifest generation failed" — so the cause is where the failure's own sentence lives; the migrate integration's envelope puts that sentence in the message and its cause therefore starts one link lower. */
 func errorCauseOf(runErr error) *output.ErrorCause {
     causeChain := exception.BuildCauseChain(runErr, 8)
     if 0 == len(causeChain) {

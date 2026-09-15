@@ -125,7 +125,6 @@ func (instance *fakeRepository) ClaimDueMessages(_ context.Context, limit int, _
     return instance.due, nil
 }
 
-/* models the store: charges a delivery attempt to a single row (advancing its stored count) only when that row is actually reached, and reports the row missing (claimed=false) when it is not among the due rows. It does not append to calls so the exact resolution-call assertions elsewhere stay meaningful. */
 func (instance *fakeRepository) RecordDeliveryAttempt(_ context.Context, id int64, _ string) (int, bool, error) {
     for index := range instance.due {
         if id == instance.due[index].Id {
@@ -270,7 +269,6 @@ func TestRelay_PublishesDueMessageAndMarksSent(t *testing.T) {
     }
 }
 
-/* the published envelope carries the outbox row id as a stable message id so a consumer can deduplicate an at-least-once redelivery. */
 func TestRelay_StampsOutboxRowIdAsMessageId(t *testing.T) {
     repository := &fakeRepository{due: []Pending{{Id: 42, TypeName: "string", Payload: []byte("hello"), Attempts: 0}}}
     transport := &fakeTransport{}
@@ -324,7 +322,6 @@ func TestRelay_DeadLettersAtMaxAttempts(t *testing.T) {
     }
 }
 
-/* negative control: a row that cannot be decoded is poison and goes straight to dead. */
 func TestRelay_UndecodableMessageIsDeadLettered(t *testing.T) {
     repository := &fakeRepository{due: []Pending{{Id: 3, TypeName: "string", Payload: []byte("x"), Attempts: 0}}}
     transport := &fakeTransport{}
@@ -342,7 +339,6 @@ func TestRelay_UndecodableMessageIsDeadLettered(t *testing.T) {
     }
 }
 
-/* a row delivered more times than the delivery cap without ever resolving (it keeps crashing or hanging the relay between the recorded attempt and resolve, so its send-failure Attempts never advances to MaxAttempts) is dead-lettered as poison instead of re-surfacing forever. With MaxAttempts=2 the cap is 4; a stored count of 4 records the 5th attempt, which trips it. */
 func TestRelay_DeadLettersPoisonExceedingMaxDeliveryAttempts(t *testing.T) {
     repository := &fakeRepository{due: []Pending{{Id: 5, TypeName: "string", Payload: []byte("x"), Attempts: 0, DeliveryAttempts: 4}}}
     transport := &fakeTransport{}
@@ -360,7 +356,6 @@ func TestRelay_DeadLettersPoisonExceedingMaxDeliveryAttempts(t *testing.T) {
     }
 }
 
-/* positive control: a row whose recorded attempt lands exactly on the delivery cap (not over it) is still delivered normally, so the cap dead-letters only genuinely stuck rows. With MaxAttempts=2 the cap is 4; a stored count of 3 records the 4th attempt, which is at the cap, not over it. */
 func TestRelay_DeliversRowAtDeliveryCapBoundary(t *testing.T) {
     repository := &fakeRepository{due: []Pending{{Id: 6, TypeName: "string", Payload: []byte("ok"), Attempts: 0, DeliveryAttempts: 3}}}
     transport := &fakeTransport{}
@@ -386,7 +381,6 @@ func (instance *markSentFailingRepository) MarkSent(_ context.Context, _ int64, 
     return errors.New("mark sent failed")
 }
 
-/* delivery_attempts is charged per row at delivery time, not for the whole batch at claim time. So a row the relay never reaches — here the second row, because the first row's delivery aborts the run — is not charged a delivery attempt it never received, and therefore never climbs toward the poison cap while merely waiting behind a crashing batch-mate. */
 func TestRelay_UnreachedBatchMateIsNotChargedDeliveryAttempt(t *testing.T) {
     repository := &markSentFailingRepository{fakeRepository{due: []Pending{
         {Id: 1, TypeName: "string", Payload: []byte("a"), Attempts: 0, DeliveryAttempts: 0},
@@ -410,7 +404,6 @@ func TestRelay_UnreachedBatchMateIsNotChargedDeliveryAttempt(t *testing.T) {
     }
 }
 
-/* the count follows the broker: a message whose send succeeded but whose MarkSent failed was still published, so the run reports it even as it surfaces the bookkeeping error */
 func TestRelay_CountsMessagePublishedWhenMarkSentFails(t *testing.T) {
     repository := &markSentFailingRepository{fakeRepository{due: []Pending{
         {Id: 1, TypeName: "string", Payload: []byte("a"), Attempts: 0, DeliveryAttempts: 0},
@@ -429,7 +422,6 @@ func TestRelay_CountsMessagePublishedWhenMarkSentFails(t *testing.T) {
     }
 }
 
-/* negative control: a misconfigured MaxDeliveryAttempts at or below MaxAttempts must be raised to safe head-room. Otherwise a row that only failed to send a couple of times (so its claim count sits just above the tiny cap) would be dead-lettered as poison, silently destroying a still-retriable message and defeating the MaxAttempts retry path. */
 func TestRelay_RaisesMisconfiguredMaxDeliveryAttempts(t *testing.T) {
     repository := &fakeRepository{due: []Pending{{Id: 8, TypeName: "string", Payload: []byte("ok"), Attempts: 1, DeliveryAttempts: 2}}}
     transport := &fakeTransport{}
@@ -473,7 +465,6 @@ func TestRelay_SkipsWorkWhenLeaseNotAcquired(t *testing.T) {
     }
 }
 
-/* negative control: a pathologically large MaxBackoff and factor must not overflow the int64 duration into a negative value (which would defeat the cap and cause an immediate-retry storm). */
 func TestRelay_NextBackoffDoesNotOverflowWithLargeMax(t *testing.T) {
     relay := NewRelay(RelayConfig{
         Repository:     &fakeRepository{},
@@ -495,7 +486,6 @@ func TestRelay_NextBackoffDoesNotOverflowWithLargeMax(t *testing.T) {
     }
 }
 
-/* a batch that outlives the lock ttl refreshes the lease as it works; when the refresh fails (lease lost), the claimed rows are still this run's — fenced by their claim token, invisible to the new holder — so the batch is drained to its end, the refresh is not tried again, and the failure is reported after the batch. The earlier form returned at the failed refresh and left every unreached row claimed for the whole visibility timeout. */
 func TestRelay_ALostLeaseDrainsTheClaimedBatchThenReportsTheFailure(t *testing.T) {
     refreshFailure := errors.New("lease lost")
 
@@ -535,7 +525,6 @@ func TestRelay_ALostLeaseDrainsTheClaimedBatchThenReportsTheFailure(t *testing.T
     }
 }
 
-/* a repository failure that ends the batch after the lease was already lost is the failure reported — the store is what failed and the command's loop classifies it — with the refresh failure carried in its context rather than dropped. */
 func TestRelay_ARepositoryFailureAfterALostLeaseCarriesTheRefreshFailure(t *testing.T) {
     refreshFailure := errors.New("lease lost")
 
@@ -569,7 +558,6 @@ func TestRelay_ARepositoryFailureAfterALostLeaseCarriesTheRefreshFailure(t *test
     }
 }
 
-/* positive control: when the lease refreshes cleanly, the whole batch drains. */
 func TestRelay_RefreshesLeaseAndDrainsWholeBatch(t *testing.T) {
     lock := &fakeLock{acquire: true}
     repository := &fakeRepository{due: []Pending{
@@ -606,7 +594,6 @@ func (instance *cancellingRepository) ClaimDueMessages(ctx context.Context, limi
     return instance.fakeRepository.ClaimDueMessages(ctx, limit, visibility)
 }
 
-/* a signal cancels the run context mid-drain, so a release riding it would never reach the backend and the lease would survive its whole ttl, stalling every other replica. */
 func TestRelay_ReleasesLeaseOnAContextThatOutlivesCancellation(t *testing.T) {
     runContext, cancel := context.WithCancel(context.Background())
     defer cancel()
@@ -648,7 +635,6 @@ func TestRelay_ReleasesLeaseOnAContextThatOutlivesCancellation(t *testing.T) {
     }
 }
 
-/* a lease that could not be released stalls every other replica for the whole ttl, so the failure must be reported rather than discarded. */
 func TestRelay_ReportsAFailedLeaseRelease(t *testing.T) {
     logger := &recordingLogger{}
 
@@ -706,7 +692,6 @@ func TestRelay_NextBackoffCapsAtMax(t *testing.T) {
     }
 }
 
-/* failingCauseTransport fails every send with a wrapped error whose CAUSE carries the broker verdict. */
 type failingCauseTransport struct {
     fakeTransport
     cause error
@@ -741,7 +726,6 @@ func TestRelay_DeadLetterRecordsTheCauseChainNotTheMessageAlone(t *testing.T) {
     }
 }
 
-/* the cap's cut lands on a rune boundary: a byte cut through a multi-byte rune leaves an invalid string, which a strict utf8mb4 column refuses — failing the very resolution write the cap exists to protect, so the row re-surfaced every visibility timeout with nothing recorded */
 func TestStoredLastError_TruncatesOnARuneBoundary(t *testing.T) {
     prefix := strings.Repeat("a", maximumStoredErrorLength-1)
 
@@ -821,13 +805,11 @@ func TestRelay_LeaseRefreshCadenceIsAnchoredAtAcquisitionNotAfterTheClaim(t *tes
         t.Fatalf("run: %v", runErr)
     }
 
-    /* the claim consumed 70ms of a 100ms lease whose refresh interval is 50ms: anchored at acquisition the first row must refresh; anchored after the claim the whole run would end with zero refreshes and the lease 20ms from lapsing */
     if 0 == lock.refreshCalls {
         t.Fatal("expected the slow claim to count against the refresh cadence, so the first row refreshes the lease")
     }
 }
 
-/* panickingCodec raises the given value from Decode on the one payload it is told to, the way an application codec does on a payload shape it never expected, and decodes every other payload as a string. */
 type panickingCodec struct {
     payload string
     value   any
@@ -845,7 +827,6 @@ func (instance *panickingCodec) Decode(_ string, payload []byte) (any, error) {
     return string(payload), nil
 }
 
-/* panickingTransport raises the given value from Send. */
 type panickingTransport struct {
     fakeTransport
     value any
@@ -868,7 +849,6 @@ func relayTestRuntimeWithLogger(logger loggingcontract.Logger) runtimecontract.R
     return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 }
 
-/* runOnceContained runs RunOnce under the test's own recover, so a panic that escapes the relay fails the assertion instead of the test binary. */
 func runOnceContained(t *testing.T, relay *Relay, runtimeInstance runtimecontract.Runtime) (published int, runErr error) {
     t.Helper()
 
@@ -881,7 +861,6 @@ func runOnceContained(t *testing.T, relay *Relay, runtimeInstance runtimecontrac
     return relay.RunOnce(runtimeInstance)
 }
 
-/* a codec that panics on one row used to kill the relay process at that row on every claim; the panic is charged to the row as a decode failure — dead-lettered, with the panic in last_error — and the batch goes on. */
 func TestRelay_APanickingDecodeIsDeadLetteredAndTheBatchContinues(t *testing.T) {
     logger := &recordingLogger{}
     repository := &fakeRepository{due: []Pending{
@@ -920,7 +899,6 @@ func TestRelay_APanickingDecodeIsDeadLetteredAndTheBatchContinues(t *testing.T) 
     }
 }
 
-/* a transport that panics on send is charged as one send failure: the row takes the retry path with the panic in last_error, and is not dead-lettered on the spot, since the relay cannot tell a transient transport fault from poison. */
 func TestRelay_APanickingSendIsChargedAsADeliveryFailure(t *testing.T) {
     logger := &recordingLogger{}
     repository := &fakeRepository{due: []Pending{
@@ -954,7 +932,6 @@ func TestRelay_APanickingSendIsChargedAsADeliveryFailure(t *testing.T) {
     }
 }
 
-/* a panic value that is not an error still reaches last_error, as a value. */
 func TestRelay_ANonErrorPanicValueIsRecordedInLastError(t *testing.T) {
     repository := &fakeRepository{due: []Pending{{Id: 1, TypeName: "string", Payload: []byte("a")}}}
 

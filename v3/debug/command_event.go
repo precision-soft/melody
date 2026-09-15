@@ -85,7 +85,7 @@ func (instance *EventCommand) Run(
             renderDeferredListenerBlock(builder, instance.deferredListeners())
             envelope.Table = builder.Build()
         } else {
-            /* the declaration of what a serving process wires travels on this branch too. It does not come from the dispatcher — the command holds it — so a dispatcher that cannot be inspected costs the listing and nothing else, and "is access control wired?" keeps being answered by a declaration rather than by an absence that means "not in this process". */
+
             envelope.Data = eventListPayload{
                 ListPayload: output.NewListPayload(
                     []eventListItem{},
@@ -109,7 +109,6 @@ func (instance *EventCommand) Run(
     listenerTotal := 0
     fromSubscriberTotal := 0
 
-    /* the summary total counts distinct subscribers across the whole dispatcher: summing the per-event distinct counts reported one subscriber listening on three events as three subscribers, a number nothing in the process matches */
     subscriberOwnerGlobalSet := make(map[string]struct{})
 
     for _, registeredEvent := range registeredEvents {
@@ -206,7 +205,6 @@ func (instance *EventCommand) Run(
             for _, registeredEvent := range selectSortedRegisteredEvents(registeredEvents, items, option.Order) {
                 verboseBlock.AddRow(output.TableRowSeparatorToken)
 
-                /* the rows keep the dispatcher's own slice order — which IS the dispatch order, held sorted at insertion — so the verbose detail and the priorities column above it read the same run; re-sorting here once inverted listeners that share a priority, because the id was compared as text */
                 for index, listener := range registeredEvent.Listeners {
                     eventCell := ""
                     if 0 == index {
@@ -240,7 +238,7 @@ func (instance *EventCommand) Run(
         )
 
         if true == option.Verbose {
-            /* the listener detail — including the required and may-skip marks that say whether the fail-closed guarantee is armed — existed only in the table format, so a machine consumer of the json document could never learn it at any verbosity */
+
             envelope.Data = eventListVerbosePayload{
                 Events:                  eventsPayload,
                 Listeners:               collectListenerListItems(registeredEvents, items, option.Order),
@@ -259,7 +257,6 @@ func (instance *EventCommand) Run(
     return output.Render(commandContext.Writer(), envelope, option)
 }
 
-/* selectSortedRegisteredEvents keeps the listener detail on the same window as the event listing, otherwise --limit lists three events and every listener in the application, and orders it by event name the way the listing is ordered — the requested direction included, since --order=desc used to reverse the listing and leave the detail ascending, so the two halves of one document contradicted each other. The direction is applied to the EVENTS, never to the flattened listeners: inside one event the rows carry the dispatcher's own slice order, which IS the dispatch order, and reversing that would make the order column lie. */
 func selectSortedRegisteredEvents(
     registeredEvents []eventcontract.RegisteredEvent,
     items []eventListItem,
@@ -292,7 +289,6 @@ func selectSortedRegisteredEvents(
     return sortedRegisteredEvents
 }
 
-/* collectListenerListItems flattens the windowed listener detail for the json document, in the order the table prints it — the dispatcher's own dispatch order, carried by the order field. */
 func collectListenerListItems(
     registeredEvents []eventcontract.RegisteredEvent,
     items []eventListItem,
@@ -321,7 +317,6 @@ func collectListenerListItems(
     return listenerItems
 }
 
-/* renderRequiredListenerMark answers what a listener's required-listener marks mean for the dispatch: whether it is protected from being skipped, or is allowed to skip the ones that are. Without the column an unarmed fail-closed guarantee looks exactly like an armed one. */
 func renderRequiredListenerMark(listener eventcontract.RegisteredListener) string {
     if true == listener.Required {
         if true == listener.MaySkipRequiredListeners {
@@ -363,13 +358,11 @@ type eventListVerbosePayload struct {
     ServingProcessListeners []DeferredListener                `json:"servingProcessListeners,omitempty"`
 }
 
-/* eventListPayload is the default-verbosity json document: the listing embedded, so data.items stays exactly where every consumer keyed it, with the declaration beside it. The declaration cannot wait for --verbose the way the listener detail does — it exists so that "is access control wired?" is not answered with an absence meaning "not in this process", and the table has printed it at every verbosity since the verdict that introduced it, so a consumer auditing the wiring through the json document read a list the two security listeners were simply missing from. Reparenting the payload under --verbose is documented design and stays; the declaration is not part of it. */
 type eventListPayload struct {
     output.ListPayload[eventListItem]
     ServingProcessListeners []DeferredListener `json:"servingProcessListeners,omitempty"`
 }
 
-/* renderDeferredListenerBlock is called from both branches, the inspectable dispatcher's and the one that only warns: the declaration is the command's own and does not depend on being able to list anything. */
 func renderDeferredListenerBlock(builder *output.TableBuilder, deferredListeners []DeferredListener) {
     if 0 == len(deferredListeners) {
         return

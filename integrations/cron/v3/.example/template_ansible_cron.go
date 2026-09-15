@@ -11,10 +11,8 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
 )
 
-/* ansibleCronOwnershipMarker is this template's own marker, distinct from the builtin one: --prune empties only files whose first bytes carry the marker of the template generating now, so a dialect of the integrator's own declares a line of its own. */
 const ansibleCronOwnershipMarker = "# owned by melody:cron:generate (ansible-cron)"
 
-/* ansibleCronHeartbeatName is the cron name of the heartbeat task, the identity ansible.builtin.cron keeps for the crontab line it writes for it. */
 const ansibleCronHeartbeatName = "melody heartbeat"
 
 /* ErrAnsibleCronDuplicateName is returned when two entries of one destination render the same cron name: ansible.builtin.cron keeps ONE crontab line per name, so the second task would silently replace the first. */
@@ -23,7 +21,6 @@ var ErrAnsibleCronDuplicateName = errors.New("ansible-cron: two entries render t
 /* ErrAnsibleCronInvalidUtf8 is returned for a value that is not valid UTF-8: the YAML scalar escapes such a byte as \xNN, which a YAML reader decodes as the code point U+00NN — a different byte sequence than the one configured, handed to the shell in silence. */
 var ErrAnsibleCronInvalidUtf8 = errors.New("ansible-cron: value is not valid UTF-8")
 
-/* the cron name becomes the "#Ansible: <name>" comment line the module writes above the crontab line it manages; a line terminator inside it ends the comment and starts a crontab line of the name's own choosing. Nothing else is refused in it: % is inert in a crontab comment, and the name never reaches a shell. */
 var ansibleCronNameForbiddenCharacters = []melodycron.ForbiddenCharacter{
     {Char: '\n', Reason: "a literal newline ends the #Ansible: comment line and starts a crontab line of its own; remove it at the source"},
     {Char: '\r', Reason: "a carriage return ends the #Ansible: comment line on many cron daemons; remove it at the source"},
@@ -56,7 +53,6 @@ func (instance *AnsibleCronTemplate) Render(entries []melodycron.Entry, options 
     var builder strings.Builder
     builder.WriteString(ansibleCronOwnershipMarker + "\n---\n")
 
-    /* ansible.builtin.cron keeps one crontab line per name, and find_job answers the first "#Ansible: <name>" comment it meets — so two tasks sharing a name are one line, the last one written, and the entry that lost is gone in silence */
     namesSeen := make(map[string]string, len(entries))
 
     for _, entry := range entries {
@@ -92,7 +88,6 @@ func (instance *AnsibleCronTemplate) Render(entries []melodycron.Entry, options 
     return builder.String(), nil
 }
 
-/* buildTask renders one entry as one task and returns the cron name it rendered under, the identity ansible.builtin.cron keeps for the line. A command expanded into several parallel instances yields one entry per instance under the same command name, so the cron name carries the instance when there is more than one — the way the k8s dialect suffixes its resource name — or every instance past the first would replace the one before it. */
 func (instance *AnsibleCronTemplate) buildTask(entry melodycron.Entry) (string, string, error) {
     if "" == entry.User {
         return "", "", exception.NewError(
@@ -153,7 +148,6 @@ func (instance *AnsibleCronTemplate) buildTask(entry melodycron.Entry) (string, 
     return cronName, task, nil
 }
 
-/* buildHeartbeatTask renders the heartbeat the way the /etc/cron.d dialect does: a heartbeat command wins over a heartbeat path, either needs the heartbeat user, and both go through the same shell quoting as an entry. It renders nothing when neither is configured. */
 func (instance *AnsibleCronTemplate) buildHeartbeatTask(options melodycron.RenderOptions) (string, error) {
     var job string
 
@@ -198,7 +192,6 @@ func (instance *AnsibleCronTemplate) buildHeartbeatTask(options melodycron.Rende
     ), nil
 }
 
-/* ansibleCronJobTokens answers the tokens of the entry's command line under the builtin crontab dialect's rule: a Command override replaces the binary and its arguments, and an entry with neither is refused rather than rendered as an empty job. */
 func ansibleCronJobTokens(entry melodycron.Entry) ([]string, error) {
     if 0 < len(entry.Command) {
         if "" == strings.Join(entry.Command, "") {
@@ -223,7 +216,6 @@ func ansibleCronJobTokens(entry melodycron.Entry) ([]string, error) {
     return append([]string{entry.Binary}, entry.Args...), nil
 }
 
-/* refuseInvalidUtf8 refuses a value yamlScalar would rewrite: an invalid byte is escaped as \xNN and decoded by a YAML reader as U+00NN, so the user or the job the module writes would differ from the one configured, in silence. */
 func refuseInvalidUtf8(entryName string, values []string) error {
     for _, value := range values {
         if false == utf8.ValidString(value) {
@@ -238,12 +230,10 @@ func refuseInvalidUtf8(entryName string, values []string) error {
     return nil
 }
 
-/* yamlScalar emits value as a double-quoted YAML scalar through Go's %q: the escapes Go writes — \" \\ \n \r \t \a \b \f \v, \xNN for a control byte, \uNNNN and \UNNNNNNNN for a code point the terminal would not show — are all read by a YAML double-quoted scalar with the same meaning, and every printable rune passes through verbatim. */
 func yamlScalar(value string) string {
     return fmt.Sprintf("%q", value)
 }
 
-/* fieldOrEveryValue mirrors the wildcard defaulting the builtin dialects apply: an empty schedule field means every value. */
 func fieldOrEveryValue(field string) string {
     if "" == field {
         return "*"

@@ -3,29 +3,10 @@ package config
 import (
     "strings"
     "testing"
-
     "github.com/precision-soft/melody/v3/.example/entity"
-    melodysecurityconfig "github.com/precision-soft/melody/v3/security/config"
     melodysecuritycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
-/* compiledSecurityModule builds the module up to what RegisterSecurity reads — the internal-auth secrets, the token validators, the impersonation resolver and the two-factor store — and compiles the configuration it registers, so a test asks the rule table the same question the access-control listener asks. */
-func compiledSecurityModule(t *testing.T) *melodysecurityconfig.Builder {
-    t.Helper()
-
-    moduleInstance := &Module{}
-    moduleInstance.buildInternalAuth()
-    moduleInstance.buildTokenAuth()
-    moduleInstance.buildImpersonation()
-    moduleInstance.buildTwoFactor()
-
-    builder := melodysecurityconfig.NewBuilder()
-    moduleInstance.RegisterSecurity(builder)
-
-    return builder
-}
-
-/* The doors that write through the example into a backend it does not own — the object storage, the outbox, the message bus — and the platform check, which spends the distributed lock and three storage operations per call, are not public: each is asserted on its own so a rule moved back to public is named by the path that moved. */
 func TestRegisterSecurity_TheDoorsThatWriteIntoABackendCarryARole(t *testing.T) {
     control := compiledSecurityModule(t).BuildAndCompile().GlobalAccessControl()
 
@@ -47,7 +28,6 @@ func TestRegisterSecurity_TheDoorsThatWriteIntoABackendCarryARole(t *testing.T) 
     }
 }
 
-/* The public rules are the readiness probe, the login and logout doors, the frontend bundle, the metrics and the openapi document, and the cipher round-trip probe, which reads nothing from the caller; the list is closed, so a rule added as public shows up here as the path that was not expected. */
 func TestRegisterSecurity_ThePublicRulesAreTheClosedListTheReadmeStates(t *testing.T) {
     control := compiledSecurityModule(t).BuildAndCompile().GlobalAccessControl()
 

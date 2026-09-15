@@ -97,7 +97,6 @@ func newParameterTestRuntime(t *testing.T) *testRuntime {
         t.Fatalf("failed to build the test configuration: %v", configurationErr)
     }
 
-    /* the window is asserted against the command's own ascending output rather than against these names, so the assertions never depend on which parameters melody registers by default */
     for index := 0; index < 12; index++ {
         applicationConfiguration.RegisterRuntime(
             fmt.Sprintf("zz.window.%02d", index),

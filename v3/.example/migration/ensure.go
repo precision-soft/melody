@@ -10,6 +10,7 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/migrate"
+    "github.com/uptrace/bun/driver/pgdriver"
 )
 
 const (
@@ -18,16 +19,13 @@ const (
     archiveMigrationUnlockCommand = "db:archive:unlock"
 )
 
-/* the unlock must not ride the caller's context: an interrupted resolution cancels it, the delete never reaches the database and the lock row survives, refusing every later migration until someone runs the unlock command */
 const migrationUnlockTimeout = 5 * time.Second
 
-/* the window bounds how long a resolution waits for another process's migration before refusing; both are variables so the tests can shorten the wait instead of holding a test binary for half a minute */
 var (
     migrationLockRetryWindow   = 30 * time.Second
     migrationLockRetryInterval = 250 * time.Millisecond
 )
 
-/* the memoization is keyed by handle AND set together. This major carries two of them — the catalogue schema on mysql and the reading archive on postgres — so a key of the handle alone would let whichever set ran first answer for the other; and nothing in the funnel forbids one handle carrying both, so the pair is the honest key even where the two handles happen to differ. */
 type migratedSetKey struct {
     database     *bun.DB
     migrationSet *migrate.Migrations
@@ -39,8 +37,6 @@ var (
     refusedDatabaseList  = map[migratedSetKey]refusedMigrationAttempt{}
 )
 
-/* refusedMigrationAttempt is what an attempt that waited out the whole window leaves behind, so the ones
-   after it are told what it learned instead of waiting for it again. */
 type refusedMigrationAttempt struct {
     refusal   error
     refusedAt time.Time
@@ -58,7 +54,6 @@ func EnsureArchiveMigrated(ctx context.Context, database *bun.DB) error {
     return ensureMigratedSet(ctx, database, ArchiveMigrations, archiveMigrationSetName, archiveMigrationUnlockCommand)
 }
 
-/* the two sets by the name a failure reports them under: a refusal of the second database has to say which database refused, because the console line an operator reads names neither the host nor the role */
 const (
     catalogMigrationSetName = "catalogue"
     archiveMigrationSetName = "archive"
@@ -78,14 +73,6 @@ func ensureMigratedSet(ctx context.Context, database *bun.DB, migrationSet *migr
         return nil
     }
 
-    /* an attempt that was refused is remembered for as long as the wait that produced it, and the callers
-       that arrive inside that span are answered with it rather than made to repeat it.
-
-       Without this the cost of one lock nobody releases is paid per resolution and serially, because the
-       whole protocol runs under this mutex: measured on a window shortened to 300ms, three concurrent
-       resolutions took 1.5s — five windows, not one — and at the real window that is two and a half minutes
-       of requests holding on a refusal already known, each of them answering 500 afterwards. The refusal is
-       the same value, so nothing about what a caller is told changes; only how long it takes to be told. */
     if refused, wasRefused := refusedDatabaseList[memoizationKey]; true == wasRefused {
         if migrationLockRetryWindow > time.Since(refused.refusedAt) {
             return refused.refusal
@@ -100,8 +87,7 @@ func ensureMigratedSet(ctx context.Context, database *bun.DB, migrationSet *migr
         migrate.WithMarkAppliedOnSuccess(true),
     )
 
-    /* every failure of the set is handed back as this application's exception naming the set and the step, with bun's error as the cause: a raw driver error travelling up through a by-type resolution is relabelled "service not registered in resolver" by the container, a headline that sends the operator to the wiring for a database that refused. errors.Is still reaches the cause. */
-    if initErr := migrator.Init(ctx); nil != initErr {
+    if initErr := initializeMigrationBookkeeping(ctx, migrator); nil != initErr {
         return migrationStepFailure(setName, "initialising the bookkeeping", unlockCommand, initErr)
     }
 
@@ -109,10 +95,7 @@ func ensureMigratedSet(ctx context.Context, database *bun.DB, migrationSet *migr
 
     locked, lockErr := acquireMigrationLock(ctx, migrator, unlockCommand)
     if nil != lockErr {
-        /* only a refusal that COST the wait is remembered, and that is the whole of the harm: a refusal
-           that came back at once — a failed init, a lock that could not be released after the set was
-           applied — costs nothing to reach again, so the next resolution reaches it again and heals as soon
-           as the database does. A caller that walked away is not evidence about the database either. */
+
         if migrationLockRetryWindow <= time.Since(lockStartedAt) && nil == ctx.Err() {
             refusedDatabaseList[memoizationKey] = refusedMigrationAttempt{refusal: lockErr, refusedAt: time.Now()}
         }
@@ -131,7 +114,6 @@ func ensureMigratedSet(ctx context.Context, database *bun.DB, migrationSet *migr
     return nil
 }
 
-/* migrationStepFailure is the exception every refusal of a set is handed back as. An exception of this application's own is left as it is, so the lock refusal keeps the remedy it names and a failed unlock keeps its verdict; anything else — bun's, the driver's — is wrapped with the set and the step. */
 func migrationStepFailure(setName string, step string, unlockCommand string, cause error) error {
     var ownException *exception.Error
     if true == errors.As(cause, &ownException) {
@@ -149,7 +131,6 @@ func migrationStepFailure(setName string, step string, unlockCommand string, cau
     )
 }
 
-/* acquireMigrationLock answers whether the lock was taken. A false with a nil error means another process applied the whole set while this one waited, so there is nothing left to run and the lock was never held here. */
 func acquireMigrationLock(ctx context.Context, migrator *migrate.Migrator, unlockCommand string) (bool, error) {
     startedAt := time.Now()
 
@@ -159,14 +140,13 @@ func acquireMigrationLock(ctx context.Context, migrator *migrate.Migrator, unloc
             return true, nil
         }
 
-        /* the status read can fail while the lock holder is mid-migration; an unreadable status keeps the wait going instead of concluding anything from it */
         pending, statusErr := hasUnappliedMigration(ctx, migrator)
         if nil == statusErr && false == pending {
             return false, nil
         }
 
         if migrationLockRetryWindow <= time.Since(startedAt) {
-            /* the refusal names the resource and the remedy: on its own bun's error states that a lock exists and nothing else — not that an unlock command exists to clear a lock a crashed process left behind. The remedy is the one for THIS set: each set's lock lives in its own database, so an operator told to run db:unlock over a held archive lock would clear the wrong one and find the refusal unchanged. The bun error stays the cause, so errors.Is still reaches it. */
+
             return false, exception.NewError(
                 "migration: the migration lock is held; another migration is running, or a crashed one left it behind",
                 exceptioncontract.Context{
@@ -194,7 +174,6 @@ func hasUnappliedMigration(ctx context.Context, migrator *migrate.Migrator) (boo
     return 0 < len(status.Unapplied()), nil
 }
 
-/* migrateWhileLocked releases the lock whatever the migration answered: a lock row that survives refuses every later migration on every process. The unlock failure becomes the verdict only when the migration itself succeeded; a failed migration keeps its own error. */
 func migrateWhileLocked(ctx context.Context, migrator *migrate.Migrator, unlockCommand string) (migrateErr error) {
     defer func() {
         unlockContext, cancelUnlock := context.WithTimeout(
@@ -221,20 +200,7 @@ func migrateWhileLocked(ctx context.Context, migrator *migrate.Migrator, unlockC
     return migrateErr
 }
 
-/* Reset brings the database back to the schema this application declares, whatever shape it was left in:
-   the tables the set owns are dropped, the bookkeeping is dropped and recreated with them, the single
-   migration is applied again, and the memo this package keeps for the handle is cleared so a resolution
-   later in the same process does not answer from a state that no longer exists.
-
-   It is the answer this example gives to a volume provisioned by an older build. An example is not a
-   project with a past: it has one state, the present one, so it carries no migration that repairs its
-   history — the reset is where a database in an older shape is brought to the present one, and dropping
-   the bookkeeping is the half that matters there, because a volume migrated by an older set still holds
-   the rows of steps this schema no longer has.
-
-   No migration lock is taken, and that is not an omission: the reset drops the very table the lock lives
-   in, so no lock could span it. It is an operator command over a development volume, run deliberately,
-   and the caller is what serializes it. */
+/* Reset drops and recreates the declared schema and migration bookkeeping. It invalidates process memoization before attempting changes. The caller must serialize this destructive development operation; no migration lock can span dropping its own lock table. */
 func Reset(ctx context.Context, database *bun.DB) error {
     return resetSet(ctx, database, Migrations)
 }
@@ -252,16 +218,16 @@ func resetSet(ctx context.Context, database *bun.DB, migrationSet *migrate.Migra
     ensureMutex.Lock()
     defer ensureMutex.Unlock()
 
+    memoizationKey := migratedSetKey{database: database, migrationSet: migrationSet}
+    delete(migratedDatabaseList, memoizationKey)
+    delete(refusedDatabaseList, memoizationKey)
+
     migrator := migrate.NewMigrator(database, migrationSet, migrate.WithMarkAppliedOnSuccess(true))
 
-    if initErr := migrator.Init(ctx); nil != initErr {
+    if initErr := initializeMigrationBookkeeping(ctx, migrator); nil != initErr {
         return initErr
     }
 
-    /* the down of the set is run before the bookkeeping goes, rather than through the migrator's own
-       rollback: a rollback reverts the last GROUP, so a volume whose rows name steps this schema no
-       longer has would leave its tables standing. The set is one migration, so its down is the whole
-       schema. */
     for _, migrationInstance := range migrationSet.Sorted() {
         if nil == migrationInstance.Down {
             continue
@@ -280,9 +246,26 @@ func resetSet(ctx context.Context, database *bun.DB, migrationSet *migrate.Migra
         return migrateErr
     }
 
-    memoizationKey := migratedSetKey{database: database, migrationSet: migrationSet}
-    delete(migratedDatabaseList, memoizationKey)
-    delete(refusedDatabaseList, memoizationKey)
-
     return nil
+}
+
+func initializeMigrationBookkeeping(ctx context.Context, migrator *migrate.Migrator) error {
+    for attempt := 0; ; attempt++ {
+        initErr := migrator.Init(ctx)
+        if nil == initErr || 3 <= attempt {
+            return initErr
+        }
+        var databaseErr pgdriver.Error
+        if false == errors.As(initErr, &databaseErr) {
+            return initErr
+        }
+        constraint := databaseErr.Field('n')
+        code := databaseErr.Field('C')
+        if "42P07" != code && ("23505" != code || ("pg_class_relname_nsp_index" != constraint && "pg_type_typname_nsp_index" != constraint)) {
+            return initErr
+        }
+        if nil != ctx.Err() {
+            return ctx.Err()
+        }
+    }
 }

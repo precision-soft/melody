@@ -30,9 +30,7 @@ func MustHashPassword(plaintextPassword string) string {
     return passwordHash
 }
 
-/* PasswordMatches reports whether the plaintext password produced the stored hash. bcrypt compares in constant time internally, so this is the whole credential comparison a caller needs.
-
-   A stored value that is not a bcrypt digest at all is refused before any key is derived, and that refusal is orders of magnitude cheaper than a real comparison: measured here, 228ns against 52ms. Response time would therefore name every account whose column holds such a value — truncated, edited by hand, written by something that is not this application — and those are exactly the accounts this door will refuse whatever is typed, which is the existence oracle DummyPasswordMatch exists to close, inverted. So a refusal bcrypt reached without working spends the comparison it skipped. */
+/* PasswordMatches verifies a password with bcrypt. Malformed hashes and overlong passwords pay a dummy default-cost comparison before refusal; valid hashes use their stored cost. This does not make the complete login path constant-time. */
 func PasswordMatches(passwordHash string, plaintextPassword string) bool {
     compareErr := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(plaintextPassword))
     if nil == compareErr {
@@ -47,10 +45,10 @@ func PasswordMatches(passwordHash string, plaintextPassword string) bool {
     return false
 }
 
-/* dummyPasswordHash is one bcrypt hash at the default cost, computed once at load. It is the material DummyPasswordMatch compares against so a login for a username that does not exist spends the same bcrypt time as one whose password is merely wrong. */
+/* The absent-user comparison uses a fixed hash at bcrypt.DefaultCost. */
 var dummyPasswordHash = MustHashPassword("melody-example-absent-user-timing-equalizer")
 
-/* DummyPasswordMatch runs a full bcrypt comparison against a fixed hash and always reports false. A login door that could not find the user calls it so the request pays the same comparison cost a found user's wrong password pays: without it, an absent username returns before any bcrypt work and its faster response is an existence oracle an attacker times to enumerate usernames. */
+/* DummyPasswordMatch performs a default-cost bcrypt comparison and returns false. It reduces the timing difference for absent users; existing hashes with different costs still take different amounts of work. */
 func DummyPasswordMatch(plaintextPassword string) bool {
     return PasswordMatches(dummyPasswordHash, plaintextPassword)
 }

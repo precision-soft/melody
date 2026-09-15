@@ -92,7 +92,6 @@ func TestEvent_Constructors_PanicOnEmptyName(t *testing.T) {
         NewEventWithTimestamp("", nil, time.Now())
     }, "event name may not be empty")
 
-    /* the source is the zero value rather than a constructed event: NewEventWithTimestamp("", ...) panics while the argument is being evaluated, so writing it inline never enters NewEventFromEvent at all. In production the state arrives only through a foreign implementation of the contract. */
     testhelper.AssertPanicsWithError(t, func() {
         NewEventFromEvent(&Event{})
     }, "event name may not be empty")

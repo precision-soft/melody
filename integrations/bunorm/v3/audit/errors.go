@@ -7,18 +7,17 @@ import (
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
-/* ErrAsyncStorageQueueFull and ErrAsyncStorageClosed are what AsyncStorage.Save returns for an entry it could not take: the buffer was full, or the storage was closed. The storage has dead-lettered such an entry through its own logger before returning; a Recorder that reads the refusal journals the entry itself unless the storage journaled it through the recorder's own logger, so a lost entry reaches the application's journal in every assembly and reaches no journal twice. */
+/* ErrAsyncStorageQueueFull and ErrAsyncStorageClosed identify entries AsyncStorage.Save cannot queue. The refusal records the dead-letter logger so Recorder can avoid reporting the same loss twice through that logger. */
 var ErrAsyncStorageQueueFull = errors.New("async audit storage queue is full")
 
 var ErrAsyncStorageClosed = errors.New("async audit storage is closed")
 
-/* journaledRefusal is a refusal the async storage has already dead-lettered, carrying the logger it did so through. It is what lets the recorder decide whether its own dead-letter would be a second record in the same journal or the only record in the application's: skipped on the sentinel alone, the recorder's record was lost whenever the storage journaled through the emergency default and the recorder through the application's logger — the wiring the readme describes. It unwraps to the refusal it carries, so errors.Is against the sentinels and errors.As against the exception keep their answers. */
 type journaledRefusal struct {
     sentinel error
     journal  loggingcontract.Logger
 }
 
-/* Error renders the sentinel and nothing more, and Is answers for it in place of an Unwrap: the refusal sits under the storage's exception as its cause, so a journal that renders the cause chain reads the sentinel once, where an extra link — the same text twice, or the message where the sentinel stood — was a change in every dead-letter record and in every caller's log of Save. errors.Is still matches the sentinel through Is, and errors.As still finds the refusal through the exception's own unwrap. */
+/* Error renders only the sentinel. Is supports errors.Is without an additional cause-chain link; errors.As can still reach the refusal through its enclosing exception. */
 func (instance *journaledRefusal) Error() string {
     return instance.sentinel.Error()
 }
@@ -27,7 +26,6 @@ func (instance *journaledRefusal) Is(target error) bool {
     return target == instance.sentinel
 }
 
-/* journaledThrough answers whether a refusal was already dead-lettered through the given logger. Identity is asked only of loggers whose dynamic type can carry one — a comparison of two interface values holding a slice or a map is a runtime panic — and a logger without identity is read as a different journal, so the entry is journaled by both rather than by neither. */
 func journaledThrough(saveErr error, logger loggingcontract.Logger) bool {
     var refusal *journaledRefusal
     if false == errors.As(saveErr, &refusal) {

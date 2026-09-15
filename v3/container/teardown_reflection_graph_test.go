@@ -3,15 +3,8 @@ package container
 import (
     "math/rand"
     "testing"
-
     containercontract "github.com/precision-soft/melody/v3/container/contract"
 )
-
-type reflectionGraphNode struct {
-    left  *reflectionGraphNode
-    right *reflectionGraphNode
-    value int
-}
 
 func TestHeldPointerIdentities_MatchesBoundedGraphReachability(t *testing.T) {
     random := rand.New(rand.NewSource(20260911))
@@ -50,7 +43,6 @@ func TestHeldPointerIdentities_MatchesBoundedGraphReachability(t *testing.T) {
         actual := heldPointerIdentities(nodes[0])
         for index, node := range nodes {
             identity, _ := pointerKeyOf(node)
-            /* Each graph edge crosses a struct and then its pointer field. */
             wanted := 0 <= distances[index] && 2 * distances[index] <= teardownWalkDepthLimit
             if wanted != holdsIdentity(actual, identity) {
                 t.Fatalf("sample %d node %d distance %d: wanted held=%v; edges=%v", sample, index, distances[index], wanted, edges)
@@ -58,8 +50,6 @@ func TestHeldPointerIdentities_MatchesBoundedGraphReachability(t *testing.T) {
         }
     }
 }
-
-func (instance *reflectionGraphNode) Close() error { return nil }
 
 func TestContainer_TeardownPlanRecognizesReachableCollaboratorThroughCycles(t *testing.T) {
     edges := [][2]int{{7, 14}, {14, 16}, {14, 14}, {14, 1}, {17, 14}, {1, 3}, {13, 9}, {9, 0}, {9, 6}, {9, 10}, {16, 14}, {8, 8}, {16, 17}, {6, 14}, {10, -1}, {5, 0}, {1, 11}, {0, 7}}

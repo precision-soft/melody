@@ -17,11 +17,7 @@ type ServerSentEvent struct {
     Retry int
 }
 
-/* NewServerSentEventWriter commits the event-stream headers and returns the writer that emits frames onto them. Two refusals stand in front of the commit, because after it nothing can be answered any more — writeResponse skips a committed stream and the recovery guard declines to write a 500 over it:
-
-   the response must not already be committed, or the frames would be appended to whatever body is in flight and the only trace would be net/http's own "superfluous WriteHeader" line on the process's stderr, outside the journal entirely; and the connection must really support streaming. The capability probe reads through the kernel's recording writer rather than at it: that wrapper always carries a Flush method, so an assertion at the wrapper succeeded even when the delegate underneath could not flush at all — the refusal was dead code for every in-framework caller, and the handler went on to subscribe and write events into a buffer nothing would ever flush.
-
-   The returned writer is safe for concurrent use: the natural shape of an event stream is a handler emitting events beside a ticker emitting keepalives, and a net/http ResponseWriter is not safe for concurrent use, so two unsynchronized frames interleave into one corrupt frame with no error anywhere. It must not outlive the handler, which is what the hub exists to make unnecessary. */
+/* NewServerSentEventWriter refuses an already-committed response or a delegate that cannot flush before committing event-stream headers. Its frame writes are concurrency-safe, but the writer must not outlive the handler. */
 func NewServerSentEventWriter(writer nethttp.ResponseWriter) (*ServerSentEventWriter, error) {
     if nil == writer {
         return nil, exception.NewError("response writer may not be nil", nil, nil)
@@ -53,7 +49,6 @@ func NewServerSentEventWriter(writer nethttp.ResponseWriter) (*ServerSentEventWr
     }, nil
 }
 
-/* streamingFlusherOf finds the flusher that actually reaches the connection, unwrapping the chain of ResponseWriter wrappers the way http.ResponseController does. A wrapper that forwards Flush only when its own delegate can flush — the kernel's recording writer is exactly that — answers a type assertion affirmatively while flushing nothing. */
 func streamingFlusherOf(writer nethttp.ResponseWriter) (nethttp.Flusher, bool) {
     current := writer
 
@@ -75,7 +70,6 @@ func streamingFlusherOf(writer nethttp.ResponseWriter) (nethttp.Flusher, bool) {
         return nil, false
     }
 
-    /* the flush is issued through the OUTERMOST writer so every wrapper still records the commit it is there to record — the kernel's recorder learns the stream was committed, and the access log reports the status the client received rather than zero */
     flusher, isFlusher := writer.(nethttp.Flusher)
     if false == isFlusher {
         return nil, false
@@ -133,7 +127,6 @@ func (instance *ServerSentEventWriter) Send(event ServerSentEvent) error {
     return instance.writeFrame(builder.String())
 }
 
-/* validateServerSentEvent refuses the shapes the grammar reads as something other than what the caller wrote. A negative retry is refused rather than dropped: the field exists to instruct the client's reconnection delay, and a computed backoff that came out negative is a unit-confusion fault whose silent drop is indistinguishable from never setting it. A zero retry is the field's own zero value and means unset — a caller asking for an immediate reconnect names one millisecond. */
 func validateServerSentEvent(event ServerSentEvent) error {
     if 0 > event.Retry {
         return exception.NewError(
@@ -153,7 +146,6 @@ func validateServerSentEvent(event ServerSentEvent) error {
         return exception.NewError("server sent event name is empty once its control bytes are removed", nil, nil)
     }
 
-    /* an event NAME with no data is refused: the grammar returns from dispatch the moment the data buffer is empty, so the listener the caller named never fires and the caller had no way to find out. An id or a retry with no data is not refused — both take effect before that return, so a checkpoint frame and a reconnection-delay frame are deliberate spellings. */
     if "" == event.Data && "" != event.Event {
         return exception.NewError(
             "server sent event carries an event name and no data, so it would dispatch nothing",
@@ -197,7 +189,6 @@ func (instance *ServerSentEventWriter) writeFrame(frame string) error {
     return nil
 }
 
-/* the two terminators of the grammar, named so each site says which one it ends with. A comment deliberately ends the FRAME and not merely the line: the blank line is what makes a comment-only keepalive observable to a client that reads frame by frame, which is the whole point of the preamble a stream flushes at subscription time — without it a client cannot tell a live stream from a hung one. The hazard a single newline would avoid, a keepalive landing between the fields of a half-built event and dispatching it, cannot arise here: Send composes every frame whole and writes it under the lock, so nothing is ever buffered when a comment runs. */
 const (
     serverSentEventLineTerminator  = "\n"
     serverSentEventFrameTerminator = "\n\n"

@@ -21,12 +21,7 @@ func NewCurrency(
     }
 }
 
-/* Currency carries the exchange rate beside the code because the catalogue quotes a product in one currency
-   and a reader may ask for another. Rate is how many units of THIS currency one unit of the rate base
-   costs, so a conversion between two currencies never needs to know what the base was:
-   amount / rate(from) * rate(to) cancels it. RateAsOf is the instant the PROVIDER took the reading, not the
-   moment this application stored it — a reader deciding whether a price is stale needs the age of the
-   reading, and the two differ by however long the refresh was delayed. */
+/* Currency stores a rate against the shared EUR base: amount / source.Rate * target.Rate converts between currencies. RateAsOf is the provider’s observation time, not the local storage time. */
 type Currency struct {
     Id       string
     Code     string

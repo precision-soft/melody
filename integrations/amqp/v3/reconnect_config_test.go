@@ -36,14 +36,12 @@ func TestNextReconnectBackoff_ClampsZeroMaxBackoff(t *testing.T) {
         t.Fatalf("expected a positive backoff when MaxBackoff is non-positive, got %v", next)
     }
 
-    /* a huge current still caps at the default max instead of returning the zero cap */
     if next := nextReconnectBackoff(config, time.Hour); DefaultReconnectConfig().MaxBackoff != next {
         t.Fatalf("expected the zero MaxBackoff to fall back to the default cap, got %v", next)
     }
 }
 
 func TestNextReconnectBackoff_ClampsOverflowingProduct(t *testing.T) {
-    /* a BackoffFactor large enough to push the float product past the int64 nanosecond range would wrap the time.Duration conversion negative, skip the cap, and feed time.After a no-delay backoff; the result must stay clamped to MaxBackoff */
     config := ReconnectConfig{InitialBackoff: time.Second, MaxBackoff: 30 * time.Second, BackoffFactor: 1e10}
 
     next := nextReconnectBackoff(config, time.Second)
@@ -58,7 +56,6 @@ func TestNextReconnectBackoff_ClampsOverflowingProduct(t *testing.T) {
 }
 
 func TestReconnectBackoffShouldReset_ClampsZeroInitialBackoff(t *testing.T) {
-    /* a directly-constructed config with a zero InitialBackoff must measure the reset threshold against the clamped default, not the raw 0: a 0 threshold would reset on every instantly-dying subscription and defeat the no-delay-storm guard the seed/reset sites already clamp for */
     config := ReconnectConfig{InitialBackoff: 0, MaxBackoff: time.Second, BackoffFactor: 2}
 
     if true == reconnectBackoffShouldReset(config, 0) {

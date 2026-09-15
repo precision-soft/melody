@@ -23,7 +23,6 @@ func ParseError(
         "actualType":    StringifyType(value),
     }
 
-    /* the refused value enters the context for the scalar shapes an operator needs to see — a refusal that names neither the value nor its magnitude cannot be acted on; on the config path a secret parameter withholds this whole error from the log, so nothing new leaks there */
     switch typedValue := value.(type) {
     case string:
         context["value"] = typedValue

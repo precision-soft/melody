@@ -8,7 +8,6 @@ import (
     "github.com/precision-soft/melody/v3/exception"
 )
 
-/* every recovery boundary of the request path funnels its recovered value through here, and nothing had ever called it: a nil that did not read as nil would turn a clean return into a fabricated failure, and a value dropped instead of described would leave an operator with a 500 and nothing to look at. A recovered error travels UNCHANGED — wrapping it would bury the level, the context and the already-logged mark the exception package carries. */
 func TestRecoverToError_ANilRecoveryIsNotAFailure(t *testing.T) {
     if nil != RecoverToError(nil) {
         t.Fatalf("expected a nil recovery to yield no error")
@@ -30,7 +29,6 @@ func TestRecoverToError_ARecoveredErrorTravelsUnchanged(t *testing.T) {
     }
 }
 
-/* a string panic — the shape a hand-written panic("...") takes — becomes the message itself rather than being buried under a generic one, because that string is everything the author of the panic said. */
 func TestRecoverToError_AStringPanicBecomesTheMessage(t *testing.T) {
     recovered := RecoverToError("the handler gave up")
 
@@ -43,7 +41,6 @@ func TestRecoverToError_AStringPanicBecomesTheMessage(t *testing.T) {
     }
 }
 
-/* anything else — an int, a struct, a nil map dereference value — is rendered into the context under a message that says what happened, so the report names the value instead of dropping it. */
 func TestRecoverToError_AnyOtherValueIsRenderedIntoTheContext(t *testing.T) {
     recovered := RecoverToError(42)
 
@@ -66,7 +63,6 @@ func TestRecoverToError_AnyOtherValueIsRenderedIntoTheContext(t *testing.T) {
     }
 }
 
-/* the typed nil is normalized to the generic branch the way the exit handler's resolver normalizes it: passed through, the first Error() reader without its own guard — the kernel's debug-mode message, inside the recovery defer — raised a second panic that escaped ServeHttp. */
 func TestRecoverToError_NormalizesATypedNilErrorToTheGenericBranch(t *testing.T) {
     var typedNil *exception.Error
 
@@ -86,7 +82,6 @@ func TestRecoverToError_NormalizesATypedNilErrorToTheGenericBranch(t *testing.T)
     }
 }
 
-/* debugErrorMessage runs inside the recovery defer, where a message that panics would cost the connection: the panic is contained into a rendered note. */
 func TestDebugErrorMessage_ContainsAPanickingError(t *testing.T) {
     message := debugErrorMessage(&panickingMessageError{})
 

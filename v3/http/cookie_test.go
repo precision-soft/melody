@@ -60,7 +60,6 @@ func TestDeleteCookie_SetsDefaultPath(t *testing.T) {
     }
 }
 
-/* the sibling door refuses the same empty name three lines above with a message of its own, so an unqualified recover reads that refusal as this one; the name of the door that refused is what separates them. */
 func TestDeleteCookie_PanicsWhenNameIsEmpty(t *testing.T) {
     response := EmptyResponse(200)
 
@@ -87,7 +86,6 @@ func indexOf(value string, needle string) int {
     return -1
 }
 
-/* Nil headers are a state the contract permits — SetHeaders stores the nil it is given — and every other consumer of Headers() in the chain checks for it before writing. */
 func TestSetCookie_AllocatesTheHeaderMapWhenTheResponseHasNone(t *testing.T) {
     response := EmptyResponse(200)
     response.SetHeaders(nil)
@@ -105,7 +103,6 @@ func TestSetCookie_AllocatesTheHeaderMapWhenTheResponseHasNone(t *testing.T) {
     }
 }
 
-/* the browser enforces the prefix contracts on the deleting Set-Cookie too: without Secure — and for __Host- without path "/" — the deletion is rejected in silence and the cookie stays. The __Host- case pins that the one acceptable path wins over the one the caller passed. */
 func TestDeleteCookie_HonoursThePrefixContractsSoTheDeletionCanLand(t *testing.T) {
     hostResponse := EmptyResponse(200)
     DeleteCookie(hostResponse, "__Host-session", "/app")

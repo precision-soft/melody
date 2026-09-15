@@ -64,7 +64,6 @@ func TestRegex_OptionalityExitsAndTheAccessorsThatDescribeThePattern(t *testing.
     }
 }
 
-/* the state under test is reachable: NewRegex keeps the compilation failure instead of panicking, so a hand-registered constraint can sit in it. */
 func TestRegex_AnUncompilablePatternRefusesEveryValueItIsAsked(t *testing.T) {
     constraint := NewRegex(`^[0-9`)
 
@@ -93,7 +92,6 @@ func TestRegex_AnUncompilablePatternRefusesEveryValueItIsAsked(t *testing.T) {
         t.Fatalf("expected the refusal to be told apart from a mismatch, got %q", validationError.Code())
     }
 
-    /* the optionality exits still come first: an uncompilable pattern must not turn an unfilled optional field into a failure */
     if validationError := constraint.Validate("", "field"); nil != validationError {
         t.Fatalf("expected an empty string to stay optional even under a broken pattern, got %v", validationError)
     }

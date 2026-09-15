@@ -28,7 +28,7 @@ type RouteRegistrar func(kernelInstance kernelcontract.Kernel)
 
 type Application struct {
     booted bool
-    /* raised for the boot window so the module doors can refuse a registration arriving from inside a module boot hook: the phase loops iterate a snapshot of the module list, so a module registered mid-boot would receive only the hooks of whatever phases had not run yet — a half-booted module reporting a successful boot */
+
     booting             bool
     ctx                 context.Context
     configuration       configcontract.Configuration
@@ -36,7 +36,7 @@ type Application struct {
     kernel              kernelcontract.Kernel
     embeddedPublicFiles fs.FS
     modules             []applicationcontract.Module
-    /* the identity set behind the module dedup: one instance reached through two providers boots once. Keyed by the interface value and populated lazily, because tests legitimately assemble a bare Application without the constructor. */
+
     registeredModuleInstances map[applicationcontract.Module]struct{}
     cliCommands           []clicontract.Command
     httpRouteRegistrars   []RouteRegistrar
@@ -48,14 +48,13 @@ type Application struct {
     moduleConfigurations  map[string]any
     bootCollisions        []bootCollision
     unappliedSecretMarks  []string
-    /* set when the framework had to supply the cache backend itself, because the one it supplies keeps every entry it is ever given; runHttp is what turns it into a warning, and only there */
+
     unboundedDefaultCacheBackend bool
-    /* set when the framework had to supply the session storage itself; paired with an unbounded session ttl it is the same unbounded growth, reached from the request path rather than from anything the application wrote */
+
     defaultInMemorySessionStorage bool
-    /* claimed by the one close that performs the teardown: the container's own closedness cannot answer "was it me", because two concurrent closes both probe it open before either enters Close, and both would then report the single failure as their own incident */
+
     closePerformerClaimed atomic.Bool
 
-    /* closed by the performer once its teardown has finished, so a losing sibling can wait for the whole teardown instead of racing the container's own Close: a sibling that entered the container first USED to be the one whose call ran the actual teardown, and the performer then read the closedness probe as "somebody else's close" and suppressed the report — the one failure reported by nobody, and an exit path proceeding over it. Lazily built, because tests construct the Application by literal. */
     closeDoneOnce sync.Once
     closeDone     chan struct{}
 }
@@ -73,12 +72,11 @@ func (instance *Application) Boot() kernelcontract.Kernel {
 
     instance.bootModulesPreConfigurationResolve()
 
-    /* the retry runs before the resolve on purpose: the marking must be on the parameter when the templates that read it resolve, or it would never travel into the derived values */
     instance.applyUnappliedSecretMarks()
 
     resolveErr := configuration.Resolve()
     if nil != resolveErr {
-        /* name the project directory in the failure: an unresolved parameter usually means the .env artifacts were not found there — melody derives the directory from the executable location (the working directory under go run), so a binary run from elsewhere fails exactly here with an otherwise unsuggestive "undefined environment key" */
+
         projectDirectory := ""
         if projectDirectoryParameter := configuration.Get(config.KernelProjectDir); nil != projectDirectoryParameter {
             projectDirectory = projectDirectoryParameter.String()
@@ -99,10 +97,8 @@ func (instance *Application) Boot() kernelcontract.Kernel {
 
     instance.ensureRuntimeDirectories()
 
-    /* armed before the first route can register and disarmed only after the aggregated report has had its chance to raise, so every duplicate route of the whole boot lands in that report instead of panicking one at a time */
     instance.armRouteCollisionRecorder()
 
-    /* the application's own routes register before any module's: where a root route and a module route meet at dispatch, the router breaks the tie on registration order, and the composition root wrote its route against the application, not against whichever module happens to boot with it */
     instance.bootHttp()
 
     instance.bootModulesPostConfigurationResolve()
@@ -119,7 +115,6 @@ func (instance *Application) Boot() kernelcontract.Kernel {
 
     instance.registerKernelHttpListeners()
 
-    /* after the collisions are reported and every registration is in: an optional feature built for its teardown, not for a caller */
     instance.buildMessageBusTransportsCloser()
 
     instance.warnUnappliedSecretMarks()
@@ -145,7 +140,7 @@ func (instance *Application) RegisterSecretParameter(
     instance.registerParameter(name, value, true)
 }
 
-/* MarkParameterSecret marks a parameter that already exists — typically one melody registered automatically from the .env artifacts — as holding a credential. A name that matches nothing does not fail the boot, since an environment key is legitimately undefined in some environments; it is retried before the configuration resolves and again at the end of the boot, and warned about only then, so a misspelled name is visible instead of silently redacting nothing. */
+/* MarkParameterSecret marks an existing parameter as secret. Missing names are retried before resolution and at the end of boot, then warned about if still absent. */
 func (instance *Application) MarkParameterSecret(name string) {
     if true == instance.booted {
         exception.Panic(
@@ -164,7 +159,6 @@ func (instance *Application) MarkParameterSecret(name string) {
     }
 }
 
-/* applyUnappliedSecretMarks retries the markings that matched nothing when they were declared. It runs after every module registered its parameters and before the configuration resolves, so a retried marking still propagates into the parameters whose templates read the secret; what still matches nothing stays queued, since a later boot phase may yet register the parameter. */
 func (instance *Application) applyUnappliedSecretMarks() {
     remaining := make([]string, 0, len(instance.unappliedSecretMarks))
 
@@ -177,7 +171,6 @@ func (instance *Application) applyUnappliedSecretMarks() {
     instance.unappliedSecretMarks = remaining
 }
 
-/* warnUnappliedSecretMarks runs when every boot phase that can register a parameter has finished: a marking that still matches nothing is a misspelled name or a key undefined in this environment, and the warning is what keeps it from silently redacting nothing. */
 func (instance *Application) warnUnappliedSecretMarks() {
     for _, name := range instance.unappliedSecretMarks {
         if true == instance.configuration.MarkSecret(name) {
@@ -212,7 +205,6 @@ func (instance *Application) registerParameter(
         )
     }
 
-    /* a duplicate is recorded for the aggregated boot report instead of panicking one at a time; the first registration wins until the guaranteed panic ends the boot */
     if "" != name && nil != instance.configuration.Get(name) {
         instance.recordBootCollision(bootCollisionKindParameter, name)
         return
@@ -232,9 +224,7 @@ func (instance *Application) Configuration() configcontract.Configuration {
     return instance.configuration
 }
 
-/* ProcessRole is the resolved process role (config.RoleWeb, config.RoleWorker or config.RoleAll): an explicit --role flag wins over the MELODY_PROCESS_ROLE parameter, which defaults to all. Melody gates nothing on it — wiring code queries it to decide whether to register background runners (outbox relays, consumers) on this process; services resolve the same value through ServiceProcessRole.
-
-   Nothing in this major waits for those runners: when Run returns, the container closes immediately, so a goroutine still draining loses its services under it. A runner that must finish its work observes the run context and completes its drain before the handler that received the context returns. */
+/* ProcessRole returns the resolved web, worker or all role. An explicit --role overrides the configured value, which defaults to all. Wiring decides which runners to register. Run does not join background goroutines; handlers must finish draining before returning. */
 func (instance *Application) ProcessRole() string {
     return instance.runtimeFlags.Role()
 }
@@ -242,10 +232,8 @@ func (instance *Application) ProcessRole() string {
 func (instance *Application) Run() {
     _ = instance.Boot()
 
-    /* boot is the last moment a parameter can still change anything: from here the wiring is done and the process is serving requests or executing a command, both against services that already read what they needed. Telling the configuration so is what turns a late Resolve into an error instead of a silent rewrite under those readers. */
     markConfigurationServing(instance.configuration)
 
-    /* one handler owns both the teardown and the exit, because neither of two separate defers can be ordered correctly: the exit helper ends in os.Exit, so a Close deferred below it would never run, and a Close deferred above it runs first and closes the very logger the final record is written through — a file-backed logger dropped every later write and the record of the dying error survived only as a one-line stderr echo. The record is therefore written first, through a logger the teardown has not touched, and the teardown runs between the record and the exit. */
     defer func() {
         recoveredValue := recover()
         if nil == recoveredValue {
@@ -283,7 +271,6 @@ func (instance *Application) Run() {
     }
 }
 
-/* resolveCliExitError answers the exit error a failed cli run should end the process with, or nil when the failure carries none. The exit-coded error may arrive wrapped — the cli action folds a command's error together with shutdown-close failures — so the cause chain is walked rather than the top type asserted, or an intended exit code degrades into a panic with a different code. The branch is a function so the typed-nil decision can be handed a chain rather than reached through a process exit. */
 func resolveCliExitError(runCliErr error) (*exception.ExitError, bool) {
     var exitError *exception.ExitError
 
@@ -291,7 +278,6 @@ func resolveCliExitError(runCliErr error) (*exception.ExitError, bool) {
         return nil, false
     }
 
-    /* errors.As matches this type on a typed-nil link and reports success. Answering that as an exit would hand Exit a nil it refuses, and the run's real error would be discarded in favour of a message about melody's own plumbing, so the run falls through to the ordinary panic that carries it. The answer is a separate boolean because the typed nil and the absence are the same pointer, and only the boolean can tell the caller them apart. */
     if nil == exitError {
         return nil, false
     }
@@ -318,7 +304,6 @@ func (instance *Application) RegisterConfiguration(name string, configuration an
         )
     }
 
-    /* the registry is consumed in exactly one place in this major, under exactly one name: the logging configuration. Any other name is unreadable by construction — no accessor exists through which a module could get it back — so accepting it would store a configuration the operator believes is active while nothing can ever consult it; a misspelling of the one supported name is the ordinary way that happens. */
     if loggingcontract.LoggingConfigurationName != name {
         exception.Panic(
             exception.NewError(
@@ -334,7 +319,7 @@ func (instance *Application) RegisterConfiguration(name string, configuration an
 
     _, exists := instance.moduleConfigurations[name]
     if true == exists {
-        /* recorded for the aggregated boot report instead of panicking one at a time; the first registration wins until the guaranteed panic ends the boot */
+
         instance.recordBootCollision(bootCollisionKindConfiguration, name)
         return
     }
@@ -375,22 +360,19 @@ func (instance *Application) logOnRecoverAndExit() {
         return
     }
 
-    /* the teardown hook mirrors the one Run passes: a boot that dies after the container was built — the logger service holds the log file open from that moment — used to exit with the container never closed, because os.Exit runs no defer. The record is written first, through a logger the teardown has not touched, and the close runs between the record and the exit. That close is unconditional; the IsClosed probe it takes first only decides whether a teardown failure is reported as this call's discovery, and what makes a boot that died before the kernel existed cost nothing is the nil-kernel check close starts with. */
     logging.LogOnRecoverAndExitAfter(instance.resolveExitLogger(), recoveredValue, 1, instance.teardownTimeout(), instance.closeBeforeExit)
 }
 
-/* resolveExitLogger picks the logger the final fatal record is written through: the configured container logger while it still writes, a last-resort logger opened on the configured destination when the container cannot answer — a boot that died before the logger service existed, a teardown that already closed it — and the emergency logger when even that destination is unusable. The container keeps serving built instances after Close, so liveness has to be asked of the logger itself — a file-backed logger a teardown already closed silently drops every write, and preferring it would lose the one record that explains the exit. The kernel guard covers an Application assembled without NewApplication: the one handler that must not panic answers with the emergency logger instead of dereferencing nil. */
 func (instance *Application) resolveExitLogger() loggingcontract.Logger {
     logger := logging.EmergencyLogger()
 
-    /* read through the interface, like the logger clause below: this resolver is evaluated as an argument, so it runs before the exit handler's own per-step shield begins, and a nil receiver here would replace the panic being reported with a bare traceback that runs neither the teardown nor os.Exit */
     if true == internal.IsNilInterface(instance.kernel) {
         return instance.exitFileLogger(logger)
     }
 
     containerLogger, loggerErr := logging.LoggerFromContainer(instance.kernel.ServiceContainer())
     if nil != loggerErr || nil == containerLogger || true == internal.IsNilInterface(containerLogger) {
-        /* the typed-nil clause is latent defense: the container refuses a provider-returned or overridden typed nil with an error today, but one that did slip through a future resolution path would pass the plain comparison and answer the Closed probe below with a nil receiver — a panic in the one handler that must not panic, in place of the emergency fallback this resolver exists to provide */
+
         return instance.exitFileLogger(logger)
     }
 
@@ -402,7 +384,6 @@ func (instance *Application) resolveExitLogger() loggingcontract.Logger {
     return containerLogger
 }
 
-/* exitFileLogger builds the last-resort logger for a process that is dying without a live container logger, on the destination the configuration names, so a deployment that reads var/log sees why the process ended instead of a boot failure that left no trace outside stderr. It is best-effort by construction: it runs as an argument to the exit handler, before the per-step shield begins, so any failure on the way — a configuration never built, an unopenable path, a module configuration that panics — answers the emergency logger instead of raising. The kernel view is built with the configuration itself, so the destination is readable for every failure after construction, resolved and created the way the container provider resolves and creates it. The descriptor is deliberately surrendered to os.Exit: the process ends before anything could close it. */
 func (instance *Application) exitFileLogger(emergencyLogger loggingcontract.Logger) (logger loggingcontract.Logger) {
     logger = emergencyLogger
 
@@ -428,15 +409,10 @@ func (instance *Application) exitFileLogger(emergencyLogger loggingcontract.Logg
     )
 }
 
-/* applicationExit terminates the process when the teardown of a normally-returning Run reports a failure; tests replace it to observe the exit code without stopping the test binary, the way signalContextExit is replaced */
 var applicationExit = os.Exit
 
-/* shieldedCloseStep is the door the clean-shutdown teardown runs through; tests replace it to drive the abandoned branch without waiting out the real budget, the way they replace applicationExit to observe an exit code */
 var shieldedCloseStep = logging.RunShieldedStepWithin
 
-/* closeAndExitOnFailure is Run's non-panic return: a teardown failure this call itself discovered turns into a non-zero exit, so a supervisor sees a shutdown that lost something — a failed flush, a close that errored — instead of recording a clean exit 0 whose only trace was one stderr line. A close somebody else already performed reported its failure through its own channel and keeps its own exit code.
-
-   The teardown runs under the same shield the panic path has had since the exit-step budget was installed, and for the same reason: the loop is sequential by default and has no budget of its own, so one Close that never returns — a pooled connection draining to a peer that is gone, a session file on a vanished mount — parks every service behind it and the process with them. The healthy shutdown was the one without an escape while the dying one had ten seconds. An abandoned teardown exits non-zero, because a process that could not release what it held did not shut down cleanly however quiet it was; and the error the step was writing is deliberately not read on that branch, since the step is still running on its own goroutine. */
 func (instance *Application) closeAndExitOnFailure() {
     var closeErr error
 
@@ -457,11 +433,6 @@ func (instance *Application) closeAndExitOnFailure() {
     applicationExit(1)
 }
 
-/* teardownTimeout answers the budget the clean shutdown's teardown runs under, from the parameter an operator sets and the default the configuration carries otherwise. It is read here rather than carried on the kernel view because nothing between boot and this moment needs it, and a method on that contract is a method every application implementing it would have to grow.
-
-   Every step of the read is best-effort by construction, for the same reason exitFileLogger is, and by the same means: this is evaluated as an ARGUMENT to the exit handler, before the per-step shield begins, so a configuration that was never built, a parameter a runtime registration removed, a value that stopped parsing, or a read that panics under a configuration lock somebody else holds must answer the configured default rather than raise. Without the recover the panic would unwind past the deferred handler's own recover, which has already returned by the time this runs, and the process would abort with no record, no certificate and no teardown at all — the outcome the shield exists to prevent, reached one line before the shield can start.
-
-   A negative value was refused at boot; zero was not, because zero is the operator asking for no deadline and the shield carries that meaning through. */
 func (instance *Application) teardownTimeout() (teardownTimeout time.Duration) {
     teardownTimeout = config.DefaultTeardownTimeout
 
@@ -485,11 +456,9 @@ func (instance *Application) teardownTimeout() (teardownTimeout time.Duration) {
         return config.DefaultTeardownTimeout
     }
 
-    /* zero is returned as it stands: it is the operator asking for no deadline, and folding it into the default here would answer a question they had already answered */
     return teardownTimeout
 }
 
-/* refuseHttpBootWithoutEnvironment fails the boot of an http process whose .env artifacts contributed no keys at all. Every built-in parameter has a development default — environment dev, debug tooling, debug commands, debug log level — so a production binary run from a directory without its .env files would otherwise serve on all of them, announced by nothing louder than one warning; refusing is the same direction the empty CORS allow list took, because booting the wrong environment is the widening. A cli process stays permissive: development commands legitimately run without any environment file, and a command takes its configuration with it when it exits. */
 func (instance *Application) refuseHttpBootWithoutEnvironment() {
     if config.ModeHttp != instance.runtimeFlags.Mode() {
         return
@@ -517,12 +486,10 @@ func (instance *Application) refuseHttpBootWithoutEnvironment() {
     )
 }
 
-/* environmentKeyCounter is the part of a configuration that can say how many keys the .env artifacts contributed. Asked for rather than demanded, the way servingMarker is: only the http boot refusal reads it, and a configuration double that does not carry it simply keeps the permissive behavior. */
 type environmentKeyCounter interface {
     EnvironmentKeyCount() int
 }
 
-/* servingMarker is the part of a configuration that can be told the wiring phase is over. It is asked for rather than demanded: only the application emits the signal, so requiring every configcontract.Configuration — every test double included — to carry the method would cost more than it buys. */
 type servingMarker interface {
     MarkServing()
 }

@@ -52,7 +52,6 @@ func generateFixture(t *testing.T, bindSet *BindSet) (string, *GenerateReport) {
     return source, report
 }
 
-/* the committed fixture output is compiled by the ordinary build, so comparing against it is what proves the generator still emits type-correct Go rather than merely well-formed text */
 func TestGenerate_MatchesTheCommittedFixtureOutput(t *testing.T) {
     source, _ := generateFixture(t, newFixtureBindSet())
 
@@ -75,7 +74,6 @@ func TestGenerate_ProducesParsableSource(t *testing.T) {
     }
 }
 
-/* the project indents with four spaces rather than tabs, and the generated file is read and reviewed like every other one */
 func TestGenerate_IndentsWithSpaces(t *testing.T) {
     source, _ := generateFixture(t, newFixtureBindSet())
 
@@ -107,7 +105,6 @@ func TestGenerate_ReportsSkippedConstructorsWithAReason(t *testing.T) {
 func TestGenerate_HonoursDirectivesAndExcludes(t *testing.T) {
     source, report := generateFixture(t, newFixtureBindSet())
 
-    /* the ignore directive and the exclude pattern both remove a constructor without reporting it as an unwireable skip */
     for _, name := range []string{"NewExcludedByDirective", "NewUserFixture"} {
         if true == strings.Contains(source, name) {
             t.Fatalf("expected %s to be absent from the generated wiring", name)
@@ -120,13 +117,11 @@ func TestGenerate_HonoursDirectivesAndExcludes(t *testing.T) {
         }
     }
 
-    /* the bind directive fills an argument no declared bind covers */
     if false == strings.Contains(source, `MustGet("fixture.reporting_url")`) {
         t.Fatalf("expected the bind directive to supply the reporting url parameter")
     }
 }
 
-/* a bind that matches no argument is the common misspelling, and the failure it causes otherwise surfaces far from its cause */
 func TestGenerate_ReportsBindsThatMatchedNothing(t *testing.T) {
     bindSet := newFixtureBindSet()
     bindSet.Name("airbnbClientID", "fixture.airbnb_client_id")
@@ -145,7 +140,6 @@ func TestGenerate_ReportsBindsThatMatchedNothing(t *testing.T) {
     }
 }
 
-/* a global bind silently reaches every constructor declaring an argument of that name, which is the footgun the reach report exists to expose */
 func TestGenerate_ReportsTheReachOfEveryGlobalBind(t *testing.T) {
     _, report := generateFixture(t, newFixtureBindSet())
 
@@ -177,7 +171,6 @@ func TestGenerate_FailsWhenAScalarArgumentHasNoBind(t *testing.T) {
     }
 }
 
-/* checking the bind target against the declared parameters turns a typo in a parameter name into a generation failure instead of a panic at boot */
 func TestGenerate_FailsWhenABindTargetsAnUndeclaredParameter(t *testing.T) {
     _, _, generateErr := Generate(&GenerateRequest{
         ProjectDirectory: fixtureProjectDir,
@@ -206,7 +199,6 @@ func TestGenerate_RequiresABindSet(t *testing.T) {
     }
 }
 
-/* nil is not a value of a struct type, so the error paths of a non-pointer provider have to return a declared zero value or the generated file does not compile */
 func TestGenerate_ReturnsADeclaredZeroValueForANonPointerConstructor(t *testing.T) {
     source, _ := generateFixture(t, newFixtureBindSet())
 
@@ -219,7 +211,6 @@ func TestGenerate_ReturnsADeclaredZeroValueForANonPointerConstructor(t *testing.
     }
 }
 
-/* a Go conversion wraps silently, so a parameter of -1 handed to a uint8 argument would otherwise become 255 instead of an error naming the parameter */
 func TestGenerate_GuardsANarrowingScalarConversion(t *testing.T) {
     source, _ := generateFixture(t, newFixtureBindSet())
 
@@ -232,7 +223,6 @@ func TestGenerate_GuardsANarrowingScalarConversion(t *testing.T) {
     }
 }
 
-/* the framework config package is imported under a fixed alias by every provider body, so a scanned dependency living in that same package must render through that alias instead of claiming "config" for itself */
 func TestGenerate_RendersAFrameworkConfigDependencyThroughTheReservedAlias(t *testing.T) {
     source, _ := generateFixture(t, newFixtureBindSet())
 
@@ -255,7 +245,6 @@ func TestGenerate_ExcludesAFileTheBuildExcludes(t *testing.T) {
     }
 }
 
-/* a function with no providers still has to compile: an import block naming the container package that no body uses would fail the build of an application whose scan found nothing yet */
 func TestGenerate_EmptyScanEmitsACompilableFile(t *testing.T) {
     bindSet := NewBindSet()
     bindSet.Package(
@@ -312,7 +301,6 @@ func TestResolveArguments_ReportsADirectiveBindThatMatchedNoArgument(t *testing.
     }
 }
 
-/* a directive bind on a service argument is the same silent loss: the bind is dead because only a scalar is filled from a parameter */
 func TestResolveArguments_ReportsADirectiveBindOnAServiceArgument(t *testing.T) {
     bindSet := NewBindSet()
     packageBinding := bindSet.Package("example.com/domain", "domain")
@@ -345,7 +333,6 @@ func TestResolveArguments_ReportsADirectiveBindOnAServiceArgument(t *testing.T) 
     }
 }
 
-/* both names land verbatim in the generated source, so a non-identifier, a keyword, a name the generated file already spells, or an identifier the spec refuses in that position (the blank identifier, init) fails generation at its cause instead of emitting a file that cannot parse, compile, or be called */
 func TestGenerate_RejectsAFunctionNameTheGeneratedFileCannotCarry(t *testing.T) {
     for _, functionName := range []string{"melodycontainer", "error", "func", "foo bar", "3services", "a.b", "Register(", "Register//", "_", "init"} {
         _, _, generateErr := Generate(&GenerateRequest{
@@ -411,7 +398,6 @@ func generateScopedFixture(t *testing.T, functionName string, scopedFunctionName
     })
 }
 
-/* the committed scoped fixture output is compiled by the ordinary build, so comparing against it is what proves the scoped emission is type-correct Go — that MustRegisterScoped really takes a ScopedRegistrar, and that the two functions can coexist in one file */
 func TestGenerate_MatchesTheCommittedScopedFixtureOutput(t *testing.T) {
     source, report, generateErr := generateScopedFixture(t, "RegisterScopedFixtureServices", "")
     if nil != generateErr {
@@ -436,7 +422,6 @@ func TestGenerate_MatchesTheCommittedScopedFixtureOutput(t *testing.T) {
     }
 }
 
-/* a scoped constructor emitted into the container function would be registered as a process singleton, which is the silent half of the lifetime mistake: it would be built once and never closed with the request it was written for. */
 func TestGenerate_EmitsScopedRegistrationsInTheirOwnFunction(t *testing.T) {
     source, _, generateErr := generateScopedFixture(t, "RegisterScopedFixtureServices", "")
     if nil != generateErr {
@@ -469,7 +454,6 @@ func TestGenerate_EmitsScopedRegistrationsInTheirOwnFunction(t *testing.T) {
     }
 }
 
-/* a project that declares nothing scoped must keep regenerating the file it already had, or every consumer of the generator sees a spurious diff and a function nobody calls. */
 func TestGenerate_OmitsTheScopedFunctionWhenNothingIsScoped(t *testing.T) {
     source, _ := generateFixture(t, newFixtureBindSet())
 
@@ -478,7 +462,6 @@ func TestGenerate_OmitsTheScopedFunctionWhenNothingIsScoped(t *testing.T) {
     }
 }
 
-/* the two functions share one file, so one name for both would declare the same function twice and not compile; which lifetime survived would be whichever the renderer wrote last. */
 func TestGenerate_RefusesAScopedFunctionNameEqualToTheFunctionName(t *testing.T) {
     _, _, generateErr := generateScopedFixture(t, "RegisterScopedFixtureServices", "RegisterScopedFixtureServices")
     if nil == generateErr {
@@ -490,7 +473,6 @@ func TestGenerate_RefusesAScopedFunctionNameEqualToTheFunctionName(t *testing.T)
     }
 }
 
-/* the scoped name lands verbatim in the generated source exactly as the container one does, so it needs the same refusal for a name the file cannot declare. */
 func TestGenerate_RefusesAScopedFunctionNameTheGeneratedFileCannotCarry(t *testing.T) {
     _, _, generateErr := generateScopedFixture(t, "RegisterScopedFixtureServices", "func")
     if nil == generateErr {
@@ -502,7 +484,6 @@ func TestGenerate_RefusesAScopedFunctionNameTheGeneratedFileCannotCarry(t *testi
     }
 }
 
-/* two constructors that claim one container key panic at the first boot of the generated file, far from the generation that reported success; the collision fails here, naming both sites. */
 func TestGenerate_RefusesTwoConstructorsRegisteringOneType(t *testing.T) {
     projectDirectory := t.TempDir()
 
@@ -535,7 +516,6 @@ type UserRepository struct {
     }
 }
 
-/* the same key rule holds for named registrations: two constructors naming one exported constant register under one service name. */
 func TestGenerate_RefusesTwoConstructorsNamingOneServiceConstant(t *testing.T) {
     projectDirectory := t.TempDir()
 
@@ -574,7 +554,6 @@ type BackupMailer struct {
     }
 }
 
-/* the two lifetimes register through different registrars, and a scoped registration of a type is what deliberately shadows the container one inside a scope — one type across the two lifetimes is not a collision. */
 func TestGenerate_AllowsOneTypeAcrossTheTwoLifetimes(t *testing.T) {
     projectDirectory := t.TempDir()
 
@@ -607,7 +586,6 @@ type Clock struct {
     }
 }
 
-/* a scoped registration whose type the container also claims renders carrying WithReplacesContainerService — without it the deliberate shadow reaches the container's own refusal and panics at boot — while a scoped registration shadowing nothing renders without the option. */
 func TestGenerate_ScopedShadowOfAContainerTypeCarriesTheReplacesOption(t *testing.T) {
     shadowDirectory := t.TempDir()
 
@@ -666,7 +644,6 @@ type Clock struct {
     }
 }
 
-/* an empty import path renders an import of "", and an empty directory joins to the project root and silently scans the whole tree as one package. */
 func TestGenerate_RefusesAPackageBindingWithAnEmptyHalf(t *testing.T) {
     for _, testCase := range []struct {
         importPath string
@@ -690,7 +667,6 @@ func TestGenerate_RefusesAPackageBindingWithAnEmptyHalf(t *testing.T) {
     }
 }
 
-/* the generator's contract is to say when it could not check the bind targets rather than silently assume every target exists; the flag is raised only when a bind actually went unchecked. */
 func TestGenerate_ReportsUncheckedBindTargets(t *testing.T) {
     projectDirectory := t.TempDir()
 
@@ -734,7 +710,6 @@ type Repository struct {
     }
 }
 
-/* an unused exclude reaches the report carrying its package's import path, the way an unused bind does, so the strict refusal names where the dead pattern was declared. */
 func TestGenerate_ReportsAnUnusedExcludeWithItsImportPath(t *testing.T) {
     bindSet := newFixtureBindSet()
     bindSet.Packages()[0].Exclude("*Respository")
@@ -771,7 +746,6 @@ func TestServiceTypeIdentityKey_ValueTypeAndItsPointerShareOneKey(t *testing.T) 
         },
     }
 
-    /* the container canonicalizes Foo and *Foo to one name (*Foo), so the generator's collision key must too, or two such constructors pass generation and panic at boot */
     if serviceTypeIdentityKey(valueConstructor) != serviceTypeIdentityKey(pointerConstructor) {
         t.Fatalf(
             "expected a value type and its pointer to share one identity key; got %q and %q",
@@ -781,7 +755,6 @@ func TestServiceTypeIdentityKey_ValueTypeAndItsPointerShareOneKey(t *testing.T) 
     }
 }
 
-/* a NAMED registration claims the returned type as well as its constant: the container's default register option carries a strict type registration, so the emitted MustRegister files the service under both. The generator therefore keys it under both. */
 func TestServiceIdentityKeys_ANamedRegistrationClaimsItsNameAndItsType(t *testing.T) {
     namedConstructor := &Constructor{
         ImportPath:            "example.com/app/domain",
@@ -807,7 +780,6 @@ func TestServiceIdentityKeys_ANamedRegistrationClaimsItsNameAndItsType(t *testin
     }
 }
 
-/* two constructors naming DIFFERENT constants and returning ONE type both claim that type strictly, so the second emitted MustRegister is refused at the first boot of the generated file. The collision is refused at generation instead, naming both sites. */
 func TestGenerate_RefusesTwoNamedConstructorsReturningOneType(t *testing.T) {
     projectDirectory := t.TempDir()
 
@@ -854,14 +826,12 @@ type Mailer struct {
     first, _ := context["first"].(string)
     second, _ := context["second"].(string)
 
-    /* the scan order of the two constructors decides which site is reported first, so both are read off the pair rather than off one field */
     named := first + " " + second
     if false == strings.Contains(named, "NewMailer (") || false == strings.Contains(named, "NewBackupMailer (") {
         t.Fatalf("expected the refusal to name both sites, got %q and %q", first, second)
     }
 }
 
-/* a scoped registration whose TYPE a NAMED container registration also claims is a deliberate shadow: the container claims the type strictly under the name, and the scoped registration reaches that claim whichever of the two is made first. It renders carrying WithReplacesContainerService, and the scan order of the two constructors does not decide it — the scoped render is deferred until every container identity is known. */
 func TestGenerate_ScopedShadowOfANamedContainerServiceCarriesTheReplacesOption(t *testing.T) {
     for _, testCase := range []struct {
         name   string
@@ -953,11 +923,9 @@ type Clock struct {
     }
 }
 
-/* replayClock stands in for a scanned service type: what the container refuses turns on the type identity alone, so one declared type reproduces the shape the generator emits for a named container registration shadowed by a scoped one. */
 type replayClock struct {
 }
 
-/* the control the two guards above rest on, measured at the container: the emitted pair is refused in BOTH boot orders while the scoped side carries no option, and admitted in both once it carries WithReplacesContainerService. Register and RegisterScopedType are the very calls the emitted MustRegister forms delegate to, so the error is read instead of a panic. */
 func TestGenerate_ScopedShadowOfANamedContainerServiceBootsOnlyWithTheReplacesOption(t *testing.T) {
     registerContainerService := func(target containercontract.Container) error {
         return container.Register[*replayClock](

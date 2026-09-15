@@ -69,7 +69,6 @@ func TestPrefersHtml_CaseInsensitive(t *testing.T) {
     }
 }
 
-/* the header above carries one type, so nothing about it exercises the comparison of two. Both entries are kept: folding them into one lost the single-type case entirely, and the two reach the parser differently — one takes the whole header as the type, the other has to split it first and fold the case of each part. */
 func TestPrefersHtml_CaseInsensitiveAheadOfAnotherType(t *testing.T) {
     request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/", "Text/HTML,Application/JSON")
     if false == PrefersHtml(request) {
@@ -77,18 +76,14 @@ func TestPrefersHtml_CaseInsensitiveAheadOfAnotherType(t *testing.T) {
     }
 }
 
-/* A wildcard range must never override the exact type's weight (RFC 7231 5.3.2 gives the weight to the most specific matching range). A trailing type wildcard or catch-all range with a higher q must not mask an explicit "text/html;q=0" refusal or a low exact q, which would serve html against the client's stated preference. */
 func TestPrefersHtml_ExactTypeQualityBeatsWildcard(t *testing.T) {
     cases := []struct {
         acceptHeader string
         expected     bool
     }{
-        /* explicit q=0 refusal on the exact type must survive a higher wildcard q */
         {"text/html;q=0, text/*", false},
         {"text/html;q=0, */*", false},
-        /* the exact-type weights (html 0.1 < json 0.5) decide, not the higher text/* q */
         {"text/html;q=0.1, text/*;q=0.9, application/json;q=0.5", false},
-        /* a bare wildcard still supplies the weight when the exact type is absent */
         {"text/*", true},
     }
 
@@ -102,7 +97,6 @@ func TestPrefersHtml_ExactTypeQualityBeatsWildcard(t *testing.T) {
     }
 }
 
-/* The q parameter is how a client ranks alternatives: "text/html;q=0.1, application/json" asks for json, and q=0 refuses a type outright. Reading the header by substring position alone served the representation the client down-weighted, or one it had explicitly rejected. */
 func TestPrefersHtml_HonoursQualityValues(t *testing.T) {
     cases := []struct {
         acceptHeader string
@@ -180,16 +174,12 @@ func TestPrefersHtml_QuotedCommaKeepsTheHtmlRefusal(t *testing.T) {
 }
 
 func TestAcceptQuality_QuotedSemicolonStaysOneParameter(t *testing.T) {
-    /* the quoted section carries a decoy: a naive semicolon split fabricates the fragment q=0.9" — an invalid q that drops the whole member — while the quote-aware split reads the one real q parameter */
     quality, _ := acceptQuality(`text/html;p="x;q=0.9";q=0.5`, "text/html")
     if 0.5 != quality {
         t.Fatalf("expected the quoted semicolon to leave the q parameter readable, got %v", quality)
     }
 }
 
-/* The request is an application-implementable contract, so a nil pointer of a request type reaches this
-door as a non-nil interface and the read below dereferences it. The untyped literal a sibling probe passes
-is the only shape a bare comparison already catches. */
 func TestPrefersHtml_ATypedNilRequestIsNotHtml(t *testing.T) {
     var unassignedRequest *testhelper.HttpTestRequest
 
@@ -198,7 +188,6 @@ func TestPrefersHtml_ATypedNilRequestIsNotHtml(t *testing.T) {
     }
 }
 
-/* excess trailing zeros are precision the qvalue grammar cannot carry and the value cannot change, and clients do write them: refusing them dropped the member from the negotiation entirely, so an api client that asked for application/json;q=1.0000 was handed the html error page. A fourth digit that is not a zero still carries a weight the grammar cannot express, and its member is still dropped. */
 func TestPrefersHtml_ReadsAJsonPreferenceWrittenWithExcessTrailingZeros(t *testing.T) {
     htmlPreferred := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/", "text/html;q=0.9, application/json;q=1.0000")
     if true == PrefersHtml(htmlPreferred) {
@@ -210,7 +199,6 @@ func TestPrefersHtml_ReadsAJsonPreferenceWrittenWithExcessTrailingZeros(t *testi
         t.Fatal("expected a fourth digit outside the grammar to drop its member")
     }
 
-    /* a refusal written with excess zeros stays a refusal, which the default weight a dropped member would fall back to could not express */
     refusedWithZeros := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/", "text/html;q=0.9, application/json;q=0.0000")
     if false == PrefersHtml(refusedWithZeros) {
         t.Fatal("expected q=0.0000 to keep refusing json")

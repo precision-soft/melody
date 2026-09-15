@@ -74,7 +74,6 @@ func TestNewInactiveMiddleware_CarriesBothHalvesOfTheExplanation(t *testing.T) {
     }
 }
 
-/* the constraint lists are copied at construction: a registrant reusing its slice across definitions — or mutating it after registration — silently rewrote the ordering constraints the pipeline was registered under. */
 func TestNewHttpMiddlewareDefinition_CopiesTheConstraintLists(t *testing.T) {
     before := []string{"cors"}
 

@@ -17,7 +17,7 @@ type LogTransport struct {
     logger loggingcontract.Logger
 }
 
-/* the logger supplied at construction is preferred; when it is nil the request-scoped logger is resolved quietly from the runtime (a missing logger service is swallowed rather than emitting an emergency log on every send), and when neither is available the send is a safe no-op */
+/* Send uses the configured logger, then a quietly resolved runtime logger. With neither available it is a no-op. */
 func (instance *LogTransport) Send(runtimeInstance runtimecontract.Runtime, message mailercontract.Message) error {
     logger := instance.logger
     if nil == logger {
@@ -45,7 +45,6 @@ func (instance *LogTransport) Send(runtimeInstance runtimecontract.Runtime, mess
     return nil
 }
 
-/* summarizes each attachment as metadata only (filename, content type, Content-ID, inline flag, byte size) — never the raw content — so an inline image embedded for an HTML body is visible in the dev log without dumping its bytes; nil when the message carries no attachments, mirroring appendEmails */
 func describeAttachments(attachments []mailercontract.Attachment) []map[string]any {
     if 0 == len(attachments) {
         return nil

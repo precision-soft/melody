@@ -33,7 +33,6 @@ type recordedLogRecord struct {
     context loggingcontract.Context
 }
 
-/* recordingLogger captures every record with its level, so a test can assert the SEVERITY a path logged at, not only that it logged. */
 type recordingLogger struct {
     mutex   sync.Mutex
     records []recordedLogRecord
@@ -356,7 +355,6 @@ func bearerRequest(tokenString string) httpcontract.Request {
     return testhelper.NewHttpTestRequestFromHttpRequest(request)
 }
 
-/* unauthenticatedRoledToken carries roles while answering IsAuthenticated false — the shape a "remembered" or half-logged-in token takes. It is what proves the voters refuse a token that reports roles it has not authenticated for; the in-package tokens never combine the two. */
 type unauthenticatedRoledToken struct {
     roles []string
 }

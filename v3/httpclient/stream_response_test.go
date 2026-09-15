@@ -53,13 +53,11 @@ func TestStreamResponse_ConcurrentCloseAndBodyDoesNotRace(t *testing.T) {
         var waiter sync.WaitGroup
         waiter.Add(2)
 
-        /* watchdog goroutine: the only abort path for an indefinite stream */
         go func() {
             defer waiter.Done()
             _ = streamResponse.Close()
         }()
 
-        /* consumer goroutine reads the body then closes it in a defer */
         go func() {
             defer waiter.Done()
 

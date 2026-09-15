@@ -24,8 +24,6 @@ func (instance fakeModule) Description() string {
     return instance.name
 }
 
-/* a module registered as a struct VALUE whose field is an interface: comparable as a type, comparable as a
-value only when the field holds something hashable */
 type payloadCarryingModule struct {
     fakeModule
     payload any
@@ -48,7 +46,6 @@ func (instance selfReferencingModuleProvider) Modules() []applicationcontract.Mo
     return []applicationcontract.Module{instance}
 }
 
-/* bareModuleProvider carries no module identity of its own, so it exercises the children-only path through RegisterModuleProvider */
 type bareModuleProvider struct {
     children []applicationcontract.Module
 }
@@ -57,7 +54,6 @@ func (instance bareModuleProvider) Modules() []applicationcontract.Module {
     return instance.children
 }
 
-/* mintingModuleProvider yields a freshly named child on every expansion, so instance identity can never break the cycle and only the depth guard is left to stop it */
 type mintingModuleProvider struct {
     fakeModule
 }
@@ -66,7 +62,6 @@ func (instance mintingModuleProvider) Modules() []applicationcontract.Module {
     return []applicationcontract.Module{mintingModuleProvider{fakeModule{name: instance.name + "+"}}}
 }
 
-/* uncomparableModule cannot be a map key, so it exercises the branch that keeps the pre-deduplication behavior instead of letting the identity set panic at insertion */
 type uncomparableModule struct {
     fakeModule
     tags []string
@@ -124,7 +119,6 @@ func TestRegisterModule_ExpandsNestedProviders(t *testing.T) {
     assertModuleNames(t, instance.modules, []string{"outer", "inner", "leaf"})
 }
 
-/* the provider hands over the same instance it is, so identity breaks the cycle before the depth guard is ever needed: the module registers once and the expansion simply stops */
 func TestRegisterModule_ASelfReferencingProviderRegistersOnce(t *testing.T) {
     instance := &Application{}
 
@@ -133,7 +127,6 @@ func TestRegisterModule_ASelfReferencingProviderRegistersOnce(t *testing.T) {
     assertModuleNames(t, instance.modules, []string{"cyclic"})
 }
 
-/* a cycle of ever-fresh instances is invisible to the identity set, and without the depth guard the expansion recurses until the stack dies */
 func TestRegisterModule_PanicsOnProviderCycleOfDistinctInstances(t *testing.T) {
     instance := &Application{}
 
@@ -154,7 +147,6 @@ func TestRegisterModuleProvider_RegistersChildrenWithoutProvider(t *testing.T) {
     assertModuleNames(t, instance.modules, []string{"child-a", "child-b"})
 }
 
-/* a provider that is itself a module boots as that module: this door used to keep only the children and silently drop the provider's own hooks, so the two registration doors registered different applications from the same value */
 func TestRegisterModuleProvider_AProviderThatIsAModuleBootsAsThatModule(t *testing.T) {
     instance := &Application{}
 
@@ -168,7 +160,6 @@ func TestRegisterModuleProvider_AProviderThatIsAModuleBootsAsThatModule(t *testi
     assertModuleNames(t, instance.modules, []string{"provider", "child-a", "child-b"})
 }
 
-/* one instance reached through two providers used to boot twice — the loud half was a duplicate service name, the silent half its listeners and middlewares attached twice */
 func TestRegisterModule_TheSameInstanceThroughTwoProvidersBootsOnce(t *testing.T) {
     instance := &Application{}
 
@@ -180,7 +171,6 @@ func TestRegisterModule_TheSameInstanceThroughTwoProvidersBootsOnce(t *testing.T
     assertModuleNames(t, instance.modules, []string{"shared"})
 }
 
-/* identity is the interface value, not the label: two distinct instances sharing a name stay two modules */
 func TestRegisterModule_TwoDistinctInstancesSharingANameStayTwoModules(t *testing.T) {
     instance := &Application{}
 
@@ -190,7 +180,6 @@ func TestRegisterModule_TwoDistinctInstancesSharingANameStayTwoModules(t *testin
     assertModuleNames(t, instance.modules, []string{"twin", "twin"})
 }
 
-/* an instance of an uncomparable type cannot enter the identity set; the guard keeps it on the pre-deduplication path instead of letting the map insertion panic */
 func TestRegisterModule_AnUncomparableModuleKeepsThePreDeduplicationBehavior(t *testing.T) {
     instance := &Application{}
 
@@ -202,7 +191,6 @@ func TestRegisterModule_AnUncomparableModuleKeepsThePreDeduplicationBehavior(t *
     assertModuleNames(t, instance.modules, []string{"uncomparable", "uncomparable"})
 }
 
-/* both module doors close for the boot window: the phase loops iterate a snapshot of the module list, so a module registered from inside a boot hook would boot by whatever fraction of the lifecycle had not run yet and report success */
 func TestModuleDoors_RefuseRegistrationDuringTheBootWindow(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
         (&Application{booting: true}).RegisterModule(fakeModule{name: "late"})
@@ -213,7 +201,6 @@ func TestModuleDoors_RefuseRegistrationDuringTheBootWindow(t *testing.T) {
     }, "may not register a module from inside a module boot hook")
 }
 
-/* the module doors close at boot and refuse a nil, because a module registered after the boot phases have run is registered into nothing: its hooks are never called, and the application starts missing whatever the module was supposed to wire */
 func TestRegisterModule_RefusesAfterBootAndRefusesANilModule(t *testing.T) {
     bootedApplication := &Application{booted: true}
 
@@ -238,7 +225,6 @@ func TestRegisterModuleProvider_RefusesAfterBootAndRefusesANilProvider(t *testin
     }, "module provider may not be nil")
 }
 
-/* hookRecordingModule implements every module hook the boot phases call, so one registration proves which phase reached which hook */
 type hookRecordingModule struct {
     fakeModule
     configurationsRegistered  bool
@@ -292,7 +278,6 @@ func (instance *hookRecordingModule) RegisterSecurity(builder *securityconfig.Bu
     instance.securityRegistered = true
 }
 
-/* the configuration and parameter hooks run BEFORE the configuration resolves, which is the whole reason they are a separate phase: a parameter registered after the resolve would never have its template expanded, and a logging configuration registered after it would never reach the logger the container builds. */
 func TestBootModulesPreConfigurationResolve_RunsTheConfigurationAndParameterHooks(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
 
@@ -313,13 +298,11 @@ func TestBootModulesPreConfigurationResolve_RunsTheConfigurationAndParameterHook
         t.Fatalf("expected the parameter the module registered to reach the configuration")
     }
 
-    /* nothing the post-resolve phase owns has run yet */
     if true == moduleInstance.servicesRegistered || true == moduleInstance.httpRoutesRegistered {
         t.Fatalf("expected the post-resolve hooks to stay untouched by the pre-resolve phase")
     }
 }
 
-/* everything a module wires against resolved configuration runs in the second phase, and each hook is optional: a module implementing all of them must see all of them called, or one silently-missing hook means an unwired subsystem with a green boot. */
 func TestBootModulesPostConfigurationResolve_RunsEveryLaterHook(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
     applicationInstance.httpMiddlewares = NewHttpMiddleware(nil, applicationInstance.configuration)
@@ -353,7 +336,6 @@ func TestBootModulesPostConfigurationResolve_RunsEveryLaterHook(t *testing.T) {
     }
 }
 
-/* orderRecordingModule writes each hook call into a shared log, so a test can read the grouping the contracts document */
 type orderRecordingModule struct {
     fakeModule
     log *[]string
@@ -380,7 +362,6 @@ func (instance orderRecordingModule) RegisterCliCommands(kernelInstance kernelco
     return nil
 }
 
-/* the second phase runs one loop per hook, and the contracts document exactly that granularity: every module's instance of one hook runs before any module's next hook, in registration order inside each group — a module may rely on every sibling's listeners existing before any middleware registers */
 func TestBootModulesPostConfigurationResolve_RunsEachHookAcrossEveryModuleBeforeTheNextHook(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
 
@@ -486,12 +467,6 @@ func TestApplication_RegisterScopedServicesHookRunsForScopedServiceModules(t *te
     }
 }
 
-/* A module carrying an `any` field is comparable as a TYPE — an interface field counts as comparable at
-that level whatever it ends up holding — while the value is only comparable if what the field holds is.
-Asking the type therefore admitted a module to the identity map and then panicked hashing it, with exactly
-the "hash of unhashable type" the guard was written to avoid, for any module registered as a struct value
-whose field holds a map, a slice or a func. Such a module keeps the uncomparable path: registered, named,
-never a map key. */
 func TestRegisterModule_AValueModuleCarryingAnUnhashableFieldIsRegisteredInsteadOfPanicking(t *testing.T) {
     instance := &Application{}
 
@@ -503,8 +478,6 @@ func TestRegisterModule_AValueModuleCarryingAnUnhashableFieldIsRegisteredInstead
     assertModuleNames(t, instance.modules, []string{"carrier"})
 }
 
-/* the comparable half of the same shape stays on the identity path, so the repair is a narrowing of the
-skip and not a removal of it: one instance reached twice still boots once. */
 func TestRegisterModule_AValueModuleCarryingAHashableFieldKeepsItsIdentity(t *testing.T) {
     instance := &Application{}
 

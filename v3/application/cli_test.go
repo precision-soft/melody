@@ -68,7 +68,6 @@ func TestStripRuntimeFlagsFromOsArgs(t *testing.T) {
         os.Args = originalArguments
     })
 
-    /* the leading -mode is a runtime flag and is stripped; the --mode=cli that follows the subcommand is the command's own flag and is left intact */
     os.Args = []string{"app", "-mode", "http", "serve", "--mode=cli", "other"}
 
     stripRuntimeFlagsFromOsArgs()
@@ -188,7 +187,6 @@ func TestParseRuntimeFlags_RoleFlagAloneDoesNotImplyCliMode(t *testing.T) {
         os.Args = originalArguments
     })
 
-    /* a lone --role must not flip the process into cli mode: the worker container runs the same image with only the role changed */
     os.Args = []string{"app", "--role=worker"}
 
     flags := ParseRuntimeFlags(config.ModeHttp)
@@ -234,7 +232,6 @@ func TestStripRuntimeFlagsFromOsArgs_StripsRoleFlags(t *testing.T) {
         os.Args = originalArguments
     })
 
-    /* the leading --role worker is a runtime flag and is stripped; the --role=web and -mode=cli that follow the subcommand are the command's own flags and are left intact */
     os.Args = []string{"app", "--role", "worker", "someCommand", "--role=web", "-mode=cli", "other"}
 
     stripRuntimeFlagsFromOsArgs()

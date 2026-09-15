@@ -21,7 +21,6 @@ func newTestRuntime() runtimecontract.Runtime {
     return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 }
 
-/* messageRecordingLogger captures every record with its message, so a test can assert both that a record was written and what it said. */
 type messageRecordingLogger struct {
     mutex    sync.Mutex
     messages []string
@@ -71,7 +70,6 @@ func (instance *messageRecordingLogger) hasMessageContaining(fragment string) bo
     return false
 }
 
-/* newTestRuntimeWithRecordingLogger mirrors newTestRuntime with the recording logger installed under the logger service, the way a framework-assembled scope carries one. */
 func newTestRuntimeWithRecordingLogger() (runtimecontract.Runtime, *messageRecordingLogger) {
     serviceContainer := container.NewContainer()
     scope := serviceContainer.NewScope()

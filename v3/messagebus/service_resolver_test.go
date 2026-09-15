@@ -120,7 +120,6 @@ func TestNewConsumeCommandFromContainer_HydratesBusTransportsAndRetryThenConsume
     }
 
     if command.resolveFromContainer {
-        /* the resolution must land in the run-local session and leave the shared command instance untouched: a run-time write to the singleton's fields races the workers of an overlapping run */
         if nil != command.bus || nil != command.transports {
             t.Fatalf("expected the container resolution to leave the command instance unmutated")
         }
@@ -134,7 +133,6 @@ func TestNewConsumeCommandFromContainer_HydratesBusTransportsAndRetryThenConsume
     }
 }
 
-/* recordingCloseTransport records whether the framework's teardown ever reached it. */
 type recordingCloseTransport struct {
     closed atomic.Bool
 }
@@ -170,7 +168,6 @@ func TestRegisterTransports_TransportsJoinTheContainerTeardown(t *testing.T) {
         map[string]messagebuscontract.Transport{"async": transport},
     )
 
-    /* resolving the map is what any consumer does; the provider resolves the closer underneath it, recording the dependency edge the ordered teardown closes by */
     resolved := TransportsMustFromResolver(serviceContainer)
     if transport != resolved["async"] {
         t.Fatalf("expected the registered transport to resolve")
@@ -180,7 +177,6 @@ func TestRegisterTransports_TransportsJoinTheContainerTeardown(t *testing.T) {
         t.Fatalf("unexpected container close error: %v", closeErr)
     }
 
-    /* the old Close(runtime) contract made this structurally impossible: the teardown recognizes Close() error and nothing else, so no transport was ever closed and a broker connection lived exactly as long as the process */
     if false == transport.closed.Load() {
         t.Fatalf("expected the container teardown to close the registered transport")
     }
@@ -207,7 +203,6 @@ func TestTransportsCloser_ClosesEveryTransportAndJoinsFailures(t *testing.T) {
         t.Fatalf("expected the close error to say what failed, got %v", closeErr)
     }
 
-    /* one failing transport must not strand the others unclosed */
     if false == healthy.closed.Load() {
         t.Fatalf("expected the healthy transport to be closed despite the sibling failure")
     }
@@ -221,8 +216,6 @@ func (instance *closeFailingTransport) Close() error {
     return exception.NewError("broker unreachable", nil, nil)
 }
 
-/* transportsNamedIn collects the transport each branch of a joined close failure blames: the name
-   travels in the error's CONTEXT, not in its text, so reading the joined message alone finds none. */
 func transportsNamedIn(closeErr error) map[string]bool {
     named := map[string]bool{}
 
@@ -244,9 +237,6 @@ func transportsNamedIn(closeErr error) map[string]bool {
     return named
 }
 
-/* closePanickingTransport is the composition-root mistake that used to cost every transport sorted
-   after it: the container recovers the panic and records it, but the closer's own loop was already
-   abandoned. */
 type closePanickingTransport struct {
     recordingCloseTransport
 }
@@ -255,14 +245,10 @@ func (instance *closePanickingTransport) Close() error {
     panic(exception.NewError("the broker connection was already torn down", map[string]any{"queue": "orders"}, nil))
 }
 
-/* typedNilTransport exists to be handed over as a nil POINTER inside a non-nil interface, the shape
-   a composition root produces when it builds a transport conditionally. */
 type typedNilTransport struct {
     recordingCloseTransport
 }
 
-/* A nil map entry is a wiring mistake and must cost only itself. The bad names sort BEFORE the
-   healthy one on purpose: the whole point is what happens to the transports that come after. */
 func TestTransportsCloser_ANilTransportDoesNotStrandTheOthers(t *testing.T) {
     healthy := &recordingCloseTransport{}
 
@@ -283,7 +269,6 @@ func TestTransportsCloser_ANilTransportDoesNotStrandTheOthers(t *testing.T) {
         t.Fatalf("expected the report to name the untyped nil entry, got %v", named)
     }
 
-    /* the typed nil is the half a plain `nil ==` comparison lets through, and it panics on Close */
     if false == named["b-typed-nil"] {
         t.Fatalf("expected the report to name the typed nil entry, got %v", named)
     }
@@ -292,17 +277,11 @@ func TestTransportsCloser_ANilTransportDoesNotStrandTheOthers(t *testing.T) {
         t.Fatalf("expected the transport sorted after the nil entries to be closed")
     }
 
-    /* the DIAGNOSTIC is the point of naming nil separately: containment alone would report both
-       entries as "close panicked" over a nil dereference, which tells the operator what the process
-       did instead of what the wiring got wrong */
     if 2 != strings.Count(closeErr.Error(), "transport is nil and was not closed") {
         t.Fatalf("expected both nil entries to be named as nil rather than as a panic, got %v", closeErr)
     }
 }
 
-/* A transport whose Close panics must not abandon the loop either: the container's recovery sits
-   around the CLOSER, so before this containment everything sorted later went unclosed in silence
-   while one record blamed a single service. */
 func TestTransportsCloser_APanickingCloseDoesNotStrandTheOthers(t *testing.T) {
     healthy := &recordingCloseTransport{}
 
@@ -324,9 +303,6 @@ func TestTransportsCloser_APanickingCloseDoesNotStrandTheOthers(t *testing.T) {
         t.Fatalf("expected the transport sorted after the panicking one to be closed")
     }
 
-    /* the panic value is an error, so it belongs in the CAUSE slot rather than flattened into a
-       context string: kept only in a context it collapses to its bare message at the render
-       boundary, and its own context and cause chain reach no record at all */
     causeChain := exception.BuildCauseChain(closeErr, 8)
     if false == strings.Contains(strings.Join(causeChain, " | "), "the broker connection was already torn down") {
         t.Fatalf("expected the panic value to travel as the cause, got chain %v", causeChain)

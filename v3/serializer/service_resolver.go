@@ -23,7 +23,7 @@ func SerializerManagerFromRuntime(runtimeInstance runtimecontract.Runtime) *Seri
     serializerManagerInstance, err := runtime.FromRuntime[*SerializerManager](runtimeInstance, ServiceSerializerManager)
     if nil == serializerManagerInstance || nil != err {
         if nil != err {
-            /* Resolving a diagnostic logger must not turn this optional lookup into a panic. */
+
             logger := logging.LoggerFromRuntime(runtimeInstance)
             if nil != logger {
                 logger.Error(

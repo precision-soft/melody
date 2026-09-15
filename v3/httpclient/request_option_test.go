@@ -4,7 +4,6 @@ import (
     "testing"
 )
 
-/* v3 carries no explicit-cap flag: the default cap binds the streaming path exactly as it binds the buffered one, so the option set holds only the value. The default and an override are pinned here. */
 func TestRequestOptions_MaxResponseBodyBytesDefaultAndOverride(t *testing.T) {
     options := NewRequestOptions()
 
@@ -53,7 +52,6 @@ func TestRequestOptions_SetHeadersMergesAndCopies(t *testing.T) {
     }
 }
 
-/* the plural setter is a canonicalizing door of its own: ranging over the caller's raw map would store the raw spellings and leave the singular setter guarding a map that is already ambiguous. */
 func TestRequestOptions_SetHeadersCanonicalizesAtTheDoor(t *testing.T) {
     options := NewRequestOptions()
 
@@ -124,7 +122,6 @@ func TestRequestOptions_WithHeadersAndWithQueryParamsReadTheCallersMapWhenApplie
     }
 }
 
-/* the getters hand out copies: a write through the returned map used to bypass the canonicalization SetHeader enforces, and the request-time winner between the planted spelling and the canonical one was chosen by map iteration — in what is often a credential header. */
 func TestRequestOptions_HeadersHandsOutACopy(t *testing.T) {
     options := NewRequestOptions()
     options.SetHeader("X-Api-Key", "canonical")

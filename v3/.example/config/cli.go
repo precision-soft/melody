@@ -30,15 +30,14 @@ func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.
         cli.NewTotpCodeCommand(),
         cli.NewMailSendCommand(instance.mailer),
         cli.NewDatabaseResetCommand(),
-        /* the grant command holds the user service through a container.Lazy handle built here, at command-registration time: the handle defers the resolution to the command's first run, so this boot-phase composition never races the container. */
+
         cli.NewGrantRoleCommand(
             melodycontainer.Lazy[*service.UserService](kernelInstance.ServiceContainer(), service.ServiceUserService),
         ),
-        /* regenerates generated/wiring_gen.go from the packages declared in the bind set; it runs inside the application, so every bind is checked against the parameters this configuration actually declares. */
+
         melodywiring.NewGenerateCommand(NewWiringBindSet()),
     }
 
-    /* per-tick deduplication: the tick command is wrapped as an exclusive command over lock.NewLazyLocker, which resolves the registered service.lock.locker (redis when configured, otherwise mysql, otherwise in-memory — see registerLockerService) at the first CreateLock instead of here — run it from two shells at once against a shared locker and exactly one executes, the other exits zero with a "skipped" log line. The ttl is crash-safety only; the lock is refreshed while the command runs and released the moment it returns. */
     commands = append(
         commands,
         melodylock.NewExclusiveCommand(

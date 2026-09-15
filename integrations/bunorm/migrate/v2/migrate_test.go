@@ -367,11 +367,6 @@ func TestRestoreDefaultRunnerOption_PutsBackOnlyOverItsOwnValue(t *testing.T) {
     }
 
     restoreDefaultRunnerOption(secondInstalled, secondPrevious)
-    if firstInstalled != processRunnerOption.Load() {
-        t.Fatal("expected the second command's restore to put back what it found, the first command's value")
-    }
-
-    restoreDefaultRunnerOption(firstInstalled, firstPrevious)
     if &host != resolveDefaultRunnerOption().Writer {
         t.Fatalf("expected the host's own value back once every command restored, got %v", resolveDefaultRunnerOption().Writer)
     }
@@ -400,4 +395,44 @@ func TestRunnerEscapesUntrustedNamesOnEveryStep(t *testing.T) {
             }
         })
     }
+}
+
+func TestRestoreDefaultRunnerOption_AllCompletionOrders(t *testing.T) {
+    orders := [][]int{{0, 1, 2}, {0, 2, 1}, {1, 0, 2}, {1, 2, 0}, {2, 0, 1}, {2, 1, 0}}
+    for _, order := range orders {
+        var writers [4]bytes.Buffer
+        SetDefaultRunnerOption(RunnerOption{Writer: &writers[0]})
+        var installed, previous [3]*RunnerOption
+        for index := range installed {
+            installed[index], previous[index] = swapDefaultRunnerOption(RunnerOption{Writer: &writers[index+1]})
+        }
+        var completed [3]bool
+        for _, index := range order {
+            completed[index] = true
+            restoreDefaultRunnerOption(installed[index], previous[index])
+            expected := 0
+            for candidate := range completed {
+                if false == completed[candidate] {
+                    expected = candidate + 1
+                }
+            }
+            if &writers[expected] != resolveDefaultRunnerOption().Writer {
+                t.Fatalf("order %v after %d: expected writer %d", order, index, expected)
+            }
+        }
+    }
+    SetDefaultRunnerOption(DefaultRunnerOption())
+}
+
+func TestRestoreDefaultRunnerOption_PreservesNewHostDefault(t *testing.T) {
+    var first, second, host bytes.Buffer
+    SetDefaultRunnerOption(RunnerOption{Writer: &first})
+    installed, previous := swapDefaultRunnerOption(RunnerOption{Writer: &second})
+    SetDefaultRunnerOption(RunnerOption{Writer: &host})
+    restoreDefaultRunnerOption(installed, previous)
+    restoreDefaultRunnerOption(installed, previous)
+    if &host != resolveDefaultRunnerOption().Writer {
+        t.Fatal("command completion replaced the newer host default")
+    }
+    SetDefaultRunnerOption(DefaultRunnerOption())
 }

@@ -13,7 +13,6 @@ func TestConstantTimeSecretEquals_AnswersEqualityWhateverTheLengths(t *testing.T
         t.Fatalf("expected the same-length difference to compare unequal")
     }
 
-    /* the length mismatch is the case the digest form exists for: compared directly, subtle.ConstantTimeCompare answers it without reading a byte, and the timing said so */
     if true == constantTimeSecretEquals("expected-key", "short") {
         t.Fatalf("expected the shorter guess to compare unequal")
     }
@@ -22,7 +21,6 @@ func TestConstantTimeSecretEquals_AnswersEqualityWhateverTheLengths(t *testing.T
         t.Fatalf("expected the empty guess to compare unequal")
     }
 
-    /* the mismatch the other way round: every case above hands a guess no longer than the secret, so a form that compared lengths first would only ever have been asked the one question */
     if true == constantTimeSecretEquals("short", "expected-key-that-is-much-longer") {
         t.Fatalf("expected the longer guess to compare unequal")
     }

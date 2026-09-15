@@ -15,8 +15,6 @@ func TestInMemoryCatalogReadingRepositoryRefusesASecondReadingAtTheSameInstant(t
         t.Fatalf("expected the first reading to be recorded, got %v", appendErr)
     }
 
-    /* the second carries a DIFFERENT payload on the same instant, so a repository that answered by
-       overwriting rather than refusing would be caught by the count as well as by the error */
     second := &CatalogReadingRecord{TakenAt: takenAt, Headline: "catalog", Payload: "products=99", ProductCount: 99, JournalCount: 0}
     appendErr := repositoryInstance.Append(context.Background(), second)
     if nil == appendErr {
@@ -37,7 +35,6 @@ func TestInMemoryCatalogReadingRepositoryRefusesASecondReadingAtTheSameInstant(t
     }
 }
 
-/* one second apart is the smallest distance the archive can tell apart, because the service truncates the instant to the second before it gets here — so this is the pair that proves the identity is the instant and not the reading. */
 func TestInMemoryCatalogReadingRepositoryKeepsReadingsOneSecondApart(t *testing.T) {
     repositoryInstance := newInMemoryCatalogReadingRepository()
     takenAt := time.Date(2026, time.September, 7, 10, 0, 0, 0, time.UTC)
@@ -64,7 +61,6 @@ func TestInMemoryCatalogReadingRepositoryListsNewestFirstAndHonoursTheLimit(t *t
     repositoryInstance := newInMemoryCatalogReadingRepository()
     takenAt := time.Date(2026, time.September, 7, 10, 0, 0, 0, time.UTC)
 
-    /* appended OLDEST first, so a repository that simply handed its slice back in insertion order would fail the first assertion */
     for index := 0; 3 > index; index++ {
         _ = repositoryInstance.Append(context.Background(), &CatalogReadingRecord{
             TakenAt:  takenAt.Add(time.Duration(index) * time.Second),
@@ -91,7 +87,6 @@ func TestInMemoryCatalogReadingRepositoryListsNewestFirstAndHonoursTheLimit(t *t
     }
 }
 
-/* a non-positive limit answers nothing rather than everything, which is the half that matters: the archive grows for the life of a volume, so a caller that asked for nothing must not receive all of it. */
 func TestInMemoryCatalogReadingRepositoryAnswersNothingForANonPositiveLimit(t *testing.T) {
     repositoryInstance := newInMemoryCatalogReadingRepository()
     _ = repositoryInstance.Append(context.Background(), &CatalogReadingRecord{
@@ -112,7 +107,6 @@ func TestInMemoryCatalogReadingRepositoryAnswersNothingForANonPositiveLimit(t *t
     }
 }
 
-/* the archive hands back COPIES: a caller that mutates what it read must not be rewriting the archive. */
 func TestInMemoryCatalogReadingRepositoryDoesNotHandBackItsOwnRecords(t *testing.T) {
     repositoryInstance := newInMemoryCatalogReadingRepository()
     takenAt := time.Date(2026, time.September, 7, 10, 0, 0, 0, time.UTC)
@@ -128,9 +122,6 @@ func TestInMemoryCatalogReadingRepositoryDoesNotHandBackItsOwnRecords(t *testing
     }
 }
 
-/* the archive keeps a COPY of what it was handed: a caller that mutates the record it appended must not
-   be rewriting the archive behind it. It is the write-side sister of the read-side copy above, and both
-   are needed — one keeps the caller out of the archive, the other keeps the archive out of the caller. */
 func TestInMemoryCatalogReadingRepositoryDoesNotKeepTheCallersRecord(t *testing.T) {
     repositoryInstance := newInMemoryCatalogReadingRepository()
     takenAt := time.Date(2026, time.September, 7, 10, 0, 0, 0, time.UTC)
@@ -145,5 +136,23 @@ func TestInMemoryCatalogReadingRepositoryDoesNotKeepTheCallersRecord(t *testing.
     readBack, _ := repositoryInstance.Recent(context.Background(), 1)
     if "catalog" != readBack[0].Headline {
         t.Fatalf("the caller's later mutation reached the archive: headline is now %q", readBack[0].Headline)
+    }
+}
+
+func TestInMemoryCatalogReadingRepositoryUsesInstantIdentity(t *testing.T) {
+    now := time.Now()
+    for _, equivalent := range []time.Time{now.Round(0), now.In(time.FixedZone("other", 3*60*60))} {
+        instance := newInMemoryCatalogReadingRepository()
+        original := &CatalogReadingRecord{TakenAt: now, Headline: "original"}
+        if appendErr := instance.Append(context.Background(), original); nil != appendErr {
+            t.Fatal(appendErr)
+        }
+        if appendErr := instance.Append(context.Background(), &CatalogReadingRecord{TakenAt: equivalent, Headline: "replacement"}); nil == appendErr {
+            t.Fatal("same instant accepted twice under different time representation")
+        }
+        stored, readErr := instance.Recent(context.Background(), 2)
+        if nil != readErr || 1 != len(stored) || "original" != stored[0].Headline {
+            t.Fatalf("duplicate changed archive: count=%d err=%v", len(stored), readErr)
+        }
     }
 }

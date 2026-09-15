@@ -10,7 +10,6 @@ import (
     melodysession "github.com/precision-soft/melody/v3/session"
 )
 
-/* The firewall's logout door is asked what the STORAGE holds afterwards, not what the session object says: deleting the two identity keys leaves the entry modified, so the response path saves it back under the same id and re-issues the cookie, and only a cleared session routes that path to DeleteSession. The response path is run here exactly as the kernel runs it, through SaveSession. */
 func TestSessionLogoutHandlerEndsTheSessionRatherThanEmptyingIt(t *testing.T) {
     storage := melodysession.NewInMemoryStorage()
     defer storage.Close()
@@ -61,7 +60,6 @@ func TestSessionLogoutHandlerEndsTheSessionRatherThanEmptyingIt(t *testing.T) {
     }
 }
 
-/* a logout that arrives with no session is refused rather than answered as a success, because the door cannot end what it cannot reach */
 func TestSessionLogoutHandlerRefusesARequestCarryingNoSession(t *testing.T) {
     result, err := NewSessionLogoutHandler().Logout(nil, plainRequest(t), melodysecuritycontract.LogoutInput{})
     if nil != err {

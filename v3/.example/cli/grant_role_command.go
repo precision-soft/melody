@@ -10,11 +10,7 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/* GrantRoleCommand grants an application role to an account.
-
-   It declares its own --role flag to show that an application command may reuse a name the runtime also understands: the runtime's --mode/--role are recognized only before the command name, so `example:grant:role --role ROLE_ADMIN` reaches this command intact rather than being captured (and rejected) by the process-role parser. It also holds the user service through a container.Lazy handle built at command-registration time — the service is resolved at the first run, not when the command is constructed, so the boot-phase composition never resolves the container early.
-
-   The grant is a real write. It used to be a print: the command looked the account up and then announced "granted role ... to user ...", for an account it had just been told did not exist as readily as for one it had found, and left the directory untouched. */
+/* GrantRoleCommand writes an application role to an existing account. Its --role flag follows the command name; process --role precedes it. The user service is resolved lazily on the first run. */
 type GrantRoleCommand struct {
     userService *melodycontainer.LazyService[*service.UserService]
 }
@@ -63,7 +59,6 @@ func (instance *GrantRoleCommand) Run(runtimeInstance melodyruntimecontract.Runt
 
     fmt.Printf("granted role %q to user %q\n", role, user)
 
-    /* the listeners that drop the account's cache entries ran in THIS process: on the shared cache that is the server's view too, on the in-process fallback it is not, and a session opened against the server keeps the roles it cached until that server restarts */
     if true == cacheIsProcessLocal(runtimeInstance) {
         fmt.Println(processLocalCacheNotice)
     }
@@ -71,7 +66,6 @@ func (instance *GrantRoleCommand) Run(runtimeInstance melodyruntimecontract.Runt
     return nil
 }
 
-/* holdsRole answers whether the account already carries the role, so a second run of the same command is a no-op rather than a second entry in the column and a second line in the audit trail. */
 func holdsRole(roles []string, role string) bool {
     for _, held := range roles {
         if role == held {

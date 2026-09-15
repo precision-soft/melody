@@ -12,7 +12,6 @@ import (
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/* recordingLogger captures every record with its level and message, so a test can assert both that a record was written and what it said. */
 type recordingLogger struct {
     mutex   sync.Mutex
     records []recordedLogEntry
@@ -68,7 +67,6 @@ func (instance *recordingLogger) hasMessageContaining(fragment string) bool {
     return false
 }
 
-/* runtimeWithRecordingLogger builds a runtime whose scope carries the recording logger under the logger service, mirroring how a framework-assembled scope resolves logging.LoggerFromRuntime. */
 func runtimeWithRecordingLogger(ctx context.Context) (runtimecontract.Runtime, *recordingLogger) {
     serviceContainer := container.NewContainer()
     scope := serviceContainer.NewScope()

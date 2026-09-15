@@ -37,7 +37,6 @@ func (instance *spyParameterRegistrar) RegisterSecretParameter(name string, valu
     instance.names = append(instance.names, name)
 }
 
-/* marking an existing parameter registers nothing, so the recorded names stay the set the module contributed */
 func (instance *spyParameterRegistrar) MarkParameterSecret(name string) {
 }
 

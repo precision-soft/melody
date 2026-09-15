@@ -18,7 +18,6 @@ const defaultRateLimiterPrefix = "melody:rate_limit:"
 
 const defaultRateLimiterCallTimeout = 250 * time.Millisecond
 
-/* rateLimiterScript is the atomic fixed-window counter: one INCR per call, with the window expiry armed in the same round trip on the call that creates the counter and on any later call that finds the key carrying no expiry at all. Without the second half a key that reached the store without a ttl — a PERSIST, an eviction policy that dropped it, a writer that set it by hand — never lapsed: the counter climbed past the limit and stayed there, so every request keyed on it was refused for as long as the key lived, which under the fail-closed default is a permanent refusal nothing in the application can lift. Reading the ttl inside the script keeps the check and the arming atomic, which is the whole reason this is a script and not three commands. */
 var rateLimiterScript = rueidis.NewLuaScript(`local count = redis.call("incr", KEYS[1])
 if count == 1 or redis.call("pttl", KEYS[1]) < 0 then
     redis.call("pexpire", KEYS[1], tonumber(ARGV[1]))
@@ -49,7 +48,7 @@ func WithRateLimiterFailureMode(mode RateLimiterFailureMode) RateLimiterOption {
     }
 }
 
-/* WithRateLimiterOnError observes store failures from the plain Allow path, which has no error return; AllowWithRuntime reports them to the caller as well. It replaces the record the limiter writes when no observer is given, rather than adding to it: an observer may be a metric rather than a journal, so the failure is handed over untouched and unmarked and whatever the caller does with the error stays what it was. An observer that wants both writes both. */
+/* WithRateLimiterOnError installs the observer for store failures from Allow and AllowWithRuntime. It replaces default logging and receives the original unmarked error; AllowWithRuntime also returns the error. */
 func WithRateLimiterOnError(onError func(error)) RateLimiterOption {
     return func(instance *RateLimiter) {
         instance.onError = onError
@@ -125,7 +124,7 @@ func (instance *RateLimiter) Allow(key string) bool {
 }
 
 func (instance *RateLimiter) AllowWithRuntime(runtimeInstance runtimecontract.Runtime, key string) (bool, error) {
-    /* cap the runtime context with the call timeout: context.WithTimeout keeps whichever deadline is earlier, so a request that already carries a tighter deadline still wins, while a request whose context has no deadline — as melody's http kernel leaves it — is bounded here rather than hanging on an unresponsive store. */
+
     callContext, cancel := context.WithTimeout(runtimeInstance.Context(), instance.callTimeout)
     defer cancel()
 
@@ -137,7 +136,7 @@ func (instance *RateLimiter) AllowWithRuntime(runtimeInstance runtimecontract.Ru
     return allowed, allowErr
 }
 
-/* Reset drops the counter for one key best-effort. The signature returns nothing, so a store failure reports through the error observer, and through a record when no observer was given: a successful login is meant to clear an account's lockout, and against a dead store the DEL fails, the account stays locked and nothing anywhere marks the attempt. */
+/* Reset removes one counter best-effort. Since it has no error return, failures reach the configured observer or the default logger. */
 func (instance *RateLimiter) Reset(key string) {
     callContext, cancel := context.WithTimeout(context.Background(), instance.callTimeout)
     defer cancel()
@@ -151,7 +150,6 @@ func (instance *RateLimiter) Reset(key string) {
     }
 }
 
-/* allow runs the fixed-window counter; on a store failure the returned allowed value is the failure-mode default, so callers can honor it even when the error is also returned. */
 func (instance *RateLimiter) allow(callContext context.Context, key string) (bool, error) {
     milliseconds := strconv.FormatInt(floorPositiveMilliseconds(instance.window), 10)
 
@@ -159,7 +157,7 @@ func (instance *RateLimiter) allow(callContext context.Context, key string) (boo
 
     count, resultErr := result.AsInt64()
     if nil != resultErr {
-        /* the caller's own cancellation is not a store failure: a client that disconnected while the round trip was in flight surfaces here as the context's cancellation, and labelled a store failure it read as a redis outage against a perfectly healthy store. The failure-mode answer applies either way — the request is already gone — but the error names what actually happened. The call-timeout deadline stays a store failure: that budget exists to catch the store being slow. */
+
         if true == errors.Is(resultErr, context.Canceled) {
             return FailureModeOpen == instance.failureMode, exception.NewError(
                 "redis rate limiter call cancelled by the caller",
@@ -178,13 +176,6 @@ func (instance *RateLimiter) allow(callContext context.Context, key string) (boo
     return count <= int64(instance.limit), nil
 }
 
-/* reportError delivers a store failure and answers the error the caller should carry on with.
-
-   An observer given by the application is the application's channel and gets the failure untouched — it may be a counter rather than a journal, so nothing is recorded here and nothing is marked, leaving whatever the caller does with the error exactly as it was.
-
-   With no observer the failure is recorded here, because two of the three doors return nothing at all: Allow answers a bool and Reset answers nothing, so a store outage refused every call and reached no channel whatsoever — no record, no error, no metric — and the shipped default is precisely that, since the reference application wires no observer. The record carries the level the http middleware picks for the same failure: a caller's own cancellation is not an outage and would page an operator for a client that hung up.
-
-   The error is then marked already-logged and handed back, so the reader above files nothing a second time — the framework's own mark, which the exception listener and the sites in the http kernel already honour. That is what lets the record be filed here, at the one place that knows the key and the failure mode, without the middleware writing its own beside it. */
 func (instance *RateLimiter) reportError(logger loggingcontract.Logger, err error) error {
     if nil != instance.onError {
         instance.onError(err)
@@ -196,7 +187,6 @@ func (instance *RateLimiter) reportError(logger loggingcontract.Logger, err erro
         logger = logging.EmergencyLogger()
     }
 
-    /* the key and the failure mode already travel in the error's own context, put there where the call was made */
     recordContext := exception.LogContext(err)
 
     if true == errors.Is(err, context.Canceled) {

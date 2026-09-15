@@ -4,7 +4,6 @@ import (
     "testing"
 )
 
-/* two scanned packages routinely share a base name — a contract package under each domain — so the alias written into the generated file cannot be the package name alone */
 func TestImportAliasTable_DisambiguatesPackagesSharingABaseName(t *testing.T) {
     importAliases := newImportAliasTable()
 
@@ -33,7 +32,6 @@ func TestImportAliasTable_DoesNotCollideWithAReservedAlias(t *testing.T) {
     }
 }
 
-/* the provider bodies spell the closure parameters, the fixed locals, the conversion type names, the error of every signature, the string and any of every guard's error context, and the nil/true/false literals; an import alias claiming one of them would be shadowed inside every closure, so the table steps over them */
 func TestImportAliasTable_StepsOverTheEmittedIdentifiers(t *testing.T) {
     cases := map[string]string{
         "github.com/acme/app/resolver":      "resolver2",
@@ -58,7 +56,6 @@ func TestImportAliasTable_StepsOverTheEmittedIdentifiers(t *testing.T) {
     }
 }
 
-/* a directory may be named after a Go keyword (app/interface is legal on disk); the bare keyword cannot appear as an import alias, so it is pushed into the suffixed form */
 func TestImportAliasTable_StepsOverAGoKeywordBase(t *testing.T) {
     importAliases := newImportAliasTable()
 
@@ -83,7 +80,6 @@ func TestSanitizeAlias_ProducesAUsableIdentifier(t *testing.T) {
     }
 }
 
-/* the qualifier written at the constructor belongs to the scanned file, not to the generated one, so rendering has to swap it for the alias the generated file imports the path under */
 func TestRenderType_SwapsTheSourceQualifierForTheGeneratedAlias(t *testing.T) {
     importAliases := newImportAliasTable()
     importAliases.reserve("github.com/acme/app/billing/contract", "billingcontract")
@@ -127,7 +123,6 @@ func TestRenderType_LeavesABuiltinTypeAlone(t *testing.T) {
     }
 }
 
-/* an accessor returns the widest type of its family, so only a narrower argument needs a conversion in the generated provider */
 func TestScalarAccessorAndConversion_PairUpPerType(t *testing.T) {
     cases := []struct {
         typeReference   *TypeReference
@@ -142,7 +137,6 @@ func TestScalarAccessorAndConversion_PairUpPerType(t *testing.T) {
         {&TypeReference{Expression: "float64"}, "Float()", true, false},
         {&TypeReference{Expression: "float32"}, "Float()", true, true},
         {&TypeReference{Expression: "time.Duration", Qualifier: "time", ImportPath: "time"}, "Duration()", true, false},
-        /* the classification follows the resolved import path: an aliased stdlib duration keeps its accessor, a foreign package named time does not borrow it */
         {&TypeReference{Expression: "stdtime.Duration", Qualifier: "stdtime", ImportPath: "time"}, "Duration()", true, false},
         {&TypeReference{Expression: "time.Duration", Qualifier: "time", ImportPath: "example.com/faketime"}, "Int()", true, true},
     }
@@ -160,7 +154,6 @@ func TestScalarAccessorAndConversion_PairUpPerType(t *testing.T) {
     }
 }
 
-/* float32(v) silently turns an out-of-range float64 into an infinity the way an integer conversion wraps, so the narrowing guard must cover it with the MaxFloat32 magnitude bounds */
 func TestScalarNarrowingRange_GuardsFloat32(t *testing.T) {
     bounds, hasRange := scalarNarrowingRange("float32")
     if false == hasRange {
@@ -178,7 +171,6 @@ func TestScalarNarrowingRange_GuardsFloat32(t *testing.T) {
     }
 }
 
-/* a pointer-to-scalar argument is not scalar-classified, so its element type is rendered verbatim in FromResolverByType; a directory named after any scalar (app/int) must therefore never claim the bare name as its import alias */
 func TestImportAliasTable_StepsOverEveryScalarTypeName(t *testing.T) {
     importAliases := newImportAliasTable()
 
@@ -189,7 +181,6 @@ func TestImportAliasTable_StepsOverEveryScalarTypeName(t *testing.T) {
     }
 }
 
-/* the generated function's own name is a package-block identifier, and Go forbids declaring it again as a file-block import alias */
 func TestImportAliasTable_ReserveIdentifierPushesTheBaseIntoTheSuffixedForm(t *testing.T) {
     importAliases := newImportAliasTable()
     importAliases.reserveIdentifier("register")
@@ -199,7 +190,6 @@ func TestImportAliasTable_ReserveIdentifierPushesTheBaseIntoTheSuffixedForm(t *t
     }
 }
 
-/* a constructor parameter legally named after a predeclared identifier (any, string, nil) would become a generated local shadowing it ahead of the guards that spell it, so the variable namer steps over the same emitted-identifier list the alias table does */
 func TestAssignVariableNames_StepsOverTheEmittedIdentifiers(t *testing.T) {
     importAliases := newImportAliasTable()
 

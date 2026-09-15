@@ -88,7 +88,6 @@ func TestWorkingDirectoryHasEnvironmentFile_IgnoresDirectoryNamedDotEnv(t *testi
     }
 }
 
-/* stat-ing through a regular file yields ENOTDIR, which is how the non-not-exist stat error is produced here without permission tricks. */
 func TestWorkingDirectoryHasEnvironmentFile_TreatsUnprovableStatErrorAsPresent(t *testing.T) {
     directory := t.TempDir()
 

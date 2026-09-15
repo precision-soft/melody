@@ -68,7 +68,6 @@ func TestRegisterRateLimitRequestListener_AnswersTooManyRequestsOnceTheBudgetIsG
     }
 }
 
-/* OnLimitExceeded is the application's, so a typed nil of a concrete response type is the shape a hand-written "no response" takes; through a bare nil check it reads as a live response, SetResponse normalizes it to nil, and the refused request is served unmetered — the guard must read it through IsNilInterface and serve the 429 fallback */
 func TestRegisterRateLimitRequestListener_ATypedNilLimitResponseStillAnswers429(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
 
@@ -154,7 +153,6 @@ func TestRegisterRateLimitRequestListener_ChargesTheBudgetBeforeTheSecurityChain
                 return nil
             }
 
-            /* the real token-resolution listener declines an answered request the same way */
             if nil != requestEvent.Response() {
                 return nil
             }
@@ -202,7 +200,6 @@ func TestRegisterRateLimitRequestListener_RefusesAMissingLimiter(t *testing.T) {
     )
 }
 
-/* the listener door classifies the caller's cancellation apart from a store failure, the way its middleware twin does: at error every client that hung up mid-round-trip paged the operator for a healthy store — and this door meters every request, ahead of authentication, so it sees more of those than the middleware ever does. */
 func TestRegisterRateLimitRequestListener_ACancelledLimiterCallIsRecordedAtWarning(t *testing.T) {
     capture := &rateLimitCaptureLogger{Logger: logging.NewNopLogger()}
 
@@ -230,9 +227,6 @@ func TestRegisterRateLimitRequestListener_ACancelledLimiterCallIsRecordedAtWarni
     }
 }
 
-/* The request is an application-implementable contract, so a nil pointer of a request type reaches this
-door as a non-nil interface and the read below dereferences it. The untyped literal a sibling probe passes
-is the only shape a bare comparison already catches. */
 func TestRegisterRateLimitRequestListener_ATypedNilRequestIsLeftAlone(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
 
@@ -257,7 +251,6 @@ func TestRegisterRateLimitRequestListener_ATypedNilRequestIsLeftAlone(t *testing
     }
 }
 
-/* the refusal is rendered through kernel.exception rather than returned to the caller, because returning it would abort the kernel.request dispatch onto the fail-closed 500 page and a deliberate 429 would come out a 500. Every other probe here reaches the hardcoded fallback below that dispatch, so the half the comment is written for — an application's exception listener answering the refusal — is the one nothing exercises: with the dispatch removed the fallback answers 429 all the same and every one of them stays green. */
 func TestRegisterRateLimitRequestListener_TheRefusalIsRenderedThroughTheExceptionEvent(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
 
@@ -309,7 +302,6 @@ func TestRegisterRateLimitRequestListener_TheRefusalIsRenderedThroughTheExceptio
         t.Fatalf("read body: %v", readErr)
     }
 
-    /* the fallback below the dispatch answers 429 too, so the status alone cannot say which of the two produced this — the body names the listener */
     if "rendered by the application" != string(body) {
         t.Fatalf("expected the exception listener to render the refusal, got %q", string(body))
     }

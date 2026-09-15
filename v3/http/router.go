@@ -26,7 +26,7 @@ func NewRouterWithRouteRegistry(routeRegistry *RouteRegistry) *Router {
 type Router struct {
     routeRegistry *RouteRegistry
     routeTreeRoot *routeTreeNode
-    /* raised by the kernel when it builds its handler; the registration doors read it and refuse. */
+
     serving atomic.Bool
 }
 
@@ -112,7 +112,6 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
         options = &RouteOptions{}
     }
 
-    /* an empty pattern — which JoinPaths produces legitimately for an empty pattern under a root group — splits exactly as "/" does, so it registers the root route rather than a phantom. It used to split to [""], and the tree registration drops the first segment, so the route was inserted under NO node at all: it stayed in the registry, resolvable by name and generable, while being unreachable by every request including "/", and it took the dispatch identity of "/" with it, so registering the real root route afterwards was refused as a duplicate of one that could never answer. splitNormalizedPath is where that is now decided, for patterns and request paths alike. */
     parts := splitPath(pattern)
     normalizedPattern := strings.Join(parts, "/")
 
@@ -126,7 +125,6 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
             continue
         }
 
-        /* the requirement must match the WHOLE parameter value, so it is wrapped in a non-capturing group before it is anchored: alternation binds looser than the anchors, and concatenating them onto "en|de|fr" would compile "^en|de|fr$" — read by the engine as (^en)|(de)|(fr$) — which matches "aden" and "en'; DROP TABLE users--" alike, turning a whitelist into a prefix/suffix test. A caller's own anchors survive the wrapping unharmed. */
         patternValue := "^(?:" + value + ")$"
 
         requiredRegex, compileErr := regexp.Compile(patternValue)
@@ -207,7 +205,6 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
         },
     )
 
-    /* a route the registry declined is not put in the matching tree. The index below is the position of the LAST STORED route, so registering it for a declined one gave the pattern's tree entry a route that is not its own — the invariant every reader of the tree relies on, and the one the priority tie-break reads the index for. Today only the re-validation inside matchPath keeps that from answering the wrong handler. */
     if false == routeStored {
         return
     }
@@ -226,7 +223,6 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
     instance.registerRouteInTree(instance.routeTreeRoot, patternSegments, routeIndex)
 }
 
-/* rejectDuplicateParameterName refuses a pattern that names one parameter twice — /orgs/:id/members/:id. The extraction writes both segments under one map key, so the handler can only ever read one of the two values and cannot tell which; the route is ambiguous by construction and the openapi document emitted for it is spec-invalid on duplicate path parameters. A parameter with no name at all — a bare ":" or ":?" — is refused here too rather than treated as an anonymous wildcard: it binds nothing, so the segment it occupies is matched and then discarded in silence. */
 func rejectDuplicateParameterName(parts []string, normalizedPattern string) {
     seenParameterNames := map[string]struct{}{}
 
@@ -243,7 +239,7 @@ func rejectDuplicateParameterName(parts []string, normalizedPattern string) {
 
         if "" == parameterName {
             if true == strings.HasPrefix(part, "*") {
-                /* an unnamed catch-all is the deliberate spelling of "swallow the rest and bind nothing" */
+
                 continue
             }
 
@@ -276,8 +272,6 @@ func rejectDuplicateParameterName(parts []string, normalizedPattern string) {
     }
 }
 
-
-/* rejectForeignParameterSyntax refuses a segment written in a parameter syntax this router does not speak. The router binds ":name" and "*name...", and everything else is a literal segment — so "/users/{id}", the spelling every other Go router and every openapi document uses, registered a route that matches only the eight-character url "/users/%7Bid%7D", binds nothing, and is refused by no validator. The developer sees a route in the table, the url generator emits the braces back unescaped, and every real request 404s. The mistake is in the declaration, so it is refused where the declaration is. */
 func rejectForeignParameterSyntax(parts []string, normalizedPattern string) {
     for _, part := range parts {
         if false == strings.HasPrefix(part, "{") {
@@ -301,11 +295,6 @@ func rejectForeignParameterSyntax(parts []string, normalizedPattern string) {
     }
 }
 
-/* rejectIncoherentLocaleDeclaration refuses the two shapes in which a route's locale declaration and its pattern contradict each other, each of which fails silently and in opposite directions.
-
-   A route that declares Locales but whose pattern carries no ":_locale" segment can never match anything: the gate reads the parameter, finds nothing, and refuses — so the route is dead for every url, with no error at registration and no record at request time. A default supplies the value too, which is why the defaults are consulted here rather than the pattern alone.
-
-   A route whose pattern carries ":_locale" but declares no Locales list is the inverse: the gate returns early, the segment binds whatever the client sent, and the kernel publishes it verbatim as the request's locale — an unvalidated, client-chosen value reaching the translator and every consumer of the locale attribute. Declaring the list is what makes the segment a whitelist. */
 func rejectIncoherentLocaleDeclaration(
     parts []string,
     normalizedPattern string,
@@ -359,7 +348,7 @@ func rejectIncoherentLocaleDeclaration(
         )
     }
 }
-/* rejectMalformedExposureAttributes refuses the three shapes that made a route silently absent from the manifest it was deliberately opted into: an exposure attribute that is not a bool and a zone that is not a string both fail the projection's type assertion and drop the route with no diagnostic, and an exposed route with no name cannot be referenced by the consumer at all. Each was a developer stating an intention the artifact then contradicted in silence. */
+
 func rejectMalformedExposureAttributes(attributes map[string]any, routeName string, normalizedPattern string) {
     exposeValue, hasExpose := attributes[RouteAttributeExpose]
     if false == hasExpose {
@@ -428,7 +417,6 @@ func rejectMalformedExposureAttributes(attributes map[string]any, routeName stri
     }
 }
 
-/* an omitted optional parameter is dropped wherever it sits in the pattern, while a match only ever ends early at the tail: a pattern like "/blog/:locale?/posts" therefore lets the url generator mint "/blog/posts", which this router answers with a 404. Only a trailing optional keeps the two sides in agreement, so anything else is refused at the definition site instead of shipping links nothing serves. */
 func rejectNonTrailingOptionalParameter(parts []string, normalizedPattern string, defaults map[string]string) {
     for index, part := range parts {
         if false == strings.HasPrefix(part, ":") {
@@ -445,7 +433,6 @@ func rejectNonTrailingOptionalParameter(parts []string, normalizedPattern string
 
         parameterName := strings.TrimSuffix(strings.TrimPrefix(part, ":"), "?")
 
-        /* a non-empty default keeps the segment in every path the generator mints — GeneratePath substitutes it both for an absent parameter and for one supplied empty — so the pattern stays matchable. An empty default cannot: it leaves nothing to emit, and an empty segment satisfies no parameter. */
         if "" != defaults[parameterName] {
             continue
         }
@@ -627,7 +614,6 @@ func (instance *Router) match(method string, path string, host string, scheme st
             continue
         }
 
-        /* the defaults are merged BEFORE the locale gate reads them, because a default is how a route supplies the locale a url does not carry: declaring Locales{"en", "de"} beside Defaults{"_locale": "en"} used to make the route unreachable by every url, the gate rejecting it sixteen lines before the value meant to satisfy the gate was filled in. The kernel below reads the same map after this merge, so the router and the kernel now agree on whether a default counts as the request locale. */
         for key, defaultValue := range routeDefinition.defaults {
             if _, exists := params[key]; false == exists {
                 params[key] = defaultValue
@@ -640,7 +626,7 @@ func (instance *Router) match(method string, path string, host string, scheme st
 
         if false == matchesMethod(routeDefinition.methods, method) {
             for _, allowedMethod := range routeDefinition.methods {
-                /* an empty method never matches, so advertising it would put a bare comma in the Allow header, which is not a valid method token */
+
                 if "" == allowedMethod {
                     continue
                 }
@@ -650,7 +636,6 @@ func (instance *Router) match(method string, path string, host string, scheme st
             continue
         }
 
-        /* priority first, then registration order — the lowest index wins a tie. Specificity is deliberately not a factor: a static segment does not outrank a parameter, so the first declaration of two equally-ranked matches is the one that answers. The rule is written on the RouteHandler contract, because it is the caller who orders the declarations. */
         if false == hasBest ||
             routeDefinition.priority > bestPriority ||
             (routeDefinition.priority == bestPriority && (0 > bestIndex || index < bestIndex)) {
@@ -680,7 +665,6 @@ func (instance *Router) match(method string, path string, host string, scheme st
         return nil, nil, map[string]any{}
     }
 
-    /* the winning route's attributes are the registry's own map, alive for every request of the process: handed out uncopied, a sort or an append through the match result — or through request.Attributes(), where the kernel publishes these values — rewrote the route table with no lock. The copy is deep, so the methods slice and any nested value a route registered are the caller's to mutate; what the copy does not descend into (a pointer, a struct) is shared state by the same boundary the session copy documents. */
     return bestHandler, bestParams, internal.CopyAnyMap(bestAttributes)
 }
 
@@ -741,7 +725,6 @@ func (instance *routeTreeNode) collectCandidates(
 
 var _ httpcontract.Router = (*Router)(nil)
 
-/* freezeRouterForServing closes a router's registration doors once the kernel has built its handler. It reaches the router through an unexported method, so it binds only to an implementation declared in this package: a router supplied from outside cannot be frozen and is held to the written contract alone, which is the most a foreign implementation can be held to. */
 func freezeRouterForServing(router httpcontract.Router) {
     freezable, isFreezable := router.(interface{ freezeForServing() })
     if false == isFreezable {
@@ -755,7 +738,6 @@ func (instance *Router) freezeForServing() {
     instance.serving.Store(true)
 }
 
-/* refuseRegistrationWhileServing refuses a route registered after the kernel started serving. The route tree is a tree of plain maps read by every request goroutine, so writing to it concurrently is an unrecoverable fatal error rather than a torn read — there is no degraded mode to fall back to, which is why this is a refusal at the door and not a lock. Routes are configuration: they are declared at boot, from the composition root or a module's registration hook. */
 func (instance *Router) refuseRegistrationWhileServing(pattern string) {
     if false == instance.serving.Load() {
         return

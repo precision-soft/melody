@@ -295,7 +295,6 @@ func TestEventDispatcherAdapter_RemoveSubscriber_DistinctZeroSizeSubscribersKeep
     }
 }
 
-/* the bookkeeping is scrubbed whether or not the wrapped dispatcher still held the listener: returning early on false left the adapter's own record of a listener that no longer exists, reported by RegisteredEvents forever and removable by nothing, since every retry took the same early return */
 func TestEventDispatcherAdapter_RemoveListener_ScrubsItsRecordForAListenerTheWrappedDispatcherNoLongerHolds(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
     adapter := NewEventDispatcherAdapter(dispatcher)
@@ -321,7 +320,6 @@ func TestEventDispatcherAdapter_RemoveListener_ScrubsItsRecordForAListenerTheWra
     }
 }
 
-/* callers probe for RequiredListenerRegistrar to learn whether the fail-closed guarantee is available, and the adapter satisfies that probe on its own behalf: swallowing the mark answered the probe yes and left the guarantee unarmed */
 func TestEventDispatcherAdapter_MarkListenerRequired_RefusesADispatcherThatCannotMarkRequiredListeners(t *testing.T) {
     adapter := NewEventDispatcherAdapter(&testPlainEventDispatcher{})
 
@@ -339,7 +337,6 @@ func TestEventDispatcherAdapter_MarkListenerRequired_RefusesADispatcherThatCanno
     )
 }
 
-/* the same refusal for the opt-out, which is just as silently absorbed */
 func TestEventDispatcherAdapter_MarkListenerMaySkipRequiredListeners_RefusesADispatcherThatCannotMarkRequiredListeners(t *testing.T) {
     adapter := NewEventDispatcherAdapter(&testPlainEventDispatcher{})
 
@@ -357,7 +354,6 @@ func TestEventDispatcherAdapter_MarkListenerMaySkipRequiredListeners_RefusesADis
     )
 }
 
-/* the marks reach the adapter's own inspection too, so wrapping a dispatcher does not hide whether the guarantee is armed */
 func TestEventDispatcherAdapter_RegisteredEvents_ReportsTheRequiredListenerMarks(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
     adapter := NewEventDispatcherAdapter(dispatcher)
@@ -381,7 +377,6 @@ func TestEventDispatcherAdapter_RegisteredEvents_ReportsTheRequiredListenerMarks
     }
 }
 
-/* a typed nil dispatcher passed the plain guard and dereferenced on the first use, blaming the dispatch instead of the wiring */
 func TestNewEventDispatcherAdapter_RefusesATypedNilDispatcher(t *testing.T) {
     var dispatcher *EventDispatcher
 
@@ -424,7 +419,6 @@ func (instance *testPlainEventDispatcher) DispatchName(runtimeInstance runtimeco
     return nil, nil
 }
 
-/* the adapter's own door carries the same two refusals as the dispatcher behind it: it does not forward before validating, so a listener registered under an empty name or a nil listener would be recorded by the adapter and refused by the dispatcher — an inspection reporting a listener that was never installed */
 func TestEventDispatcherAdapter_AddListener_RefusesAnEmptyNameAndANilListener(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
     adapter := NewEventDispatcherAdapter(dispatcher)
@@ -456,7 +450,6 @@ func TestEventDispatcherAdapter_AddListener_RefusesAnEmptyNameAndANilListener(t 
     }
 }
 
-/* the v1/v2 assertion is INVERTED, for the reason the dispatcher's twin gives: there a second registration of one subscriber is refused because the installation is filed under the value's pointer; here it is filed under an id, so the second registration is a second installation and the two are removed independently. */
 func TestEventDispatcherAdapter_AddSubscriber_SecondRegistrationIsItsOwnInstallation(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
     adapter := NewEventDispatcherAdapter(dispatcher)
@@ -496,7 +489,6 @@ func TestEventDispatcherAdapter_AddSubscriber_SecondRegistrationIsItsOwnInstalla
     }
 }
 
-/* removing the last listener of a subscriber drops the subscriber key rather than leaving an empty list: kept, the subscriber is reported as registered forever and can never be registered again */
 func TestEventDispatcherAdapter_RemoveListener_DropsTheSubscriberKeyWithItsLastRegistration(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
     adapter := NewEventDispatcherAdapter(dispatcher)
@@ -536,11 +528,9 @@ func TestEventDispatcherAdapter_RemoveListener_DropsTheSubscriberKeyWithItsLastR
         t.Fatalf("expected the subscriber key to be dropped with its last registration")
     }
 
-    /* the record is gone, so the same subscriber may be registered again — the proof that nothing stale was left behind */
     adapter.AddSubscriber(subscriber)
 }
 
-/* the opt-out mark is recorded on the adapter's own entry, not only forwarded: the adapter is what an inspection reads, so a mark that reached the dispatcher alone left `debug:events --verbose` reporting a guarantee still armed for a listener that had opted out of it */
 func TestEventDispatcherAdapter_MarkListenerMaySkipRequiredListeners_RecordsTheMarkForInspection(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
     adapter := NewEventDispatcherAdapter(dispatcher)
@@ -568,7 +558,6 @@ func TestEventDispatcherAdapter_MarkListenerMaySkipRequiredListeners_RecordsTheM
     }
 }
 
-/* listeners of equal priority are reported in registration order: dispatch breaks such a tie by listener id, so an inspection ordering them any other way would advertise an execution order the dispatch does not use */
 func TestEventDispatcherAdapter_RegisteredEvents_BreaksEqualPrioritiesByRegistrationOrder(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
     adapter := NewEventDispatcherAdapter(dispatcher)
@@ -615,7 +604,6 @@ func TestEventDispatcherAdapter_RegisteredEvents_BreaksEqualPrioritiesByRegistra
     }
 }
 
-/* the v1/v2 assertion is INVERTED, for the reason the dispatcher's twin gives: every concurrent call installs now, so what subscriberMutex still guarantees is asserted instead — four whole installations, four distinct ids, never a half-installed one. */
 func TestEventDispatcherAdapter_ConcurrentAddSubscriberInstallsEachWhole(t *testing.T) {
     for iteration := 0; iteration < 2000; iteration++ {
         dispatcher, _ := testNewEventDispatcher()
@@ -682,7 +670,6 @@ func TestEventDispatcherAdapter_InspectorTiebreakFollowsTheDispatchOrder(t *test
         t.Fatalf("expected the wrapped dispatcher to issue increasing listener ids")
     }
 
-    /* the interleaving under construction: the goroutine holding the lower listener id was preempted before recording its adapter entry, so the entries arrived in the opposite order */
     adapter.mutex.Lock()
     adapter.listenerRegistrations["adapter.tiebreak"] = []adapterListenerRegistration{
         {

@@ -6,19 +6,19 @@ import (
 
 /* Context supplies a command’s parsed flags, positional arguments and output writer. */
 type Context interface {
-    /* String answers the value of a string flag, or its declared default when the flag was not given. */
+    /* String returns the string flag value or its declared default when absent. */
     String(flagName string) string
 
-    /* Bool answers the value of a bool flag, or its declared default when the flag was not given. */
+    /* Bool returns the boolean flag value or its declared default when absent. */
     Bool(flagName string) bool
 
-    /* Int answers the value of an int flag, or its declared default when the flag was not given. */
+    /* Int returns the integer flag value or its declared default when absent. */
     Int(flagName string) int
 
-    /* StringSlice answers the values of a repeatable string flag, in the order they were given. */
+    /* StringSlice returns repeatable flag values in command-line order. */
     StringSlice(flagName string) []string
 
-    /* IsSet reports whether the flag was given on the command line at all, which is the difference between an explicit value that equals the default and no value. */
+    /* IsSet distinguishes an explicitly supplied flag from its default value. */
     IsSet(flagName string) bool
 
     /* Arguments returns an independent copy of the positional arguments. */

@@ -119,7 +119,6 @@ func TestNormalizeOption_ClampsANegativeVerbosityLevel(t *testing.T) {
     }
 }
 
-/* the parser reads a contract now, so the reading is asserted on a double that answers per name instead of on a command line driven through the parsing engine: what the test then proves is this file's own guard — which flag name feeds which field of the option — rather than the engine's ability to parse an argument. That the declared validators and defaults survive the trip into the engine is the adapter's guard and is proved there. */
 type stubCommandContext struct {
     stringValues      map[string]string
     boolValues        map[string]bool
@@ -179,7 +178,6 @@ func (instance *stubCommandContext) Writer() io.Writer {
     return instance.writer
 }
 
-/* the two sources have to agree on nine strings and nothing checks that they do: a name read here that no flag declares reads the zero value of a flag that does not exist, on every run, in silence. The double records what was asked for, so the lockstep is asserted in the direction the argument-driven test could only assert by accident. */
 func TestParseOptionFromCommand_ReadsOnlyDeclaredFlagNames(t *testing.T) {
     commandContext := &stubCommandContext{}
 
@@ -201,7 +199,6 @@ func TestParseOptionFromCommand_ReadsOnlyDeclaredFlagNames(t *testing.T) {
     }
 }
 
-/* a caller handing back a typed nil of its own context type produces a non-nil interface: read with a plain comparison it passes the guard above and the first flag read dereferences it */
 func TestParseOptionFromCommand_ReturnsTheDefaultsForATypedNilCommand(t *testing.T) {
     var typedNilContext *stubCommandContext
 

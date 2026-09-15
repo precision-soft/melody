@@ -40,7 +40,7 @@ func (instance *ArchiveStorage) IsPersistent() bool {
     return nil != instance.database
 }
 
-/* Location names the database the handle is open on, as the connection was declared, and is empty for a handle nobody located. */
+/* Location returns the declared database location, or an empty string when none is supplied. */
 func (instance *ArchiveStorage) Location() string {
     return instance.location
 }

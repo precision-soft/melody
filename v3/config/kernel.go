@@ -9,9 +9,7 @@ import (
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
-/* DefaultTeardownTimeout bounds the whole process teardown, including dependency waves, when MELODY_TEARDOWN_TIMEOUT is unset. Exhausting the budget abandons the wait and exits non-zero. Configure it to fit the deployment supervisor's shutdown allowance.
-
-   An explicit zero disables the deadline; a negative duration fails boot. */
+/* DefaultTeardownTimeout bounds the whole process teardown. Half of a positive budget becomes the shared component deadline; the remaining half allows completion and diagnostics before the outer shield abandons waiting. Zero disables the clean-shutdown deadline while panic handling retains its fallback. Negative values fail boot. */
 const DefaultTeardownTimeout = 10 * time.Second
 
 func newKernelConfiguration(
@@ -170,7 +168,6 @@ func (instance *kernelConfiguration) validateProcessRole() error {
     )
 }
 
-/* validateEnvironment names the key and the files a refusal is about, because the emptiness it refuses is READ somewhere else and read differently: the dotenv source answers "dev" for a present-but-empty MELODY_ENV and goes on to load .env.dev, so a deployment template rendering `MELODY_ENV=` boots far enough to read the development files and then dies here. Told only that "environment may not be empty", an operator has neither the key to search for nor the reason the development values were the ones loaded. */
 func (instance *kernelConfiguration) validateEnvironment() error {
     environment := instance.Env()
     if "" == environment {
@@ -223,8 +220,6 @@ func (instance *kernelConfiguration) validateLogPath() error {
     if "" == logPath {
         return nil
     }
-
-    /* resolution fails on any placeholder it cannot expand, so a resolved path can only carry a percent as data — the doubled-percent escape produces one — and a placeholder-shaped check here would reject exactly those legitimate values */
 
     return nil
 }

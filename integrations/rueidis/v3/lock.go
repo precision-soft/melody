@@ -14,12 +14,8 @@ import (
     "github.com/redis/rueidis"
 )
 
-/* defaultLockerCallTimeout is the budget of one round trip, the one the token store and the server-sent event backplane in this package give theirs. A lock round trip is one Lua script — a compare-and-set, a compare-and-delete or a compare-and-extend — so a healthy store answers in a few milliseconds; the budget only has to sit under the client's own connection timeout, which is what bounded the call before this option existed, and under the renewal cadence the framework's lock helpers run Refresh at, which they bound on their own. */
 const defaultLockerCallTimeout = time.Second
 
-/* lockAcquireScript answers 1 for a lease TAKEN under ARGV[1] and 2 for one this handle already holds whose expiry it has just pushed out. ARGV[2] is the token this handle currently holds, and a handle holding none passes its new token there, so the second comparison can never match a token belonging to somebody else. A re-acquisition leaves the stored value ALONE, so the token of an attempt that ended without an answer is on the key only when that attempt took a FRESH lease — which is what lets its give-back name the attempt rather than the handle.
-
-   The comparison against ARGV[1] is the incumbent one for a handle holding nothing and CANNOT fire for any other: the acquisition token is minted in the call that runs this script, and the only writer of it to the key is the set on the other side of the branch above. It is written as a disjunction rather than as one comparison because the two arguments carry different questions — the token being offered and the token being held — and a client that ever retried a write would need both read; this one does not, so the second is what answers. */
 var lockAcquireScript = rueidis.NewLuaScript(`local current = redis.call("get", KEYS[1])
 if current == false then
     redis.call("set", KEYS[1], ARGV[1], "PX", tonumber(ARGV[3]))
@@ -83,19 +79,16 @@ func (instance *Locker) CreateLock(name string, ttl time.Duration) lockcontract.
     }
 }
 
-
 type redisLock struct {
     client      rueidis.Client
     name        string
     ttl         time.Duration
     callTimeout time.Duration
 
-    /* mutex serialises the three doors, the form the mysql and pgsql backends of this repo use. It is what lets held be a plain field: with the doors serial, no write of it can land between another door's read and its own write. */
     mutex sync.Mutex
     held  string
 }
 
-/* heldToken answers the lease this handle currently holds, or the empty string before its first acquisition and after a release or a lost refresh. */
 func (instance *redisLock) heldToken() string {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -103,7 +96,6 @@ func (instance *redisLock) heldToken() string {
     return instance.held
 }
 
-/* callContext caps the runtime context with the call timeout: context.WithTimeout keeps whichever deadline is earlier, so a caller that already carries a tighter deadline — the framework's lock helpers renew and release under one of their own — still wins, while a request whose context has no deadline, as melody's http kernel leaves it, is bounded here rather than held for the client's own connection timeout. */
 func (instance *redisLock) callContext(runtimeInstance runtimecontract.Runtime) (context.Context, context.CancelFunc) {
     return context.WithTimeout(runtimeInstance.Context(), instance.callTimeout)
 }
@@ -123,7 +115,6 @@ func (instance *redisLock) Acquire(runtimeInstance runtimecontract.Runtime) (boo
 
     milliseconds := strconv.FormatInt(floorPositiveMilliseconds(instance.ttl), 10)
 
-    /* the token of THIS acquisition, minted before the call so the give-back below can name the attempt rather than the handle. A handle that holds nothing passes its new token as the incumbent too, which makes the script's second comparison compare the new token with itself and so unable to match anybody else's lease. */
     acquisitionToken := newLockToken()
 
     incumbentToken := instance.held
@@ -145,7 +136,7 @@ func (instance *redisLock) Acquire(runtimeInstance runtimecontract.Runtime) (boo
 
     acquired, resultErr := result.AsInt64()
     if nil != resultErr {
-        /* a context already done before the call refuses the command before it is written, so no lease can have been taken and the give-back would be a round trip against a store this call never reached. It is a narrow test — it says nothing about a dial that failed or a deadline that fired mid-flight, which stay ambiguous and are still given back — but it is the one case the caller's own state proves. */
+
         if nil == dispatchContextErr {
             instance.releaseAmbiguousAcquire(acquisitionToken)
         }
@@ -160,30 +151,26 @@ func (instance *redisLock) Acquire(runtimeInstance runtimecontract.Runtime) (boo
     }
 
     if lockAcquireExtended == acquired {
-        /* an extension left the stored value untouched, so what this handle holds is the incumbent it offered — which is what it already held, since a handle holding none cannot reach this branch */
+
         instance.held = incumbentToken
 
         return true, nil
     }
 
-    /* the store has answered that the key carries a token this handle does not own, which settles what the handle could not settle on its own: the claim is dropped here rather than left to be re-offered as an incumbent that can never match, and to keep Release the round-trip-free no-op its contract promises */
     instance.held = ""
 
     return false, nil
 }
 
 const (
-    /* lockAcquireTaken and lockAcquireExtended are the two ways lockAcquireScript says yes: a lease newly written under this acquisition's token, and one this handle already held whose expiry was pushed out without its value changing. */
+
     lockAcquireTaken    = int64(1)
     lockAcquireExtended = int64(2)
 )
 
-/* releaseAmbiguousAcquire best-effort deletes only this failed attempt's token, which the server may have stored before its reply was lost. Extensions retain the incumbent token, and later acquisitions use fresh tokens, so neither can be deleted by this cleanup.
-
-   Cleanup runs asynchronously with its own callTimeout budget to preserve the caller's deadline. Errors and panics are ignored; if cleanup fails or the process exits first, the lease expires by TTL. */
 func (instance *redisLock) releaseAmbiguousAcquire(acquisitionToken string) {
     go func() {
-        /* a panic on a bare goroutine takes the process down with it, and this one runs for a caller that has already been answered */
+
         defer func() { _ = recover() }()
 
         releaseContext, cancel := context.WithTimeout(context.Background(), instance.callTimeout)
@@ -193,9 +180,7 @@ func (instance *redisLock) releaseAmbiguousAcquire(acquisitionToken string) {
     }()
 }
 
-/* Release gives up the lease this handle holds. A handle that holds none returns without a round trip, which is the published contract — releasing a lock this instance no longer holds is a no-op that reports no error — and is also the only correct answer, since there is no token to compare against.
-
-   The claim is dropped only once the store has ANSWERED. A release whose round trip never landed leaves the lease standing under a token nothing else can name, so a claim dropped before the answer would report success over a lease still held on the retry and leave every later acquire refused until the ttl lapsed. */
+/* Release is a no-op when this handle holds no lease. It retains the local claim until the store answers, so a failed round trip can be retried with the same token. */
 func (instance *redisLock) Release(runtimeInstance runtimecontract.Runtime) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -226,7 +211,6 @@ func (instance *redisLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl 
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    /* a handle that holds no lease has nothing to extend, and says so with the same error a lost lease gets: Refresh is the authoritative liveness check by published contract, so it must answer "no longer held" rather than a silent success */
     heldToken := instance.held
     if "" == heldToken {
         return exception.NewError("redis lock is no longer held", map[string]any{"name": instance.name}, nil)
@@ -245,7 +229,7 @@ func (instance *redisLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl 
     }
 
     if 0 == refreshed {
-        /* the store has answered that the key is gone or carries another token, which is the one reading that settles the question this handle cannot settle on its own; a refresh that merely ENDED AMBIGUOUSLY leaves the claim standing, because there the safe reading is that the lease is still ours */
+
         instance.held = ""
 
         return exception.NewError("redis lock is no longer held", map[string]any{"name": instance.name}, nil)
@@ -254,8 +238,6 @@ func (instance *redisLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl 
     return nil
 }
 
-
-/* floorPositiveMilliseconds guarantees a positive window never collapses to a 0 PEXPIRE argument, which Redis rejects. */
 func floorPositiveMilliseconds(ttl time.Duration) int64 {
     milliseconds := ttl.Milliseconds()
     if 0 == milliseconds {

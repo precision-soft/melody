@@ -24,10 +24,10 @@ const MinimumSessionTtl = time.Second
    Zero is not free of hazard, and the hazard is worth naming here rather than discovering in a memory graph: melody mints a session for every request that arrives without a session cookie, so once an application writes to a session on a public path — a csrf token, a flash message, a locale — an unbounded lifetime turns every cookie-less request into a permanent entry. That is survivable in a shared store an operator can expire, and it is not in the default in-memory one, which is why the application warns at boot when it finds both together rather than quietly picking a lifetime on the deployment's behalf. Set this to what the deployment actually wants. */
 const DefaultSessionTtl = 0 * time.Second
 
-/* DefaultSessionTombstoneRetention is how long a deleted session id keeps refusing a write-back when MELODY_HTTP_SESSION_TOMBSTONE_RETENTION says nothing. The window has to cover the longest a request of the deployment can still be holding a session snapshot loaded before the delete — nothing in the chain bounds a handler's lifetime, the server's socket timeouts cut the connection but not the goroutine — so a deployment whose slowest legitimate request outlives five minutes raises this to match, at the cost of one remembered entry per deletion within the window. The record lives in the manager, per process. */
+/* DefaultSessionTombstoneRetention bounds process-local protection against saving a deleted session snapshot. Configure it to exceed the longest request that can retain a snapshot; socket timeouts do not bound handler goroutine lifetime. Memory cost is one tombstone per deletion inside the window. */
 const DefaultSessionTombstoneRetention = 5 * time.Minute
 
-/* DefaultHttpShutdownTimeout is how long a stopping http server waits for the requests already admitted when MELODY_HTTP_SHUTDOWN_TIMEOUT says nothing. Five seconds is deliberately far below the thirty the write timeout promises each request: a deployment whose supervisor grants a longer termination grace raises this to match, and one that leaves both at their defaults trades the tail of the slowest requests for a process that is gone before the supervisor escalates. */
+/* DefaultHttpShutdownTimeout bounds the wait for admitted HTTP requests during shutdown. Configure it to fit the deployment supervisor’s grace; requests exceeding it can be cut off. */
 const DefaultHttpShutdownTimeout = 5 * time.Second
 
 func newHttpConfiguration(
@@ -121,17 +121,17 @@ func (instance *httpConfiguration) StaticExcludedPaths() []string {
     return append([]string{}, instance.staticExcludedPaths...)
 }
 
-/* SessionTtl is how long a stored session stays valid, DefaultSessionTtl when MELODY_HTTP_SESSION_TTL says nothing. The clock runs from the last write, not from the last request, and reading a session does not refresh it: a session written on every request renews itself, while one written once at login lapses this long after that write however active the visitor was. Zero stores the session without any expiry and is available as an explicit choice. */
+/* SessionTtl measures expiry from the last stored write; reads do not refresh it. An explicit zero disables expiry. An absent setting uses DefaultSessionTtl. */
 func (instance *httpConfiguration) SessionTtl() time.Duration {
     return instance.sessionTtl
 }
 
-/* SessionTombstoneRetention is how long a deleted session id keeps refusing a write-back, DefaultSessionTombstoneRetention when MELODY_HTTP_SESSION_TOMBSTONE_RETENTION says nothing. It is sized to the longest a request of this deployment can still be holding a session snapshot loaded before the delete: a request that outlives it can save the deleted session back with the pre-logout identity intact. Only a positive value can describe the window, so zero and negative fail the boot instead of silently disarming the logout defence. */
+/* SessionTombstoneRetention must exceed the longest request that can retain a pre-deletion snapshot, or that request can restore deleted state. Zero and negative values fail boot; an absent setting uses DefaultSessionTombstoneRetention. */
 func (instance *httpConfiguration) SessionTombstoneRetention() time.Duration {
     return instance.sessionTombstoneRetention
 }
 
-/* ShutdownTimeout is how long a stopping http server waits for the requests it has already admitted before cutting them, DefaultHttpShutdownTimeout when MELODY_HTTP_SHUTDOWN_TIMEOUT says nothing. Exceeding it is reported as a shutdown failure and the process exits non-zero, because requests were lost; only a positive value can describe a wait, so zero and negative fail the boot instead of silently becoming the default. */
+/* ShutdownTimeout bounds HTTP shutdown waiting. Exceeding it reports failure and exits non-zero. It must be positive; an absent setting uses DefaultHttpShutdownTimeout. */
 func (instance *httpConfiguration) ShutdownTimeout() time.Duration {
     return instance.shutdownTimeout
 }
@@ -318,7 +318,6 @@ func (instance *httpConfiguration) validateStaticCacheMaxAge() error {
     return nil
 }
 
-/* an excluded path is compared against the request path the way security.NewPathPrefixMatcher compares one, so it has to be shaped like the beginning of a path. A request path always starts with a slash, so an entry that does not can never match, and the application that wrote it would go on believing a directory is hers while the file server keeps answering for it. An empty entry is refused for the opposite reason: the prefix comparison matches every path against it, so one stray comma would silently take the whole file server out of service. */
 func (instance *httpConfiguration) validateStaticExcludedPaths() error {
     for _, excludedPath := range instance.staticExcludedPaths {
         if "" == excludedPath {
@@ -370,7 +369,6 @@ func (instance *httpConfiguration) validateSessionTtl() error {
     return nil
 }
 
-/* only a positive window can refuse anything: zero or negative would disarm the write-back defence entirely, which is not a shorter window but a different and dangerous meaning, so it is refused rather than silently normalized to a default the operator did not choose. */
 func (instance *httpConfiguration) validateSessionTombstoneRetention() error {
     if 0 >= instance.sessionTombstoneRetention {
         return exception.NewError(
@@ -386,7 +384,6 @@ func (instance *httpConfiguration) validateSessionTombstoneRetention() error {
     return nil
 }
 
-/* only a positive duration can describe a wait, and unlike the session ttl there is no meaning left over for zero: a deployment that wants no graceful window says so with a value as small as it likes, while zero and negative are refused rather than silently normalized to a default the operator did not choose. */
 func (instance *httpConfiguration) validateShutdownTimeout() error {
     if 0 >= instance.shutdownTimeout {
         return exception.NewError(
@@ -402,7 +399,6 @@ func (instance *httpConfiguration) validateShutdownTimeout() error {
     return nil
 }
 
-/* a list arrives as one environment value, and the comma is the separator melody already reads lists with — an accept header, an entity tag list, the redis address list — and the one an .env line carries without quoting. Each entry is trimmed because a list written to stay readable carries spaces the request path never has, so an untrimmed entry would silently match nothing. A value that is empty once trimmed is no list at all rather than a list of one empty entry, which is the difference between naming nothing and naming everything. Nothing here interprets the entry, so a pattern language added later reads through the same key and the same separator. */
 func splitHttpConfigurationList(value string) []string {
     trimmedValue := strings.TrimSpace(value)
     if "" == trimmedValue {

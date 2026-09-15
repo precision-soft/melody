@@ -38,7 +38,6 @@ func (instance *fakeStorage) Save(ctx context.Context, table string, entries ...
     return nil
 }
 
-/* the mutex is the double's own: the recorder hands one logger to every request goroutine, so a capture without it races in exactly the concurrent tests that exist to prove the recorder does not */
 type fakeLogger struct {
     mutex         sync.Mutex
     errorMessages []string
@@ -95,7 +94,6 @@ func TestRecorder_RoutesPerEntityTableAndHonorsIgnoredFields(t *testing.T) {
     }
 }
 
-/* the changes column must never carry the JSON literal null: an idempotent update and an insert of a non-struct model both record nothing, and the delete path already writes [] for that, so a trail consumer running jsonb_array_length(changes::jsonb) must read 0 rather than error out. */
 func TestRecorder_EmptyChangeSetIsStoredAsAnEmptyArray(t *testing.T) {
     storage := &fakeStorage{}
     recorder := NewRecorderWithStorage(storage, NewRegistry("melody_audit"))
@@ -136,7 +134,6 @@ func TestRecorder_DeadLettersOnStorageFailure(t *testing.T) {
     }
 }
 
-/* an entry the async storage refused — its queue full — is dead-lettered by the storage itself, with the change-set, before the refusal is returned; the recorder used to dead-letter it a second time on the same logger, so every dropped entry was journaled twice, exactly under the queue-full storm the dead-letter exists for. One record per dropped entry, and the refusal still reaches the caller */
 func TestRecorder_DoesNotDeadLetterAgainAnEntryTheAsyncStorageAlreadyDeadLettered(t *testing.T) {
     delegate := &recordingStorage{entered: make(chan struct{}), release: make(chan struct{})}
     storage := NewAsyncStorage(delegate, 1)
@@ -144,7 +141,6 @@ func TestRecorder_DoesNotDeadLetterAgainAnEntryTheAsyncStorageAlreadyDeadLettere
     storage.WithLogger(logger)
     recorder := NewRecorderWithStorage(storage, NewRegistry("")).WithLogger(logger)
 
-    /* the first save parks the worker inside the delegate, the second fills the buffer of one, the third is refused */
     if saveErr := recorder.RecordInsert(context.Background(), "parityAccount", "1", parityAccount{Id: 1}); nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
     }
@@ -171,7 +167,6 @@ func TestRecorder_DoesNotDeadLetterAgainAnEntryTheAsyncStorageAlreadyDeadLettere
     }
 }
 
-/* skipped on the sentinel alone, the recorder's record was lost whenever the storage journaled through the emergency default and the recorder through the application's logger — the wiring the readme describes — so the queue-full storm the dead-letter exists for left the application's journal empty; the record is skipped only when the storage journaled through this recorder's own logger */
 func TestRecorder_DeadLettersAnEntryTheAsyncStorageJournaledElsewhere(t *testing.T) {
     emergency := installDefaultAsyncStorageLogger(t)
     delegate := &recordingStorage{entered: make(chan struct{}), release: make(chan struct{})}
@@ -209,7 +204,6 @@ func TestRecorder_DeadLettersAnEntryTheAsyncStorageJournaledElsewhere(t *testing
     }
 }
 
-/* the sentinels are exported: a storage of the application's own that reports its refusal through one of them has journaled nothing this recorder knows of, so the entry is dead-lettered here, once */
 func TestRecorder_DeadLettersAnEntryAForeignStorageRefusedWithTheSentinel(t *testing.T) {
     storage := &sentinelReturningStorage{sentinel: ErrAsyncStorageClosed}
     application := &fakeLogger{}
@@ -225,7 +219,6 @@ func TestRecorder_DeadLettersAnEntryAForeignStorageRefusedWithTheSentinel(t *tes
     }
 }
 
-/* the closed half of the skip: an entry a closed async storage refused is journaled by the storage through the logger it shares with the recorder, and by the recorder not again */
 func TestRecorder_DoesNotDeadLetterAgainAnEntryTheClosedAsyncStorageAlreadyDeadLettered(t *testing.T) {
     storage := NewAsyncStorage(&recordingStorage{entered: make(chan struct{}, 1), release: make(chan struct{})}, 1)
     logger := &fakeLogger{}
@@ -246,7 +239,6 @@ func TestRecorder_DoesNotDeadLetterAgainAnEntryTheClosedAsyncStorageAlreadyDeadL
     }
 }
 
-/* sentinelReturningStorage is a storage of the application's own that reports every save through one of the exported sentinels, wrapped, and journals nothing */
 type sentinelReturningStorage struct {
     sentinel error
 }

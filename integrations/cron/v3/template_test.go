@@ -28,7 +28,6 @@ func TestBuiltinTemplatesReturnsCrontabVariantsAndK8s(t *testing.T) {
     }
 }
 
-/* the package-level Render is the door onto the crontab template, so it answers what that template answers rather than a shape of its own. */
 func TestRender_RendersThroughTheCrontabTemplate(t *testing.T) {
     entries := []Entry{
         {
@@ -84,7 +83,6 @@ func (instance *silentTemplate) Render(entries []Entry, options RenderOptions) (
     return "", nil
 }
 
-/* a template that answers for itself is believed whatever it is called, and one that does not is judged by the builtin name — the only thing the generator can read about a dialect it was handed. Deciding on the name alone made every registered dialect that renders no user column, the readme's own kubernetes example among them, demand a crontab user it would never render. */
 func TestTemplateRendersUserColumn_AsksTheTemplateBeforeTheName(t *testing.T) {
     for _, testCase := range []struct {
         name     string

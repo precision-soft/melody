@@ -6,7 +6,6 @@ import (
     "testing"
 )
 
-/* writeFixtureFile lays one source file into a test-local project tree, creating the directories on the way. */
 func writeFixtureFile(t *testing.T, projectDirectory string, relativePath string, content string) {
     t.Helper()
 
@@ -20,7 +19,6 @@ func writeFixtureFile(t *testing.T, projectDirectory string, relativePath string
     }
 }
 
-/* bindSetWithPackage builds a set holding one package binding, for the tests that need the set rather than the binding the fluent Package call answers with. */
 func bindSetWithPackage(importPath string, directory string) *BindSet {
     bindSet := NewBindSet()
     bindSet.Package(importPath, directory)

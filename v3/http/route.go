@@ -81,7 +81,6 @@ type route struct {
     schemes      []string
     requirements map[string]*regexp.Regexp
 
-    /* the pattern the caller declared, kept beside the compiled one: the compiled form carries the anchoring and the non-capturing wrapper the registration adds, so introspection — the route manifest, the openapi document, the debug listing — published "^(?:en|de)$" where the developer wrote "en|de", a spelling that is not theirs, that re-wraps on every round trip, and that carries RE2-only syntax into consumers whose engine is ECMA-262. */
     requirementSources map[string]string
 
     defaults     map[string]string

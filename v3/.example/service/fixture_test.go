@@ -1,20 +1,120 @@
 package service
 
 import (
-    "sync"
-    "time"
-
+    "sync/atomic"
+    "context"
+    "github.com/precision-soft/melody/v3/.example/entity"
+    "github.com/precision-soft/melody/v3/.example/event"
+    "net/http"
+    "github.com/precision-soft/melody/v3/httpclient"
+    "net/http/httptest"
     melodycachecontract "github.com/precision-soft/melody/v3/cache/contract"
     melodyclock "github.com/precision-soft/melody/v3/clock"
-    melodyevent "github.com/precision-soft/melody/v3/event"
     melodyclockcontract "github.com/precision-soft/melody/v3/clock/contract"
+    melodycontainer "github.com/precision-soft/melody/v3/container"
+    melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
+    melodyevent "github.com/precision-soft/melody/v3/event"
     melodyeventcontract "github.com/precision-soft/melody/v3/event/contract"
+    melodylogging "github.com/precision-soft/melody/v3/logging"
+    melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
+    melodyruntime "github.com/precision-soft/melody/v3/runtime"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
+    "github.com/precision-soft/melody/v3/.example/persistence"
+    "github.com/precision-soft/melody/v3/.example/repository"
+    "strings"
+    "sync"
+    "testing"
+    "time"
 )
 
-/* ttlRecordingCache answers what it was given and remembers under which ttl each write landed, which is
-   the whole property under test: the doors cannot be asked "for how long" any other way. It keeps values
-   as they are, because these probes are not about serialization. */
+func assertUsableAsCacheKey(t *testing.T, key string) {
+    t.Helper()
+
+    if "" == key {
+        t.Fatalf("expected a non-empty cache key")
+    }
+
+    if true == strings.Contains(key, " ") {
+        t.Fatalf("expected the key to carry no space, got %q", key)
+    }
+
+    if true == strings.Contains(key, "\n") {
+        t.Fatalf("expected the key to carry no newline, got %q", key)
+    }
+}
+
+type countingUserRepository struct {
+    mutex   sync.Mutex
+    lookups int
+}
+
+func (instance *countingUserRepository) All(ctx context.Context) ([]*entity.User, error) {
+    return nil, nil
+}
+
+func (instance *countingUserRepository) FindById(ctx context.Context, id string) (*entity.User, bool, error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.lookups++
+
+    return nil, false, nil
+}
+
+func (instance *countingUserRepository) FindByUsername(ctx context.Context, username string) (*entity.User, bool, error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.lookups++
+
+    return nil, false, nil
+}
+
+func (instance *countingUserRepository) Create(ctx context.Context, user *entity.User) error {
+    return nil
+}
+
+func (instance *countingUserRepository) Update(ctx context.Context, user *entity.User) (bool, error) {
+    return false, nil
+}
+
+func (instance *countingUserRepository) DeleteById(ctx context.Context, id string) (bool, error) {
+    return false, nil
+}
+
+func conversionCurrency(id string, code string, rate float64) *entity.Currency {
+    return entity.NewCurrency(id, code, code, rate, time.Date(2026, time.September, 7, 9, 0, 0, 0, time.UTC))
+}
+
+var currencyQuoteInstant = time.Date(2026, time.September, 7, 9, 0, 0, 0, time.UTC)
+
+func currencyServiceUnderTest(t *testing.T) (*CurrencyService, *recordingDispatcher, melodyruntimecontract.Runtime) {
+    t.Helper()
+
+    currencyRepository, repositoryErr := repository.NewCurrencyRepository(persistence.NewCatalogStorage(nil))
+    if nil != repositoryErr {
+        t.Fatalf("building the repository failed: %v", repositoryErr)
+    }
+
+    clockInstance := &frozenClock{instant: currencyQuoteInstant}
+    dispatcher := newRecordingDispatcher(clockInstance, event.CurrencyUpdatedEventName)
+
+    containerInstance := melodycontainer.NewContainer()
+    t.Cleanup(func() { _ = containerInstance.Close() })
+
+    melodycontainer.MustRegister(
+        containerInstance,
+        melodylogging.ServiceLogger,
+        func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
+            return melodylogging.NewNopLogger(), nil
+        },
+    )
+
+    return NewCurrencyService(currencyRepository, newTtlRecordingCache(), dispatcher.dispatcher, clockInstance),
+        dispatcher,
+        melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+}
+
 type ttlRecordingCache struct {
     mutex  sync.Mutex
     values map[string]any
@@ -138,13 +238,6 @@ func (instance *ttlRecordingCache) Close() error {
 
 var _ melodycachecontract.Cache = (*ttlRecordingCache)(nil)
 
-/* countingUserRepository answers nothing and counts how often it was asked, which is what tells a
-   remembered absence from a lookup that reached the directory again. */
-
-/* recordingDispatcher is the framework's own dispatcher with one listener on it, rather than a double of the
-   whole six-method contract. It is the shorter thing to write and the stronger thing to assert: what the
-   write doors owe the cache is that the invalidation LISTENER runs, and a double that only counted calls
-   would answer the same whether the dispatch reached a listener or not. */
 type recordingDispatcher struct {
     dispatcher *melodyevent.EventDispatcher
     mutex      sync.Mutex
@@ -179,9 +272,6 @@ func (instance *recordingDispatcher) names() []string {
     return append([]string{}, instance.observed...)
 }
 
-/* frozenClock names the instant a stamping door writes, rather than letting it come from the wall. The
-   ticker half of the contract is not what these doors use, so it answers the real one: a door that started
-   a ticker would be a different subject, and a double that returned nothing there would hide it. */
 type frozenClock struct {
     instant time.Time
 }
@@ -195,3 +285,36 @@ func (instance *frozenClock) NewTicker(interval time.Duration) melodyclockcontra
 }
 
 var _ melodyclockcontract.Clock = (*frozenClock)(nil)
+
+const rateDocumentBody = `{"base":"EUR","asOf":"2026-09-07T09:00:00Z","rates":{"EUR":1,"USD":1.0842}}`
+
+type countingRateProvider struct {
+    server   *httptest.Server
+    requests atomic.Int64
+}
+
+func newCountingRateProvider(t *testing.T, handler func(writer http.ResponseWriter, request *http.Request)) *countingRateProvider {
+    t.Helper()
+
+    provider := &countingRateProvider{}
+    provider.server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        provider.requests.Add(1)
+        handler(writer, request)
+    }))
+
+    t.Cleanup(provider.server.Close)
+
+    return provider
+}
+
+func (instance *countingRateProvider) client(t *testing.T) *httpclient.HttpClient {
+    t.Helper()
+
+    client := httpclient.NewHttpClient(
+        httpclient.NewHttpClientConfig(instance.server.URL+"/v1/", 2*time.Second, nil),
+    )
+
+    t.Cleanup(func() { _ = client.Close() })
+
+    return client
+}

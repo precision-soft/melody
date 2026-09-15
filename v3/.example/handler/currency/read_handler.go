@@ -11,10 +11,7 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/* the rate travels with the code because the nomenclature holds one: a client shown a list of currencies and
-   no rates cannot tell which of them the catalogue can convert into, nor how old the quote is. RateAsOf is
-   rendered in RFC 3339 like every other instant this application publishes, and it is the instant the
-   PROVIDER took the reading rather than the one this application wrote it at. */
+/* CurrencyResponse includes the rate and its provider observation time, formatted as RFC3339. */
 type CurrencyResponse struct {
     Id       string  `json:"id"`
     Code     string  `json:"code"`

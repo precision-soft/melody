@@ -9,7 +9,6 @@ import (
     "github.com/precision-soft/melody/v3/exception"
 )
 
-/* lazyRepository defers resolving the registered outbox Store until the first repository call, so a component assembled during boot can hold the outbox Repository before the container is safe to resolve — the deferred-resolution proxy a consumer would otherwise hand-roll, shipped over the integration's own contract. A store that cannot be resolved surfaces as the call's error, never as a panic: the relay drives this Repository from its error-driven backoff-and-retry loop, and a panic would take the whole relay process down on a transient store outage. The concrete Store (with Enqueue / EnsureSchema) is reachable the same way through the generic container.Lazy[*Store]. */
 type lazyRepository struct {
     store *container.LazyService[*Store]
 }
@@ -25,7 +24,6 @@ func NewLazyRepository(resolver containercontract.Resolver) Repository {
     }
 }
 
-/* resolveStore resolves the registered store, reporting a resolution failure — or a nil yield — as an error the caller returns from its own call, so the relay's retry loop owns the failure instead of a panic owning the process. */
 func (instance *lazyRepository) resolveStore() (*Store, error) {
     store, resolveErr := instance.store.Resolve()
     if nil != resolveErr {

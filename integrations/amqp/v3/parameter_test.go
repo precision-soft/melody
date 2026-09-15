@@ -18,7 +18,6 @@ func (instance *parameterSpyRegistrar) RegisterParameter(name string, value any)
     instance.order = append(instance.order, name)
 }
 
-/* the parameter NAMES are the wire between the module's defaults and whatever an application writes in its configuration: a name that drifts here leaves the application's own value unread while everything still compiles */
 func TestAmqpParameterNames_AreTheConfigurationNames(t *testing.T) {
     for _, probe := range []struct {
         actual   string
@@ -48,7 +47,6 @@ func TestRegisterDefaultParameters_RegistersTheDefaultsUnderTheirNames(t *testin
     }
 }
 
-/* the exchange deliberately gets NO default: it names the application's own topology, and a default would silently bind every application that forgot to declare one onto the same exchange */
 func TestRegisterDefaultParameters_LeavesTheExchangeToTheApplication(t *testing.T) {
     registrar := newParameterSpyRegistrar()
 

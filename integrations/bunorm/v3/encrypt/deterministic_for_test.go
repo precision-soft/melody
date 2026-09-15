@@ -59,7 +59,6 @@ func TestEncryptedDeterministicStringFor_RedactsString(t *testing.T) {
     }
 }
 
-/* the searchable compartment-bound column carries the same marker, pinned here for the reason written on its EncryptedStringFor sibling. */
 var _ EncryptedColumn = EncryptedDeterministicStringFor[crmCipherRef]("")
 
 func TestEncryptedDeterministicStringFor_UnmarshalJSONRefusesTheRedactionPlaceholder(t *testing.T) {
@@ -94,7 +93,6 @@ func TestEncryptedDeterministicStringFor_UnmarshalJSONDecodesAPlaintextString(t 
     }
 }
 
-/* the generic instantiation cannot be asserted in the source file — see the sibling assertion on EncryptedStringFor */
 var _ json.Unmarshaler = (*EncryptedDeterministicStringFor[crmCipherRef])(nil)
 
 func TestEncryptedDeterministicStringFor_FormatRedactsNumericVerbs(t *testing.T) {

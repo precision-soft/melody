@@ -10,7 +10,6 @@ import (
     "github.com/precision-soft/melody/v3/internal"
 )
 
-/* escapeLine keeps a single-line channel single-line and inert on a terminal: the summary lines, titles, warnings and error texts carry values an http client may have written earlier, and an embedded carriage return or escape sequence would repaint or forge what the report appears to say. The escaping is visible rather than silent — the operator reads \x1b where the terminal would have obeyed it. */
 func escapeLine(value string) string {
     return internal.EscapeControlCharacters(value)
 }
@@ -40,7 +39,6 @@ type TablePrinter struct {
     tableMaxWidth int
 }
 
-/* errorTrackingWriter remembers the first write failure and swallows the rest: the table is printed through dozens of small writes, and threading every result through the row and cell helpers would bury the layout code. A report truncated by a full disk used to end with a success banner and exit zero; the remembered failure is what lets Print refuse instead. */
 type errorTrackingWriter struct {
     writer   io.Writer
     firstErr error
@@ -107,7 +105,6 @@ func (instance *TablePrinter) Print(
         }
     }
 
-    /* the warnings are printed under quiet as well: quiet suppresses the decorative headers, and a warning is the one thing a command said beside its result — swallowed by a default, it never reached anyone rendering the default table. Only the warning details stay behind the verbose flag. */
     if 0 != len(envelope.Warnings) {
         _, _ = fmt.Fprintln(writer, "WARNINGS:")
         for _, warning := range envelope.Warnings {
@@ -127,7 +124,6 @@ func (instance *TablePrinter) Print(
         }
     }
 
-    /* the error is rendered whole, and regardless of quiet: this printer is the only presentation the default format has, and an envelope failure that renders nowhere leaves the red one-line echo as the entire report — the code, the details and the cause existed only here */
     if nil != envelope.Error {
         _, _ = fmt.Fprintf(writer, "ERROR: %s\n", escapeLine(envelope.Error.Message))
 
@@ -193,7 +189,6 @@ func (instance *TablePrinter) printTableBlock(writer io.Writer, block TableBlock
     }
 }
 
-/* sanitizeTableBlock escapes the control characters of every column and cell before the widths are measured, so the escaped spelling is the one the width arithmetic counts and the one the wrap slices — escaping at print time instead would render wider than it measured. A newline stays a real line break, because a cell renders multi-line on purpose, and a separator row keeps its token so the separator detection still recognizes it. */
 func sanitizeTableBlock(block TableBlock) TableBlock {
     sanitizedColumns := make([]string, len(block.Columns))
     for index, column := range block.Columns {
@@ -222,7 +217,6 @@ func sanitizeTableBlock(block TableBlock) TableBlock {
     }
 }
 
-/* cellDisplayWidth measures a cell by its widest line, because this printer is the one renderer that keeps a newline as a real line break instead of escaping it before measuring. A whole-string measure sums every line of a multi-line cell into a single column, and under the maximum width the sibling columns are then shrunk to pay for width no line ever renders. */
 func cellDisplayWidth(value string) int {
     widestLineWidth := 0
 
@@ -240,7 +234,6 @@ func (instance *TablePrinter) calculateColumnWidthsWithMaxWidth(block TableBlock
     columnCount := len(block.Columns)
     widths := make([]int, columnCount)
 
-    /* the measure is display cells, not runes: a CJK ideogram or an emoji occupies two terminal cells and a combining mark none, so a rune count rendered exactly those columns out of line with the separators it measured */
     for index, column := range block.Columns {
         widths[index] = cellDisplayWidth(column)
     }
@@ -400,7 +393,6 @@ func (instance *TablePrinter) wrapCellValue(value string, width int) []string {
             continue
         }
 
-        /* the wrap slices by the same display-cell measure the widths were computed in, so a padded line never renders wider than it measured; the first rune of a line is always taken, which is what keeps a rune wider than the whole column from wrapping forever */
         splitRunes := []rune(splitLine)
         for 0 < len(splitRunes) {
             lineWidth := 0

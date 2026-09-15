@@ -259,7 +259,6 @@ func TestTruncateString(t *testing.T) {
     }
 }
 
-/* the format widths pad by rune count, so the budget is runes too: a byte-sliced multi-byte value would be truncated even when it fits the column, with the cut landing mid-rune and rendering as a replacement character */
 func TestTruncateString_CountsRunesNotBytes(t *testing.T) {
     seventeenRunes := strings.Repeat("愛", 17)
     if seventeenRunes != truncateString(seventeenRunes, 18) {
@@ -276,7 +275,6 @@ func TestTruncateString_CountsRunesNotBytes(t *testing.T) {
     }
 }
 
-/* a budget with no room for the ellipsis answers the clipped runes alone instead of slicing negative */
 func TestTruncateString_SurvivesABudgetSmallerThanTheEllipsis(t *testing.T) {
     if "ab" != truncateString("abcdef", 2) {
         t.Fatalf("expected the clipped runes alone, got %q", truncateString("abcdef", 2))
@@ -291,7 +289,6 @@ func TestTruncateString_SurvivesABudgetSmallerThanTheEllipsis(t *testing.T) {
     }
 }
 
-/* the machine document is not shaped by a display flag: verbosity decides how the TEXT renders — the readme says so in as many words — while json is the contract, and gating the blocks on --verbose left db:migrate --format=json answering an empty data object for a run that applied five migrations. */
 func TestCommandOutput_WantsDetailFollowsTheFormatNotTheVerbosity(t *testing.T) {
     for _, testCase := range []struct {
         format          output.Format
@@ -313,7 +310,6 @@ func TestCommandOutput_WantsDetailFollowsTheFormatNotTheVerbosity(t *testing.T) 
     }
 }
 
-/* the document key and the display title were one string, so the same set of migrations arrived under APPLIED from db:status and under APPLIED MIGRATIONS from db:migrate, with no enumerable set of keys and a rename for readability breaking every consumer in silence */
 func TestCommandOutput_PrintMigrationsBlockKeysTheDocumentApartFromTheTitle(t *testing.T) {
     jsonOption := output.DefaultOption()
     jsonOption.Format = output.FormatJson
@@ -330,7 +326,6 @@ func TestCommandOutput_PrintMigrationsBlockKeysTheDocumentApartFromTheTitle(t *t
         t.Fatalf("expected the display title to stay out of the document, got %v", jsonInstance.migrations)
     }
 
-    /* the title is still what a person reads */
     textInstance, textBuffer := newBufferedOutput(true)
     textInstance.printMigrationsBlock("applied", "APPLIED MIGRATIONS", []string{"20240101000000_create_users"})
 
@@ -343,7 +338,6 @@ func TestCommandOutput_PrintMigrationsBlockKeysTheDocumentApartFromTheTitle(t *t
     }
 }
 
-/* "no current database" was the string <null>, indistinguishable from a database named literally <null> and readable only by a consumer who knew melody's own placeholder; the text block keeps rendering it, because a person reads an empty cell as a missing value either way */
 func TestCommandOutput_TheAbsentDatabaseIsJsonNull(t *testing.T) {
     jsonOption := output.DefaultOption()
     jsonOption.Format = output.FormatJson
@@ -374,7 +368,6 @@ func TestCommandOutput_TheAbsentDatabaseIsJsonNull(t *testing.T) {
         t.Fatalf("expected the absent database to be json null, got %#v", databaseValue)
     }
 
-    /* a named database still arrives as its name, or the guard above would pass for a field that never carries anything */
     named := "orders"
     namedBuffer := &bytes.Buffer{}
     namedInstance := newCommandOutput(namedBuffer, nil, jsonOption)
@@ -398,7 +391,6 @@ func TestCommandOutput_TheAbsentDatabaseIsJsonNull(t *testing.T) {
     }
 }
 
-/* TestCommandOutput_FinishCarriesTheFailureDetailsAndCause pins the two fields the json envelope always declared and always answered null. The machine document is the contract a pipeline reads, and it was the one rendering that threw away what the error already carried: at the same instant, over the same value, the journal filed the connection, the pool sizing and the whole cause chain while stdout answered a single sentence beside `"details":null, "cause":null`. */
 func TestCommandOutput_FinishCarriesTheFailureDetailsAndCause(t *testing.T) {
     buffer := &bytes.Buffer{}
     outputInstance := newCommandOutput(buffer, nil, output.Option{Format: output.FormatJson})
@@ -457,7 +449,6 @@ func TestCommandOutput_FinishCarriesTheFailureDetailsAndCause(t *testing.T) {
     }
 }
 
-/* an error carrying no context still answers an object, and one carrying no cause answers a null there: a field whose json type changes with the outcome cannot be consumed, while a cause that genuinely does not exist is honestly absent */
 func TestCommandOutput_FinishKeepsTheDetailsAnObjectWithoutAContext(t *testing.T) {
     buffer := &bytes.Buffer{}
     outputInstance := newCommandOutput(buffer, nil, output.Option{Format: output.FormatJson})
@@ -491,7 +482,6 @@ func TestCommandOutput_FinishKeepsTheDetailsAnObjectWithoutAContext(t *testing.T
     }
 }
 
-/* a typed-nil *exception.Error under a fmt wrap satisfies errors.As and passes a plain nil comparison, and Context() on the nil receiver takes a read lock on a nil pointer. The chain below is the shape bun's migrator produces: it wraps the application's migration-function error with %w after a plain nil test that a typed nil passes, and fmt records the operand before formatting it, so the wrap exists and carries the typed nil while its own text reads "<nil>". The panic would unwind the command's finish defer and the cli runner would re-panic it, so the json document — and with it the real failure — would never be written. */
 func TestCommandOutput_FinishSurvivesATypedNilContextProviderInTheChain(t *testing.T) {
     buffer := &bytes.Buffer{}
     outputInstance := newCommandOutput(buffer, nil, output.Option{Format: output.FormatJson})
@@ -537,7 +527,6 @@ func TestCommandOutput_FinishSurvivesATypedNilContextProviderInTheChain(t *testi
     }
 }
 
-/* the error text came off the wire and the identity fields are the server's own answers, so the terminal rendering must escape control characters — visibly, before the cell widths are measured — while the json branch is left to its encoder. */
 func TestCommandOutput_PrintErrorEscapesControlCharacters(t *testing.T) {
     plain, plainBuffer := newBufferedOutput(true)
     plain.printError(errors.New("boom\x1b[2J\rforged"))
@@ -587,10 +576,6 @@ func TestCommandOutput_PrintMigrationsBlockEscapesTheNames(t *testing.T) {
     }
 }
 
-/* The document is the machine contract a deploy pipeline reads, and a run that DIED must not be
-   able to write a success into it. Rendered from the named return alone it could: a panic never
-   reaches the assignment, so the deferred render saw a nil error and wrote `"error":null` beside
-   every message the run had accumulated before it fell over. */
 func TestCommandOutput_FinishRunRendersAFailureDocumentForAPanickingRun(t *testing.T) {
     buffer := &bytes.Buffer{}
     outputInstance := newCommandOutput(buffer, nil, output.NormalizeOption(output.Option{Format: output.FormatJson}))
@@ -609,7 +594,6 @@ func TestCommandOutput_FinishRunRendersAFailureDocumentForAPanickingRun(t *testi
         return false
     }()
 
-    /* the panic is re-raised unchanged, so the exit path, its status code and the journal record are all exactly what they were */
     if false == panicked {
         t.Fatalf("expected the panic to be re-raised once the document said what happened")
     }
@@ -624,15 +608,11 @@ func TestCommandOutput_FinishRunRendersAFailureDocumentForAPanickingRun(t *testi
         t.Fatalf("expected the document to name the panic, got %s", rendered)
     }
 
-    /* a panic value that is not an error has no cause to give, so it must reach the document as
-       the value it is: without that the operator learns something panicked and never what */
     if false == strings.Contains(rendered, "the migration dereferenced a nil map") {
         t.Fatalf("expected the panic value to reach the document, got %s", rendered)
     }
 }
 
-/* An error-shaped panic value belongs in the CAUSE slot, where its own context and cause chain
-   survive: kept only in a context slot it collapses to its bare message at the render boundary. */
 func TestCommandOutput_FinishRunCarriesAnErrorShapedPanicAsTheCause(t *testing.T) {
     buffer := &bytes.Buffer{}
     outputInstance := newCommandOutput(buffer, nil, output.NormalizeOption(output.Option{Format: output.FormatJson}))
@@ -659,14 +639,11 @@ func TestCommandOutput_FinishRunCarriesAnErrorShapedPanicAsTheCause(t *testing.T
         t.Fatalf("expected the error-shaped panic to travel as the cause, got %s", rendered)
     }
 
-    /* the chain beneath it survives too, which is the whole reason the cause slot is not a context slot */
     if false == strings.Contains(rendered, "Table 'melody.bun_migration_locks' doesn't exist") {
         t.Fatalf("expected the cause chain beneath the panic to survive, got %s", rendered)
     }
 }
 
-/* A run that had already failed keeps its own failure as the verdict: the panic came after it, and
-   the reason the command failed is the one the operator needs. */
 func TestCommandOutput_FinishRunKeepsTheRunsOwnFailureWhenAPanicFollowsIt(t *testing.T) {
     buffer := &bytes.Buffer{}
     outputInstance := newCommandOutput(buffer, nil, output.NormalizeOption(output.Option{Format: output.FormatJson}))
@@ -686,7 +663,6 @@ func TestCommandOutput_FinishRunKeepsTheRunsOwnFailureWhenAPanicFollowsIt(t *tes
     }
 }
 
-/* The ordinary paths must be untouched: no panic renders exactly what finish rendered before. */
 func TestCommandOutput_FinishRunLeavesTheOrdinaryPathsUnchanged(t *testing.T) {
     successBuffer := &bytes.Buffer{}
     successOutput := newCommandOutput(successBuffer, nil, output.NormalizeOption(output.Option{Format: output.FormatJson}))
@@ -711,10 +687,6 @@ func TestCommandOutput_FinishRunLeavesTheOrdinaryPathsUnchanged(t *testing.T) {
     }
 }
 
-/* recover() answers only when it is called directly by the deferred function itself, so the door
-   takes the recovered value as a parameter. A command that read it one frame deeper would see nil
-   and believe every run ended well — which is the defect, spelled differently. This pins that every
-   command in the family passes recover() at its own defer rather than delegating the call. */
 func TestMigrateCommands_EveryCommandPassesItsOwnRecoverToTheSharedDoor(t *testing.T) {
     commandFiles := []string{
         "command_migrate.go",
@@ -740,7 +712,6 @@ func TestMigrateCommands_EveryCommandPassesItsOwnRecoverToTheSharedDoor(t *testi
     }
 }
 
-/* the warning is the one text door whose caller carries text off the wire — the close failure of the migration connection — and it let the message through as sent, so a carriage return in it repainted the line and an escape sequence in it was obeyed; every text door escapes what it did not write itself, in both colour modes, and the sequence the DATA carried is what must not survive, the colour's own being the door's to write */
 func TestCommandOutput_PrintWarningEscapesControlCharacters(t *testing.T) {
     for _, noColor := range []bool{true, false} {
         instance, buffer := newBufferedOutput(noColor)
@@ -758,7 +729,6 @@ func TestCommandOutput_PrintWarningEscapesControlCharacters(t *testing.T) {
     }
 }
 
-/* the applied line names the manager the operator configured and the success lines are composed from names the commands did not write; they escape the same way, so a rule that holds for one door holds for the type */
 func TestCommandOutput_PrintSuccessEscapesControlCharacters(t *testing.T) {
     for _, noColor := range []bool{true, false} {
         instance, buffer := newBufferedOutput(noColor)
@@ -772,7 +742,6 @@ func TestCommandOutput_PrintSuccessEscapesControlCharacters(t *testing.T) {
     }
 }
 
-/* the files block names the paths bun answered for the migration it created, built from a name the operator typed */
 func TestCommandOutput_PrintFilesBlockEscapesControlCharacters(t *testing.T) {
     instance, buffer := newBufferedOutput(true)
     instance.printFilesBlock([]string{"migrations/20240101_a\rb.go"})

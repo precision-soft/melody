@@ -8,7 +8,6 @@ import (
     mailercontract "github.com/precision-soft/melody/v3/mailer/contract"
 )
 
-/* the service NAME is the whole wiring: a name that drifts from the one the module registers under leaves every reader blind while everything still compiles, so the constant is asserted by value rather than through itself. */
 func TestMailerServiceName_IsTheRegisteredName(t *testing.T) {
     if "service.mailer.mailer" != ServiceMailer {
         t.Fatalf("expected the registered service name, got %q", ServiceMailer)
@@ -31,13 +30,11 @@ func TestMailerMustFromContainerAndResolver_AnswerTheRegisteredService(t *testin
         t.Fatalf("expected the registered service from the container")
     }
 
-    /* the resolver-taking door is what a scoped service reads through: a scope is a Resolver and not a Container, so the two doors are not interchangeable at the call site */
     if expected != MailerMustFromResolver(serviceContainer.NewScope()) {
         t.Fatalf("expected the registered service through a scope")
     }
 }
 
-/* the strict readers are the boot-time ones: they panic rather than hand back a nil the caller would dereference later, at a point where nothing names the missing registration */
 func TestMailerMustFromContainerAndResolver_PanicWhenUnregistered(t *testing.T) {
     for _, probe := range []struct {
         name string

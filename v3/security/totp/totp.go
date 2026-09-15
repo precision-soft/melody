@@ -41,17 +41,15 @@ func (instance Config) Resolve() Config {
 
 func (instance Config) withDefaults() Config {
     resolved := instance
-    /* clamp the period alongside the zero default: base = at.Unix() / int64(Period), so a Period past the int64 range (a uint at or above 1<<63) converts to a non-positive int64 — 1<<63 becomes math.MinInt64, freezing base at 0 so one counter's code, derived from the secret alone, verifies at every instant forever. maxPeriod covers every realistic authenticator step; anything larger is a misconfiguration and falls back to the default, mirroring the skew clamp below. */
+
     if 0 == resolved.Period || maxPeriod < resolved.Period {
         resolved.Period = defaultPeriod
     }
 
-    /* RFC 6238 defines 6 to 8 digits; clamp anything outside that range (including the zero value and values large enough to overflow the uint32 modulo in hotpCode) back to the default. */
     if 6 > resolved.Digits || 8 < resolved.Digits {
         resolved.Digits = defaultDigits
     }
 
-    /* clamp the skew window: the verify loop runs 2*Skew+1 HMAC-SHA1 computations, so an unbounded (mis)configured skew turns every verification into heavy CPU work — and a skew near the uint maximum would additionally overflow the int64 loop bound in VerifyAt. A window of a few steps already covers realistic clock drift (maxSkew steps is ±5 minutes at the default 30-second period). */
     if 0 == resolved.Skew {
         resolved.Skew = defaultSkew
     } else if maxSkew < resolved.Skew {
@@ -207,7 +205,7 @@ func decodeSecret(secret string) ([]byte, error) {
 }
 
 func newRecoveryCode() (string, error) {
-    /* six random bytes base32-encode (unpadded) to exactly ten characters, so the [:5]+"-"+[5:] split yields the documented xxxxx-xxxxx layout (48 bits of entropy — the tenth base32 character carries only the trailing three bits, the rest is zero padding); five bytes would only produce eight characters (xxxxx-xxx). */
+
     raw := make([]byte, 6)
     if _, readErr := rand.Read(raw); nil != readErr {
         return "", exception.NewError("could not generate a recovery code", nil, readErr)

@@ -119,7 +119,6 @@ func TestRegisterKernelTerminateAccessLogListener_RecordsTheRequestItCompleted(t
         t.Fatalf("expected the record to carry how long the request took")
     }
 
-    /* the id is asserted by VALUE against the one the request carries, not merely by the key being present: an accessor answering the empty string leaves the key there and the record still reads as complete, while every line of that request becomes uncorrelatable with every other. */
     loggedRequestId, present := loggedContext["requestId"]
     if false == present {
         t.Fatalf("expected the record to carry the request id")

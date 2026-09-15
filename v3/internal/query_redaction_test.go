@@ -19,7 +19,6 @@ func TestRedactQueryValuesForDiagnostics_KeepsNamesAndRedactsValues(t *testing.T
     }
 }
 
-/* a query that does not parse cannot have its secret half told apart from its diagnosable half, so it is redacted whole rather than passed through */
 func TestRedactQueryValuesForDiagnostics_RedactsAnUnparseableQueryWhole(t *testing.T) {
     redacted := RedactQueryValuesForDiagnostics("%zz=secret-value")
 

@@ -10,7 +10,6 @@ import (
     sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
-/* a missing endpoint is a configuration error, not a silent no-op exporter. */
 func TestNewTracerProvider_RequiresEndpoint(t *testing.T) {
     provider, err := NewTracerProvider(context.Background(), Config{})
     if nil == err {
@@ -21,7 +20,6 @@ func TestNewTracerProvider_RequiresEndpoint(t *testing.T) {
     }
 }
 
-/* an unknown protocol is rejected rather than defaulting silently to the wrong transport. */
 func TestNewTracerProvider_RejectsUnsupportedProtocol(t *testing.T) {
     provider, err := NewTracerProvider(context.Background(), Config{Endpoint: "collector:4317", Protocol: "carrier-pigeon"})
     if nil == err {
@@ -32,7 +30,6 @@ func TestNewTracerProvider_RejectsUnsupportedProtocol(t *testing.T) {
     }
 }
 
-/* grpc (default when unset) builds a provider without dialing — otlptracegrpc connects lazily. */
 func TestNewTracerProvider_BuildsWithDefaultProtocol(t *testing.T) {
     provider, err := NewTracerProvider(context.Background(), Config{Endpoint: "collector:4317", Insecure: true})
     if nil != err {
@@ -45,7 +42,6 @@ func TestNewTracerProvider_BuildsWithDefaultProtocol(t *testing.T) {
     _ = provider.Shutdown(context.Background())
 }
 
-/* a ratio in (0,1) yields a ratio sampler; 0 and >=1 sample everything. */
 func TestSamplerFor(t *testing.T) {
     cases := []struct {
         ratio    float64
@@ -104,7 +100,6 @@ func TestConfig_RedactsHeadersOnEveryFmtVerb(t *testing.T) {
         }
     }
 
-    /* a pointer to the config redacts too, since the value receiver is promoted */
     pointerRendered := fmt.Sprintf("%v", &config)
     if true == strings.Contains(pointerRendered, "super-secret-token") {
         t.Fatalf("a *Config leaked the header credential: %s", pointerRendered)

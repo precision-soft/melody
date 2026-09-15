@@ -71,7 +71,6 @@ func TestFileServerConfig_SetExcludedPathListOfNilExcludesNothing(t *testing.T) 
     }
 }
 
-/* an entry without a leading slash is compared as a prefix against a request path that always begins with one, so it could never match and silently excluded nothing — the setter normalizes it to the shape that matches */
 func TestFileServerConfig_SetExcludedPathListNormalizesAMissingLeadingSlash(t *testing.T) {
     config := newTestFileServerConfig()
 

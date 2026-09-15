@@ -1,19 +1,25 @@
 package subscriber
 
 import (
+    "github.com/uptrace/bun"
+    cachecontract "github.com/precision-soft/melody/v3/cache/contract"
     "context"
-    "database/sql"
+    "github.com/uptrace/bun/dialect"
     "database/sql/driver"
     "errors"
-    "sync"
-
-    "github.com/uptrace/bun"
-    "github.com/uptrace/bun/dialect"
+    "github.com/precision-soft/melody/v3/.example/event"
     "github.com/uptrace/bun/dialect/feature"
+    melodyclock "github.com/precision-soft/melody/v3/clock"
+    melodycontainer "github.com/precision-soft/melody/v3/container"
+    melodyevent "github.com/precision-soft/melody/v3/event"
+    melodyruntime "github.com/precision-soft/melody/v3/runtime"
     "github.com/uptrace/bun/schema"
+    "database/sql"
+    "sync"
+    "testing"
+    "github.com/precision-soft/melody/v3/.example/twofactor"
 )
 
-/* recordingDriver is the least a bun handle needs in order to EXECUTE a statement and say what it executed: the store under test deletes through Exec, and what a test reads is the statement bun composed and sent, not the answer a server would give. Every statement is answered as one row affected. The migration package keeps a twin of this shape; a test fixture cannot cross a package boundary, so it is written where this package can reach it. */
 type recordingDriver struct {
     mutex   sync.Mutex
     queries []string
@@ -77,7 +83,6 @@ func (instance recordingResult) RowsAffected() (int64, error) {
     return 1, nil
 }
 
-/* renderingDialect is the least a bun handle needs in order to RENDER a statement: the mysql dialect asks the connection for its version as it is installed, which the recording driver cannot answer, while what these tests read is the statement bun composes. The twofactor package keeps the twin this one is written after. */
 type renderingDialect struct {
     schema.BaseDialect
     tables *schema.Tables
@@ -124,7 +129,6 @@ func (instance *renderingDialect) DefaultSchema() string {
     return "main"
 }
 
-/* newRecordingDatabase answers a bun handle whose every statement is rendered and lands in the recorder. */
 func newRecordingDatabase() (*bun.DB, *recordingDriver) {
     recorder := &recordingDriver{}
 
@@ -132,6 +136,39 @@ func newRecordingDatabase() (*bun.DB, *recordingDriver) {
 }
 
 var _ driver.Driver = (*recordingDriver)(nil)
+
 var _ driver.Connector = (*recordingDriver)(nil)
+
 var _ driver.ExecerContext = (*recordingConnection)(nil)
+
 var _ schema.Dialect = (*renderingDialect)(nil)
+
+type failingDeleteCache struct {
+    cachecontract.Cache
+    failure error
+}
+
+func (instance *failingDeleteCache) Delete(key string) error {
+    return instance.failure
+}
+
+func deleteEnrollmentStatementsAfter(t *testing.T, eventName string, payload any) []string {
+    t.Helper()
+
+    database, recorder := newRecordingDatabase()
+    subscriberInstance := NewTwoFactorEnrollmentSubscriber(twofactor.NewStore(database))
+
+    containerInstance := melodycontainer.NewContainer()
+    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+
+    listeners := subscriberInstance.SubscribedEvents()[event.UserDeletedEventName]
+    if 1 != len(listeners) {
+        t.Fatalf("expected one listener on %s, got %d", event.UserDeletedEventName, len(listeners))
+    }
+
+    if listenErr := listeners[0].Listener()(runtimeInstance, melodyevent.NewEvent(eventName, payload, melodyclock.NewSystemClock())); nil != listenErr {
+        t.Fatalf("expected the listener to answer nil, got %v", listenErr)
+    }
+
+    return recorder.recordedQueries()
+}

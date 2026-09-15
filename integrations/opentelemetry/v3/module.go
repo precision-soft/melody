@@ -37,7 +37,7 @@ func (instance *Module) Description() string {
     return "registers the tracing and metrics middlewares plus the prometheus metrics route"
 }
 
-/* a nil entry in the configured lists is refused at boot rather than skipped: a skipped observability middleware has no later consumer to fail loudly — the app serves traffic uninstrumented and the operator reads an empty-but-healthy dashboard with nothing to distinguish "no traffic" from "not measured". The typical source is a discarded constructor error (`middleware, _ := NewMetricsMiddleware(meter)`), which is exactly a wiring mistake boot should name. */
+/* RegisterHttpMiddlewares rejects nil configured middleware entries at boot. */
 func (instance *Module) RegisterHttpMiddlewares(kernelInstance kernelcontract.Kernel, registrar applicationcontract.HttpMiddlewareRegistrar) {
     for _, middleware := range instance.config.Middlewares {
         if nil == middleware {

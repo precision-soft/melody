@@ -9,7 +9,6 @@ import (
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
 )
 
-/* the three Must resolvers are how the framework and an application reach the routing services out of the container; two of them had never been entered. Each is bound to a service name, and a resolver reading the wrong name would hand back a service of the wrong kind — the failure surfaces as a type assertion deep inside url generation rather than at the wiring mistake. */
 
 func newRoutingServiceContainer() (containercontract.Container, *RouteRegistry, *Router) {
     serviceContainer := container.NewContainer()
@@ -90,7 +89,6 @@ func TestRouterMustFromContainer_ResolvesTheRegisteredRouter(t *testing.T) {
     }
 }
 
-/* the three service names are distinct constants: two resolvers sharing one name would silently hand the same service to both callers, and the mistake would only appear where the returned value is used. */
 
 func TestRoutingServiceNames_AreDistinct(t *testing.T) {
     names := map[string]string{
@@ -105,7 +103,6 @@ func TestRoutingServiceNames_AreDistinct(t *testing.T) {
     }
 }
 
-/* the request context lives only on a request scope — the kernel installs it per request and the root container never carries it — so its accessor takes a resolver: the door the documentation's scoped-provider example already used before the function existed */
 func TestRequestContextMustFromResolver_ResolvesTheInstalledContext(t *testing.T) {
     serviceContainer := container.NewContainer()
 
@@ -135,7 +132,6 @@ func TestRequestContextMustFromResolver_ResolvesTheInstalledContext(t *testing.T
     }
 }
 
-/* absence — a console process, the root container — answers nil from the tolerant form, so code shared between the two process shapes can treat the request context as optional without recovering a panic */
 func TestRequestContextFromResolver_AnswersNilWhenAbsent(t *testing.T) {
     serviceContainer := container.NewContainer()
 

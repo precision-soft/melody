@@ -96,7 +96,6 @@ func TestInMemoryTransport_RequeueAfterCloseIsRefusedDeterministically(t *testin
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
-    /* before the guard, one select weighed a ready queue slot against the closed transport and Go picks between ready cases at RANDOM — a post-Close requeue succeeded about half the time, so "closed" was enforced on Send and coin-flipped on Nack; fifty attempts make a surviving coin flip astronomically unlikely */
     for attempt := 0; attempt < 50; attempt++ {
         if nackErr := transport.Nack(runtimeInstance, NewEnvelope(taskCreated{TaskId: attempt}), true); nil == nackErr {
             t.Fatalf("expected every post-close requeue to be refused, attempt %d landed", attempt)
@@ -109,7 +108,6 @@ func TestInMemoryTransport_DroppedDelayedRequeueIsLoggedThroughTheRuntime(t *tes
 
     runtimeInstance, logger := newTestRuntimeWithRecordingLogger()
 
-    /* fill the queue so the deferred requeue has nowhere to land */
     if sendErr := transport.Send(runtimeInstance, NewEnvelope(taskCreated{TaskId: 1})); nil != sendErr {
         t.Fatalf("unexpected send error: %v", sendErr)
     }
@@ -119,7 +117,6 @@ func TestInMemoryTransport_DroppedDelayedRequeueIsLoggedThroughTheRuntime(t *tes
         t.Fatalf("unexpected nack error: %v", nackErr)
     }
 
-    /* the Nack already answered success and the drop happens later on a detached goroutine: the logger captured from the Nack's runtime is the only witness — the transport's own WithLogger is wired by nothing in any production assembly */
     deadline := time.Now().Add(2 * time.Second)
     for time.Now().Before(deadline) {
         if true == logger.hasMessageContaining("dropped a delayed requeue") {
@@ -163,13 +160,11 @@ func TestInMemoryTransport_ConcurrentSendsAndCloseAreRaceFreeAndNeverPanic(t *te
         go func() {
             defer senders.Done()
             for iteration := 0; iteration < 200; iteration++ {
-                /* a panic here — a send onto a closed queue — fails the test rather than crashing the binary */
                 _ = transport.Send(runtimeInstance, NewEnvelope(taskCreated{TaskId: iteration}))
             }
         }()
     }
 
-    /* a reader drains so unbuffered sends can make progress until Close lands */
     stopReader := make(chan struct{})
     queue, _ := transport.Receive(runtimeInstance)
     go func() {

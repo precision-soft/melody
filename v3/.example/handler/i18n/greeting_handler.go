@@ -10,7 +10,7 @@ import (
     melodytranslation "github.com/precision-soft/melody/v3/translation"
 )
 
-/* bound by the openapi descriptor in config; keep it exported */
+
 type GreetingResponse struct {
     Locale   string `json:"locale"`
     Greeting string `json:"greeting"`

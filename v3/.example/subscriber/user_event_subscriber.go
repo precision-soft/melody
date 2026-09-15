@@ -1,6 +1,8 @@
 package subscriber
 
 import (
+    "errors"
+    "github.com/precision-soft/melody/v3/.example/twofactor"
     "github.com/precision-soft/melody/v3/.example/event"
     "github.com/precision-soft/melody/v3/.example/repository"
     "github.com/precision-soft/melody/v3/.example/service"
@@ -10,13 +12,18 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-type UserEventSubscriber struct{}
-
-func NewUserEventSubscriber() *UserEventSubscriber {
-    return &UserEventSubscriber{}
+type UserEventSubscriber struct {
+    enrollmentStore *twofactor.Store
 }
 
-/* userUsernameCacheKey answers the cache key a username is served under, empty for a username that folds to nothing — which every caller below skips. The fold itself lives in the key constructor; this asks only whether there is a name left to key on, so no listener spells the fold out beside its own call and none of them can drift from the write door. */
+func NewUserEventSubscriber() *UserEventSubscriber {
+    return NewUserEventSubscriberWithEnrollmentStore(nil)
+}
+
+func NewUserEventSubscriberWithEnrollmentStore(store *twofactor.Store) *UserEventSubscriber {
+    return &UserEventSubscriber{enrollmentStore: store}
+}
+
 func userUsernameCacheKey(username string) string {
     if "" == repository.NormalizedUsername(username) {
         return ""
@@ -105,7 +112,6 @@ func (instance *UserEventSubscriber) onUserUpdated() melodyeventcontract.EventLi
             }
         }
 
-        /* a rename leaves the by-username entry keyed on the OLD spelling: cleared only under the new one, the old key kept authenticating the pre-rename credentials for as long as the entry lived, and the old name could never be re-registered — the deleted event carries its username for exactly this reason */
         previousUsernameCacheKey := userUsernameCacheKey(payloadInstance.PreviousUsername())
         if "" != previousUsernameCacheKey && previousUsernameCacheKey != usernameCacheKey {
             previousUsernameDeleteErr := cacheInstance.Delete(previousUsernameCacheKey)
@@ -129,7 +135,7 @@ func (instance *UserEventSubscriber) onUserUpdated() melodyeventcontract.EventLi
 }
 
 func (instance *UserEventSubscriber) onUserDeleted() melodyeventcontract.EventListener {
-    return func(runtimeInstance melodyruntimecontract.Runtime, eventValue melodyeventcontract.Event) error {
+    return func(runtimeInstance melodyruntimecontract.Runtime, eventValue melodyeventcontract.Event) (cleanupErr error) {
         payloadValue := eventValue.Payload()
         payloadInstance, ok := payloadValue.(*event.UserDeletedEvent)
         if false == ok {
@@ -137,6 +143,13 @@ func (instance *UserEventSubscriber) onUserDeleted() melodyeventcontract.EventLi
         }
         if nil == payloadInstance {
             return nil
+        }
+
+        if nil != instance.enrollmentStore {
+            defer func() {
+                _, enrollmentErr := instance.enrollmentStore.DeleteEnrollment(runtimeInstance, payloadInstance.UserId())
+                cleanupErr = errors.Join(cleanupErr, enrollmentErr)
+            }()
         }
 
         cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Container())

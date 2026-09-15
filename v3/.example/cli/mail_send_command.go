@@ -10,7 +10,6 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/* a 1x1 transparent PNG standing in for a brand logo; a real application embeds its own asset (for example with go:embed) and attaches it the same way */
 const exampleLogoPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
 
 func NewMailSendCommand(mailer melodymailercontract.Mailer) *MailSendCommand {
@@ -74,7 +73,7 @@ func (instance *MailSendCommand) Run(
                 Filename:    "logo.png",
                 ContentType: "image/png",
                 Content:     logo,
-                /* a non-empty ContentId embeds the image inline (multipart/related) so the HTML <img src="cid:logo"> resolves in real mail clients */
+
                 ContentId: "logo",
             },
         },

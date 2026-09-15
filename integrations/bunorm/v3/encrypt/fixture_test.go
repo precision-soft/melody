@@ -46,7 +46,6 @@ func deterministicCandidateMatches(t *testing.T, cipher Cipher, plaintext string
     return false
 }
 
-/* scriptedSqlDriver answers each query by the first matching fragment, so a test can shape the information_schema answer, the keyset pages and the update results independently. */
 type scriptedSqlResponse struct {
     fragment    string
     columns     []string
@@ -156,7 +155,6 @@ func (instance *scriptedSqlRows) Columns() []string {
     return instance.columns
 }
 
-/* ColumnTypeDatabaseTypeName reports the scripted type name, empty when the script declared none — the same silence a driver without the capability answers. */
 func (instance *scriptedSqlRows) ColumnTypeDatabaseTypeName(index int) string {
     if index >= len(instance.columnTypes) {
         return ""
@@ -218,7 +216,6 @@ func (instance fakeRuntime) Container() containercontract.Container {
     return nil
 }
 
-/* newRampKey is the 32-byte ramp key the live mysql suites seal with; the sibling newKey fills every byte alike, and the two must stay distinguishable because a rotation test needs two keys that differ in every position. */
 func newRampKey() []byte {
     key := make([]byte, 32)
     for index := range key {
@@ -227,7 +224,6 @@ func newRampKey() []byte {
     return key
 }
 
-/* capturingCommand delegates to the command under test and keeps its error, so a test can tell a refused command line — which the dispatch answers — from the command's own failure, which is what it is asserting. */
 type capturingCommand struct {
     clicontract.Command
     runtimeInstance runtimecontract.Runtime

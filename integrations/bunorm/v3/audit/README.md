@@ -98,3 +98,9 @@ registry.Register("user", audit.EntityOptions{CaptureDeleteBeforeImage: true})
 ```
 
 The delete then loads and locks the row before removing it, so the trail carries its real values. That costs one select and a row lock on every delete of that entity, and deleting a row that is already absent becomes an error. A delete that matched no row is never recorded.
+
+### Failed saves and transaction outcomes
+
+A dead-letter records an attempted audit entry. On a Tracker path, the save error propagates to the transaction and rolls back the business change; the diagnostic can therefore describe a change that did not commit. Confirm transaction outcomes independently before replaying or treating a diagnostic as a committed audit row.
+
+`Storage.Save` does not promise atomic batch acceptance across all implementations. Unbound `AsyncStorage.Save` attempts each entry and can accept part of a batch while returning a queue-full error for the rest. Accepted entries remain queued; refused entries are dead-lettered. Do not retry the entire batch on that error, as accepted entries could be duplicated. `FileStorage` can likewise fail after writing earlier entries. For transactional persistence use a database-bound save with a transactional delegate; an unbound async save only confirms enqueueing, not persistence.

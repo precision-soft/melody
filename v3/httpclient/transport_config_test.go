@@ -125,7 +125,6 @@ func TestResolveTransportConfig_TheRemainingFourOverridesAreApplied(t *testing.T
     }
 }
 
-/* the whole point of the pointer fields: a SET zero and a SET negative are statements, not "unset", and they resolve verbatim — MaxIdleConns zero is net/http's unbounded pool, a negative KeepAlive disables the dialer's probes, IdleConnTimeout zero waits forever. Under the old non-positive sentinel every one of these silently became the default beside it. */
 func TestResolveTransportConfig_ZeroAndNegativeAreResolvedVerbatim(t *testing.T) {
     resolved := resolveTransportConfig(&TransportConfig{
         KeepAlive:       TransportDuration(-1),
@@ -146,7 +145,6 @@ func TestResolveTransportConfig_ZeroAndNegativeAreResolvedVerbatim(t *testing.T)
     }
 }
 
-/* a MaxIdleConns SET to zero must also carry the per-host pool with it: the follow rule reads "pinned or not", not "positive or not". */
 func TestResolveTransportConfig_AZeroTotalCarriesThePerHostPoolWithIt(t *testing.T) {
     resolved := resolveTransportConfig(&TransportConfig{MaxIdleConns: TransportCount(0)})
 
@@ -155,7 +153,6 @@ func TestResolveTransportConfig_AZeroTotalCarriesThePerHostPoolWithIt(t *testing
     }
 }
 
-/* the helpers exist so a TransportConfig literal stays a literal; each hands back a pointer to its own copy of the value. */
 func TestTransportDurationAndTransportCount_HandBackPointersToTheValue(t *testing.T) {
     duration := TransportDuration(5 * time.Second)
     if nil == duration || 5*time.Second != *duration {

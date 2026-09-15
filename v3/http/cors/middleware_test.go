@@ -377,7 +377,6 @@ func TestRestrictive_PreflightAdvertisesTheNarrowMethodList(t *testing.T) {
     }
 }
 
-/* a streaming handler commits its headers straight to the writer and returns a response the write path discards, so the cross-origin headers applied to that response never reach the connection. The middleware places them on the writer before the handler runs, where the handler's own commit carries them. */
 func TestMiddleware_AppliesHeadersToTheWriterBeforeTheHandlerRuns(t *testing.T) {
     middleware := DefaultMiddleware()
     recorder := httptest.NewRecorder()
@@ -393,7 +392,6 @@ func TestMiddleware_AppliesHeadersToTheWriterBeforeTheHandlerRuns(t *testing.T) 
         originOnWriterWhenHandlerRan = writer.Header().Get("Access-Control-Allow-Origin")
         varyOnWriterWhenHandlerRan = writer.Header().Get("Vary")
 
-        /* a streamed response returns nothing, having committed through the writer */
         return nil, nil
     }
 
@@ -415,7 +413,6 @@ func TestMiddleware_AppliesHeadersToTheWriterBeforeTheHandlerRuns(t *testing.T) 
     }
 }
 
-/* the canonical door reads a nil service as the default one rather than dereferencing it on the first request it meters; asserting that a middleware came back only proves the constructor returned, so the answer itself is read here against what DefaultService grants. */
 func TestMiddleware_ANilServiceReadsAsTheDefaultService(t *testing.T) {
     handler := Middleware(nil)(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         return http.TextResponse(nethttp.StatusOK, "ok"), nil

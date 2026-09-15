@@ -71,7 +71,6 @@ func TestEncryptedStringFor_CompartmentsAreIsolated(t *testing.T) {
         t.Fatalf("value: %v", valueErr)
     }
 
-    /* the billing compartment must not be able to decrypt a crm ciphertext */
     var leaked EncryptedStringFor[billingCipherRef]
     if scanErr := leaked.Scan(stored.([]byte)); nil == scanErr {
         t.Fatalf("expected the billing compartment to reject a crm ciphertext")
@@ -147,7 +146,6 @@ func TestEncryptedStringFor_RotationInsideTheCompartmentKeepsDecrypting(t *testi
         t.Fatalf("value: %v", valueErr)
     }
 
-    /* rotate: a new current key, the old key still active for decryption */
     rotatedProvider := NewStaticKeyProvider("crm-v2", map[string][]byte{
         "crm-v1": oldKey,
         "crm-v2": newKey(37),
@@ -164,14 +162,12 @@ func TestEncryptedStringFor_RotationInsideTheCompartmentKeepsDecrypting(t *testi
     }
 }
 
-/* emptyNameCipherRef is the misuse the compartment marker must refuse: an empty name is the default cipher's reserved registry entry, not a compartment. */
 type emptyNameCipherRef struct{}
 
 func (instance emptyNameCipherRef) CipherName() string {
     return ""
 }
 
-/* A marker with an empty CipherName() would resolve the DEFAULT cipher, silently giving a compartment-bound column the default key — the cross-compartment read the marker exists to prevent. */
 func TestEncryptedStringFor_EmptyCipherNameIsRejected(t *testing.T) {
     UseCipher(NewFakeCipher())
     defer UseCipher(nil)
@@ -188,7 +184,6 @@ func TestEncryptedStringFor_EmptyCipherNameIsRejected(t *testing.T) {
     }
 }
 
-/* fmt reaches for GoStringer under %#v; without it the underlying string literal — the plaintext — is printed straight into logs and test failures. */
 func TestEncryptedTypes_RedactUnderTheGoStringVerb(t *testing.T) {
     const plaintext = "RO49-SECRET-IBAN"
 
@@ -212,7 +207,6 @@ func (instance pointerFormRef) CipherName() string {
     return "pointer-form"
 }
 
-/* the pointer form compiles whenever the value form does, and its zero value is a nil pointer whose CipherName() dereferences nil from inside database/sql; it must answer as an error naming the marker */
 func TestEncryptedStringFor_RefusesAPointerFormMarker(t *testing.T) {
     column := EncryptedStringFor[*pointerFormRef]("plaintext")
 
@@ -226,7 +220,6 @@ func TestEncryptedStringFor_RefusesAPointerFormMarker(t *testing.T) {
     }
 }
 
-/* the compartment-bound column carries the EncryptedColumn marker its non-generic sibling carries, which is what the auto-redaction type walk recognises it by. The assertion lives here rather than beside the type because instantiating a generic column needs a CipherRef marker, and the package deliberately ships none — a marker is the integrator's, minted per compartment. */
 var _ EncryptedColumn = EncryptedStringFor[crmCipherRef]("")
 
 func TestEncryptedStringFor_UnmarshalJSONRefusesTheRedactionPlaceholder(t *testing.T) {
@@ -261,7 +254,6 @@ func TestEncryptedStringFor_UnmarshalJSONDecodesAPlaintextString(t *testing.T) {
     }
 }
 
-/* the generic instantiation cannot be asserted in the source file, because the package ships no marker of its own on purpose: the marker is the integrator's, one per compartment */
 var _ json.Unmarshaler = (*EncryptedStringFor[crmCipherRef])(nil)
 
 func TestEncryptedStringFor_FormatRedactsNumericVerbs(t *testing.T) {

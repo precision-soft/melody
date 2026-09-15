@@ -7,8 +7,6 @@ import (
     "github.com/precision-soft/melody/v3/wiring/internal/fixture/domain/contract"
 )
 
-/* the types below stand in for an application domain: the scanner has to cover a constructor with no arguments, one mixing services with scalars, one that does not return an error, and the shapes it must decline to wire */
-
 func NewUserRepository() *UserRepository {
     return &UserRepository{}
 }
@@ -121,7 +119,7 @@ func NewMigrationRunner() error {
 
 const ServiceCollisionProbe = "domain.collisionProbe"
 
-/* the argument names collide with the generated body's own identifiers on purpose: the package aliases (domain, contract), the configuration helper and the closure parameter must all survive a constructor written in idiomatic Go */
+
 //melody:service ServiceCollisionProbe
 func NewCollisionProbe(
     domain *UserRepository,

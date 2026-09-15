@@ -3,15 +3,10 @@ package container
 import (
     "errors"
     "testing"
-
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     collisionalpha "github.com/precision-soft/melody/v3/container/internal/collisionalpha/contract"
     collisionbeta "github.com/precision-soft/melody/v3/container/internal/collisionbeta/contract"
 )
-
-type scopedRegistrarProbe struct {
-    value string
-}
 
 func TestRegisterScoped_RefusesANameTheContainerAlreadyHolds(t *testing.T) {
     serviceContainer := NewContainer()
@@ -41,7 +36,6 @@ func TestRegisterScoped_RefusesANameTheContainerAlreadyHolds(t *testing.T) {
     }
 }
 
-/* both registrations opt out of the type registration on purpose: with it, the cross-level TYPE check refuses first and the name check underneath is never reached. */
 func TestRegister_RefusesANameAScopedRegistrationAlreadyHolds(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -353,7 +347,6 @@ func TestRegisterScoped_ProtectedNameRefused(t *testing.T) {
     }
 }
 
-/* unlike its two siblings — the generic front door and the one on a live scope, which both wrap the failure with a message naming the declaration — this door re-panics the registration's own refusal unchanged, matching MustRegister beside it; the assertion pins that spelling. */
 func TestContainer_MustRegisterScoped_RegistersAndRePanicsTheRefusalUnchanged(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -431,12 +424,6 @@ func TestContainerScopedRegistrar_EmptyNameIsRefusedByName(t *testing.T) {
     }
 }
 
-func scopedNameProbeProvider() containercontract.Provider[*providerContractProbe] {
-    return func(resolver containercontract.Resolver) (*providerContractProbe, error) {
-        return &providerContractProbe{value: "scoped"}, nil
-    }
-}
-
 func TestContainer_RegisterScopedRefusedAfterClose(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -491,7 +478,6 @@ func TestContainer_RegisterScoped_StrictDuplicateTypeRefused(t *testing.T) {
     }
 }
 
-/* the identity registry guards the scoped type door with the same refusal the container door carries: two pointer-to-unnamed-composite types of same-short-named packages share one identity key, and a scoped registration taking the key of an already-registered DIFFERENT type would hand the creation guard and the teardown one node for two types. The second declaration is refused at its own boot line. */
 func TestRegisterScoped_TypeIdentityKeyCollisionRefused(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -516,7 +502,6 @@ func TestRegisterScoped_TypeIdentityKeyCollisionRefused(t *testing.T) {
     }
 }
 
-/* TestContainer_RegisterScoped_RefusesATeardownDependency pins the refusal the declarative edge gets on the scoped path. A scope keeps its own teardown graph, recorded per scope from the resolutions that scope actually made, so a declaration written once at registration has no scope to be written into — and accepting it silently would install nothing while reading as an ordering that holds. */
 func TestContainer_RegisterScoped_RefusesATeardownDependency(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -533,9 +518,6 @@ func TestContainer_RegisterScoped_RefusesATeardownDependency(t *testing.T) {
     }
 }
 
-type scopedTeardownProbeService struct{}
-
-/* the declaration keyed by TYPE is the same declaration, and the door refuses it for the same reason: it would install nothing while reading as an ordering that holds. Measured before the refusal, the type form was accepted with nil at both scoped doors. */
 func TestContainer_RegisterScoped_RefusesATeardownDependencyKeyedByType(t *testing.T) {
     serviceContainer := NewContainer()
 

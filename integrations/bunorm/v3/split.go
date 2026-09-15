@@ -18,7 +18,6 @@ func NewReadWriteSplitter(registry *ManagerRegistry, primaryName string, replica
         exception.Panic(exception.NewError("read/write splitter primary name is empty", nil, nil))
     }
 
-    /* an empty replica name would fail every resolution it is picked for, and the fallback below would route that share of the reads to the primary forever with no signal; it is a wiring error and is refused where it is written */
     for index, replicaName := range replicaNames {
         if "" == replicaName {
             exception.Panic(exception.NewError("read/write splitter replica name is empty", map[string]any{"index": index}, nil))
@@ -56,7 +55,7 @@ func (instance *ReadWriteSplitter) Writer() (*bun.DB, error) {
     return instance.registry.Database(instance.WriterName())
 }
 
-/* Reader answers the round-robin replica, and falls back to the primary only when the replica failed to OPEN — a transient outage, where reading from the primary is the availability trade this splitter exists to make. A replica name the registry does not know, an empty name, a closed registry and a provider that answered neither a database nor an error are refused instead of absorbed: each is a wiring error or a teardown in progress, permanent by nature, and folding it into the fallback routed every read to the primary forever with no signal that the replica configuration was dead — the nil-database provider is the one this list missed after the registry started refusing it, so a replica wired to such a provider fell to the primary on every read, permanently and silently. When the primary fails too, the answer carries the primary failure as its cause and names the replica failure beside it, so the diagnosis does not point at the wrong database. */
+/* Reader selects replicas round-robin and falls back to the primary only for an operational open failure. Empty or unknown names, a closed registry and a nil-database provider are returned as errors. If both opens fail, the primary error is the cause and the replica failure remains in the diagnostic context. */
 func (instance *ReadWriteSplitter) Reader() (*bun.DB, error) {
     readerName := instance.ReaderName()
 

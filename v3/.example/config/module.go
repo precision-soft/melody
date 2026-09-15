@@ -57,32 +57,23 @@ type Module struct {
 
     redisClient rueidis.Client
 
-    /* redisConnection owns the eagerly opened client; registered through the rueidis module, it is what lets the container teardown close the connection the raw client cannot answer for */
     redisConnection *melodyrueidis.Connection
 
-    /* catalogWriteThrottle is nil when the environment gave the example no redis: there is then no shared counter, and the nomenclature's writes go through unthrottled rather than being refused. */
     catalogWriteThrottle melodyhttpcontract.Middleware
 
     storageClient *minio.Client
     storageBucket string
     storage       *melodyawss3.Storage
 
-    /* the registry is the one door onto BOTH connections: the db:* command family resolves it by name for the catalogue and the db:archive:* family for the archive, and the catalogue handle below is its default manager rather than a second pool opened beside it.
-
-       There is no archive handle beside it on purpose. The catalogue is opened eagerly here because everything in this application reads it; the archive is opened at its first resolution instead, because a process that never takes a reading — every db:* invocation, every debug command, every --help — would otherwise pay a second handshake for a connection it never uses. */
     databaseRegistry *melodybunorm.ManagerRegistry
     database         *bun.DB
 
-    /* processContext is what the registry's lazy opens are bound to: the archive is opened at the first resolution of the service that publishes it, on a request or a command, and an open that outlives the process's signal is an open the teardown waits for */
     processContext context.Context
 
-    /* trustedProxyResolver is the one client resolver both budgets read the client through; the list it resolves is re-read on a schedule, so a balancer restarted onto a new address is trusted again within the interval */
     trustedProxyResolver *trustedProxyResolver
 
-    /* archiveWired is what the environment armed, kept as an answer rather than re-derived: the services, the migration context and the reset command each ask it, and asking the registry instead would open the connection to find out. */
     archiveWired bool
 
-    /* the two databases as their connections were declared — host:port/schema — carried to the handles the reset prints before it destroys anything; the registry knows them, but only by the manager's name, which is not what an operator reads a plan for */
     catalogLocation string
     archiveLocation string
     cipher           melodyencrypt.Cipher
@@ -110,7 +101,6 @@ func NewExampleModule(ctx context.Context, configuration melodyconfigcontract.Co
     return moduleInstance
 }
 
-/* env-key constants for the example's opt-in live integrations. melody auto-registers every .env key as a same-named parameter, so these double as the parameter names the eager build steps read through environmentValue. */
 const (
     environmentKeyMysqlHost     = "MYSQL_HOST"
     environmentKeyMysqlPort     = "MYSQL_PORT"
@@ -119,9 +109,6 @@ const (
     environmentKeyMysqlPassword = "MYSQL_PASSWORD"
     environmentKeyMysqlInsecure = "MYSQL_INSECURE"
 
-    /* the archive connection is the example's SECOND database, on postgres, and it carries a switch of
-       its own: the catalogue on mysql and the reading archive on postgres are independently wired, so
-       every combination boots — both live, either one alone, or neither. */
     environmentKeyPgsqlHost     = "PGSQL_HOST"
     environmentKeyPgsqlPort     = "PGSQL_PORT"
     environmentKeyPgsqlDatabase = "PGSQL_DATABASE"
@@ -152,18 +139,11 @@ const (
 
 )
 
-/* the two outbound endpoints are read through PARAMETERS rather than through the raw .env keys above,
-   because a constructor argument bound to one is read with MustGet: an auto-registered key vanishes with
-   its line in .env and takes the boot down with it, while a parameter declared in RegisterParameters with
-   an empty-string fallback survives the line being removed and answers "" — which is what "this door is
-   unwired" means everywhere else in this application. Both spellings name one value: the parameter reads
-   the key. */
 const (
     parameterRatesBaseUrl        = "app.rates.base_url"
     parameterReportExportEndpoint = "app.reporting.export_endpoint"
 )
 
-/* environmentValue reads a value melody auto-registered from the .env files (every env key becomes a same-named parameter). The values are already fully resolved here — NewConfiguration (called in NewApplication, before this composition root runs) applies applyEnvironmentOverrides + resolvePlaceholders, which expand %env(X)%/%name% indirection and unescape %% — so a plain String() read is correct. Returns "" when the key is absent so the eager build steps keep their "unset means skip this integration" behaviour. */
 func (instance *Module) environmentValue(key string) string {
     parameter := instance.configuration.Get(key)
     if nil == parameter {

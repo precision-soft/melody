@@ -35,7 +35,6 @@ func (instance *TableBuilder) AddBlock(
 
     instance.table.Blocks = append(instance.table.Blocks, block)
 
-    /* hold the owner and the index, never a pointer into the slice: a later AddBlock can reallocate Blocks, and a builder pointing at the old backing array would silently write its rows into memory nobody reads */
     return &TableBlockBuilder{
         owner: instance,
         index: len(instance.table.Blocks) - 1,
@@ -54,7 +53,6 @@ type TableBlockBuilder struct {
 func (instance *TableBlockBuilder) AddRow(cells ...string) *TableBlockBuilder {
     block := &instance.owner.table.Blocks[instance.index]
 
-    /* a row whose cell count disagrees with the declared columns is refused at the line that writes it: the printer sizes and prints by the columns alone, so a surplus cell would silently never render and a missing one would render as an empty cell nobody intended — a report reading complete while it is not. The separator row is the one sanctioned exception: it is a single-token marker the printer expands to the full width. */
     if len(cells) != len(block.Columns) && false == isSeparatorCells(cells) {
         exception.Panic(
             exception.NewError(

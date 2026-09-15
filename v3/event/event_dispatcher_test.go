@@ -914,7 +914,6 @@ func TestEventDispatcher_StoppingListenerThatAlsoFails_StillReportsTheSkippedReq
         t.Fatalf("expected a RequiredListenerSkippedError, got: %T (%v)", err, err)
     }
 
-    /* the stop's refusal carries the listener's own failure as its cause: returned unlogged on the promise that the caller's record names it, the failure otherwise reached no log at all on exactly this path */
     chain := ""
     for current := err; nil != current; current = errors.Unwrap(current) {
         chain = chain + current.Error() + "\n"
@@ -1143,7 +1142,6 @@ func TestEventDispatcher_RegisteredEvents_ReportsTheRequiredListenerMarks(t *tes
     }
 }
 
-/* the v1/v2 assertion is INVERTED here, and the inversion is the point of the redesign. There a second registration of one identity is refused, because the installation is filed under the subscriber's pointer and two instances of a zero-size type answer one address — so a removal for either would take both down. Here the installation is filed under an id the dispatcher issues, so the second registration is legal, the two are distinct, and removing one leaves the other's listener live. */
 func TestEventDispatcher_AddSubscriber_SecondRegistrationOfTheSameIdentityIsItsOwnInstallation(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
 
@@ -1248,7 +1246,6 @@ func TestEventDispatcher_AddSubscriber_RefusesATypedNilSubscriber(t *testing.T) 
     )
 }
 
-/* the v1/v2 assertion is INVERTED: there RemoveSubscriber takes the subscriber value and refuses a typed nil, here it takes a registration and there is no value to be nil. An id that names nothing — the zero value, or one already removed — removes nothing and answers zero, because the counter is monotonic and never reused, so such an id can only ever name a removal that already happened. */
 func TestEventDispatcher_RemoveSubscriber_AnUnknownRegistrationRemovesNothing(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
 
@@ -1375,7 +1372,6 @@ func TestEventDispatcher_ListenerPanic_IsNotLoggedTwiceWhenTheValueReportsItself
     }
 }
 
-/* the mark is read at the depth MarkLogged writes it, which is what the sibling above cannot show: there the payload carries the mark itself. A listener that panics with an error WRAPPING one its producer already logged asked the same question one link down, and a shallow type test answered no — one failure, two records. */
 func TestEventDispatcher_ListenerPanic_IsNotLoggedTwiceWhenTheMarkIsOneLinkDown(t *testing.T) {
     dispatcher, clockInstance := testNewEventDispatcher()
 
@@ -1473,7 +1469,6 @@ func (instance *testRecordingLogger) Info(message string, context loggingcontrac
 func (instance *testRecordingLogger) Debug(message string, context loggingcontract.Context) {
 }
 
-/* the dispatcher's panic record travels through logging.LogError, which writes a melody error via Log at the error's own level — an error-level record landing here counts the same as one through Error */
 func (instance *testRecordingLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
     if loggingcontract.LevelError == level {
         instance.errorRecords = append(instance.errorRecords, message)
@@ -1488,7 +1483,6 @@ func (instance *testRecordingLogger) Closed() bool {
     return false
 }
 
-/* the propagation probe is what dispatch calls outside the listener recovery, so a panic raised there escapes into dispatchSafely — the only door to the generic diagnostic, since a melody error and an exit are re-raised untouched above it */
 type testPanickingPropagationEvent struct {
     panicValue any
 }
@@ -1702,7 +1696,6 @@ func TestEventDispatcher_RemoveListener_ScrubsOnlyTheRemovedEntryFromTheSubscrib
         t.Fatalf("expected the subscriber key to be dropped once its last registration went")
     }
 
-    /* the record is gone, so the same subscriber may be registered again — the proof that nothing stale was left behind */
     dispatcher.AddSubscriber(subscriber)
 }
 
@@ -1722,7 +1715,6 @@ func (instance testValueSubscriber) SubscribedEvents() map[string][]eventcontrac
     }
 }
 
-/* the v1/v2 assertion is INVERTED: there a subscriber that is not a pointer is refused at both doors, because the pointer IS the identity the installation is filed under and a value has none. Here the id is the identity, so a value subscriber installs and removes like any other — the refusal that guarded the filing has nothing left to guard. */
 func TestEventDispatcher_AddSubscriber_ASubscriberThatIsNotAPointerInstalls(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
 
@@ -1776,7 +1768,6 @@ func TestEventDispatcher_FailingListenerBeforeRequiredListener_FailsClosed(t *te
         t.Fatalf("expected the listener's failure to travel as the cause, got: %v", err)
     }
 
-    /* the refusal must NAME the listener that ended the dispatch, and the name is resolved on this branch alone — the ordinary dispatch never pays for it. Measured on all three majors before it was written: no suite asserts it, v1 and v2 included, so without this the name could collapse to the dash and every test would still pass. */
     var exceptionErr *exception.Error
     if false == errors.As(err, &exceptionErr) {
         t.Fatalf("expected an exception error in the chain, got: %T", err)
@@ -1792,7 +1783,6 @@ func TestEventDispatcher_FailingListenerBeforeRequiredListener_FailsClosed(t *te
     }
 }
 
-/* the may-skip mark licenses the stop, not the failure: its own GoDoc scopes it to a listener that stops propagation, and the registrar contract says without exception that a failure with a required listener behind it reports the skip and carries the failure as its cause. Read on the failure branch the mark granted more than it was written for — the marked listener's response was served with access control never consulted. */
 func TestEventDispatcher_FailingListenerWithMaySkip_StillReportsTheSkippedRequiredListener(t *testing.T) {
     dispatcher, clockInstance := testNewEventDispatcher()
 
@@ -1871,7 +1861,6 @@ func TestEventDispatcher_FailingListenerAfterTheRequiredListenerRan_ReportsItsOw
     }
 }
 
-/* a subscriber installation is atomic against its twin and against its removal: without the outer subscriber section, two concurrent registrations of one identity both pass the duplicate refusal and every listener fires twice. The rounds make the interleaving overwhelmingly likely to occur at least once, and the race detector reads the same window directly. */
 func TestEventDispatcher_ConcurrentSubscriberRegistrationStaysAtomic(t *testing.T) {
     for round := 0; 100 > round; round++ {
         dispatcher, clockInstance := testNewEventDispatcher()
@@ -1892,13 +1881,11 @@ func TestEventDispatcher_ConcurrentSubscriberRegistrationStaysAtomic(t *testing.
             },
         }
 
-        /* the v1/v2 assertion is INVERTED: there three of the four concurrent calls are refused as duplicates and one installation survives. Here every call installs, so what subscriberMutex still guarantees is what is asserted — four COMPLETE installations with four distinct ids, never a half-installed one, and the listener fires once per installation. */
         registrationIdSet := make(map[uint64]struct{})
 
         var panicMutex sync.Mutex
         var registrations sync.WaitGroup
 
-        /* the gate releases both registrations at once: started bare, the first goroutine often finishes before the second begins and the interleaving under test never occurs */
         start := make(chan struct{})
 
         for attempt := 0; 4 > attempt; attempt++ {
@@ -1936,7 +1923,6 @@ func TestEventDispatcher_ConcurrentSubscriberRegistrationStaysAtomic(t *testing.
     }
 }
 
-/* debugGateLogger records what it is handed and answers the level question the way a configured journal would: against a THRESHOLD, not with one answer for every level. A double that answered the same for all five would shadow the guard it is here to prove — asking about the wrong level would get the right answer by accident, and a dispatch gating on emergency instead of debug would pass. */
 type debugGateLogger struct {
     debugMessages []string
     debugContexts []loggingcontract.Context
@@ -1982,7 +1968,6 @@ func (instance *debugGateLogger) Enabled(level loggingcontract.Level) bool {
 
 var _ loggingcontract.LevelReporter = (*debugGateLogger)(nil)
 
-/* the dispatch asks the journal once and builds nothing it would throw away: at least three events travel per request, and every debug record below assembles a context map at the call site — plus, for one of them, a listener name resolved through reflect and runtime.FuncForPC per listener per dispatch. A logger that says the level is off must receive nothing at all; the same dispatch under a logger that says it is on must receive every record it always did, which is what tells the gate apart from a deletion. */
 func TestEventDispatcher_DoesNotBuildDebugRecordsTheJournalWouldDiscard(t *testing.T) {
     for _, testCase := range []struct {
         name            string
@@ -2023,10 +2008,6 @@ func TestEventDispatcher_DoesNotBuildDebugRecordsTheJournalWouldDiscard(t *testi
     }
 }
 
-/* the listener name is resolved where it is USED, so the paths that need it must still carry it with the journal at a level that builds no debug record at all: the failure wrapper's context and the required-listener refusal are what an operator reads when a dispatch goes wrong, and a name resolved only inside the debug branch would leave both saying "-" exactly when they matter. */
-/* the twin of the failure-path test, on the branch that only runs with debug ON: the "event listener started" record must name the listener it is about. The name is resolved through listenerNameOf at the call site rather than ahead of the branch, so a dispatch under a journal above debug pays no reflection at all — but under a journal that keeps debug, the record still has to say WHICH listener started.
-
-   Measured on all three majors before it was written: no suite asks the debug record for the name, v1 and v2 included, so the name could collapse to the dash there and every test would still pass. */
 func TestEventDispatcher_DebugRecordNamesTheListenerItIsAbout(t *testing.T) {
     logger := &debugGateLogger{minLevel: loggingcontract.LevelDebug}
 
@@ -2106,7 +2087,6 @@ func failingGateListener(runtimeInstance runtimecontract.Runtime, eventValue eve
     return errors.New("the listener refused")
 }
 
-/* which listener stopped propagation travels as the LISTENER and is named only when the refusal is built, so the required-listener refusal must still say who stopped it. Resolving the name per iteration paid the reflection for an answer almost no dispatch asks for; resolving it nowhere would leave this message blaming "-". */
 func TestEventDispatcher_NamesTheStoppingListenerInTheRequiredRefusalWithDebugOff(t *testing.T) {
     logger := &debugGateLogger{minLevel: loggingcontract.LevelError}
 

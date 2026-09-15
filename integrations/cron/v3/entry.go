@@ -9,7 +9,7 @@ type Entry struct {
     Command         []string
     LogPath         string
     DestinationFile string
-    /* instance discriminator for commands expanded into several parallel runs; InstanceCount > 1 makes the k8s template suffix the resource name with InstanceIndex so each CronJob is unique. The expansion writes 1/1 for a single-instance command — only a count above one arms the suffix — and the crontab template ignores both fields */
+    /* InstanceIndex distinguishes expanded parallel runs. Kubernetes suffixes resource names only when InstanceCount exceeds one; single-instance expansion uses 1/1, and crontab ignores these fields. */
     InstanceIndex int
     InstanceCount int
 }

@@ -40,7 +40,6 @@ func TestEscapeControlCharactersKeepingNewlines_KeepsTheLineBreakAndEscapesTheRe
     }
 }
 
-/* the C1 block is the second control block, and a terminal decoding UTF-8 obeys it without an ESC ever appearing: U+009B is the control sequence introducer that "\x1b[" abbreviates, so one rune repaints a line the escaping was meant to make inert. The whole 0x80…0x9f range is escaped and both ends are entered, because a range guard fails at its ends first. */
 func TestEscapeControlCharacters_EscapesTheWholeC1Block(t *testing.T) {
     for _, currentCase := range []struct {
         name     string
@@ -60,7 +59,6 @@ func TestEscapeControlCharacters_EscapesTheWholeC1Block(t *testing.T) {
         }
     }
 
-    /* the runes on either side of the block are ordinary text and must survive as themselves, or the guard escapes what it was never asked to */
     for _, neighbour := range []string{"a~b", "a\u00a0b", "a\u00e9b"} {
         if neighbour != EscapeControlCharacters(neighbour) {
             t.Fatalf("expected a rune outside the block to pass through unchanged, got %q", EscapeControlCharacters(neighbour))
@@ -68,7 +66,6 @@ func TestEscapeControlCharacters_EscapesTheWholeC1Block(t *testing.T) {
     }
 }
 
-/* LINE SEPARATOR and PARAGRAPH SEPARATOR are the only runes outside the control blocks that a unicode line splitter reads as a record boundary, so a log line carrying one is read downstream as two records — the half of the harm that does not depend on which terminal is attached. */
 func TestEscapeControlCharacters_EscapesTheTwoUnicodeLineSeparators(t *testing.T) {
     for _, currentCase := range []struct {
         name     string
@@ -86,7 +83,6 @@ func TestEscapeControlCharacters_EscapesTheTwoUnicodeLineSeparators(t *testing.T
     }
 }
 
-/* a rune above one byte cannot take the \xNN spelling: \x2028 reads as \x20 followed by the digits 28, which is a space and not a separator, so the four-digit form is what keeps the two apart in a log a human reads. */
 func TestEscapeControlCharacters_SpellsARuneAboveOneByteInFourDigits(t *testing.T) {
     escaped := EscapeControlCharacters("a\u2028b")
 
@@ -99,7 +95,6 @@ func TestEscapeControlCharacters_SpellsARuneAboveOneByteInFourDigits(t *testing.
     }
 }
 
-/* every rune a unicode line splitter counts as a record boundary has to leave the value escaped, or one record is read downstream as two. The set is entered whole — the C0 breaks, the file, group and record separators, NEL and the two unicode separators — because the last three are exactly the ones a C0-and-DEL predicate passes through. */
 func TestEscapeControlCharacters_NoUnicodeLineBoundarySurvives(t *testing.T) {
     boundaries := []rune{'\n', '\v', '\f', '\r', '\x1c', '\x1d', '\x1e', '\u0085', '\u2028', '\u2029'}
 
@@ -118,7 +113,6 @@ func TestEscapeControlCharacters_NoUnicodeLineBoundarySurvives(t *testing.T) {
     }
 }
 
-/* the early return answers a value it finds nothing to escape in with the value itself, so it has to agree with the loop rune for rune: a value made of one newly-escaped rune and nothing else is the shape that tells the two apart. */
 func TestEscapeControlCharacters_TheEarlyReturnAgreesWithTheLoop(t *testing.T) {
     for _, currentCase := range []struct {
         value    string
@@ -141,7 +135,6 @@ func TestEscapeControlCharacters_TheEarlyReturnAgreesWithTheLoop(t *testing.T) {
     }
 }
 
-/* the cell form keeps the newline the consumer renders on purpose, and nothing else: NEL and the two unicode separators are record boundaries the table never asked for, and they stay escaped in both forms. */
 func TestEscapeControlCharactersKeepingNewlines_KeepsOnlyTheNewline(t *testing.T) {
     escaped := EscapeControlCharactersKeepingNewlines("one\u0085two\u2028three\nfour")
 
@@ -154,7 +147,6 @@ func TestEscapeControlCharactersKeepingNewlines_KeepsOnlyTheNewline(t *testing.T
     }
 }
 
-/* the C1 introducer reaches the escaping as a raw byte at least as readily as in its two-byte encoding — a header value admits 0x9b, and a percent-encoded path segment is decoded to it before it enters a log context — and a walk over runes read that byte as U+FFFD, outside every range the guard checks, so the promise the GoDoc makes for \x9b was kept for the encoded spelling alone. Every byte that starts no valid sequence is spelled \xNN, and what comes out is valid UTF-8. */
 func TestEscapeControlCharacters_EscapesARawByteThatIsNotValidUtf8(t *testing.T) {
     for _, currentCase := range []struct {
         name     string
@@ -178,7 +170,6 @@ func TestEscapeControlCharacters_EscapesARawByteThatIsNotValidUtf8(t *testing.T)
     }
 }
 
-/* once another control character forced the rewrite, the raw byte was written out as U+FFFD: the same input was kept as sent when the byte stood alone and corrupted when a newline stood beside it, and what the client sent was destroyed instead of shown. Neither form may carry the replacement rune. */
 func TestEscapeControlCharacters_ARawByteIsNotReplacedWhenAnotherCharacterForcesTheRewrite(t *testing.T) {
     escaped := EscapeControlCharacters("a\x9bb\n")
 
@@ -191,7 +182,6 @@ func TestEscapeControlCharacters_ARawByteIsNotReplacedWhenAnotherCharacterForces
     }
 }
 
-/* a genuine U+FFFD is three valid bytes and ordinary text: the invalid-byte rule reads the decoder's width, so the replacement rune a client sent as itself passes through as itself, beside a raw byte or alone. */
 func TestEscapeControlCharacters_LeavesAGenuineReplacementRuneUntouched(t *testing.T) {
     if "a\xef\xbf\xbdb" != EscapeControlCharacters("a\xef\xbf\xbdb") {
         t.Fatalf("expected a genuine U+FFFD to pass through unchanged, got %q", EscapeControlCharacters("a\xef\xbf\xbdb"))
@@ -202,7 +192,6 @@ func TestEscapeControlCharacters_LeavesAGenuineReplacementRuneUntouched(t *testi
     }
 }
 
-/* the early return answers a value it finds nothing to escape in with the value itself, so it has to see an invalid byte the way the loop does: a raw byte and nothing else is the shape that tells the two apart. */
 func TestEscapeControlCharacters_TheEarlyReturnSeesARawByte(t *testing.T) {
     escaped := EscapeControlCharacters("\x9b")
 
@@ -211,7 +200,6 @@ func TestEscapeControlCharacters_TheEarlyReturnSeesARawByte(t *testing.T) {
     }
 }
 
-/* the cell form keeps the real line break and nothing else, a raw byte beside it included */
 func TestEscapeControlCharactersKeepingNewlines_EscapesARawByteAndKeepsTheLineBreak(t *testing.T) {
     escaped := EscapeControlCharactersKeepingNewlines("a\x9bb\nc")
 
@@ -220,7 +208,6 @@ func TestEscapeControlCharactersKeepingNewlines_EscapesARawByteAndKeepsTheLineBr
     }
 }
 
-/* encoding/json escapes the C0 block and the two Unicode line separators and emits the C1 block raw, so a document carrying U+009B repainted the terminal it was printed to. The rewrite spells the rune as the escape the encoder uses for its own set — in a value, in a key and at both ends of the block — and the decoded document is the one the encoder was given. */
 func TestEscapeJsonC1Block_SpellsEveryC1RuneAsAJsonEscape(t *testing.T) {
     original := map[string]string{
         "k\xc2\x9dey": "a\xc2\x9bb",
@@ -257,7 +244,6 @@ func TestEscapeJsonC1Block_SpellsEveryC1RuneAsAJsonEscape(t *testing.T) {
     }
 }
 
-/* the lead byte of the block also opens the no-break space and the Latin-1 punctuation, and a lead byte at the very end of the document has no continuation to read: none of them is a C1 rune, and a document without one is answered as it was given. */
 func TestEscapeJsonC1Block_LeavesEveryOtherByteAsItWas(t *testing.T) {
     for _, document := range [][]byte{
         []byte("\"caf\xc3\xa9 \xc2\xa0 \xc2\xbf tab\\t line\\" + "u2028\""),

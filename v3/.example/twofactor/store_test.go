@@ -1,33 +1,20 @@
 package twofactor
 
 import (
+    "bytes"
+    "context"
+    "database/sql"
+    "os"
     "strings"
     "testing"
     "time"
-
+    mysql "github.com/go-sql-driver/mysql"
+    "github.com/uptrace/bun"
+    "github.com/uptrace/bun/dialect/mysqldialect"
+    melodycontainer "github.com/precision-soft/melody/v3/container"
+    melodyruntime "github.com/precision-soft/melody/v3/runtime"
     melodyencrypt "github.com/precision-soft/melody/integrations/bunorm/v3/encrypt"
 )
-
-/* the write is read as the dialect renders it: what has to be pinned is the clause that decides what a
-   SECOND enrollment does, and that lives entirely in the statement.
-
-   A plain insert made the enrollment permanent. The primary key is the user identifier, so an account
-   whose authenticator was lost stayed bound to its first secret for good and the second attempt surfaced
-   the key as an opaque 500 — no door at all for the person holding the lost device. Replacing is only safe
-   because the caller no longer names the account: the handler takes the identifier from the authenticated
-   token, so the row this overwrites is always the caller's own. */
-func renderedEnrollmentUpsert(t *testing.T) string {
-    t.Helper()
-
-    store := &Store{database: newRenderingDatabase()}
-
-    return store.enrollmentUpsert(&Enrollment{
-        UserIdentifier: "user-2",
-        Secret:         melodyencrypt.EncryptedString("zz-secret"),
-        RecoveryCodes:  melodyencrypt.EncryptedString(`["zz-one"]`),
-        CreatedAt:      time.Unix(1, 0),
-    }).String()
-}
 
 func TestEnrollmentUpsertReplacesAnEnrollmentThatIsAlreadyThere(t *testing.T) {
     rendered := renderedEnrollmentUpsert(t)
@@ -40,9 +27,6 @@ func TestEnrollmentUpsertReplacesAnEnrollmentThatIsAlreadyThere(t *testing.T) {
     }
 }
 
-/* the secret alone is not the enrollment. The recovery codes are minted beside it and open the account on
-   their own, so a set left from the previous enrollment would keep letting whoever holds the old device in
-   after the factor it belongs to was replaced — which is the whole reason for replacing it. */
 func TestEnrollmentUpsertReplacesTheRecoveryCodesWithTheSecret(t *testing.T) {
     rendered := renderedEnrollmentUpsert(t)
 
@@ -53,11 +37,89 @@ func TestEnrollmentUpsertReplacesTheRecoveryCodesWithTheSecret(t *testing.T) {
     }
 }
 
-/* the deletion is keyed on the account identifier and on nothing wider: a statement without the predicate would release every account's factor when one account is deleted. */
 func TestEnrollmentDeleteIsKeyedOnTheAccountIdentifierAlone(t *testing.T) {
     rendered := NewStore(newRenderingDatabase()).enrollmentDelete("user-4").String()
 
     if false == strings.HasPrefix(rendered, "DELETE FROM `melody_example_v3_two_factor`") || false == strings.Contains(rendered, "WHERE (user_identifier = 'user-4')") {
         t.Fatalf("expected the enrollment of user-4 alone to be deleted, got %q", rendered)
+    }
+}
+
+func TestStoreReenrollmentOnMySQL(t *testing.T) {
+    dsn := os.Getenv("MYSQL_DSN")
+    if "" == dsn {
+        t.Skip("MYSQL_DSN is not set")
+    }
+    driverConfig, configErr := mysql.ParseDSN(dsn)
+    if nil != configErr {
+        t.Fatal("invalid MYSQL_DSN")
+    }
+    driverConfig.ParseTime = true
+    connection, openErr := sql.Open("mysql", driverConfig.FormatDSN())
+    if nil != openErr {
+        t.Fatal(openErr)
+    }
+    connection.SetMaxOpenConns(1)
+    database := bun.NewDB(connection, mysqldialect.New())
+    defer database.Close()
+    ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+    defer cancel()
+    _, createErr := database.ExecContext(ctx, `CREATE TEMPORARY TABLE melody_example_v3_two_factor (
+        user_identifier VARCHAR(100) PRIMARY KEY,
+        secret VARBINARY(512) NOT NULL,
+        recovery_codes VARBINARY(2048) NOT NULL,
+        created_at DATETIME(6) NOT NULL
+    )`)
+    if nil != createErr {
+        t.Fatal(createErr)
+    }
+    melodyencrypt.UseCipher(melodyencrypt.NewCipher(melodyencrypt.NewStaticKeyProvider("test", map[string][]byte{"test": bytes.Repeat([]byte{37}, 32)})))
+    defer melodyencrypt.UseCipher(nil)
+    containerInstance := melodycontainer.NewContainer()
+    runtimeInstance := melodyruntime.New(ctx, containerInstance.NewScope(), containerInstance)
+    store := NewStore(database)
+    oldSecret, _, oldCodes, enrollErr := store.Enroll(ctx, "member", "test")
+    if nil != enrollErr {
+        t.Fatal(enrollErr)
+    }
+    neighborSecret, _, _, neighborErr := store.Enroll(ctx, "neighbor", "test")
+    if nil != neighborErr {
+        t.Fatal(neighborErr)
+    }
+    newSecret, _, newCodes, replaceErr := store.Enroll(ctx, "member", "test")
+    if nil != replaceErr {
+        t.Fatal(replaceErr)
+    }
+    if oldSecret == newSecret || 0 == len(oldCodes) || 0 == len(newCodes) {
+        t.Fatal("replacement did not mint a new factor")
+    }
+    secret, found, findErr := store.FindTotpSecret(runtimeInstance, "member")
+    if nil != findErr || false == found || newSecret != secret {
+        t.Fatalf("replacement lookup failed: found=%v err=%v", found, findErr)
+    }
+    if redeemed, redeemErr := store.RedeemRecoveryCode(runtimeInstance, "member", oldCodes[0]); nil != redeemErr || true == redeemed {
+        t.Fatalf("old recovery code remained usable: redeemed=%v err=%v", redeemed, redeemErr)
+    }
+    for index, expected := range []bool{true, false} {
+        redeemed, redeemErr := store.RedeemRecoveryCode(runtimeInstance, "member", newCodes[0])
+        if nil != redeemErr || expected != redeemed {
+            t.Fatalf("new recovery code attempt %d: redeemed=%v err=%v", index, redeemed, redeemErr)
+        }
+    }
+    var storedSecret, storedCodes string
+    if readErr := connection.QueryRowContext(ctx, "SELECT secret, recovery_codes FROM melody_example_v3_two_factor WHERE user_identifier = 'member'").Scan(&storedSecret, &storedCodes); nil != readErr {
+        t.Fatal(readErr)
+    }
+    if strings.Contains(storedSecret, newSecret) || strings.Contains(storedCodes, newCodes[1]) {
+        t.Fatal("plaintext factor persisted")
+    }
+    if deleted, deleteErr := store.DeleteEnrollment(runtimeInstance, "member"); nil != deleteErr || false == deleted {
+        t.Fatalf("delete failed: deleted=%v err=%v", deleted, deleteErr)
+    }
+    if _, found, findErr := store.FindTotpSecret(runtimeInstance, "member"); nil != findErr || true == found {
+        t.Fatalf("deleted enrollment found=%v err=%v", found, findErr)
+    }
+    if secret, found, findErr := store.FindTotpSecret(runtimeInstance, "neighbor"); nil != findErr || false == found || neighborSecret != secret {
+        t.Fatalf("neighbor changed: found=%v err=%v", found, findErr)
     }
 }

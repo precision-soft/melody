@@ -170,7 +170,6 @@ func TestStringSlice_PresentNilReportsUnset(t *testing.T) {
     }
 }
 
-/* This wrapper deliberately hides the atomic appender to exercise the contract fallback. */
 type contractOnlyParameterBag struct {
     values map[string]any
 }

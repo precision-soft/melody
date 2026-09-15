@@ -20,11 +20,9 @@ func (instance *Module) RegisterEventSubscribers(kernelInstance melodykernelcont
     instance.registerSubscribers(kernelInstance.EventDispatcher())
 }
 
-/* registerSubscribers installs the application's subscribers on the dispatcher; a door of its own so what the composition root INSTALLS can be read off a dispatcher, not only what each subscriber does once installed. */
 func (instance *Module) registerSubscribers(eventDispatcher melodyeventcontract.EventDispatcher) {
     instance.registerRequiredRequestContextListener(eventDispatcher)
 
-    /* the registration each call answers is deliberately discarded: these five are installed once at boot and live for the process, so nothing here ever removes them. An application that removes a subscriber at runtime must keep what AddSubscriber returns — the subscriber value is not accepted back. */
     eventDispatcher.AddSubscriber(
         subscriber.NewProductEventSubscriber(),
     )
@@ -38,25 +36,17 @@ func (instance *Module) registerSubscribers(eventDispatcher melodyeventcontract.
     )
 
     eventDispatcher.AddSubscriber(
-        subscriber.NewUserEventSubscriber(),
+        subscriber.NewUserEventSubscriberWithEnrollmentStore(instance.twoFactorStore),
     )
 
     eventDispatcher.AddSubscriber(
         subscriber.NewSecurityAuthenticationEventSubscriber(),
     )
 
-    /* the store is nil when the environment gave the example no database, and then there is no enrollment to release — the same switch the enroll and verify routes read */
-    if nil != instance.twoFactorStore {
-        eventDispatcher.AddSubscriber(
-            subscriber.NewTwoFactorEnrollmentSubscriber(instance.twoFactorStore),
-        )
-    }
-
     instance.registerCorsListeners(eventDispatcher)
     instance.registerRateLimitRequestListener(eventDispatcher)
 }
 
-/* registerCorsListeners wires cors as LISTENERS rather than as the middleware: a preflight aimed at an access-controlled path and the refusals the security listeners produce never enter the middleware chain, and the request listener sits ahead of token resolution so a preflight is answered before anything can refuse it. The empty value keeps the door unwired, like every other switch of the example — handing cors.NewService an empty list would deny every origin, which is a different statement than "no cors at all". */
 func (instance *Module) registerCorsListeners(eventDispatcher melodyeventcontract.EventDispatcher) {
     originList := make([]string, 0)
 
@@ -82,14 +72,12 @@ func (instance *Module) registerCorsListeners(eventDispatcher melodyeventcontrac
     melodyhttpcors.RegisterListeners(eventDispatcher, corsService)
 }
 
-/* registerRateLimitRequestListener meters every request on kernel.request, ahead of authentication and access control — the catalogue write throttle in http.go meters only what reaches the handler path, so a burst the security chain refuses consumes no budget there; this door charges that burst. The budget is per client address and per hour, generous enough that the browsing the example invites never meets it, and the unset value keeps the door unwired like every other switch of the example. */
 func (instance *Module) registerRateLimitRequestListener(eventDispatcher melodyeventcontract.EventDispatcher) {
     budgetValue := strings.TrimSpace(instance.environmentValue(environmentKeyRequestBudgetPerHour))
     if "" == budgetValue {
         return
     }
 
-    /* a malformed value is refused by name rather than read as unset: swallowed, a typo in the key disarmed the global budget with no signal on any channel, indistinguishable from never having asked — the cron heartbeat opt-in refuses its malformed value for the same reason */
     budget, parseErr := strconv.Atoi(budgetValue)
     if nil != parseErr || 0 >= budget {
         melodyexception.Panic(melodyexception.NewError(
@@ -102,13 +90,6 @@ func (instance *Module) registerRateLimitRequestListener(eventDispatcher melodye
     melodyhttpmiddleware.RegisterRateLimitRequestListener(eventDispatcher, requestBudgetConfig(budget, instance.trustedProxyResolver))
 }
 
-/* requestBudgetConfig is the hourly budget as this example wires it. The client key is resolved through the
-   same trusted-proxy door the write throttle uses, over the same list: with the peer address alone, every
-   client behind the compose load balancer — behind any reverse proxy — is charged to one key, so the budget
-   stops being per client and becomes a single hourly allowance the first runaway script spends for everyone,
-   on a listener that runs ahead of authentication and therefore refuses them at the door; with a header
-   believed from anywhere inside the deployment, the same listener let any neighbouring process pick the key
-   it was charged to. */
 func requestBudgetConfig(budget int, trustedProxyResolver *trustedProxyResolver) *melodyhttpmiddleware.RateLimitConfig {
     rateLimitConfig := melodyhttpmiddleware.NewRateLimitConfig(
         melodyhttpmiddleware.NewFixedWindowLimiter(budget, time.Hour),
@@ -121,7 +102,6 @@ func requestBudgetConfig(budget int, trustedProxyResolver *trustedProxyResolver)
     return rateLimitConfig
 }
 
-/* registerRequiredRequestContextListener demonstrates a required kernel.request listener. It prepares a per-request attribute that later stages depend on, so it must always run; marking it required through the event RequiredListenerRegistrar makes the kernel fail closed if any other kernel.request listener stops propagation before it — the same guarantee the security access-control listener gets automatically. A listener that deliberately short-circuits the request phase past required listeners would instead opt out with eventDispatcher.MarkListenerMaySkipRequiredListeners(registration). */
 func (instance *Module) registerRequiredRequestContextListener(eventDispatcher melodyeventcontract.EventDispatcher) {
     registration := eventDispatcher.AddListener(
         melodykernelcontract.EventKernelRequest,

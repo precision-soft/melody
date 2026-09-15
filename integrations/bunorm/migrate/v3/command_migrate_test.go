@@ -132,7 +132,6 @@ func TestMigrateCommand_LockFailureAbortsWithoutMigratingOrUnlocking(t *testing.
         t.Fatalf("a never-acquired lock was released: %v", recorder.recordedQueries())
     }
 
-    /* the command no longer pre-prints the failure it returns: the cli runner's [error] line and the full log record already report it, and the third copy on the same console said nothing new */
     if true == strings.Contains(rendered, "ERROR:") {
         t.Fatalf("the returned failure must not be pre-printed by the command, got: %q", rendered)
     }
@@ -238,7 +237,6 @@ func TestMigrateCommand_FailedMigrationKeepsItsErrorOverAFailedUnlock(t *testing
     }
 }
 
-/* a pipeline reading .data.migrations to record what it deployed used to receive {"data":{}} for a run that applied migrations, and the readme told its author that --verbose affects the plain-text output — so the one flag that would have filled the document was documented as irrelevant to it */
 func TestMigrateCommand_JsonCarriesTheDetailAtTheDefaultVerbosity(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = appliedMigrationRowsHook()
@@ -267,7 +265,6 @@ func TestMigrateCommand_JsonCarriesTheDetailAtTheDefaultVerbosity(t *testing.T) 
         t.Fatalf("expected the applied count in the document, got %#v in %q", document.Data.Details, rendered)
     }
 
-    /* the group is computed inside the same block, so a repair that moved only the printing would leave it at its placeholder */
     if "" == document.Data.Details["group"] || "<none>" == document.Data.Details["group"] {
         t.Fatalf("expected the migration group in the document, got %#v", document.Data.Details["group"])
     }
@@ -281,7 +278,6 @@ func TestMigrateCommand_JsonCarriesTheDetailAtTheDefaultVerbosity(t *testing.T) 
         t.Fatalf("expected the applied migration to be named, got %q", applied[0])
     }
 
-    /* the text rendering is unchanged: verbosity still decides what a person is shown */
     textDatabase, textRecorder := newFakeBunDatabase()
     textRecorder.queryHook = appliedMigrationRowsHook()
 
@@ -300,7 +296,6 @@ func TestMigrateCommand_JsonCarriesTheDetailAtTheDefaultVerbosity(t *testing.T) 
     }
 }
 
-/* TestMigrateCommand_ARunThatChangedTheSchemaSaysSoOnTheText pins the line a deploy log captures. The success line lived inside wantsDetail(), so a plain run — the shape a deploy script invokes — printed a warning for the run that did nothing and not one byte for the run that applied migrations: the log was empty exactly when something had happened, and the operator reading it could not tell the two apart. The rollback sibling has always printed its line. */
 func TestMigrateCommand_ARunThatChangedTheSchemaSaysSoOnTheText(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = appliedMigrationRowsHook()
@@ -331,7 +326,6 @@ func TestMigrateCommand_ARunThatChangedTheSchemaSaysSoOnTheText(t *testing.T) {
     }
 }
 
-/* the machine document is deliberately untouched by the line above: under json the same run already carries the applied count, the group and the names as structured fields, so a prose duplicate would be a second and weaker spelling of what the consumer has */
 func TestMigrateCommand_TheSuccessLineDoesNotEnterTheMachineDocument(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = appliedMigrationRowsHook()
@@ -365,7 +359,6 @@ func TestMigrateCommand_TheSuccessLineDoesNotEnterTheMachineDocument(t *testing.
     }
 }
 
-/* a group that fails part way through names what it already applied, on both renderings. Bun returns the landed migrations beside the failure and the command used to throw them away, so the operator was told which migration broke and nothing about which had been applied and recorded — leaving the choice between re-running (safe) and rolling back (which would take the landed ones with it) impossible to make without reading the database by hand. */
 func TestMigrateCommand_AFailedGroupNamesTheMigrationsThatLanded(t *testing.T) {
     applied := make([]string, 0)
 
@@ -456,7 +449,6 @@ func TestMigrateCommand_AFailedGroupNamesTheMigrationsThatLanded(t *testing.T) {
     }
 }
 
-/* a run that fails on its first migration reports no applied block at all, rather than an empty one claiming a partial state */
 func TestMigrateCommand_AGroupThatLandedNothingReportsNoAppliedBlock(t *testing.T) {
     migrations := migrate.NewMigrations()
     migrations.Add(migrate.Migration{
@@ -487,13 +479,11 @@ func TestMigrateCommand_AGroupThatLandedNothingReportsNoAppliedBlock(t *testing.
         t.Fatalf("a run that landed nothing must claim no applied migrations, got: %q", rendered)
     }
 
-    /* the details block is the half of the report that the empty-set guard actually defends: printMigrationsBlock refuses an empty list on its own, but printDetailsBlock would happily render "applied | 0" beside a group id, which reads as a partial state where there is none */
     if true == strings.Contains(rendered, "DETAILS") {
         t.Fatalf("a run that landed nothing must print no applied-group detail block, got: %q", rendered)
     }
 }
 
-/* the per-query progress of a migration that runs its own statements must not reach the command writer under json: the document is the only byte the command may emit there, and a single "[migration:up] ... executing:" line ahead of it turns the run's whole output into something no decoder accepts. The runner reads its writer from the process default the command installs from its parsed flags — a generated migration's signature is fixed by bun and cannot receive them — so this asserts the one thing the installation exists for. Neither frozen major carries this pin: measured on `io.Discard` and `runnerOptionForCommand` across the three test suites, no test observes the discarded writer at all, which left the json posture of the runner option unproven everywhere. It is added on the major still in development. */
 func TestMigrateCommand_TheRunnersOwnProgressStaysOutOfTheMachineDocument(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = appliedMigrationRowsHook()
@@ -535,7 +525,6 @@ func TestMigrateCommand_TheRunnersOwnProgressStaysOutOfTheMachineDocument(t *tes
     }
 }
 
-/* the command's writer reaches the migrations through the context the migrator hands them, not through the process-wide fallback: with the fallback pointing elsewhere, the only way the per-query line lands on the command's writer is the context */
 func TestMigrateCommand_HandsItsPostureToTheMigrationsThroughTheContext(t *testing.T) {
     t.Cleanup(func() {
         processRunnerOption.Store(nil)
@@ -575,7 +564,6 @@ func TestMigrateCommand_HandsItsPostureToTheMigrationsThroughTheContext(t *testi
         t.Fatalf("the per-query line reached the process-wide fallback instead: %q", elsewhere.String())
     }
 
-    /* the context is the channel, not the fallback: with the fallback installed for the run, a migration handed the plain runtime context would still print on the command's writer, so what separates the two is the option the context carries */
     if false == carriedByTheContext {
         t.Fatal("the migration was not handed the context carrying the command's posture")
     }

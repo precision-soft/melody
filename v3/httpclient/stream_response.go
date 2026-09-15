@@ -57,7 +57,6 @@ func (instance *StreamResponse) Close() error {
     return body.Close()
 }
 
-/* closedStreamBody is the reader a closed — or never-opened — stream answers with. Its Close succeeds, so a consumer's deferred close stays correct. */
 type closedStreamBody struct{}
 
 func (instance closedStreamBody) Read([]byte) (int, error) {

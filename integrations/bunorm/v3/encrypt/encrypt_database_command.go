@@ -74,7 +74,6 @@ type EncryptDatabaseCommand struct {
     resolveMutex     sync.Mutex
 }
 
-/* resolveMigrator returns the eagerly-built migrator, or builds it from the database resolver at the first run and memoizes the success, so a resolved database is reused across runs while a failed resolution surfaces as the run error and is retried on the next run. The memoization is synchronized and the resolver runs under the lock, so racing runs cannot each open a database and leak the loser's pool — that is all the lock promises: two runs migrating the same table still see each other's guarded updates as skipped rows and report the run incomplete, which a re-run then clears. */
 func (instance *EncryptDatabaseCommand) resolveMigrator() (*Migrator, error) {
     instance.resolveMutex.Lock()
     defer instance.resolveMutex.Unlock()
@@ -121,7 +120,7 @@ func (instance *EncryptDatabaseCommand) Run(
     runtimeInstance runtimecontract.Runtime,
     commandContext clicontract.Context,
 ) error {
-    /* a negative batch silently became the default of 500, so the operator who believed they had throttled the run had not; it is refused by name, while zero keeps selecting the default the flag documents */
+
     batchFlag := commandContext.Int("batch")
     if 0 > batchFlag {
         return exception.NewError("--batch must not be negative; zero selects the default", map[string]any{"batch": batchFlag}, nil)
@@ -148,7 +147,6 @@ func (instance *EncryptDatabaseCommand) Run(
         return exception.NewError("mode reencrypt requires --target-key", nil, nil)
     }
 
-    /* both writing modes size their columns up front themselves (see MigrateEncrypt / MigrateReencrypt): a server left in a non-strict sql_mode accepts an overflowing UPDATE, keeps a ciphertext that will never authenticate and reports the row as migrated, so the check lives inside the run and covers the programmatic caller too. Decrypting only ever shortens a value, so it needs no room. */
     var processed int
     var runErr error
 
@@ -164,7 +162,7 @@ func (instance *EncryptDatabaseCommand) Run(
     }
 
     if nil != runErr {
-        /* a run that stops halfway leaves the column mixed, and the rows already converted are the one number that says what a re-run costs and whether the state is explainable — it used to be dropped with the error */
+
         return exception.NewError(
             "encrypt database migration failed",
             map[string]any{"table": spec.Table, "mode": mode, "processedRows": processed},

@@ -29,6 +29,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- lock: share the bounded pinned-session verification and bad-connection disposal used by acquire, refresh and release, preserving lock ownership decisions.
+
+
 - Build TCP addresses with `net.JoinHostPort`, preserving IPv6 literals with or without brackets, scoped IPv6 addresses, IPv4 and DNS names.
 
 - every failure of the named lock names the folded form the server was asked for beside the caller's name. A name past the server's 64-character limit is folded to a hash-suffixed form, and a diagnostic that showed only the caller's spelling sent the operator to look for a lock the server had never heard of.

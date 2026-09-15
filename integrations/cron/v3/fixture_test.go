@@ -266,7 +266,6 @@ func newStubConfigurationWithProjectDirectory(values map[string]string, projectD
     }
 }
 
-/* the generate command is driven through the framework's own dispatch door, so the arguments are parsed against the flags the command declares and the command context it reads is the one production hands it. The injected configuration travels through a delegating command rather than through a hand-built parser, because the configuration seam sits inside runWithConfiguration and only the dispatch above it changed. */
 type configuredGenerateCommand struct {
     *GenerateCommand
     configuration configcontract.Configuration
@@ -307,7 +306,6 @@ func dispatchGenerateCommand(
     return stdout.String(), runErr
 }
 
-/* runnerDispatch drives the runner command through the framework's dispatch door while keeping the Run(ctx, argv) shape the tests around it were written against: the arguments are parsed against the flags the command declares, and the context it reads is the one production hands it. */
 type runnerDispatch struct {
     runner          *RunnerCommand
     runtimeInstance runtimecontract.Runtime

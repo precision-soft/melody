@@ -33,7 +33,6 @@ func TestMemoryNonceGuard_DistinctNoncesBothAccepted(t *testing.T) {
     }
 }
 
-/* a non-positive ttl reports unseen and is not recorded — the caller (HMAC edge-of-window / a saturated TOTP window) must guard against feeding one, since an unrecorded nonce is replayable. */
 func TestMemoryNonceGuard_NonPositiveTtlNotRecorded(t *testing.T) {
     guard := NewMemoryNonceGuard()
 
@@ -46,7 +45,6 @@ func TestMemoryNonceGuard_NonPositiveTtlNotRecorded(t *testing.T) {
     }
 }
 
-/* the expired-entry sweep is amortized: a second Remember within the purge interval must not run another O(n) sweep, so a high volume of distinct nonces does not pay an O(n) sweep on every call. */
 func TestMemoryNonceGuard_PurgeIsAmortizedWithinInterval(t *testing.T) {
     guard := NewMemoryNonceGuard()
 
@@ -63,7 +61,6 @@ func TestMemoryNonceGuard_PurgeIsAmortizedWithinInterval(t *testing.T) {
     }
 }
 
-/* the frozen instant sits decades from the real clock: expiry driven by Advance alone proves the guard reads the injected clock, not the system one. */
 func TestMemoryNonceGuard_ExpiryRunsOnTheInjectedClock(t *testing.T) {
     frozen := clock.NewFrozenClock(time.Unix(1000, 0))
     guard := NewMemoryNonceGuardWithClock(frozen)
@@ -89,7 +86,6 @@ func TestNewMemoryNonceGuardWithClock_RefusesANilClock(t *testing.T) {
     }, "nonce guard clock is nil")
 }
 
-/* the twin above hands an UNWRAPPED nil, which a bare comparison refuses just as well; the guard reads the interface, and a nil pointer of a caller's own clock type arrives as a non-nil interface that dereferences on the first Now(). */
 func TestNewMemoryNonceGuardWithClock_RefusesATypedNilClock(t *testing.T) {
     var unassignedClock *clock.FrozenClock
 

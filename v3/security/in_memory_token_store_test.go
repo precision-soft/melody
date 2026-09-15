@@ -20,7 +20,6 @@ func tokenStoreRuntime() runtimecontract.Runtime {
     return runtime.New(context.Background(), c.NewScope(), c)
 }
 
-/* the originating actor must survive the store's claim clone (Put + Lookup), otherwise the opaque-token path silently drops F1 propagation. */
 func TestInMemoryTokenStore_PreservesOriginatingActor(t *testing.T) {
     store := NewInMemoryTokenStore()
 
@@ -154,7 +153,6 @@ func TestInMemoryTokenStore_LookupDeepCopiesNestedAttributeMap(t *testing.T) {
     }
 }
 
-/* the impersonator subtree carried on an originating actor must be deep-copied by the store clone, otherwise a Lookup caller (or a caller mutating its claims after Put) corrupts the stored impersonator's roles and concurrent Lookups race on the shared *ActorData. */
 func TestInMemoryTokenStore_LookupDeepCopiesImpersonatorSubtree(t *testing.T) {
     store := NewInMemoryTokenStore()
     rt := tokenStoreRuntime()
@@ -190,7 +188,6 @@ func TestInMemoryTokenStore_LookupDeepCopiesImpersonatorSubtree(t *testing.T) {
     }
 }
 
-/* mutating the caller's nested impersonator after Put must not reach the stored entry. */
 func TestInMemoryTokenStore_PutDeepCopiesImpersonatorSubtree(t *testing.T) {
     store := NewInMemoryTokenStore()
     rt := tokenStoreRuntime()
@@ -222,7 +219,6 @@ func TestInMemoryTokenStore_PutDeepCopiesImpersonatorSubtree(t *testing.T) {
     }
 }
 
-/* a cyclic impersonator chain (reachable in-process through the exported ActorData.Impersonator field) must terminate via the depth bound rather than recurse until the goroutine stack overflows — a fatal error no recover() can catch. The test completing (Put and Lookup both return) is the assertion; without the bound cloneActorData would SIGSEGV. */
 func TestInMemoryTokenStore_CyclicImpersonatorChainTerminates(t *testing.T) {
     store := NewInMemoryTokenStore()
     rt := tokenStoreRuntime()
@@ -412,7 +408,6 @@ func TestInMemoryTokenStore_PurgeExpiredKeepsTheBoundaryWhileATokenRemains(t *te
     }
 }
 
-/* the boundary of a user with NO stored tokens must survive the purge: stateless JWTs are validated against these boundaries without ever being stored, so a token-linked eviction would let the first purge after a RevokeBefore silently un-revoke every outstanding JWT of that user. */
 func TestInMemoryTokenStore_PurgeExpiredKeepsTheBoundaryOfAUserWithNoStoredTokens(t *testing.T) {
     frozen := clock.NewFrozenClock(time.Unix(1000, 0))
     store := NewInMemoryTokenStoreWithClock(frozen)
@@ -484,7 +479,6 @@ func TestInMemoryTokenStore_PutWithTtlRefusesANonPositiveTtl(t *testing.T) {
     }, "token store ttl must be positive")
 }
 
-/* gateClock hands out the inner clock's instants but blocks on the FIRST Now() until released, holding open the critical section that reads it so the test below can prove what may not interleave with it. */
 type gateClock struct {
     inner    clockcontract.Clock
     entered  chan struct{}
@@ -505,7 +499,6 @@ func (instance *gateClock) NewTicker(interval time.Duration) clockcontract.Ticke
     return instance.inner.NewTicker(interval)
 }
 
-/* the IssuedAt stamp and the insert must share one critical section: with the stamp read outside the lock, a RevokeBefore published between the stamp and the insert left the fresh token born already revoked. The gate holds put() open at its clock read; a RevokeBefore attempted in that window completing is the defect. */
 func TestInMemoryTokenStore_PutStampsAndInsertsAtomicallyAgainstRevokeBefore(t *testing.T) {
     frozen := clock.NewFrozenClock(time.Unix(1000, 0))
     gate := &gateClock{inner: frozen, entered: make(chan struct{}), release: make(chan struct{})}
@@ -567,7 +560,6 @@ func TestInMemoryTokenStore_ConcurrentRevokeAndLookupIsRaceFree(t *testing.T) {
     waitGroup.Wait()
 }
 
-/* every revocation case in this file puts the token a minute away from the boundary, where a comparison written either way answers the same. The instant the boundary NAMES is the decisive one: a token stamped exactly at it is revoked, and only a frozen clock can stamp one there. Its JWT twin is probed at the boundary already; the store was not. */
 func TestInMemoryTokenStore_ATokenIssuedExactlyAtTheRevocationBoundaryIsRevoked(t *testing.T) {
     frozen := clock.NewFrozenClock(time.Unix(1000, 0))
     store := NewInMemoryTokenStoreWithClock(frozen)

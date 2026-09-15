@@ -81,7 +81,6 @@ func TestTotpSecondFactor_EnrolledWithoutCodeIsPending(t *testing.T) {
     }
 }
 
-/* the replay-guard validity window must stay strictly positive even for a pathological period/skew: a window of zero or less makes the NonceGuard skip recording the accepted code (it ignores a ttl <= 0), silently disabling replay protection. The window saturates instead. With Period=3333333334, Skew=1 the un-guarded `time.Duration(period*(2*skew+1)) * time.Second` overflows int64 to a negative duration. */
 func TestTotpSecondFactor_ReplayWindowStaysPositiveOnOverflow(t *testing.T) {
     authenticator := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
         Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"})},
@@ -108,7 +107,6 @@ func TestTotpSecondFactor_ValidCodeAuthenticates(t *testing.T) {
     }
 }
 
-/* negative control: a wrong code keeps the request pending. */
 func TestTotpSecondFactor_WrongCodeIsPending(t *testing.T) {
     secret, _ := totp.GenerateSecret()
 
@@ -136,7 +134,6 @@ func TestTotpSecondFactor_ReplayedCodeIsRejected(t *testing.T) {
     }
 }
 
-/* Verify normalizes whitespace out of a submitted code, so "123 456" and "123456" are the same code. The replay guard must key on the normalized form: keying on the raw header value would let a captured code be replayed by re-spacing it. */
 func TestTotpSecondFactor_ReplayedCodeIsRejectedWhenRespaced(t *testing.T) {
     secret, _ := totp.GenerateSecret()
     code, _ := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
@@ -156,7 +153,6 @@ func TestTotpSecondFactor_ReplayedCodeIsRejectedWhenRespaced(t *testing.T) {
     }
 }
 
-/* negative control: with no ReplayGuard configured the source defaults to an in-process guard, so a captured code still cannot be replayed out of the box. */
 func TestTotpSecondFactor_ReplayedCodeIsRejectedByDefaultGuard(t *testing.T) {
     secret, _ := totp.GenerateSecret()
     code, _ := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
@@ -174,7 +170,6 @@ func TestTotpSecondFactor_ReplayedCodeIsRejectedByDefaultGuard(t *testing.T) {
     }
 }
 
-/* recoveryEnrollmentStore also implements TwoFactorRecoveryStore, tracking each recovery code's unused state so a redeemed code cannot be redeemed a second time. */
 type recoveryEnrollmentStore struct {
     secret   string
     enrolled bool
@@ -235,7 +230,6 @@ func TestTotpSecondFactor_RecoveryCodeAuthenticatesAndIsSingleUse(t *testing.T) 
     }
 }
 
-/* negative control: a recovery code that is not one of the user's unused codes keeps the request pending. */
 func TestTotpSecondFactor_UnknownRecoveryCodeIsPending(t *testing.T) {
     store := &recoveryEnrollmentStore{enrolled: true, unused: map[string]bool{"abcde-fghij": true}}
 
@@ -246,7 +240,6 @@ func TestTotpSecondFactor_UnknownRecoveryCodeIsPending(t *testing.T) {
     }
 }
 
-/* an enrollment store that does not implement TwoFactorRecoveryStore makes recovery unavailable: a recovery header is ignored and the request stays pending rather than authenticating. */
 func TestTotpSecondFactor_RecoveryIgnoredWhenStoreUnsupported(t *testing.T) {
     secret, _ := totp.GenerateSecret()
 
@@ -257,7 +250,6 @@ func TestTotpSecondFactor_RecoveryIgnoredWhenStoreUnsupported(t *testing.T) {
     }
 }
 
-/* L1: the replay window must mirror exactly the skew Verify accepts. A misconfigured huge skew is clamped to maxSkew (10) by totp.Config.Resolve, so the window is (2*10+1)*period, not a ~centuries-long span computed from the raw skew that would pin the accepted-code entry in an in-process guard effectively forever. */
 func TestTotpSecondFactor_ReplayWindowMirrorsClampedSkew(t *testing.T) {
     authenticator := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
         Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"})},
@@ -287,7 +279,6 @@ func TestTotpSecondFactor_AnonymousPrimaryPassesThrough(t *testing.T) {
     }
 }
 
-/* the frozen instant sits decades from the real clock, so a code generated FOR that instant authenticates only if the authenticator verifies on the injected clock — and stops authenticating once that clock alone leaves the skew window. */
 func TestTotpSecondFactor_VerifiesOnTheInjectedClock(t *testing.T) {
     secret, secretErr := totp.GenerateSecret()
     if nil != secretErr {
@@ -327,7 +318,6 @@ func TestTotpSecondFactor_VerifiesOnTheInjectedClock(t *testing.T) {
     }
 }
 
-/* fixedEnrollmentStore never fails, so the fail-closed refusal below it had no fixture that could reach it: inverting that refusal to return the primary token would have let every enrolled user past the second factor whenever the enrollment store was down, with the suite green. */
 type failingEnrollmentStore struct {
     lookupErr error
 }

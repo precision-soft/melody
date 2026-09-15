@@ -30,7 +30,7 @@ func (instance *RouteManifestCommand) Description() string {
     return "export the exposed routes as a JSON manifest for frontend URL generation"
 }
 
-/* the standard set joins the command's own so the machine-readable output has the quiet contract: without it the flag did not exist here, quiet could not suppress the run banner, and the manifest printed to stdout arrived framed inside it — unparseable from the first byte for the pipeline reading it */
+/* Flags includes standard output flags so quiet and JSON modes suppress non-document output. */
 func (instance *RouteManifestCommand) Flags() []clicontract.Flag {
     return output.MergeFlags(output.StandardFlags(), []clicontract.Flag{
         &clicontract.StringFlag{
@@ -44,14 +44,14 @@ func (instance *RouteManifestCommand) Flags() []clicontract.Flag {
     })
 }
 
-/* Run emits the manifest. It mirrors the openapi generate command in the four places that decide whether the artifact is trustworthy, none of which it used to: a relative --out is anchored at the project directory rather than at whatever directory the process happened to start in, a target that is not a JSON document is refused rather than destroyed, the write lands through a temp file and a rename so an interrupted run leaves the previous manifest intact, and the output travels through the command writer rather than process stdout — the cli layer redirects that writer, and in json mode a raw print splices the document into the machine-readable stream. */
+/* Run exports the route manifest. Relative output paths are anchored at the project directory. Non-JSON targets are refused; file output uses a temporary file and rename. Console output uses the command writer. */
 func (instance *RouteManifestCommand) Run(
     runtimeInstance runtimecontract.Runtime,
     commandContext clicontract.Context,
 ) error {
     zone := strings.TrimSpace(commandContext.String("zone"))
     if "" != zone && false == IsRouteZone(zone) {
-        /* an unrecognised zone matched no entry, so the command wrote an empty manifest over the good one and reported success; the frontend then failed to resolve every route it asked for, at runtime, with the build green */
+
         return exception.NewError(
             "route zone is not one of the declared zones",
             map[string]any{

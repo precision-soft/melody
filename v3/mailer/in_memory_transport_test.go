@@ -28,7 +28,6 @@ func TestInMemoryTransport_KeepsWhatItWasSentInOrder(t *testing.T) {
     }
 }
 
-/* the recorded list is handed out as a copy: a test holding the slice while the application keeps sending would otherwise be reading a backing array the transport appends into under it */
 func TestInMemoryTransport_SentHandsOutACopy(t *testing.T) {
     transport := NewInMemoryTransport()
     _ = transport.Send(nil, mailercontract.Message{Subject: "first"})
@@ -47,7 +46,6 @@ func TestInMemoryTransport_SentHandsOutACopy(t *testing.T) {
     }
 }
 
-/* the transport stands in for a real one in tests that run handlers concurrently, so its own bookkeeping must be safe under the race detector — the guard is the mutex, and without it this is exactly the append that corrupts */
 func TestInMemoryTransport_IsSafeUnderConcurrentSendAndRead(t *testing.T) {
     transport := NewInMemoryTransport()
 

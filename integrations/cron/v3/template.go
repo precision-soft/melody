@@ -17,7 +17,6 @@ type UserColumnTemplate interface {
     RendersUserColumn() bool
 }
 
-/* templateRendersUserColumn asks the template itself and falls back to the builtin name for one that does not answer. The builtins all implement the interface, so the name branch serves a registered replacement of one of them that does not; it answers false for both user-less builtin names, because the k8s dialect has no user column any more than the user-less crontab dialect does. */
 func templateRendersUserColumn(template Template) bool {
     if userColumnTemplate, isUserColumnTemplate := template.(UserColumnTemplate); true == isUserColumnTemplate {
         return userColumnTemplate.RendersUserColumn()

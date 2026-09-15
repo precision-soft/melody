@@ -99,7 +99,6 @@ func TestPgsqlLock_RefreshReportsLostLock(t *testing.T) {
     }
 }
 
-/* every lock failure names both spellings: the caller's name and the advisory key halves the server was actually asked for, without which the operator has nothing to match against pg_locks */
 func TestPgsqlLock_FailuresNameTheAdvisoryKeyBesideTheName(t *testing.T) {
     sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN("postgres://melody:melody@127.0.0.1:1/melody?sslmode=disable")))
     database := bun.NewDB(sqldb, pgdialect.New())

@@ -43,7 +43,6 @@ func TestSystemTickerStopDoesNotPanic(t *testing.T) {
     ticker.Stop()
 }
 
-/* Check the message because time.NewTicker also panics on this input. */
 func TestSystemClock_NewTicker_PanicsOnInvalidInterval(t *testing.T) {
     clockInstance := NewSystemClock()
 

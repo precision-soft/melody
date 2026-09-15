@@ -105,7 +105,6 @@ func TestModule_RegisterServicesRegistersTheConnectionOwner(t *testing.T) {
     }
 }
 
-/* handing in only the Connection is enough: the client is read off it, so the composition root does not have to carry both */
 func TestModule_RegisterServicesDerivesTheClientFromTheConnection(t *testing.T) {
     registrar := &spyServiceRegistrar{}
 

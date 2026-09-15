@@ -6,7 +6,6 @@ import (
     messagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
 )
 
-/* the stamp name is what separates this stamp from every other one an envelope carries: a drift here makes the acknowledgement stamp invisible to the reader that acks, and nothing in the type system says so */
 func TestDeliveryStamp_CarriesItsWireNameAndTheAcknowledgementFacts(t *testing.T) {
     stamp := DeliveryStamp{Tag: 7, Redelivered: true, Generation: 3}
 
@@ -19,7 +18,6 @@ func TestDeliveryStamp_CarriesItsWireNameAndTheAcknowledgementFacts(t *testing.T
     }
 }
 
-/* the stamp is a VALUE: the generation is what makes an ack of a stale connection a no-op, so two stamps that differ only in generation must not compare equal */
 func TestDeliveryStamp_ComparesByEveryFieldIncludingTheGeneration(t *testing.T) {
     if (DeliveryStamp{Tag: 7, Generation: 1}) == (DeliveryStamp{Tag: 7, Generation: 2}) {
         t.Fatal("expected the generation to take part in the comparison")

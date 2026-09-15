@@ -6,51 +6,8 @@ import (
     "sync/atomic"
     "testing"
     "time"
-
-    "github.com/precision-soft/melody/v3/.example/entity"
 )
 
-type countingUserRepository struct {
-    mutex   sync.Mutex
-    lookups int
-}
-
-func (instance *countingUserRepository) All(ctx context.Context) ([]*entity.User, error) {
-    return nil, nil
-}
-
-func (instance *countingUserRepository) FindById(ctx context.Context, id string) (*entity.User, bool, error) {
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    instance.lookups++
-
-    return nil, false, nil
-}
-
-func (instance *countingUserRepository) FindByUsername(ctx context.Context, username string) (*entity.User, bool, error) {
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    instance.lookups++
-
-    return nil, false, nil
-}
-
-func (instance *countingUserRepository) Create(ctx context.Context, user *entity.User) error {
-    return nil
-}
-
-func (instance *countingUserRepository) Update(ctx context.Context, user *entity.User) (bool, error) {
-    return false, nil
-}
-
-func (instance *countingUserRepository) DeleteById(ctx context.Context, id string) (bool, error) {
-    return false, nil
-}
-
-/* an absence is remembered under a key its caller spelled, so it has to lapse: the unauthenticated login
-   door writes one of these for every name anyone invents. */
 func TestRememberEntityOrAbsenceBoundsAnAbsence(t *testing.T) {
     cacheInstance := newTtlRecordingCache()
 
@@ -79,8 +36,6 @@ func TestRememberEntityOrAbsenceBoundsAnAbsence(t *testing.T) {
     }
 }
 
-/* an entity that was found keeps the unbounded entry the event listeners clear by name: an expiry here
-   would send every request after it back to the database for a value nothing had invalidated. */
 func TestRememberEntityOrAbsenceLeavesAFoundEntityUnbounded(t *testing.T) {
     cacheInstance := newTtlRecordingCache()
 
@@ -110,11 +65,6 @@ func TestRememberEntityOrAbsenceLeavesAFoundEntityUnbounded(t *testing.T) {
     }
 }
 
-/* the probe is on a hit that FOUND something, because that is the only hit the early return changes:
-   a remembered absence is answered the same way with or without it — Remember reads the store itself and
-   writes nothing on a hit, and a nil computed value is returned before the second write — while a found
-   entity would be re-stored by every reader, one cache write per request served from memory. Measured:
-   with the early return disarmed, this is the assertion that moves. */
 func TestRememberEntityOrAbsenceAnswersAFoundHitWithoutWritingItBack(t *testing.T) {
     cacheInstance := newTtlRecordingCache()
     if setErr := cacheInstance.Set("hit-key", "entity", entityCacheTtl); nil != setErr {
@@ -149,8 +99,6 @@ func TestRememberEntityOrAbsenceAnswersAFoundHitWithoutWritingItBack(t *testing.
     }
 }
 
-/* the absence keeps the expiry it was given: nothing on the read path writes it back, so a name someone
-   keeps trying still lapses on its own schedule. */
 func TestRememberEntityOrAbsenceLeavesARememberedAbsenceUntouched(t *testing.T) {
     cacheInstance := newTtlRecordingCache()
     if setErr := cacheInstance.Set("absent-hit-key", nil, absenceCacheTtl); nil != setErr {
@@ -179,8 +127,6 @@ func TestRememberEntityOrAbsenceLeavesARememberedAbsenceUntouched(t *testing.T) 
     }
 }
 
-/* the door is what has to bound the absence, not the helper alone: this is the one reachable without
-   credentials, and a lookup that stopped going through the helper would leave it permanent again. */
 func TestFindByUsernameBoundsTheAbsenceItRemembers(t *testing.T) {
     cacheInstance := newTtlRecordingCache()
     userRepository := &countingUserRepository{}
@@ -207,15 +153,11 @@ func TestFindByUsernameBoundsTheAbsenceItRemembers(t *testing.T) {
         t.Fatalf("expected one write for the absence, got %d", len(writes))
     }
 
-    /* the window is asserted as the VALUE, not as the constant the code reads: comparing against
-       absenceCacheTtl moves both sides of the assertion together, so a window shortened to nothing —
-       which is what an unbounded entry is spelled as — would read as correct. */
     if time.Minute != writes[0].ttl {
         t.Fatalf("expected the door to bound the absence to a minute, got %s", writes[0].ttl)
     }
 }
 
-/* a loader that parks until it is released puts twenty readers of one key in flight together, so Remember coalesces them onto one loader; what is then counted is who writes the found value unbounded: the reader that loaded it once, and no waiter — a waiter's write landed after the leader's and re-installed, unbounded, whatever a listener had cleared in between, so the absence of every waiter's write is the whole repair. */
 func TestRememberEntityOrAbsenceWritesAFoundValueOnceForEveryWaiterOfOneLoad(t *testing.T) {
     cacheInstance := newTtlRecordingCache()
 
@@ -252,7 +194,6 @@ func TestRememberEntityOrAbsenceWritesAFoundValueOnceForEveryWaiterOfOneLoad(t *
 
     started.Wait()
 
-    /* the readers are started, and the one whose loader is running is parked at the gate; the others wait on it inside Remember. The gate opens once the leader's loader has been entered, which the run counter shows. */
     deadline := time.Now().Add(2 * time.Second)
     for 1 > loaderRuns.Load() && time.Now().Before(deadline) {
         time.Sleep(time.Millisecond)

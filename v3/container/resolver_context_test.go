@@ -1,27 +1,15 @@
 package container
 
 import (
-    "errors"
     "reflect"
     "strconv"
     "strings"
     "sync"
     "sync/atomic"
     "testing"
-
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
 )
-
-type resolverRaceProbeFirst struct{}
-type resolverRaceProbeSecond struct{}
-
-type resolverRaceRegisteredZero struct{}
-type resolverRaceRegisteredOne struct{}
-type resolverRaceRegisteredTwo struct{}
-type resolverRaceRegisteredThree struct{}
-type resolverRaceRegisteredFour struct{}
-type resolverRaceRegisteredFive struct{}
 
 func TestResolverContext_GetSnapshotsProviderUnderTheLock(t *testing.T) {
     serviceContainer := NewContainer()
@@ -42,7 +30,6 @@ func TestResolverContext_GetSnapshotsProviderUnderTheLock(t *testing.T) {
             readersStarted <- struct{}{}
 
             for 0 == atomic.LoadInt32(&stop) {
-                /* resolving a never-registered service reaches the create closure, which reads providers[serviceName] with the mutex released. */
                 _, _ = serviceContainer.Get(missingServiceName)
             }
         }()
@@ -94,7 +81,6 @@ func TestResolverContext_GetByTypeSnapshotsTypeProviderUnderTheLock(t *testing.T
             readersStarted <- struct{}{}
 
             for 0 == atomic.LoadInt32(&stop) {
-                /* an unregistered target type reaches the type-branch create closure, which reads typeProviders[type] with the mutex released. */
                 _, _ = serviceContainer.GetByType(probeType)
             }
         }()
@@ -150,10 +136,6 @@ func TestResolverContext_GetByTypeSnapshotsTypeProviderUnderTheLock(t *testing.T
     waitGroup.Wait()
 }
 
-type suspensionHasProbe struct {
-    value string
-}
-
 func TestResolverContext_HasHonorsScopeSuspension(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -200,14 +182,6 @@ func TestResolverContext_HasHonorsScopeSuspension(t *testing.T) {
     if false == scopeInstance.Has("app.scoped.only") {
         t.Fatalf("expected the unsuspended scope to keep answering for its own name")
     }
-}
-
-type resolverContextMustProbe struct {
-    value string
-}
-
-type resolverContextMustDependent struct {
-    dependency *resolverContextMustProbe
 }
 
 func TestResolverContext_MustGet_AnswersInsideAProviderAndNamesItsOwnFailure(t *testing.T) {
@@ -375,38 +349,6 @@ func TestResolverContext_MustGet_KeepsTheAlreadyLoggedMarkOfTheFailure(t *testin
     _ = serviceContainer.MustGet("app.logged.failure")
 }
 
-/* contextValueInChain walks the wrap chain for the first melody error whose context carries key, because the original failure travels out whole and its coordinates live in its context, not in a wrapper's message. */
-func contextValueInChain(err error, key string) string {
-    for current := err; nil != current; current = errors.Unwrap(current) {
-        melodyErr, isMelodyErr := current.(*exception.Error)
-        if false == isMelodyErr || nil == melodyErr {
-            continue
-        }
-
-        value, exists := melodyErr.Context()[key]
-        if false == exists {
-            continue
-        }
-
-        stringValue, isString := value.(string)
-        if true == isString {
-            return stringValue
-        }
-    }
-
-    return ""
-}
-
-/* renderedCauseChain walks the whole chain because a provider panic is wrapped by the creation guard before it reaches the caller, and only the chain says what the provider itself refused. */
-func renderedCauseChain(err error) string {
-    rendered := ""
-    for current := err; nil != current; current = errors.Unwrap(current) {
-        rendered = rendered + current.Error() + "\n"
-    }
-
-    return rendered
-}
-
 func TestResolverContext_Get_EmptyNameRefused(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -433,17 +375,6 @@ func TestResolverContext_GetByType_NilTypeRefused(t *testing.T) {
     }
 }
 
-type resolverContextGraphDependency struct{}
-
-type resolverContextGraphParent struct {
-    dependency *resolverContextGraphDependency
-}
-
-type resolverContextGraphControlParent struct {
-    dependency *resolverContextGraphDependency
-}
-
-/* the container's dependency graph is never pruned and its teardown walks only container-created representatives, so an edge recorded under a scoped parent would sit there unread for the life of the process — one permanent entry per distinct scoped name. The container-parent edge asserted beside it is the control that the filter removed only the scoped writes. */
 func TestResolverContext_AScopedParentWritesNoEdgeIntoTheContainerGraph(t *testing.T) {
     serviceContainer := NewContainer().(*container)
 
@@ -462,7 +393,6 @@ func TestResolverContext_AScopedParentWritesNoEdgeIntoTheContainerGraph(t *testi
                 return nil, getErr
             }
 
-            /* the by-type door runs the same filter at its own site, so both writes are exercised by the one scoped parent */
             if _, getByTypeErr := resolver.GetByType(reflect.TypeOf((*resolverContextGraphDependency)(nil))); nil != getByTypeErr {
                 return nil, getByTypeErr
             }
@@ -520,7 +450,6 @@ func TestResolverContext_AScopedParentWritesNoEdgeIntoTheContainerGraph(t *testi
     }
 }
 
-/* the resolution key is unique per type identity, not the type's String() which two same-named types from different packages share, so the creation guard and cycle detection cannot alias two distinct types onto one key */
 func TestTypeIdentityKey_DistinguishesSameStringTypesFromDifferentPackages(t *testing.T) {
     interfaceType := reflect.TypeOf((*collectableHandler)(nil)).Elem()
     pointerType := reflect.TypeOf(&invoiceHandler{})
@@ -533,7 +462,6 @@ func TestTypeIdentityKey_DistinguishesSameStringTypesFromDifferentPackages(t *te
         t.Fatalf("expected the same type to yield a stable key")
     }
 
-    /* the discriminator is the named type's import path, which differs even when String() would not: the key carries it ahead of the String() */
     if false == strings.HasPrefix(typeIdentityKey(pointerType), pointerType.Elem().PkgPath()) {
         t.Fatalf("expected the key to lead with the named type's package path, got %q", typeIdentityKey(pointerType))
     }

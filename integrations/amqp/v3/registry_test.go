@@ -22,7 +22,6 @@ func TestMessageRegistry_RoundTripsANameToAFreshValueOfItsType(t *testing.T) {
         t.Fatalf("expected the registered name, got %q exists=%v", name, exists)
     }
 
-    /* New answers a POINTER to a zero value: the decoder unmarshals into it, so handing back the value itself would decode into a copy nobody reads */
     message, built := registry.New("probe")
     if false == built {
         t.Fatal("expected the registered name to build a message")
@@ -50,13 +49,11 @@ func TestMessageRegistry_AnswersFalseForAnythingUnregistered(t *testing.T) {
         t.Fatalf("expected an unregistered name to build nothing, got %v", message)
     }
 
-    /* the name is keyed on the VALUE type, so a pointer to a registered message is not itself registered */
     if name, exists := registry.NameFor(&registryProbeMessage{}); true == exists || "" != name {
         t.Fatalf("expected a pointer to be a different type, got %q", name)
     }
 }
 
-/* re-registering the same pair is how two modules can declare the same message without ordering between them; a name or a type that would come to mean two things is refused, because a wire name resolving to the wrong type decodes silently into the wrong shape */
 func TestRegisterMessage_AdmitsTheSamePairAndRefusesEitherCollision(t *testing.T) {
     registry := NewMessageRegistry()
     RegisterMessage[registryProbeMessage](registry, "probe")
@@ -81,7 +78,6 @@ func TestRegisterMessage_AdmitsTheSamePairAndRefusesEitherCollision(t *testing.T
     }
 }
 
-/* the registry is read on every publish and every delivery, from the transport's goroutines, while a late module may still be registering: the guard is the mutex, and without it this is the concurrent map access that kills the process */
 func TestMessageRegistry_IsSafeUnderConcurrentRegistrationAndReads(t *testing.T) {
     registry := NewMessageRegistry()
 

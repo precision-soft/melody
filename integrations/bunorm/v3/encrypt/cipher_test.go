@@ -170,7 +170,6 @@ func TestCipher_EncryptPassesThroughCiphertextSealedUnderRetiredKey(t *testing.T
         t.Fatalf("seal: %v", sealErr)
     }
 
-    /* the retired key v1 stays in the set (still decryptable) until re-encryption completes; only then is it removed */
     rotatedProvider := NewStaticKeyProvider("v2", map[string][]byte{"v2": newKey(2), "v1": newKey(1)})
     rotatedCipher := NewCipher(rotatedProvider)
 
@@ -188,7 +187,6 @@ func TestCipher_EncryptSealsMarkerShapedPlaintextWithUnknownKeyId(t *testing.T) 
     provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
     cipher := NewCipher(provider)
 
-    /* a client-supplied marker-shaped string naming a key id that is not in the set must not be stored verbatim, or every later Scan/Decrypt of the row fails with key-not-found */
     forged := "<ENC>\x00gcm1\x00rogue:" + base64.RawStdEncoding.EncodeToString([]byte("forged payload bytes"))
 
     if _, decryptErr := cipher.Decrypt(forged); nil == decryptErr {
@@ -318,7 +316,6 @@ func TestReencryptSkipAvoidsNonceRewrite(t *testing.T) {
     }
 }
 
-/* truncateSealed cuts a sealed value the way a column too narrow for it does under a non-strict sql_mode: the marker and the key id survive, the base64 payload keeps only its first characters. The retained payload length is chosen so the remainder no longer decodes to a whole sealed body — which is exactly the shape that used to be mistaken for plaintext. */
 func truncateSealed(t *testing.T, sealed string, retainedPayloadCharacters int) string {
     t.Helper()
 
@@ -341,7 +338,6 @@ func truncateSealed(t *testing.T, sealed string, retainedPayloadCharacters int) 
     return sealed[:len(markerPrefix)+separator+1] + payload[:retainedPayloadCharacters]
 }
 
-/* a value that carries the framework's marker was written by this cipher, so a payload that no longer decodes is damage — a column truncated under sql_mode='' — and must be reported. Returning it verbatim with a nil error is how a truncated ciphertext used to read back as garbage that the application then stored on. */
 func TestCipher_DecryptReportsATruncatedCiphertextInsteadOfPassingItThrough(t *testing.T) {
     provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
     cipher := NewCipher(provider)
@@ -351,7 +347,6 @@ func TestCipher_DecryptReportsATruncatedCiphertextInsteadOfPassingItThrough(t *t
         t.Fatalf("encrypt: %v", encryptErr)
     }
 
-    /* 8 base64 characters decode cleanly to 6 bytes, which is short of the nonce; 5 do not decode at all */
     for _, retained := range []int{8, 5, 0} {
         truncated := truncateSealed(t, sealed, retained)
 
@@ -366,7 +361,6 @@ func TestCipher_DecryptReportsATruncatedCiphertextInsteadOfPassingItThrough(t *t
     }
 }
 
-/* the marker with no key id separator behind it cannot name a key, so it is damage too. */
 func TestCipher_DecryptReportsAMarkerWithNoKeyId(t *testing.T) {
     provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
     cipher := NewCipher(provider)
@@ -378,7 +372,6 @@ func TestCipher_DecryptReportsAMarkerWithNoKeyId(t *testing.T) {
     }
 }
 
-/* the pass-through for values carrying NO marker is what makes an incremental migration work: the rows not yet sealed keep reading while the column is converted one write at a time. */
 func TestCipher_DecryptStillPassesGenuinePlaintextThrough(t *testing.T) {
     provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
     cipher := NewCipher(provider)
@@ -395,7 +388,6 @@ func TestCipher_DecryptStillPassesGenuinePlaintextThrough(t *testing.T) {
     }
 }
 
-/* keyIdOf classifies rows for the bulk migrator, so it must not report a truncated ciphertext as plaintext: doing so seals the wreckage a second time and reports the row as migrated. */
 func TestKeyIdOf_ReportsATruncatedCiphertextAsAnError(t *testing.T) {
     provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
     cipher := NewCipher(provider)
@@ -413,7 +405,6 @@ func TestKeyIdOf_ReportsATruncatedCiphertextAsAnError(t *testing.T) {
     }
 }
 
-/* an application still holding a marker-shaped string must not have it stored verbatim: the write side seals it, so it can never poison a later read. */
 func TestCipher_EncryptSealsAMarkerShapedPlaintextThatDoesNotDecode(t *testing.T) {
     provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
     cipher := NewCipher(provider)
@@ -456,7 +447,6 @@ func (instance *invalidIdKeyProvider) Key(keyId string) ([]byte, error) {
     return newKey(1), nil
 }
 
-/* the key id is part of the wire format: StaticKeyProvider enforces its grammar at construction, but KeyProvider is public and a custom provider's id reaches seal unchecked — an empty id or one carrying a colon produced a stored value decodeEncrypted could never split back apart */
 func TestCipher_SealRefusesAKeyIdTheWireFormatCannotCarry(t *testing.T) {
     for _, keyId := range []string{"", "v1:extra", "id with spaces"} {
         cipher := NewCipher(&invalidIdKeyProvider{keyId: keyId})
@@ -472,7 +462,6 @@ func TestCipher_SealRefusesAKeyIdTheWireFormatCannotCarry(t *testing.T) {
     }
 }
 
-/* the lenient decoder mapped several base64 spellings onto the same bytes, so an altered last character still authenticated while CiphertextCandidates only emits the canonical spelling — a deterministic equality lookup missed a row it held. The tamper must change ONLY the discarded bits: a 28-byte payload ends in a two-character quantum whose canonical final character is one of A/Q/g/w, and its alphabet NEIGHBOUR (B/R/h/x) shares the two encoded bits while setting a discarded one — so the lenient decoder reads the same byte and still authenticates, and only strictness can refuse. An arbitrary substitute character changes the encoded bits too, fails authentication under both decoders, and turns this mutant into a coin flip on the nonce. */
 func TestCipher_DecryptRefusesANonCanonicalBase64Spelling(t *testing.T) {
     provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
     cipher := NewCipher(provider)
@@ -495,7 +484,6 @@ func TestCipher_DecryptRefusesANonCanonicalBase64Spelling(t *testing.T) {
     }
 }
 
-/* a payload shorter than nonce plus tag cannot be a seal of even the empty string: it used to pass the nonce-only floor and fail inside gcm.Open as "could not decrypt value", blaming an authentication failure on a key for what is structural damage */
 func TestCipher_DecryptReportsAStructurallyShortPayloadAsDamage(t *testing.T) {
     provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
     cipher := NewCipher(provider)
@@ -615,7 +603,6 @@ func TestCipher_EncryptPassesThroughADeterministicSeal(t *testing.T) {
         t.Fatalf("seal: %v", sealErr)
     }
 
-    /* the random door asks only whether the value authenticates: a deterministic seal is confidential whichever nonce it carries, so it is not re-sealed */
     stored, encryptErr := cipher.Encrypt(deterministic)
     if nil != encryptErr {
         t.Fatalf("encrypt: %v", encryptErr)

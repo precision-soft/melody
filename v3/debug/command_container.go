@@ -43,7 +43,6 @@ func (instance *ContainerCommand) Flags() []clicontract.Flag {
     )
 }
 
-/* serviceDescriptionReporter is the door the listing asks for descriptions — asked, not required, so a substituted container that does not implement it keeps a name-only listing instead of failing the command */
 type serviceDescriptionReporter interface {
     ServiceDescriptions() []containercontract.ServiceDescription
 }
@@ -119,7 +118,6 @@ type containerServiceDescriptionItem struct {
     Teardown *containerServiceTeardownItem `json:"teardown,omitempty"`
 }
 
-/* describeServiceList is the default listing: it runs no provider. The descriptions carry both lifetimes; a container without the descriptions door is listed by name alone, with a warning naming the limitation instead of a silent narrower answer. */
 func (instance *ContainerCommand) describeServiceList(
     serviceContainer containercontract.Container,
     option output.Option,
@@ -240,7 +238,6 @@ func (instance *ContainerCommand) describeServiceList(
     )
 }
 
-/* containerServiceTeardownItem is the teardown's answer about one built container service, carried beside the service in every form the command answers: the wave the drain gives it, the services it is closed before, the services closed before it, whether anything orders it at all, and the node the plan files it under — its own, or the one it was collapsed onto as an alias of the same instance. It is nil on a service the plan does not list — a registration never built, a scoped one — so the json document omits the key instead of inventing a wave for a service the teardown will never meet. The ordering reads `proved` where the graph relates the service to something, `none` where nothing does, and `cycle` where the service is on a dependency ring the drain could not open: the ring is closed as one unit, one service at a time, and the teardown reports it, which read as a proved order until the figure said otherwise. */
 type containerServiceTeardownItem struct {
     Wave         int      `json:"wave"`
     Node         string   `json:"node"`
@@ -250,13 +247,6 @@ type containerServiceTeardownItem struct {
     Group        int      `json:"group"`
 }
 
-/* teardownView is the plan read once per command, both as the block the table renders and as the per-service answer the items carry.
-
-   Arming the parallel teardown is an assertion an operator has to be able to CHECK rather than take on trust, and the check has to read the same in every form the command answers. It did not: the default listing rendered the block, the --build sweep, the single-service door and the json document said nothing about the teardown at all, and the one block that rendered listed every node whatever window the listing had applied.
-
-   The ordering of a node is read on BOTH sides of it. A node with no dependencies and no dependents is the one the graph has nothing to say about, and under waves it closes beside everything else in its wave — that is the node an operator has to look at. Read on the outgoing edges alone, every pure dependency — the logger, the tracer provider, exactly what a dependent needs to outlive it — read as unordered, which is the opposite of what the edge towards it proves.
-
-   A container that does not carry the door — an application running its own Container implementation — has no view: it is skipped rather than rendered as a teardown with nothing in it, which would read as a container with nothing to close. */
 type teardownView struct {
     entries   []containercontract.TeardownPlanEntry
     byNodeKey map[string]*containerServiceTeardownItem
@@ -264,13 +254,10 @@ type teardownView struct {
     inWaves   bool
 }
 
-/* teardownNameNodeKeyPrefix is the spelling the plan gives a node filed under a name, as TeardownPlanEntry documents it; a node filed only under its type carries the other prefix and no name a listing could window on. */
 const teardownNameNodeKeyPrefix = "service:"
 
-/* teardownTypeNodeKeyPrefix is the spelling of a container TYPE node's key, the container's own; the view only reads it, to render an alias. */
 const teardownTypeNodeKeyPrefix = "type:"
 
-/* newTeardownView reads the plan once and answers nil for a container that does not carry the door or has nothing built; every reader below tolerates the nil, so a command over such a container renders its listing with no teardown in it rather than failing. */
 func newTeardownView(serviceContainer containercontract.Container) *teardownView {
     planned, carriesPlan := serviceContainer.(interface {
         TeardownPlan() []containercontract.TeardownPlanEntry
@@ -299,7 +286,6 @@ func newTeardownView(serviceContainer containercontract.Container) *teardownView
 
         byNodeKey[entry.NodeKey] = item
 
-        /* an alias answers with the item of the node it was collapsed onto: the plan lists one instance once, and a name the plan folded away used to have no item at all — read by the json document as a service never built, and by a windowed listing as nothing to show */
         for _, alias := range entry.Aliases {
             byNodeKey[alias] = item
         }
@@ -307,7 +293,6 @@ func newTeardownView(serviceContainer containercontract.Container) *teardownView
         aliasesOf[entry.NodeKey] = entry.Aliases
     }
 
-    /* the dependents are derived from the dependencies rather than asked of the container: the plan states each edge once, at its dependent, and this view is the one reader that needs the edge from its other end */
     for _, entry := range entries {
         for _, dependencyKey := range entry.Dependencies {
             dependency, listed := byNodeKey[dependencyKey]
@@ -342,7 +327,6 @@ func newTeardownView(serviceContainer containercontract.Container) *teardownView
     }
 }
 
-/* forService answers the teardown item of a container service filed under its name, nil for a name the plan does not list and nil for a SCOPED registration whatever its name: a scoped service is built and closed by each scope and has no node in the container's plan, but a scoped registration is allowed to share its name with a built container service, and asked by the name alone it was handed that service's item — a `lifetime: scoped` row carrying a wave, which sent the operator to declare an ordering the scoped door refuses. A service filed only under its type has no name to be asked by and reaches the table through the block alone. */
 func (instance *teardownView) forService(serviceName string, lifetime string) *containerServiceTeardownItem {
     if nil == instance || containercontract.ServiceLifetimeScoped == lifetime {
         return nil
@@ -351,7 +335,6 @@ func (instance *teardownView) forService(serviceName string, lifetime string) *c
     return instance.byNodeKey[teardownNameNodeKeyPrefix+serviceName]
 }
 
-/* readableAliases renders the node keys an instance is also filed under in the spelling an operator can read: a type key is the container's identity key — the package path, a NUL and the type's string — which the ordinary service, registered under a name and resolved through its type, carries as an alias on every row; printed raw it wrapped over three lines of escaped path on every service of the example application. The type's own string is what names it. */
 func readableAliases(aliases []string) []string {
     readable := make([]string, 0, len(aliases))
 
@@ -368,7 +351,6 @@ func readableAliases(aliases []string) []string {
     return readable
 }
 
-/* addBlock renders the plan for the nodes the listing shows: a node filed under a name is kept when that name — or the name of any alias collapsed onto it — is in the window, a node filed only under its type has no name a window could name and is kept always. The wave index is the plan's, not the window's, so a windowed listing still says where each shown service stands in the whole teardown. */
 func (instance *teardownView) addBlock(builder *output.TableBuilder, shownNames map[string]struct{}) {
     if nil == instance {
         return
@@ -388,7 +370,6 @@ func (instance *teardownView) addBlock(builder *output.TableBuilder, shownNames 
             node = fmt.Sprintf("%s (also %s)", entry.NodeKey, strings.Join(readableAliases(entry.Aliases), ", "))
         }
 
-        /* a group is printed by its number, empty for a service in none: the operator reads "these close one after the other" from two rows sharing a figure, which "same wave, no dependencies" used to hide */
         group := ""
         if 0 != item.Group {
             group = fmt.Sprintf("%d", item.Group)
@@ -426,7 +407,6 @@ func (instance *teardownView) addBlock(builder *output.TableBuilder, shownNames 
     }
 }
 
-/* isShown answers whether a node filed under a name is in the listing's window under any of its names: the window is applied to the names the listing shows, and an instance the plan lists under one name may be shown under another */
 func (instance *teardownView) isShown(entry containercontract.TeardownPlanEntry, shownNames map[string]struct{}) bool {
     if _, shown := shownNames[strings.TrimPrefix(entry.NodeKey, teardownNameNodeKeyPrefix)]; true == shown {
         return true
@@ -478,7 +458,6 @@ func resolveErrorContextJson(resolveErr error, option output.Option) string {
         return emptyErrorContextJsonForFormat(option)
     }
 
-    /* the context is read through the ContextProvider contract rather than the concrete *exception.Error: an HttpException — or any userland error carrying a context — in the resolution chain used to contribute nothing, so its context was silently absent from the one report built to show it */
     var provider exceptioncontract.ContextProvider
     if false == errors.As(resolveErr, &provider) || true == internal.IsNilInterface(provider) {
         return emptyErrorContextJsonForFormat(option)
@@ -489,7 +468,6 @@ func resolveErrorContextJson(resolveErr error, option output.Option) string {
         return emptyErrorContextJsonForFormat(option)
     }
 
-    /* sanitize BEFORE marshalling: both fallbacks below print the value they were handed, so walking only the happy path would leak exactly the stack and trace entries the noise filter strips whenever json.Marshal or json.Unmarshal fails. The defined exceptioncontract.Context type is converted to its plain map[string]any underlying because the walk matches via value.(map[string]any) first; nested named types are converted inside the tracked walk itself. */
     keepNoiseKeys := 3 <= option.VerbosityLevel
     redactedContext := sanitizeErrorContextValueTracked(map[string]any(contextValue), map[errorContextVisitKey]struct{}{}, 0, keepNoiseKeys)
 
@@ -516,7 +494,6 @@ func resolveErrorContextJson(resolveErr error, option output.Option) string {
     return truncateErrorContextForFormat(string(contextJsonBytes), option)
 }
 
-/* emptyErrorContextJsonForFormat answers "nothing to report" in the grammar of the format asking. The json document declares a string of json, so the absence has to be a parseable one: `.errorContextJson | fromjson` died with "Cannot parse ''" on every healthy row of the very sweep built to be read by a machine, and a field whose type changes with the value of the row cannot be consumed at all. The table keeps the empty cell, where a literal {} would be noise in a column read by a person. */
 func emptyErrorContextJsonForFormat(option output.Option) string {
     if output.FormatTable == option.Format {
         return ""
@@ -525,7 +502,6 @@ func emptyErrorContextJsonForFormat(option output.Option) string {
     return "{}"
 }
 
-/* unrepresentableErrorContextForFormat answers a context json.Marshal refuses — a chan, a func, a complex, a MarshalJSON that fails — in the grammar of the format asking, the same split emptyErrorContextJsonForFormat makes. The sanitizing walk passes an unrecognised scalar through untouched, so this is reachable from any provider that puts one in a context, and the %v rendering it used to answer is Go syntax: `"errorContextJson": "map[listener:0x5f8e40]"`, on which the `.errorContextJson | fromjson` this line documents dies for that row alone. Wrapping it in an object keeps the field parseable on every row and keeps the rendering, which names the culprit, under a key that says what it is. The table keeps the bare rendering, where a person reads the value rather than parses it. */
 func unrepresentableErrorContextForFormat(contextValue any, option output.Option) string {
     rendered := fmt.Sprintf("%v", contextValue)
 
@@ -545,7 +521,6 @@ func unrepresentableErrorContextForFormat(contextValue any, option output.Option
     return string(rawBytes)
 }
 
-/* normalizeErrorCauseChain answers an empty list rather than a nil one, so the field stays an array in every row of one document — `jq '.data.items[].errorCauseChain[]'` used to die with "Cannot iterate over null" at the first service that resolved. It is the convention the envelope factory already applies to Warnings. The table renders both spellings identically. */
 func normalizeErrorCauseChain(causeChain []string) []string {
     if nil == causeChain {
         return []string{}
@@ -554,7 +529,6 @@ func normalizeErrorCauseChain(causeChain []string) []string {
     return causeChain
 }
 
-/* truncateErrorContextForFormat applies the table-cell truncation to the table format alone: the json envelope is a machine document, and cutting a json fragment at a display width handed the consumer an unparseable value with no sign anything was dropped */
 func truncateErrorContextForFormat(value string, option output.Option) string {
     if output.FormatTable != option.Format {
         return value
@@ -563,13 +537,11 @@ func truncateErrorContextForFormat(value string, option output.Option) string {
     return truncateTableCellValueByVerbosity(value, option.VerbosityLevel)
 }
 
-/* resolveErrorCauseChain walks the causes below the resolution error's own message, so the report names why the build failed and not only that it did: the error string of a melody error is its message alone, and the dial refusal, the missing file, the refused credential all live below it — the one detail the operator runs the command to learn used to reach neither the table nor the json */
 func resolveErrorCauseChain(resolveErr error) []string {
     if nil == resolveErr {
         return nil
     }
 
-    /* built from the failure itself with the head dropped, rather than from a bare errors.Unwrap: a joined failure answers Unwrap with nothing — its causes live behind the []error shape — so the whole chain vanished from the report exactly when there was more than one cause to show. BuildCauseChain walks both unwrap shapes. */
     chain := exception.BuildCauseChain(resolveErr, 9)
     if 1 >= len(chain) {
         return nil
@@ -578,7 +550,6 @@ func resolveErrorCauseChain(resolveErr error) []string {
     return chain[1:]
 }
 
-/* populateServiceList is the --build sweep: every windowed service is resolved and the failures report their causes. A scoped registration resolves through the run's own scope — the scope a console command's services live in — never through the container that refuses it. */
 func (instance *ContainerCommand) populateServiceList(
     serviceContainer containercontract.Container,
     runScope containercontract.Scope,
@@ -614,7 +585,6 @@ func (instance *ContainerCommand) populateServiceList(
     okItems := make([]containerServiceListItem, 0, len(selected))
     errorItems := make([]containerServiceListItem, 0, len(selected))
 
-    /* the view is read AFTER the sweep resolved the window, because the plan lists what is built and the sweep is what builds it */
     shownNames := make(map[string]struct{}, len(selected))
 
     for _, registration := range selected {
@@ -682,7 +652,6 @@ func (instance *ContainerCommand) populateServiceList(
             total,
         )
 
-        /* the shown count precedes the ok/error split so the split reads as scoped to it: only the windowed services are resolved, and an unqualified "8 ok | 2 error" beside a larger total implied the rest were neither instead of unprobed */
         if shown != total {
             summary = fmt.Sprintf(
                 "%s | %d shown",
@@ -779,7 +748,6 @@ func (instance *ContainerCommand) populateServiceList(
     )
 }
 
-/* reportServiceSweepFailures puts the sweep's failures where the exit code reads them. Render turns an envelope carrying an error into a non-zero exit, which is the whole reason the envelope contract exists: `app debug:container --build --format=json || exit 1` is a deployment gate, and a sweep whose declared purpose is "build everything and report the failures with their causes" used to answer `"error": null` and exit 0 over every one of them, leaving the failures reachable only as data.items[].error for a consumer nobody told to read them. The single-name door and the middleware sibling have reported theirs all along. */
 func reportServiceSweepFailures(
     errorItems []containerServiceListItem,
     envelope *output.Envelope,
@@ -810,7 +778,6 @@ func reportServiceSweepFailures(
     )
 }
 
-/* resolveServiceForLifetime routes a build to the owner of the name: the container for its own services, the run's scope for a scoped registration — the same resolution a scoped service gets everywhere else in a console process */
 func resolveServiceForLifetime(
     serviceContainer containercontract.Container,
     runScope containercontract.Scope,
@@ -824,18 +791,12 @@ func resolveServiceForLifetime(
     return serviceContainer.Get(serviceName)
 }
 
-/* the placeholder a container that contains itself is rendered as, so the operator sees where the loop closed instead of a truncated blob or nothing at all */
 const errorContextCycleMarker = "<cycle>"
 
-/* errorContextDepthMarker stands in for a subtree the walk refused to descend into. It reads differently from the cycle marker because the two say different things to whoever is looking at the rendered context: a cycle is a structure that closes on itself, this is a structure that simply goes deeper than anything worth printing. */
 const errorContextDepthMarker = "<depth limit>"
 
-/* maximumErrorContextDepth bounds the descent. The cycle guard above answers the context that holds itself; it says nothing about one that is merely very deep, and nothing else did either — a deep enough acyclic context walked until the goroutine stack was gone. That failure is `fatal error: stack overflow`, which no recover reaches, so the command layer cannot report it and the process dies rendering a debug page. Measured with the stack capped at 16 MiB it took some five hundred thousand levels, which the production cap of one gigabyte scales up rather than removes.
-
-   The bound is far above anything a real error context reaches: these are producer-supplied maps describing a failure, and a hand-built one nests a handful of levels. It matches the bound internal/copy.go puts on the same shape of walk for the same reason. */
 const maximumErrorContextDepth = 10000
 
-/* the walk records the containers on the current path only, and drops each one again on the way out. An error context may legitimately hand the same map or slice to two sibling keys, and rendering the second one as a cycle would be a silent wrong answer; a container is only a cycle when it is its own ancestor. A slice is keyed on its backing pointer together with its length, so two views of the same array are told apart rather than collapsed. */
 type errorContextVisitKey struct {
     pointer uintptr
     length  uintptr
@@ -845,8 +806,6 @@ func sanitizeErrorContextValue(value any) any {
     return sanitizeErrorContextValueTracked(value, map[errorContextVisitKey]struct{}{}, 0, false)
 }
 
-/* the context handed in at the top of resolveErrorContextJson is the caller's own map, redacted before it reaches json.Marshal so the fallbacks cannot print what the redaction exists to strip. That ordering puts this walk ahead of encoding/json's cycle detector, so the walk carries its own: a context holding itself — `context["self"] = context`, which any producer can build — would otherwise recurse until the stack is gone, and a stack overflow is a fatal error that no recover in the command layer turns into a reported failure. */
-/* the plain shapes the tracked walk descends into; a defined type sharing their underlying type is converted to them below, which keeps the backing pointer and so the cycle keying */
 var plainContextMapType = reflect.TypeOf(map[string]any(nil))
 var plainContextSliceType = reflect.TypeOf([]any(nil))
 
@@ -861,7 +820,7 @@ func sanitizeErrorContextValueTracked(value any, seen map[errorContextVisitKey]s
 
     mapValue, isMap := value.(map[string]any)
     if false == isMap {
-        /* a defined type whose underlying type is map[string]any — the framework's own exceptioncontract.Context is one, and it is exactly what a producer reaches for when nesting structured data — fails the assertion above while carrying the same shape. Left unconverted it rode past all three guards at once: a cycle survived into json.Marshal, whose cycle error routed it to the fmt fallback that has no cycle detection of its own — a fatal stack overflow no recover reaches — a depth past the bound recursed inside the encoder, and a dropped key inside it reached the fallbacks in the clear. */
+
         reflectedValue := reflect.ValueOf(value)
         if reflect.Map == reflectedValue.Kind() && true == reflectedValue.Type().ConvertibleTo(plainContextMapType) {
             mapValue = reflectedValue.Convert(plainContextMapType).Interface().(map[string]any)
@@ -881,7 +840,7 @@ func sanitizeErrorContextValueTracked(value any, seen map[errorContextVisitKey]s
 
     sliceValue, isSlice := value.([]any)
     if false == isSlice {
-        /* a defined slice type with underlying []any is converted for the reason the map conversion documents */
+
         reflectedValue := reflect.ValueOf(value)
         if reflect.Slice == reflectedValue.Kind() && true == reflectedValue.Type().ConvertibleTo(plainContextSliceType) {
             sliceValue = reflectedValue.Convert(plainContextSliceType).Interface().([]any)
@@ -947,7 +906,6 @@ func toLowerAscii(value string) string {
     return string(bytesValue)
 }
 
-/* shouldDropErrorContextKey names DIAGNOSTIC NOISE, not secrets: a stack or trace entry floods the table with screens of frames, so it is dropped below full verbosity — and only there, since -vvv shows the context whole. The filter deliberately redacts nothing else: the command prints what a producer put in its context, and a producer that parks a credential there owns that choice, exactly as every producer in this tree already refuses to. */
 func shouldDropErrorContextKey(key string) bool {
     if "trace" == key {
         return true
@@ -1013,7 +971,6 @@ func truncateTableCellValue(value string) string {
     return value[:runeAwareByteLimit(value, maxLength-3)] + "..."
 }
 
-/* runeAwareByteLimit returns the largest byte offset that is not greater than limit and lands on a UTF-8 rune boundary, so slicing at it never splits a multibyte rune into invalid bytes */
 func runeAwareByteLimit(value string, limit int) int {
     if 0 >= limit {
         return 0
@@ -1095,7 +1052,6 @@ func buildContainerServiceErrorLines(item containerServiceListItem) []string {
         lines = append(lines, splitLines(item.ErrorString)...)
     }
 
-    /* the causes explain the message above them: without these lines the table said a build failed and withheld the dial refusal or missing credential that failed it */
     for _, causeEntry := range item.ErrorCauseChain {
         causeLines := splitLines("caused by: " + causeEntry)
         lines = append(lines, causeLines...)
@@ -1133,7 +1089,7 @@ func wrapFixedWidth(value string, width int) []string {
 
         cut := runeAwareByteLimit(value, width)
         if 0 == cut {
-            /* the next rune is wider than the wrap width, so keep it whole rather than splitting its bytes into invalid UTF-8 */
+
             _, size := utf8.DecodeRuneInString(value)
             cut = size
         }
@@ -1227,7 +1183,6 @@ func (instance *ContainerCommand) populateSingleService(
         errorCauseChain = normalizeErrorCauseChain(resolveErrorCauseChain(getErr))
         errorContextJson = resolveErrorContextJson(getErr, option)
 
-        /* a registered service that fails to build is a wiring problem inside the provider, not a missing registration; reporting both as notFound sends the operator after a registration that is in fact present — and a registration either lifetime knows counts as present */
         errorCode := "debug.buildFailed"
         errorMessage := "service failed to build"
 

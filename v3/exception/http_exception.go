@@ -12,7 +12,7 @@ import (
 type HttpException struct {
     statusCode int
     message    string
-    /* stateMutex guards context and alreadyLogged: a memoized failure is shared across request goroutines. The immutable fields need no lock. */
+
     stateMutex    sync.RWMutex
     context       exceptioncontract.Context
     causeErr      error
@@ -53,7 +53,6 @@ func (instance *HttpException) SetContextValue(key string, value any) {
     instance.stateMutex.Lock()
     defer instance.stateMutex.Unlock()
 
-    /* the zero value is constructible outside the constructors and carries a nil map */
     if nil == instance.context {
         instance.context = make(exceptioncontract.Context)
     }
@@ -92,7 +91,7 @@ func IsHttpException(err error) bool {
 }
 
 func AsHttpException(err error) *HttpException {
-    /* the typed nil is refused with the plain one: errors.As walks the chain through Unwrap, and every Unwrap in this package reads a field off its receiver */
+
     if nil == err || true == isNilInterfaceValue(err) {
         return nil
     }
@@ -108,7 +107,6 @@ func AsHttpException(err error) *HttpException {
 func ValidationFailed(validationErrors any) *HttpException {
     httpException := NewHttpException(nethttp.StatusUnprocessableEntity, "validation failed")
 
-    /* the validationErrors key is the one the kernel exception listener serves to the client */
     httpException.SetContextValue("validationErrors", validationErrors)
 
     return httpException

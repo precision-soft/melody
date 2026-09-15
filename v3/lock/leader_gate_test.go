@@ -95,7 +95,6 @@ func TestLeaderGate_ExactlyOneLeader(t *testing.T) {
         return first.IsLeader() != second.IsLeader()
     }, "expected exactly one of the two gates to lead")
 
-    /* hold the state for a few refresh cycles: still exactly one leader */
     time.Sleep(30 * time.Millisecond)
     if first.IsLeader() == second.IsLeader() {
         t.Fatalf("expected exactly one leader to persist: first=%v second=%v", first.IsLeader(), second.IsLeader())
@@ -128,7 +127,6 @@ func TestLeaderGate_FailoverOnLeaderShutdown(t *testing.T) {
         secondDone <- second.Run(testRuntimeWithContext(secondContext))
     }()
 
-    /* the second gate keeps campaigning while the first leads */
     time.Sleep(20 * time.Millisecond)
     if true == second.IsLeader() {
         t.Fatalf("expected the second gate to wait while the first leads")
@@ -139,7 +137,6 @@ func TestLeaderGate_FailoverOnLeaderShutdown(t *testing.T) {
         t.Fatalf("expected a clean shutdown from the first gate, got: %v", runErr)
     }
 
-    /* the shutdown released the lock, so failover must not wait out any ttl */
     waitUntil(t, 2*time.Second, second.IsLeader, "expected the second gate to take over after shutdown")
 
     secondCancel()
@@ -149,7 +146,6 @@ func TestLeaderGate_FailoverOnLeaderShutdown(t *testing.T) {
 func TestLeaderGate_DemotesAndReelectsOnRefreshFailure(t *testing.T) {
     innerLocker := NewInMemoryLocker(clock.NewSystemClock())
 
-    /* fail refreshes only while enabled, so the gate can lose the lease once and then win it back */
     failing := &switchableRefreshLocker{inner: innerLocker}
     failing.fail.Store(true)
 
@@ -193,7 +189,6 @@ func TestLeaderGate_DemotesAndReelectsOnRefreshFailure(t *testing.T) {
     }
     lostMutex.Unlock()
 
-    /* let refreshes succeed again: the gate must campaign back to leadership */
     failing.fail.Store(false)
     <-elected
 
@@ -226,7 +221,6 @@ func TestLeaderGate_ReleasesOnShutdown(t *testing.T) {
         t.Fatalf("expected the gate to drop leadership on shutdown")
     }
 
-    /* the one-hour ttl must not matter: shutdown releases the lock immediately */
     contender := locker.CreateLock("worker:release", time.Minute)
     acquired, _ := contender.Acquire(testRuntime())
     if false == acquired {
@@ -234,7 +228,6 @@ func TestLeaderGate_ReleasesOnShutdown(t *testing.T) {
     }
 }
 
-/* A gate that can never acquire — a redis locker built with a non-positive ttl fails closed on every Acquire — is otherwise indistinguishable from a healthy follower: it campaigns, backs off and elects nobody, silently, forever. */
 func TestLeaderGate_CampaignErrorsReachTheHook(t *testing.T) {
     runContext, cancel := context.WithCancel(context.Background())
     defer cancel()
@@ -278,7 +271,6 @@ func TestLeaderGate_CampaignErrorsReachTheHook(t *testing.T) {
     }
 }
 
-/* A shutdown cancels the context the backend is called with, so the campaign in flight fails with that cancellation. Reporting it would hand every graceful stop an error indistinguishable from a store outage. */
 func TestLeaderGate_ShutdownDoesNotReportACampaignError(t *testing.T) {
     runContext, cancel := context.WithCancel(context.Background())
     runtimeInstance := testRuntimeWithContext(runContext)
@@ -307,7 +299,6 @@ func TestLeaderGate_ShutdownDoesNotReportACampaignError(t *testing.T) {
         done <- gate.Run(runtimeInstance)
     }()
 
-    /* the campaign must be inside the backend call when the shutdown lands, or the loop simply exits before it ever errors */
     select {
     case <-acquireEntered:
     case <-time.After(2 * time.Second):
@@ -332,11 +323,9 @@ func TestLeaderGate_ShutdownDoesNotReportACampaignError(t *testing.T) {
     }
 }
 
-/* A RetryInterval slower than the one-minute outage cap must not invert into faster-than-healthy retries: doubling the campaign backoff caps at the configured RetryInterval, never below it, so an outage never hammers the store more often than the healthy campaign cadence. */
 func TestLeaderGate_CampaignBackoffNeverFasterThanRetryInterval(t *testing.T) {
     retryInterval := 5 * time.Minute
 
-    /* Run seeds the backoff with RetryInterval, so start from there and double repeatedly */
     backoff := retryInterval
     for attempt := 0; attempt < 8; attempt++ {
         backoff = nextCampaignBackoff(backoff, retryInterval)
@@ -345,14 +334,12 @@ func TestLeaderGate_CampaignBackoffNeverFasterThanRetryInterval(t *testing.T) {
         }
     }
 
-    /* a RetryInterval at or under the cap still caps at the cap, never runs away */
     fast := 5 * time.Second
     if capped := nextCampaignBackoff(defaultMaxCampaignBackoff, fast); capped != defaultMaxCampaignBackoff {
         t.Fatalf("expected the backoff to hold at the cap %v, got %v", defaultMaxCampaignBackoff, capped)
     }
 }
 
-/* An override RefreshInterval slower than half the lease ttl would let the lease lapse before the first renewal, so a second instance could acquire and both report leadership. NewLeaderGateWithOptions must clamp such an override down to the safe derived cadence (ttl/2). */
 func TestLeaderGate_RefreshIntervalClampedToHalfTtl(t *testing.T) {
     locker := NewInMemoryLocker(clock.NewSystemClock())
 
@@ -472,7 +459,6 @@ func (instance *countingRefreshLock) Refresh(runtimeInstance runtimecontract.Run
     return instance.inner.Refresh(runtimeInstance, ttl)
 }
 
-/* contextSensitiveAcquireLocker fails Acquire with the call's context error, as a real backend does once the context is cancelled. */
 type contextSensitiveAcquireLocker struct {
     entered chan struct{}
 }
@@ -491,7 +477,6 @@ func (instance *contextSensitiveAcquireLock) Acquire(runtimeInstance runtimecont
     default:
     }
 
-    /* block inside the backend call, the way a real round trip does, so the shutdown lands while the campaign is in flight */
     <-runtimeInstance.Context().Done()
 
     return false, exception.NewError("acquire failed", nil, runtimeInstance.Context().Err())
@@ -505,7 +490,6 @@ func (instance *contextSensitiveAcquireLock) Refresh(runtimeInstance runtimecont
     return nil
 }
 
-/* hangingRefreshLocker acquires and releases through the real locker but never answers a renewal: the store took the call and went quiet, the way a wedged connection or an unresponsive replica does. The call comes back only when the context handed to it is cancelled, which is precisely the deadline a renewal must carry. */
 type hangingRefreshLocker struct {
     inner lockcontract.Locker
 }
@@ -532,7 +516,6 @@ func (instance *hangingRefreshLock) Refresh(runtimeInstance runtimecontract.Runt
     return exception.NewError("lock refresh never answered", nil, runtimeInstance.Context().Err())
 }
 
-/* A renewal that takes longer than the lease is not the same failure the cadence clamp defends against: nothing lets the lease lapse in the schedule, the call itself simply never comes back. With leadership derived from "did the last renewal return an error", there is no error to derive it from, so the holder keeps claiming the lock while the lease runs out underneath it and a second instance acquires — two leaders, both certain. */
 func TestLeaderGate_ARenewalThatNeverAnswersNeverYieldsTwoLeaders(t *testing.T) {
     innerLocker := NewInMemoryLocker(clock.NewSystemClock())
 
@@ -561,7 +544,6 @@ func TestLeaderGate_ARenewalThatNeverAnswersNeverYieldsTwoLeaders(t *testing.T) 
         _ = second.Run(testRuntimeWithContext(secondContext))
     }()
 
-    /* long enough for the lease to lapse several times over under the renewal that never answers */
     deadline := time.Now().Add(2 * time.Second)
     for time.Now().Before(deadline) {
         if true == first.IsLeader() && true == second.IsLeader() {
@@ -580,7 +562,6 @@ func TestLeaderGate_ARenewalThatNeverAnswersNeverYieldsTwoLeaders(t *testing.T) 
     waitGroup.Wait()
 }
 
-/* IsLeader and the hooks are two signals for one fact, and LOCK.md tells callers to combine them, so the claim must fall the moment the lease is provably lost — not when the hook that was elected finally unwinds, which is a duration the gate does not control and a hook ignoring its cancelled context never reaches at all. */
 func TestLeaderGate_LeadershipDropsWhileTheElectedHookIsStillRunning(t *testing.T) {
     failing := &switchableRefreshLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}
     failing.fail.Store(true)
@@ -597,7 +578,6 @@ func TestLeaderGate_LeadershipDropsWhileTheElectedHookIsStillRunning(t *testing.
         OnElected: func(runtimeInstance runtimecontract.Runtime) {
             close(hookEntered)
 
-            /* a hook that outlives the lease: the gate cannot campaign again while it runs, so leadership is whatever IsLeader says it is */
             <-releaseHook
         },
     })
@@ -618,7 +598,6 @@ func TestLeaderGate_LeadershipDropsWhileTheElectedHookIsStillRunning(t *testing.
     <-done
 }
 
-/* The budget of one renewal is a deadline on the CALL, not a verdict on the lease, so what it has to satisfy is that it never outlives the cadence it sits inside: an attempt that outlived it would still be in flight against the same lock when its successor started. The previous invariant — a budget well below the lease — was both wrong and untested where it mattered: it read the budget as the demotion signal, and it was sampled only at ttls of 100ms and up, where the floor never engages. Below two milliseconds the floor engaged on the cadence and on the budget independently and produced a budget LARGER than the cadence, which the old assertion never saw. */
 func TestLeaderGate_TheRenewalBudgetNeverOutlivesTheCadenceItSitsInside(t *testing.T) {
     locker := NewInMemoryLocker(clock.NewSystemClock())
 
@@ -655,7 +634,6 @@ func TestLeaderGate_TheRenewalBudgetNeverOutlivesTheCadenceItSitsInside(t *testi
     }
 }
 
-/* countedFailureLocker fails the first failureCount renewals and answers every one after them, which is the shape of a store that dropped a connection and came back. */
 type countedFailureLocker struct {
     inner        lockcontract.Locker
     failureCount int64
@@ -687,7 +665,6 @@ func (instance *countedFailureLock) Refresh(runtimeInstance runtimecontract.Runt
     return instance.inner.Refresh(runtimeInstance, ttl)
 }
 
-/* A store that drops a connection and reconnects must not cost a term. The lease the gate last wrote is the store's own promise that nobody else gets this lock until it lapses — which is exactly why the cadence is half the lease — so a renewal lost while the lease runs has cost nothing, and the one behind it lands. Leaving on the first failure turned an eight-second failover into a cancelled term, a re-election, and leader work restarted from the beginning for a lock that was never in danger. */
 func TestLeaderGate_ASingleFailedRenewalDoesNotCostTheTerm(t *testing.T) {
     failing := &countedFailureLocker{inner: NewInMemoryLocker(clock.NewSystemClock()), failureCount: 1}
 
@@ -720,7 +697,6 @@ func TestLeaderGate_ASingleFailedRenewalDoesNotCostTheTerm(t *testing.T) {
         t.Fatal("the gate never became leader")
     }
 
-    /* well past several cadences, so a gate that leaves on the first failure has certainly done so by now */
     time.Sleep(200 * time.Millisecond)
 
     if 0 != lostCount.Load() {
@@ -735,7 +711,6 @@ func TestLeaderGate_ASingleFailedRenewalDoesNotCostTheTerm(t *testing.T) {
     <-done
 }
 
-/* the other half: a store that is simply gone must end the term rather than let leader work run out the whole lease. The lease clock cannot see this on its own here — the cadence is far denser than the lease, so the lease still has a minute left — which is precisely the gap the consecutive-failure threshold covers. */
 func TestLeaderGate_ThresholdConsecutiveFailuresEndTheTermWhileTheLeaseIsStillValid(t *testing.T) {
     failing := &switchableRefreshLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}
     failing.fail.Store(true)
@@ -783,7 +758,6 @@ func TestLeaderGate_ThresholdConsecutiveFailuresEndTheTermWhileTheLeaseIsStillVa
     <-done
 }
 
-/* the threshold is a knob, and turning it off has to leave the lease clock as the only signal — that is what a deployment asks for when it would rather run out the lease than give up a term early. */
 func TestLeaderGate_ANegativeThresholdLeavesOnlyTheLeaseClock(t *testing.T) {
     gate := NewLeaderGateWithOptions(
         NewInMemoryLocker(clock.NewSystemClock()),
@@ -793,7 +767,6 @@ func TestLeaderGate_ANegativeThresholdLeavesOnlyTheLeaseClock(t *testing.T) {
     )
 
     if false == gate.refreshFailureEndsTheTerm(1000) {
-        /* the lease is unset outside a term, so the lease clock alone already says the term is over; what matters is that the threshold did not decide it */
         t.Fatal("expected the lease clock to answer on its own")
     }
 
@@ -804,7 +777,6 @@ func TestLeaderGate_ANegativeThresholdLeavesOnlyTheLeaseClock(t *testing.T) {
     }
 }
 
-/* the default has to be reachable only where it is meant to be. At the documented cadence of half the ttl, three renewals already outlast the lease, so the lease clock decides and the threshold changes nothing for a gate that did not ask for a denser cadence. */
 func TestLeaderGate_TheDefaultThresholdIsUnreachableAtTheDefaultCadence(t *testing.T) {
     ttl := time.Minute
 
@@ -824,7 +796,6 @@ func TestLeaderGate_TheDefaultThresholdIsUnreachableAtTheDefaultCadence(t *testi
     }
 }
 
-/* alternatingRefreshLocker fails every other renewal: losses that never land back to back, the shape of a lossy link rather than a store that has gone. */
 type alternatingRefreshLocker struct {
     inner    lockcontract.Locker
     attempts atomic.Int64
@@ -855,7 +826,6 @@ func (instance *alternatingRefreshLock) Refresh(runtimeInstance runtimecontract.
     return instance.inner.Refresh(runtimeInstance, ttl)
 }
 
-/* The threshold counts failures that are CONSECUTIVE, so a renewal that lands has to clear the count. Without the reset the counter only ever climbs: a lossy link that drops one renewal in two — every one of them survived by the next — still reaches three eventually and ends a term that was never lost, which is the flapping the threshold exists to prevent rather than cause. Over the window below the gate accumulates far more than three individual failures and none of them are adjacent. */
 func TestLeaderGate_ScatteredFailuresNeverAccumulateIntoADemotion(t *testing.T) {
     failing := &alternatingRefreshLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}
 
@@ -903,7 +873,6 @@ func TestLeaderGate_ScatteredFailuresNeverAccumulateIntoADemotion(t *testing.T) 
     <-done
 }
 
-/* In session mode there is no lease and no lease clock: the lock lives as long as the backend session does. Before the guard, enterTerm dated a "lease" from the acquire instant with a non-positive ttl — a deadline already in the past — so the FIRST failed liveness probe of every term found it beyond recovery and demoted immediately, overriding the documented three-failure tolerance the option promises. */
 func TestLeaderGate_SessionModeToleratesTransientProbeFailures(t *testing.T) {
     failing := &countedFailureLocker{inner: NewInMemoryLocker(clock.NewSystemClock()), failureCount: 1}
 
@@ -932,7 +901,6 @@ func TestLeaderGate_SessionModeToleratesTransientProbeFailures(t *testing.T) {
         t.Fatalf("the gate was never elected")
     }
 
-    /* wait long enough for the single failing probe and several healthy ones to land */
     waitUntil(t, 2*time.Second, func() bool { return 3 <= failing.attempts.Load() }, "expected several probes to land")
 
     if 0 != lostCount.Load() {
@@ -962,7 +930,6 @@ func TestLeaderGate_SessionModePersistentProbeFailuresEndTheTerm(t *testing.T) {
 
     go gate.Run(testRuntimeWithContext(runContext))
 
-    /* with no lease clock in session mode, the consecutive-failure threshold is the only demotion signal — a store that is plainly gone must still end the term */
     select {
     case <-lost:
     case <-time.After(2 * time.Second):
@@ -991,7 +958,6 @@ func TestLeaderGate_PanickingOnElectedHookIsShieldedAndLogged(t *testing.T) {
         close(runDone)
     }()
 
-    /* the panic is recovered and recorded; the gate keeps its term — a hook failure is not a lost lease — and above all the process survives, where the unshielded form killed it with the lock held for the rest of its ttl on every peer */
     waitUntil(t, 2*time.Second, func() bool { return logger.hasMessageContaining("leader gate hook panicked") }, "expected the hook panic to be logged")
 
     if false == gate.IsLeader() {
@@ -1006,7 +972,6 @@ func TestLeaderGate_PanickingOnElectedHookIsShieldedAndLogged(t *testing.T) {
         t.Fatalf("the gate did not shut down cleanly after the recovered panic")
     }
 
-    /* the shutdown released the lock: a fresh campaign must win it immediately */
     acquired, acquireErr := locker.CreateLock("worker:hook-panics", time.Minute).Acquire(testRuntimeWithContext(context.Background()))
     if nil != acquireErr || false == acquired {
         t.Fatalf("expected the lock to be released on shutdown, got acquired=%v err=%v", acquired, acquireErr)
@@ -1023,7 +988,6 @@ func TestLeaderGate_CampaignErrorIsLoggedWhenNoHookIsWired(t *testing.T) {
 
     go gate.Run(runtimeInstance)
 
-    /* without the record a store outage and a permanent misconfiguration both look exactly like a deployment that quietly elects no leader and does no work */
     waitUntil(t, 2*time.Second, func() bool { return logger.hasMessageContaining("leader gate campaign failed") }, "expected the failed campaign to be logged")
 }
 
@@ -1074,7 +1038,6 @@ func TestLeaderGate_PanickingRefreshDemotesInsteadOfKillingTheProcess(t *testing
 
     go gate.Run(testRuntimeWithContext(runContext))
 
-    /* a panicking backend Refresh unwinds a bare goroutine with no recover of the caller's; recovered, it is the same demotion signal a returned error is — the process survives and the gate re-campaigns */
     select {
     case cause := <-lost:
         if nil == cause || false == strings.Contains(cause.Error(), "leader gate refresh panicked") {
@@ -1091,7 +1054,6 @@ func TestLeaderGate_IsLeaderAnswersFromTheAcquireLeaseBeforeAnyRenewal(t *testin
 
     leaderAtElection := make(chan bool, 1)
 
-    /* the refresh cadence is left at its default — half a one-minute ttl — so no renewal can land before the assertion: what answers inside OnElected is the lease enterTerm dated from the acquire, the only lease that exists in the window between election and the first renewal. A gate that fails to store it reports a leader the fleet cannot see. */
     var gate *LeaderGate
     gate = NewLeaderGateWithOptions(NewInMemoryLocker(clock.NewSystemClock()), "worker:first-window", time.Minute, LeaderGateOptions{
         RetryInterval: 5 * time.Millisecond,

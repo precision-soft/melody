@@ -70,19 +70,13 @@ func (instance *Module) RegisterHttpMiddlewares(kernelInstance kernelcontract.Ke
     registrar.Use(opentelemetry.NewTracingMiddleware(handle.provider.Tracer(tracerName), instance.config.Propagator))
 }
 
-/* providerHandle adapts the OTLP TracerProvider's Shutdown to the two closing doors the container knows: it prefers CloseWithContext on any service that carries one and falls back to Close() error, so this handle offers both and the teardown takes the first. */
 type providerHandle struct {
     provider *sdktrace.TracerProvider
 }
 
-/* unbudgetedShutdownGrace bounds the shutdown of a handle closed with no deadline at all, where nobody said how long the flush of the pending spans may take. It is the fallback, not the figure: a caller that declares a budget is honoured whole, and an operator who needs the export finished raises the teardown budget rather than this. It is applied on whichever door is reached without a deadline, not on the plain one alone — the container calls CloseWithContext, so a reserve that lived on Close() was a reserve the teardown never spent. */
 const unbudgetedShutdownGrace = 5 * time.Second
 
-/* CloseWithContext hands the teardown's own deadline to the provider's Shutdown, which has taken a context since it was written — erasing that context is the only thing this handle ever did, and it did it because the container's teardown used to ask for Close() error and nothing else.
-
-   A context that is already spent is NOT handed on, and that is the whole of this door's own judgement. Measured in the vendor (go.opentelemetry.io/otel/sdk trace/provider.go): Shutdown latches isShutdown through a compare-and-swap BEFORE its loop, the loop then reads ctx.Done() at the head of its first iteration and returns, the list of span processors is never emptied, and every later Shutdown answers nil on the strength of that latch. So an expired deadline does not merely drop the spans it could not export — it leaves the provider permanently unclosable, with its batch goroutine, its ticker and its exporter connection still running and no door left that can end them. Refusing to make the call keeps the provider closable by whatever comes next, and the container's failure map names this service either way, which is what an operator reads.
-
-   What this does not close is the deadline that is nearly spent: a remainder too small for one processor to shut down inside still latches, because bounding that would mean spending time the caller's budget no longer has. The figure that would buy is a decision about every component of the teardown at once, not about this one. */
+/* CloseWithContext passes the caller’s deadline to provider shutdown, adding the package fallback when none is present. An already-spent context is refused before the provider can latch its shutdown state. A deadline that expires inside vendor shutdown can still leave processors unclosed; the method cannot guarantee their completion beyond the caller’s budget. */
 func (instance *providerHandle) CloseWithContext(closeContext context.Context) error {
     if nil != closeContext.Err() {
         return exception.NewError(

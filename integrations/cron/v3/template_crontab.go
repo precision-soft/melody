@@ -13,7 +13,7 @@ const TemplateNameCrontab = "crontab"
 /* TemplateNameCrontabNoUser renders the user-less crontab dialect: busybox crond (alpine images) and per-user `crontab` files reject the /etc/cron.d user column, so this variant omits it — no more cutting the column with sed in the image build. */
 const TemplateNameCrontabNoUser = "crontab-no-user"
 
-/* CrontabOwnershipMarker identifies the generator in rendered headers. It does not establish application ownership and is not used to select prune targets. */
+/* CrontabOwnershipMarker identifies the generator in headers. It neither establishes application ownership nor selects prune targets. */
 const CrontabOwnershipMarker = "# owned by melody:cron:generate"
 
 const crontabHeaderBlock = `#############################################################################
@@ -164,7 +164,6 @@ func (instance *CrontabTemplate) Render(entries []Entry, options RenderOptions) 
     return builder.String(), nil
 }
 
-/* heartbeatUserColumn resolves the heartbeat line's user: the /etc/cron.d dialect requires and validates it, the user-less dialect ignores it entirely. */
 func (instance *CrontabTemplate) heartbeatUserColumn(
     options RenderOptions,
     missingUserMessage string,
@@ -204,7 +203,6 @@ func buildCrontabLine(entry Entry, includeUserColumn bool) (string, error) {
         return "", scheduleValidationErr
     }
 
-    /* the user-less dialect targets busybox crond, which classifies a day field by its expanded values where vixie reads the spelling's first character — so a day-field pair the two daemons read differently is refused at generation, the same way the stepped single value is: emitting it would run one schedule in-process and another on the box. */
     if false == includeUserColumn && nil != entry.Schedule {
         dayOfMonthExpression := fieldOrWildcard(entry.Schedule.DayOfMonth)
         dayOfWeekExpression := normalizeCronNameTokens(fieldOrWildcard(entry.Schedule.DayOfWeek), cronDayOfWeekNameValues)

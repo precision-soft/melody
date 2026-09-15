@@ -138,7 +138,6 @@ func TestDirFileSystem_OpenNonExistentPathReturnsError(t *testing.T) {
     }
 }
 
-/* the padded and the exact spelling name two different files, and only the exact one exists: collapsing them would resolve a request the rules in front of the application judged on the padded spelling */
 func TestDirFileSystem_OpenDoesNotTrimTheName(t *testing.T) {
     directory := t.TempDir()
 
@@ -211,13 +210,11 @@ func TestHasExcludedPathPrefix_EmptyListExcludesNothing(t *testing.T) {
 }
 
 func TestHasExcludedPathPrefix_EmptyEntryExcludesEverything(t *testing.T) {
-    /* the prefix comparison is the one security.NewPathPrefixMatcher makes, where an empty prefix matches every path; the configuration refuses such an entry precisely because it reaches this outcome. */
     if false == hasExcludedPathPrefix("/index.html", []string{""}) {
         t.Fatalf("expected an empty entry to exclude every path")
     }
 }
 
-/* the substitution of "." for the empty name is inert for the outcome — joining "." onto the base resolves back to the base — so this test does not prove it on position; the inversion does, by emptying every name that is not "." and answering the root for a request that named a file. */
 func TestDirFileSystem_OpenDotNamesTheServedDirectory(t *testing.T) {
     directory := t.TempDir()
 
@@ -239,7 +236,6 @@ func TestDirFileSystem_OpenDotNamesTheServedDirectory(t *testing.T) {
     }
 }
 
-/* the fallback that keeps the configured base when the base itself does not resolve is LATENT: resolving the target resolves the base as its prefix, so the base cannot fail while the target succeeds, and the target's own failure is answered above it — which is what this asserts. Only the base disappearing between the two resolutions could enter that branch, which no in-process state forces. */
 func TestDirFileSystem_ABaseThatDoesNotResolveIsRefusedOnTheTargetFirst(t *testing.T) {
     directory := t.TempDir()
 
@@ -255,7 +251,6 @@ func TestDirFileSystem_ABaseThatDoesNotResolveIsRefusedOnTheTargetFirst(t *testi
     }
 }
 
-/* the mirror of the firewall matcher's trailing-slash reading: an entry written "/admin/" claims the bare "/admin" too, and nothing wider — the two comparisons promise to select the same requests */
 func TestHasExcludedPathPrefix_ATrailingSlashEntryClaimsTheBareSpelling(t *testing.T) {
     excludedPathList := []string{"/admin/"}
 

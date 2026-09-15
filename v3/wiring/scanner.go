@@ -81,9 +81,9 @@ type ScanResult struct {
     Skipped      []*SkippedConstructor
     /* SkippedVendorDirectories names the vendor trees the walk stepped over; they cannot contribute services, so they are reported separately from the skipped constructors strict fails on. */
     SkippedVendorDirectories []string
-    /* ExcludedFiles names the source files a build constraint kept out of the scan even though they hold constructor candidates — a service the running binary carries under a build tag the scan was not told about. They are reported on request rather than skipped, since strict cannot know which tags the binary was built with; passing them through --tags brings the file back in. */
+    /* ExcludedFiles lists constructor-bearing files omitted by build constraints. Supply the matching build tags to include them; strict mode cannot infer the binary’s tags. */
     ExcludedFiles []string
-    /* UnusedExcludes names the exclude patterns that matched no constructor, in declaration order. An exclusion that stopped matching — a renamed type, a typo in the pattern — silently registers the very constructor it was declared to keep out, so it is reported the way an unused bind is. */
+    /* UnusedExcludes lists unmatched exclusion patterns in declaration order. */
     UnusedExcludes []string
 }
 
@@ -94,7 +94,7 @@ type SkippedConstructor struct {
     Reason string
 }
 
-/* Scan walks the directory of a package binding and returns every constructor it can wire. A directory below the one declared is scanned as its own package, its import path derived from the relative path, so a package declared as the root of a domain covers the packages beneath it. A symlink standing where the declared directory should be is resolved before the walk — the walk itself does not follow symlinks, and a symlinked root would otherwise be read as an empty package with nothing to report; a symlinked subdirectory stays out of the scan, exactly as the go tool leaves it out of a build. */
+/* Scan discovers constructors in the declared directory and descendant packages, deriving import paths from relative paths. A symlinked root is resolved before walking; symlinked subdirectories are not followed. */
 func Scan(projectDirectory string, packageBinding *PackageBinding, buildTags []string) (*ScanResult, error) {
     rootDirectory := packageBinding.Directory()
     if false == filepath.IsAbs(rootDirectory) {
@@ -114,7 +114,6 @@ func Scan(projectDirectory string, packageBinding *PackageBinding, buildTags []s
     }
     rootDirectory = resolvedRootDirectory
 
-    /* a malformed pattern is refused before anything is walked: path.Match answers ErrBadPattern for it on every name, so the exclusion the operator declared would otherwise match nothing and the constructor it names would be registered anyway, with no trace */
     excludes := packageBinding.Excludes()
     for _, pattern := range excludes {
         if _, matchErr := path.Match(pattern, ""); nil != matchErr {
@@ -148,7 +147,6 @@ func Scan(projectDirectory string, packageBinding *PackageBinding, buildTags []s
                 return nil
             }
 
-            /* a directory the go tool never compiles as part of the module cannot contribute services; a skipped vendor tree is recorded so the report can name it on request */
             baseName := entry.Name()
             if "vendor" == baseName {
                 result.SkippedVendorDirectories = append(result.SkippedVendorDirectories, currentPath)
@@ -206,7 +204,7 @@ func scanFile(
     matchedExcludes map[string]bool,
     result *ScanResult,
 ) error {
-    /* a file the build excludes — a //go:build ignore script, the unsatisfied half of a tag pair, a foreign GOOS suffix — contributes no constructors to the binary the wiring is generated for, and scanning it anyway would register phantom services or the same service twice. The scan is told which tags the binary carries so a file gated on one of them is included rather than dropped; the generated source is then specific to that tag set, naming constructors a build without those tags does not have. */
+
     buildContext := build.Default
     buildContext.BuildTags = buildTags
     isIncluded, matchErr := buildContext.MatchFile(filepath.Dir(currentPath), filepath.Base(currentPath))
@@ -221,7 +219,7 @@ func scanFile(
     }
 
     if false == isIncluded {
-        /* an excluded file that holds a constructor candidate is coverage a build tag kept out; it is named on request so a missing service is traceable to the tag it needs, without failing strict on a file legitimately excluded for another target */
+
         if true == fileHasConstructorCandidate(fileSet, currentPath) {
             result.ExcludedFiles = append(result.ExcludedFiles, currentPath)
         }
@@ -240,7 +238,6 @@ func scanFile(
         )
     }
 
-    /* a main package is a program, not an importable package; a constructor under cmd/ would render an import the compiler refuses. Its candidates are reported as skipped instead of dropped without a trace, so --strict surfaces the lost coverage and //melody:ignore acknowledges it. */
     if "main" == fileNode.Name.Name {
         for _, declaration := range fileNode.Decls {
             functionDeclaration, isFunction := declaration.(*ast.FuncDecl)
@@ -330,7 +327,6 @@ func scanFile(
     return nil
 }
 
-/* fileHasConstructorCandidate reports whether a build-excluded file holds a function the scan would have taken as a provider; a parse failure or a main package answers false, since neither yields a constructor the report should point at. */
 func fileHasConstructorCandidate(fileSet *token.FileSet, currentPath string) bool {
     fileNode, parseErr := parser.ParseFile(fileSet, currentPath, nil, parser.ParseComments)
     if nil != parseErr {
@@ -394,7 +390,6 @@ func parseDirectives(
     for _, comment := range functionDeclaration.Doc.List {
         text := strings.TrimSpace(comment.Text)
 
-        /* the remainder of an ignore is its reason, which the directive does not read: //melody:ignore kept as a test double is the natural spelling, and demanding the bare form would silently register the constructor the comment says to leave out */
         if _, isIgnore := directiveRemainder(text, ignoreDirective); true == isIgnore {
             directives.isIgnored = true
 
@@ -420,7 +415,6 @@ func parseDirectives(
             for _, assignment := range strings.Fields(remainder) {
                 separatorIndex := strings.Index(assignment, "=")
 
-                /* a bind spelled without the equals sign, or with an empty half, would otherwise fall back to a broader bind — or to none — and the override written right beside the constructor would silently not be the one in effect */
                 if 0 >= separatorIndex || len(assignment)-1 == separatorIndex {
                     return nil, exception.NewError(
                         "a bind directive assignment must be spelled argument=parameter",
@@ -440,7 +434,6 @@ func parseDirectives(
             continue
         }
 
-        /* any other spelling under the directive prefix is a typo of one of the four directives, and every one of them fails open when it is dropped: a mistyped scoped demotes a request-lifetime service to a singleton, a mistyped ignore registers the constructor it acknowledges, so the unknown directive is refused where it was written */
         if true == strings.HasPrefix(text, directivePrefix) {
             return nil, exception.NewError(
                 "an unknown melody directive is not one of bind, ignore, service or scoped",
@@ -458,7 +451,6 @@ func parseDirectives(
     return directives, nil
 }
 
-/* directiveRemainder matches a directive exactly or followed by whitespace. A plain prefix match would also claim a longer word — //melody:serviceFoo — and read a name out of what is not the directive at all. */
 func directiveRemainder(text string, directive string) (string, bool) {
     if text == directive {
         return "", true
@@ -575,7 +567,6 @@ func describeConstructor(
     }, ""
 }
 
-/* describeType renders a type expression as the generated file must write it. A type named without a qualifier belongs to the scanned package and gains one; a qualified type keeps its qualifier and carries the import path the alias resolves to. Anything the generator cannot address by name from another package — an inline struct, a map, a channel — is reported as unrenderable rather than guessed at. */
 func describeType(
     expression ast.Expr,
     importPath string,
@@ -606,7 +597,6 @@ func describeType(
             return nil
         }
 
-        /* a dot import makes an unqualified exported name ambiguous — it may belong to the scanned package or to the dot-imported one, and the parser alone cannot tell — so the type is unrenderable rather than misattributed */
         if _, hasDotImport := fileImports["."]; true == hasDotImport {
             return nil
         }
@@ -649,7 +639,6 @@ func isScalarType(typeReference *TypeReference) bool {
     return isStandardDuration(typeReference)
 }
 
-/* isStandardDuration matches time.Duration by the resolved import path, so the spelled qualifier — an aliased stdlib import, a foreign package that happens to be called time — cannot mislead the classification. */
 func isStandardDuration(typeReference *TypeReference) bool {
     if "time" != typeReference.ImportPath {
         return false
@@ -663,7 +652,6 @@ func isStandardDuration(typeReference *TypeReference) bool {
 func collectImports(fileNode *ast.File) map[string]string {
     fileImports := make(map[string]string)
 
-    /* explicit aliases first: Go guarantees their uniqueness in a file, so they own their name outright */
     for _, importSpec := range fileNode.Imports {
         if nil == importSpec.Name {
             continue
@@ -677,7 +665,6 @@ func collectImports(fileNode *ast.File) map[string]string {
         fileImports[importSpec.Name.Name] = importPath
     }
 
-    /* a path base never overrides an alias, and a base two unnamed imports share is ambiguous — the file compiles because the packages' real names differ, so the base identifies neither and is dropped for both */
     basePathByName := make(map[string]string)
     baseCountByName := make(map[string]int)
 
@@ -706,7 +693,6 @@ func collectImports(fileNode *ast.File) map[string]string {
         }
     }
 
-    /* the qualifier a file uses is the package name, which the last path segment does not always spell: a major-version directory (melody/v3), a gopkg.in versioned base (yaml.v3), a hyphenated repository (go-redis). The conventional names those shapes resolve to are added as fallbacks — an explicit alias or an exact base always wins over a guess, and a guess two imports both produce is ambiguous and added for neither. */
     candidatePathByName := make(map[string]string)
     candidateCountByName := make(map[string]int)
 
@@ -721,7 +707,7 @@ func collectImports(fileNode *ast.File) map[string]string {
         }
 
         for _, candidate := range packageNameCandidates(importPath) {
-            /* a name two unnamed bases already contested identifies neither of them, and a guess must not claim it for a third import */
+
             if 1 < baseCountByName[candidate] {
                 continue
             }
@@ -800,7 +786,6 @@ func derivedImportPath(rootImportPath string, rootDirectory string, filePath str
     return rootImportPath + "/" + filepath.ToSlash(relativeDirectory), nil
 }
 
-/* isExcluded reports whether an exclude pattern claims the type name, recording every pattern that matched so the scan can name the ones that never did. A malformed pattern cannot reach this loop: Scan refuses it before the walk starts. */
 func isExcluded(typeExpression string, excludes []string, matchedExcludes map[string]bool) bool {
     typeName := strings.TrimPrefix(typeExpression, "*")
 

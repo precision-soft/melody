@@ -19,7 +19,6 @@ func newTestManager() *Manager {
     return NewManager("en", []string{"en"}, english, romanian)
 }
 
-/* This catalog deliberately preserves the requested domain to exercise normalization by the manager. */
 type verbatimDomainCatalog struct {
     locale            string
     messagesByDomain  map[string]map[string]string

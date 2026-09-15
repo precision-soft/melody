@@ -92,7 +92,6 @@ func evaluateArgument(inner []rune, parameters map[string]any, locale string, po
     }
 }
 
-/* Missing arguments remain visible as placeholders; an explicitly nil argument renders empty. */
 func stringifyArgument(name string, parameters map[string]any) string {
     value, exists := parameters[name]
     if false == exists {

@@ -2,36 +2,11 @@ package container
 
 import (
     "errors"
-    "runtime"
     "strings"
-    "sync"
     "testing"
-
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
-    exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
 )
-
-type closedGuardCloser struct {
-    mutex  sync.Mutex
-    closed bool
-}
-
-func (instance *closedGuardCloser) Close() error {
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    instance.closed = true
-
-    return nil
-}
-
-func (instance *closedGuardCloser) IsClosed() bool {
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    return instance.closed
-}
 
 func TestResolve_AfterCloseFailsInsteadOfCreating(t *testing.T) {
     serviceContainer := NewContainer()
@@ -53,7 +28,6 @@ func TestResolve_AfterCloseFailsInsteadOfCreating(t *testing.T) {
         t.Fatalf("expected resolution after Close to fail instead of creating a service that would never be closed")
     }
 
-    /* the container's own cause, distinct from a scope's: a caller telling a request that ended from an application shutting down reads them apart here */
     if false == errors.Is(getErr, ErrContainerClosed) {
         t.Fatalf("expected the refusal to classify as ErrContainerClosed")
     }
@@ -106,13 +80,6 @@ func TestResolve_DuringCloseClosesTheCreatedValueInsteadOfLeakingIt(t *testing.T
     }
 }
 
-type panickingCloser struct{}
-
-func (instance *panickingCloser) Close() error {
-    panic("close exploded")
-}
-
-/* the discarded value's Close runs while the container mutex is unlocked and the caller unwinds through a deferred unlock, so a panic escaping it would abort the whole process on an unlocked mutex instead of failing this one resolution */
 func TestResolve_DuringCloseContainsAPanickingCloseOfTheDiscardedValue(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -150,7 +117,6 @@ func TestResolve_DuringCloseContainsAPanickingCloseOfTheDiscardedValue(t *testin
     }
 }
 
-/* The created value being nil unconditionally replaced whatever the provider stage had reported, so resolving a name nobody registered failed with "service provider returned nil" — a symptom — and demoted the real "service is not registered" into the cause chain, where callers reading the message never see it. */
 func TestServiceWithCreationGuard_MissingServiceReportsItsOwnFailure(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -164,7 +130,6 @@ func TestServiceWithCreationGuard_MissingServiceReportsItsOwnFailure(t *testing.
     }
 }
 
-/* A provider that genuinely returns (nil, nil) says nothing at all, so the generic report stays: it is the only thing that names the provider. */
 func TestServiceWithCreationGuard_SilentNilProviderKeepsTheGenericReport(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -188,7 +153,6 @@ func TestServiceWithCreationGuard_SilentNilProviderKeepsTheGenericReport(t *test
     }
 }
 
-/* the suspension is written on the view the provider is handed, not on the caller's own resolution, so a provider that panics cannot leave the caller suspended: the resolution that continues above the failed frame belongs to the caller, and a scope hidden from every service it resolves afterwards is the failure this guards against. */
 func TestServiceWithCreationGuard_LeavesTheCallersScopeVisibleAfterAPanickingProvider(t *testing.T) {
     serviceContainer := NewContainer().(*container)
 
@@ -238,28 +202,6 @@ func TestServiceWithCreationGuard_LeavesTheCallersScopeVisibleAfterAPanickingPro
     }
 }
 
-type scopeCloseRaceService struct {
-    mutex  sync.Mutex
-    closed bool
-}
-
-func (instance *scopeCloseRaceService) Close() error {
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    instance.closed = true
-
-    return nil
-}
-
-func (instance *scopeCloseRaceService) wasClosed() bool {
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    return instance.closed
-}
-
-/* a scoped service finishing after its scope closed is refused by the store, and the refused value is closed best-effort — the scope-side twin of the container-close race. Before the guard, the freshly built value was dropped unclosed: an error for the caller, a silent leak for the resource. */
 func TestCreationGuard_ScopeClosedDuringCreation_ClosesBuiltValue(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -302,7 +244,6 @@ func TestCreationGuard_ScopeClosedDuringCreation_ClosesBuiltValue(t *testing.T) 
         t.Fatalf("expected the resolution to fail on the closed scope")
     }
 
-    /* the store is the door this window reaches — the entry check let the resolution through while the scope was still open — so classifying here is what tells this refusal apart from a provider that simply failed */
     if false == errors.Is(getErr, ErrScopeClosed) {
         t.Fatalf("expected the store's refusal to classify as ErrScopeClosed")
     }
@@ -312,15 +253,6 @@ func TestCreationGuard_ScopeClosedDuringCreation_ClosesBuiltValue(t *testing.T) 
     }
 }
 
-type typedNilPanicError struct {
-    detail string
-}
-
-func (instance *typedNilPanicError) Error() string {
-    return instance.detail
-}
-
-/* a provider panicking with a TYPED-NIL error passes the recovery's error assertion as a non-nil interface whose Error() dereferences a nil receiver. The recovery runs with the container mutex unlocked, so a second panic there used to escape as a fatal unlock-of-unlocked-mutex through the caller's deferred Unlock, with every waiter parked forever. The typed nil is normalized away, the resolution fails cleanly, and the error stays loggable. */
 func TestCreationGuard_TypedNilPanicValue_FailsWithoutSecondPanic(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -345,7 +277,6 @@ func TestCreationGuard_TypedNilPanicValue_FailsWithoutSecondPanic(t *testing.T) 
         t.Fatalf("expected the panic error to be loggable")
     }
 
-    /* the caller's own read of the failure, outside every framework door: a typed-nil cause left in the chain is a non-nil link whose Error() dereferences a nil receiver, so walking the chain bare is what tells the normalized cause from one merely absorbed by the log rendering */
     for currentErr := errors.Unwrap(getErr); nil != currentErr; currentErr = errors.Unwrap(currentErr) {
         _ = currentErr.Error()
     }
@@ -356,13 +287,6 @@ func TestCreationGuard_TypedNilPanicValue_FailsWithoutSecondPanic(t *testing.T) 
     }
 }
 
-type panickingPanicValueError struct{}
-
-func (instance *panickingPanicValueError) Error() string {
-    panic("the error message gives up")
-}
-
-/* a provider panicking with an error whose Error() itself panics used to blow up the recovery handler while it rendered the context — the same unlocked-mutex escape as the typed nil, from a live receiver. The rendering is contained on its own: the report loses that context and nothing else. */
 func TestCreationGuard_PanickingErrorMessage_FailsWithoutSecondPanic(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -382,7 +306,6 @@ func TestCreationGuard_PanickingErrorMessage_FailsWithoutSecondPanic(t *testing.
     }
 }
 
-/* the owner of a finished creation drops its waiters' wait-graph edges under the lock that wakes them. A woken waiter clears its own edge only after re-acquiring the mutex, and until then the stale edge read as a circular dependency to any resolution the owner ran next — a spurious refusal between two resolutions that shared nothing but the lock they queued on. The assertion runs while the guard's caller still holds the mutex, so the waiter provably has not cleaned up after itself yet. */
 func TestCreationGuard_OwnerClearsWaiterEdgesOnCompletion(t *testing.T) {
     serviceContainer := NewContainer().(*container)
 
@@ -484,28 +407,6 @@ func TestCreationGuard_OwnerClearsWaiterEdgesOnCompletion(t *testing.T) {
     }
 }
 
-type overrideRaceBuiltService struct {
-    mutex  sync.Mutex
-    closed bool
-}
-
-func (instance *overrideRaceBuiltService) Close() error {
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    instance.closed = true
-
-    return nil
-}
-
-func (instance *overrideRaceBuiltService) wasClosed() bool {
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    return instance.closed
-}
-
-/* an override installed while the provider ran already occupies the slot and wins: an override answers before anything is built, and the creation blindly overwriting it revoked an installation its caller was told succeeded — while the type-keyed map kept the override, so name and type answered differently forever after. The built value that lost the race is closed. */
 func TestCreationGuard_OverrideInstalledDuringCreationWins(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -572,34 +473,6 @@ func TestCreationGuard_OverrideInstalledDuringCreationWins(t *testing.T) {
     }
 }
 
-type waitingResolverProbe struct {
-    value string
-}
-
-/* awaitCreationWaiter blocks until the creation of serviceName has registered at least the given number of waiters, which is the state a test needs before it can release the owner: the wait registration is what the guard under test then reads. */
-func awaitCreationWaiter(t *testing.T, serviceContainer *container, serviceName string, waiterCount int) {
-    t.Helper()
-
-    for attempt := 0; attempt < 20000; attempt++ {
-        serviceContainer.mutex.RLock()
-        state, exists := serviceContainer.creatingByName[serviceName]
-        registered := 0
-        if true == exists && nil != state {
-            registered = len(state.waiterContextIds)
-        }
-        serviceContainer.mutex.RUnlock()
-
-        if waiterCount <= registered {
-            return
-        }
-
-        runtime.Gosched()
-    }
-
-    t.Fatalf("expected %d waiters on the creation of %q", waiterCount, serviceName)
-}
-
-/* a service the container memoizes is created once and handed to the owner AND to every goroutine that arrived while it was being built — so a creation that FAILED has to reach the waiters as a failure too. Nothing had ever entered that branch: a waiter released after a failed creation used to be proven only by the absence of a crash, and a branch that instead fell through to the lookup would have answered "service was not available after creation finished" and sent the reader looking for a missing registration rather than for the provider that refused. */
 func TestCreationGuard_AWaiterInheritsTheOwnersCreationFailure(t *testing.T) {
     serviceContainer := NewContainer().(*container)
 
@@ -711,7 +584,6 @@ func TestCreationGuard_AWaiterInheritsTheAlreadyLoggedMarkOfTheOwnersFailure(t *
     }
 }
 
-/* the resolution stack catches a cycle inside ONE resolver context, and this guard catches the other shape: two contexts each owning a creation the other is waiting on, which no stack can see because neither context ever repeats a key. Without it the two goroutines simply wait on each other's channel for the life of the process — a hang, with no report at all, at the moment the second request arrives. The deadlock is built deliberately, both owners established before either is released, so the detection is what ends it rather than a scheduling accident. */
 func TestCreationGuard_ACycleAcrossTwoConcurrentResolutionsIsReported(t *testing.T) {
     serviceContainer := NewContainer().(*container)
 
@@ -773,7 +645,6 @@ func TestCreationGuard_ACycleAcrossTwoConcurrentResolutionsIsReported(t *testing
     <-firstEntered
     <-secondEntered
 
-    /* the first resolution reaches for the second and parks as its waiter, which is the edge the detection then closes */
     close(releaseFirst)
     awaitCreationWaiter(t, serviceContainer, "app.cycle.second", 1)
 
@@ -794,7 +665,6 @@ func TestCreationGuard_ACycleAcrossTwoConcurrentResolutionsIsReported(t *testing
     }
 }
 
-/* the suspension the container's own providers run under is written on the view handed to the provider, so the two answers are readable at the same instant and are different: the handed view cannot see the scope while it builds a process-lifetime singleton, and the caller's resolution — which continues above this frame — still can. The pair is what tells a suspension carried on the handed view from one written onto the shared context and undone afterwards, which the caller's answer alone cannot distinguish. */
 func TestServiceWithCreationGuard_SuspendsTheHandedViewAndNotTheCallersResolution(t *testing.T) {
     serviceContainer := NewContainer().(*container)
 
@@ -855,19 +725,6 @@ func TestServiceWithCreationGuard_SuspendsTheHandedViewAndNotTheCallersResolutio
     }
 }
 
-type contextPanickingError struct{}
-
-func (instance *contextPanickingError) Error() string {
-    return "the context panicked"
-}
-
-func (instance *contextPanickingError) Context() exceptioncontract.Context {
-    panic("context rendering gave up")
-}
-
-var _ exceptioncontract.ContextProvider = (*contextPanickingError)(nil)
-
-/* the exception package renders an error's TEXT under its own recover, but a foreign error's Context() runs bare inside LogContext — and the creation guard renders the recovered error's context with the container mutex unlocked, where a second panic unwinds through the caller's deferred Unlock as a fatal unlock-of-unlocked-mutex. The rendering is contained on its own, so an error whose Context() panics costs its context slot and nothing else. */
 func TestCreationGuard_APanicValueWhoseContextPanicsIsContained(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -891,17 +748,6 @@ func TestCreationGuard_APanicValueWhoseContextPanicsIsContained(t *testing.T) {
     }
 }
 
-type unwrapPanickingError struct{}
-
-func (instance *unwrapPanickingError) Error() string {
-    return "the cause walk gives up"
-}
-
-func (instance *unwrapPanickingError) Unwrap() error {
-    panic("unwrap gave up")
-}
-
-/* the exception package contains a panicking Error() and a panicking Context() behind its own doors, but a foreign Unwrap() still runs bare inside the cause walk — and the creation guard renders the recovered error with the container mutex unlocked, where a second panic unwinds through the caller's deferred Unlock as a fatal unlock-of-unlocked-mutex. The guard's own recover is the containment that outlives whatever door the exception package grows next. */
 func TestCreationGuard_APanicValueWhoseUnwrapPanicsIsContained(t *testing.T) {
     serviceContainer := NewContainer()
 

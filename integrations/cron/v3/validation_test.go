@@ -62,7 +62,6 @@ func TestValidateNoForbiddenCharsEmptyTokensReturnsNil(t *testing.T) {
     }
 }
 
-/* crond treats one out-of-range field as a parse error and refuses the whole crontab file with it, so generation must fail on the same bounds the in-process matcher enforces */
 func TestValidateScheduleFieldsRejectsOutOfRangeValues(t *testing.T) {
     cases := []struct {
         field    string
@@ -93,7 +92,6 @@ func TestValidateScheduleFieldsRejectsOutOfRangeValues(t *testing.T) {
     }
 }
 
-/* day of week 7 is the Sunday alias vixie crond accepts, while the robfig scheduler behind the k8s template bounds the field at 6 */
 func TestValidateScheduleFieldsDayOfWeekSevenPerDialect(t *testing.T) {
     entry := Entry{Name: "job", Schedule: &Schedule{DayOfWeek: "7"}}
 
@@ -106,7 +104,6 @@ func TestValidateScheduleFieldsDayOfWeekSevenPerDialect(t *testing.T) {
     }
 }
 
-/* the robfig scheduler reads a whole-field "?" as the wildcard (the Quartz day-field convention); crond has no "?" and the crontab dialect must keep refusing it */
 func TestValidateScheduleFieldsQuestionMarkPerDialect(t *testing.T) {
     for _, schedule := range []*Schedule{
         {DayOfMonth: "?"},
@@ -211,7 +208,6 @@ func TestValidateUserField_RefusesEveryUnicodeSpace(t *testing.T) {
     }
 }
 
-/* the wrapping refusal names the entry, the field and the value; the parse error beneath it carries the bounds and the dialect that chose them. A reader of the outer record sees the first, the journal's cause chain walks to the second — so the pin unwraps one link, where the frozen majors' generator validation deliberately names no dialect because theirs judges everything against the crontab limits alone. */
 func TestValidateScheduleFields_TheRefusalCauseNamesTheFieldAndTheDialect(t *testing.T) {
     err := ValidateScheduleFields(
         Entry{Name: "job:probe", Schedule: &Schedule{DayOfWeek: "7"}},

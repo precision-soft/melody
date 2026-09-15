@@ -20,7 +20,7 @@ import (
 )
 
 func (instance *Module) registerStorageService(registrar melodyapplicationcontract.ServiceRegistrar) {
-    /* the S3 backend is registered by the awss3 module when configured (see configure.go); this is the local-disk fallback. */
+
     if nil != instance.storageClient {
         return
     }
@@ -54,7 +54,6 @@ func (instance *Module) registerLockerService(registrar melodyapplicationcontrac
     )
 }
 
-/* registerArchiveLockerService publishes the archive's locker. With an archive wired it is the advisory lock of the archive's own database, resolved LAZILY through the archive handle's own service so registering it costs no connection. Without one it is the in-process locker, the way the general locker falls back: the archive is then the in-process repository, and a writer that found no locker skipped the write on every run — an archive nobody could fill, whose history door always answered an empty list. One process is the whole population of an in-process archive, so the in-process lock is the exclusion it needs, and the same one the rest of the application already accepts. */
 func (instance *Module) registerArchiveLockerService(registrar melodyapplicationcontract.ServiceRegistrar) {
     registrar.RegisterService(
         persistence.ServiceArchiveLocker,
@@ -70,7 +69,7 @@ func (instance *Module) registerArchiveLockerService(registrar melodyapplication
 
             return melodypgsql.NewLocker(database), nil
         },
-        /* the framework's ServiceLocker registration above already claims the Locker contract on the type index, and this is a second implementation of it — asked for by name, because "the locker" of this application is that one and this is the archive's */
+
         melodycontainer.WithoutTypeRegistration(),
     )
 }

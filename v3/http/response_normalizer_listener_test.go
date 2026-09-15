@@ -10,7 +10,6 @@ import (
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/* capturingEventDispatcher records what the registrar hands it instead of dispatching. The listener under test reads nothing off the runtime and nothing off the dispatcher, so driving it directly is both sufficient and the only way to reach it without booting a kernel — and a kernel would supply the very 204 whose absence this pins. */
 type capturingEventDispatcher struct {
     eventName string
     listener  eventcontract.EventListener
@@ -56,7 +55,6 @@ func (instance *capturingEventDispatcher) DispatchName(
     return nil, nil
 }
 
-/* payloadEvent carries a payload and nothing else. The listener reads only Payload(), so building the real event type here would drag the event package into the http tests for no assertion. */
 type payloadEvent struct {
     payload any
 }
@@ -97,7 +95,6 @@ func captureResponseNormalizerListener(t *testing.T) eventcontract.EventListener
     return dispatcher.listener
 }
 
-/* A nil response has to leave the normalizer as nil. The kernel already replaces a handler's nil with an empty 204 before it dispatches this event, and writeResponse answers a nil the same way, so a synthesis here would be a second place deciding what "no response" means — and the two can then disagree. Nothing covered this: putting the synthesis back left every package under ./http/... green. */
 func TestKernelResponseNormalizerListener_LeavesANilResponseAlone(t *testing.T) {
     listener := captureResponseNormalizerListener(t)
 
@@ -113,7 +110,6 @@ func TestKernelResponseNormalizerListener_LeavesANilResponseAlone(t *testing.T) 
     }
 }
 
-/* the two normalizations the listener does own: a response that names no status code gets 200, and one with no header map gets an empty one, so everything downstream can write into it without a nil check. */
 func TestKernelResponseNormalizerListener_FillsTheStatusCodeAndHeaders(t *testing.T) {
     listener := captureResponseNormalizerListener(t)
 

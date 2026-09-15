@@ -2,80 +2,12 @@ package reporting
 
 import (
     "strings"
-    "context"
     "encoding/json"
-    "io"
     "net/http"
     "net/http/httptest"
     "sync/atomic"
     "testing"
-    "time"
-
-    "github.com/precision-soft/melody/v3/.example/service"
-    melodycontainer "github.com/precision-soft/melody/v3/container"
-    melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
-    "github.com/precision-soft/melody/v3/httpclient"
-    melodyruntime "github.com/precision-soft/melody/v3/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
-
-/* recordingSink stands in for whatever an operator points the export at. It keeps the body it was given,
-   because the property under test is that the reading travels — a status alone would be satisfied by an
-   empty request. */
-type recordingSink struct {
-    server   *httptest.Server
-    requests atomic.Int64
-    body     atomic.Value
-}
-
-func newRecordingSink(t *testing.T, status int) *recordingSink {
-    t.Helper()
-
-    sink := &recordingSink{}
-    sink.server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-        sink.requests.Add(1)
-
-        received, _ := io.ReadAll(request.Body)
-        sink.body.Store(string(received))
-
-        writer.WriteHeader(status)
-    }))
-
-    t.Cleanup(sink.server.Close)
-
-    return sink
-}
-
-/* exportRuntime carries the one service the exporter resolves, registered under the name the composition
-   root registers it under — by NAME and not by type, which is what the application does too, because two
-   clients of one concrete type cannot both hold the type. */
-func exportRuntime(t *testing.T) melodyruntimecontract.Runtime {
-    t.Helper()
-
-    containerInstance := melodycontainer.NewContainer()
-
-    melodycontainer.MustRegister(
-        containerInstance,
-        service.ServiceReportExportHttpClient,
-        func(resolver melodycontainercontract.Resolver) (*httpclient.HttpClient, error) {
-            /* built the way the composition root builds it: a client that hands a redirect back rather than following it, which is what lets the exporter see the 3xx at all */
-            return httpclient.NewHttpClient(httpclient.NewHttpClientConfig("", 2*time.Second, nil).WithoutRedirects()), nil
-        },
-        melodycontainer.WithoutTypeRegistration(),
-    )
-
-    t.Cleanup(func() { _ = containerInstance.Close() })
-
-    return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
-}
-
-func exportReading() *CatalogReading {
-    return &CatalogReading{
-        RecordedAt: time.Date(2026, time.September, 7, 10, 47, 37, 0, time.UTC),
-        Headline:   "Melody Example Catalog: 25 entries",
-        Payload:    "products=5 journal=3",
-    }
-}
 
 func TestCatalogReportExporterExport_SendsTheReadingToTheConfiguredSink(t *testing.T) {
     sink := newRecordingSink(t, http.StatusOK)
@@ -112,8 +44,6 @@ func TestCatalogReportExporterExport_SendsTheReadingToTheConfiguredSink(t *testi
     }
 }
 
-/* the sink refusing is an error and not a quiet false, because the whole point of an export is that someone
-   downstream received it — the command's exit code is the only way that reaches an operator */
 func TestCatalogReportExporterExport_FailsWhenTheSinkRefuses(t *testing.T) {
     sink := newRecordingSink(t, http.StatusServiceUnavailable)
 
@@ -132,8 +62,6 @@ func TestCatalogReportExporterExport_FailsWhenTheSinkRefuses(t *testing.T) {
     }
 }
 
-/* the pair is what makes the gate a measurement rather than a montage that could not have sent anything:
-   the arm above proves this runtime and this sink DO carry an export, so the nothing here is the gate's. */
 func TestCatalogReportExporterExport_SendsNothingWithNoEndpointConfigured(t *testing.T) {
     sink := newRecordingSink(t, http.StatusOK)
 
@@ -151,7 +79,6 @@ func TestCatalogReportExporterExport_SendsNothingWithNoEndpointConfigured(t *tes
     }
 }
 
-/* a sink that moved, or a proxy in front of it that sends the caller to a login page, answers the POST with a redirect. Followed, net/http re-sends the POST as a GET without its body, and the 200 of the page it lands on used to read as "the sink received the reading" — exported=true over a sink that stored nothing. The export refuses the redirect by name, and the page is never asked. */
 func TestCatalogReportExporterExport_RefusesASinkThatRedirectsInsteadOfReceiving(t *testing.T) {
     sinkPosts := atomic.Int64{}
     pageGets := atomic.Int64{}

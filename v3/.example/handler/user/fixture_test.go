@@ -26,9 +26,7 @@ import (
     melodysessioncontract "github.com/precision-soft/melody/v3/session/contract"
 )
 
-/* The shared test material of the package lives here, and only here: this is the one test file the layout rule exempts from having a source of its own. */
 
-/* recordingUserRepository is the directory the admin doors write into, kept in this process. The doors under test are asked what they STORE, so a double that only answers reads would let the test agree with itself about what an update wrote. */
 type recordingUserRepository struct {
     mutex sync.Mutex
     users map[string]*entity.User
@@ -133,7 +131,6 @@ func (instance *recordingUserRepository) DeleteById(ctx context.Context, id stri
     return true, nil
 }
 
-/* storedRoles reads the roles the repository holds, which is the only reading that answers what an update actually wrote. */
 func (instance *recordingUserRepository) storedRoles(t *testing.T, id string) []string {
     t.Helper()
 
@@ -151,7 +148,6 @@ func (instance *recordingUserRepository) storedRoles(t *testing.T, id string) []
 
 var _ repository.UserRepository = (*recordingUserRepository)(nil)
 
-/* valueCache keeps the values it is given, as they are. The doors under test are not about serialization, and a cache that round-tripped through json would answer a map where the service asserts an entity — a failure of the double rather than of the door. */
 type valueCache struct {
     mutex  sync.Mutex
     values map[string]any
@@ -252,7 +248,6 @@ func (instance *valueCache) Close() error {
 
 var _ melodycachecontract.Cache = (*valueCache)(nil)
 
-/* silentEventDispatcher stands in for the wired dispatcher: the doors under test dispatch a domain event on the way out, and what the listeners then do belongs to their own tests. */
 type silentEventDispatcher struct{}
 
 func (instance *silentEventDispatcher) AddListener(eventName string, listener melodyeventcontract.EventListener, priority int) melodyeventcontract.ListenerRegistration {
@@ -281,7 +276,6 @@ func (instance *silentEventDispatcher) DispatchName(runtimeInstance melodyruntim
 
 var _ melodyeventcontract.EventDispatcher = (*silentEventDispatcher)(nil)
 
-/* adminRuntime builds the runtime an admin door needs: a container carrying the user service, and a security context whose token holds the roles the caller is to be granted. The firewall under the context is the smallest compiled one that answers a role question, because the doors read nothing else off it. */
 func adminRuntime(t *testing.T, userRepository repository.UserRepository, actorId string, actorRoles []string) melodyruntimecontract.Runtime {
     t.Helper()
 
@@ -332,7 +326,6 @@ func adminRuntime(t *testing.T, userRepository repository.UserRepository, actorI
     return runtimeInstance
 }
 
-/* callDoor drives one admin door with a json body and the route parameters it reads, and answers the status it decided on. */
 func callDoor(
     t *testing.T,
     runtimeInstance melodyruntimecontract.Runtime,
@@ -385,7 +378,6 @@ func readAll(response melodyhttpcontract.Response) (string, error) {
     return buffer.String(), nil
 }
 
-/* sessionCarrying hands back a real session holding the values named. A real one is used rather than a double: the helpers under test read through the typed getters, and a double would let the test agree with itself about what a session stores. */
 func sessionCarrying(t *testing.T, values map[string]any) melodysessioncontract.Session {
     t.Helper()
 

@@ -27,18 +27,8 @@ const (
     ServiceRateRefreshService = "service-example-rate-refresh-service"
 )
 
-/* ratesLatestTarget is RELATIVE, and that is load-bearing rather than stylistic: the client resolves a
-   target against its base url by RFC 3986, so an absolute-path spelling ("/latest") would replace the base
-   path entirely and ask the provider for a resource one segment above the one configured. */
 const ratesLatestTarget = "latest"
 
-/* rateRefreshAttemptCount is three because a refresh runs on a schedule with nothing waiting on it: the
-   failure worth surviving is the one that lasts less than a moment — a provider restarting behind a load
-   balancer, a connection reset — and a fourth attempt buys nothing a run five minutes later does not.
-
-   rateRefreshRetryBackoff is short for the same reason and is a FIXED wait rather than a growing one: three
-   attempts do not span enough time for a growing wait to mean anything, and a fixed one keeps the whole
-   refresh inside a bound a reader can compute — three budgets plus two waits. */
 const (
     rateRefreshAttemptCount = 3
     rateRefreshRetryBackoff = 200 * time.Millisecond
@@ -72,12 +62,7 @@ type RateRefreshService struct {
     ratesBaseUrl    string
 }
 
-/* RateRefreshOutcome is what a refresh did, in numbers a caller can print and a test can assert. Skipped
-   counts two things that are both "no quote was written and nothing went wrong": a currency the provider did
-   not quote, which is the ordinary case because a provider is entitled to quote fewer currencies than a
-   catalogue carries, and one that stopped existing between the listing and its own update, which is a
-   delete landing inside the run. Neither is a failure and neither is worth a second counter — what a
-   caller does about them is the same. */
+/* RateRefreshOutcome counts updated, failed and skipped quotes. Skipped includes both currencies absent from the provider document and currencies deleted before their update. */
 type RateRefreshOutcome struct {
     Configured bool
     Attempts   int
@@ -87,9 +72,6 @@ type RateRefreshOutcome struct {
     AsOf       time.Time
 }
 
-/* rateDocument is the provider's answer. The rates are quoted against Base, one unit of Base costing that
-   many units of the currency, and AsOf is when the provider took the reading — which is what this
-   application stores, so a reader can tell the age of a quote rather than the age of the last refresh run. */
 type rateDocument struct {
     Base  string             `json:"base"`
     AsOf  time.Time          `json:"asOf"`
@@ -180,11 +162,6 @@ func (instance *RateRefreshService) Refresh(runtimeInstance melodyruntimecontrac
     return outcome, errors.Join(failures...)
 }
 
-/* readRateDocument spends up to rateRefreshAttemptCount exchanges on one reading. What is retried is
-   deliberately narrow: a call that never produced an answer, and an answer in the 5xx class, because those
-   are the two a provider can recover from between one attempt and the next. A 4xx is NOT retried — the
-   request is what is wrong, so repeating it repeats the mistake and spends the provider's budget doing it —
-   and neither is a body that fails to decode, which a working provider does not send twice. */
 func readRateDocument(client *httpclient.HttpClient) (rateDocument, int, error) {
     var lastErr error
 

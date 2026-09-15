@@ -1,6 +1,6 @@
 package contract
 
-/* Bus and its beta twin share the type String() "contract.Bus" while being distinct types from distinct packages, the shape that used to alias the resolution keys. */
+/* Bus shares its String representation with the distinct beta package type, providing a collision fixture. */
 type Bus struct {
     Region string
 }

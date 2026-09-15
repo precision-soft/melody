@@ -2,10 +2,8 @@ package internal
 
 import "reflect"
 
-/* maxCopyDepth bounds the deep-copy recursion as a safety net for genuinely deep (non-shared) data: a value that legitimately nests past this bound is returned as-is from there on rather than overflowing the goroutine stack — a fatal error that no deferred recover() can catch and which takes down the whole process. Cycles and shared substructure no longer reach this bound at all: the visited map closes a cycle onto its own copy and reuses the copy of a node reached through a second edge, so the traversal is linear in the number of distinct nodes where the depth-only form was exponential — a 28-level value whose every node was reachable through two edges never finished copying, with the caller's lock held the whole time. */
 const maxCopyDepth = 10000
 
-/* visitedKey identifies a container node across the two edges that may reach it: maps are identified by their pointer alone, slices by their backing array pointer AND length, because two slices of one array with different lengths are two different nodes — memoizing on the pointer alone would hand the copy of one to a reader of the other. */
 type visitedKey struct {
     pointer uintptr
     length  int
@@ -51,7 +49,7 @@ func copyAnyMapAtDepth(source map[string]any, depth int, visited map[visitedKey]
     }
 
     copied := make(map[string]any, len(source))
-    /* registered before the descent: a cycle that returns to this node closes onto the copy, not onto the live original */
+
     visited[key] = copied
 
     for sourceKey, value := range source {
@@ -82,11 +80,9 @@ func copyAnySliceAtDepth(source []any, depth int, visited map[visitedKey]any) []
         return copied
     }
 
-    /* a zero-length slice carries nothing shareable and its backing pointer is not a stable identity, so it is copied without entering the visited map */
     return make([]any, 0)
 }
 
-/* at maxCopyDepth the value is returned as-is (a shallow alias) rather than copied further; realistic data (JSON-derived) is far shallower, and the shapes that used to ride the recursion to this bound — cycles, shared substructure — are resolved by the visited map before depth ever matters. */
 func copyAnyValueAtDepth(value any, depth int, visited map[visitedKey]any) any {
     if depth >= maxCopyDepth {
         return value
@@ -159,6 +155,5 @@ func copyAnyValueAtDepth(value any, depth int, visited map[visitedKey]any) any {
         return copiedMap.Interface()
     }
 
-    /* every other kind — a pointer, a struct or array holding one, a channel, a function — is returned as-is: the copy descends into maps and slices only, which is the documented boundary of what session data may safely carry (a pointer put into a session is shared state between the requests that loaded it) */
     return value
 }

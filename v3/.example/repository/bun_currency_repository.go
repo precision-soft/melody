@@ -12,7 +12,6 @@ import (
     "github.com/uptrace/bun"
 )
 
-/* currencyRow is the nomenclature as the database holds it; the domain entity stays free of storage concerns because it is cached through a gob serializer. */
 type currencyRow struct {
     bun.BaseModel `bun:"table:melody_example_v3_currency,alias:currency"`
 
@@ -45,7 +44,6 @@ type bunCurrencyRepository struct {
     database *bun.DB
 }
 
-/* seedIfEmpty writes the opening nomenclature into an empty table; the table itself belongs to the migration set the constructor has already applied. The insert ignores duplicate keys because several example applications may reach an empty table at the same time, and losing that race is not a failure. */
 func (instance *bunCurrencyRepository) seedIfEmpty(ctx context.Context) error {
     count, countErr := instance.database.
         NewSelect().
@@ -107,7 +105,6 @@ func (instance *bunCurrencyRepository) FindById(ctx context.Context, id string) 
     return row.toEntity(), true, nil
 }
 
-/* findRowById separates a row that is not there from a query that could not run: only sql.ErrNoRows is an answer, and every other failure is reported. */
 func (instance *bunCurrencyRepository) findRowById(ctx context.Context, id string) (*currencyRow, bool, error) {
     row := &currencyRow{}
 
@@ -191,7 +188,7 @@ func (instance *bunCurrencyRepository) Update(ctx context.Context, currency *ent
     }
 
     if affectedAtLeastOneRow(result) { return true, nil }
-    /* MySQL reports changed rows by default; an identical update still found its currency. */
+
     _, stillPresent, readErr := instance.findRowById(ctx, id)
     return stillPresent, readErr
 }

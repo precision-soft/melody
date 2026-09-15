@@ -28,10 +28,8 @@ const (
 
     defaultPublishReturnBuffer = 16
 
-    /* defaultPublishTimeout bounds EACH of the three stretches one Send spends time in — the wait for its turn, the WRITE the amqp client runs with the caller's context discarded, and the CONFIRMATION, which PublishTimeout describes. Sized like closeJoinTimeout, to a full amqp handshake, because a broker under a resource alarm legitimately holds publishers for seconds and a bound that fired inside that would fail sends the broker was about to accept. */
     defaultPublishTimeout = 30 * time.Second
 
-    /* maxPrefetch caps the configured prefetch at the AMQP 0-9-1 prefetch-count wire limit. The field is encoded as uint16 by channel.Qos, so a larger value wraps on the wire — 65536 becomes 0, which RabbitMQ interprets as UNLIMITED prefetch, the exact opposite of the configured flow-control cap. */
     maxPrefetch = 65535
 )
 
@@ -42,10 +40,8 @@ const (
     forwardChannelLost
 )
 
-/* errReconnectInProgress is a PLAIN sentinel, matched with errors.Is, and every return wraps it in a FRESH melody error: a package-level *exception.Error carries the already-logged mark and a mutable context map on the instance itself, so one shared singleton, once logged anywhere, would silence every later occurrence process-wide — on every transport — and cross-instance context writes would race on it. */
 var errReconnectInProgress = errors.New("amqp reconnect already in progress")
 
-/* errPublishTimedOut is matched with errors.Is when a publish write did not return inside the publish timeout; plain and wrapped fresh at the return site, for the reason above. */
 var errPublishTimedOut = errors.New("amqp publish did not return within the publish timeout")
 
 func NewTransport(config TransportConfig) *Transport {
@@ -120,7 +116,7 @@ type TransportConfig struct {
     PublishReturnBuffer int
     /* DelayBuckets are the queue-level-ttl delay tiers for delayed redelivery (ascending, positive, at most maxDelayBuckets; zero value uses defaultDelayBuckets). A delayed message is parked in the largest bucket not exceeding its requested delay, so every message in a bucket queue shares one ttl and RabbitMQ's head-of-queue-only expiry cannot stall short delays behind long ones; the actual delay quantizes down to the bucket. Delays below the smallest bucket keep the legacy per-message-ttl queue, where head-of-line waiting is bounded by that smallest bucket. */
     DelayBuckets []time.Duration
-    /* PublishTimeout bounds EACH of the three stretches one Send spends time in: the wait for its turn behind the publishes ahead of it, the WRITE, and the CONFIRMATION. The amqp client discards the context it is handed for the write, so a broker that stops reading its socket — a resource alarm, a half-dead peer — would otherwise hold the send, every later send and the transport's close for good; and the confirmation ran on the caller's context, which carries no deadline on the paths melody publishes from, while holding the publish mutex, so a broker that accepted a write and never acked it parked every later send behind that one. A write that outlives the timeout fails as a channel fault: on a connection the transport dialed itself the connection is cut and the one retry redials, on a caller-owned connection sends are refused until that write returns. A caller that runs out of budget waiting for its turn is told so, marks nothing, and its publish is not written afterwards. A confirmation cut short by this budget is AMBIGUOUS — the message is on the wire — and is not retried automatically. The figure sizes ONE attempt over a channel already open — its three stretches, at most three budgets; a Send whose channel must be opened or redialed first, or the one retry after a channel fault, pays the channel RPCs and the join beyond them, which the amqp client bounds by nothing but the socket — measured on the backplane beside it, seven and a half budgets on a broker that held its replies. A non-positive value takes the default. */
+    /* PublishTimeout separately bounds the turn wait, write and confirmation for one attempt on an open channel. Turn timeout prevents the queued write. Write timeout can cut an owned connection and permit one retry; a caller-owned connection remains wedged until the write returns. Confirmation timeout is ambiguous and is not retried automatically. Channel-open RPCs and retries can extend Send beyond three budgets. Non-positive values use the default. */
     PublishTimeout time.Duration
 }
 
@@ -148,7 +144,7 @@ type Transport struct {
     closing           bool
     reconnecting      bool
     ownsConnection    bool
-    /* wedged is set while a publish write that outlived the publish timeout is still blocked on a connection this transport does not own and so cannot cut: every send until it returns is refused at once, instead of parking one more goroutine behind it per send */
+
     wedged bool
     closeSignal       chan struct{}
     closeOnce         sync.Once
@@ -158,7 +154,6 @@ type Transport struct {
     publishMutex sync.Mutex
     consumeMutex sync.Mutex
 
-    /* writesInFlight counts the publishes currently inside the amqp client's blocking write. A publish half that a join could not take is BUSY, which is not the same as wedged — it can equally be a healthy confirmation still in its budget — and teardown reports and decides on the difference rather than on the join alone. */
     writesInFlight atomic.Int64
 }
 
@@ -217,7 +212,6 @@ func (instance *Transport) Ack(
         return exception.NewError("amqp consume channel is not open", map[string]any{"queue": instance.queue}, nil)
     }
 
-    /* a stamp from an older generation answers success on purpose: its channel is gone, so the broker already re-owns the delivery and will redeliver it whole — the at-least-once direction — and there is nothing left this call could ack */
     if stamp.Generation != generation {
         return nil
     }
@@ -240,7 +234,6 @@ func (instance *Transport) Nack(
         return exception.NewError("amqp consume channel is not open", map[string]any{"queue": instance.queue}, nil)
     }
 
-    /* same deliberate success as Ack: an older generation's delivery is already the broker's again */
     if stamp.Generation != generation {
         return nil
     }
@@ -252,7 +245,6 @@ func (instance *Transport) Nack(
     return instance.republish(runtimeInstance, channel, stamp, envelopeInstance)
 }
 
-/* closeJoinTimeout bounds the three stretches of Close that cannot observe the close signal: the consume goroutine's join, the publish half's join, and the close of an owned connection. The consume loop observes closeSignal at every blocking point, so a healthy join costs microseconds; the one stretch it cannot observe it is inside the caller-supplied dialer, and connect rechecks closing the moment that dial returns — so the wait is one dial attempt, not an open-ended one. The publish half holds its mutex across a socket write the amqp client cannot interrupt, and the connection close is an RPC over that same socket; both end at once on a healthy broker and never on one that stopped reading. The window is sized to a full amqp handshake so every join completes for a dialer that carries a timeout and for a broker that answers; a dialer with none, or a broker that does not, would otherwise hang teardown for good, which is why the waits are bounded at all rather than open. */
 const closeJoinTimeout = 30 * time.Second
 
 /* Close joins the consume goroutine, then gives the publish half up to its publish timeout to finish. The publish join result and writesInFlight distinguish an outstanding write from a confirmation still within its budget. No AMQP operation runs under instance.mutex.
@@ -264,9 +256,7 @@ func (instance *Transport) Close() error {
     return instance.CloseWithContext(context.Background())
 }
 
-/* CloseWithContext is Close under a deadline its caller declares, and it is the door that makes the sum below an answer instead of a warning. The stretches are serial, so a caller with no deadline budgets for their sum: the consume join (closeJoinTimeout) plus the publish join (one publish timeout) plus either the owned connection's deadline (one publish timeout) or the caller-owned channel closes (closeJoinTimeout) — ninety seconds at the defaults, per transport, which is what an operator had to size a supervisor's termination grace against with no way to change it.
-
-   Under a deadline each stretch takes what is LEFT of it instead of its own constant, so the sum is the caller's figure however many stretches wedge, and a second transport closed after this one spends what this one did not. Measured against a broker that stopped reading, one wedged transport costs one stretch — thirty seconds — not the four-stretch sum, so the ninety is a ceiling rather than a bill. */
+/* CloseWithContext closes the transport under a shared caller deadline, clamping each serial operation to its own package ceiling. Without a deadline, the total ceiling is the sum of the consume join, publish join and connection or channel close budgets. A caller-owned connection is never closed. */
 func (instance *Transport) CloseWithContext(closeContext context.Context) error {
     instance.mutex.Lock()
     instance.closing = true
@@ -310,7 +300,7 @@ func (instance *Transport) CloseWithContext(closeContext context.Context) error 
 
     switch {
     case false == ownsConnection && false == publishJoined && true == writeInFlight:
-        /* a caller-owned connection with a wedged write cannot be cut from here, and a channel close over it would join the write in blocking; the channels die with the connection, by the owner's hand */
+
         closeErrs = append(closeErrs, exception.NewError(
             "amqp transport close left a publish write blocked on a caller-owned connection; the channels were not closed and end with that connection",
             map[string]any{"queue": instance.queue},
@@ -333,9 +323,8 @@ func ignoringAlreadyClosed(closeErr error) error {
     return closeErr
 }
 
-/* lockWithin takes the mutex unless the wait outlives the bound, and reports which. A publish holds its mutex across a socket write the amqp client cannot interrupt, so a teardown that joined the publish half unbounded would hang exactly on the write it exists to end; a join that fails is the measurement that the write is wedged. On failure the goroutine is left to take and release the mutex whenever the write returns, so the mutex is never left held by nobody. */
 func lockWithin(mutex *sync.Mutex, bound time.Duration) bool {
-    /* a mutex nobody holds is taken here, whatever the bound says. The bound is zero on every teardown whose budget an earlier component already spent, and a zero bound arms a timer that is ready at once, so the select below reported a publish half NOBODY was holding as a wedged write — measured 2000 times out of 2000. The question is asked before the goroutine is launched rather than inside it, because what a spent budget cannot wait for is that goroutine being scheduled: the non-blocking read of a channel a goroutine has not reached yet answers "not done" however done the work is. */
+
     if true == mutex.TryLock() {
         return true
     }
@@ -366,7 +355,6 @@ func lockWithin(mutex *sync.Mutex, bound time.Duration) bool {
     }
 }
 
-/* closeChannels closes the channels that are still open; a channel the broker or the connection already tore down answers ErrClosed, which is the state a close exists to reach. */
 func closeChannels(channels ...*amqp091.Channel) []error {
     var closeErrs []error
 
@@ -381,9 +369,8 @@ func closeChannels(channels ...*amqp091.Channel) []error {
     return closeErrs
 }
 
-/* closeChannelsWithin is closeChannels bounded: a channel close is an RPC over the connection's socket and observes no context, so on a connection the caller owns — the one teardown cannot cut — a broker that stops reading mid-close would otherwise hold teardown for as long as the socket does. Past the bound the closes are left to end when the socket does, and the bound is reported. */
 func closeChannelsWithin(bound time.Duration, channels ...*amqp091.Channel) []error {
-    /* a close with nothing to close cannot fail to return. closeChannels skips a nil channel, so a transport whose channels were never opened asks for no socket work at all — and it was answered with a fabricated "did not return within 0s" 2000 times out of 2000, because a spent budget makes the bound zero and a zero bound arms a timer that is ready before the goroutine below has been scheduled. Counted here rather than left to that goroutine, for exactly that reason. */
+
     openChannels := 0
 
     for _, channel := range channels {
@@ -402,7 +389,6 @@ func closeChannelsWithin(bound time.Duration, channels ...*amqp091.Channel) []er
         outcome <- closeChannels(channels...)
     }()
 
-    /* a close the caller gave NO time is not a close that FAILED, on this branch as on the owned one: the bound is zero on every teardown whose budget an earlier component already spent, and a zero bound arms a timer that is ready before the goroutine above has been scheduled, so a close that ends a millisecond later was reported as one that did not return — measured 10 times out of 10 over channels that were closed on their own within a hundred milliseconds. The closes are left to end when the socket does, which is what the report below says happens past the bound anyway; a bound that was POSITIVE and still ran out says something different and is reported. */
     if 0 >= bound {
         return nil
     }
@@ -414,7 +400,7 @@ func closeChannelsWithin(bound time.Duration, channels ...*amqp091.Channel) []er
     case closeErrs := <-outcome:
         return closeErrs
     case <-timer.C:
-        /* the closes and the timer can become ready in the same instant, and a select between two ready cases picks at random: an answer that exists is preferred over a bound that expired, so a close that finished is never reported as one that was abandoned */
+
         select {
         case closeErrs := <-outcome:
             return closeErrs
@@ -429,7 +415,6 @@ func closeChannelsWithin(bound time.Duration, channels ...*amqp091.Channel) []er
     }
 }
 
-/* the consume goroutine's own helpers (isClosing, resetConsumeChannel, ensureConsumeChannel on the reopen path) take instance.mutex, so the join must run with that mutex released or Close deadlocks against the goroutine it is waiting for. */
 func (instance *Transport) awaitConsumeLoopWithin(bound time.Duration) {
     joined := make(chan struct{})
 
@@ -445,7 +430,7 @@ func (instance *Transport) awaitConsumeLoopWithin(bound time.Duration) {
     select {
     case <-joined:
     case <-timer.C:
-        /* the waiter is left to finish on its own: no further Add can happen, since startConsumeLoop refuses once closing is set, so it ends as soon as the loop does */
+
     }
 }
 
@@ -506,7 +491,6 @@ func (instance *Transport) connect() (*amqp091.Connection, error) {
     return connection, nil
 }
 
-/* dialInterruptibly runs the caller-supplied dialer under the close signal, mirroring the backplane's dialWithContext: the dial used to be the one blocking stretch Close could not interrupt, so a dialer without its own timeout held teardown for the full closeJoinTimeout and the consume goroutine past it. A dial that completes after the interrupt is closed by the drain goroutine, so the late connection cannot leak. */
 func (instance *Transport) dialInterruptibly() (*amqp091.Connection, error) {
     type dialOutcome struct {
         connection *amqp091.Connection
@@ -548,7 +532,6 @@ func (instance *Transport) nackChannel(channel *amqp091.Channel, tag uint64, req
     return channel.Nack(tag, false, requeue)
 }
 
-/* drainPublishReturn removes every return currently queued on the channel, reporting the last one seen and whether any were drained. It drains the whole buffer rather than a single return so that an unroutable publish is still detected when more than one return has accumulated (and so a stale return from an earlier publish cannot be left behind to be misattributed to the next one). */
 func drainPublishReturn(returns <-chan amqp091.Return) (amqp091.Return, bool) {
     if nil == returns {
         return amqp091.Return{}, false
@@ -612,7 +595,6 @@ func (instance *Transport) buildPublishing(
         Body: body,
     }
 
-    /* carry a producer-assigned message id (for example the outbox row id) as the AMQP message id so a consumer can deduplicate redeliveries from an at-least-once producer. */
     if messageId, hasMessageId := melodymessagebus.MessageId(envelopeInstance); true == hasMessageId {
         publishing.MessageId = messageId
     }
@@ -631,25 +613,16 @@ func (instance *Transport) publish(
     return publishErr
 }
 
-/* publishDisposition says what a failed publish attempt allows. It carries TWO answers rather than the one bool it replaces, because the two sites that read it ask different questions and one publish answers them differently.
-
-   channelFaulted says the CHANNEL is what failed, so the cached channel is torn down and one immediate attempt is made on a fresh one. A broker-semantic verdict — an unroutable return, a nack — must never take that path, or the retry would silently re-drop the message.
-
-   furtherAttemptMayRecover says a caller that keeps trying has something to gain. That caller is publishRequeue, whose advanced retry counters exist only on this publishing, so an attempt abandoned abandons the accounting with it.
-
-   The publish that separated them is the one that ran out of budget waiting for its TURN behind the publishes ahead of it: it never touched the socket, so there is no channel to blame and tearing one down would demolish a channel this publish never reached — while the very condition that stopped it, the queue in front of it, is exactly what a later attempt can find gone. Under the single bool it answered NO to both, and a requeue spent one of its three attempts and dead-lettered a message nothing was wrong with. */
 type publishDisposition struct {
     channelFaulted           bool
     furtherAttemptMayRecover bool
 }
 
-/* publishOutcome is what the write goroutine hands back: the failure, if any, and what it allows. It is a package type rather than one declared inside publishOnce so the branch that resolves an EXPIRED write can be a door of its own — a branch reachable only when two events land in the same instant cannot be driven from outside, but it can be handed the state that instant produces. */
 type publishOutcome struct {
     disposition publishDisposition
     err         error
 }
 
-/* publishRecoverable is publish, additionally reporting whether a failure it returns is one a further attempt could still recover from. A caller that keeps trying (a requeue whose retry counters only exist on this publishing) needs that answer: retrying a channel fault is how the counters get through, while retrying a broker verdict only produces the same verdict on a fresh channel. */
 func (instance *Transport) publishRecoverable(
     ctx context.Context,
     exchange string,
@@ -661,7 +634,6 @@ func (instance *Transport) publishRecoverable(
         return false, nil
     }
 
-    /* a failure the CALLER's context explains is recoverable by nothing: the channel other publishers share did nothing wrong, so it is not torn down, and a retry against the same dead context could only fail the same way. */
     if nil != ctx.Err() {
         return false, publishErr
     }
@@ -670,7 +642,6 @@ func (instance *Transport) publishRecoverable(
         return false, publishErr
     }
 
-    /* a failure that is not the channel's gets no fresh channel and no immediate second attempt — but it still reports what it knows about a LATER one, which is where the turn timeout parts company with a broker verdict */
     if false == disposition.channelFaulted {
         return disposition.furtherAttemptMayRecover, publishErr
     }
@@ -685,11 +656,6 @@ func (instance *Transport) publishRecoverable(
     return true == retryDisposition.furtherAttemptMayRecover && true == instance.publishRetryable(), retryErr
 }
 
-/* the channel runs in publisher-confirm mode and the publish is serialized with its confirmation wait: a message is reported sent only after the broker acked it and no basic.return arrived, so republish-then-ack cannot drop a message the broker silently discarded (reject-publish policy, deleted queue).
-
-   The write runs on its own goroutine and is waited for under the publish timeout, because the amqp client discards the context it is handed for it and holds the channel and connection send locks across the blocking socket write — and its own shutdown takes the channel lock before it closes the socket, so a peer that stops reading leaves the write, every later write, every close and the client's heartbeat teardown blocked behind one another with nothing to break the ring but a deadline on the socket. The publish mutex is taken INSIDE the goroutine, so a caller that gave up on a wedged write is not itself parked on the mutex that write still holds.
-
-   THREE intervals are bounded here, each with the publish timeout and each with its own answer, because they fail for different reasons and only one of them means the socket is wedged: the wait for this publish's TURN, which the serialization above imposes and which says nothing about the socket; the WRITE, which is the one stretch a blocked peer holds; and the CONFIRMATION, which the caller's context does not bound on any path melody publishes from — the http kernel attaches no deadline — and which used to run unbounded under the publish mutex, so one broker that stopped acking parked every later send behind this one. A caller that gave up while still queued marks the publish as abandoned under the same lock the goroutine takes its turn under, so the message it was told was not sent is not published a moment later by a goroutine nobody is reading any more. */
 func (instance *Transport) publishOnce(
     ctx context.Context,
     exchange string,
@@ -698,7 +664,7 @@ func (instance *Transport) publishOnce(
 ) (*amqp091.Channel, publishDisposition, error) {
     channel, returns, channelErr := instance.ensurePublishChannel()
     if nil != channelErr {
-        /* a refusal that names an earlier blocked write is not a channel fault: the one retry would meet the same refusal, and the reset before it would tear down a channel this publish never reached. It is not worth a later attempt either, which is what separates it from the turn timeout below: the write it names is blocked on a connection this transport cannot cut, so every attempt until that write returns meets this same refusal. */
+
         recoverable := false == errors.Is(channelErr, errPublishTimedOut)
 
         return nil, publishDisposition{channelFaulted: recoverable, furtherAttemptMayRecover: recoverable}, channelErr
@@ -735,7 +701,7 @@ func (instance *Transport) publishOnce(
 
         acked, waitErr := confirmation.WaitContext(confirmationContext)
         if nil != waitErr {
-            /* an outcome this transport's own budget cut short is AMBIGUOUS — the message is on the wire and the broker may still accept it — so it is not retried automatically, which would publish it twice; a wait the channel's death ended is a channel fault, as it always was */
+
             confirmationRetryable := true
             if nil == ctx.Err() && true == errors.Is(waitErr, context.DeadlineExceeded) {
                 confirmationRetryable = false
@@ -746,7 +712,6 @@ func (instance *Transport) publishOnce(
             return
         }
 
-        /* an unroutable return and a nack are the broker's verdict on the message, not a channel fault: they must never be retried, or the retry would silently re-drop the message on a fresh channel */
         if returned, wasReturned := drainPublishReturn(returns); true == wasReturned {
             outcome <- publishOutcome{err: exception.NewError(
                 "amqp publish was returned as unroutable",
@@ -779,7 +744,7 @@ func (instance *Transport) publishOnce(
     case <-turn.started():
     case <-turnTimer.C:
         if true == turn.abandon() {
-            /* the socket was never touched by this publish, so nothing here may mark the transport wedged or name a blocked write: what ran out was this send's wait for its turn behind the publishes ahead of it. Nothing is faulted and nothing is torn down — and a further attempt is exactly what this failure is worth, because the queue it waited behind is the one condition a later attempt can find gone. */
+
             return channel, publishDisposition{furtherAttemptMayRecover: true}, exception.NewError(
                 "amqp publish did not reach the socket within the publish timeout while earlier publishes on this transport still held it",
                 map[string]any{"queue": instance.queue, "exchange": exchange, "routingKey": routingKey, "publishTimeout": budget.String()},
@@ -805,11 +770,6 @@ func (instance *Transport) publishOnce(
     }
 }
 
-/* resolveExpiredWrite is the branch the write budget expiring leads to, and its first act is to ask whether the write has ALREADY returned.
-
-   The budget expiring and the write ending are two events with no order between them, so this branch is reached for a write that finished a moment earlier as readily as for one that is blocked — and the abandon below is wrong for a publish that is done: it cuts a healthy connection, reports a fault to a caller whose message the broker has, and names a write nobody is waiting on. The sister branch at the top of publishOnce has always re-read writeStarted under the turn lock for exactly this reason; this half went without one, so the window was not the instant of a tie but the whole stretch from the timer firing to the abandon reaching the socket.
-
-   The check cannot make the window vanish — a write that returns one instruction later is genuinely still in flight when it is read — and it is not meant to: what it removes is the stretch, which is the part a caller can lose a message to. It is a door rather than two inline lines because a branch reached only when two events land in the same instant cannot be driven from outside, while a door can be handed the state that instant produces. */
 func (instance *Transport) resolveExpiredWrite(
     exchange string,
     routingKey string,
@@ -827,7 +787,6 @@ func (instance *Transport) resolveExpiredWrite(
     return instance.abandonWedgedPublish(exchange, routingKey, written)
 }
 
-/* abandonWedgedPublish is the timed-out branch of publishOnce. On a connection this transport dialed itself the socket is cut with a deadline already passed, which is the one door the amqp client leaves open once its send locks are held: the blocked write returns, the client's shutdown completes, and the one retry redials through connect — the fault is retryable, exactly like any other channel fault. On a caller-owned connection nothing here may cut the socket, so the transport marks itself wedged until the write returns — by the owner's hand, or never — and refuses every send in between at once rather than parking one goroutine per send behind the held mutex; that fault is not retryable, since the retry would meet the same refusal. */
 func (instance *Transport) abandonWedgedPublish(exchange string, routingKey string, written <-chan struct{}) (publishDisposition, error) {
     instance.mutex.Lock()
     closing := instance.closing
@@ -845,7 +804,6 @@ func (instance *Transport) abandonWedgedPublish(exchange string, routingKey stri
         "publishTimeout": instance.resolvedPublishTimeout().String(),
     }
 
-    /* a write still blocked while Close runs is Close's to end — it cuts an owned connection itself and cannot cut another's — so nothing is marked here and nothing is retried */
     if true == closing {
         return publishDisposition{}, exception.NewError(
             "amqp publish did not return within the publish timeout while the transport was closing",
@@ -857,7 +815,6 @@ func (instance *Transport) abandonWedgedPublish(exchange string, routingKey stri
     if true == ownsConnection && nil != connection {
         _ = connection.CloseDeadline(time.Now())
 
-        /* the write returns as soon as the deadline lands on the socket; the wait is bounded all the same, because a Dial-injected conn that ignores deadlines is not this transport's to reason about */
         timer := time.NewTimer(closeJoinTimeout)
         defer timer.Stop()
 
@@ -896,7 +853,6 @@ func (instance *Transport) resolvedPublishTimeout() time.Duration {
     return instance.publishTimeout
 }
 
-/* closes the cached publish channel only when it is still the one the caller failed on, so a concurrent publisher that already reopened a healthy channel is not torn down. A nil failed channel (the caller never obtained one, e.g. ensurePublishChannel itself failed) identifies no specific channel, so it is a no-op rather than closing whatever channel is currently cached — a stale/closed cached channel is re-detected by ensurePublishChannel's IsClosed guard on the next publish. */
 func (instance *Transport) resetPublishChannel(failed *amqp091.Channel) {
     instance.mutex.Lock()
 
@@ -911,11 +867,9 @@ func (instance *Transport) resetPublishChannel(failed *amqp091.Channel) {
     instance.publishReturns = nil
     instance.mutex.Unlock()
 
-    /* the close is an RPC over the connection's socket and runs with the mutex RELEASED: a peer that stopped reading holds it for as long as the socket does, and every reader of this mutex — isClosing, the publish path, teardown — would wait on that write */
     detached.Close()
 }
 
-/* resetConsumeChannel closes the cached consume channel only when it is still the one the caller lost, mirroring resetPublishChannel: without the identity guard, two Receive loops on one transport could repeatedly tear down each other's freshly reopened subscriptions — each teardown bumping the generation and silently voiding the acks of deliveries already handed to workers, which the broker then redelivers as duplicates. A nil failed channel identifies no specific channel and is a no-op. */
 func (instance *Transport) resetConsumeChannel(failed *amqp091.Channel) {
     instance.mutex.Lock()
 
@@ -932,7 +886,6 @@ func (instance *Transport) resetConsumeChannel(failed *amqp091.Channel) {
     detached.Close()
 }
 
-/* subscribe returns the channel even when Consume refuses, so the retry path can reset exactly the channel it failed on rather than whatever is cached by then. The generation travels beside the channel all the way to the consume loop, so the deliveries of a subscription are always stamped with the generation of the channel that carried them. */
 func (instance *Transport) subscribe() (*amqp091.Channel, uint64, <-chan amqp091.Delivery, error) {
     channel, generation, channelErr := instance.ensureConsumeChannel()
     if nil != channelErr {
@@ -947,7 +900,6 @@ func (instance *Transport) subscribe() (*amqp091.Channel, uint64, <-chan amqp091
     return channel, generation, deliveries, nil
 }
 
-/* the Add and the Done live together here so consumeLoop carries no precondition a caller must remember, and Close joins whatever this started. The Add is taken under the mutex Close sets closing under, so a loop can never be started after Close observed the count — which would both escape the join and race the Wait already in flight. */
 func (instance *Transport) startConsumeLoop(
     runtimeInstance runtimecontract.Runtime,
     channel *amqp091.Channel,
@@ -1042,12 +994,10 @@ func (instance *Transport) consumeLoop(
     }
 }
 
-/* maxDelayExpirationMilliseconds caps a delayed-retry message's expiration. The AMQP per-message expiration is a string RabbitMQ parses as a 32-bit millisecond count, so a delay whose milliseconds exceed this would wrap and could collapse to a tiny ttl — expiring the message almost immediately instead of after the intended delay. ~49.7 days is far beyond any realistic retry delay. */
 const maxDelayExpirationMilliseconds = int64(math.MaxUint32)
 
 var defaultDelayBuckets = []time.Duration{5 * time.Second, 1 * time.Minute, 10 * time.Minute, 1 * time.Hour}
 
-/* maxDelayBuckets bounds the delay-tier count so a misconfiguration cannot declare an unbounded number of broker queues. */
 const maxDelayBuckets = 8
 
 func resolveDelayBuckets(buckets []time.Duration) []time.Duration {
@@ -1083,7 +1033,6 @@ func resolveDelayBuckets(buckets []time.Duration) []time.Duration {
             )
         }
 
-        /* the queue-level ttl is clamped at the wire's 32-bit millisecond limit and the queue NAME carries the unclamped milliseconds, so a bucket past the limit would deliver ~49.7 days early under a name promising the full delay; a sub-millisecond bucket truncates to a "0ms" name and a 1ms ttl, collapsing distinct declared tiers onto one queue. Both are misconfigurations the constructor refuses, the way it already refuses a descending pair. */
         if time.Millisecond > bucket || bucket.Milliseconds() > maxDelayExpirationMilliseconds {
             exception.Panic(
                 exception.NewError(
@@ -1104,7 +1053,6 @@ func resolveDelayBuckets(buckets []time.Duration) []time.Duration {
     return resolved
 }
 
-/* delayBucketFor picks the largest bucket not exceeding the requested delay; a delay below the smallest bucket returns false so the caller keeps the legacy per-message-ttl queue (bounded head-of-line waiting) instead of over-delaying the message. */
 func delayBucketFor(buckets []time.Duration, delay time.Duration) (time.Duration, bool) {
     selected := time.Duration(0)
     found := false
@@ -1209,10 +1157,10 @@ func (instance *Transport) republish(
         exchange = ""
 
         if bucket, hasBucket := delayBucketFor(instance.delayBuckets, delayStamp.Delay); true == hasBucket {
-            /* the bucket queue carries a queue-level ttl, so no per-message expiration: every message in it shares the same ttl and the head-of-queue expiry cannot stall a short delay behind a long one */
+
             routingKey = delayBucketQueueName(instance.queue, bucket)
         } else {
-            /* below the smallest bucket the per-message expiration stays precise; head-of-line waiting here is bounded by the smallest bucket */
+
             expiration = strconv.FormatInt(delayExpirationMilliseconds(delayStamp.Delay), 10)
             routingKey = instance.queue + ".delay"
         }
@@ -1220,7 +1168,7 @@ func (instance *Transport) republish(
 
     publishing, buildErr := instance.buildPublishing(envelopeInstance, expiration)
     if nil != buildErr {
-        /* a serialization failure is deterministic: the same envelope builds the same way on the next attempt, so retrying it only delays the same verdict */
+
         return instance.rejectUncountedRequeue(runtimeInstance, channel, stamp, "amqp requeue re-publish build failed", buildErr)
     }
 
@@ -1235,14 +1183,8 @@ func (instance *Transport) republish(
     return instance.ackChannel(channel, stamp.Tag)
 }
 
-/* republishAttemptCount bounds how many times a requeue is re-published carrying the counters it has just advanced.
-
-   Only the re-publish carries them: RedeliveryStamp and DeadLetterAttemptStamp are advanced on the Go envelope and reach the broker as x-redelivery-count and x-dead-letter-attempt-count on the new publishing, while the delivery already on the channel still holds the counts the message arrived with. Anything that abandons the re-publish therefore abandons the accounting too, which is why a transient publish failure is worth attempting again rather than giving up on the first one — a channel or connection that flaps is the ordinary cause, and the next attempt carries the true counts through.
-
-   Three is where the two costs cross. Each attempt is itself a publish, which already retries once on a freshly opened channel, so three attempts are up to six publishes across up to three channels, spaced by the reconnect backoff — room enough to ride out a channel loss and a reconnect. Beyond that the failure is no longer transient (a queue full under a reject-publish policy, a route that no longer exists), and every further attempt holds a worker on one message while the broker's answer stays the same. */
 const republishAttemptCount = 3
 
-/* publishRequeue publishes a requeue, retrying a bounded number of times while the failure is one a further attempt could recover from. It stops early on everything else: a broker verdict on the message, a transport that is closing, a runtime context that is done, or a connection no dialer can bring back. */
 func (instance *Transport) publishRequeue(
     runtimeInstance runtimecontract.Runtime,
     exchange string,
@@ -1281,11 +1223,6 @@ func (instance *Transport) publishRequeue(
     return lastErr
 }
 
-/* rejectUncountedRequeue ends a requeue whose advanced counters could never reach the broker.
-
-   Handing the ORIGINAL delivery back with basic.nack and requeue set returns it bearing the counts it arrived with, because the increments only ever existed on the envelope the failed publish was carrying. The consumer then re-reads the same x-redelivery-count and x-dead-letter-attempt-count on the next delivery, MaxRetries and MaxDeadLetterAttempts are measured against the same numbers forever, and — with no DelayStamp surviving either — the message spins at full speed and never dead-letters. The delivery is rejected instead, so a queue that carries a dead-letter exchange routes the message there for an operator to see; a queue configured without one drops it, the same verdict a message that fails to decode already receives.
-
-   A transport that is shutting down is the one failure that is not the message's fault, so nothing is rejected there: the delivery is left unacked and the broker redelivers it whole when the channel closes, resuming from the counts persisted in its headers instead of losing the message to a deploy. A delivery whose generation has already moved on is gone for the same reason and needs no verdict either. */
 func (instance *Transport) rejectUncountedRequeue(
     runtimeInstance runtimecontract.Runtime,
     channel *amqp091.Channel,
@@ -1299,9 +1236,6 @@ func (instance *Transport) rejectUncountedRequeue(
         return cause
     }
 
-    /* where a dead-letter queue exists, refusing without requeue routes the delivery to it: the message is kept, an operator can see it, and the counters it lost are recoverable from there. Where one does NOT exist, the same refusal DESTROYS the message — the broker has nowhere to route it and discards it — so the transport is handed back to the caller having silently turned at-least-once into at-most-once, and it happens under exactly the conditions that produce these failures in the first place: a max-length policy with overflow=reject-publish, an unroutable return, a queue that filled up. A message is worth more than an accurate redelivery count, so it goes back on the queue.
-
-       What is given up by requeuing is the accounting, and that is real: the counters advanced for this attempt travel only on the re-publish that just failed, so the delivery returns carrying the counts it arrived with and a failure that persists will be seen again at the same count. Configure a dead-letter queue to bound that; without one there is nothing to bound it WITH, and dropping is not a bound, it is a loss. */
     requeue := requeueOnRejectedRepublish(instance.deadLetter)
 
     rejectMessage := message + ", dead-lettering rather than returning it uncounted"
@@ -1318,7 +1252,6 @@ func (instance *Transport) rejectUncountedRequeue(
     return instance.nackChannel(channel, stamp.Tag, requeue)
 }
 
-/* requeueOnRejectedRepublish decides what a refused re-publish does with the delivery still on the channel. It is a named predicate rather than an inline negation because it is the transport's at-least-once guarantee in one line, and a broker is needed to observe it any other way: without a dead-letter exchange bound to the queue, refusing without requeue does not park the message anywhere, it discards it. */
 func requeueOnRejectedRepublish(deadLetter bool) bool {
     return false == deadLetter
 }
@@ -1327,7 +1260,6 @@ func (instance *Transport) consumeChannelForAck() (*amqp091.Channel, uint64) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    /* treat a non-nil but already-closed consume channel as absent, matching ensureConsumeChannel and ensurePublishChannel: when the broker closes the channel between delivery and Ack/Nack but before the consume loop resets it, returning the closed channel would attempt an Ack on it; returning nil instead surfaces a clean "channel not open" error and lets the message redeliver on the next generation. */
     if nil != instance.consumeChannel && true == instance.consumeChannel.IsClosed() {
         return nil, instance.consumeGeneration
     }
@@ -1342,7 +1274,6 @@ func (instance *Transport) isClosing() bool {
     return instance.closing
 }
 
-/* connectionAlive reports whether the transport currently holds a usable connection: non-nil and not marked closed. A live connection can still open a fresh channel even when no dialer is configured, so a channel-only loss on it (queue deleted, basic.cancel, a PRECONDITION_FAILED that closes only the channel) is recoverable rather than terminal. */
 func (instance *Transport) connectionAlive() bool {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -1350,7 +1281,6 @@ func (instance *Transport) connectionAlive() bool {
     return nil != instance.connection && false == instance.connection.IsClosed()
 }
 
-/* publishRetryable reports whether a failed publish is worth one retry on a fresh channel: a closing transport never retries; otherwise a dialer can reconnect, or a live static connection (no dialer) can open a new channel on the same live connection. Only a no-dialer transport whose connection is gone gives up without retrying, since a fresh channel can never be opened there. */
 func (instance *Transport) publishRetryable() bool {
     if true == instance.isClosing() {
         return false
@@ -1363,7 +1293,6 @@ func (instance *Transport) publishRetryable() bool {
     return instance.connectionAlive()
 }
 
-/* a lost consume channel on a live static connection (no dialer) is recoverable: connect() still hands back the live connection and a fresh channel can be opened on it, mirroring server_sent_event_backplane.go liveConnection. Only give up when the connection itself is gone and no dialer can redial — there a re-subscribe can never recover. */
 func (instance *Transport) subscribeRetryable() bool {
     if true == instance.isClosing() {
         return false
@@ -1383,7 +1312,6 @@ func (instance *Transport) currentGeneration() uint64 {
     return instance.consumeGeneration
 }
 
-/* the generation stamped on every delivery is the one handed down with the channel that carried it, never the transport-wide counter read here. A channel closed by the broker hands its buffered deliveries out as it tears down — the amqp client's buffer goroutine sees the closed signal and a waiting receiver at the same time and picks between them at random — so this loop can still be draining generation G's queue after a reconnect installed G+1. Stamping those with the counter makes them match consumeChannelForAck, the ack guard passes, and the ack lands on the FRESH channel under a delivery tag that restarts at one there: it acknowledges an unrelated in-flight message, or the broker refuses the precondition and kills the healthy channel. */
 func (instance *Transport) forwardDeliveries(
     runtimeInstance runtimecontract.Runtime,
     channel *amqp091.Channel,
@@ -1429,7 +1357,6 @@ func (instance *Transport) forwardDeliveries(
     }
 }
 
-/* messageTypeHeader reads the type header in both spellings an AMQP field table can carry a string in: a long string, which this transport writes, and a byte array, which a foreign producer — a library that encodes strings as the table's 'x' type, a management-ui republish — writes and the client decodes as []byte; read through an exact string assertion, such a delivery was dead-lettered as untyped in silence. Any other form is absent. */
 func messageTypeHeader(headers amqp091.Table) string {
     switch value := headers[headerMessageType].(type) {
     case string:
@@ -1480,7 +1407,6 @@ func (instance *Transport) decode(delivery amqp091.Delivery, generation uint64) 
         stamps = append(stamps, melodymessagebus.DeadLetterAttemptStamp{Count: count})
     }
 
-    /* round-trip a producer-assigned message id so a consumer can read it for deduplication and, just as importantly, so an application-driven requeue (Nack with requeue, including the delayed-retry path) re-publishes through buildPublishing under the SAME message id instead of an empty one. */
     if "" != delivery.MessageId {
         stamps = append(stamps, melodymessagebus.MessageIdStamp{MessageId: delivery.MessageId})
     }
@@ -1496,7 +1422,6 @@ func deadLetterAttemptCountFromHeader(headers amqp091.Table) int {
     return intFromHeader(headers, headerDeadLetterAttemptCount)
 }
 
-/* intFromHeader clamps into [0, math.MaxInt] instead of converting blindly: a foreign producer (or a management-UI republish) can put any number in these headers, and an out-of-range uint64 or float used to WRAP to a negative int — read as count zero by every caller's `0 < count` guard, silently resetting the retry accounting and bypassing the caps built on it. Clamping high keeps the fail-closed direction: an absurd count dead-letters, it does not restart the counter. */
 func intFromHeader(headers amqp091.Table, key string) int {
     raw, exists := headers[key]
     if false == exists {
@@ -1553,7 +1478,6 @@ func clampHeaderUnsigned(value uint64) int {
     return int(value)
 }
 
-/* a NaN compares false against everything, so both range checks fall through and it reads as zero — absence, the only honest reading of a number that is not one. */
 func clampHeaderFloat(value float64) int {
     if false == (0 <= value) {
         return 0
@@ -1626,7 +1550,6 @@ func (instance *Transport) ensurePublishChannel() (*amqp091.Channel, <-chan amqp
         cachedReturns := instance.publishReturns
         instance.mutex.Unlock()
 
-        /* the channel this call opened and lost the race with is closed with the mutex RELEASED: the close is an RPC over the socket, and holding the mutex across it would park every reader of it behind a peer that stopped reading */
         channel.Close()
 
         return cached, cachedReturns, nil
@@ -1639,7 +1562,6 @@ func (instance *Transport) ensurePublishChannel() (*amqp091.Channel, <-chan amqp
     return channel, returns, nil
 }
 
-/* ensureConsumeChannel answers the generation belonging to the channel it answers, read under the same mutex hold that read the channel. The counter is transport-wide and only ever moves forward, so a later read of it is never the generation of an older channel — it is the generation of a NEWER one, and that is the direction that defeats the ack guard, which passes exactly when a stamp matches the current generation. The pairing therefore travels with the channel from here rather than being recovered from the counter afterwards. */
 func (instance *Transport) ensureConsumeChannel() (*amqp091.Channel, uint64, error) {
     instance.mutex.Lock()
     closing := instance.closing
@@ -1748,7 +1670,6 @@ func (instance *Transport) declareTopology(channel *amqp091.Channel) error {
         return exception.NewError("amqp delay queue declare failed", map[string]any{"queue": delayQueue}, delayQueueErr)
     }
 
-    /* one queue per delay bucket, each with a queue-level ttl and a dead-letter route back to the main queue: RabbitMQ expires only the head of a queue, so heterogeneous per-message ttls in one queue stall short delays behind long ones (up to the retry policy's MaxDelay); uniform-ttl buckets remove that while the legacy per-message-ttl queue above keeps serving delays below the smallest bucket (and drains messages parked by older deployments). */
     for _, bucket := range instance.delayBuckets {
         bucketQueue := delayBucketQueueName(instance.queue, bucket)
 
@@ -1792,7 +1713,6 @@ func (instance *Transport) logError(runtimeInstance runtimecontract.Runtime, mes
     logger.Error(message, exception.LogContext(err))
 }
 
-/* closeOwnedConnectionWithin cuts a wedged write immediately; otherwise it grants the smaller of the remaining caller budget and the handshake bound. A deliberately zero-budget handshake is not reported as a failure, but a cut write or an exhausted positive allowance is. */
 func closeOwnedConnectionWithin(closeContext context.Context, connection *amqp091.Connection, handshakeBound time.Duration, cutWedgedWrite bool) error {
     closeStretch := time.Duration(0)
     if false == cutWedgedWrite {
@@ -1807,7 +1727,6 @@ func closeOwnedConnectionWithin(closeContext context.Context, connection *amqp09
     return nil
 }
 
-/* teardownStretchWithin returns the smaller of the package bound and the remaining caller deadline, recalculated for each serial teardown stretch. Without a deadline it returns the package bound; cancellation or an expired deadline returns zero. Zero skips waiting without skipping resource cleanup. */
 func teardownStretchWithin(closeContext context.Context, packageBound time.Duration) time.Duration {
     if nil != closeContext.Err() {
         return 0

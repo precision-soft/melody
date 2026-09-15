@@ -62,7 +62,6 @@ func GetHandler(storage *melodyawss3.Storage) melodyhttpcontract.Handler {
     }
 }
 
-/* queryString reads a query parameter as a string, handling the bag's []string storage. */
 func queryString(request melodyhttpcontract.Request, name string) string {
     value, exists := request.Query().Get(name)
     if false == exists {

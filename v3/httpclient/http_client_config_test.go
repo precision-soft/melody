@@ -27,7 +27,6 @@ func TestHttpClientConfigHeaders_ReturnsDefensiveCopy(t *testing.T) {
     }
 }
 
-/* the constructor is one of the four doors that write into a header map applied with Set; storing the raw spelling there left the canonicalizing setters guarding a map that was already ambiguous. */
 func TestNewHttpClientConfig_HeadersAreStoredCanonicalized(t *testing.T) {
     config := NewHttpClientConfig("", 0, map[string]string{"x-api-key": "secret"})
 
@@ -36,7 +35,6 @@ func TestNewHttpClientConfig_HeadersAreStoredCanonicalized(t *testing.T) {
     }
 }
 
-/* RFC 3986 resolution merges a relative target over the LAST SEGMENT of the base path: a base spelled without its trailing slash loses that segment on every request, as a 404 in production. The refusal moves the mistake to the wiring site. */
 func TestNewHttpClientConfig_ABaseUrlPathWithoutATrailingSlashIsRefused(t *testing.T) {
     defer func() {
         recovered := recover()
@@ -56,7 +54,6 @@ func TestNewHttpClientConfig_ABaseUrlPathWithoutATrailingSlashIsRefused(t *testi
     NewHttpClientConfig("https://api.example.com/v1", 0, nil)
 }
 
-/* a base with an empty path has no segment for the merge to cut, and an empty base url means no base at all; neither is a mistake. A base that does not parse cannot be judged at this door — buildUrl reports it on the first request. */
 func TestNewHttpClientConfig_ABaseWithAnEmptyPathOrNoBaseAtAllIsLegal(t *testing.T) {
     for _, legalBaseUrl := range []string{"", "https://api.example.com", "https://api.example.com/", "https://api.example.com/v1/", ":"} {
         config := NewHttpClientConfig(legalBaseUrl, 0, nil)

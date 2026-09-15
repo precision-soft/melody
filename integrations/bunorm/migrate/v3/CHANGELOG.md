@@ -27,6 +27,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Restore the host runner option after overlapping migration commands finish in any order; a completed command no longer leaves its writer installed. Explicit host-default replacements survive older command completion.
+
 - Text output failures propagate to the command result; custom command prefixes are reflected in create usage diagnostics.
 
 - Escape control characters in migration names and directions on every progress line. Failed lock release now identifies the unlock operation and its recovery precondition; JSON uses `migrate.unlock_failed` with structured action details while preserving the original migration failure.

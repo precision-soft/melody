@@ -141,7 +141,6 @@ func TestHasBalancedBrackets_CharClassMembersAreLiteral(t *testing.T) {
         }
     }
 
-    /* a ']' with no open class is a literal in RE2 ("]a" matches "]a"), so it is not a syntax error; the genuinely unbalanced forms are the openers left open and the closers with no opener */
     unbalanced := []string{"^[a", "a{2", "(a", "a)"}
     for _, value := range unbalanced {
         if true == hasBalancedBrackets(value) {
@@ -185,14 +184,12 @@ func TestParseValidationTag_ParenthesizedRegexWithCommaInsideGroup(t *testing.T)
     }
 }
 
-/* a ']' outside a character class is a literal in RE2, so a pattern carrying one is valid. */
 func TestParseValidationTag_RegexWithLiteralClosingBracketIsAccepted(t *testing.T) {
     if _, err := parseValidationTag(`regex(pattern=^a]b$)`); nil != err {
         t.Fatalf("expected a regex with a literal ']' to parse, got: %v", err)
     }
 }
 
-/* a POSIX named class ([[:alpha:]]) carries its own ']' inside the bracket expression, and that inner ']' is not the class close. */
 func TestSplitByTopLevelComma_PosixNamedClassKeepsInClassComma(t *testing.T) {
     parts := splitByTopLevelComma("regex=[[:alpha:],]")
     if 1 != len(parts) {
@@ -364,7 +361,6 @@ func TestSplitByCommaOutsideRegexMeta_BothQuoteCharactersHoldACommaTogether(t *t
         t.Fatalf("unexpected first member: %q", singleQuoted[0])
     }
 
-    /* a quote of the other kind inside a quoted section is a literal, so it must not close the section it sits in */
     mixed := splitByCommaOutsideRegexMeta(`message="it's one, two",max=5`)
     if 2 != len(mixed) {
         t.Fatalf("expected the apostrophe inside the double-quoted value to stay literal, got %#v", mixed)

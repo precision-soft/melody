@@ -93,7 +93,7 @@ func (instance *ExclusiveCommand) Run(
     if false == ran {
         logger := logging.LoggerFromRuntime(runtimeInstance)
         if nil != logger {
-            /* RunExclusive answers (false, nil) for two different events, and the exit-zero design makes this log line the single source of truth for "did not run" — so the two must not share one message: a SIGTERM that lands during the acquire is a shutdown, and attributing it to another instance sends an operator hunting for a peer that does not exist. */
+
             skipMessage := "command skipped: an exclusive run is already in progress on another instance"
             if nil != runtimeInstance.Context().Err() {
                 skipMessage = "command skipped: shutdown was requested before the lock was acquired"

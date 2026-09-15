@@ -33,17 +33,7 @@ func FindCurrencyByCode(currencies []*entity.Currency, code string) (*entity.Cur
     return nil, false
 }
 
-/* ConvertAmount restates an amount quoted in one currency in another. Both rates are quoted against one
-   base — one unit of that base costs Rate units of the currency — so dividing by the source rate and
-   multiplying by the target's cancels the base, and neither this function nor its caller ever has to know
-   what the base was.
-
-   The source rate is judged even though the write doors already refuse a non-positive one, and the reason is
-   the row rather than the code: a rate this application did not write — a volume carried over from before
-   the column existed, a value edited by hand — divides an amount by zero and hands the reader an infinity
-   the serializer cannot render, or flips the sign of every price it touches. That is true of the example
-   whatever its database has been through, so the guard belongs on the read path as well as on the write
-   one. */
+/* ConvertAmount calculates amount / sourceRate * targetRate for rates against a common base. It rejects invalid rates on the read path, including values inserted outside the service. */
 func ConvertAmount(amount float64, from *entity.Currency, to *entity.Currency) (float64, error) {
     if nil == from || nil == to {
         return 0, exception.NewError("a conversion needs both currencies", nil, nil)
@@ -62,9 +52,6 @@ func ConvertAmount(amount float64, from *entity.Currency, to *entity.Currency) (
         )
     }
 
-    /* rounded to the cent the way every price this application renders is, at the door that produces the
-       number rather than at the one that prints it, so a converted price and a quoted one are the same kind
-       of value wherever they are read */
     converted := amount / from.Rate * to.Rate
 
     rounded := math.Round(converted*100.0) / 100.0
@@ -74,9 +61,6 @@ func ConvertAmount(amount float64, from *entity.Currency, to *entity.Currency) (
     return rounded, nil
 }
 
-/* foldCurrencyCode is the one spelling of what makes two codes the same name. Trim then upper-case, through
-   the standard library rather than a hand-rolled loop: an ISO 4217 code is three ASCII letters, so there is
-   no case-folding subtlety to get right and nothing to reimplement. */
 func foldCurrencyCode(code string) string {
     return strings.ToUpper(strings.TrimSpace(code))
 }

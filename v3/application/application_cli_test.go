@@ -46,7 +46,6 @@ func (instance *exitCodedProbeApplicationCommand) Run(
     return exception.NewExitError(7, exception.NewError("command asked for an exit code", nil, nil))
 }
 
-/* the tree's own guard for the inert exit handler lives beside the constructor that installs it, in cli/root_test.go, and it builds its own tree — so it would still pass if runCli stopped using that constructor. This one drives the real runCli. */
 func TestRunCli_InstallsTheExitErrHandlerOnTheRootCommand(t *testing.T) {
     exitedWith := -1
     originalExiter := urfavecli.OsExiter
@@ -83,7 +82,6 @@ func TestRunCli_InstallsTheExitErrHandlerOnTheRootCommand(t *testing.T) {
     }
 }
 
-/* The unbounded default cache is a hazard only in a process that stays up: a command builds its map, runs and takes it away with it. A cli invocation must therefore see no cache warning at all, or every command a scheduler runs prints advice its lifetime makes meaningless. This drives the real runCli against the same wiring the http test warns from. */
 func TestRunCli_DoesNotWarnAboutTheUnboundedDefaultCacheBackend(t *testing.T) {
     logger := &warningRecordingLogger{}
 
@@ -108,7 +106,6 @@ func TestRunCli_DoesNotWarnAboutTheUnboundedDefaultCacheBackend(t *testing.T) {
     }
 }
 
-/* three normalization points must agree on a command's name — the boot registration, the cli library's trimmed registration, and the suggestion gate's trimmed input. A padded name judged raw at boot registered under a spelling no argv can produce: the suggestion table blocked every invocation of a command that exists. */
 func TestRegisterCliCommand_JudgesTheNameTrimmed(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
 
@@ -119,7 +116,6 @@ func TestRegisterCliCommand_JudgesTheNameTrimmed(t *testing.T) {
         t.Fatalf("expected the padded duplicate to be recorded as a collision, got %d", len(applicationInstance.bootCollisions))
     }
 
-    /* the reversed order exercises the other side of the comparison: the already-registered name is the padded one */
     reversedApplication := newCollisionTestApplication(t)
 
     reversedApplication.RegisterCliCommand(&namedTestCommand{name: "app:reversed "})
@@ -134,7 +130,6 @@ func TestRegisterCliCommand_JudgesTheNameTrimmed(t *testing.T) {
     }, "cli command name may not be empty")
 }
 
-/* the whole path: a command whose Name carries padding must still be reachable from argv — the suggestion gate compares the trimmed input against the trimmed name and the cli library dispatches the trimmed registration. */
 func TestRunCli_DispatchesACommandWhoseNameCarriesPadding(t *testing.T) {
     applicationInstance := NewApplication(
         context.Background(),
@@ -162,7 +157,6 @@ func TestRunCli_DispatchesACommandWhoseNameCarriesPadding(t *testing.T) {
     }
 }
 
-/* paddedNameProbeCommand wraps a command and pads its name, the shape the trimming exists for */
 type paddedNameProbeCommand struct {
     inner clicontract.Command
 }
@@ -186,9 +180,7 @@ func (instance *paddedNameProbeCommand) Run(
     return instance.inner.Run(runtimeInstance, commandContext)
 }
 
-/* the suggestion refusal travels unmarked so the exit path writes it to the application log: the rendered table lives only on stderr, and a run refused here used to be invisible to anything reading the log file */
 func TestSuggestCliCommand_ReturnsTheRefusalUnmarked(t *testing.T) {
-    /* the input is a substring of the available name, so this refusal travels through the matches-found branch, not the zero-match one */
     suggestErr := suggestCliCommand(
         []string{"app", "product"},
         []commandSuggestion{
@@ -212,7 +204,6 @@ func TestSuggestCliCommand_ReturnsTheRefusalUnmarked(t *testing.T) {
     }
 }
 
-/* the zero-match refusal is the same contract: unmarked, exit-coded, the full command list rendered on stderr */
 func TestSuggestCliCommand_ReturnsTheZeroMatchRefusalUnmarked(t *testing.T) {
     suggestErr := suggestCliCommand(
         []string{"app", "nosuchthing"},
@@ -234,7 +225,6 @@ func TestSuggestCliCommand_ReturnsTheZeroMatchRefusalUnmarked(t *testing.T) {
     }
 }
 
-/* the command name comes from argv, so a carriage return or an escape sequence embedded there could repaint the header as another verdict in a captured log — the header escapes it the way the run banners and the suggestion table already do */
 func TestPrintCliCommandNotFoundHeader_EscapesTheArgvDerivedName(t *testing.T) {
     buffer := &bytes.Buffer{}
 
@@ -252,7 +242,6 @@ func TestPrintCliCommandNotFoundHeader_EscapesTheArgvDerivedName(t *testing.T) {
     }
 }
 
-/* the short verbosity flags are rewritten before the cli library parses anything, because the library has no notion of a repeated letter: -vv means level two here and nothing at all there. Everything else must pass through untouched — a lone dash, a long flag, a short flag that merely starts with v, and everything after the end-of-options terminator, which belongs to the command and not to the runtime. */
 func TestNormalizeCliVerbosityArguments_RewritesOnlyTheRepeatedVerbosityFlag(t *testing.T) {
     cases := []struct {
         name      string
@@ -318,7 +307,6 @@ func TestNormalizeCliVerbosityArguments_RewritesOnlyTheRepeatedVerbosityFlag(t *
     }
 }
 
-/* typedNilProbeCommand is handed over as a typed nil, which a plain comparison accepts and command.Name() three lines below dereferences */
 type typedNilProbeCommand struct{}
 
 func (instance *typedNilProbeCommand) Name() string {
@@ -380,7 +368,6 @@ func (instance *processContextProbeCliCommand) Run(runtimeInstance runtimecontra
     return nil
 }
 
-/* the console counterpart of the request context the http kernel installs: the run's identity is resolvable from the run scope, instead of being computed for the logger and thrown away */
 func TestRunCli_InstallsTheProcessContextIntoTheRunScope(t *testing.T) {
     applicationInstance := NewApplication(
         context.Background(),
@@ -483,7 +470,6 @@ func (instance *providedKeyProbeCliCommand) Run(runtimeInstance runtimecontract.
     return nil
 }
 
-/* the console decorator is the trusted-caller one: the generated id keeps the correlation whole on every record, and what the command wrote under the key survives verbatim beside it, under the neutral suffix rather than the request path's accusation */
 func TestRunCli_TheRunLoggerPreservesACallerProcessIdUnderProvided(t *testing.T) {
     baseLogger := &contextCapturingCliLogger{}
 

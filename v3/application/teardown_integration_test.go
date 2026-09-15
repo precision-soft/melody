@@ -27,7 +27,6 @@ func (instance *applicationTeardownProbe) CloseWithContext(ctx context.Context) 
     return instance.close(ctx)
 }
 
-/* Exercise Boot, the configured budget, CLI Run and its deferred teardown together. */
 func TestRun_UsesConfiguredBudgetAndArmedDependencyWaves(t *testing.T) {
     originalArguments := os.Args
     os.Args = []string{"probe", "probe:serving"}

@@ -55,7 +55,7 @@ func RegisterTransports(registrar ServiceRegistrar, transports map[string]messag
     registrar.RegisterService(
         ServiceTransports,
         func(resolver containercontract.Resolver) (map[string]messagebuscontract.Transport, error) {
-            /* resolving the closer through this provider records the dependency edge the teardown orders by: the map's consumers close first, the closer — and with it the transports — after them */
+
             container.MustFromResolver[*TransportsCloser](resolver, ServiceTransportsCloser)
 
             return transports, nil
@@ -72,18 +72,18 @@ func (instance *TransportsCloser) Close() error {
     return instance.CloseWithContext(context.Background())
 }
 
-/* CloseWithContext is Close under the teardown's own deadline, handed to every transport that can take one. The transports are closed SERIALLY, in sorted name order, so they share the deadline rather than each getting a copy of it: two brokers that have both stopped reading cost the caller one budget between them, not two, which is the figure a supervisor's termination grace is measured against. The one that closes first therefore spends what the second does not get, and the failure map names them both. */
+/* CloseWithContext closes transports serially in sorted name order, passing the shared caller deadline to context-aware transports. Earlier closes spend budget unavailable to later ones; failures identify each affected transport. */
 func (instance *TransportsCloser) CloseWithContext(closeContext context.Context) error {
     names := make([]string, 0, len(instance.transports))
     for name := range instance.transports {
         names = append(names, name)
     }
-    /* deterministic order: map iteration would close the transports in a different order on every run */
+
     sort.Strings(names)
 
     var closeErrs []error
     for _, name := range names {
-        /* a nil entry is a wiring mistake, and it must not cost the transports that come after it. The container recovers a panicking Close and records it, so the process survives — but the panic still abandons THIS loop, and everything sorted later than the offending name would never be closed at all, its broker connection living as long as the process while the record blames one service. The amqp module already refuses a nil transport at its own registration door; this map is handed in whole by the composition root, which has no such door. */
+
         if true == isNilTransport(instance.transports[name]) {
             closeErrs = append(
                 closeErrs,
@@ -104,12 +104,10 @@ func (instance *TransportsCloser) CloseWithContext(closeContext context.Context)
     return errors.Join(closeErrs...)
 }
 
-/* isNilTransport reads the map entry through the typed-nil door rather than a plain nil comparison: a composition root that builds a transport conditionally hands back a non-nil interface around a nil pointer, which passes `nil ==` and then dereferences inside Close. */
 func isNilTransport(transport messagebuscontract.Transport) bool {
     return true == internal.IsNilInterface(transport)
 }
 
-/* closeOne contains a panicking transport Close as a returned failure, so the teardown of the transports that sort after it still happens. The container's own teardown makes the same decision one level up for the same reason — but its boundary is around the CLOSER, so a panic inside this loop is recorded once and the rest of the map is silently skipped. The recovered value travels as the cause, not as a stringified context slot, so an error-shaped panic keeps its own context and cause chain in the record. */
 func (instance *TransportsCloser) closeOne(closeContext context.Context, name string) (closeErr error) {
     defer func() {
         recoveredValue := recover()
@@ -126,7 +124,6 @@ func (instance *TransportsCloser) closeOne(closeContext context.Context, name st
 
     transport := instance.transports[name]
 
-    /* the transport's own context-taking door is preferred when it carries one, which is what makes the deadline reach the amqp stretches rather than stopping at this loop */
     contextCloseable, isContextCloseable := transport.(interface {
         CloseWithContext(closeContext context.Context) error
     })

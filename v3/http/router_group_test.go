@@ -9,7 +9,6 @@ import (
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/* the guard exists to replace the raw dereference with a refusal that names the pattern, so an unqualified recover is satisfied by the very crash it was written to remove. */
 func TestRouteGroup_PanicsWhenRouterIsNil(t *testing.T) {
     group := NewRouteGroup(nil, "/api")
 
@@ -24,7 +23,6 @@ func TestRouteGroup_PanicsWhenRouterIsNil(t *testing.T) {
     }, "router is nil")
 }
 
-/* the nil options refusal sits below the nil router one and reads the same to an unqualified recover; the message is what says which of the two answered. */
 func TestRouteGroup_PanicsWhenOptionsIsNil(t *testing.T) {
     router := NewRouter()
     group := router.Group("/api")

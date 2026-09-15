@@ -68,7 +68,6 @@ func NewTotpSecondFactorAuthenticator(config TotpSecondFactorAuthenticatorConfig
         clockInstance = clock.NewSystemClock()
     }
 
-    /* default to an in-process replay guard (as the HMAC source does) so an accepted code cannot be replayed within its validity window out of the box; multi-instance deployments supply a shared guard. */
     var replayGuard securitycontract.NonceGuard = config.ReplayGuard
     if true == internal.IsNilInterface(replayGuard) {
         replayGuard = NewMemoryNonceGuardWithClock(clockInstance)
@@ -131,11 +130,9 @@ func (instance *TotpSecondFactorAuthenticator) Authenticate(request httpcontract
         return token, nil
     }
 
-    /* no TOTP code and no accepted recovery code: the second factor is still outstanding, so surface a pending token the application uses to prompt for one rather than letting the primary credential stand on its own. */
     return NewTwoFactorPendingToken(token), nil
 }
 
-/* authenticateWithTotpCode verifies a supplied TOTP code and, on success, enforces single use through the replay guard before authenticating. A wrong or replayed code yields a pending token so the caller re-prompts. */
 func (instance *TotpSecondFactorAuthenticator) authenticateWithTotpCode(
     request httpcontract.Request,
     token securitycontract.Token,
@@ -160,7 +157,6 @@ func (instance *TotpSecondFactorAuthenticator) authenticateWithTotpCode(
     return token, nil
 }
 
-/* tryRecoveryCode redeems a single-use recovery code when one is supplied on the recovery header and the enrollment store implements TwoFactorRecoveryStore. It reports whether a code was accepted (and thereby consumed): a false with a nil error means no recovery code was supplied, the store does not support recovery, or the supplied code was not a currently-unused one. Single use is enforced atomically by the store, so no replay-guard entry is recorded here. */
 func (instance *TotpSecondFactorAuthenticator) tryRecoveryCode(
     request httpcontract.Request,
     token securitycontract.Token,
@@ -187,9 +183,6 @@ func (instance *TotpSecondFactorAuthenticator) tryRecoveryCode(
     return redeemed, nil
 }
 
-/* codeAlreadyUsed records an accepted code through the replay guard and reports whether it had already been used within its validity window. The constructor always installs a guard (an in-process one by default), so this relies on that invariant rather than tolerating a nil guard — a struct built by literal without one would fail loudly here instead of silently disabling replay protection.
-
-   The nonce keys on the NORMALIZED code, exactly as Verify compared it: "123 456" and "123456" are the same code to Verify, so keying on the raw header value would let a captured code be replayed by re-spacing it. */
 func (instance *TotpSecondFactorAuthenticator) codeAlreadyUsed(
     request httpcontract.Request,
     userIdentifier string,
@@ -206,13 +199,12 @@ func (instance *TotpSecondFactorAuthenticator) codeAlreadyUsed(
 }
 
 func (instance *TotpSecondFactorAuthenticator) codeValidityWindow() time.Duration {
-    /* resolve through the totp package so period and skew match exactly the values Verify accepts — in particular the maxSkew clamp: a raw read of a misconfigured (large) skew would remember an accepted code for far longer than it stays verifiable, pinning the entry in an in-process guard effectively forever while Verify only honors the clamped window. */
+
     resolved := instance.totpConfig.Resolve()
 
     period := uint64(resolved.Period)
     skew := uint64(resolved.Skew)
 
-    /* the window must cover the whole span a code verifies — (2*skew+1) periods — so a replayed code stays blocked for as long as it would still be accepted. Compute in uint64 and saturate to the maximum duration on any overflow: a pathological period that wrapped time.Duration to a non-positive value would make the replay guard skip recording (a NonceGuard ignores a ttl <= 0) and silently disable replay protection. */
     const maxSeconds = uint64(math.MaxInt64 / int64(time.Second))
     if skew > (maxSeconds-1)/2 {
         return time.Duration(math.MaxInt64)

@@ -15,7 +15,6 @@ import (
 )
 
 
-/* Temporary tables shadow only this connection's example tables; permanent application rows are untouched. */
 func TestBunIdentifiersAreExactOnMySQL(t *testing.T) {
     if "1" != os.Getenv("MELODY_EXAMPLE_SQL_ID_TEST") {
         t.Skip("requires the local example MySQL schema")

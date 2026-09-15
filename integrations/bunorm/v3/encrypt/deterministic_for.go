@@ -16,12 +16,12 @@ func (instance EncryptedDeterministicStringFor[R]) String() string {
     return redactedPlaceholder
 }
 
-/* GoString redacts under the %#v verb too: fmt reaches for GoStringer there and would otherwise print the underlying string literal, so a struct dumped with %#v in a log line or a test failure would carry the plaintext. */
+/* GoString returns the redacted representation. */
 func (instance EncryptedDeterministicStringFor[R]) GoString() string {
     return redactedPlaceholder
 }
 
-/* Format redacts under the numeric verbs (%d %o %b %c %U) that fmt routes through neither Stringer nor GoStringer, which would otherwise print the underlying string through the badverb form and carry the plaintext; every verb is answered with the same redacted rendering, for the reason on EncryptedString.Format. */
+/* Format redacts values when fmt invokes the Formatter interface. */
 func (instance EncryptedDeterministicStringFor[R]) Format(state fmt.State, verb rune) {
     _, _ = state.Write([]byte(redactedPlaceholder))
 }
@@ -36,16 +36,7 @@ func (instance EncryptedDeterministicStringFor[R]) MarshalJSON() ([]byte, error)
 
 /* UnmarshalJSON refuses the redaction placeholder MarshalJSON writes and decodes any other string, for the reason on EncryptedString.UnmarshalJSON. */
 func (instance *EncryptedDeterministicStringFor[R]) UnmarshalJSON(data []byte) error {
-    decoded, present, decodeErr := decodeEncryptedJson(data, fmt.Sprintf("%T", *instance))
-    if nil != decodeErr {
-        return decodeErr
-    }
-
-    if true == present {
-        *instance = EncryptedDeterministicStringFor[R](decoded)
-    }
-
-    return nil
+    return unmarshalEncryptedJson(instance, data)
 }
 
 func (instance EncryptedDeterministicStringFor[R]) Value() (driver.Value, error) {

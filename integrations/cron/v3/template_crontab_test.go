@@ -1011,12 +1011,10 @@ func TestCrontabTemplatesRenderTheirOwnershipMarker(t *testing.T) {
             t.Fatalf("expected %q to name its ownership marker", template.Name())
         }
 
-        /* the marker is read back from the same door the rendering is compared against, so it is pinned to the constant as well: an empty marker would satisfy every containment check while making the template unprunable, which is the fail-safe rather than the contract */
         if CrontabOwnershipMarker != ownedTemplate.OwnershipMarker() {
             t.Fatalf("expected %q to name the crontab marker, got %q", template.Name(), ownedTemplate.OwnershipMarker())
         }
 
-        /* the k8s builtin joins the loop on this major, so the entry-carrying render hands it the image its manifest validation demands */
         options := RenderOptions{}
         if TemplateNameK8s == template.Name() {
             options.Image = "registry.example/app:1"

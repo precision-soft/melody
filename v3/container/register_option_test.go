@@ -61,7 +61,6 @@ func TestRegisterOptions_EachMovesExactlyItsOwnField(t *testing.T) {
     }
 }
 
-/* TestWithTeardownDependency_ComposesAcrossCallsAndArguments pins the promise the option's documentation makes about composing: two declarations add to one list rather than the second replacing the first, and one call naming several services keeps all of them in the order they were written. A replacing fold would silently drop the first collaborator, which is the failure no ordering test can see — the edge that is missing simply never constrains anything. */
 func TestWithTeardownDependency_ComposesAcrossCallsAndArguments(t *testing.T) {
     option := applyRegisterServiceOptions([]containercontract.RegisterOption{
         WithTeardownDependency("service.logger", "service.metrics"),

@@ -13,10 +13,8 @@ import (
 
 const defaultNonceGuardPrefix = "melody:nonce"
 
-/* defaultNonceGuardCallTimeout is the budget of one round trip, the one the token store on the same authentication path gives its Lookup. A guard round trip is one Lua script or one EXISTS, so a healthy store answers in a few milliseconds; the budget only has to sit under the client's own connection timeout, which is what bounded the record before this option existed — nothing bounded the existence check at all. */
 const defaultNonceGuardCallTimeout = time.Second
 
-/* nonceRememberScript records a nonce only if it is not already present, with a millisecond expiry, in a single atomic round-trip. It returns 0 when the nonce was newly recorded (first use) and 1 when it already existed (a replay), so the guard never has a check-then-set race between instances. */
 var nonceRememberScript = rueidis.NewLuaScript(`if redis.call("set", KEYS[1], "1", "NX", "PX", tonumber(ARGV[1])) then return 0 else return 1 end`)
 
 /* NewNonceGuard returns a Redis-backed securitycontract.NonceGuard. Because the recorded nonces live in Redis, a nonce replayed against any application instance is detected, which the in-process guard cannot do. */
@@ -78,7 +76,6 @@ type NonceGuard struct {
     callTimeout time.Duration
 }
 
-/* callContext caps the request context with the call timeout: context.WithTimeout keeps whichever deadline is earlier, so a request that already carries a tighter deadline still wins, while a request whose context has no deadline — as melody's http kernel leaves it — is bounded here rather than held for the client's connection timeout on the record, or retried against an unresponsive store for as long as the client's retry policy allows on the existence check. */
 func (instance *NonceGuard) callContext(runtimeInstance runtimecontract.Runtime) (context.Context, context.CancelFunc) {
     return context.WithTimeout(runtimeInstance.Context(), instance.callTimeout)
 }
@@ -92,7 +89,7 @@ func (instance *NonceGuard) Remember(
     defer cancel()
 
     if 0 >= ttl {
-        /* a non-positive ttl carries no lifetime to record, but the NonceGuard contract still reports whether the nonce is currently recorded — mirror MemoryNonceGuard, which performs the existence check before its own ttl short-circuit, with a read-only EXISTS rather than silently reporting the nonce as fresh (which would let a replay through at the acceptance-window edge). EXISTS is a read-only command, which the client retries on a fresh connection for as long as its context allows, so the call timeout is the only thing that ends this check against a store that stopped answering. */
+
         existsResult := instance.client.Do(
             callContext,
             instance.client.B().Exists().Key(instance.key(nonce)).Build(),

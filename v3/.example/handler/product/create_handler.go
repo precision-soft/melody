@@ -46,7 +46,6 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
     }
 }
 
-/* the cause travels with the refusal, so the responder answers through ApiRefusal rather than ApiError: a validation failure is rendered field by field, and every other refusal keeps its generic message with the decoder's own diagnosis in the debug-gated context instead of dying at this boundary. Answering the generic message alone left a form with nothing to attach to an input — the framework hands the per-field collection to this responder precisely so it need not be destroyed here, and a door that installs no responder at all has it rendered by the kernel's exception listener. Returning the response rather than nothing is what keeps the refusal a refusal — a responder that answers nothing leaves the framework's own refusal standing, and returning a nil pair used to be read as a handler that answered nothing at all and served an empty 204 for a rejected write. */
 func apiJsonErrorResponder(
     runtimeInstance melodyruntimecontract.Runtime,
     request melodyhttpcontract.Request,
@@ -57,9 +56,9 @@ func apiJsonErrorResponder(
     return presenter.ApiRefusal(runtimeInstance, request, status, message, cause), nil
 }
 
-/* bound by the openapi descriptor in config; keep it exported */
+
 type CreateRequest struct {
-    /* the id becomes a cache key component and the backend grammar refuses spaces and newlines inside a key, so a spelling the grammar refuses is turned away here instead of landing in the database and failing every later cache write. The pattern is written in the subset OPENAPI.md requires — this tag reaches the published document as a pattern facet, and OpenAPI 3.0 prescribes ECMA-262, which has no POSIX class — so \S carries what the frozen majors spell as [[:space:]]. */
+    /* Id must satisfy cache-key grammar. Its validation pattern uses the regular-expression subset supported by the published OpenAPI document. */
     Id          string  `json:"id" validate:"max=60,regex=^\\S+$"`
     Name        string  `json:"name" validate:"notBlank,min=2,max=120"`
     Description string  `json:"description" validate:"notBlank,min=1,max=40"`

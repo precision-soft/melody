@@ -114,7 +114,6 @@ func TestValidateContexts_AcceptsDistinctContexts(t *testing.T) {
     })
 }
 
-/* ManagerName is per-context by design and does NOT inherit the base pin, while its sibling fields — CommandPrefix, ManagerFlagName, ManagerRegistryServiceId — still cascade from it. */
 func TestEffectiveOptions_ManagerNameDoesNotInheritTheBasePin(t *testing.T) {
     resolved := effectiveOptions(
         ContextConfig{Name: "analytics"},

@@ -45,7 +45,6 @@ func NewSerializerManager(serializersByMime map[string]serializercontract.Serial
             )
         }
 
-        /* Reject normalized-key collisions so map iteration cannot choose the serializer. */
         occupiedRawKey, occupied := rawKeysByNormalizedMime[normalizedMimeKey]
         if true == occupied {
             conflictingKeys := []string{occupiedRawKey, mimeKey}
@@ -89,12 +88,10 @@ func (instance *SerializerManager) Get(mime string) (serializercontract.Serializ
     return serializerInstance, true
 }
 
-/* The default is JSON when available, otherwise the first MIME type in lexical order. */
 func (instance *SerializerManager) defaultSerializer() (serializercontract.Serializer, bool) {
     return instance.defaultSerializerExcluding(nil)
 }
 
-/* Explicit refusals also exclude a type from the default selection. */
 func (instance *SerializerManager) defaultSerializerExcluding(refusedMimes map[string]struct{}) (serializercontract.Serializer, bool) {
     if _, refused := refusedMimes[MimeApplicationJson]; false == refused {
         serializerInstance, exists := instance.serializersByMime[MimeApplicationJson]
@@ -148,7 +145,6 @@ func (instance *SerializerManager) ResolveByAcceptHeader(acceptHeader string) (s
 
     sort.Strings(candidateMimes)
 
-    /* The most specific matching range determines quality, including q=0. Unmatched types remain eligible for fallback. */
     selectedMime := ""
     selectedQuality := 0.0
     selectedSpecificity := 0
@@ -181,7 +177,6 @@ func (instance *SerializerManager) ResolveByAcceptHeader(acceptHeader string) (s
             continue
         }
 
-        /* Equal quality follows the JSON-first default, then lexical order. */
         if quality == selectedQuality && specificity == selectedSpecificity && MimeApplicationJson == candidateMime {
             selectedMime = candidateMime
         }

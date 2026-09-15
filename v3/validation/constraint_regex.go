@@ -88,7 +88,6 @@ func (instance *Regex) WithParams(params map[string]string) (validationcontract.
         )
     }
 
-    /* the empty pattern compiles to a regular expression that matches every string, so it is refused rather than armed; a pattern meant to match everything says so explicitly */
     if "" == patternString {
         return nil, exception.NewError(
             "regex constraint requires a non-empty pattern",

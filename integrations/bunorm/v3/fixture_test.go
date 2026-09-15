@@ -1,14 +1,13 @@
 package bunorm
 
 import (
+    "errors"
+    "github.com/uptrace/bun"
     "sync"
 
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
-/* capturingDiagnosticLogger is the journal double the routing probes read, shared by the tests of the diagnostics sink and of the registry door that replaces it. Every method DEREFERENCES the receiver, which is what lets a typed-nil guard die: a double tolerating a nil receiver would pass with the guard removed.
-
-   It lives here rather than beside either of them because it is the shared material of two mirrors, and the layout rule keeps that in one fixture. */
 type capturingDiagnosticLogger struct {
     mutex   sync.Mutex
     records []capturedDiagnosticRecord
@@ -52,4 +51,17 @@ func (instance *capturingDiagnosticLogger) captured() []capturedDiagnosticRecord
     defer instance.mutex.Unlock()
 
     return append([]capturedDiagnosticRecord{}, instance.records...)
+}
+
+type delayedDiagnosticProvider struct {
+    entered chan struct{}
+    resume chan struct{}
+}
+
+func (instance *delayedDiagnosticProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    RouteDiagnostics(logger)
+    close(instance.entered)
+    <-instance.resume
+    RouteDiagnostics(logger)
+    return nil, errors.New("delayed open refused")
 }

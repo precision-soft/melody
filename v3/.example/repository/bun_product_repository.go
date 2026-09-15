@@ -14,7 +14,6 @@ import (
     "github.com/uptrace/bun"
 )
 
-/* productRow is the catalogue as the database holds it. The domain entity stays free of storage concerns because it is cached through a gob serializer, so the mapping lives here, beside the repository that performs it. */
 type productRow struct {
     bun.BaseModel `bun:"table:melody_example_v3_product,alias:product"`
 
@@ -61,13 +60,11 @@ func newBunProductRepository(storage *persistence.CatalogStorage) *bunProductRep
     return &bunProductRepository{database: storage.Database(), tracker: storage.Tracker()}
 }
 
-/* bunProductRepository keeps the catalogue in the database and its history beside it. Every write goes through the audit tracker, which performs the write and records the field-level change in one transaction: an entry that failed to persist rolls the change back with it, so the catalogue never holds a version of a row the trail cannot account for. */
 type bunProductRepository struct {
     database *bun.DB
     tracker  *melodyaudit.Tracker
 }
 
-/* auditContext names whoever is behind the write for the trail. The actor is put on the context by the service layer, which is the last place that still knows which request it is serving; a write with nobody on the context is a scheduled or console one, and the trail says so rather than leaving the column empty. */
 func auditContext(ctx context.Context) context.Context {
     actor := persistence.ActorFromContext(ctx)
     if "" == actor {
@@ -77,7 +74,6 @@ func auditContext(ctx context.Context) context.Context {
     return melodyaudit.WithActor(ctx, actor)
 }
 
-/* seedIfEmpty writes the opening catalogue into an empty table; the table itself belongs to the migration set the constructor has already applied. The insert ignores duplicate keys because several example applications may reach an empty table at the same time, and losing that race is not a failure. */
 func (instance *bunProductRepository) seedIfEmpty(ctx context.Context) error {
     count, countErr := instance.database.
         NewSelect().
@@ -139,7 +135,6 @@ func (instance *bunProductRepository) FindById(ctx context.Context, id string) (
     return row.toEntity(), true, nil
 }
 
-/* findRowById separates a row that is not there from a query that could not run: only sql.ErrNoRows is an answer, and every other failure is reported. */
 func (instance *bunProductRepository) findRowById(ctx context.Context, id string) (*productRow, bool, error) {
     row := &productRow{}
 
@@ -223,7 +218,6 @@ func (instance *bunProductRepository) Update(ctx context.Context, product *entit
         product.UpdatedAt = time.Now()
     }
 
-    /* the row is known to be there — it was just read — so the tracker's own load of the before-image cannot come up empty; what it adds is that the recorded before-image is the row as the DATABASE held it rather than whatever the caller passed */
     updateErr := instance.tracker.Update(auditContext(ctx), persistence.AuditEntityProduct, id, newProductRow(product))
     if nil != updateErr {
         return false, updateErr
@@ -238,7 +232,6 @@ func (instance *bunProductRepository) DeleteById(ctx context.Context, id string)
         return false, fmt.Errorf("id is required")
     }
 
-    /* the tracker deletes by primary key and treats a row that was not there as nothing to do, so whether there was one is asked first: the caller's answer distinguishes a delete that happened from a request for a product that does not exist, and a silent no-op cannot tell them apart */
     _, found, findErr := instance.findRowById(ctx, normalizedId)
     if nil != findErr {
         return false, findErr

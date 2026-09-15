@@ -35,7 +35,6 @@ func TestNewGenerateCommandIdentity(t *testing.T) {
         t.Fatalf("Description() should not be empty")
     }
 
-    /* the command carries its 12 own flags plus the standard set every melody command accepts — without the standard set, the framework's -v/-vv rewrite into --verbosity killed exactly this command with "flag provided but not defined" */
     flags := command.Flags()
     expectedFlagCount := 12 + len(output.StandardFlags())
     if expectedFlagCount != len(flags) {
@@ -2025,7 +2024,6 @@ func TestRunRendersK8sTemplateWithImageAndNamespaceFlags(t *testing.T) {
 }
 
 func TestRunK8sTemplateRejectsResourceNameCollisionAcrossDestinationFiles(t *testing.T) {
-    /* the namespace is one global flag, so two commands that sanitize to the same resource name collide on kubectl apply even when split across distinct destination files; Render only sees one destination, so the CLI must reject the clash across the whole set */
     tempDir := t.TempDir()
     defaultOutputPath := filepath.Join(tempDir, "cron.yaml")
 
@@ -2094,7 +2092,6 @@ func TestRunK8sTemplateWarnsWhenHeartbeatConfigured(t *testing.T) {
 }
 
 func TestRunK8sTemplateIgnoresUnmatchedHeartbeatDestination(t *testing.T) {
-    /* the k8s template declares heartbeat options ignored (it never emits a heartbeat CronJob), so a --heartbeat-destination that matches no written destination must not hard-fail the command the way it does for the crontab template */
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "cron.yaml")
     heartbeatPath := filepath.Join(tempDir, "heartbeat.crontab")
@@ -2135,7 +2132,6 @@ func TestRunK8sTemplateIgnoresUnmatchedHeartbeatDestination(t *testing.T) {
 }
 
 func TestRunK8sTemplateWithHeartbeatAndEmptyConfigurationWritesNothing(t *testing.T) {
-    /* heartbeat is crontab-only; with the k8s template an empty Configuration must not synthesize a heartbeat-only destination, so no file is written and the missing image is never demanded */
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "cron.yaml")
     heartbeatPath := filepath.Join(tempDir, "heartbeat.crontab")
@@ -2275,7 +2271,6 @@ func TestRunK8sTemplateSuffixesNamesForMultiInstanceCommand(t *testing.T) {
 }
 
 func TestRunK8sTemplateWithHeartbeatAndNoUserSucceedsAndWarns(t *testing.T) {
-    /* the k8s template ignores the heartbeat, so a heartbeat-configured k8s run with no --user must not fail with ErrHeartbeatUserMissing (a crontab-only requirement); it succeeds and warns that the heartbeat is dropped */
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "cron.yaml")
     heartbeatPath := filepath.Join(tempDir, "heartbeat.crontab")
@@ -2310,7 +2305,6 @@ func TestRunK8sTemplateWithHeartbeatAndNoUserSucceedsAndWarns(t *testing.T) {
 }
 
 func TestRunK8sTemplateSucceedsWithoutLogsDir(t *testing.T) {
-    /* the k8s template logs to container stdout and never reads Entry.LogPath, so a k8s run must not inherit the crontab-only logs-dir requirement (ErrNoLogsDir) */
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "cron.yaml")
 
@@ -2556,7 +2550,6 @@ func TestAtomicWriteFileRollsBackTemporaryOnRenameFailure(t *testing.T) {
     }
 }
 
-/* The crontab-no-user dialect renders no user column at all, so the heartbeat line needs no user to place. Demanding --user turned a valid busybox-crond configuration into a hard error. */
 func TestRunCrontabNoUserTemplateWithHeartbeatAndNoUserSucceeds(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")
@@ -2790,7 +2783,6 @@ func TestGenerateCommand_JsonFormatRendersOneDocument(t *testing.T) {
 func TestGenerateCommand_JsonNamesTheDestinationsWrittenBeforeTheFailure(t *testing.T) {
     tempDir := t.TempDir()
 
-    /* the second destination cannot be created: its parent is a file, so MkdirAll fails after the first has been written */
     blockingFile := filepath.Join(tempDir, "blocked")
     if writeErr := os.WriteFile(blockingFile, []byte("not a directory"), 0o644); nil != writeErr {
         t.Fatalf("failed to place the blocking file: %v", writeErr)
@@ -2897,7 +2889,6 @@ func TestGenerateCommand_JsonReportsTheFailureAndWhatWasAlreadyWritten(t *testin
         t.Fatalf("expected the cause to name the missing logs-dir, got %q", document.Error.Cause.Message)
     }
 
-    /* the document used to flatten every failure to that one sentence — details and cause.details were nil on every run alike — while the journal, over the same value at the same instant, carried the context and the whole chain under it */
     if nil == document.Error.Details {
         t.Fatalf("expected the failure details to be an object, got %q", stdout)
     }
@@ -2910,12 +2901,10 @@ func TestGenerateCommand_JsonReportsTheFailureAndWhatWasAlreadyWritten(t *testin
         t.Fatalf("expected the chain to start at the failure itself, got %v", document.Error.Cause.Details["chain"])
     }
 
-    /* the writes key stays an array on a failed run: a consumer keying on it must not meet a null */
     if nil == document.Data.Writes {
         t.Fatalf("expected an empty writes array on a failed run, got %q", stdout)
     }
 
-    /* the success path must stay exactly what it was, or the guard above would pass for a command that reports every run as failed */
     successStdout, successErr := runGenerateCommand(
         t,
         []clicontract.Command{
@@ -3397,7 +3386,6 @@ func (instance *noUserColumnTemplate) RendersUserColumn() bool {
     return false
 }
 
-/* the dropped-heartbeat warning must reach the machine document too: in json mode the cli prints nothing else, so a warning that only ever went to the text branch would leave the pipeline reading a clean document about a setting the run just ignored */
 func TestRunK8sHeartbeatWarningReachesTheJsonEnvelope(t *testing.T) {
     tempDir := t.TempDir()
 
@@ -3442,7 +3430,6 @@ func TestRunK8sHeartbeatWarningReachesTheJsonEnvelope(t *testing.T) {
     }
 }
 
-/* the malformed opt-in fails under every template — only the derived path is the k8s template's to skip. A typo hidden by the template choice would resurface as a missing liveness line the day the deployment switches back to crontab, with nothing ever having said the parameter was broken. */
 func TestRun_RefusesAMalformedHeartbeatOptInUnderK8s(t *testing.T) {
     tempDir := t.TempDir()
 
@@ -3479,7 +3466,6 @@ func TestRun_RefusesAMalformedHeartbeatOptInUnderK8s(t *testing.T) {
     }
 }
 
-/* the k8s template ignores the heartbeat, so a well-formed opt-in derives no path for it: deriving one would only arm the dropped-heartbeat warning on a setting nobody made for this dialect */
 func TestRunK8sTemplateDoesNotAutoDeriveAHeartbeat(t *testing.T) {
     tempDir := t.TempDir()
 
@@ -3511,7 +3497,6 @@ func TestRunK8sTemplateDoesNotAutoDeriveAHeartbeat(t *testing.T) {
     }
 }
 
-/* the emptying is irreversible, so ownership must not be a substring question: a file that QUOTES the marker inside a longer line, or past the leading lines, is not one this generator wrote — and a custom dialect that suffixes the builtin marker (the ansible example) declares files of its own, which a substring match claimed for the builtin run */
 
 func TestGenerateCommand_PruneLeavesABystanderFileThatQuotesTheMarker(t *testing.T) {
     tempDir := t.TempDir()
@@ -3552,7 +3537,6 @@ func TestGenerateCommand_PruneLeavesABystanderFileThatQuotesTheMarker(t *testing
     }
 }
 
-/* the binary is the fourth path-shaped value the generator resolves, and its parameter follows the rule of the other three: relative from the configuration means under the project, relative from the flag means where the shell is. */
 func TestRunAnchorsARelativeBinaryParameterAtTheProjectDirectory(t *testing.T) {
     projectDirectory := t.TempDir()
     workingDirectory := t.TempDir()

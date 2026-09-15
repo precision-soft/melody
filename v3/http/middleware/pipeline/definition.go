@@ -17,7 +17,7 @@ type HttpMiddlewareDefinition struct {
     factory             HttpMiddlewareFactory
     replaceExisting     bool
     allowDuplicates     bool
-    /* the function behind the definition, captured at registration so a description needs no factory run; empty when the registrar did not declare it */
+
     functionName string
 }
 
@@ -37,7 +37,7 @@ func NewHttpMiddlewareDefinition(
     replaceExisting bool,
     allowDuplicates bool,
 ) *HttpMiddlewareDefinition {
-    /* the constraint lists are copied, not retained: the builder reads them at every Build and Describe, so a registrant reusing its slice across two definitions — or mutating it after registration — silently rewrote the ordering constraints the pipeline was registered under. The build report copies its lists for the same reason. */
+
     return &HttpMiddlewareDefinition{
         name:                name,
         priority:            priority,

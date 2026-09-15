@@ -44,7 +44,6 @@ func TestAuthenticationDoesNotReuseCachedCredentials(t *testing.T) {
 }
 
 
-/* a name longer than the user table holds is a name this application does not have: answered as absent on the anonymous login door, where a cache key over the backends' 1024-byte ceiling — 1000 ASCII bytes, or 167 two-byte runes once the escape has tripled them — was refused by the cache and surfaced as a 500 */
 func TestUserService_FindByUsernameAnswersANameTheTableCannotHoldAsAbsent(t *testing.T) {
     backend := melodycache.NewInMemoryBackend(0, time.Minute, melodyclock.NewSystemClock())
     manager := melodycache.NewManagerOwningBackend(backend, examplecache.NewGobSerializer())

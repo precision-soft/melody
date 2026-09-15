@@ -6,6 +6,7 @@ import (
     "io"
     "os"
     "strings"
+    "sync"
     "sync/atomic"
 
     "github.com/precision-soft/melody/v3/cli"
@@ -29,15 +30,12 @@ func DefaultRunnerOption() RunnerOption {
     }
 }
 
-/* runnerOptionContextKey is the key under which a migrate command hands its parsed posture to the migrations it runs. A generated migration's signature is fixed by bun as (ctx, db) and cannot receive the parsed flags any other way, and bun passes the command's context into every migration unchanged, so the context is the one channel that reaches the migration and belongs to that run alone. */
 type runnerOptionContextKey struct{}
 
-/* withRunnerOption returns a context carrying the option RunQueries reads first; the migrate commands derive it from their parsed flags and run the migrator under it. */
 func withRunnerOption(ctx context.Context, option RunnerOption) context.Context {
     return context.WithValue(ctx, runnerOptionContextKey{}, option)
 }
 
-/* runnerOptionFromContext answers the option a migrate command put on the context, and false when the context carries none — a migration invoked outside any command, or one that dropped the context it was handed. */
 func runnerOptionFromContext(ctx context.Context) (RunnerOption, bool) {
     if nil == ctx {
         return RunnerOption{}, false
@@ -48,23 +46,47 @@ func runnerOptionFromContext(ctx context.Context) (RunnerOption, bool) {
     return option, present
 }
 
-/* processRunnerOption is the process-wide fallback RunQueries reads when the context carries no option. It exists for the migration that drops the context it was handed and for a host process that runs migrations outside melody's commands; it is not how a command reaches its own migrations — that is the context — because a process default is one value for the whole process, so two commands dispatched concurrently overwrote each other's writer and a --format=json run sent a text run's per-query lines into its own discarded writer. */
 var processRunnerOption atomic.Pointer[RunnerOption]
+var processRunnerOptionMutex sync.Mutex
+var previousRunnerOptionByInstalled map[*RunnerOption]*RunnerOption
 
-/* SetDefaultRunnerOption installs the process-wide fallback RunQueries uses when the context carries no option. It is the door of a host process that runs migrations on its own; the migrate commands do not leave anything behind in it — each installs its posture for the length of its run and puts back what was there. */
+/* SetDefaultRunnerOption replaces the process fallback, including any temporary command override. Context-carried options take precedence. */
 func SetDefaultRunnerOption(option RunnerOption) {
+    processRunnerOptionMutex.Lock()
+    defer processRunnerOptionMutex.Unlock()
+
+    previousRunnerOptionByInstalled = nil
     processRunnerOption.Store(&option)
 }
 
-/* swapDefaultRunnerOption installs the fallback for the length of a command and answers the pointer that was installed before, for restoreDefaultRunnerOption. The fallback is what a migration that drops its context sees, and under --format=json that migration would otherwise print its per-query lines into the document; the pointer is what makes the restore exact — only the command that installed a value puts it back. */
 func swapDefaultRunnerOption(option RunnerOption) (installed *RunnerOption, previous *RunnerOption) {
-    installed = &option
+    processRunnerOptionMutex.Lock()
+    defer processRunnerOptionMutex.Unlock()
 
-    return installed, processRunnerOption.Swap(installed)
+    installed = &option
+    previous = processRunnerOption.Swap(installed)
+    if nil == previousRunnerOptionByInstalled {
+        previousRunnerOptionByInstalled = make(map[*RunnerOption]*RunnerOption)
+    }
+    previousRunnerOptionByInstalled[installed] = previous
+
+    return installed, previous
 }
 
-/* restoreDefaultRunnerOption puts the previous fallback back, and only when the one this command installed is still the live one: a command that finishes while another dispatched after it is still running leaves that command's value where it is. Two commands with migrations that drop their context share the one fallback for as long as they overlap — the context is the channel that keeps them apart, and a migration that drops it has opted out of that. */
-func restoreDefaultRunnerOption(installed *RunnerOption, previous *RunnerOption) {
+func restoreDefaultRunnerOption(installed *RunnerOption, _ *RunnerOption) {
+    processRunnerOptionMutex.Lock()
+    defer processRunnerOptionMutex.Unlock()
+
+    previous, exists := previousRunnerOptionByInstalled[installed]
+    if false == exists {
+        return
+    }
+    delete(previousRunnerOptionByInstalled, installed)
+    for successor, predecessor := range previousRunnerOptionByInstalled {
+        if installed == predecessor {
+            previousRunnerOptionByInstalled[successor] = previous
+        }
+    }
     processRunnerOption.CompareAndSwap(installed, previous)
 }
 
@@ -76,7 +98,6 @@ func resolveDefaultRunnerOption() RunnerOption {
     return DefaultRunnerOption()
 }
 
-/* resolveRunnerOption answers the posture a run prints under, in the order the doors are trusted: the option the command put on the context, then the process-wide fallback, then the package default. */
 func resolveRunnerOption(ctx context.Context) RunnerOption {
     if option, present := runnerOptionFromContext(ctx); true == present {
         return option
@@ -98,7 +119,6 @@ func RunQueriesWithOption(ctx context.Context, db *bun.DB, direction string, mig
     total := len(queries)
     printer := &migrationPrinter{writer: writer, noColor: option.NoColor}
 
-    /* an empty set is almost always a builder that produced nothing rather than a migration with nothing to do, and the migrator marks the migration applied on success — burying it, since an applied migration never runs again. The run still succeeds, so the caller decides; what it must not do is read like the queries ran. */
     if 0 == total {
         printer.printEmpty(direction, migrationName)
 
@@ -168,7 +188,6 @@ func (instance *migrationPrinter) printCompleted(prefix string, queryName string
     _, _ = fmt.Fprintf(instance.writer, "%s%s%s completed: %s%s%s\n", cli.AnsiCyan, prefix, cli.AnsiReset, cli.AnsiGreen, escapedQueryName, cli.AnsiReset)
 }
 
-/* printFailed escapes what it did not write itself before the terminal sees it: the error text came off the wire, and the statement — kept multi-line on purpose, its line breaks are the readability — may carry any byte the migration author or the driver put there. */
 func (instance *migrationPrinter) printFailed(prefix string, queryName string, err error, sql string) {
     escapedQueryName := escapeControlCharacters(queryName, false)
     escapedErrorMessage := escapeControlCharacters(err.Error(), false)

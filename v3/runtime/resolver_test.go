@@ -56,7 +56,6 @@ func TestFromRuntime_UsesScopeWhenPresentAndUsesContainerWhenScopeDoesNotHaveIns
     }
 }
 
-/* Omit type registration so the incompatible override reaches typed resolution rather than failing during registration. */
 func TestFromRuntime_DoesNotMaskScopeOverrideTypeMismatch(t *testing.T) {
     serviceContainer := container.NewContainer()
 

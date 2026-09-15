@@ -17,17 +17,14 @@ func TestRememberInFlightCall_RemoveWaiterDoesNotPoisonAConcurrentJoiner(t *test
     call.AddWaiter()
     shard.inFlightByKey["k"] = call
 
-    /* A fresh joiner enters rememberWithStampedeProtection's critical section: it holds the shard mutex, has just found the in-flight call and is about to inspect IsCanceled and AddWaiter. */
     shard.mutex.Lock()
 
     removeWaiterReturned := make(chan struct{})
     go func() {
-        /* The last existing waiter times out and leaves. */
         call.RemoveWaiter(shard)
         close(removeWaiterReturned)
     }()
 
-    /* Give the departing waiter's RemoveWaiter time to run. When the decrement-to-zero and the cancel decision are made outside the shard mutex, it observes zero waiters and cancels the call right here, under the joiner's feet. */
     time.Sleep(50 * time.Millisecond)
 
     if true == call.IsCanceled() {
@@ -36,13 +33,11 @@ func TestRememberInFlightCall_RemoveWaiterDoesNotPoisonAConcurrentJoiner(t *test
         t.Fatalf("joiner observed a canceled in-flight call while still holding the shard mutex")
     }
 
-    /* The joiner commits to joining the healthy call under the same mutex. */
     call.AddWaiter()
     shard.mutex.Unlock()
 
     <-removeWaiterReturned
 
-    /* Because the joiner incremented the waiter count under the mutex, the departing waiter must not have canceled the call. */
     if true == call.IsCanceled() {
         t.Fatalf("healthy joiner was poisoned by the departing waiter's cancel")
     }
@@ -68,7 +63,6 @@ func TestRememberInFlightCall_WaitZeroTakesACompletedResult(t *testing.T) {
     }
 }
 
-/* the wait is driven from a goroutine and given a deadline of its own: a wait that does NOT end on the context is the defect under test, so letting it run to the package timeout would report the same failure ten minutes later and with the reason buried in a panic dump */
 func waitForRememberCallAnswer(
     t *testing.T,
     call *rememberInFlightCall,
@@ -171,7 +165,6 @@ func TestRememberInFlightCall_WaitWithoutACallerContextParksUntilTheFlightAnswer
     }
 }
 
-/* the pre-select above the two blocking selects exists to take the coin out of a tie: with a memoized result AND a lapsed caller context both ready, a select chooses uniformly at random, so the same call answered the value or the cancellation from one run to the next. A single-shot assertion cannot prove that guard — measured, the mutant that removes it is killed four runs in five, which is luck, not proof — so the tie is built sixty-four times and every one of them has to answer the value. */
 func TestRememberInFlightCall_AMemoizedResultBeatsALapsedContextEveryTime(t *testing.T) {
     canceledContext, cancel := context.WithCancel(context.Background())
     cancel()

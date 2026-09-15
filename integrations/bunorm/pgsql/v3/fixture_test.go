@@ -11,7 +11,6 @@ import (
     "github.com/uptrace/bun/dialect/pgdialect"
 )
 
-/* the shared material of this package's tests. A connector that never connects is what lets the registration tests hand the locker a real *bun.DB without a server: the doors under test decide what to register, and none of them issues a query, so a handle that would fail on the first one is the honest double. */
 
 type neverConnectingConnector struct{}
 
@@ -33,7 +32,6 @@ func newUndialedDatabase() *bun.DB {
     return bun.NewDB(sql.OpenDB(neverConnectingConnector{}), pgdialect.New())
 }
 
-/* spyServiceRegistrar records the names a registration door claims, which is the whole observable of both doors: what they register, and under which name. It satisfies the module's registrar contract as well as this package's narrower one, so one double serves both tests. */
 type spyServiceRegistrar struct {
     names []string
 }

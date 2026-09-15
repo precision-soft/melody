@@ -27,7 +27,7 @@ type ImpersonationTokenSourceConfig struct {
     /* RoleMode selects whose roles the impersonation token authorizes with: RoleModeImpersonated (the default) takes on the target's roles for their full context, RoleModeImpersonator keeps the admin's own rights. The impersonator stays auditable and propagates between services in either mode. */
     RoleMode ImpersonationRoleMode
 
-    /* RoleHierarchy, when set, expands the admin's roles through the role hierarchy before the switch-role check, matching how the access-decision path authorizes (an admin granted the switch role transitively — e.g. via a super-admin role that implies it — is then allowed to switch). Optional: a nil hierarchy checks the raw token roles, so the default behavior is unchanged. */
+    /* RoleHierarchy expands admin roles before checking switch permission. Nil checks only the token’s direct roles. */
     RoleHierarchy *RoleHierarchy
 }
 
@@ -106,7 +106,7 @@ func (instance *ImpersonationTokenSource) Resolve(
 
     impersonatedToken, userErr := instance.users.ResolveImpersonatedUser(runtimeInstance, target)
     if nil != userErr {
-        /* the resolver's error used to be DROPPED here — the record said only "could not resolve", so a user store outage and a mistyped target were indistinguishable in the journal and the outage's cause survived nowhere. The cause now travels with the record; the contract spells an error as a denial, so the baseline severity stays Info, and only an error carrying the infrastructure mark is filed as the incident it is. */
+
         logger := logging.LoggerFromRuntime(runtimeInstance)
         if nil != logger {
             record := exception.LogContext(exception.NewError(
@@ -122,7 +122,6 @@ func (instance *ImpersonationTokenSource) Resolve(
             }
         }
 
-        /* the caller already passed the switch-role check, so this request was meant to run narrowed to the target's identity. Refuse it closed with an anonymous token rather than silently continuing with the caller's own (broader, switch-privileged) roles: that fail-to-narrow would execute the request with privileges the operator believed were constrained to the target (a destructive write running with admin authority behind an impersonation UI). Access-control then denies the protected route. The earlier branches (no switch header, anonymous caller, caller without the switch role) carry no such footgun — no narrowing was ever going to happen — so they still pass the inner token through unchanged. */
         return NewAnonymousToken(), nil
     }
 

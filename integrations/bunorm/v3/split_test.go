@@ -145,7 +145,6 @@ func (instance *noDatabaseSplitProvider) Open(params ConnectionParameters, logge
     return nil, nil
 }
 
-/* a provider answering neither a database nor an error is the wiring mistake the registry refuses by name; folded into the fallback it routed every read of that replica to the primary forever, with no signal that the replica was dead */
 func TestReadWriteSplitter_ReaderRefusesAReplicaWhoseProviderAnsweredNoDatabase(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
         &fakeLogger{},

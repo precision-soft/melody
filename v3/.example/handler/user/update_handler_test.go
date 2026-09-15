@@ -26,7 +26,6 @@ func TestProtectsAnotherAdminAllowsAnAccountBelow(t *testing.T) {
     }
 }
 
-/* An update names the fields it changes: an omitted username and an omitted password are kept a few lines above the roles, and roles are the one field an omission used to REMOVE — the target came back holding the base role alone, an administrator editing their own account included. */
 func TestApiUpdateHandlerKeepsTheRolesABodyDoesNotName(t *testing.T) {
     userRepository := newRecordingUserRepository(administrator("admin-1"), editor("editor-1"))
     runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})
@@ -51,7 +50,6 @@ func TestApiUpdateHandlerKeepsTheRolesABodyDoesNotName(t *testing.T) {
     }
 }
 
-/* the other half of the same rule: roles the body DOES name replace what the target held */
 func TestApiUpdateHandlerReplacesTheRolesABodyNames(t *testing.T) {
     userRepository := newRecordingUserRepository(administrator("admin-1"), editor("editor-1"))
     runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})
@@ -76,7 +74,6 @@ func TestApiUpdateHandlerReplacesTheRolesABodyNames(t *testing.T) {
     }
 }
 
-/* a list sent EXPLICITLY empty is an opinion, and normalizeRoles answers the base role for it: an account is never left with none, because the example's catch-all rule guards every path behind ROLE_USER */
 func TestApiUpdateHandlerFallsBackToTheBaseRoleForAnEmptyListTheBodyNames(t *testing.T) {
     userRepository := newRecordingUserRepository(administrator("admin-1"), editor("editor-1"))
     runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})
@@ -101,7 +98,6 @@ func TestApiUpdateHandlerFallsBackToTheBaseRoleForAnEmptyListTheBodyNames(t *tes
     }
 }
 
-/* the repository joins the role list into one comma-separated column, so a role carrying a comma comes back as SEVERAL roles on the next read — the update door is where that is refused, before the row lands */
 func TestApiUpdateHandlerRefusesARoleCarryingAComma(t *testing.T) {
     userRepository := newRecordingUserRepository(administrator("admin-1"), editor("editor-1"))
     runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})
@@ -130,7 +126,6 @@ func TestApiUpdateHandlerRefusesARoleCarryingAComma(t *testing.T) {
     }
 }
 
-/* the same rule, at the door on this major */
 func TestRolesForUpdateKeepsWhatTheBodyDoesNotName(t *testing.T) {
     current := []string{entity.RoleUser, entity.RoleEditor}
 

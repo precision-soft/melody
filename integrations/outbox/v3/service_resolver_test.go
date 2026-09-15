@@ -7,7 +7,6 @@ import (
     containercontract "github.com/precision-soft/melody/v3/container/contract"
 )
 
-/* the service NAMES are the whole wiring: a name that drifts between the registrar and the reader leaves the relay unresolvable while everything still compiles, so both constants are asserted by value rather than through themselves. */
 func TestOutboxServiceNames_AreTheRegisteredNames(t *testing.T) {
     if "service.outbox.store" != ServiceStore {
         t.Fatalf("expected the registered store name, got %q", ServiceStore)
@@ -18,7 +17,6 @@ func TestOutboxServiceNames_AreTheRegisteredNames(t *testing.T) {
     }
 }
 
-/* the registrars are the composition root's door: what they register under must be exactly what the readers below ask for, which is the pair no compiler checks */
 func TestRegisterStoreService_RegistersUnderTheNameTheReadersAsk(t *testing.T) {
     registrar := &spyServiceRegistrar{}
 
@@ -60,7 +58,6 @@ func TestStoreAndRelayReaders_AnswerWhatTheRegistrarsRegistered(t *testing.T) {
         t.Fatal("expected the registered relay from the container")
     }
 
-    /* the resolver-taking doors are what a scoped service reads through: a scope is a Resolver and not a Container, so the two are not interchangeable at the call site */
     scope := serviceContainer.NewScope()
 
     if store != StoreMustFromResolver(scope) {
@@ -72,7 +69,6 @@ func TestStoreAndRelayReaders_AnswerWhatTheRegistrarsRegistered(t *testing.T) {
     }
 }
 
-/* the strict readers are the boot-time ones: they panic rather than hand back a nil the caller would dereference later, at a point where nothing names the missing registration */
 func TestStoreAndRelayReaders_PanicWhenUnregistered(t *testing.T) {
     for _, probe := range []struct {
         name string

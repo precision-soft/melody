@@ -22,7 +22,6 @@ func TestRegisterLockerServiceUsesTheFrameworkLockerName(t *testing.T) {
     }
 }
 
-/* the name is half the contract; the other half is that the provider actually answers a Locker built over the handle it was given, which is what an application resolving the framework's locker name receives. */
 func TestRegisterLockerServiceProviderAnswersAPgsqlLocker(t *testing.T) {
     var captured any
 

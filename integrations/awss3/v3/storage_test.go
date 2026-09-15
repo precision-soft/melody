@@ -120,7 +120,6 @@ func TestNormalizeObjectKey_RejectsEmptyAndDotKeys(t *testing.T) {
 }
 
 func TestBoundedPutReader_StripsReaderAtAndCapsWhatMinioCanStore(t *testing.T) {
-    /* minio's single-shot putObject wraps an io.ReaderAt+io.Seeker reader (bytes.Reader/strings.Reader/os.File) in an io.SectionReader and uploads it via ReadAt in one shot; the sequential path consumes the body one part buffer at a time instead, which is what lets a size-checked body cut an upload off before its last declared byte. boundedPutReader must therefore hand minio a reader that is neither io.ReaderAt nor io.Seeker. */
     exactBody := "exactly-sized-body"
     original := strings.NewReader(exactBody)
     putReader := boundedPutReader(original, int64(len(exactBody)))
@@ -137,7 +136,6 @@ func TestBoundedPutReader_StripsReaderAtAndCapsWhatMinioCanStore(t *testing.T) {
         t.Fatalf("expected minio to read exactly %d bytes through the bounded reader, got %d", len(exactBody), consumed)
     }
 
-    /* the cap bounds what minio can store at the declared size on any path, single-shot or multipart */
     longerBody := "declared-short-but-body-is-actually-longer"
     declared := int64(9)
     overConsumed, _ := io.Copy(io.Discard, boundedPutReader(strings.NewReader(longerBody), declared))
@@ -145,7 +143,6 @@ func TestBoundedPutReader_StripsReaderAtAndCapsWhatMinioCanStore(t *testing.T) {
         t.Fatalf("expected the bounded reader to cap minio's read at the declared %d bytes, got %d", declared, overConsumed)
     }
 
-    /* a negative size means unknown length: stream the reader whole with no cap, so the same reader instance is returned */
     streamed := strings.NewReader("whole")
     if streamed != boundedPutReader(streamed, -1) {
         t.Fatalf("expected a negative size to stream the original reader unwrapped")
@@ -153,7 +150,6 @@ func TestBoundedPutReader_StripsReaderAtAndCapsWhatMinioCanStore(t *testing.T) {
 }
 
 func TestSizeCheckedReader_StopsShortOfTheDeclaredSizeWhenTheBodyIsLonger(t *testing.T) {
-    /* the upload must be left incomplete, not merely wrong: a request that carried every declared byte announces a content length it satisfied, and the bucket is entitled to commit it. Cutting the body off one byte early is what makes minio abort the multipart upload and the bucket refuse a single-shot put, so the object already at the key survives. */
     declared := int64(16)
     checked := newSizeCheckedReader(context.Background(), "invoices/2026-07.pdf", &sequentialReader{reader: strings.NewReader(strings.Repeat("b", 64))}, declared)
 
@@ -195,7 +191,6 @@ func TestSizeCheckedReader_YieldsAnExactlySizedBodyWhole(t *testing.T) {
 }
 
 func TestSizeCheckedReader_StopsWhenTheContextIsDone(t *testing.T) {
-    /* a slow body would otherwise pin an upload with no deadline of its own */
     ctx, cancel := context.WithCancel(context.Background())
     cancel()
 
@@ -276,7 +271,6 @@ func (instance *recordingObjectServer) recorded() []recordedObjectRequest {
     return append([]recordedObjectRequest(nil), instance.requestList...)
 }
 
-/* minio signs an unencrypted put with the streaming signature, so the recorded body arrives wrapped in aws-chunked framing (a hex length plus signature line, the payload, then a zero length chunk) and has to be unwrapped before it can be compared with what the caller handed to Put */
 func decodeChunkedPutBody(body string) string {
     var payload strings.Builder
 
@@ -318,7 +312,6 @@ func (instance *sequentialReader) Read(buffer []byte) (int, error) {
     return instance.reader.Read(buffer)
 }
 
-/* yields the body one byte at a time, returning a legal (0, nil) read before every byte and before the final io.EOF, which an over-read probe must not mistake for the end of the body */
 type stutteringReader struct {
     remaining string
     stutter   bool
@@ -424,7 +417,6 @@ func TestPut_UploadsTheWholeBodyWhenTheDeclaredSizeMatches(t *testing.T) {
 }
 
 func TestPut_HandlesABodyShorterThanItsDeclaredSizeAndAnEmptyBody(t *testing.T) {
-    /* a body shorter than its declared size is left to minio, which refuses the put rather than storing a short object; the wait is minio's own retry ladder */
     shortRecorder := newRecordingObjectServer(t)
     shortStore := shortRecorder.newStorage(t)
 
@@ -470,7 +462,6 @@ func TestValidatedPutBody_StreamsASeekableBodyAndSpoolsOnlyWhatASmallNonSeekable
         t.Fatalf("a seekable body must be streamed straight to minio, not buffered")
     }
 
-    /* a declared size can come from a client supplied content length, so the spool must hold what the body actually yields, never the declared size itself */
     spooled, _, spooledErr := validatedPutBody(context.Background(), "invoices/2026-07.pdf", &sequentialReader{reader: strings.NewReader("tiny")}, putSpoolLimit)
     if nil != spooledErr {
         t.Fatalf("unexpected error: %s", spooledErr.Error())
@@ -491,7 +482,6 @@ func TestValidatedPutBody_StreamsASeekableBodyAndSpoolsOnlyWhatASmallNonSeekable
 }
 
 func TestValidatedPutBody_LooksPastAZeroLengthRead(t *testing.T) {
-    /* a (0, nil) read is legal and means nothing happened, so treating it as the end of the body would let an over-read through and store a silently truncated object */
     _, _, trailingErr := validatedPutBody(context.Background(), "invoices/2026-07.pdf", &stutteringReader{remaining: "abcd"}, 3)
     if nil == trailingErr {
         t.Fatalf("a zero length read must not be taken for the end of the body")
@@ -510,7 +500,6 @@ func TestValidatedPutBody_LooksPastAZeroLengthRead(t *testing.T) {
     }
 }
 
-/* generates a body of the requested length without allocating it, so a test can assert how much of a large body Put is willing to hold in memory; the filler tells one generated body from another once it is stored */
 type generatedBodyReader struct {
     remaining int64
     filler    byte
@@ -537,7 +526,6 @@ func (instance *generatedBodyReader) Read(buffer []byte) (int, error) {
     return int(limit), nil
 }
 
-/* a reader that only ever returns a legal (0, nil): nothing to deliver, no error, forever */
 type stalledBodyReader struct{}
 
 func (instance *stalledBodyReader) Read(buffer []byte) (int, error) {
@@ -545,7 +533,6 @@ func (instance *stalledBodyReader) Read(buffer []byte) (int, error) {
 }
 
 func TestValidatedPutBody_StreamsABodyAboveTheSpoolLimitInsteadOfHoldingItInMemory(t *testing.T) {
-    /* the natural call is store.Put(runtimeInstance, key, request.Body, request.ContentLength, options) and an http request body cannot seek, so buffering the declared size means a client that uploads gigabytes makes the process attempt an allocation of the same order — an unrecoverable out of memory that takes every other in-flight request with it */
     declared := int64(4 * putSpoolLimit)
     body := &generatedBodyReader{remaining: declared}
 
@@ -682,12 +669,10 @@ func TestObjectStorage_StreamedPutAboveTheSpoolLimitIsAllOrNothing(t *testing.T)
         declared int64
     }{
         {name: "last part shorter than the part size", declared: putSpoolLimit + 1024},
-        /* a declared size that lands exactly on a part boundary is the case an over-read probe run after the upload cannot catch: minio fills its part buffer completely, and a reader error alongside a full buffer is dropped, so the truncated upload would be completed and the key replaced */
         {name: "declared size on a part boundary", declared: 2 * putSpoolLimit},
     }
 
     for _, testCase := range cases {
-        /* above the spool limit nothing is held in memory: the body proves its own size to minio as it is streamed multipart, so an exactly sized one must still arrive whole */
         putErr := store.Put(runtimeInstance, key, &generatedBodyReader{remaining: testCase.declared, filler: 'p'}, testCase.declared, storagecontract.PutOptions{ContentType: "application/octet-stream"})
         if nil != putErr {
             t.Fatalf("%s: put: %v", testCase.name, putErr)
@@ -697,7 +682,6 @@ func TestObjectStorage_StreamedPutAboveTheSpoolLimitIsAllOrNothing(t *testing.T)
             t.Fatalf("%s: expected the whole %d byte streamed body to be stored, got %d bytes of %q", testCase.name, testCase.declared, storedSize, string(storedFiller))
         }
 
-        /* a longer body carrying a different filler is cut off before its last declared byte, which leaves the multipart upload incomplete for minio to abort: the stored object must be untouched, filler included */
         rejectedErr := store.Put(runtimeInstance, key, &generatedBodyReader{remaining: testCase.declared + 4096, filler: 'r'}, testCase.declared, storagecontract.PutOptions{ContentType: "application/octet-stream"})
         if nil == rejectedErr {
             t.Fatalf("%s: expected a streamed body longer than the declared size to be rejected", testCase.name)
@@ -737,7 +721,6 @@ func storedObjectShape(t *testing.T, store *Storage, runtimeInstance runtimecont
     return tail + 1, head[0]
 }
 
-/* a body that cancels the request context once it has delivered part of itself, which is what a client that walks away mid-upload looks like from inside Put */
 type disconnectingBodyReader struct {
     remaining   int64
     filler      byte
@@ -776,7 +759,6 @@ func (instance *disconnectingBodyReader) Read(buffer []byte) (int, error) {
     return int(limit), nil
 }
 
-/* newMultipartAbortServer answers the two requests an abort is made of — the list of incomplete uploads for the bucket and the DELETE that removes one — and records every DELETE it serves, so a test can tell whether the abort actually left the process. */
 func newMultipartAbortServer(t *testing.T, uploadKey string, uploadId string) *multipartAbortServer {
     recorder := &multipartAbortServer{}
 
@@ -840,7 +822,6 @@ func (instance *multipartAbortServer) deletedUploadIds() []string {
     return append([]string(nil), instance.deletedUploadIdList...)
 }
 
-/* minio builds its own abort on the context the upload ran under, so a client that disconnects cancels the cleanup along with the upload and the initiated multipart upload survives on the bucket, billing for the parts already sent. The sweep therefore has to run on a context the dead request cannot reach. */
 func TestAbortOrphanedMultipartUpload_LeavesEvenWhenTheRequestContextIsAlreadyCancelled(t *testing.T) {
     server := newMultipartAbortServer(t, "uploads/large.bin", "upload-id-42")
     store := server.newStorage(t)
@@ -856,7 +837,6 @@ func TestAbortOrphanedMultipartUpload_LeavesEvenWhenTheRequestContextIsAlreadyCa
     }
 }
 
-/* the sweep is only ever needed when the request context is what killed the upload and only ever possible for a body that took the multipart path; anything else must cost the caller no request at all */
 func TestAbortOrphanedMultipartUpload_StaysQuietWhenThereIsNothingToSweep(t *testing.T) {
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
@@ -883,7 +863,6 @@ func TestAbortOrphanedMultipartUpload_StaysQuietWhenThereIsNothingToSweep(t *tes
     }
 }
 
-/* a multipart put whose client disconnects mid-body leaves an initiated upload on the bucket that holds every part already sent and bills for it until a lifecycle rule expires it, which most buckets do not carry; the key must come out of the incomplete upload list even though the request that started it is gone. */
 func TestObjectStorage_CancelledMultipartPutLeavesNoIncompleteUpload(t *testing.T) {
     endpoint := os.Getenv("MINIO_ENDPOINT")
     if "" == endpoint {
@@ -909,7 +888,6 @@ func TestObjectStorage_CancelledMultipartPutLeavesNoIncompleteUpload(t *testing.
 
     key := "uploads/disconnected.bin"
 
-    /* an orphan an earlier run left behind would make the assertion pass or fail for the wrong reason */
     if removeErr := client.RemoveIncompleteUpload(context.Background(), bucket, key); nil != removeErr {
         t.Fatalf("clear incomplete uploads: %v", removeErr)
     }
@@ -963,7 +941,6 @@ func countIncompleteUploads(t *testing.T, client *minio.Client, bucket string, k
     return count
 }
 
-/* faultAfterPayloadReader yields its payload and then fails every read with the same transport error, the shape of a connection that breaks exactly at the declared boundary. */
 type faultAfterPayloadReader struct {
     payload  []byte
     position int

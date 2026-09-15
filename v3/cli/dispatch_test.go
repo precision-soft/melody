@@ -76,7 +76,6 @@ func (instance *typedNilDispatchFailure) Error() string {
     return instance.message
 }
 
-/* a command declaring a concrete error type hands back a typed nil boxed into a non-nil interface: read as the failure it is not, the caller of the dispatch would report a run that succeeded as failed, and the first render of it would dereference the nil receiver */
 func TestDispatchCommand_ReadsATypedNilCommandErrorAsSuccess(t *testing.T) {
     command := &testCommand{
         nameValue:        "probe",
@@ -119,11 +118,9 @@ func TestDispatchCommand_WritesTheCommandsOutputToTheGivenWriter(t *testing.T) {
     }
 }
 
-/* the dispatch adds none of what the registration path adds around a command: no banner on the stream, and no scope close under a caller that still owns it */
 func TestDispatchCommand_AddsNoBannerAndClosesNoScope(t *testing.T) {
     buffer := &bytes.Buffer{}
 
-    /* an OPEN scope, unlike the shared double, because what is asserted is that the dispatch leaves it open */
     serviceContainer := container.NewContainer()
     scope := serviceContainer.NewScope()
     defer scope.Close()
@@ -151,7 +148,6 @@ func TestDispatchCommand_AddsNoBannerAndClosesNoScope(t *testing.T) {
         t.Fatalf("expected nothing but the command's own output on the stream, got %q", buffer.String())
     }
 
-    /* a closed scope refuses every resolution, so a scope that still answers is one the dispatch left alone — which is what a caller driving many commands through one scope depends on */
     container.MustRegisterScoped(
         runtimeInstance.Scope(),
         "probe.service",
@@ -172,7 +168,6 @@ func TestDispatchCommand_PanicsOnANilCommand(t *testing.T) {
     }, "cli command may not be nil")
 }
 
-/* read through the interface: a caller handing back a typed nil of its own command type produces a non-nil interface that a plain comparison lets through, and the name read two lines below dereferences it */
 func TestDispatchCommand_PanicsOnATypedNilCommand(t *testing.T) {
     var typedNilCommand *testCommand
 
@@ -196,7 +191,6 @@ func TestDispatchCommand_PanicsOnANilRuntime(t *testing.T) {
     }, "runtime instance may not be nil in cli dispatch")
 }
 
-/* the engine reads arguments[0] as the invoked name and parses the rest: handed nothing at all it would index an empty slice inside the engine, which is a refusal worth naming here */
 func TestDispatchCommand_PanicsOnEmptyArguments(t *testing.T) {
     command := &testCommand{
         nameValue:        "probe",

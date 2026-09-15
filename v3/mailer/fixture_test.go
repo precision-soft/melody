@@ -22,7 +22,6 @@ func testRuntimeWithContext(ctx context.Context) runtimecontract.Runtime {
     return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
 }
 
-/* nilRuntime exists so a test can hand a TYPED nil runtime through the Runtime interface: the interface value then carries a type and a nil pointer, which a plain == nil comparison waves through. */
 type nilRuntime struct{}
 
 func (instance *nilRuntime) Context() context.Context {
@@ -37,7 +36,6 @@ func (instance *nilRuntime) Container() containercontract.Container {
     return nil
 }
 
-/* mailerRecordingLogger captures every record's message, so a test can assert what a warning said. */
 type mailerRecordingLogger struct {
     mutex    sync.Mutex
     messages []string
@@ -89,7 +87,6 @@ func (instance *mailerRecordingLogger) contextOfMessage(fragment string) (loggin
     return nil, false
 }
 
-/* testRuntimeWithRecordingLogger mirrors testRuntime with the recording logger installed under the logger service. */
 func testRuntimeWithRecordingLogger() (runtimecontract.Runtime, *mailerRecordingLogger) {
     serviceContainer := container.NewContainer()
     scope := serviceContainer.NewScope()

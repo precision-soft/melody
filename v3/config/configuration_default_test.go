@@ -90,7 +90,6 @@ func TestRegisterDefaultParameters_AnEnvironmentValueWinsOverTheDefault(t *testi
         t.Fatalf("expected the declared address to win, got %q", httpAddress.String())
     }
 
-    /* a default the environment said nothing about is untouched by the two that were overridden */
     if "melody" != configuration.Get(CliNameKey).String() {
         t.Fatalf("expected the untouched default to survive, got %q", configuration.Get(CliNameKey).String())
     }

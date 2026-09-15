@@ -148,7 +148,7 @@ func (instance *Provider) isTransientError(inputErr error) bool {
         "server closed the connection",
         "connection closed",
         "use of closed network connection",
-        /* the same aborted-connection error under the two spellings its platforms give it */
+
         "software caused connection abort",
         "established connection was aborted",
         "network is unreachable",
@@ -178,7 +178,6 @@ func (instance *Provider) isTransientError(inputErr error) bool {
 func (instance *Provider) computeBackoffDelay(attempt uint32) time.Duration {
     defaults := DefaultRetryConfig()
 
-    /* non-positive delays and a multiplier below 1 fall back to the defaults: a negative delay makes time.Sleep return immediately and a sub-1 multiplier decays the delay toward zero, both collapsing the backoff into a re-dial storm; a multiplier of exactly 1 stays a valid constant backoff. */
     initialDelay := instance.retryConfig.InitialDelay
     if 0 >= initialDelay {
         initialDelay = defaults.InitialDelay
@@ -189,13 +188,11 @@ func (instance *Provider) computeBackoffDelay(attempt uint32) time.Duration {
         maxDelay = defaults.MaxDelay
     }
 
-    /* the not-at-least-1 form is deliberate: NaN fails every comparison, so `1 > NaN` would let a NaN multiplier through, poison the float-space growth below and collapse the backoff into an immediate re-dial storm once the NaN converts to a negative duration. */
     backoffMultiplier := instance.retryConfig.BackoffMultiplier
     if false == (backoffMultiplier >= 1) {
         backoffMultiplier = defaults.BackoffMultiplier
     }
 
-    /* grow the delay in float space and cap at maxDelay as soon as it is reached, before converting to time.Duration — otherwise a large attempt count overflows the float64->int64 conversion to a negative duration, which slips past the `> maxDelay` cap and collapses the backoff to zero (a re-dial storm). */
     maxDelayFloat := float64(maxDelay)
     delay := float64(initialDelay)
 
@@ -283,9 +280,6 @@ func (instance *Provider) open(params ConnectionParameters) (rueidis.Client, err
     )
 }
 
-/* connectionContext is the diagnostic shape of every refusal this provider writes, and it is assembled here rather than inside ConnectionParameters.SafeContext because only the provider knows what the safe context cannot: the deadlines that actually governed the attempt, which live in the client and timeout configurations the connection values know nothing about. It is the shape the bunorm siblings' toConnectionContext already writes for a failed dial. The password is never part of it: the safe context decides what may be rendered.
-
-   Unlike the frozen majors, this one names no configuration parameter in the context. Those majors read the address and the user from parameters they were told the names of, and named them here so the operator had a key to go and set; this major is handed the values, so there is no key to name and inventing one would be a guess. */
 func (instance *Provider) connectionContext(
     params ConnectionParameters,
     clientConfig *ClientConfig,
@@ -303,10 +297,8 @@ func (instance *Provider) connectionContext(
     return connectionContext
 }
 
-/* libraryDefaultDialTimeout is rueidis's own, applied whenever this provider installs no dialer of its own. */
 const libraryDefaultDialTimeout = 5 * time.Second
 
-/* resolveDialTimeoutDescription reports the deadline that GOVERNED the dial, not the one that was configured, which is what the rest of this context already does one line above for the connect timeout. The custom dialer is installed only for a positive value, so a zero or negative DialTimeout — the footgun of a partial ClientConfig literal — ran under the library's own five seconds while the record said "0s". An operator reads that as no dial bound at all and goes looking for a deadline that never existed; measured, the dial failed after five seconds under it. */
 func resolveDialTimeoutDescription(clientConfig *ClientConfig) string {
     if 0 < clientConfig.DialTimeout {
         return clientConfig.DialTimeout.String()
@@ -315,7 +307,6 @@ func resolveDialTimeoutDescription(clientConfig *ClientConfig) string {
     return libraryDefaultDialTimeout.String() + " (library default)"
 }
 
-/* resolveConnectTimeout bounds the boot ping. A non-positive value takes the default rather than removing the bound, the way Ping reads its own zero and the way this package's options read theirs: a TimeoutConfig that names only the command timeout would otherwise run the ping on a context with no deadline, and a store that accepts the connection without answering would hang boot forever holding a client no one can close yet. */
 func resolveConnectTimeout(timeoutConfig *TimeoutConfig) time.Duration {
     if nil == timeoutConfig || 0 >= timeoutConfig.ConnectTimeout {
         return DefaultTimeoutConfig().ConnectTimeout

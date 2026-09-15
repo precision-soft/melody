@@ -16,7 +16,6 @@ func manifestTestHandler(runtimeInstance runtimecontract.Runtime, writer nethttp
 func manifestTestRouter() *Router {
     router := NewRouter()
 
-    /* exposed + named + zoned */
     router.HandleWithOptions(
         "/users/:id",
         manifestTestHandler,
@@ -33,14 +32,12 @@ func manifestTestRouter() *Router {
         ),
     )
 
-    /* named but not exposed → excluded */
     router.HandleWithOptions(
         "/internal/health",
         manifestTestHandler,
         NewRouteOptions("health", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
     )
 
-    /* exposed + named, different zone */
     router.HandleWithOptions(
         "/account",
         manifestTestHandler,
@@ -57,7 +54,6 @@ func TestBuildRouteManifest_OnlyExposedNamedRoutes(t *testing.T) {
         t.Fatalf("expected only the two exposed named routes, got %d: %+v", len(manifest.Routes), manifest.Routes)
     }
 
-    /* sorted by name: account_show before user_show */
     if "account_show" != manifest.Routes[0].Name || "user_show" != manifest.Routes[1].Name {
         t.Fatalf("expected deterministic name order, got %+v", manifest.Routes)
     }
@@ -71,14 +67,12 @@ func TestBuildRouteManifest_OnlyExposedNamedRoutes(t *testing.T) {
         t.Fatalf("expected frontend zone, got %q", user.Zone)
     }
 
-    /* the manifest carries the pattern the caller DECLARED, not the anchored, non-capturing form the registration compiles: the wrapped spelling is not the developer's, it re-wraps on every round trip through NewRequirements, and it carries RE2-only syntax to consumers whose engine is not */
     if `\d+` != user.Requirements["id"] {
         t.Fatalf("expected the declared requirement to be carried, got %+v", user.Requirements)
     }
 }
 
 func TestRouterRegistration_RefusesAnExposedRouteWithNoName(t *testing.T) {
-    /* the projection used to drop it in silence: the developer stated the intention and the artifact contradicted it with no diagnostic anywhere */
     testhelper.AssertPanicsWithError(
         t,
         func() {
@@ -145,7 +139,6 @@ func TestBuildRouteManifest_CarriesEveryMatchDiscriminatorAGeneratedUrlMustSatis
 
     entry := manifest.Routes[0]
 
-    /* each of these three used to be absent, and each absence made the frontend mint a url the router refuses: the wrong origin, the wrong scheme, and no locale at all */
     if "api.example.com" != entry.Host {
         t.Fatalf("expected the host to be carried, got %q", entry.Host)
     }

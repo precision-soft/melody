@@ -2,27 +2,25 @@ package security
 
 import (
     "github.com/precision-soft/melody/v3/.example/entity"
-    nethttp "net/http"
+    "encoding/hex"
     "net/http/httptest"
-    "testing"
-    "time"
-
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
+    melodysecuritycontract "github.com/precision-soft/melody/v3/security/contract"
     melodysession "github.com/precision-soft/melody/v3/session"
     melodysessioncontract "github.com/precision-soft/melody/v3/session/contract"
+    nethttp "net/http"
+    "crypto/sha256"
+    "testing"
+    "time"
 )
 
-/* The shared test material of the package lives here, and only here: this is the one test file the layout rule exempts from having a source of its own. */
-
-/* plainRequest builds a request with no headers of its own. The runtime and the request context are left nil because nothing on the paths under test reads them — the token resolver reaches the attribute bag and nothing else. */
 func plainRequest(t *testing.T) melodyhttpcontract.Request {
     t.Helper()
 
     return melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/products/", nil), nil, nil, nil)
 }
 
-/* requestCarryingSession hands back a request whose attribute bag holds the session, the way the http kernel publishes it, together with the session itself so the caller can write into it. A real session is used rather than a double: the resolver reads the values back through the typed getters, and a double would let the test agree with itself about what a session stores. */
 func requestCarryingSession(t *testing.T) (melodyhttpcontract.Request, melodysessioncontract.Session) {
     t.Helper()
 
@@ -36,7 +34,6 @@ func requestCarryingSession(t *testing.T) (melodyhttpcontract.Request, melodyses
     return request, sessionInstance
 }
 
-/* requestCarryingSessionAttribute publishes an arbitrary value under the session attribute, so the resolver can be asked what it does when something that is NOT a session sits where one is expected. */
 func requestCarryingSessionAttribute(t *testing.T, value any) melodyhttpcontract.Request {
     t.Helper()
 
@@ -52,4 +49,23 @@ func testSessionUserLookup(request melodyhttpcontract.Request, userId string) (*
         roles = []string{"ROLE_USER", "ROLE_ADMIN"}
     }
     return entity.NewUser(userId, "test-user", "test-password-hash", roles), true, nil
+}
+
+func storedValueBcryptCannotRead(plaintextPassword string) string {
+    digest := sha256.Sum256([]byte(plaintextPassword))
+
+    return hex.EncodeToString(digest[:])
+}
+
+const equalizedRefusalFloor = 5 * time.Millisecond
+
+func signedIn(t *testing.T, userId string, roles []string) melodysecuritycontract.Token {
+    t.Helper()
+
+    request, sessionInstance := requestCarryingSession(t)
+    sessionInstance.Set(SessionKeySecurityUserId, userId)
+    sessionInstance.Set(SessionKeySecurityCredentialVersion, SessionCredentialVersion("test-password-hash"))
+    sessionInstance.Set(SessionKeySecurityRoles, roles)
+
+    return SessionTokenResolver(testSessionUserLookup)(request)
 }

@@ -13,7 +13,7 @@ type Provider interface {
     Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error)
 }
 
-/* ContextOpener is the optional capability of opening under a caller's context: the retry loop between attempts sleeps on the context as well as the clock, so a shutdown that cancels it reaches a dial in flight instead of sleeping through the whole retry budget — the exact window in which supervisors send their signals. The registry prefers it whenever the provider implements it, handing the context it was constructed with. */
+/* ContextOpener opens under the caller’s context. The registry prefers this capability and passes its construction context to the provider. */
 type ContextOpener interface {
     OpenContext(ctx context.Context, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error)
 }
@@ -23,7 +23,7 @@ type MigrationProvider interface {
     OpenForMigration(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error)
 }
 
-/* MigrationContextOpener is what ContextOpener is to Open: the migration open under the caller's context, so the context the registry was constructed with reaches this door too. Without it the registry's promise held on the Manager path alone — the migration open took no context at all — and a db:migrate that received SIGTERM against a down database slept through the whole retry budget instead of refusing at the first cancellable step, which is the exact window a supervisor's signal lands in. The registry prefers it whenever the provider implements it; a provider carrying only MigrationProvider is unaffected. */
+/* MigrationContextOpener opens migration connections under the caller’s context. The registry prefers it over MigrationProvider and passes its construction context; providers implementing only MigrationProvider remain supported. */
 type MigrationContextOpener interface {
     OpenForMigrationContext(ctx context.Context, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error)
 }

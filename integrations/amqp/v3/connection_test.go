@@ -84,7 +84,6 @@ func TestProviderNewTransport_TransportOverridesGeneral(t *testing.T) {
     }
 }
 
-/* net/url parses "guest:guest@host" as scheme "guest" with no userinfo, so the redaction must fail closed rather than echo the input into the connection-failure log */
 func TestRedactDsn_FailsClosedOnDsnWithoutParsableUserinfo(t *testing.T) {
     for _, dsn := range []string{
         "guest:secret@rabbitmq:5672",
@@ -103,11 +102,9 @@ func TestRedactDsn_FailsClosedOnDsnWithoutParsableUserinfo(t *testing.T) {
     }
 }
 
-/* amqp091.DialConfig surfaces a malformed dsn as a *url.Error whose Error() quotes the entire raw dsn, password included. Provider.Open must scrub that before wrapping it as the exception cause, or exception.LogContext prints the secret on every connection and reconnect failure. */
 func TestProviderOpen_DoesNotLeakPasswordThroughDialErrorCause(t *testing.T) {
     const dsn = "amqp://user:sup3r%secret@rabbit:5672/"
 
-    /* Precondition: prove the leak vector is real — the raw dial error quotes the password verbatim. */
     if _, rawErr := amqp091.DialConfig(dsn, amqp091.Config{}); nil == rawErr || false == strings.Contains(rawErr.Error(), "secret") {
         t.Fatalf("precondition: expected the raw dial error to quote the password, got %v", rawErr)
     }
@@ -134,7 +131,6 @@ func TestProviderOpen_DoesNotLeakPasswordThroughDialErrorCause(t *testing.T) {
     }
 }
 
-/* net/url embeds dsn fragments inside the *url.Error cause, not just its URL field: a url.EscapeError carries the offending percent-escape triple — the two password characters that follow a literal '%' — and url.Error.Error() renders that value verbatim. Copying urlErr.Err through untouched leaks the password even after the URL field is redacted, so redactDialError must scrub the inner cause too. */
 func TestRedactDialError_ScrubsEscapeErrorPasswordFragment(t *testing.T) {
     dialErr := &neturl.Error{
         Op:  "parse",
@@ -142,7 +138,6 @@ func TestRedactDialError_ScrubsEscapeErrorPasswordFragment(t *testing.T) {
         Err: neturl.EscapeError("%ss"),
     }
 
-    /* Precondition: prove the leak vector is real — the raw url.Error quotes the escape fragment verbatim. */
     if false == strings.Contains(dialErr.Error(), "%ss") {
         t.Fatalf("precondition: expected the raw error to quote the escape fragment, got %q", dialErr.Error())
     }
@@ -160,7 +155,6 @@ func TestRedactDialError_ScrubsEscapeErrorPasswordFragment(t *testing.T) {
     }
 }
 
-/* A well-formed dsn keeps its shape so the log stays useful; only the password goes. */
 func TestRedactDsn_KeepsWellFormedDsnWithoutThePassword(t *testing.T) {
     redacted := redactDsn("amqp://guest:secret@rabbitmq:5672/vhost")
 
@@ -172,7 +166,6 @@ func TestRedactDsn_KeepsWellFormedDsnWithoutThePassword(t *testing.T) {
     }
 }
 
-/* the close is asserted on the deadline it arms on the socket, not on its return: the return is bounded by closeJoinTimeout, thirty seconds, while the plain close it replaced arms nothing and never returns over a wedged socket */
 func TestProvider_CloseArmsADeadlineOnAWedgedConnection(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     connection, gated := dialGated(t, dsn)

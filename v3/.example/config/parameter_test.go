@@ -6,40 +6,6 @@ import (
     "testing"
 )
 
-/* recordingParameterRegistrar keeps what RegisterParameters declared and marked, which is the whole question here: the marks are what debug:parameters redacts by. */
-type recordingParameterRegistrar struct {
-    registered map[string]any
-    marked     []string
-}
-
-func newRecordingParameterRegistrar() *recordingParameterRegistrar {
-    return &recordingParameterRegistrar{registered: map[string]any{}}
-}
-
-func (instance *recordingParameterRegistrar) RegisterParameter(name string, value any) {
-    instance.registered[name] = value
-}
-
-func (instance *recordingParameterRegistrar) RegisterSecretParameter(name string, value any) {
-    instance.registered[name] = value
-    instance.marked = append(instance.marked, name)
-}
-
-func (instance *recordingParameterRegistrar) MarkParameterSecret(name string) {
-    instance.marked = append(instance.marked, name)
-}
-
-func (instance *recordingParameterRegistrar) isMarked(name string) bool {
-    for _, marked := range instance.marked {
-        if name == marked {
-            return true
-        }
-    }
-
-    return false
-}
-
-/* the two outbound urls can carry a credential in their userinfo — the shape the amqp dsn is marked for — and then debug:parameters printed it in clear, twice: under the key and under the parameter that reads it. Marked as written, the mark propagates to that parameter through its template. */
 func TestRegisterParameters_MarksAnOutboundUrlSecretWhenItCarriesAUserinfo(t *testing.T) {
     registrar := newRecordingParameterRegistrar()
 
@@ -55,7 +21,6 @@ func TestRegisterParameters_MarksAnOutboundUrlSecretWhenItCarriesAUserinfo(t *te
     }
 }
 
-/* the sister case, so the mark is a measurement of the value and not a blanket: the shipped urls carry no credential, and an operator reads them in debug:parameters to see where the process points. */
 func TestRegisterParameters_LeavesAnOutboundUrlWithoutAUserinfoReadable(t *testing.T) {
     registrar := newRecordingParameterRegistrar()
 
@@ -75,7 +40,6 @@ func TestRegisterParameters_LeavesAnOutboundUrlWithoutAUserinfoReadable(t *testi
     }
 }
 
-/* the integration keys are switches the readme says to remove — the line gone, not blank — to boot the in-process fallbacks, and a parameter that read one of them in its template without a default failed the boot's resolution the moment the line was gone: the database dsn did exactly that, over a value nothing in the application consumed. No template may read them. */
 func TestRegisterParameters_NoTemplateReadsARemovableIntegrationKey(t *testing.T) {
     registrar := newRecordingParameterRegistrar()
 

@@ -29,7 +29,6 @@ func (instance *moduleSpyRegistrar) MustRegister(serviceName string, provider an
     instance.RegisterService(serviceName, provider, options...)
 }
 
-/* the service NAME is what RegisterHttpMiddlewares resolves the provider back by, and the two sit in different methods with nothing between them: a drift makes the middleware registration panic at boot on a service it just registered itself */
 func TestServiceTracerProvider_IsTheNameTheModuleRegistersUnder(t *testing.T) {
     if "opentelemetry.otlp.tracer_provider" != ServiceTracerProvider {
         t.Fatalf("expected the registered service name, got %q", ServiceTracerProvider)
@@ -55,7 +54,6 @@ func TestModule_NamesAndDescribesItself(t *testing.T) {
     }
 }
 
-/* the registered provider is built LAZILY: the module is registered at boot, long before an endpoint is reachable, so the exporter must not be constructed while the registration is being recorded */
 func TestModule_RegisterServicesDoesNotBuildTheExporter(t *testing.T) {
     registrar := &moduleSpyRegistrar{}
 
@@ -66,7 +64,6 @@ func TestModule_RegisterServicesDoesNotBuildTheExporter(t *testing.T) {
     }
 }
 
-/* the handle exists only to give the container the Close() error contract it closes services by: without it the batch span processor is never flushed, and the spans of the last seconds before shutdown are lost with the process */
 func TestProviderHandle_ClosesTheTracerProviderItWraps(t *testing.T) {
     provider := sdktrace.NewTracerProvider()
 
@@ -76,13 +73,11 @@ func TestProviderHandle_ClosesTheTracerProviderItWraps(t *testing.T) {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
-    /* a second shutdown is a no-op rather than a failure, which is what makes the handle safe under a teardown that runs twice */
     if closeErr := handle.Close(); nil != closeErr {
         t.Fatalf("unexpected error on a second close: %v", closeErr)
     }
 }
 
-/* recordingSpanProcessor answers the two questions the probes below ask of the vendor: whether the provider reached its span processors at all, and what deadline it reached them under. It is the only observable — TracerProvider.Shutdown answers nil for a provider it has already latched shut, so its return value cannot tell a flush that happened from one that was skipped. */
 type recordingSpanProcessor struct {
     shutdownCalls    int
     shutdownDeadline time.Time
@@ -106,7 +101,6 @@ func (instance *recordingSpanProcessor) ForceFlush(flushContext context.Context)
     return nil
 }
 
-/* a close reached with the teardown budget already spent must leave the provider CLOSABLE. Driven under a spent context, the vendor latches isShutdown before its loop and returns at the head of the first iteration, so no span processor is shut down and every later Shutdown answers nil on the strength of that latch: the batch goroutine, the ticker and the exporter connection are then beyond every door there is. The assertion that carries this is the POSITIVE one — that the second close reaches the processor — because the refusal alone reads the same whether the provider survived it or not. */
 func TestProviderHandle_ASpentDeadlineIsRefusedRatherThanLockingTheProviderShut(t *testing.T) {
     processor := &recordingSpanProcessor{}
     handle := &providerHandle{provider: sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(processor))}
@@ -125,7 +119,6 @@ func TestProviderHandle_ASpentDeadlineIsRefusedRatherThanLockingTheProviderShut(
         t.Fatalf("the span processor was shut down %d times under a spent deadline, wanted none", processor.shutdownCalls)
     }
 
-    /* the load-bearing assertion, and it is asked BEFORE the wording of the refusal: the old form refused too — with the vendor's own "context deadline exceeded" — so a probe that reads the message first is killed by every mutant without the latch ever being exercised */
     if closeErr := handle.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("the provider was left unclosable by the refused close: %v", closeErr)
     }
@@ -139,7 +132,6 @@ func TestProviderHandle_ASpentDeadlineIsRefusedRatherThanLockingTheProviderShut(
     }
 }
 
-/* the container reaches this handle through CloseWithContext, so a teardown that declares no deadline is where the package reserve has to be applied. Applied on Close() alone it was a reserve the teardown never spent, and the flush the reserve exists for ran with no bound of any kind. */
 func TestProviderHandle_ACloseWithoutADeadlineDerivesThePackageReserve(t *testing.T) {
     processor := &recordingSpanProcessor{}
     handle := &providerHandle{provider: sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(processor))}
@@ -154,14 +146,12 @@ func TestProviderHandle_ACloseWithoutADeadlineDerivesThePackageReserve(t *testin
         t.Fatalf("a close with no deadline handed the span processor a context with none either")
     }
 
-    /* measured from an instant taken BEFORE the call, so the reserve reads a shade longer than the constant; the window only has to separate the package grace from any other figure, and from the absence checked above */
     reserve := processor.shutdownDeadline.Sub(before)
     if reserve > unbudgetedShutdownGrace+time.Second || reserve < unbudgetedShutdownGrace/2 {
         t.Fatalf("the derived reserve was %s, wanted about the package grace %s", reserve, unbudgetedShutdownGrace)
     }
 }
 
-/* a caller that declares a deadline keeps it whole: the reserve stands in for a budget nobody declared and must not shorten or lengthen one that was. */
 func TestProviderHandle_ADeclaredDeadlineIsHandedOnUntouched(t *testing.T) {
     processor := &recordingSpanProcessor{}
     handle := &providerHandle{provider: sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(processor))}

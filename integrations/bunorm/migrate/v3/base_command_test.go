@@ -190,7 +190,6 @@ func (instance *recordingMigrationUnlocker) Unlock(ctx context.Context) error {
     return instance.unlockError
 }
 
-/* an interrupted migration cancels the command context; if the unlock rides it the delete never reaches the database and the migration lock row survives, refusing every later migration until someone runs the unlock command by hand */
 func TestUnlockMigrations_RunsOnACancelledCommandContext(t *testing.T) {
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
@@ -230,7 +229,6 @@ func TestUnlockMigrations_ReportsAFailedUnlock(t *testing.T) {
         t.Fatalf("expected the unlock failure to be reported, got %q", buffer.String())
     }
 
-    /* the printed line alone is not enough: the failure must also reach the exit code, or a deploy script reads success over a lock row that refuses every later migration */
     if false == errors.Is(unlockErr, deleteRefused) {
         t.Fatalf("expected the unlock failure to be returned for the exit code, got %v", unlockErr)
     }
@@ -249,7 +247,6 @@ func (instance *migrationCapableDatabaseProvider) OpenForMigration(params bunorm
     return instance.migrationDatabase, nil
 }
 
-/* the commands prefer the dedicated migration connection and say so in the label, so a verbose run names the connection its DDL actually rides */
 func TestResolveDatabase_PrefersTheDedicatedMigrationConnection(t *testing.T) {
     ordinaryDatabase, _ := newFakeBunDatabase()
     migrationDatabase, _ := newFakeBunDatabase()
@@ -315,7 +312,6 @@ func TestResolveDatabase_PrefersTheDedicatedMigrationConnection(t *testing.T) {
     }
 }
 
-/* TestNewMigrator_SqlMigrationExecFailureReachesTheCaller pins the verdict of the SQL migration path against the bun version this module requires. The path is bun's — a *migrate.Migrations filled by Discover — but melody builds the migrator over it and is the layer that prints the result, so a swallowed failure here is a green deploy over a schema that never changed. Under bun v1.2.16 the deferred conn.Close overwrote the exec failure with its own nil return, so Migrate answered nil, the command printed [success], exited 0 and marked the migration applied forever, which made the failure unrepeatable. The pin drives a .up.sql whose exec the driver refuses and requires the refusal to reach the caller, so a bump that reintroduces the swallow fails here rather than at three in the morning. */
 func TestNewMigrator_SqlMigrationExecFailureReachesTheCaller(t *testing.T) {
     const migrationName = "20260101000001"
     const migrationStatement = "CREATE TABLE probe_three (id NOT_A_TYPE)"
@@ -359,7 +355,6 @@ func TestNewMigrator_SqlMigrationExecFailureReachesTheCaller(t *testing.T) {
         t.Fatalf("expected the migration name in the returned error, got %q", migrateErr.Error())
     }
 
-    /* the row is the other half of the defect: a migration marked applied over a statement that never ran can never be retried, and db:status reports it as done */
     for _, query := range recorder.recordedQueries() {
         if true == strings.HasPrefix(query, "INSERT") && true == strings.Contains(query, "bun_migrations") {
             t.Fatalf("the failed migration was marked applied: %q", query)
@@ -367,7 +362,6 @@ func TestNewMigrator_SqlMigrationExecFailureReachesTheCaller(t *testing.T) {
     }
 }
 
-/* migrationCapableTestProvider hands out a SEPARATE database for the migration door, so a probe can tell the dedicated connection from the ordinary pool by identity rather than by trusting the flag beside it. */
 type migrationCapableTestProvider struct {
     ordinaryDatabase  *bun.DB
     migrationDatabase *bun.DB
@@ -386,9 +380,6 @@ func (instance *migrationCapableTestProvider) OpenForMigration(params bunorm.Con
 
 var _ bunorm.MigrationProvider = (*migrationCapableTestProvider)(nil)
 
-/* TestResolveDatabase_TheReleaseEndsTheDedicatedMigrationConnection pins the half of the door a command defers. The dedicated connection deliberately lifts the driver's read and write deadlines and recycles nothing, which is right for a DDL statement that runs for minutes and wrong for anything that then sits idle; the registry memoizes it until the registry itself closes, so a migration run at the boot of a process that goes on to serve requests used to leave a deadline-less connection open for the life of that process.
-
-   The proof is that the NEXT resolution dials again: the memo is really gone, not merely marked. Counting the provider's migration opens says that where checking the connection's own state could not — the same pointer answers both times. */
 func TestResolveDatabase_TheReleaseEndsTheDedicatedMigrationConnection(t *testing.T) {
     ordinaryDatabase, _ := newFakeBunDatabase()
     migrationDatabase, _ := newFakeBunDatabase()
@@ -443,7 +434,6 @@ func TestResolveDatabase_TheReleaseEndsTheDedicatedMigrationConnection(t *testin
 
             releaseDatabase()
 
-            /* the memo is gone, so this dials the provider a second time */
             if _, _, _, secondErr := base.resolveDatabase(runtimeInstance, commandContext, resolveOutput); nil != secondErr {
                 t.Errorf("unexpected resolve error on the second call: %s", secondErr.Error())
             }
@@ -461,7 +451,6 @@ func TestResolveDatabase_TheReleaseEndsTheDedicatedMigrationConnection(t *testin
     }
 }
 
-/* a release that FAILS must reach a channel. The registry forgets the handle before it closes it and its own teardown snapshots the map, so nothing downstream covers what this close leaves behind; a release that swallowed the failure reported it nowhere at all. The record is a warning rather than the command's verdict, and it belongs in the json document as much as on the terminal — the release is deferred after finish and defers are last-in-first-out, so it runs while the document is still being assembled. */
 func TestResolveDatabase_TheReleaseReportsAFailedClose(t *testing.T) {
     ordinaryDatabase, _ := newFakeBunDatabase()
     migrationDatabase, _ := newFakeBunDatabase()
@@ -507,7 +496,6 @@ func TestResolveDatabase_TheReleaseReportsAFailedClose(t *testing.T) {
                 return nil
             }
 
-            /* the registry goes down first, so the release meets a refusal it cannot retry — the shape of every close that fails after the handle is already forgotten */
             if closeErr := registry.Close(); nil != closeErr {
                 t.Errorf("unexpected registry close error: %s", closeErr.Error())
             }
@@ -548,7 +536,6 @@ func TestResolveDatabase_TheReleaseReportsAFailedClose(t *testing.T) {
     }
 }
 
-/* a release that succeeds says nothing: a warning on every migration run would teach the operator to ignore the one that matters. */
 func TestResolveDatabase_TheSuccessfulReleaseIsSilent(t *testing.T) {
     ordinaryDatabase, _ := newFakeBunDatabase()
     migrationDatabase, _ := newFakeBunDatabase()
@@ -608,7 +595,6 @@ func TestResolveDatabase_TheSuccessfulReleaseIsSilent(t *testing.T) {
     }
 }
 
-/* a provider with no migration capability ran on the ordinary POOL, which belongs to the application; the release must leave it alone, or a migration command would take the database away from everything else the process runs. */
 func TestResolveDatabase_TheReleaseLeavesTheOrdinaryPoolAlone(t *testing.T) {
     database, _ := newFakeBunDatabase()
     runtimeInstance := newRuntimeWithDatabase(t, database)
@@ -639,7 +625,6 @@ func TestResolveDatabase_TheReleaseLeavesTheOrdinaryPoolAlone(t *testing.T) {
 
             releaseDatabase()
 
-            /* the same pool is still the answer, and still usable: nothing was ended */
             secondResolved, _, _, secondErr := base.resolveDatabase(runtimeInstance, commandContext, resolveOutput)
             if nil != secondErr {
                 t.Errorf("unexpected resolve error on the second call: %s", secondErr.Error())

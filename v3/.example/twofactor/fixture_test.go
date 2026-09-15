@@ -1,20 +1,16 @@
 package twofactor
 
 import (
-    "database/sql"
-
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect"
     "github.com/uptrace/bun/dialect/feature"
+    melodyencrypt "github.com/precision-soft/melody/integrations/bunorm/v3/encrypt"
     "github.com/uptrace/bun/schema"
+    "database/sql"
+    "testing"
+    "time"
 )
 
-/* renderingDialect is the least a bun handle needs in order to RENDER a statement: the mysql dialect asks
-   the connection for its version as it is installed, so a handle built on it cannot be made without a
-   database, while what these tests read is the statement bun composes, not the answer a server would give.
-   Nothing here executes, so the handle carries no driver at all. The repository and migration packages keep
-   twins of this shape, the second of which also records what was executed; a test fixture cannot cross a
-   package boundary, so the three are the same shape written where each package can reach it. */
 type renderingDialect struct {
     schema.BaseDialect
 
@@ -32,11 +28,11 @@ func (instance *renderingDialect) Init(database *sql.DB) {
 }
 
 func (instance *renderingDialect) Name() dialect.Name {
-    return dialect.SQLite
+    return dialect.MySQL
 }
 
 func (instance *renderingDialect) Features() feature.Feature {
-    return 0
+    return feature.InsertOnDuplicateKey
 }
 
 func (instance *renderingDialect) Tables() *schema.Tables {
@@ -62,9 +58,21 @@ func (instance *renderingDialect) DefaultSchema() string {
     return "main"
 }
 
-/* newRenderingDatabase answers a handle that can compose a statement and cannot run one. */
 func newRenderingDatabase() *bun.DB {
     return bun.NewDB(nil, newRenderingDialect())
 }
 
 var _ schema.Dialect = (*renderingDialect)(nil)
+
+func renderedEnrollmentUpsert(t *testing.T) string {
+    t.Helper()
+
+    store := &Store{database: newRenderingDatabase()}
+
+    return store.enrollmentUpsert(&Enrollment{
+        UserIdentifier: "user-2",
+        Secret:         melodyencrypt.EncryptedString("zz-secret"),
+        RecoveryCodes:  melodyencrypt.EncryptedString(`["zz-one"]`),
+        CreatedAt:      time.Unix(1, 0),
+    }).String()
+}

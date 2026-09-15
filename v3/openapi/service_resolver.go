@@ -17,7 +17,7 @@ func RegistryMustFromResolver(resolver containercontract.Resolver) *Registry {
     return container.MustFromResolver[*Registry](resolver, ServiceOpenApiRegistry)
 }
 
-/* InfoFromResolver returns the document Info registered by the application, or an empty Info when none was registered (the Info is optional metadata, not a hard dependency). */
+/* InfoFromResolver returns optional document metadata, using empty Info when no registration exists. */
 func InfoFromResolver(resolver containercontract.Resolver) Info {
     if false == resolver.Has(ServiceOpenApiInfo) {
         return Info{}

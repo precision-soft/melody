@@ -7,7 +7,6 @@ import (
     "github.com/precision-soft/melody/v3/.example/entity"
 )
 
-/* The order is part of the answer: the repository joins the list into one comma-separated column, so an answer built by ranging a map writes a different spelling of the same set on a share of the saves — and the audit trail, which compares the stored values, then records a change nobody asked for. A thousand runs is the sample the rate needs: at the measured 13 per cent for two roles, ten runs miss it a quarter of the time. */
 func TestNormalizeRolesAnswersTheOrderItWasGiven(t *testing.T) {
     given := []string{entity.RoleEditor, entity.RoleAdmin, entity.RoleUser}
     wanted := strings.Join(given, ",")
@@ -39,7 +38,6 @@ func TestNormalizeRolesDropsBlanksAndDuplicatesKeepingTheFirstPlace(t *testing.T
     }
 }
 
-/* An account is never left with nothing: an empty role list is what the access control reads as "no rule grants this", and the catch-all rule of the example guards every path behind ROLE_USER, so a user saved with none could sign in and reach nothing at all. */
 func TestNormalizeRolesFallsBackToTheBaseRole(t *testing.T) {
     for name, roles := range map[string][]string{
         "no roles at all":  nil,
@@ -60,7 +58,6 @@ func TestNormalizeRolesFallsBackToTheBaseRole(t *testing.T) {
     }
 }
 
-/* The roles are trimmed but NOT folded, because the access control compares them exactly: a role saved as "role_admin" would grant nothing and read as though it did. */
 func TestNormalizeRolesKeepsTheCaseItWasGiven(t *testing.T) {
     normalized := normalizeRoles([]string{" role_admin "})
 
@@ -69,7 +66,6 @@ func TestNormalizeRolesKeepsTheCaseItWasGiven(t *testing.T) {
     }
 }
 
-/* the repository stores the role list comma-joined, so a role carrying a comma would come back as several roles on the next read — among them, possibly, an administrator nobody granted */
 func TestRoleContainingCommaReportsTheOffendingRole(t *testing.T) {
     role, found := roleContainingComma([]string{entity.RoleUser, "ROLE_X," + entity.RoleAdmin})
     if false == found {
@@ -87,7 +83,6 @@ func TestRoleContainingCommaAcceptsPlainRoles(t *testing.T) {
     }
 }
 
-/* A file-backed session storage snapshots through json, so the role list comes back as []any: the copy of the helper this package holds must accept the same two spellings the token resolver accepts, or the door reading it answers an empty role list to a signed-in caller. */
 func TestGetStringSliceFromSessionAcceptsARestoredRoleList(t *testing.T) {
     sessionInstance := sessionCarrying(t, map[string]any{
         "roles": []any{entity.RoleUser, entity.RoleEditor},

@@ -25,7 +25,7 @@ func NewMiddlewareCommand(
     descriptionProvider MiddlewareDescriptionProvider,
     buildProvider MiddlewareBuildProvider,
 ) *MiddlewareCommand {
-    /* every value the providers return is guarded below, but the providers themselves were not: a nil handed here surfaced as a bare nil-function call in Run, far from the wiring mistake that produced it */
+
     if nil == descriptionProvider {
         exception.Panic(
             exception.NewError("middleware command created with nil description provider", nil, nil),
@@ -91,7 +91,6 @@ func (instance *MiddlewareCommand) Run(
 
     envelope := output.NewEnvelope(meta)
 
-    /* the zero-value command is constructible outside the constructor that refuses nil providers; a named refusal reaches the report where a nil-function call reached the recover */
     if nil == instance.descriptionProvider || nil == instance.buildProvider {
         return exception.NewError("middleware provider is nil", nil, nil)
     }
@@ -107,9 +106,6 @@ func (instance *MiddlewareCommand) Run(
     return output.Render(commandContext.Writer(), envelope, option)
 }
 
-/* middlewareListItem is one shape serving three documents, and the reason is the field that used to appear and disappear with them: an active row omitted it, an inactive row carried it, and a consumer keying on it could not tell an active middleware from a malformed document. It is always present now, empty where there is nothing to say.
-
-   What --build cannot fill is worth naming rather than faking: MiddlewareBuildProvider hands back the built chain and nothing else, so a built row carries no name and no priority — index, function and status are all the build knows. Correlating the built chain with the described one by position would be a guess, because the description also lists the inactive entries the build never produces. A consumer that needs the name reads the default listing, which describes without building. */
 type middlewareListItem struct {
     Index    int    `json:"index"`
     Name     string `json:"name"`
@@ -119,7 +115,6 @@ type middlewareListItem struct {
     Reason   string `json:"reason"`
 }
 
-/* populateDescription is the default listing: nothing is built, so listing the pipeline in a console process runs no factory and touches no serving-process state */
 func (instance *MiddlewareCommand) populateDescription(
     option output.Option,
     envelope *output.Envelope,
@@ -156,7 +151,6 @@ func (instance *MiddlewareCommand) populateDescription(
     if nil != report {
         inactive := report.Inactive()
 
-        /* the reason makes the comparator total: same-name inactive entries are the normal case — a duplicate definition skipped beside an environment mismatch of the same name — and under an unstable sort a name-only comparator flips their rows between runs */
         sort.Slice(inactive, func(leftIndex int, rightIndex int) bool {
             if inactive[leftIndex].Name() == inactive[rightIndex].Name() {
                 return inactive[leftIndex].Reason() < inactive[rightIndex].Reason()
@@ -235,7 +229,6 @@ func (instance *MiddlewareCommand) populateDescription(
     )
 }
 
-/* populateBuiltChain runs the real build under a recover, so a factory that panics answers as a rendered failure instead of killing the command that asked about it */
 func (instance *MiddlewareCommand) populateBuiltChain(
     option output.Option,
     envelope *output.Envelope,
@@ -250,7 +243,7 @@ func (instance *MiddlewareCommand) populateBuiltChain(
             output.NewErrorCause(
                 buildErr.Error(),
                 map[string]any{
-                    /* the chain is built from the failure itself with the head dropped, rather than from a bare errors.Unwrap: a joined failure answers Unwrap with nothing, and the report lost every cause exactly when there was more than one to show */
+
                     "causeChain": causeChainBelowHead(buildErr),
                 },
             ),
@@ -330,7 +323,7 @@ func (instance *MiddlewareCommand) runBuildProviderRecovered() (middlewares []ht
         }
 
         middlewares = nil
-        /* the recovered value travels in the message because the message is what the envelope cause renders — a detail map here would reach the log and not the operator reading the report */
+
         buildErr = exception.NewError(
             fmt.Sprintf("middleware build panicked: %v", recovered),
             nil,
@@ -360,7 +353,6 @@ func middlewareFunctionName(middleware httpcontract.Middleware) string {
     return function.Name()
 }
 
-/* causeChainBelowHead walks the causes below the failure's own message through both unwrap shapes: a bare errors.Unwrap answers nothing for a joined failure, whose causes live behind the []error shape. */
 func causeChainBelowHead(err error) []string {
     chain := exception.BuildCauseChain(err, 9)
     if 1 >= len(chain) {
@@ -371,4 +363,3 @@ func causeChainBelowHead(err error) []string {
 }
 
 var _ clicontract.Command = (*MiddlewareCommand)(nil)
-

@@ -16,7 +16,7 @@ const (
     FormatJsonPretty Format = "json-pretty"
 )
 
-/* IsJsonFormat answers for both json spellings, and every place that used to compare against FormatJson asks through it: the two differ in whitespace alone, so a site that recognises one and not the other would color a banner into a document, or print a table where a document was asked for. */
+/* IsJsonFormat recognizes both compact and indented JSON formats. */
 func IsJsonFormat(format Format) bool {
     return FormatJson == format || FormatJsonPretty == format
 }

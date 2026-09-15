@@ -2,15 +2,10 @@ package migration
 
 import (
     "context"
-    "database/sql/driver"
     "strings"
     "testing"
 )
 
-/* the set is ONE migration because the example has one state, so what is pinned here is the CONTENT of
-   that migration — which statements it emits, and in what order — rather than how many steps the schema
-   is spread over. The count this replaced could not see either: a set of seven steps in the wrong order
-   would have satisfied it. */
 func TestMigrationsHoldOneSchemaMigration(t *testing.T) {
     sorted := Migrations.Sorted()
     if 1 != len(sorted) {
@@ -65,35 +60,6 @@ func TestDownSchemaDropsTheConstraintFirstAndTheTablesInReverse(t *testing.T) {
     })
 }
 
-/* indexPresenceRows answers the catalogue question the constraint asks before it touches the table. It has
-   to tolerate a volume whose table already carries the key, the way every table is created IF NOT EXISTS —
-   MySQL has no ADD KEY IF NOT EXISTS, so the tolerance is spelled by asking first. */
-func indexPresenceRows(present int64) func(query string) ([]string, [][]driver.Value, error) {
-    return func(query string) ([]string, [][]driver.Value, error) {
-        if true == strings.Contains(query, "information_schema.STATISTICS") {
-            return []string{"count"}, [][]driver.Value{{present}}, nil
-        }
-
-        return []string{}, nil, nil
-    }
-}
-
-func isUsernameIndexAdd(query string) bool {
-    return strings.HasPrefix(query, "ALTER TABLE") &&
-        strings.Contains(query, "ADD UNIQUE KEY")
-}
-
-func isUsernameIndexDrop(query string) bool {
-    return strings.HasPrefix(query, "ALTER TABLE") &&
-        strings.Contains(query, "DROP INDEX")
-}
-
-/* the expression is the whole point of the constraint: the identity this application gives a username is
-   LOWER(username) compared byte for byte, because NormalizedUsername folds case and nothing else and the
-   lookup door compares on utf8mb4_bin for the same reason. Indexed on the column as it stands, the key
-   would follow the column's own accent-insensitive collation and refuse two names the application holds
-   apart — 'ana' and 'ána' — while admitting 'Ana' beside 'ana', which it holds to be one. Measured on the
-   running server with exactly this expression: 'ana' and 'ANA' collide with 'Ana', 'Ána' does not. */
 func TestAddUserUsernameIndexBuildsTheKeyOnTheFoldedSpelling(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = indexPresenceRows(0)
@@ -122,8 +88,6 @@ func TestAddUserUsernameIndexBuildsTheKeyOnTheFoldedSpelling(t *testing.T) {
     }
 }
 
-/* the tolerance is the half a volume older than this schema depends on: asked for a key it already
-   carries, the migration must do nothing rather than fail the whole set on a duplicate index name. */
 func TestAddUserUsernameIndexLeavesAKeyThatIsAlreadyThere(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = indexPresenceRows(1)

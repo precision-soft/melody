@@ -10,7 +10,6 @@ import (
     "github.com/precision-soft/melody/v3/version"
 )
 
-/* the header is a comma-separated list and a proxy may weaken a strong tag; an exact string comparison silently re-sent the whole body for both shapes */
 func TestEtagMatchesIfNoneMatch(t *testing.T) {
     etag := `"1024-1717000000"`
 
@@ -41,7 +40,6 @@ func TestEtagMatchesIfNoneMatch(t *testing.T) {
     }
 }
 
-/* GenerateEtag is what makes a conditional request answerable at all, and its nil branch had no test: a nil FileInfo has to produce the empty string rather than an entity tag built from a dereference, because the caller reaches here on the path where a stat failed and a panic there runs outside anything that could answer the request. */
 
 func TestGenerateEtag_ANilFileInfoProducesNoTag(t *testing.T) {
     if "" != GenerateEtag(nil, false) {
@@ -53,7 +51,6 @@ func TestGenerateEtag_ANilFileInfoProducesNoTag(t *testing.T) {
     }
 }
 
-/* the weak form carries the W/ prefix and the strong one does not. The distinction is what a proxy is allowed to rewrite, so the two spellings of one file must differ by exactly that prefix — a strong tag emitted where a weak one was configured tells caches the bytes are byte-identical when the application only promised semantic equivalence. */
 
 func TestGenerateEtag_TheWeakFormDiffersOnlyByItsPrefix(t *testing.T) {
     info := &staticEtagFileInfo{size: 1024, modTime: time.Unix(1754049600, 0)}
@@ -70,7 +67,6 @@ func TestGenerateEtag_TheWeakFormDiffersOnlyByItsPrefix(t *testing.T) {
     }
 }
 
-/* the tag is a digest, and that is a disclosure property, not a rendering choice: spelled out, the tag told every anonymous client the file's modification instant to the nanosecond, and the embedded branch told them the binary's build version, on every asset */
 func TestGenerateEtag_DisclosesNeitherTheTimestampNorTheBuildVersion(t *testing.T) {
     dated := GenerateEtag(&staticEtagFileInfo{size: 1024, modTime: time.Unix(1754049600, 0)}, false)
     if true == strings.Contains(dated, "1754049600") {
@@ -83,7 +79,6 @@ func TestGenerateEtag_DisclosesNeitherTheTimestampNorTheBuildVersion(t *testing.
     }
 }
 
-/* the tag changes when either half of it changes — the size or the modification time. A tag built from one of them alone would answer 304 for a deploy that rewrote a file to the same length, and the client would keep the previous bytes until the file changed size. */
 
 func TestGenerateEtag_ChangesWithEitherTheSizeOrTheModificationTime(t *testing.T) {
     base := GenerateEtag(&staticEtagFileInfo{size: 1024, modTime: time.Unix(1754049600, 0)}, false)
@@ -99,7 +94,6 @@ func TestGenerateEtag_ChangesWithEitherTheSizeOrTheModificationTime(t *testing.T
     }
 }
 
-/* two rewrites within the same second that keep the same length must still produce different tags: at whole-second resolution they did not, so a deploy that swapped a bundle for one of the same size revalidated 304 and stayed served stale until its length or its second changed */
 func TestGenerateEtag_ChangesWithinTheSameSecond(t *testing.T) {
     earlier := GenerateEtag(&staticEtagFileInfo{size: 1024, modTime: time.Unix(1754049600, 100000000)}, false)
     later := GenerateEtag(&staticEtagFileInfo{size: 1024, modTime: time.Unix(1754049600, 900000000)}, false)
@@ -109,7 +103,6 @@ func TestGenerateEtag_ChangesWithinTheSameSecond(t *testing.T) {
     }
 }
 
-/* a filesystem that reports no modification time — every embedded one — used to make the tag degenerate into size alone, identical across rebuilds, so a redeployed asset that kept its length revalidated 304 and stayed served stale. The build version stands in for the timestamp there, inside the digest: the undated derivation must differ from every dated one of the same size, and still tell two sizes apart. */
 func TestGenerateEtag_AZeroModificationTimeDerivesFromTheBuildVersionInsteadOfTheTimestamp(t *testing.T) {
     zeroTimed := GenerateEtag(&staticEtagFileInfo{size: 1024}, false)
 
@@ -129,7 +122,6 @@ func TestGenerateEtag_AZeroModificationTimeDerivesFromTheBuildVersionInsteadOfTh
     }
 }
 
-/* the weak form of an undated file's tag differs from the strong one only by its prefix, the way it does for a dated one */
 func TestGenerateEtag_AZeroModificationTimeKeepsTheWeakFormsPrefix(t *testing.T) {
     strong := GenerateEtag(&staticEtagFileInfo{size: 1024}, false)
     weak := GenerateEtag(&staticEtagFileInfo{size: 1024}, true)
@@ -139,7 +131,6 @@ func TestGenerateEtag_AZeroModificationTimeKeepsTheWeakFormsPrefix(t *testing.T)
     }
 }
 
-/* the field is a list, and a proxy that rewrites it leaves an empty member behind, so ", \"abc\"" is a shape a real cache sends. Skipping the empty member is what keeps it from being compared against the tag; the control below shows that a list of nothing but empty members still matches nothing, so the skip does not turn an empty header into a match. */
 func TestEtagMatchesIfNoneMatch_AnEmptyMemberIsSkippedRatherThanCompared(t *testing.T) {
     if false == EtagMatchesIfNoneMatch(", \"abc\"", "\"abc\"") {
         t.Fatalf("expected the tag to be found past an empty member of the list")

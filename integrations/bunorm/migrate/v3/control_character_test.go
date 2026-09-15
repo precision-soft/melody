@@ -6,7 +6,6 @@ import (
     "unicode/utf8"
 )
 
-/* text of server origin reaches an operator's terminal through this helper — an error message off the wire, a reported version string, a failed statement — so a control character it carries must arrive as its visible spelling rather than as an instruction the terminal obeys. A carriage return alone repaints the line the previous record wrote; a newline forges a whole record in a captured log. */
 func TestEscapeControlCharactersRendersEveryControlCharacterVisibly(t *testing.T) {
     escaped := escapeControlCharacters("before\r\n\tafter\x00\x1b\x7fend", false)
 
@@ -15,7 +14,6 @@ func TestEscapeControlCharactersRendersEveryControlCharacterVisibly(t *testing.T
     }
 }
 
-/* the named three are spelled by name and everything else by its hexadecimal code, so a reader can tell a tab from a vertical tab instead of reading one escape for both */
 func TestEscapeControlCharactersSpellsTheNamedThreeByNameAndTheRestInHexadecimal(t *testing.T) {
     for value, expected := range map[string]string{
         "\n":   `\n`,
@@ -32,7 +30,6 @@ func TestEscapeControlCharactersSpellsTheNamedThreeByNameAndTheRestInHexadecimal
     }
 }
 
-/* the multi-line form is what the query rendering uses, where a real line break is the point: the newline survives and every other control character is still escaped, so a multi-line statement stays readable without becoming a way to forge lines */
 func TestEscapeControlCharactersKeepsTheNewlineWhenAskedAndEscapesTheRest(t *testing.T) {
     escaped := escapeControlCharacters("select 1\nfrom dual\r\tend", true)
 
@@ -45,7 +42,6 @@ func TestEscapeControlCharactersKeepsTheNewlineWhenAskedAndEscapesTheRest(t *tes
     }
 }
 
-/* a value with nothing to escape is answered as it was given: the helper runs on every rendered cell, and rebuilding an untouched string for each of them is the cost this guard pins */
 func TestEscapeControlCharactersAnswersAnUntouchedValueUnchanged(t *testing.T) {
     plain := "melody_example_v1 on db.internal"
 
@@ -58,7 +54,6 @@ func TestEscapeControlCharactersAnswersAnUntouchedValueUnchanged(t *testing.T) {
     }
 }
 
-/* the newline is the one character whose classification depends on the mode, and it is the whole difference between the two forms */
 func TestIsEscapedControlRuneReadsTheNewlineByTheModeAndTheRestAlike(t *testing.T) {
     if false == isEscapedControlRune('\n', false) {
         t.Fatal("the single-line form must escape the newline")
@@ -83,7 +78,6 @@ func TestIsEscapedControlRuneReadsTheNewlineByTheModeAndTheRestAlike(t *testing.
     }
 }
 
-/* the C1 block is the second control block, and a terminal decoding UTF-8 obeys it without an ESC ever appearing: U+009B is the control sequence introducer that "\x1b[" abbreviates, so one rune repaints a line the escaping was meant to make inert. The whole 0x80…0x9f range is escaped and both ends are entered, because a range guard fails at its ends first. */
 func TestEscapeControlCharactersEscapesTheWholeC1Block(t *testing.T) {
     for _, currentCase := range []struct {
         name     string
@@ -103,7 +97,6 @@ func TestEscapeControlCharactersEscapesTheWholeC1Block(t *testing.T) {
         }
     }
 
-    /* the runes on either side of the block are ordinary text and must survive as themselves, or the guard escapes what it was never asked to */
     for _, neighbour := range []string{"a~b", "a\u00a0b", "a\u00e9b"} {
         if neighbour != escapeControlCharacters(neighbour, false) {
             t.Fatalf("expected a rune outside the block to pass through unchanged, got %q", escapeControlCharacters(neighbour, false))
@@ -111,7 +104,6 @@ func TestEscapeControlCharactersEscapesTheWholeC1Block(t *testing.T) {
     }
 }
 
-/* LINE SEPARATOR and PARAGRAPH SEPARATOR are the only runes outside the control blocks that a unicode line splitter reads as a record boundary, so a log line carrying one is read downstream as two records — the half of the harm that does not depend on which terminal is attached. */
 func TestEscapeControlCharactersEscapesTheTwoUnicodeLineSeparators(t *testing.T) {
     for _, currentCase := range []struct {
         name     string
@@ -129,7 +121,6 @@ func TestEscapeControlCharactersEscapesTheTwoUnicodeLineSeparators(t *testing.T)
     }
 }
 
-/* a rune above one byte cannot take the \xNN spelling: \x2028 reads as \x20 followed by the digits 28, which is a space and not a separator, so the four-digit form is what keeps the two apart in a log a human reads. */
 func TestEscapeControlCharactersSpellsARuneAboveOneByteInFourDigits(t *testing.T) {
     escaped := escapeControlCharacters("a\u2028b", false)
 
@@ -142,7 +133,6 @@ func TestEscapeControlCharactersSpellsARuneAboveOneByteInFourDigits(t *testing.T
     }
 }
 
-/* every rune a unicode line splitter counts as a record boundary has to leave the value escaped, or one record is read downstream as two. The set is entered whole — the C0 breaks, the file, group and record separators, NEL and the two unicode separators — because the last three are exactly the ones a C0-and-DEL predicate passes through. */
 func TestEscapeControlCharactersNoUnicodeLineBoundarySurvives(t *testing.T) {
     boundaries := []rune{'\n', '\v', '\f', '\r', '\x1c', '\x1d', '\x1e', '\u0085', '\u2028', '\u2029'}
 
@@ -161,7 +151,6 @@ func TestEscapeControlCharactersNoUnicodeLineBoundarySurvives(t *testing.T) {
     }
 }
 
-/* the early return answers a value it finds nothing to escape in with the value itself, so it has to agree with the loop rune for rune: a value made of one newly-escaped rune and nothing else is the shape that tells the two apart. */
 func TestEscapeControlCharactersTheEarlyReturnAgreesWithTheLoop(t *testing.T) {
     for _, currentCase := range []struct {
         value    string
@@ -184,7 +173,6 @@ func TestEscapeControlCharactersTheEarlyReturnAgreesWithTheLoop(t *testing.T) {
     }
 }
 
-/* the multi-line form keeps the newline the query rendering exists for, and nothing else: NEL and the two unicode separators are record boundaries the query rendering never asked for, and they stay escaped in both forms. */
 func TestEscapeControlCharactersKeepsOnlyTheNewlineAmongTheRecordBoundaries(t *testing.T) {
     escaped := escapeControlCharacters("one\u0085two\u2028three\nfour", true)
 
@@ -197,7 +185,6 @@ func TestEscapeControlCharactersKeepsOnlyTheNewlineAmongTheRecordBoundaries(t *t
     }
 }
 
-/* the server can answer the single-byte C1 introducer raw, and a walk over runes read that byte as U+FFFD, outside every range the guard checks, so the raw spelling went to the terminal as sent while the encoded one was escaped. Every byte that starts no valid sequence is spelled \xNN, and what comes out is valid UTF-8. */
 func TestEscapeControlCharactersEscapesARawByteThatIsNotValidUtf8(t *testing.T) {
     for _, currentCase := range []struct {
         name     string
@@ -221,7 +208,6 @@ func TestEscapeControlCharactersEscapesARawByteThatIsNotValidUtf8(t *testing.T) 
     }
 }
 
-/* once another control character forced the rewrite, the raw byte was written out as U+FFFD: the same answer was kept as sent when the byte stood alone and corrupted when a newline stood beside it, and what the server sent was destroyed instead of shown. Neither form may carry the replacement rune. */
 func TestEscapeControlCharactersDoesNotReplaceARawByteWhenAnotherCharacterForcesTheRewrite(t *testing.T) {
     escaped := escapeControlCharacters("a\x9bb\n", false)
 
@@ -234,7 +220,6 @@ func TestEscapeControlCharactersDoesNotReplaceARawByteWhenAnotherCharacterForces
     }
 }
 
-/* a genuine U+FFFD is three valid bytes and ordinary text: the invalid-byte rule reads the decoder's width, so a replacement rune the server sent as itself passes through as itself, beside a raw byte or alone. */
 func TestEscapeControlCharactersLeavesAGenuineReplacementRuneUntouched(t *testing.T) {
     if "a\xef\xbf\xbdb" != escapeControlCharacters("a\xef\xbf\xbdb", false) {
         t.Fatalf("expected a genuine U+FFFD to pass through unchanged, got %q", escapeControlCharacters("a\xef\xbf\xbdb", false))
@@ -245,7 +230,6 @@ func TestEscapeControlCharactersLeavesAGenuineReplacementRuneUntouched(t *testin
     }
 }
 
-/* the early return answers a value it finds nothing to escape in with the value itself, so it has to see an invalid byte the way the loop does: a raw byte and nothing else is the shape that tells the two apart */
 func TestContainsControlCharacterSeesARawByte(t *testing.T) {
     if false == containsControlCharacter("\x9b", false) {
         t.Fatal("a raw byte must be reported as a control character, or the early return hands it back as sent")
@@ -256,7 +240,6 @@ func TestContainsControlCharacterSeesARawByte(t *testing.T) {
     }
 }
 
-/* the multi-line form keeps the real line break the query rendering exists for and nothing else, a raw byte beside it included */
 func TestEscapeControlCharactersKeepsTheNewlineBesideARawByte(t *testing.T) {
     escaped := escapeControlCharacters("a\x9bb\nc", true)
 

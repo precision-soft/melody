@@ -58,7 +58,6 @@ func (instance *containerRegistrar) MustRegister(serviceName string, provider an
     instance.target.MustRegister(serviceName, provider, options...)
 }
 
-/* the backend borrows the client and declines to close it; resolving it must record the edge that lets the teardown close the owning connection after it */
 func TestRegisterBackendService_ResolutionOrdersTheConnectionIntoTheTeardown(t *testing.T) {
     client := &teardownSpyClient{}
     serviceContainer := container.NewContainer()
@@ -81,7 +80,6 @@ func TestRegisterBackendService_ResolutionOrdersTheConnectionIntoTheTeardown(t *
     }
 }
 
-/* the registered backend is probed over a store whose replies stop arriving, under a timer far below the client's five-second ceiling: a Get the client retries for as long as the context allows fails on the timer, a bounded one is refused with its own deadline */
 const registeredBackendProbeBudget = 2 * time.Second
 
 func TestRegisterBackendServiceWithOptions_HandsTheOptionsToTheBackend(t *testing.T) {
@@ -112,7 +110,6 @@ func TestRegisterBackendServiceWithOptions_HandsTheOptionsToTheBackend(t *testin
     }
 }
 
-/* PIN of the subpackage's convention, not a guard: the door without options registers the backend unbounded, the behaviour of a backend built without WithCommandTimeout */
 func TestRegisterBackendService_KeepsTheUnboundedDefault(t *testing.T) {
     serviceContainer := container.NewContainer()
     registrar := &containerRegistrar{target: serviceContainer}

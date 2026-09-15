@@ -47,7 +47,6 @@ func TestCipherRegistry_NamedAndDefaultEntriesAreIndependent(t *testing.T) {
         storeCipher("crm", nil)
     }()
 
-    /* the two assertions below can only distinguish the compartments while the two fakes are distinguishable themselves; asserted first, so a fake that collapsed back into one value fails here instead of leaving both of them holding whichever entry the registry answered from */
     if defaultCipher == namedCipher {
         t.Fatalf("the two fakes are the same value, so neither assertion below can fail")
     }
@@ -72,7 +71,6 @@ func TestUseCipher_NilResetsTheEntry(t *testing.T) {
     }
 }
 
-/* a bare nil is the documented deinstall door; a TYPED nil is a failed resolution installed anyway, and stored it would be handed out with a nil error and dereferenced inside database/sql at the first column write */
 func TestUseCipher_RefusesATypedNilCipher(t *testing.T) {
     defer func() {
         recovered := recover()

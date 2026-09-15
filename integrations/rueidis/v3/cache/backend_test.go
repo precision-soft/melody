@@ -233,7 +233,6 @@ func TestSetMultipleCtx_RefusesANegativeTtl(t *testing.T) {
     }
 }
 
-/* zero keeps meaning no expiry on both doors, which is what separates it from the negative value refused above. */
 func TestSetCtx_AZeroTtlStoresWithoutExpiry(t *testing.T) {
     backend, client := liveBackend(t)
 
@@ -310,7 +309,6 @@ func TestHasAndDeleteCtx_ReportAndRemoveOneEntry(t *testing.T) {
     }
 }
 
-/* deleting a key that is not there is not a failure: the caller asked for its absence and gets it. */
 func TestDeleteCtx_AnAbsentKeyIsNotAFailure(t *testing.T) {
     backend, _ := liveBackend(t)
 
@@ -418,7 +416,6 @@ func TestIncrementAndDecrementCtx_MoveOneCounter(t *testing.T) {
     }
 }
 
-/* redis refuses to increment a payload that is not an integer, and that refusal must reach the caller rather than be read as a fresh counter — the in-memory backend refuses the same input for the same reason. */
 func TestIncrementCtx_RefusesANonIntegerPayload(t *testing.T) {
     backend, _ := liveBackend(t)
 
@@ -475,7 +472,6 @@ func TestClearCtx_RemovesTheWholePrefixAndLeavesTheRestAlone(t *testing.T) {
     }
 }
 
-/* the scan pages rather than reading the keyspace in one answer, so the walk is driven past one page with a scan count of one. */
 func TestClearCtx_WalksEveryPageOfTheScan(t *testing.T) {
     _, client := liveBackend(t)
 
@@ -538,7 +534,6 @@ func TestClearByPrefixCtx_RemovesOnlyTheNamedSubtree(t *testing.T) {
     }
 }
 
-/* a prefix carrying a glob metacharacter is matched literally, so it neither misses the keys it names nor reaches the siblings a wildcard would. */
 func TestClearByPrefixCtx_MatchesAGlobMetacharacterLiterally(t *testing.T) {
     backend, _ := liveBackend(t)
 
@@ -572,7 +567,6 @@ func TestClearCtx_AnEmptyPrefixSpaceIsNotAFailure(t *testing.T) {
 }
 
 func TestNormalizeKey_RefusesTheSpellingsRedisCannotCarryAndNamesTheKey(t *testing.T) {
-    /* the key bound is a FIELD on this major, not the package constant the frozen majors compare against, so a bare literal would carry a maximum of zero and refuse every key as too long. The field is set to what the constructor guarantees, which is what this test is about to exercise. */
     backend := &Backend{prefix: "melody:", maxKeyLength: rueidisBackendDefaultMaxKeyLength}
 
     if _, emptyErr := backend.normalizeKey(""); nil == emptyErr {
@@ -616,7 +610,6 @@ func TestNormalizeKey_RefusesTheSpellingsRedisCannotCarryAndNamesTheKey(t *testi
     }
 }
 
-/* one malformed key stops the whole batch, so the refusal has to say which one it was — the caller handed in a set and cannot otherwise tell. */
 func TestManyCtx_ABatchRefusalNamesTheOffendingKey(t *testing.T) {
     backend, _ := liveBackend(t)
 
@@ -716,7 +709,6 @@ func TestFirstDeleteFailure_NamesOneKeyDeterministicallyAndCountsTheRest(t *test
     }
 }
 
-/* every operation reports a store that cannot be reached rather than answering as if it had. The client is the door: rueidis refuses on a closed one with an error of its own, so this backend needs no closed flag of its own — unlike the in-memory sibling, whose map would keep answering. Driving every operation through it also enters each one's store-failure branch, which no reachable store can produce. */
 func TestEveryOperation_ReportsAClosedClientInsteadOfAnsweringOverIt(t *testing.T) {
     backend, client := liveBackend(t)
 
@@ -771,7 +763,6 @@ func TestEveryOperation_ReportsAClosedClientInsteadOfAnsweringOverIt(t *testing.
     }
 }
 
-/* the batch delete names the key that stopped it, which is the whole reason the per-key answer is read rather than discarded. */
 func TestDeleteMultipleCtx_AFailureNamesTheKeyAndTheBatchSize(t *testing.T) {
     backend, client := liveBackend(t)
 
@@ -796,7 +787,6 @@ func TestDeleteMultipleCtx_AFailureNamesTheKeyAndTheBatchSize(t *testing.T) {
     }
 }
 
-/* the batch set names the key whose write did not land: the commands are built from a map, so without the parallel key list the caller would be told only that something in the batch failed. */
 func TestSetMultipleCtx_AFailureNamesOneOfTheKeys(t *testing.T) {
     backend, client := liveBackend(t)
 
@@ -817,7 +807,6 @@ func TestSetMultipleCtx_AFailureNamesOneOfTheKeys(t *testing.T) {
     }
 }
 
-/* Close ends THIS backend and leaves the shared client alone: every later operation refuses — the answer the in-memory backend behind the same contract gives, so a teardown-ordering bug reads identically whichever backend is wired — while a second backend over the same client keeps working, which is what proves the client itself was not closed. */
 func TestClose_RefusesLaterOperationsAndLeavesTheSharedClientOpen(t *testing.T) {
     backend, client := liveBackend(t)
 
@@ -847,7 +836,6 @@ func TestClose_RefusesLaterOperationsAndLeavesTheSharedClientOpen(t *testing.T) 
     }
 }
 
-/* the empty prefix is refused like the empty key everywhere else: a prefix assembled at run time that comes out empty must not select the whole namespace. */
 func TestClearByPrefix_RefusesTheEmptyPrefix(t *testing.T) {
     backend, _ := liveBackend(t)
 
@@ -876,7 +864,6 @@ func TestClearByPrefix_RefusesTheEmptyPrefix(t *testing.T) {
     }
 }
 
-/* the ttl is judged before the empty early-return, the order the in-memory backend judges it in. */
 func TestSetMultiple_RefusesANegativeTtlEvenForAnEmptyBatch(t *testing.T) {
     backend, _ := liveBackend(t)
 
@@ -890,7 +877,6 @@ func TestSetMultiple_RefusesANegativeTtlEvenForAnEmptyBatch(t *testing.T) {
     }
 }
 
-/* the counter refusal names the key it happened on, the way the in-memory backend's does. */
 func TestIncrement_WrapsTheStoreRefusalWithTheKey(t *testing.T) {
     backend, _ := liveBackend(t)
 
@@ -915,7 +901,6 @@ func TestIncrement_WrapsTheStoreRefusalWithTheKey(t *testing.T) {
     }
 }
 
-/* the configured command timeout bounds the contract calls, which carry no context of their own. */
 func TestCommandTimeout_BoundsTheContractCalls(t *testing.T) {
     _, client := liveBackend(t)
 
@@ -971,7 +956,6 @@ func TestFirstSetFailure_NamesTheSortedFirstKeyAndCountsTheRest(t *testing.T) {
     }
 }
 
-/* the validation refusal names the sorted-first malformed key, never a map-iteration choice — the nondeterminism the response reporting further down already refuses. Validation runs before anything is sent, so the batch leaves no trace. */
 func TestSetMultipleCtx_NamesTheSortedFirstMalformedKey(t *testing.T) {
     backend, _ := liveBackend(t)
 
@@ -994,7 +978,6 @@ func TestSetMultipleCtx_NamesTheSortedFirstMalformedKey(t *testing.T) {
     }
 }
 
-/* a multi-batch wipe that fails part-way answers at the operation's extent — the batches before the failure are irreversibly gone, and the batch's own counts could not say how much of the namespace went with them. A single-batch operation keeps the batch report, whose counts already are the operation's. */
 func TestDeleteKeysInBatches_AMultiBatchFailureReportsTheOperationsExtent(t *testing.T) {
     backend, _ := liveBackend(t)
 
@@ -1027,7 +1010,6 @@ func TestDeleteKeysInBatches_AMultiBatchFailureReportsTheOperationsExtent(t *tes
     }
 }
 
-/* the caller's own mistakes are named the way the in-memory backend names them, because the shared contract makes the grammar of a refusal part of the promise. Three distinct mistakes used to arrive under one message that is also the message of a store outage, so neither the operator nor the application could tell a bug in the call from redis being down. Redis refuses all three itself — what was missing was never the refusal but its name. */
 func TestBackend_CounterRefusalsAreNamedTheWayTheInMemorySiblingNamesThem(t *testing.T) {
     for _, testCase := range []struct {
         name    string
@@ -1074,7 +1056,6 @@ func TestBackend_CounterRefusalsAreNamedTheWayTheInMemorySiblingNamesThem(t *tes
     }
 }
 
-/* the fragments are matched inside whatever prefix the server or a script wraps them in, and case does not decide */
 func TestBackend_CounterRefusalsAreMatchedInsideTheServersOwnWrapping(t *testing.T) {
     refusal := counterError(
         "probe-key",
@@ -1086,7 +1067,6 @@ func TestBackend_CounterRefusalsAreMatchedInsideTheServersOwnWrapping(t *testing
     }
 }
 
-/* the configurable key bound is this major's own: the frozen majors compare against the package constant directly, so these two assertions have no site there. */
 func TestNewBackend_DefaultMaxKeyLength(t *testing.T) {
     client := &closeTrackingClient{}
 

@@ -174,7 +174,6 @@ func TestGenerate_NumericConstraintsEmbeddingAndNullability(t *testing.T) {
         t.Fatalf("expected the numericRequest component schema")
     }
 
-    /* inverted with the validation repairs: min on an integer no longer passes silently — the length constraint refuses a non-string value, so the field is advertised unsatisfiable (the empty exclusive window) instead of as an unconstrained integer */
     quantity := schema.Properties["quantity"]
     if nil == quantity || "integer" != quantity.Type || nil != quantity.MinLength ||
         nil == quantity.Minimum || 0 != *quantity.Minimum || nil == quantity.ExclusiveMinimum ||
@@ -337,7 +336,6 @@ type taggedRequest struct {
     Code string   `json:"code" validate:"min=2,max=8"`
 }
 
-/* inverted with the validation repairs: min/max measure a genuine string and refuse every other shape outright, so on a []string field they no longer pass silently — the array is advertised unsatisfiable (impossible items window) instead of unconstrained — while the string field keeps its exact length bounds */
 func TestGenerate_MinMaxAppliesOnlyToStringLength(t *testing.T) {
     registry := NewRegistry()
     registry.Describe("tags.create", Descriptor{
@@ -467,7 +465,6 @@ func TestGenerate_StripsOptionalPathParameterMarker(t *testing.T) {
     }
 }
 
-/* a brace segment is a literal path component to the router, so an optional marker inside braces must not mint the shortened path the ":name?" spelling legitimately serves */
 func TestGenerate_BraceOptionalMarkerDoesNotMintAShortenedPath(t *testing.T) {
     routes := []httpcontract.RouteDefinition{
         fakeRoute{name: "page.show", pattern: "/page/{slug?}", methods: []string{"GET"}},
@@ -545,7 +542,6 @@ func TestGenerate_NumericConstraintsAreNotEmittedOnStringFields(t *testing.T) {
         t.Fatalf("greaterThan must not set a numeric minimum on a string field: %+v", codeSchema)
     }
 
-    /* the validator rejects every value of a string field tagged greaterThan ("value must be numeric"), so the spec must advertise it unsatisfiable (an impossible length window) rather than as a satisfiable string a client would trust */
     if nil == codeSchema.MinLength || 1 != *codeSchema.MinLength || nil == codeSchema.MaxLength || 0 != *codeSchema.MaxLength {
         t.Fatalf("expected greaterThan on a string to advertise an unsatisfiable string (minLength 1, maxLength 0), got %+v", codeSchema)
     }
@@ -764,7 +760,6 @@ func TestGenerate_MirroredPathDoesNotDisplaceARouteRegisteredThere(t *testing.T)
     }
 }
 
-/* the range over descriptor.Responses is the one unordered driver of first-touch component naming: iterated directly, whichever type a run visits first takes the bare name and the other takes the numbered sibling, so two runs over one registry disagree on every $ref to a colliding name — the statuses are visited sorted, and thirty-two fresh generations pin the order because a surviving inversion would have to win a coin flip every time. */
 func TestGenerate_ResponsesAreVisitedInStatusOrder(t *testing.T) {
     for iteration := 0; iteration < 32; iteration++ {
         registry := NewRegistry()
@@ -795,7 +790,6 @@ func TestGenerate_ResponsesAreVisitedInStatusOrder(t *testing.T) {
     }
 }
 
-/* the router treats an empty method list as answering every verb, so an operation-less path item would read as an endpoint answering nothing while the server answers everything — the document spells the eight path item verbs out, each with its own operationId. */
 func TestGenerate_ARouteWithoutMethodsDocumentsEveryPathItemVerb(t *testing.T) {
     routes := []httpcontract.RouteDefinition{
         fakeRoute{name: "webhook.catch", pattern: "/webhook/", methods: nil},
@@ -821,7 +815,6 @@ func TestGenerate_ARouteWithoutMethodsDocumentsEveryPathItemVerb(t *testing.T) {
     }
 }
 
-/* a verb outside the eight the format models has no slot in a path item; the operation used to be built and dropped without a trace, an endpoint answering in production and absent from the spec — the route now stays in the document with the undescribed verb named. */
 func TestGenerate_ANonStandardVerbIsNamedOnThePathItem(t *testing.T) {
     routes := []httpcontract.RouteDefinition{
         fakeRoute{name: "cache.purge", pattern: "/cache/", methods: []string{"PURGE", "GET"}},
@@ -840,7 +833,6 @@ func TestGenerate_ANonStandardVerbIsNamedOnThePathItem(t *testing.T) {
     }
 }
 
-/* the router reads the "..." suffix as a catch-all and its registration RETURNS there: every segment written after it is discarded and never matched, so the converted path mirrors that instead of advertising a template no request the route answers can ever spell; a mid-pattern "*name" without the dots is a single-segment wildcard and keeps its tail. */
 func TestGenerate_ACatchAllPatternDropsTheSegmentsTheRouterDrops(t *testing.T) {
     routes := []httpcontract.RouteDefinition{
         fakeRoute{name: "assets.read", pattern: "/assets/*rest.../thumbnail", methods: []string{"GET"}},
@@ -862,7 +854,6 @@ func TestGenerate_ACatchAllPatternDropsTheSegmentsTheRouterDrops(t *testing.T) {
     }
 }
 
-/* two routes whose patterns converge on one converted path — a placeholder against a brace literal — must not silently replace each other's operations: the earlier registration wins, exactly as it does in the router's match order. */
 func TestGenerate_ALaterRouteDoesNotDisplaceAnEarlierRoutesOperation(t *testing.T) {
     routes := []httpcontract.RouteDefinition{
         fakeRoute{name: "users.read", pattern: "/users/:id", methods: []string{"GET"}},
@@ -877,7 +868,6 @@ func TestGenerate_ALaterRouteDoesNotDisplaceAnEarlierRoutesOperation(t *testing.
     }
 }
 
-/* a status outside the registered table answers an empty status text, and the response description is required by the format — an empty string is a spec violation most tooling rejects. */
 func TestGenerate_AnUnregisteredStatusCodeKeepsADescription(t *testing.T) {
     registry := NewRegistry()
     registry.Describe("things.read", Descriptor{
@@ -898,7 +888,6 @@ func TestGenerate_AnUnregisteredStatusCodeKeepsADescription(t *testing.T) {
     }
 }
 
-/* the descriptor arrives by value but its Tags slice shares the registry's backing array; a document that aliases it hands every post-processing write through into the boot-time registry and every later generation. */
 func TestGenerate_TheDocumentDoesNotAliasTheRegistryTags(t *testing.T) {
     registry := NewRegistry()
     registry.Describe("products.read", Descriptor{

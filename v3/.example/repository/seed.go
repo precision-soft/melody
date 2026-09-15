@@ -9,8 +9,6 @@ import (
     "github.com/precision-soft/melody/v3/.example/security"
 )
 
-/* The catalogue the example opens with. Both implementations start from it: the in-memory one holds it for the life of the process, and the database-backed one writes it once into an empty table, so the application shows the same nomenclature whichever way it was configured. */
-
 func seedProductList(now time.Time) []*entity.Product {
     return []*entity.Product{
         entity.NewProduct(
@@ -80,15 +78,8 @@ func seedCategoryList() []*entity.Category {
     }
 }
 
-/* seedRateAsOf is the instant the opening rates were taken. It is a fixed past moment rather than the boot
-   instant on purpose: the rates below are the state the application SHIPS with, not a reading it took, and
-   a refresh has to be visible as a change. Seeded and refreshed values therefore differ in both the number
-   and the instant, which is what makes "the refresh landed" a measurement rather than a hope. */
 var seedRateAsOf = time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 
-/* the rates are quoted against the euro, one euro costing this many units of the currency, which is the
-   base the provider the refresh reads also quotes against. A conversion cancels the base, so the catalogue
-   never has to name it. */
 func seedCurrencyList() []*entity.Currency {
     return []*entity.Currency{
         entity.NewCurrency("cur-eur", entity.RateBaseCurrencyCode, "Euro", 1, seedRateAsOf),
@@ -105,14 +96,7 @@ func seedUserList() []*entity.User {
     }
 }
 
-/* SeedAll writes the opening state of every nomenclature this application ships with, over a database that
-   has just been brought to the schema. It is the door example:db:reset uses, and it does exactly what the
-   repository constructors do at first resolution — the same seedIfEmpty over the same four repositories
-   and the same seed lists above — because a reset has to leave the application in the state a fresh volume
-   would be in, not in a second, hand-written version of it.
-
-   Each of the four is a no-op over a table that already holds rows, so calling this over a database that
-   was not reset changes nothing. */
+/* SeedAll seeds each empty catalogue table using the same seed lists as repository construction. Tables containing rows remain unchanged. */
 func SeedAll(ctx context.Context, storage *persistence.CatalogStorage) error {
     seedList := []func(ctx context.Context) error{
         newBunCategoryRepository(storage.Database()).seedIfEmpty,

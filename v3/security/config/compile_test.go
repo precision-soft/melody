@@ -63,10 +63,6 @@ func TestCompile_SourceIsNoneWhenDependencyAbsent(t *testing.T) {
     }
 }
 
-/* the three override dependencies the plain nil comparison cannot judge: a typed nil handed to one of
-   these setters reads as declared, so the fallback to the global one is skipped and the first request
-   behind the firewall dereferences a nil receiver inside the listener. The refusal has to reach the
-   caller from Compile, because the setters take the value without looking at it. */
 func TestCompile_RefusesATypedNilOverrideDependency(t *testing.T) {
     var typedNilDecisionManager securitycontract.AccessDecisionManager = (*security.AccessDecisionManager)(nil)
     var typedNilEntryPoint securitycontract.EntryPoint = (*typedNilEntryPointProbe)(nil)

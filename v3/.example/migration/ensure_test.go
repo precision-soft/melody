@@ -2,6 +2,14 @@ package migration
 
 import (
     "context"
+    "database/sql"
+    "fmt"
+    "os"
+
+    "github.com/uptrace/bun"
+    "github.com/uptrace/bun/dialect/pgdialect"
+    "github.com/uptrace/bun/driver/pgdriver"
+    "github.com/uptrace/bun/migrate"
     "strings"
     "database/sql/driver"
     "errors"
@@ -54,7 +62,6 @@ func TestEnsureMigratedRunsOncePerHandle(t *testing.T) {
         t.Fatalf("expected the migration run to succeed, got %v", ensureErr)
     }
 
-    /* the first resolution must have DONE the work: without this the test cannot tell once-then-skipped apart from never-at-all, and a guard inverted to skip the first run answers both calls with silence */
     if createCount := recorder.countMatching(isExampleCreateTable); 6 != createCount {
         t.Fatalf("expected the first resolution to apply the set, got %d creates", createCount)
     }
@@ -101,7 +108,6 @@ func TestEnsureMigratedSkipsWhenTheLockIsHeldAndNothingIsPending(t *testing.T) {
         t.Fatal("expected the never-held lock to never be released")
     }
 
-    /* the observed competitor success is recorded like an own one: the next resolution asks nothing */
     recorder.reset()
     recorder.execHook = nil
     recorder.queryHook = nil
@@ -151,7 +157,6 @@ func TestEnsureMigratedRefusesAfterTheRetryWindowNamingTheRemedy(t *testing.T) {
         t.Fatal("expected the bun lock error to stay reachable as the cause")
     }
 
-    /* a refusal is not a success: the next resolution tries again */
     recorder.reset()
     recorder.execHook = nil
 
@@ -169,7 +174,6 @@ func TestEnsureMigratedReleasesTheLockOnACancelledContext(t *testing.T) {
     cancellableContext, cancel := context.WithCancel(context.Background())
     defer cancel()
 
-    /* the fake connection refuses a cancelled context before recording, so the unlock delete can appear below only by riding a context detached from the cancelled one */
     recorder.execHook = func(query string) error {
         if true == isExampleCreateTable(query) {
             cancel()
@@ -220,7 +224,6 @@ func TestEnsureMigratedSerializesConcurrentResolutions(t *testing.T) {
     }
 }
 
-/* the journal table is the one this major keeps in the same set instead of a context of its own, so the set applying without it would leave catalog:journal reading a table nothing creates */
 func TestEnsureMigratedCreatesTheJournalTableWithTheCatalogue(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 
@@ -233,7 +236,6 @@ func TestEnsureMigratedCreatesTheJournalTableWithTheCatalogue(t *testing.T) {
     }
 }
 
-/* the released lock is the whole point of the deferred unlock, so a release that FAILED has to become the verdict rather than be dropped: a lock row that survives refuses every later migration on every process, and a resolution that answered success would leave the operator with a database nothing can migrate and no error saying why. Neither frozen major pins it — this is the assertion added here. */
 func TestEnsureMigratedReportsAFailedUnlockAsTheVerdict(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 
@@ -265,12 +267,10 @@ func TestEnsureMigratedReportsAFailedUnlockAsTheVerdict(t *testing.T) {
         t.Fatal("expected the release failure to stay reachable as the cause")
     }
 
-    /* the migration ran: the failure is about the release, not about the set */
     if createCount := recorder.countMatching(isExampleCreateTable); 6 != createCount {
         t.Fatalf("expected the set to have been applied before the release failed, got %d creates", createCount)
     }
 
-    /* and it is not recorded as a success: the next resolution tries again */
     recorder.reset()
     recorder.execHook = nil
 
@@ -279,7 +279,6 @@ func TestEnsureMigratedReportsAFailedUnlockAsTheVerdict(t *testing.T) {
     }
 }
 
-/* the two-factor enrollment table is this major's own: neither frozen major carries it, and the set applying without it would leave the enrollment flow unwired at every boot, silently — the build step swallows a schema failure rather than aborting the application */
 func TestEnsureMigratedCreatesTheTwoFactorTableWithTheCatalogue(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 
@@ -292,11 +291,6 @@ func TestEnsureMigratedCreatesTheTwoFactorTableWithTheCatalogue(t *testing.T) {
     }
 }
 
-/* the wait is paid once, not once per resolution. The whole protocol runs under one process mutex, so a
-   lock nobody releases used to cost the window to every caller in turn: measured on a 300ms window, three
-   concurrent resolutions took 1.5s and each later request added its own. What the refusal says does not
-   change — it is the same value, handed back — so the assertion is on the COST and on the identity of what
-   is returned, the two things that separate a remembered refusal from a repeated one. */
 func TestEnsureMigratedAnswersARememberedRefusalWithoutWaitingAgain(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 
@@ -338,8 +332,6 @@ func TestEnsureMigratedAnswersARememberedRefusalWithoutWaitingAgain(t *testing.T
     }
 }
 
-/* the memory is not a verdict: once the window it was recorded for has passed, the next resolution asks the
-   database again, so a lock that was released heals the process without a restart. */
 func TestEnsureMigratedForgetsTheRefusalOnceItsWindowHasPassed(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 
@@ -374,11 +366,6 @@ func TestEnsureMigratedForgetsTheRefusalOnceItsWindowHasPassed(t *testing.T) {
     }
 }
 
-/* Reset is the door an operator reaches for when a volume was provisioned by an older build, so what it
-   has to do is more than re-run the set: it drops the schema, drops the BOOKKEEPING with it — which is
-   where an older set's rows live — and applies the schema again. The order is the assertion, because a
-   reset that dropped the bookkeeping before the schema would leave the tables standing with no record of
-   them. */
 func TestResetDropsTheSchemaAndTheBookkeepingThenAppliesTheSchemaAgain(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 
@@ -411,8 +398,6 @@ func TestResetDropsTheSchemaAndTheBookkeepingThenAppliesTheSchemaAgain(t *testin
     }
 }
 
-/* the memo is what would otherwise answer for a state the reset has just taken away: a resolution later in
-   the same process reads "already migrated" and finds no tables. */
 func TestResetClearsTheMemoForTheHandle(t *testing.T) {
     database, _ := newFakeBunDatabase()
     memoizationKey := migratedSetKey{database: database, migrationSet: Migrations}
@@ -439,17 +424,6 @@ func TestResetClearsTheMemoForTheHandle(t *testing.T) {
     }
 }
 
-/* the memo key is the handle AND the set together, and this is what that buys: one handle asked for both
-   sets must run BOTH. Keyed by the handle alone — the shape this package carried while it had a single
-   set — the first set applied would answer for the second, and the archive's table would never be created
-   on an application that keeps both on one connection.
-
-   It is driven through the funnel rather than by writing the map directly, because the key is computed
-   INSIDE the funnel: a test that built the key itself would asserting its own arithmetic, and a mutant on
-   the line that computes it would survive untouched.
-
-   The two sets are driven over ONE handle deliberately: over two handles the memo separates them under
-   either key, so the pair is only observable where the handle is shared. */
 func TestTheMemoDoesNotLetOneSetAnswerForTheOther(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 
@@ -470,9 +444,6 @@ func TestTheMemoDoesNotLetOneSetAnswerForTheOther(t *testing.T) {
         t.Fatalf("archive set: %v", archiveErr)
     }
 
-    /* the archive's own table is what says the second set RAN. With the memo keyed on the handle alone the
-       catalogue's entry answers for the archive, EnsureArchiveMigrated returns nil having done nothing,
-       and this statement never reaches the recorder. */
     sawArchiveTable := 0 < recorder.countMatching(func(query string) bool {
         return strings.Contains(query, CatalogReadingTableName)
     })
@@ -482,7 +453,6 @@ func TestTheMemoDoesNotLetOneSetAnswerForTheOther(t *testing.T) {
     }
 }
 
-/* a failure of the database on the archive's first resolution travelled up raw, and the container's by-type resolution relabelled it "service not registered in resolver" — a headline that sent the operator to the wiring for a database that had refused. Every failure of a set is handed back as this application's exception naming the set and the step, with the driver's error as the cause, so the headline says which database and errors.Is still reaches the cause. */
 func TestEnsureArchiveMigratedNamesTheArchiveSetAndTheStepOverADatabaseThatRefuses(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 
@@ -513,11 +483,101 @@ func TestEnsureArchiveMigratedNamesTheArchiveSetAndTheStepOverADatabaseThatRefus
     }
 }
 
-/* the lock refusal already names its remedy; wrapping it again would bury the remedy under a second headline, so an exception of this application's own is handed back as it is */
 func TestMigrationStepFailureLeavesAnOwnExceptionUntouched(t *testing.T) {
     own := exception.NewError("migration: the migration lock is held", nil, nil)
 
     if own != migrationStepFailure("archive", "applying the set", "db:archive:unlock", own) {
         t.Fatal("expected the application's own exception to be handed back unwrapped")
+    }
+}
+
+func TestInitializeMigrationBookkeepingConcurrentPostgres(t *testing.T) {
+    dsn := os.Getenv("POSTGRES_DSN")
+    if "" == dsn {
+        t.Skip("POSTGRES_DSN is not set")
+    }
+    ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+    defer cancel()
+    root := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
+    defer root.Close()
+    schemaName := fmt.Sprintf("melody_init_%d", time.Now().UnixNano())
+    if _, err := root.ExecContext(ctx, "CREATE SCHEMA "+schemaName); nil != err {
+        t.Fatal(err)
+    }
+    defer func() {
+        cleanupContext, cancelCleanup := context.WithTimeout(context.Background(), 5*time.Second)
+        defer cancelCleanup()
+        if _, err := root.ExecContext(cleanupContext, "DROP SCHEMA "+schemaName+" CASCADE"); nil != err {
+            t.Error(err)
+        }
+    }()
+
+    const workers = 12
+    databases := make([]*bun.DB, workers)
+    for index := range databases {
+        sqlDatabase := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
+        sqlDatabase.SetMaxOpenConns(1)
+        sqlDatabase.SetMaxIdleConns(1)
+        if _, err := sqlDatabase.ExecContext(ctx, "SET search_path TO "+schemaName); nil != err {
+            sqlDatabase.Close()
+            t.Fatal(err)
+        }
+        databases[index] = bun.NewDB(sqlDatabase, pgdialect.New())
+        defer databases[index].Close()
+    }
+    start := make(chan struct{})
+    results := make(chan error, workers)
+    for _, database := range databases {
+        go func() {
+            <-start
+            results <- initializeMigrationBookkeeping(ctx, migrate.NewMigrator(database, migrate.NewMigrations()))
+        }()
+    }
+    close(start)
+    for range workers {
+        if err := <-results; nil != err {
+            t.Errorf("concurrent init: %v", err)
+        }
+    }
+}
+
+func TestResetFailureInvalidatesSuccessfulMigrationMemo(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    defer database.Close()
+    if err := EnsureMigrated(context.Background(), database); nil != err {
+        t.Fatal(err)
+    }
+    failure := errors.New("drop refused")
+    recorder.execHook = func(query string) error {
+        if strings.HasPrefix(query, "DROP TABLE") {
+            return failure
+        }
+        return nil
+    }
+    if err := Reset(context.Background(), database); false == errors.Is(err, failure) {
+        t.Fatalf("reset failure lost: %v", err)
+    }
+    recorder.execHook = nil
+    recorder.reset()
+    if err := EnsureMigrated(context.Background(), database); nil != err {
+        t.Fatal(err)
+    }
+    if 0 == len(recorder.recordedQueries()) {
+        t.Fatal("failed reset retained success memo")
+    }
+}
+
+func TestInitializeMigrationBookkeepingReturnsNonCatalogErrors(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    defer database.Close()
+    failure := errors.New("create refused")
+    calls := 0
+    recorder.execHook = func(query string) error {
+        calls++
+        return failure
+    }
+    err := initializeMigrationBookkeeping(context.Background(), migrate.NewMigrator(database, migrate.NewMigrations()))
+    if false == errors.Is(err, failure) || 1 != calls {
+        t.Fatalf("unexpected retry or cause: calls=%d error=%v", calls, err)
     }
 }

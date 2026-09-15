@@ -252,7 +252,6 @@ func TestValidator_ReturnsUnknownRuleError(t *testing.T) {
 func TestValidator_MalformedNumericParameterFailsClosed(t *testing.T) {
     validatorInstance := NewValidator()
 
-    /* a non-numeric constraint parameter must be rejected, not silently degraded to a default bound */
     for _, payload := range []any{
         payloadWithMalformedGreaterThan{Quantity: 5},
         payloadWithMalformedMinLength{Name: "anything"},
@@ -269,7 +268,6 @@ func TestValidator_MalformedNumericParameterFailsClosed(t *testing.T) {
         }
     }
 
-    /* a fractional bound is refused whole, not truncated: 3.9 read as 3 silently enforced a bound the tag does not declare, and on lessThan a truncated negative bound accepted values the tag as written refuses */
     fractionalErrors := requireValidationErrors(t, validatorInstance.Validate(payloadWithFractionalMaxLength{Name: "abc"}))
 
     fractionalError, ok := fractionalErrors[0].(*ValidationError)
@@ -309,7 +307,6 @@ type payloadWithGreaterThanShorthand struct {
 func TestValidator_UnrecognizedParameterKeyFailsClosed(t *testing.T) {
     validatorInstance := NewValidator()
 
-    /* a parameterizable constraint that receives parameters without its recognized key ("value", or "pattern"/"value" for regex) must fail closed rather than silently degrade to the registered default bound: a fail-open here would leave the field validated against a weaker constraint than the tag declares (regex(re=...) degrading to the match-all `.*` default, min(len=8) to a floor of 1) */
     for _, payload := range []any{
         payloadWithGreaterThanUnknownParam{Count: -1},
         payloadWithLessThanUnknownParam{Count: 100},
@@ -329,7 +326,6 @@ func TestValidator_UnrecognizedParameterKeyFailsClosed(t *testing.T) {
         }
     }
 
-    /* the shorthand form maps to the recognized `value` key, so it still configures and enforces the bound: 3 is not greater than 5, 9 is */
     requireValidationErrors(t, validatorInstance.Validate(payloadWithGreaterThanShorthand{Count: 3}))
     requireNoValidationErrors(t, validatorInstance.Validate(payloadWithGreaterThanShorthand{Count: 9}))
 }
@@ -1077,7 +1073,6 @@ func TestValidator_ValidatesConcurrentlyWithMemoizedConstraints(t *testing.T) {
 
     waitGroup.Wait()
 
-    /* LoadOrStore lets several goroutines build a value on the first touch and keeps one, so the memo bounds constructions by the racing goroutines rather than pinning them at one; without it every validated value builds its own */
     constructionCount := counting.constructionCount.Load()
     if constructionCount < 1 || int64(workerCount) < constructionCount {
         t.Fatalf("expected at most one construction per goroutine, got %d", constructionCount)
@@ -1149,7 +1144,6 @@ type depthCutMapNode struct {
     Children map[string]depthCutMapNode `json:"children"`
 }
 
-/* the depth cut follows the element type of a slice or a map, so a tag-bearing chain reached through either is still reported rather than passed */
 func TestValidateStruct_FailsClosedPastTheNestingDepthLimitThroughCollections(t *testing.T) {
     sliceNode := depthCutSliceNode{Name: "leaf"}
     mapNode := depthCutMapNode{Name: "leaf"}
@@ -1197,7 +1191,6 @@ type ordinaryTimeFieldPayload struct {
     Name      string    `json:"name" validate:"notBlank"`
 }
 
-/* the embedded time.Time promotes the codec for the whole value, so the body is an RFC 3339 string: encoding/json fills the embedded time and never the sibling, and enforcing the sibling's constraint would reject every body the type can decode */
 func TestValidateStruct_PromotedTimeCodecLeavesNoSiblingToValidate(t *testing.T) {
     payload := promotedTimeCodecPayload{}
 
@@ -1227,7 +1220,6 @@ func TestValidateStruct_PromotedTimeCodecLeavesNoSiblingToValidate(t *testing.T)
     }
 }
 
-/* only the promoted codec silences the walk: an ordinary time.Time field leaves the object shape intact, so its siblings are still enforced */
 func TestValidateStruct_OrdinaryTimeFieldKeepsItsSiblingsValidated(t *testing.T) {
     validatorInstance := NewValidator()
 
@@ -1267,7 +1259,6 @@ func buildNilLeafDepthChain(levels int) nilLeafDepthWrapper {
     return *outermost
 }
 
-/* a nil pointer past the cut has nothing the cut could have truncated — the walk returns no errors for it at any depth — so reporting one would reject a payload for a member it sent as null */
 func TestValidateStruct_DepthCutIgnoresANilMemberPastTheLimit(t *testing.T) {
     validatorInstance := NewValidator()
 
@@ -1291,7 +1282,6 @@ func buildTaglessDepthChain(levels int) *taglessDepthNode {
     return root
 }
 
-/* the counterpart of the depth error: a struct chain declaring no constraint at all is passed however deep it goes, so the cut reports a truncated subtree rather than every subtree */
 func TestValidateStruct_TaglessChainPastTheNestingDepthLimitIsAccepted(t *testing.T) {
     validatorInstance := NewValidator()
 
@@ -1820,7 +1810,6 @@ func TestValidator_TypedNilConstraintErrorIsSuccess(t *testing.T) {
     requireNoValidationErrors(t, validatorInstance.Validate(typedNilErrorPayload{Value: "anything"}))
 }
 
-/* the registry is append-only, so the missing-name read is unreachable through Validate: the guard is latent and this pins it at the only level it is observable. */
 func TestValidator_CreateConstraintWithParamsRefusesUnregisteredName(t *testing.T) {
     validatorInstance := NewValidator()
 
@@ -1877,11 +1866,9 @@ func (instance *settlementProbeCodec) UnmarshalJSON(data []byte) error {
     return nil
 }
 
-/* the first probe is held open and computes the opposite answer, so the ordering is constructed rather than awaited. */
 func TestValidator_TimeCodecVerdictSettlesOnTheFirstStored(t *testing.T) {
     structType := reflect.TypeOf(settlementProbeCodec{})
 
-    /* the memo is process-global, so a repeated run (-count) finds the verdict already settled and the probe choreography must not replay over closed channels */
     if cached, exists := validationTimeCodecCache.Load(structType); true == exists {
         if true == cached.(bool) {
             t.Fatalf("expected the settled verdict to remain the first stored one")
@@ -1971,7 +1958,6 @@ func TestRefusesValidationObjectBody_APanickingDecoderCountsAsAccepting(t *testi
         t.Fatalf("expected a panicking decoder to count as accepting the object body")
     }
 
-    /* the two sides it sits between: a plain struct accepts an empty object, and a type whose body must be a string refuses it */
     if true == refusesValidationObjectBody(reflect.TypeOf(struct{ Name string }{})) {
         t.Fatalf("expected a plain struct to accept an empty object body")
     }
@@ -2123,7 +2109,6 @@ type dashExcludedEmbedPayload struct {
     DashExcludedEmbedCore `json:"-"`
 }
 
-/* this test is not the proof of the dash guard in isPromotedValidationEmbed: for the exact "-" tag the split check below it answers the same false, so the guard is shadowed there and is proved instead on verdict, by an inversion that stops flattening every plain embed. */
 func TestIsPromotedValidationEmbed_ADashTaggedEmbedIsNeitherFlattenedNorNamed(t *testing.T) {
     encoded, marshalErr := json.Marshal(dashExcludedEmbedPayload{})
     if nil != marshalErr {
@@ -2222,7 +2207,6 @@ func TestValidator_BuildConstraintWithParamsRefusesATypedNilConstruction(t *test
     }
 }
 
-/* the segment the parser refused reaches the field error's own context: without it a long tag reports only that "the tag" is invalid, and the developer is left comparing every comma-separated rule by eye. No suite on any major pins this promotion — measured before this test was written — so it is what puts the majors in disagreement if the branch is ever lost. */
 func TestValidator_TheRefusedTagSegmentReachesTheErrorContext(t *testing.T) {
     validatorInstance := NewValidator()
 

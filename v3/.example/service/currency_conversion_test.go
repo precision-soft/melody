@@ -3,17 +3,8 @@ package service
 import (
     "testing"
     "math"
-    "time"
-
     "github.com/precision-soft/melody/v3/.example/entity"
 )
-
-/* the three rates the provider quotes, spelled here as the literals they are. The expected conversions below
-   are literals too rather than the same arithmetic written twice: derived from these, both sides of every
-   assertion would move together and a conversion that multiplied where it should divide would still pass. */
-func conversionCurrency(id string, code string, rate float64) *entity.Currency {
-    return entity.NewCurrency(id, code, code, rate, time.Date(2026, time.September, 7, 9, 0, 0, 0, time.UTC))
-}
 
 func TestConvertAmount_RestatesAPriceQuotedInTheRateBase(t *testing.T) {
     converted, err := ConvertAmount(
@@ -30,8 +21,6 @@ func TestConvertAmount_RestatesAPriceQuotedInTheRateBase(t *testing.T) {
     }
 }
 
-/* neither currency is the base the rates are quoted against, which is the case that proves the base cancels:
-   an implementation that needed to know what the base was could not answer this at all. */
 func TestConvertAmount_CancelsTheRateBaseBetweenTwoCurrenciesThatAreNotIt(t *testing.T) {
     converted, err := ConvertAmount(
         100,
@@ -62,7 +51,6 @@ func TestConvertAmount_RestatesAPriceIntoTheRateBase(t *testing.T) {
     }
 }
 
-/* the source rate is the divisor, so a zero there is the one that would hand a reader an infinity */
 func TestConvertAmount_RefusesACurrencyWhoseStoredRateIsNotPositive(t *testing.T) {
     for _, testCase := range []struct {
         name string
@@ -132,7 +120,6 @@ func TestFindCurrencyByCode_AnswersNothingForACodeTheCatalogueDoesNotCarry(t *te
         }
     }
 }
-
 
 func TestConvertAmountRejectsNonFiniteResults(t *testing.T) {
     for _, rate := range []float64{1e308, math.Inf(1), math.NaN()} {

@@ -78,7 +78,6 @@ func TestError_SetContext_WithNilMap_LeavesAWritableContext(t *testing.T) {
     }
 }
 
-/* the proof is one writer held open against one reader on the same instance, which without the lock is a concurrent map iteration and map write; a memoized creation failure is reachable from the owner request and every waiter at once. */
 func TestError_ConcurrentContextWriteAndRead_IsOrdered(t *testing.T) {
     sharedError := NewError("creation failed", map[string]any{"attempt": 1}, nil)
 

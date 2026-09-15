@@ -16,7 +16,6 @@ func TestMaxLength_PointerToLongStringIsRejected(t *testing.T) {
     }
 }
 
-/* a length constraint measures a string, not a Go rendering: an int whose single-digit rendering sat under the bound passed a rule that cannot measure it — the short rendering is what tells the type guard apart from the rendering it replaced */
 func TestMaxLength_NonStringIsRejected(t *testing.T) {
     constraint := NewMaxLength(5)
 
@@ -27,7 +26,6 @@ func TestMaxLength_NonStringIsRejected(t *testing.T) {
     }
 }
 
-/* a length is never negative, so a negative bound is a typo that would reject every value with a message naming an impossible limit */
 func TestMaxLength_WithParamsRefusesNegativeBound(t *testing.T) {
     constraint := NewMaxLength(5)
 
@@ -38,7 +36,6 @@ func TestMaxLength_WithParamsRefusesNegativeBound(t *testing.T) {
     }
 }
 
-/* the constructor refuses what the tag door beside it has always refused: a negative maximum built a constraint that answered "this field must not exceed -1 characters" to every value, the empty string included, and that message reached the client. The two doors of one constraint used to judge the same typo differently. */
 func TestMaxLength_TheConstructorRefusesANegativeBound(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
@@ -49,7 +46,6 @@ func TestMaxLength_TheConstructorRefusesANegativeBound(t *testing.T) {
     )
 }
 
-/* zero is a bound and not a mistake: it is the one non-negative value that reads like one, and the sibling refusal must not swallow it — a rule declaring that a field carries no characters is a rule */
 func TestMaxLength_ZeroIsABoundRatherThanAMistake(t *testing.T) {
     constraint := NewMaxLength(0)
 
@@ -62,7 +58,6 @@ func TestMaxLength_ZeroIsABoundRatherThanAMistake(t *testing.T) {
     }
 }
 
-/* a length constraint measures a string, and anything else is a declaration mistake refused rather than measured: the value used to be fmt-formatted first, so an empty slice passed max=1 on the strength of its two-character rendering while the payload it stood for did not. The accessor beside it had never been executed by anything — it is how a caller reads back the bound a parsed tag produced, so one that answered the wrong field would misreport every limit in an introspection or an error message. */
 func TestMaxLength_MeasuresStringsAndRefusesEverythingElse(t *testing.T) {
     constraint := NewMaxLength(4)
 
@@ -86,7 +81,6 @@ func TestMaxLength_MeasuresStringsAndRefusesEverythingElse(t *testing.T) {
     }
 }
 
-/* a length constraint treats an absent value as optionality rather than as a zero-length string. The two answers differ exactly where it matters: a nil pointer under min=3 must pass — nothing was supplied — while an empty string under it must fail. */
 func TestMaxLength_AnAbsentValueIsOptionalityRatherThanAZeroLengthString(t *testing.T) {
     if validationError := NewMaxLength(4).Validate(nil, "field"); nil != validationError {
         t.Fatalf("expected an absent value to pass the upper bound, got %v", validationError)

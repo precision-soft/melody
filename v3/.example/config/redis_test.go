@@ -7,7 +7,6 @@ import (
     examplecache "github.com/precision-soft/melody/v3/.example/cache"
 )
 
-/* the namespace root is what the three example applications keep apart; the layout token inside it is what keeps two BUILDS of this one apart, so a build reads only what a build of the same layout wrote */
 func TestCacheKeyPrefix_CarriesTheLayoutTokenInsideTheNamespace(t *testing.T) {
     prefix := cacheKeyPrefix()
 

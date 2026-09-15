@@ -31,7 +31,6 @@ func TestKernelGettersMatchParameterValues(t *testing.T) {
     }
 }
 
-/* every kernel value is validated at construction, and each refusal names what it refused: these are the settings a deployment gets wrong in its .env, and the boot is the only place where saying so is still useful. A validator that stopped refusing would let the process start on a value nothing downstream can act on — a mode nothing dispatches, a role no runner matches, an environment that decides debug tooling. */
 func TestNewKernelConfiguration_RefusesEveryValueItCannotAct(t *testing.T) {
     cases := []struct {
         name            string
@@ -143,7 +142,6 @@ func TestNewKernelConfiguration_RefusesEveryValueItCannotAct(t *testing.T) {
     }
 }
 
-/* the environment refusal names the key it is about, because the emptiness it refuses is read elsewhere and read differently: the dotenv source answers "dev" for a present-but-empty MELODY_ENV and loads .env.dev, so the process reaches this refusal having already taken the development values. Without the key an operator has nothing to search for, and without the sentence no reason the development files were the ones read. */
 func TestNewKernelConfiguration_TheEmptyEnvironmentRefusalNamesTheKeyAndTheFiles(t *testing.T) {
     _, kernelErr := newKernelConfiguration(
         ModeHttp,
@@ -185,7 +183,6 @@ func TestNewKernelConfiguration_TheEmptyEnvironmentRefusalNamesTheKeyAndTheFiles
     }
 }
 
-/* a kernel configuration whose every value is acceptable is built and hands each one back, including the log path, which is allowed to be empty because an empty one means stdout */
 func TestNewKernelConfiguration_AcceptsAValidSetAndKeepsEveryValue(t *testing.T) {
     kernelConfigurationInstance, kernelErr := newKernelConfiguration(
         ModeHttp,
@@ -227,7 +224,6 @@ func TestNewKernelConfiguration_AcceptsAValidSetAndKeepsEveryValue(t *testing.T)
     }
 }
 
-/* the log level decides what every later record is measured against, so a name the logger does not know is refused instead of falling back: a deployment that misspells it would otherwise run at whatever level the fallback picked, and find out when an incident is missing from the log */
 func TestParseKernelLogLevel_MapsEveryKnownNameAndRefusesTheRest(t *testing.T) {
     known := []loggingcontract.Level{
         loggingcontract.LevelDebug,

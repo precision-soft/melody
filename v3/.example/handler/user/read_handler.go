@@ -117,7 +117,6 @@ func ApiReadHandler() melodyhttpcontract.Handler {
     }
 }
 
-/* normalizeRoles answers the roles in the order they were given, deduplicated. The order is part of the answer rather than an accident of it: the repository stores the list comma-joined into one column, so a set built by ranging a map is written back in a different spelling on roughly a quarter of the saves — measured at 131 of 1 000 for two roles and 226 of 1 000 for three — and the audit trail, which compares the stored values, then records a "roles changed" entry naming a change nobody asked for, with the same roles on both sides of it. */
 func normalizeRoles(roles []string) []string {
     seen := map[string]struct{}{}
     result := make([]string, 0, len(roles))
@@ -143,7 +142,6 @@ func normalizeRoles(roles []string) []string {
     return result
 }
 
-/* roleContainingComma reports the first role carrying a comma: the repository stores the role list comma-joined, so a role with one inside would come back as several roles on the next read — among them, possibly, an administrator nobody granted. */
 func roleContainingComma(roles []string) (string, bool) {
     for _, role := range roles {
         if true == strings.Contains(role, ",") {
@@ -192,7 +190,6 @@ func getStringFromSession(sessionInstance melodysessioncontract.Session, key str
     return typed, true
 }
 
-/* getStringSliceFromSession accepts the two spellings a role list has in a session: the []string the login handler writes, and the []any a file-backed storage answers after a restart — its snapshot round-trips through json, which keeps no element type. The second form is accepted only when EVERY element is a string; anything else stays a refusal. */
 func getStringSliceFromSession(sessionInstance melodysessioncontract.Session, key string) ([]string, bool) {
     if false == sessionInstance.Has(key) {
         return nil, false

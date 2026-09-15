@@ -143,7 +143,6 @@ func TestApplicationRegisterService_PanicsAfterBoot(t *testing.T) {
     }, "may not register services after boot")
 }
 
-/* anonymousProbeTokenSource is the smallest token source a firewall can be compiled with */
 type anonymousProbeTokenSource struct{}
 
 func (instance *anonymousProbeTokenSource) Name() string {
@@ -179,7 +178,6 @@ func newSecurityWiringApplication(t *testing.T, mode string) *Application {
     return applicationInstance
 }
 
-/* registeredListenerCount reads how many listeners the kernel dispatcher carries, through the introspection the debug commands use */
 func registeredListenerCount(t *testing.T, applicationInstance *Application) int {
     t.Helper()
 
@@ -196,7 +194,6 @@ func registeredListenerCount(t *testing.T, applicationInstance *Application) int
     return total
 }
 
-/* a compiled security configuration only becomes enforcement when this runs: the firewall manager reaches the container and the two kernel listeners reach the dispatcher. Security in this framework is a pair of listeners rather than middleware, so a boot that skipped them would serve every protected route wide open with a configuration that looks correct everywhere it is printed. */
 func TestRegisterSecurity_WiresTheFirewallManagerAndTheKernelListeners(t *testing.T) {
     applicationInstance := newSecurityWiringApplication(t, config.ModeHttp)
 
@@ -220,7 +217,6 @@ func TestRegisterSecurity_WiresTheFirewallManagerAndTheKernelListeners(t *testin
     }
 }
 
-/* a console process with a compiled configuration resolves the firewall manager — configured means resolvable, whatever the mode — but wires no listeners: they are the enforcement, they listen for requests, and a console process has no request to guard. A process without a compiled configuration wires nothing at all — that is an application that declared no security, not one whose security failed to compile, which the compile step refuses on its own. */
 func TestRegisterSecurity_AConsoleProcessResolvesTheManagerAndWiresNoListeners(t *testing.T) {
     cliApplication := newSecurityWiringApplication(t, config.ModeCli)
 
@@ -367,7 +363,6 @@ func TestApplicationRegisterHttpSession_KeepsAnUnconfiguredTtlUnbounded(t *testi
     }
 }
 
-/* The framework's fallback cache backend is unbounded in both dimensions, so the application has to be told; the flag is what carries that to the http path, and it must be set exactly when melody supplied the backend itself. */
 func TestApplicationRegisterCache_MarksTheFallbackBackendAsUnbounded(t *testing.T) {
     applicationInstance := newSessionTtlTestApplication(t, "30m")
 
@@ -378,7 +373,6 @@ func TestApplicationRegisterCache_MarksTheFallbackBackendAsUnbounded(t *testing.
     }
 }
 
-/* An application that brought its own backend chose its own bounds, and melody has nothing to warn it about. */
 func TestApplicationRegisterCache_LeavesAnApplicationSuppliedBackendUnmarked(t *testing.T) {
     applicationInstance := newSessionTtlTestApplication(t, "30m")
 
@@ -396,7 +390,6 @@ func TestApplicationRegisterCache_LeavesAnApplicationSuppliedBackendUnmarked(t *
     }
 }
 
-/* every one of the three cache services is only supplied when the application did not: a framework registration that overwrote an application's own serializer would silently change the format of everything already in the cache, and one that overwrote the cache itself would hand every consumer a different instance than the one the wiring built */
 func TestApplicationRegisterCache_LeavesEveryApplicationSuppliedServiceAlone(t *testing.T) {
     applicationInstance := newSessionTtlTestApplication(t, "30m")
 
@@ -541,7 +534,6 @@ func TestNewContainerLogger_CreatesTheLogDirectory(t *testing.T) {
     }
 }
 
-/* the configured window must travel from the environment key through the configuration into the manager: only a lapsed 300ms window explains a deleted session accepting a write-back 400ms later, where the five-minute default would still refuse it. */
 func TestBootContainer_TheSerializerManagerIsSubstitutedNotCollided(t *testing.T) {
     applicationInstance := NewApplication(
         context.Background(),
@@ -581,7 +573,6 @@ func TestBootContainer_TheSerializerManagerIsSubstitutedNotCollided(t *testing.T
     }
 }
 
-/* TestBootContainer_TheValidatorAndUrlGeneratorAreSubstitutedNotCollided pins the other two the boot used to make unsubstitutable. Both have exported constructors, so a replacement built outside is a whole answer — which is the line that separates them from the router, the dispatcher and the clock, where a gate would promise a substitution the request path would then ignore. */
 func TestBootContainer_TheValidatorAndUrlGeneratorAreSubstitutedNotCollided(t *testing.T) {
     applicationInstance := NewApplication(
         context.Background(),
@@ -633,7 +624,6 @@ func TestBootContainer_TheValidatorAndUrlGeneratorAreSubstitutedNotCollided(t *t
     }
 }
 
-/* TestBootContainer_TheDefaultSerializerAnswersItsDocumentedResolvers pins the id the two published resolvers read. SerializerMustFromRuntime and SerializerFromRuntime were documented with the id nothing registered, so the Must door panicked for every caller and the soft one answered nil — by construction, on every boot the framework has ever performed. */
 func TestBootContainer_TheDefaultSerializerAnswersItsDocumentedResolvers(t *testing.T) {
     applicationInstance := NewApplication(
         context.Background(),
@@ -660,7 +650,6 @@ func TestBootContainer_TheDefaultSerializerAnswersItsDocumentedResolvers(t *test
     }
 }
 
-/* TestBootContainer_TheApplicationsOwnDefaultSerializerIsSubstitutedNotCollided pins the gate over the same id, so registering a default serializer is a substitution rather than the boot collision every ungated framework id answered with. */
 func TestBootContainer_TheApplicationsOwnDefaultSerializerIsSubstitutedNotCollided(t *testing.T) {
     applicationInstance := NewApplication(
         context.Background(),
@@ -727,7 +716,6 @@ func TestApplication_RegisterScopedAfterBootPanics(t *testing.T) {
     }, "may not register scoped services after boot")
 }
 
-/* A name claimed at both lifetimes is a wiring mistake, and it has to join the aggregated boot report rather than end the boot on its own — the report exists so a consolidation that produced several collisions surfaces them all at once. */
 func TestApplication_AScopedNameCollidingWithAContainerServiceIsReportedAtBoot(t *testing.T) {
     kernelInstance := newTestKernel()
     applicationInstance := newScopedServiceApplication(kernelInstance)
@@ -762,7 +750,6 @@ func TestApplication_AScopedNameCollidingWithAContainerServiceIsReportedAtBoot(t
 }
 
 
-/* recordingCloseTransport records whether the container's teardown ever reached it. */
 type recordingCloseTransport struct {
     closed atomic.Bool
 }
@@ -789,7 +776,6 @@ func (instance *recordingCloseTransport) Close() error {
     return nil
 }
 
-/* the http process is the case the closer was never built for: it publishes through a routing that holds the transport value directly, so it resolves the transports map never, and before this the container closed nothing it had not been asked to build — the broker connection lived exactly as long as the process. */
 func TestBoot_TheRegisteredTransportsAreClosedByAProcessThatNeverResolvesTheMap(t *testing.T) {
     applicationInstance := NewApplication(
         context.Background(),
@@ -815,7 +801,6 @@ func TestBoot_TheRegisteredTransportsAreClosedByAProcessThatNeverResolvesTheMap(
     }
 }
 
-/* the consume process still gets its ordered teardown: the edge is recorded on the RESOLUTION, so a closer already built at boot is no less a dependency of the map than one the map's own provider built. */
 func TestBoot_ResolvingTheTransportsMapStillOrdersTheTeardownAfterTheBootBuild(t *testing.T) {
     applicationInstance := NewApplication(
         context.Background(),
@@ -847,7 +832,6 @@ func TestBoot_ResolvingTheTransportsMapStillOrdersTheTeardownAfterTheBootBuild(t
     }
 }
 
-/* an application that registered nothing must not gain a service it never asked for, and the boot must not fail looking for one. */
 func TestBoot_NoTransportsRegisteredBuildsNoCloser(t *testing.T) {
     applicationInstance := NewApplication(
         context.Background(),

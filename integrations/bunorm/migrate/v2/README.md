@@ -131,3 +131,5 @@ With the default prefix (`db`), the commands are:
 A failed lock release emits `migrate.unlock_failed` in JSON warnings, with `action: "unlock"` and `requiresNoActiveMigration: true`. Verify that no migration is active before using the configured unlock command against the same database/manager. The original migration failure remains the primary error; an unlock failure also prevents a successful exit when migration work otherwise succeeded. Migration names and directions are escaped before terminal output.
 
 Text output failures propagate to the command result; custom command prefixes are reflected in create usage diagnostics.
+
+Overlapping commands restore the most recently installed option whose command is still running, then the host default after the last command finishes. `SetDefaultRunnerOption` replaces all current fallback overrides; finishing an older command does not undo that explicit setting. Only context-carried options isolate overlapping commands from each other.

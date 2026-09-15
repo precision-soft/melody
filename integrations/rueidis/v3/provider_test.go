@@ -26,7 +26,6 @@ func TestNewProvider_LeavesEveryConfigNilSoOpenFallsBackToTheDefaults(t *testing
     }
 }
 
-/* the frozen majors carry a second constructor, NewProviderWithConfig, that takes the two configurations positionally. This major configures through options instead, so the constructor and the options are the same door and the assertion is that each option lands on its own field. */
 func TestProviderOptions_StoreTheConfigurationsTheyAreGiven(t *testing.T) {
     clientConfig := DefaultClientConfig()
     timeoutConfig := DefaultTimeoutConfig()
@@ -148,7 +147,6 @@ func TestProvider_Ping_NilClientReturnsError(t *testing.T) {
     }
 }
 
-/* the name of this test used to say the ping ran WITHOUT a deadline at a zero connect timeout — and on this major it was TRUE, which is the half the frozen majors' row could not report: they had already taken the bound back, this one had not. The ping now runs under resolveConnectTimeout, which reads a non-positive value as the default rather than as "unbounded", so it is bounded either way. The claim this test can make against a live store is that a config naming only the command timeout still opens and pings — the bound itself is proven, without a store, by TestResolveConnectTimeout_ANonPositiveValueTakesTheDefaultRatherThanRemovingTheBound below. */
 func TestProvider_Open_AZeroConnectTimeoutPingsUnderTheDefaultBound(t *testing.T) {
     address := os.Getenv("REDIS_ADDRESS")
     if "" == address {
@@ -182,7 +180,6 @@ func TestProvider_Open_AZeroConnectTimeoutPingsUnderTheDefaultBound(t *testing.T
     }
 }
 
-/* the boot ping is bounded even where the connect timeout is left at zero: a TimeoutConfig naming only the command timeout would otherwise put the ping on a context with no deadline, and a store that accepts the connection without answering would hang boot forever holding a client no one can close yet. Ping one screen below reads its own zero the same way. */
 func TestResolveConnectTimeout_ANonPositiveValueTakesTheDefaultRatherThanRemovingTheBound(t *testing.T) {
     defaultConnectTimeout := DefaultTimeoutConfig().ConnectTimeout
 
@@ -203,7 +200,6 @@ func TestResolveConnectTimeout_ANonPositiveValueTakesTheDefaultRatherThanRemovin
     }
 }
 
-/* the frozen majors also assert the configuration parameter the refusal names, because there the provider is told the parameter names and the operator needs the key to go and set. This major is handed the values, so the refusal names the deadlines that governed the attempt and nothing else — and above all not the credential. */
 func TestProviderOpen_TheRefusalNamesTheDeadlinesAndNotTheCredential(t *testing.T) {
     provider := NewProvider()
 
@@ -238,7 +234,6 @@ func TestProviderOpen_TheRefusalNamesTheDeadlinesAndNotTheCredential(t *testing.
     }
 }
 
-/* the refusal reports the deadline that GOVERNED the dial, not the one that was configured. The custom dialer is installed only for a positive value, so a zero or negative DialTimeout — the footgun of a partial ClientConfig literal — ran under the library's own five seconds while the record said "0s", and an operator reads that as no dial bound at all and goes looking for a deadline that never existed. Measured against an unroutable address: the dial failed after five seconds under it. */
 func TestProvider_TheReportedDialTimeoutIsTheOneThatGovernedTheDial(t *testing.T) {
     for _, testCase := range []struct {
         name        string
@@ -260,7 +255,6 @@ func TestProvider_TheReportedDialTimeoutIsTheOneThatGovernedTheDial(t *testing.T
     }
 }
 
-/* the value travels into the diagnostic context every refusal of this provider carries, beside the connect timeout it mirrors */
 func TestProvider_TheConnectionContextCarriesTheGoverningDialTimeout(t *testing.T) {
     clientConfig := DefaultClientConfig()
     clientConfig.DialTimeout = 0

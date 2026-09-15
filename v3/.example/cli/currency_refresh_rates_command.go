@@ -1,6 +1,7 @@
 package cli
 
 import (
+    "errors"
     "fmt"
     "time"
 
@@ -67,15 +68,15 @@ func (instance *CurrencyRefreshRatesCommand) Run(runtimeInstance melodyruntimeco
         },
     }
 
-    /* the same table helper product:list prints through, rendered into the command's own writer so the
-       section that drives this command can read what it printed without capturing a process stream */
-    fprintTable(writer, headers, rows)
+    writeErr := fprintTable(writer, headers, rows)
 
-    /* the refresh writes through the service so the listeners drop the cached currencies — in THIS process. On the shared cache the server rereads the new rate; on the in-process fallback the server keeps the rate it cached, which is the one failure the two GoDocs of the write path say the design prevents, and it prevents it only with redis. */
     if true == cacheIsProcessLocal(runtimeInstance) {
         _, _ = fmt.Fprintln(writer, processLocalCacheNotice)
     }
 
+    if nil != writeErr {
+        return errors.Join(refreshErr, writeErr)
+    }
     return refreshErr
 }
 

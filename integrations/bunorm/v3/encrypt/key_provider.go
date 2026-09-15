@@ -19,7 +19,7 @@ type KeyProvider interface {
     Key(keyId string) ([]byte, error)
 }
 
-/* NewStaticKeyProvider holds the keys it is handed for the life of the process. Every key must be 32 bytes, the AES-256 size, and must not be all zero bytes: that is the key a buffer nobody wrote to has, the shape of a key file that was never generated or a variable that was never set, and it sealed every column under a key any reader can guess. Nothing beyond that is judged — a key is the operator's, generated from crypto/rand, and this door cannot tell a strong one from a weak one. */
+/* NewStaticKeyProvider retains the supplied keys for its lifetime. Each key must contain 32 bytes and must not be all zero. Callers must supply cryptographically random keys; these checks do not establish key strength. */
 func NewStaticKeyProvider(currentKeyId string, keysById map[string][]byte) *StaticKeyProvider {
     if "" == currentKeyId {
         exception.Panic(exception.NewError("current key id is empty", nil, nil))
@@ -72,12 +72,12 @@ func (instance StaticKeyProvider) GoString() string {
     return instance.String()
 }
 
-/* String keeps the master keys out of every rendering fmt can reach: %#v and %v walk unexported fields, so a provider dropped into a debug log — or into an error context formatted later — would print each key as raw bytes. The receiver is a value so that both the provider and a pointer to it redact, and the current key id is kept because it names a key without revealing one. */
+/* String identifies the current key without exposing key material. */
 func (instance StaticKeyProvider) String() string {
     return "encrypt.StaticKeyProvider{currentKeyId:" + instance.currentKeyId + ", keysById:[redacted]}"
 }
 
-/* Format keeps the master keys redacted for the numeric verbs (%d %o %b %c %U) that fmt never routes through Stringer or GoStringer: fmt consults those interfaces only for %v %s %q %x %X and %#v, so a numeric verb would otherwise reflection-walk the unexported keysById field and dump the raw key bytes. Every verb is answered with the same redacted String() rendering, and the value receiver makes both the provider and a pointer to it satisfy fmt.Formatter. */
+/* Format redacts values when fmt invokes the Formatter interface. */
 func (instance StaticKeyProvider) Format(state fmt.State, verb rune) {
     _, _ = state.Write([]byte(instance.String()))
 }

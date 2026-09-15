@@ -132,7 +132,6 @@ func TestMiddlewareBuildReport_NilListsStayNil(t *testing.T) {
     }
 }
 
-/* SetInactive copies like every sibling accessor of this report: a caller that keeps the slice it passed can no longer rewrite the inactive list of a report the diagnostics already hold — the asymmetry this test used to pin. */
 func TestMiddlewareBuildReport_SetInactiveCopiesTheCallersSlice(t *testing.T) {
     report := NewMiddlewareBuildReport("web", "dev", nil, nil, nil, false)
 

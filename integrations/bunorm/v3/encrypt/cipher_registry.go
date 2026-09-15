@@ -12,7 +12,6 @@ type CipherRef interface {
     CipherName() string
 }
 
-/* defaultCipherName is the reserved registry entry behind UseCipher; named ciphers must use a non-empty name. */
 const defaultCipherName = ""
 
 var cipherRegistryMutex sync.RWMutex
@@ -23,7 +22,7 @@ func UseCipher(cipherInstance Cipher) {
     storeCipher(defaultCipherName, cipherInstance)
 }
 
-/* UseCipherNamed installs a named cipher — one key compartment — for columns bound through a CipherRef marker. Each named cipher owns its KeyProvider, so compartments stay isolated: the "crm" cipher can never decrypt a "billing" ciphertext, unlike merging every key into one provider where either context can read the other's rows. */
+/* UseCipherNamed selects a cipher for columns bound through CipherRef. Isolation between names requires distinct keys: registry names are not authenticated ciphertext metadata. */
 func UseCipherNamed(name string, cipherInstance Cipher) {
     if "" == name {
         exception.Panic(exception.NewError("named cipher name is empty; use UseCipher for the default cipher", nil, nil))
@@ -32,7 +31,6 @@ func UseCipherNamed(name string, cipherInstance Cipher) {
     storeCipher(name, cipherInstance)
 }
 
-/* storeCipher installs, replaces or — for a bare nil — uninstalls a registry entry; the bare nil is the documented deinstall door test binaries reset compartments with. A TYPED nil is a different thing entirely: it is a wiring error (a resolution that failed and was installed anyway), it is not a deinstall request, and stored it would be handed out by cipherByName with a nil error and dereferenced inside database/sql at the first column write. It is refused here, at the boot-time door whose caller can be named. */
 func storeCipher(name string, cipherInstance Cipher) {
     if nil != cipherInstance {
         reflected := reflect.ValueOf(cipherInstance)

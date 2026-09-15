@@ -25,12 +25,12 @@ type Rule struct {
     isSegmentPrefix bool
 }
 
-/* PathPrefix answers the normalized path the rule was declared with. For a regex rule it is empty and Pattern carries the declaration instead. */
+/* PathPrefix returns the normalized path for non-regex rules. Regex rules return an empty prefix and expose Pattern instead. */
 func (instance Rule) PathPrefix() string {
     return instance.pathPrefix
 }
 
-/* Pattern answers the regex a MatchingRegex rule was declared with, and the empty string for every other mode. */
+/* Pattern returns the declared expression for MatchingRegex and an empty string for other modes. */
 func (instance Rule) Pattern() string {
     return instance.regexPattern
 }
@@ -191,7 +191,6 @@ func normalizeAttributes(attributes []string) []string {
         )
     }
 
-    /* a rule whose attributes all normalize away still matches its path, and an empty attribute list grants every authenticated principal while shadowing any longer-prefixed rule that would have denied; the blank attribute is refused here rather than degrading the guard silently */
     if 0 == len(normalizedAttributes) {
         exception.Panic(
             exception.NewError("access control rule requires at least one attribute", nil, nil),

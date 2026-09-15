@@ -16,25 +16,21 @@ type creationState struct {
     waitChannel     chan struct{}
     ownerContextId  uint64
     lastCreationErr error
-    /* the contexts blocked on waitChannel, recorded so the owner can drop their wait-graph edges the moment it finishes, under the same lock that closes the channel. A woken waiter clears its own edge only after re-acquiring the mutex, and in that window the edge is stale: the owner's next resolution reading it would report a circular dependency between two resolutions that share nothing but the lock they are queued on. */
+
     waiterContextIds []uint64
 }
 
 type createWithGuardLookupFunc func() (any, bool)
 type createWithGuardCreateFunc func(resolver containercontract.Resolver) (any, error, *providerDebugInfo)
 
-/* instanceStore is where a finished service is kept. A container provider builds a process-lifetime singleton and writes the container's own maps; a scoped provider builds one instance for the scope that drove the resolution and writes that scope alone, which is what keeps the root container blind to it. Naming the target rather than hiding it inside the creation closure is what lets one creation guard serve both lifetimes without knowing which it is running.
-
-   keep answers with the value that ends up installed: an override that landed while the provider ran already occupies the slot and wins — an override answers before anything is built, and blindly overwriting it would revoke an installation the overrider was told succeeded — so keep leaves it in place and hands it back with overrideWins raised, and the guard closes the value it built and serves the override instead. */
 type instanceStore struct {
     keep func(value any) (keptValue any, overrideWins bool, err error)
 }
 
-/* guardedCreation is one creation the guard has to run: where the value is looked up, how it is built, where it is kept, and which creation-state map tells a concurrent resolution that it is already under way. */
 type guardedCreation struct {
     requestedKey string
     creatingKey  string
-    /* ownerNodeKey is the graph node the provider builds, written onto the view of the resolution the provider is handed so that anything it resolves later — through a resolver it kept — is recorded as this node's dependency */
+
     ownerNodeKey       string
     getCreatingState   func() (*creationState, bool)
     setCreatingState   func(state *creationState)
@@ -42,7 +38,7 @@ type guardedCreation struct {
     lookup             createWithGuardLookupFunc
     create             createWithGuardCreateFunc
     store              instanceStore
-    /* suspendsScope is true for a provider the CONTAINER owns and false for one a SCOPE owns. A container service is one instance for the whole process, so it may read only what the container holds, and the suspension is what refuses one request's substitutes to it. A scoped service is the request, so it reads both levels, and suspending it would hide from it the very entries it exists to consume. */
+
     suspendsScope bool
 }
 
@@ -55,7 +51,6 @@ func (instance *container) serviceWithCreationGuardLocked(
     lookup := creation.lookup
     create := creation.create
 
-    /* a resolution after the teardown finished is refused before the lookup, not after it: the maps still hold what was built, and answering out of them handed the caller a service every Close in the process has already run on, with a nil error saying it was fine. During the teardown the lookup still answers — a service's own Close is entitled to what it depends on — which is the other half of closing the logger last. */
     if true == instance.teardownFinished {
         return nil, newContainerClosedError(creatingKey)
     }
@@ -90,7 +85,7 @@ func (instance *container) serviceWithCreationGuardLocked(
         currentState.waiterContextIds = append(currentState.waiterContextIds, resolver.contextId)
 
         instance.mutex.Unlock()
-        /* the receive is unconditional on purpose: the channel is closed on every exit of the creating call — return and panic alike, through the recover — so the wait ends exactly when the creation settles. The one assumption is the provider's, not this site's: a provider that neither returns nor panics parks its owner and every coalesced waiter alike, and Close does not release them, because failing the waiters open would hand out services from a teardown in progress. */
+
         <-currentState.waitChannel
         instance.mutex.Lock()
 
@@ -110,7 +105,6 @@ func (instance *container) serviceWithCreationGuardLocked(
                 currentState.lastCreationErr,
             )
 
-            /* the wrapper inherits the already-logged mark of the failure it carries: the mark is read at the nearest implementer, so a fresh unmarked wrapper would shadow it and every coalesced waiter would file a full record for the one failure the owner already logged. */
             if true == exception.IsAlreadyLogged(currentState.lastCreationErr) {
                 _ = exception.MarkLogged(creationErr)
             }
@@ -146,9 +140,6 @@ func (instance *container) serviceWithCreationGuardLocked(
 
     instance.mutex.Unlock()
 
-    /* a provider the CONTAINER owns resolves what it needs from the container alone: a process-lifetime singleton assembled out of one request's values would hold that request for the life of the process, and closing it with the request would take it away from every other one. A provider a SCOPE owns is the opposite case and reads both levels, so it is left unsuspended.
-
-       Both answers ride on the view handed to the provider rather than on the caller's own context, so the resolution that continues above this frame keeps seeing the scope whatever happens here — including a provider that panics. */
     providerResolver := resolver.childOwnedBy(creation.ownerNodeKey, creation.suspendsScope)
 
     createdValue, err, debugInfo := func() (createdValue any, err error, debugInfo *providerDebugInfo) {
@@ -164,7 +155,6 @@ func (instance *container) serviceWithCreationGuardLocked(
             var recoveredErr error
             recoveredErr, _ = recoveredValue.(error)
 
-            /* a panic value that is a TYPED-NIL error passes the assertion above as a non-nil interface whose Error() dereferences a nil receiver. This handler runs with the container mutex unlocked, so a second panic here would not merely lose the report: it would unwind through the caller's deferred Unlock as a fatal unlock-of-unlocked-mutex, with every waiter on this creation blocked forever. The typed nil is normalized away, and the context rendering below is contained on its own, so an error whose Error() panics costs its context and nothing else. */
             if true == internal.IsNilInterface(recoveredErr) {
                 recoveredErr = nil
             }
@@ -198,7 +188,7 @@ func (instance *container) serviceWithCreationGuardLocked(
         createdValue, err, debugInfo = create(providerResolver)
 
         if true == internal.IsNilInterface(createdValue) {
-            /* a nil value handed back together with an error is the provider saying why it could not build the service — "service is not registered" is the everyday one — and that reason is the failure worth naming. Overwriting it here would put a symptom at the top and bury the cause one level down, so the generic report is kept for the genuinely silent (nil, nil) return, where nothing else says anything at all. */
+
             if nil != err {
                 return nil, err, debugInfo
             }
@@ -278,7 +268,6 @@ func (instance *container) serviceWithCreationGuardLocked(
         )
     }
 
-    /* a value created while Close() ran would be stored after the close snapshot and leak un-closed; close it best-effort instead of storing it and fail the resolution. */
     if nil == err && true == instance.isClosed {
         instance.mutex.Unlock()
         closeValueAfterContainerClose(createdValue)
@@ -291,7 +280,7 @@ func (instance *container) serviceWithCreationGuardLocked(
         keptValue, overrideWins, keepErr := creation.store.keep(createdValue)
 
         if nil != keepErr {
-            /* the store refusing — the scope this value was built for closed while the provider ran — is the scope-side twin of the container-close race above, and it drops the value on the same floor: nothing else holds it, so it is closed best-effort before the resolution fails. */
+
             instance.mutex.Unlock()
             closeValueAfterContainerClose(createdValue)
             instance.mutex.Lock()
@@ -308,7 +297,6 @@ func (instance *container) serviceWithCreationGuardLocked(
 
     newState.lastCreationErr = err
 
-    /* the owner is done: every context recorded as waiting on this creation stops waiting the instant the channel below closes, and their edges are dropped here, under the lock that closes it. A waiter left to clear its own edge does so only after re-acquiring the mutex, and until then the stale edge reads as a cycle to any resolution this owner runs next. */
     for _, waiterContextId := range newState.waiterContextIds {
         instance.clearResolverWaitLocked(waiterContextId, newState.ownerContextId)
     }
@@ -339,7 +327,6 @@ func closeValueAfterContainerClose(value any) {
         return
     }
 
-    /* the caller runs this with the container mutex unlocked and unwinds through a deferred unlock; a panicking Close() would otherwise abort the process on an unlocked mutex. */
     defer func() {
         _ = recover()
     }()

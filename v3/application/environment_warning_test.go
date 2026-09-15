@@ -79,7 +79,6 @@ func TestWarnIgnoredProcessEnvironment_SuppressesMirroredValues(t *testing.T) {
 
     logger := &recordingLogger{}
 
-    /* a platform that mirrors the resolved .env value into the environment is harmless: same value, no drift possible */
     warnIgnoredProcessEnvironment(logger, configuration, []string{
         "MELODY_PROCESS_ROLE=all",
     })
@@ -117,6 +116,5 @@ func TestBootLogger_FallsBackToTheEmergencyLoggerWhenTheContainerHasNone(t *test
         t.Fatalf("expected a logger even when the container carries none")
     }
 
-    /* it must be usable, not merely non-nil: the warnings around the wiring are written through it */
     logger.Warning("probe", loggingcontract.Context{})
 }

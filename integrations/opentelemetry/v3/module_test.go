@@ -55,7 +55,6 @@ func TestModule_NameAndDescription(t *testing.T) {
     }
 }
 
-/* inverted from the old skip-the-nil pin: a skipped observability middleware has no later consumer to fail loudly, so the wiring mistake (typically a discarded constructor error) must be refused at boot rather than served as an empty-but-healthy dashboard. */
 func TestModule_RegisterHttpMiddlewaresRefusesANilEntryAtBoot(t *testing.T) {
     registrar := &spyMiddlewareRegistrar{}
 

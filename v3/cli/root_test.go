@@ -52,7 +52,6 @@ func TestRoot_CommandNamesAnswersTheRegistrationOrder(t *testing.T) {
     }
 }
 
-/* the engine defaults each command's stream on its own, to the process's standard output, so a writer set on the tree alone left every command writing past it: the door has to reach the commands or it does not mean what it says */
 func TestRoot_SetWriterReachesACommandRegisteredBeforeIt(t *testing.T) {
     written := runProbeCommandThroughRoot(t, false)
 
@@ -105,7 +104,6 @@ func runProbeCommandThroughRoot(t *testing.T, setWriterFirst bool) []byte {
     return buffer.Bytes()
 }
 
-/* the tree installs an inert exit handler and the whole cli shutdown path depends on what that buys: the engine must hand the exit-coded error back instead of taking the process down from inside Run, or the application's deferred Close and its structured error log never run. This locks that engine contract, so an upgrade that changes it fails here rather than silently skipping teardown in production. */
 func TestNewRoot_ExitCodedErrorLeavesRunInsteadOfExitingInside(t *testing.T) {
     exitedWith := -1
     originalExiter := urfavecli.OsExiter
@@ -146,7 +144,6 @@ func TestNewRoot_ExitCodedErrorLeavesRunInsteadOfExitingInside(t *testing.T) {
     }
 }
 
-/* the control: the same tree WITHOUT the handler the constructor installs — an engine command built by hand — resolves the exit itself from inside Run, which is exactly the path that skipped the application's teardown. It is what makes the assertion above non-vacuous, and it is why the handler has no door to unset it. */
 func TestNewRoot_WithoutTheInertExitHandlerTheEngineExitsFromInsideRun(t *testing.T) {
     exitedWith := -1
     originalExiter := urfavecli.OsExiter

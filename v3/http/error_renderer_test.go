@@ -176,7 +176,6 @@ func TestRenderErrorResponse_BaseKeysWinACollisionWithTheExtras(t *testing.T) {
     }
 }
 
-/* the renderer is consulted from inside the recovery defer: an application serializer that panics on the error payload must cost its representation, never the response — the contained panic degrades to the json fallback under the door's own "an error response always exists". */
 func TestSerializeErrorPayloadSafely_ContainsAPanickingSerializer(t *testing.T) {
     _, serializeErr := serializeErrorPayloadSafely(&panickingSerializer{}, map[string]any{"error": "boom"})
     if nil == serializeErr {

@@ -9,7 +9,6 @@ import (
     "github.com/precision-soft/melody/v3/internal/testhelper"
 )
 
-/* the four kernel events are how every listener in the framework and in an application reaches the request, the runtime and the response. Their accessors sat at zero coverage: an event that handed back the wrong one of its three fields would send a listener the request of one hop and the response of another, and nothing in the dispatch would notice. Each event is asserted to report the very instances it was constructed with. */
 
 func TestKernelEvents_ReportTheInstancesTheyWereBuiltWith(t *testing.T) {
     runtimeInstance := newTestRuntime()
@@ -40,7 +39,6 @@ func TestKernelEvents_ReportTheInstancesTheyWereBuiltWith(t *testing.T) {
         t.Fatalf("the controller event reported another request")
     }
 
-    /* the response event is the one of the four that carries no runtime — the kernel builds it from the request and the final response alone, so a listener needing the runtime reads it off the request. */
     responseEvent := NewKernelResponseEvent(request, response)
 
     if request != responseEvent.Request() {
@@ -66,7 +64,6 @@ func TestKernelEvents_ReportTheInstancesTheyWereBuiltWith(t *testing.T) {
     }
 }
 
-/* the exception event carries the failure beside the request, and its response starts empty: a listener sets one to answer the failure, and the kernel reads back whether any listener did. An event that reported a response it never received would make the kernel serve nil. */
 
 func TestKernelExceptionEvent_CarriesTheFailureAndStartsWithoutAResponse(t *testing.T) {
     runtimeInstance := newTestRuntime()
@@ -99,7 +96,6 @@ func TestKernelExceptionEvent_CarriesTheFailureAndStartsWithoutAResponse(t *test
     }
 }
 
-/* Response is an interface, so a nil pointer of an implementation a listener left unassigned arrives here as a non-nil interface; every reader of these events asks `nil == Response()` to decide whether a response exists, so it is taken for one and carried to the writer that dereferences it. */
 func TestKernelEvents_SetResponseStoresTheNilATypedNilMeans(t *testing.T) {
     runtimeInstance := newTestRuntime()
     request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/hello", nil), nil, runtimeInstance, nil)

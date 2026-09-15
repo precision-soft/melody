@@ -8,7 +8,6 @@ import (
     "github.com/precision-soft/melody/v3/.example/entity"
 )
 
-/* every repository is a process-wide singleton and net/http serves each request on its own goroutine, so a listing request and a deleting request overlap; the writer here always removes a non-terminal element, which is what makes DeleteById compact the backing array under the reader */
 
 func TestInMemoryUserRepositoryConcurrentReadAndDelete(t *testing.T) {
     ctx := context.Background()
@@ -79,7 +78,6 @@ func TestInMemoryUserRepositoryConcurrentReadAndDelete(t *testing.T) {
     }
 }
 
-/* usernames are matched without regard to case in both implementations, so the comparison is normalised in the example rather than left to a database collation */
 
 func TestInMemoryUserRepositoryFindByUsernameIgnoresCase(t *testing.T) {
     ctx := context.Background()
@@ -99,12 +97,6 @@ func TestInMemoryUserRepositoryFindByUsernameIgnoresCase(t *testing.T) {
     }
 }
 
-/* the three sibling repositories — products, categories and currencies — refuse an identifier that is
-   already taken, in both of their implementations; users refused it in neither. Measured, an occupied id
-   was appended as a SECOND row: FindById answered the first, DeleteById removed the first, and the account
-   behind the second could be reached by no door that goes through the id. On the bun implementation the
-   same create surfaced the driver's raw duplicate-key text through a 500 instead of this message — which
-   is also what the identifier ceiling's own written rationale promises the caller is told. */
 func TestInMemoryUserRepositoryRefusesAnIdentifierThatIsAlreadyTaken(t *testing.T) {
     ctx := context.Background()
     repositoryInstance := newInMemoryUserRepository()
@@ -123,8 +115,6 @@ func TestInMemoryUserRepositoryRefusesAnIdentifierThatIsAlreadyTaken(t *testing.
         t.Fatalf("expected the refusal the sibling repositories answer, got %q", createErr.Error())
     }
 
-    /* the assertion that separates a refusal from a message: nothing was stored under the identifier a
-       second time, so the reading and the deleting doors still reach exactly one account. */
     all, allErr := repositoryInstance.All(ctx)
     if nil != allErr {
         t.Fatalf("all: %v", allErr)

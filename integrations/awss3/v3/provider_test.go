@@ -43,14 +43,12 @@ func TestNewClientAcceptsCompleteCredentials(t *testing.T) {
     }
 }
 
-/* bucketRaceServer plays an s3 endpoint mid bucket-creation race: the existence probe answers absent until the creation was attempted, and the creation itself answers the conflict a losing replica sees. */
 type bucketRaceServer struct {
     makeAttempted atomic.Bool
     conflictCode  string
 }
 
 func (instance *bucketRaceServer) ServeHTTP(writer nethttp.ResponseWriter, request *nethttp.Request) {
-    /* minio's BucketExists probes with GET ?location= and reads 200 as "exists" */
     if nethttp.MethodGet == request.Method || nethttp.MethodHead == request.Method {
         if true == instance.makeAttempted.Load() {
             writer.WriteHeader(nethttp.StatusOK)
@@ -102,7 +100,6 @@ func TestEnsureBucketTreatsALostCreationRaceAsSuccessWhenTheBucketIsUsable(t *te
     }
 }
 
-/* aloneConflictServer answers the creation conflict but keeps reporting the bucket absent, the shape of BucketAlreadyExists on a name another account owns: the re-check must NOT excuse that refusal. */
 type aloneConflictServer struct{}
 
 func (instance aloneConflictServer) ServeHTTP(writer nethttp.ResponseWriter, request *nethttp.Request) {

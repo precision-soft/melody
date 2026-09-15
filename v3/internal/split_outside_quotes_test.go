@@ -5,7 +5,6 @@ import (
     "testing"
 )
 
-/* a separator inside a quoted parameter value belongs to that value: without quote awareness the media range text/plain;version="1,2";q=0 split into two members and the refusal it carried travelled with the junk half */
 func TestSplitOutsideQuotes_HonoursQuotedSections(t *testing.T) {
     parts := SplitOutsideQuotes(`text/plain;version="1,2";q=0, application/json`, ',')
     if 2 != len(parts) {
@@ -24,7 +23,6 @@ func TestSplitOutsideQuotes_HonoursQuotedSections(t *testing.T) {
 }
 
 func TestSplitOutsideQuotes_CapsTheMemberCount(t *testing.T) {
-    /* an unauthenticated header of nothing but separators must not become a member per byte: the negotiating readers cut a short list, so the split is bounded far above any real header and the remainder past the cap stays one final member */
     hostileValue := strings.Repeat(",", 100000)
 
     members := SplitOutsideQuotes(hostileValue, ',')
@@ -35,7 +33,6 @@ func TestSplitOutsideQuotes_CapsTheMemberCount(t *testing.T) {
 }
 
 func TestSplitOutsideQuotes_ALegitimateListIsNotTruncated(t *testing.T) {
-    /* a real header of a few members must split whole — the cap only bites pathological input */
     members := SplitOutsideQuotes("text/html, application/json, text/plain;q=0.5, */*;q=0.1", ',')
 
     if 4 != len(members) {

@@ -44,7 +44,6 @@ func NewHmacEnvelopeSigner(config HmacEnvelopeSignerConfig) *HmacEnvelopeSigner 
         exception.Panic(exception.NewError("hmac signer secrets provider is nil", nil, nil))
     }
 
-    /* the verifier refuses an envelope whose key id is not bound to its claimed app, so fail fast here rather than emit envelopes the callee will silently reject: the signer's current key must be issued to the app it signs for. */
     currentKeyId := config.Secrets.CurrentKeyId()
     if boundApp, keyBound := config.Secrets.AppForKeyId(currentKeyId); false == keyBound || boundApp != config.App {
         exception.Panic(

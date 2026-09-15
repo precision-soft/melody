@@ -10,7 +10,6 @@ import (
 func ParseOptionFromCommand(commandContext clicontract.Context) Option {
     option := DefaultOption()
 
-    /* read through the interface: the parameter is a contract now, so a caller handing back a typed nil of its own context type produces a non-nil interface that a plain comparison lets through, and the first flag read below dereferences it */
     if true == internal.IsNilInterface(commandContext) {
         return option
     }
@@ -56,7 +55,6 @@ func NormalizeOption(option Option) Option {
         normalized.Order = SortOrderAscending
     }
 
-    /* the json format carries a single machine-readable document, so nothing around it may be colored */
     if true == IsJsonFormat(normalized.Format) {
         normalized.NoColor = true
     }

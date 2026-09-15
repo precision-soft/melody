@@ -33,7 +33,7 @@ func (instance *Module) Description() string {
     return "registers the websocket stream route bridged onto a server-sent-event hub"
 }
 
-/* a missing hub or path is refused at boot rather than skipped: an unregistered route has no later consumer to fail loudly — the endpoint simply does not exist, clients get 404 and every boot-time check reads healthy — while the same module already panics one field over on a zero IdleTimeout. A module registered at all is a decision to serve the stream. Only the PATH carries its own guard: a nil hub is already refused by name inside NewStreamHandler, which HandleNamed below reaches at this same boot moment, so a second check in front of it would be a shadowed sister no test could pin. */
+/* RegisterHttpRoutes refuses a missing path or hub at boot. A registered module must define a usable stream endpoint. */
 func (instance *Module) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel) {
     if "" == instance.config.Path {
         exception.Panic(exception.NewError("websocket module path is empty - typically a missing configuration key; the stream route cannot be registered without one", nil, nil))

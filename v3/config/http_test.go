@@ -321,7 +321,6 @@ func TestConfigurationHttpStaticExcludedPathsAreCopiedOnRead(t *testing.T) {
 }
 
 func TestConfigurationHttpStaticExcludedPathsRefuseAnEntryThatIsNotAPath(t *testing.T) {
-    /* an entry that cannot be a prefix of a request path would exclude nothing while the application believes the directory is hers, and an empty entry would exclude everything; both are refused at boot rather than guessed at. */
     for _, value := range []string{"admin", "/admin,", ",", "/admin, ,/api"} {
         source := &testEnvironmentSource{
             values: map[string]string{

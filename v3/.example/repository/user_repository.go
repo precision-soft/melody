@@ -35,9 +35,7 @@ func MustGetUserRepository(resolver melodycontainercontract.Resolver) UserReposi
     return melodycontainer.MustFromResolver[UserRepository](resolver, ServiceUserRepository)
 }
 
-/* NewUserRepository hands back the nomenclature the environment can actually support: the database-backed one when a connection was configured, and the in-memory one otherwise. The choice is made here rather than in the configuration because the generated wiring fills this constructor from the container, and the storage handle is what carries the answer.
-
-   The migration set is applied and the table seeded on the way out, so the first caller finds a nomenclature rather than an empty one. The trail's own tables are created beside it: an audited write is one transaction over both, so a missing trail table would turn every write into a failure rather than into an unaudited success. */
+/* NewUserRepository selects persistent or in-memory storage. Persistent construction applies the shared catalogue and audit schema and seeds an empty user table. */
 //melody:service ServiceUserRepository
 func NewUserRepository(storage *persistence.CatalogStorage) (UserRepository, error) {
     if false == storage.IsPersistent() {
@@ -64,7 +62,6 @@ func NewUserRepository(storage *persistence.CatalogStorage) (UserRepository, err
     return repositoryInstance, nil
 }
 
-/* validateUser reports the first field the user fails on, shared by both implementations so a bad write is refused with the same words whichever one the environment picked. */
 func validateUser(user *entity.User) error {
     if nil == user {
         return fmt.Errorf("user is required")
@@ -85,7 +82,7 @@ func nextUserId(existingIdList []string) string {
     return fmt.Sprintf("user-%d", highestIdSuffix(existingIdList, "user-")+1)
 }
 
-/* NormalizedUsername is the form both implementations compare on, exported because the cache key constructor folds through it: a username folded in one place and not another writes an entry under one key and clears it under another. Usernames are matched without regard to case, and leaving that to the database collation would make the answer depend on how the table was created. */
+/* NormalizedUsername defines the case-insensitive spelling shared by repository lookups and cache keys, independently of database collation. */
 func NormalizedUsername(username string) string {
     return strings.ToLower(strings.TrimSpace(username))
 }

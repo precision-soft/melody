@@ -58,16 +58,12 @@ type SmtpConfig struct {
     DataTerminationTimeout time.Duration
 }
 
-/* defaultSmtpDialTimeout is the ceiling on connect + handshake + greeting when the caller does not set one. */
 const defaultSmtpDialTimeout = 30 * time.Second
 
-/* smtpDataTerminationTimeoutMinimum floors the derived dot-acknowledgment ceiling, so a tight per-step Timeout still leaves a scanning relay a realistic acceptance window. */
 const smtpDataTerminationTimeoutMinimum = 2 * time.Minute
 
-/* smtpClientLocalName is the client name sent in the hello, the same default net/smtp uses when the hello is left implicit. */
 const smtpClientLocalName = "localhost"
 
-/* resolveSmtpCommandTimeout selects the per-step session deadline: an explicit Timeout wins, else the DialTimeout is reused so a single tunable bounds both the handshake and the conversation, else the package default applies. */
 func resolveSmtpCommandTimeout(timeout time.Duration, dialTimeout time.Duration) time.Duration {
     if 0 < timeout {
         return timeout
@@ -80,7 +76,6 @@ func resolveSmtpCommandTimeout(timeout time.Duration, dialTimeout time.Duration)
     return defaultSmtpDialTimeout
 }
 
-/* resolveSmtpDataTerminationTimeout selects the dot-acknowledgment ceiling: an explicit value wins, else four per-step timeouts with the two-minute floor apply. */
 func resolveSmtpDataTerminationTimeout(dataTerminationTimeout time.Duration, commandTimeout time.Duration) time.Duration {
     if 0 < dataTerminationTimeout {
         return dataTerminationTimeout
@@ -109,7 +104,7 @@ type SmtpTransport struct {
 }
 
 func (instance *SmtpTransport) Send(runtimeInstance runtimecontract.Runtime, message mailercontract.Message) error {
-    /* the runtime's context drives mid-session cancellation, so a nil runtime is rejected up front instead of reaching the cancellation watcher; IsNilInterface also catches a typed-nil runtime, which a plain comparison waves through onto a nil dereference at the dial. */
+
     if true == internal.IsNilInterface(runtimeInstance) {
         return exception.NewError("runtime may not be nil", nil, nil)
     }
@@ -133,7 +128,6 @@ func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, 
         return exception.NewError("smtp dial failed", map[string]any{"address": instance.address}, dialErr)
     }
 
-    /* net/smtp has no context api, so once the session runs a cancelled runtime context can only reach an in-flight read or write by closing the connection out from under it: the blocked call then returns an error and the session unwinds (the connect itself is context-aware). The watcher is armed before the greeting is read, so the whole session — the greeting included — is cancellable; a relay that accepts the connection and then says nothing no longer pins the sender until the dial timeout. */
     watcherDone := make(chan struct{})
     go watchRuntimeCancellation(runtimeInstance, connection, watcherDone)
 
@@ -144,11 +138,9 @@ func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, 
         return exception.NewError("smtp dial failed", map[string]any{"address": instance.address}, clientErr)
     }
 
-    /* the deferred order is deliberate: close(watcherDone) is registered last so it runs FIRST, stopping the watcher before client.Close() closes the connection — otherwise a clean delivery would race its own shutdown. */
     defer client.Close()
     defer close(watcherDone)
 
-    /* the hello runs as its own step under a fresh deadline instead of riding lazily on the first client operation: left implicit, it would share one deadline with whichever command triggers it — the STARTTLS extension probe on the plain path, MAIL on the implicit-tls path — and every later client call is one round trip only because the hello is already done. */
     if deadlineErr := instance.resetSessionDeadline(connection); nil != deadlineErr {
         return deadlineErr
     }
@@ -174,7 +166,7 @@ func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, 
     if "" != instance.username {
         supported, _ := client.Extension("AUTH")
         if false == supported {
-            /* configured credentials fail CLOSED: a server that does not advertise AUTH cannot take them, and skipping the auth silently — the old RequireAuth-false behavior — sent the message as anonymous submission while reporting success, with the operator's configured identity quietly unused. The common trigger is a relay that only advertises AUTH after STARTTLS, on a session where tls was not negotiated. */
+
             return exception.NewError(
                 "smtp server does not advertise AUTH while credentials are configured",
                 map[string]any{"address": instance.address},
@@ -196,7 +188,6 @@ func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, 
         return deadlineErr
     }
 
-    /* "failed", not "rejected": the error may as well be a per-step deadline expiry or the cancellation watcher closing the connection, and a message that asserts a server verdict for those sends the operator investigating a policy decision that never happened — the cause carries the real reason */
     if mailErr := client.Mail(from); nil != mailErr {
         return exception.NewError("smtp mail command failed", map[string]any{"from": from}, mailErr)
     }
@@ -224,7 +215,6 @@ func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, 
         return writeErr
     }
 
-    /* the dot acknowledgment is the step where the relay runs its content inspection, so it gets its own, longer ceiling — a per-step deadline here would report a message the server may already have queued as a failure and invite a duplicate delivery. */
     if deadlineErr := connection.SetDeadline(time.Now().Add(instance.dataTerminationTimeout)); nil != deadlineErr {
         return exception.NewError("smtp set session deadline failed", map[string]any{"address": instance.address}, deadlineErr)
     }
@@ -233,7 +223,6 @@ func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, 
         return exception.NewError("smtp payload flush failed", map[string]any{"address": instance.address}, closeErr)
     }
 
-    /* from here the message is accepted: reporting any later failure would invite a retry and a duplicate delivery, so the quit path only ever logs. A deadline that cannot be re-armed also means the quit cannot be bounded — skip it and let the deferred close drop the connection. */
     if deadlineErr := instance.resetSessionDeadline(connection); nil != deadlineErr {
         if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
             logger.Warning(
@@ -247,7 +236,7 @@ func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, 
 
     if quitErr := client.Quit(); nil != quitErr {
         if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
-            /* log-only is right (the message is accepted; returning would invite a duplicate delivery), but the record must carry the cause — a recurring quit failure with only the address beside it cannot be told apart from a timeout, a protocol error or a closed socket */
+
             logger.Warning(
                 "smtp quit failed after the message was accepted",
                 exception.LogContext(quitErr, map[string]any{"address": instance.address}),
@@ -258,10 +247,8 @@ func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, 
     return nil
 }
 
-/* smtpPayloadChunkSize is the unit of payload progress the session deadline bounds: the payload is written in chunks of this size with the deadline re-armed before each one, so the ceiling applies to per-chunk progress rather than to the whole transfer. */
 const smtpPayloadChunkSize = 32 * 1024
 
-/* writePayload streams the payload to the DATA writer in fixed-size chunks, re-arming the per-step session deadline before each chunk: a single absolute deadline over the whole body would kill a large message on a slow-but-alive link once the total transfer time exceeded the timeout even though bytes kept flowing, while the per-chunk deadline lets a slow-but-steady peer complete regardless of the message size and still cuts a genuinely stalled peer within one timeout. */
 func (instance *SmtpTransport) writePayload(connection net.Conn, writer io.Writer, payload []byte) error {
     for offset := 0; offset < len(payload); offset += smtpPayloadChunkSize {
         end := offset + smtpPayloadChunkSize
@@ -281,7 +268,6 @@ func (instance *SmtpTransport) writePayload(connection net.Conn, writer io.Write
     return nil
 }
 
-/* resetSessionDeadline pushes the connection deadline out by commandTimeout before the next session step, so a per-step ceiling governs every command and the payload write rather than only the opening greeting. */
 func (instance *SmtpTransport) resetSessionDeadline(connection net.Conn) error {
     if deadlineErr := connection.SetDeadline(time.Now().Add(instance.commandTimeout)); nil != deadlineErr {
         return exception.NewError("smtp set session deadline failed", map[string]any{"address": instance.address}, deadlineErr)
@@ -290,7 +276,6 @@ func (instance *SmtpTransport) resetSessionDeadline(connection net.Conn) error {
     return nil
 }
 
-/* watchRuntimeCancellation closes the connection when the runtime context is cancelled, unblocking any smtp command in flight; done is closed by the caller on return so a completed delivery stops the watcher without closing the connection a second time. */
 func watchRuntimeCancellation(runtimeInstance runtimecontract.Runtime, connection net.Conn, done <-chan struct{}) {
     select {
     case <-runtimeInstance.Context().Done():
@@ -299,7 +284,6 @@ func watchRuntimeCancellation(runtimeInstance runtimecontract.Runtime, connectio
     }
 }
 
-/* resolveDialTimeout is the ceiling on the connect, the tls handshake and the opening greeting. */
 func (instance *SmtpTransport) resolveDialTimeout() time.Duration {
     if 0 >= instance.dialTimeout {
         return defaultSmtpDialTimeout
@@ -308,7 +292,6 @@ func (instance *SmtpTransport) resolveDialTimeout() time.Duration {
     return instance.dialTimeout
 }
 
-/* connect opens the transport connection under the runtime context, so a cancelled runtime aborts a connect still in flight instead of stalling until the dial timeout. It stops at the connection: the greeting read that follows is a session step, and the caller arms the cancellation watcher over it before reading. */
 func (instance *SmtpTransport) connect(ctx context.Context) (net.Conn, error) {
     dialer := &net.Dialer{Timeout: instance.resolveDialTimeout()}
 
@@ -318,11 +301,9 @@ func (instance *SmtpTransport) connect(ctx context.Context) (net.Conn, error) {
         return tlsDialer.DialContext(ctx, "tcp", instance.address)
     }
 
-    /* dial the raw connection and build the client with instance.host explicitly, rather than smtp.Dial(address) which derives the client server name from the address host: startTls uses instance.host for the TLS SNI and PlainAuth is constructed with instance.host, so a configured Host that differs from the Address host (dialing by IP, through a tunnel, or a CNAME) must be the server name here too — otherwise smtp.PlainAuth.Start rejects the mismatch with "wrong host name" and authentication can never succeed. The implicit-TLS branch passes instance.host to NewClient the same way. */
     return dialer.DialContext(ctx, "tcp", instance.address)
 }
 
-/* newSmtpClientWithGreetingDeadline bounds the server's opening 220 greeting, which smtp.NewClient reads synchronously with no deadline of its own: a server that accepts the tcp connection and then says nothing would pin the sending goroutine and its socket indefinitely. The deadline is cleared once the greeting has been read, so the rest of the session is governed by the caller. */
 func newSmtpClientWithGreetingDeadline(connection net.Conn, host string, timeout time.Duration) (*smtp.Client, error) {
     if deadlineErr := connection.SetDeadline(time.Now().Add(timeout)); nil != deadlineErr {
         connection.Close()
@@ -346,7 +327,6 @@ func newSmtpClientWithGreetingDeadline(connection net.Conn, host string, timeout
     return client, nil
 }
 
-/* startTls upgrades the session when the server offers it; the extension probe is a local lookup (the hello has already run) and the upgrade itself — the STARTTLS command, the tls handshake and the hello the client repeats over tls — runs as one step under a fresh deadline. */
 func (instance *SmtpTransport) startTls(client *smtp.Client, connection net.Conn) error {
     supported, _ := client.Extension("STARTTLS")
     if false == supported {
@@ -372,7 +352,6 @@ func (instance *SmtpTransport) startTls(client *smtp.Client, connection net.Conn
     return nil
 }
 
-/* resolveTlsConfig supplies the tls configuration for both the implicit-tls dial and the STARTTLS upgrade. A user config that sets neither ServerName nor InsecureSkipVerify would fail the STARTTLS handshake ("either ServerName or InsecureSkipVerify must be specified"), so the transport host is filled in on a clone — the caller's config may be shared and is never mutated. */
 func (instance *SmtpTransport) resolveTlsConfig() *tls.Config {
     if nil == instance.tlsConfig {
         return &tls.Config{ServerName: instance.host}

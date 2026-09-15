@@ -73,7 +73,6 @@ func TestWriteFileAtomically_CreatesTheParentDirectoriesAndLeavesNoTempResidue(t
         t.Fatalf("stat: %v", statErr)
     }
 
-    /* the temp file is born 0600; the artifact keeps the mode a direct write would have given it */
     if 0o644 != info.Mode().Perm() {
         t.Fatalf("unexpected mode: %v", info.Mode().Perm())
     }

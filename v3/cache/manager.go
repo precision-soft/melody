@@ -11,7 +11,7 @@ import (
     "github.com/precision-soft/melody/v3/internal"
 )
 
-/* NewManager takes a backend it does not own: Close leaves it open, because a backend handed in was built by someone else and is closed by whoever built it. That is what the container path needs — the backend is a registered service the container closes itself, so a manager that closed it too would close it twice, which a backend wrapping a connection typically reports as a failure on the second call and turns a clean shutdown into a reported one. Use NewManagerOwningBackend to get the cascade back. */
+/* NewManager borrows its backend; Close leaves the backend open. Use NewManagerOwningBackend for ownership and cascading close. */
 func NewManager(
     backend cachecontract.Backend,
     serializer cachecontract.Serializer,
@@ -53,7 +53,6 @@ type Manager struct {
     ownsBackend bool
 }
 
-/* normalizeThirdPartyError reads the error through the interface: a backend or serializer declared with a concrete error type hands back a typed nil boxed into a non-nil interface, which would be treated as the failure it is not — and would panic the first caller that renders it. */
 func normalizeThirdPartyError(err error) error {
     if true == internal.IsNilInterface(err) {
         return nil
@@ -130,7 +129,7 @@ func (instance *Manager) Clear() error {
     return normalizeThirdPartyError(instance.backend.Clear())
 }
 
-/* an entry whose payload does not deserialize is left out of the result the way an absent key is — Get answers the same entry with exists false — and the keys it happened under come back in a DeserializationError beside the values that did decode, so one corrupt entry no longer discards the whole answer and the error names its culprits deterministically. */
+/* Many returns successfully decoded values and a DeserializationError naming corrupt entries. Missing and corrupt entries are omitted without discarding valid results. */
 func (instance *Manager) Many(keys []string) (map[string]any, error) {
     payloadsByKey, manyErr := instance.backend.Many(keys)
     manyErr = normalizeThirdPartyError(manyErr)
@@ -198,7 +197,7 @@ func (instance *Manager) DeleteMultiple(keys []string) error {
     return normalizeThirdPartyError(instance.backend.DeleteMultiple(keys))
 }
 
-/* the counter operations are backend-native so a distributed backend keeps them atomic, which means they bypass the serializer and store the count as decimal text; a counter key must therefore be read with GetCounter rather than Get, and must not be mixed with Set on the same key */
+/* Increment uses the backend’s atomic counter representation, bypassing serialization. Read counter keys with GetCounter and do not mix them with Set/Get values. */
 func (instance *Manager) Increment(key string, delta int64) (int64, error) {
     newValue, incrementErr := instance.backend.Increment(key, delta)
 

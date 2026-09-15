@@ -25,7 +25,6 @@ func TestAnonymousToken_IsNobody(t *testing.T) {
     }
 }
 
-/* Scope and Attributes exist only on v3, where the contract widened; both must answer an empty map rather than nil, for the same reason Roles does — a consumer ranges over the answer without guarding it. */
 func TestAnonymousToken_CarriesEmptyScopeAndAttributes(t *testing.T) {
     token := NewAnonymousToken()
 

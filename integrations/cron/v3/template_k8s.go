@@ -14,23 +14,19 @@ const TemplateNameK8s = "k8s"
 
 const k8sDefaultRestartPolicy = "OnFailure"
 
-/* k8s resource names are RFC 1123 DNS labels; a CronJob name is further capped so the generated job/pod name suffixes stay within 63 octets */
 const k8sNameMaxLength = 52
 
-/* line terminators are rejected outright with an actionable error; every other value is emitted as a double-quoted YAML scalar (with any remaining control character escaped by yamlQuote), so colons, spaces, and wildcards survive without breaking the document */
 var k8sForbiddenCharacters = []ForbiddenCharacter{
     {Char: '\n', Reason: "a literal newline terminates the YAML scalar and corrupts the manifest; remove it at the source"},
     {Char: '\r', Reason: "a carriage return terminates the YAML scalar on parsers that treat CR as a line break; remove it before rendering"},
 }
 
-/* schedule fields carry the same line-terminator restriction as every other k8s value, plus a % rejection: % is not a valid character in a cron schedule field, so reject it here with a k8s-appropriate reason rather than emitting a manifest the apiserver refuses */
 var k8sScheduleForbiddenCharacters = []ForbiddenCharacter{
     {Char: '%', Reason: "not a valid character in a kubernetes CronJob schedule field; remove it at the source"},
     {Char: '\n', Reason: "a literal newline terminates the YAML scalar and corrupts the manifest; remove it at the source"},
     {Char: '\r', Reason: "a carriage return terminates the YAML scalar on parsers that treat CR as a line break; remove it before rendering"},
 }
 
-/* k8sHeaderBlock identifies generated manifests. Removing a local file with --prune does not delete any CronJob already applied to the cluster; cluster retirement remains a deployment operation. */
 const k8sHeaderBlock = `# GENERATED FILE
 # DO NOT EDIT LOCALLY
 ` + CrontabOwnershipMarker + `
@@ -56,7 +52,7 @@ func (instance *K8sTemplate) RendersUserColumn() bool {
 
 /* Render renders one batch/v1 CronJob document per entry under a marker-carrying comment header, separated by the YAML document marker; heartbeat options are crontab-only and ignored here */
 func (instance *K8sTemplate) Render(entries []Entry, options RenderOptions) (string, error) {
-    /* An empty render contains no containers and requires no image. */
+
     if 0 == len(entries) {
         return k8sHeaderBlock, nil
     }
@@ -76,7 +72,6 @@ func (instance *K8sTemplate) Render(entries []Entry, options RenderOptions) (str
         return "", validationErr
     }
 
-    /* yamlQuote iterates runes, so an invalid UTF-8 byte in the image reference would be silently rewritten to U+FFFD — a DIFFERENT image pulled than the one configured; it is refused instead */
     if false == utf8.ValidString(options.Image) {
         return "", exception.NewError(
             "cron: the k8s container image is not valid UTF-8; the manifest would silently rewrite it",
@@ -85,7 +80,6 @@ func (instance *K8sTemplate) Render(entries []Entry, options RenderOptions) (str
         )
     }
 
-    /* the namespace is judged by the grammar the apiserver enforces — an RFC 1123 label — the way the restart policy and the resource names already are: it used to be the one k8s value checked only for line terminators, so a namespace with a dot or an uppercase letter rendered a manifest kubectl apply then refused, after generation had reported success */
     if "" != options.Namespace {
         if false == isRfc1123Label(options.Namespace) {
             return "", exception.NewError(
@@ -109,7 +103,6 @@ func (instance *K8sTemplate) Render(entries []Entry, options RenderOptions) (str
         return "", validationErr
     }
 
-    /* a CronJob pod template accepts only OnFailure or Never; Always is rejected by the apiserver, so fail here with a clear message instead of emitting a manifest kubectl apply will refuse */
     if "OnFailure" != restartPolicy && "Never" != restartPolicy {
         return "", exception.NewError(
             fmt.Sprintf("cron: k8s restartPolicy %q is invalid; use OnFailure or Never", restartPolicy),
@@ -127,7 +120,6 @@ func (instance *K8sTemplate) Render(entries []Entry, options RenderOptions) (str
 
     documentsWritten := 0
 
-    /* distinct command names can sanitize to the same k8s resource name (lowercasing, dash-collapsing, the 52-octet cap); two CronJob documents sharing one metadata.name would let kubectl apply silently overwrite the first, so reject the collision here */
     namesSeen := make(map[string]string, len(entries))
 
     for _, entry := range entries {
@@ -154,7 +146,6 @@ func (instance *K8sTemplate) Render(entries []Entry, options RenderOptions) (str
     return builder.String(), nil
 }
 
-/* Render only sees one destination's entries, so it can catch collisions within a single manifest stream; the namespace is one global option, so commands split across several destination files can still sanitize to the same resource name and clash on kubectl apply. The CLI calls this over every entry it is about to write to detect that case before rendering. */
 func ensureK8sNamesUnique(entries []Entry) error {
     namesSeen := make(map[string]string, len(entries))
 
@@ -192,7 +183,6 @@ func buildCronJobManifest(entry Entry, image string, namespace string, restartPo
         return "", "", nameErr
     }
 
-    /* the same per-field schedule validation the crontab template applies; embedded whitespace, %, CR or LF are all invalid in a k8s cron schedule too, so reject them with a clear error rather than emitting a broken manifest */
     if scheduleValidationErr := ValidateScheduleFields(entry, k8sScheduleForbiddenCharacters, RunnerDialectKubernetes); nil != scheduleValidationErr {
         return "", "", scheduleValidationErr
     }
@@ -238,7 +228,6 @@ func buildCronJobManifest(entry Entry, image string, namespace string, restartPo
     return name, builder.String(), nil
 }
 
-/* a Command override replaces the image entrypoint (k8s "command"); otherwise the command name plus its arguments are passed as "args" so the image entrypoint (the application binary) runs them in CLI mode. Both arrays refuse EMPTY tokens, not just an all-empty override: in the exec form every element is one argv entry, so an empty entrypoint token or an empty argument reaches the pod verbatim and fails there — a CrashLoopBackOff diagnosed in the cluster for a mistake generation could name. The crontab dialects quote an empty token as '' and hand the process an empty argument, which the application's own flag parsing then answers; here there is no shell and no parsing between the manifest and the pod, so the mistake is refused where it can still be named. */
 func k8sInvocation(entry Entry) (string, []string, error) {
     if 0 < len(entry.Command) {
         if tokenErr := refuseEmptyTokens(entry.Name, "Command", entry.Command); nil != tokenErr {
@@ -273,7 +262,6 @@ func refuseEmptyTokens(entryName string, field string, tokens []string) error {
             )
         }
 
-        /* yamlQuote iterates runes, so an invalid UTF-8 byte would be silently rewritten to U+FFFD — an argv element changed between the configuration and the manifest; it is refused instead */
         if false == utf8.ValidString(token) {
             return exception.NewError(
                 fmt.Sprintf("cron: entry %q has a %s token at position %d that is not valid UTF-8; the manifest would silently rewrite it", entryName, field, index),
@@ -286,7 +274,6 @@ func refuseEmptyTokens(entryName string, field string, tokens []string) error {
     return nil
 }
 
-/* isRfc1123Label mirrors the apiserver's namespace grammar: lowercase alphanumerics and '-', starting and ending alphanumeric, at most 63 characters. */
 func isRfc1123Label(value string) bool {
     if 0 == len(value) || 63 < len(value) {
         return false
@@ -309,7 +296,6 @@ func isRfc1123Label(value string) bool {
     return true
 }
 
-/* a command expanded into several parallel instances yields one Entry per run, all sharing the command name; the k8s template needs a unique metadata.name per CronJob, so a -<index> suffix is appended when InstanceCount > 1. The sanitized base is capped so the base plus the suffix still fits k8sNameMaxLength, keeping the 63-octet headroom intact */
 func k8sResourceName(commandName string, instanceIndex int, instanceCount int) (string, error) {
     suffix := ""
     if 1 < instanceCount {
@@ -335,7 +321,6 @@ func k8sResourceName(commandName string, instanceIndex int, instanceCount int) (
 
     name := strings.Trim(builder.String(), "-")
 
-    /* the suffix is at most a sign plus the digits of an int, so it can never approach the 52-octet cap; baseMaxLength therefore stays comfortably positive and the slice below is always in range */
     baseMaxLength := k8sNameMaxLength - len(suffix)
     if baseMaxLength < len(name) {
         name = strings.Trim(name[:baseMaxLength], "-")
@@ -352,7 +337,6 @@ func k8sResourceName(commandName string, instanceIndex int, instanceCount int) (
     return name + suffix, nil
 }
 
-/* emits value as a double-quoted YAML scalar; the backslash and double quote are escaped, the common control characters get their short YAML escapes, and any other C0/C1 control or DEL is escaped as \xNN while the Unicode line and paragraph separators (which a YAML 1.1 parser treats as line breaks) are escaped as \uNNNN, so a stray non-printable byte never lands raw inside the scalar and trips a strict parser. Printable runes (including multi-byte UTF-8) pass through verbatim */
 func yamlQuote(value string) string {
     var builder strings.Builder
     builder.WriteByte('"')

@@ -166,7 +166,6 @@ func (instance *RouteGroup) HandleWithOptions(pattern string, handler httpcontra
         defaults[key] = value
     }
 
-    /* the group registers options of its own instead of writing the name prefix and the merged group values back into the caller's: one options value reused across two grouped registrations would otherwise accumulate the prefix, so the second route would register under a name nothing can generate, and the first group's requirements would leak into a later registration through a different group */
     groupedOptions := NewRouteOptions(
         groupedName,
         options.Methods(),

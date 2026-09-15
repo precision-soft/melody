@@ -241,7 +241,6 @@ func TestFirewallOverride_ASetterOnTheZeroValueStartsFromTheConstructorDefaults(
         nil,
     )
 
-    /* a setter called on the exact zero value must first read the constructor defaults: without that, WithEntryPoint alone would carry an empty merge strategy the builder repairs to inheritGlobal=true anyway, but WithInheritGlobalAccessControl(false) alone would be the field that never arrived. Here the entry-point setter on the zero value must still leave inheritance on. */
     override := FirewallOverrideConfiguration{}.WithEntryPoint(nil)
 
     builder.AddStatelessFirewall(
@@ -264,10 +263,6 @@ func TestFirewallOverride_WithMergeStrategyRefusesAnUnknownStrategy(t *testing.T
     }, "unknown security access control merge strategy")
 }
 
-/* the two dependencies every firewall must carry are refused at the declaration door, where the
-   composition root can still be pointed at the line that declared them — a typed nil reads as
-   declared, so without this the firewall boots and the first request behind it dereferences a nil
-   receiver inside the resolution listener. */
 func TestBuilder_AddFirewallRefusesATypedNilMatcherAndTokenSource(t *testing.T) {
     var typedNilMatcher securitycontract.Matcher = (*security.PathPrefixMatcher)(nil)
     var typedNilTokenSource securitycontract.TokenSource = (*typedNilTokenSourceProbe)(nil)

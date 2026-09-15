@@ -27,7 +27,6 @@ func TestHandlerDecorator_TracesShortCircuitedRequest(t *testing.T) {
         t.Fatalf("unexpected decorator error: %v", decoratorErr)
     }
 
-    /* the inner handler stands in for the kernel writing a 401 short-circuit before any middleware ran — the exact request shape the middleware seam never observes */
     denied := nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
         writer.WriteHeader(nethttp.StatusUnauthorized)
         _, _ = writer.Write([]byte(`{"error":"unauthorized"}`))
@@ -63,7 +62,6 @@ func TestHandlerDecorator_InnerSpanParentsToLifecycleSpan(t *testing.T) {
         t.Fatalf("unexpected decorator error: %v", decoratorErr)
     }
 
-    /* the inner handler starts a child span from the request context, standing in for the routed tracing middleware */
     routed := nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
         _, span := tracer.Start(request.Context(), "GET /hello")
         span.End()
@@ -80,7 +78,6 @@ func TestHandlerDecorator_InnerSpanParentsToLifecycleSpan(t *testing.T) {
         t.Fatalf("expected the lifecycle span plus the routed child span, got %d", len(spans))
     }
 
-    /* Ended() lists the child first (it ends first); the child must parent to the lifecycle span */
     child := spans[0]
     lifecycle := spans[1]
 

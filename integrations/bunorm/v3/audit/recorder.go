@@ -13,7 +13,6 @@ import (
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
-/* isNilInterface answers true for a nil interface AND for a typed-nil value behind one: `nil == storage` alone lets `var s *BunStorage; NewRecorderWithStorage(s, nil)` through the construction guard, and the panic then fires at the first recorded write — deep in a request, far from the wiring that caused it — instead of at the door whose message names it. */
 func isNilInterface(value any) bool {
     if nil == value {
         return true
@@ -48,7 +47,7 @@ func NewRecorderWithStorage(storage Storage, registry *Registry) *Recorder {
     }
 }
 
-/* NewRecorderOwningStorage is NewRecorderWithStorage with the ownership cascade: Close closes the storage. It exists for the composition root that builds the recorder and its storage by hand — an AsyncStorage in particular has a drain goroutine only its Close ends, and a recorder registered as the sole service over it was a closable resource the container teardown could never reach. */
+/* NewRecorderOwningStorage closes its storage when the recorder closes. Use it when the recorder owns an AsyncStorage worker or another closable storage. */
 func NewRecorderOwningStorage(storage Storage, registry *Registry) *Recorder {
     recorder := NewRecorderWithStorage(storage, registry)
     recorder.ownsStorage = true
@@ -148,7 +147,7 @@ func (instance *Recorder) record(
     table := instance.registry.tableFor(entity)
 
     if saveErr := instance.storage.Save(ctx, table, entry); nil != saveErr {
-        /* an async storage that refused the entry — its queue full, or closed — dead-lettered it itself before returning, with the same change-set: a second record here journaled every dropped entry twice into the same journal, exactly under the queue-full storm the dead-letter exists for. Skipped on the sentinel alone, the record was lost instead whenever the storage journaled through the emergency default and this recorder through the application's logger, so the refusal names the logger it went through and the record is skipped only when that logger is this recorder's; a refusal from any other storage, sentinel or not, is dead-lettered here, once */
+
         if false == journaledThrough(saveErr, instance.deadLetterLogger()) {
             instance.deadLetter(table, entry, saveErr)
         }
@@ -159,7 +158,6 @@ func (instance *Recorder) record(
     return nil
 }
 
-/* deadLetterLogger reads the logger a dead-letter goes through, under the lock WithLogger writes it under */
 func (instance *Recorder) deadLetterLogger() loggingcontract.Logger {
     instance.loggerMutex.RLock()
     defer instance.loggerMutex.RUnlock()
@@ -174,9 +172,6 @@ func (instance *Recorder) deadLetter(table string, entry Entry, saveErr error) {
         return
     }
 
-    /* the record carries the failure's whole cause chain and context, not a flattened message: an exception.Error renders its message alone through Error(), so "could not write the audit entries" without the driver error and the table was the entire diagnostic an operator got for a trail that stopped filling.
-
-       It carries the change-set too, on purpose: the dead-letter is the fallback store of an entry the trail could not keep ("logged, not dropped" is the readme's contract), and without the changes the record would say only that something was lost. What reaches the journal is the change-set as the trail would have stored it — an encrypted column and an audit:"redact" field are already the placeholder — so the trail's own redaction policy is the journal's, and a field that must not reach either is tagged, not filtered here. */
     logger.Error("audit entry could not be stored; dead-lettering", exception.LogContext(saveErr, map[string]any{
         "table":     table,
         "entity":    entry.Entity,

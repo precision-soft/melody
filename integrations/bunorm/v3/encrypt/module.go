@@ -119,7 +119,6 @@ func (instance *Module) RegisterCliCommands(kernelInstance kernelcontract.Kernel
     return commands
 }
 
-/* buildCommand assembles one bulk command from exactly one of a prebuilt database and a factory — an ambiguous configuration carrying both panics before this assembly. A factory is wrapped into a database resolver that runs at the first command run against the service container captured from the kernel here, so a registry-resolved database is opened when the container is fully booted rather than at this registration phase; without a factory the prebuilt database yields an eagerly-wired command. */
 func (instance *Module) buildCommand(
     database *bun.DB,
     factory func(resolver containercontract.Resolver) (*bun.DB, error),

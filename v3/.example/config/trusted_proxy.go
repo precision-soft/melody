@@ -15,20 +15,12 @@ import (
     melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
-/* trustedProxyRefreshInterval is how long a resolved list is believed before the names on it are looked up again. The compose balancer keeps its service name across a restart and loses its address, so a list resolved once at build — the previous form — was stale after the first restart of the balancer and empty for a process booted before the balancer's name existed, in both cases with every client behind it charged to the balancer's own key and one line on standard error. A minute is the longest a restarted balancer is not trusted, and the price is one lookup a minute on the request path, off the lock. */
 const trustedProxyRefreshInterval = time.Minute
 
-/* trustedProxyWarningLogger is where an entry of the trusted proxy list that names nothing is reported: the entry is skipped rather than refused because a name that does not resolve in this process — the balancer not started beside a cli command — must not stop the command; skipped, the list trusts one hop fewer, which fails closed onto the peer address. A variable so the test can capture what would otherwise go to standard error. */
 var trustedProxyWarningLogger = melodylogging.EmergencyLogger
 
-/* trustedProxyLookup is the name resolution the list goes through; a variable so a test can hand it a table. */
 var trustedProxyLookup = net.LookupHost
 
-/* trustedProxyResolver answers which client a request came from, the way every budget of this example has to read it: behind a trusted proxy the X-Forwarded-For client, on a direct hit the peer address, and a header sent by a peer outside the trusted list ignored rather than believed. An empty list trusts no header at all, so every request is charged to its peer.
-
-   Both budgets share ONE resolver because they are two halves of one policy and the trusted list must not drift apart: the write throttle meters the writes that reach a handler, the request budget meters every request ahead of authentication. Left on the peer address, that one charged the whole world to the proxy, so one client could spend everyone's hour; trusting the whole private address space instead charged the header to whoever sat in it, so any other container of the deployment chose its own key per request — a budget it could refill at will, or a victim's it could spend — and, behind the compose balancer, the docker gateway every host client enters through was read as one more hop, which put the whole host population back on the balancer's key. The list is the balancer itself, from configuration.
-
-   The entries are kept as written and the names among them are resolved when the resolver is first asked and again once the interval has passed, on the request that finds the list stale and outside the lock — every other request keeps the list last resolved, so a lookup that hangs costs one request, not a burst. */
 type trustedProxyResolver struct {
     entryList []string
 
@@ -39,7 +31,6 @@ type trustedProxyResolver struct {
     now        func() time.Time
 }
 
-/* newTrustedProxyResolver reads the comma-separated list and REFUSES an entry that can be nothing — neither a prefix, nor an address, nor a host name: an address with a port, a bracketed address, a prefix without its length. The middleware refuses such an entry at construction for the reason this does — skipped on every request, it narrowed the trusted list in silence, which reads at runtime as every client behind that proxy sharing one key. A name that merely does not resolve right now is a different case, and is skipped and reported by the resolution below. */
 func newTrustedProxyResolver(rawList string, now func() time.Time) *trustedProxyResolver {
     var entryList []string
 
@@ -78,7 +69,6 @@ func (instance *trustedProxyResolver) Resolve(request melodyhttpcontract.Request
     return instance.current()(request)
 }
 
-/* current hands back the resolver over the list last resolved, resolving it first when there is none and again when the interval has passed — that refresh runs on the request that found the list stale, after the lock is released, and lands under the lock when it is done. */
 func (instance *trustedProxyResolver) current() melodyhttpmiddleware.ClientIpResolver {
     instance.mutex.Lock()
 
@@ -115,7 +105,6 @@ func (instance *trustedProxyResolver) current() melodyhttpmiddleware.ClientIpRes
     return resolver
 }
 
-/* resolvedList is the list as the middleware reads it: an address or a prefix is taken as written, and any other entry is a host name looked up now — the compose balancer is reachable by its service name and nothing else about it is stable, so naming it is the one spelling that survives a restart of the stack. A name that resolves to nothing is skipped and reported, never refused: a cli command boots without the balancer beside it. */
 func (instance *trustedProxyResolver) resolvedList() []string {
     var trustedProxyList []string
 
@@ -142,12 +131,10 @@ func (instance *trustedProxyResolver) resolvedList() []string {
     return trustedProxyList
 }
 
-/* trustedProxyList is the list as it resolves right now, the door the tests read the resolution through. */
 func (instance *Module) trustedProxyList() []string {
     return instance.trustedProxyResolver.resolvedList()
 }
 
-/* forwardedClientIpResolver is the middleware's resolver over one resolved list. */
 func forwardedClientIpResolver(trustedProxyList []string) melodyhttpmiddleware.ClientIpResolver {
     return melodyhttpmiddleware.NewForwardedClientIpResolver(melodyhttpcontract.ForwardedHeadersPolicy{
         TrustForwardedHeaders: 0 < len(trustedProxyList),
@@ -155,7 +142,6 @@ func forwardedClientIpResolver(trustedProxyList []string) melodyhttpmiddleware.C
     })
 }
 
-/* buildTrustedProxyResolver reads the list at build and resolves nothing: the names on it are looked up at the first request, which arrives through the balancer and therefore after the balancer exists. */
 func (instance *Module) buildTrustedProxyResolver() {
     instance.trustedProxyResolver = newTrustedProxyResolver(instance.environmentValue(environmentKeyTrustedProxyList), time.Now)
 }

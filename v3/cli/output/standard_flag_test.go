@@ -7,7 +7,6 @@ import (
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
 )
 
-/* the declared validator is called directly rather than through a driven command line: the flag set is what this source produces, and the validator is the guard it carries. That the validator survives the trip into the parsing engine — installed, and consulted on the value the engine parsed — is the adapter's guard and is proved in its own mirror. */
 func findStringFlagValidator(t *testing.T, flagName string) func(value string) error {
     t.Helper()
 
@@ -86,7 +85,6 @@ func TestStandardFlags_AcceptTheSupportedFormatAndOrderValues(t *testing.T) {
     }
 }
 
-/* the withdrawn flags are refused by not being declared: an argument naming one reaches the parser as an unknown flag, which the parser refuses on its own. What this file owns is the absence, and asserting it here rather than through a driven command line keeps the guard where the declaration is. */
 func TestStandardFlags_RejectTheWithdrawnProjectionFlags(t *testing.T) {
     declared := map[string]bool{}
     for _, flag := range StandardFlags() {

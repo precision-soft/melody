@@ -4,7 +4,6 @@ import (
     "testing"
 )
 
-/* the guard asks the PARSED expression, not the spelling, because the two disagree exactly where it matters: "^/public|/status" begins with "^" and is read by Go as (^/public)|(/status), whose second branch floats anywhere. Each unanchored case below is one a public rule must not be declared on; each anchored case is one the previous textual test refused by mistake. */
 func TestPatternIsAnchoredToPathStart(t *testing.T) {
     for _, testCase := range []struct {
         pattern  string
@@ -36,7 +35,6 @@ func TestPatternIsAnchoredToPathStart(t *testing.T) {
     }
 }
 
-/* the refusal is what keeps a public rule from reaching into a protected path: among regex rules the first registered that matches wins, so a public substring rule shadows every stricter regex declared after it. */
 func TestNewRegexRule_RefusesPublicAccessOnAPatternThatCanMatchInsideAPath(t *testing.T) {
     for _, pattern := range []string{"/status", "^/public|/status", "(?m)^/public"} {
         func() {
@@ -65,7 +63,6 @@ func TestNewRegexRule_AcceptsPublicAccessOnAnAnchoredPattern(t *testing.T) {
     }
 }
 
-/* a non-public rule is not the matcher's concern: the anchor question exists to stop a rule from GRANTING inside a protected path, and an unanchored role rule only ever demands more. */
 func TestNewRegexRule_AcceptsAnUnanchoredPatternForARoleAttribute(t *testing.T) {
     defer func() {
         if recovered := recover(); nil != recovered {

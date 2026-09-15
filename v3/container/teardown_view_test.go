@@ -5,12 +5,10 @@ import (
     "reflect"
     "sync"
     "testing"
-
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
 )
 
-/* the view is the plan the teardown would run, read without running it: the dependencies of a node are listed sorted, and its wave is the one the drain gives it. */
 func TestContainer_TeardownPlan_ListsEachNodeWithItsSortedDependenciesAndItsWave(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -80,16 +78,6 @@ func TestContainer_TeardownRunsInWaves_ReportsTheArming(t *testing.T) {
     }
 }
 
-type selfHoldingService struct {
-    self  *selfHoldingService
-    label string
-}
-
-func (instance *selfHoldingService) Close() error {
-    return nil
-}
-
-/* a service filed under its name AND its type is one node, and what it holds of itself is not an edge: the identity the walk records for the service used to be keyed on whichever of the two filings the map handed out last, so the skip of a node's own identity missed on the other filing and the plan listed the service closed before itself — an ordering "proved" over one node, in seven runs out of eight. The check is asked in the canonical key space now, where both filings are the same node. */
 func TestContainer_TeardownPlan_AServiceFiledUnderItsNameAndTypeHoldingItselfListsNoDependency(t *testing.T) {
     for round := 0; round < 8; round = round + 1 {
         serviceContainer := NewContainer()
@@ -130,7 +118,6 @@ func TestContainer_TeardownPlan_AServiceFiledUnderItsNameAndTypeHoldingItselfLis
     }
 }
 
-/* arming a closed container is refused with the cause Register answers on the same condition; accepted, it walked the closed instances, re-created the records the teardown had released, and left the flag set on a container that will never close again. */
 func TestContainer_ArmParallelTeardown_RefusesAClosedContainer(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -154,7 +141,6 @@ func TestContainer_ArmParallelTeardown_RefusesAClosedContainer(t *testing.T) {
         t.Fatalf("expected arming a closed container to be refused as closed, got %v", armErr)
     }
 
-    /* the refusal names the door it refused, not a service in creation: the resolver's constructor has one slot, and "creatingKey: ArmParallelTeardown" read as a service of that name */
     if "ArmParallelTeardown" != exception.LogContext(armErr)["door"] {
         t.Fatalf("expected the refusal to name the door, got %v", exception.LogContext(armErr))
     }
@@ -170,7 +156,6 @@ func TestContainer_ArmParallelTeardown_RefusesAClosedContainer(t *testing.T) {
     }
 }
 
-/* the remainder the drain leaves holds the ring and the pure dependencies of its members alike; the flag names the ring: a resolves b, b declares a, and b resolves c — c is closed with the remainder and is on no ring */
 func TestTeardownPlan_APureDependencyOfARingMemberIsNotFlaggedAsACycle(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -221,7 +206,6 @@ func TestTeardownPlan_APureDependencyOfARingMemberIsNotFlaggedAsACycle(t *testin
     }
 }
 
-/* a bridge between two rings — a service one ring member depends on, that depends on a member of the other ring — is on no ring: it is released once the first ring closes and closed before the second, in the order the graph proves, so it is not flagged */
 func TestTeardownPlan_ABridgeBetweenTwoRingsIsNotFlaggedAsACycle(t *testing.T) {
     serviceContainer := NewContainer()
 
