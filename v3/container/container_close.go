@@ -209,9 +209,9 @@ func (instance *container) refuseDeclaredTeardownEdgeLocked(declaredEdge declare
     return exception.NewError(
         "a declared teardown dependency names a service that was never registered, and the parallel teardown admits no ordering that is not there",
         exceptioncontract.Context{
-            "serviceName":  declaredEdge.dependentServiceName,
-            "dependency":   declaredEdge.dependencySpelling,
-            "dependencyOf": declaredEdge.dependencyNodeKey,
+            "serviceName":       declaredEdge.dependentServiceName,
+            "dependency":        declaredEdge.dependencySpelling,
+            "dependencyNodeKey": declaredEdge.dependencyNodeKey,
         },
         ErrTeardownDependencyWasNeverRegistered,
     )
@@ -901,7 +901,7 @@ func (instance *container) closeInternal(closeContext context.Context) error {
     instance.teardownFinished = true
     instance.heldIdentitiesByNodeKey = nil
     instance.heldIdentitiesByValue = nil
-    instance.teardownDeadline = deadlineRecord
+    instance.teardownDeadline = cloneDeadlineRecord(deadlineRecord)
     instance.mutex.Unlock()
 
     return resultErr
@@ -946,6 +946,33 @@ func teardownDeadlineContext(
         "starved":   starved,
         "durations": renderDurations(closeDurations),
     }
+}
+
+/* cloneDeadlineRecord answers a copy of the record, its inner maps and list copied with it, because the record is handed to two readers: the error a failed teardown carries and the TeardownDeadlineOverrun door a clean one is asked through. Handed the one map twice, a reader that edits what the door answered — a journal decorating the record before writing it — edited the error's record with it. A nil record stays nil, since nil is the answer for a teardown that overran nothing. */
+func cloneDeadlineRecord(record exceptioncontract.Context) exceptioncontract.Context {
+    if nil == record {
+        return nil
+    }
+
+    copied := make(exceptioncontract.Context, len(record))
+    for key, value := range record {
+        switch typed := value.(type) {
+        case map[string]string:
+            copiedMap := make(map[string]string, len(typed))
+            for innerKey, innerValue := range typed {
+                copiedMap[innerKey] = innerValue
+            }
+            copied[key] = copiedMap
+        case []string:
+            copiedList := make([]string, len(typed))
+            copy(copiedList, typed)
+            copied[key] = copiedList
+        default:
+            copied[key] = value
+        }
+    }
+
+    return copied
 }
 
 /* closeServiceValueWithin runs one service's close under the teardown's deadline when the service can take one, and under its own terms otherwise. The preference is asked of the VALUE rather than declared on any contract, the way bunorm's registry prefers a provider's OpenContext over its Open: a service that grows the door does not have to be re-registered, and one that never grows it is not broken by the door existing.

@@ -318,7 +318,6 @@ func (instance *container) NewScope() containercontract.Scope {
     return newScope(instance, instance.scopePlanForNewScope())
 }
 
-/* registeredTypesForServiceName answers every type the name is registered under, for the scope override that propagates to them; the scope calls it before taking its own lock, container-then-scope being the only order the two locks are ever taken in. */
 /* serviceNamesForRegisteredType lists the service names a type is registered under, so a caller deciding whether a type is free can see who, if anyone, already claims it. */
 func (instance *container) serviceNamesForRegisteredType(canonicalType reflect.Type) []string {
     instance.mutex.RLock()
@@ -327,6 +326,7 @@ func (instance *container) serviceNamesForRegisteredType(canonicalType reflect.T
     return instance.typeRegistrationNamesByType[canonicalType]
 }
 
+/* registeredTypesForServiceName answers every type the name is registered under, for the scope override that propagates to them; the scope calls it before taking its own lock, container-then-scope being the only order the two locks are ever taken in. */
 func (instance *container) registeredTypesForServiceName(serviceName string) []reflect.Type {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()

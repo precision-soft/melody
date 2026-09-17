@@ -261,6 +261,68 @@ type hubHolder struct {
 
 func (instance *hubHolder) Close() error { return nil }
 
+/* the declared gap of the walk: an atomic.Pointer[T] is an unsafe.Pointer, an untyped word the walk names no type for, so a collaborator held that way gains no edge and keeps the order it had, while the same collaborator held through a plain pointer field is seen */
+func TestHeldPointerIdentities_DoesNotSeeACollaboratorHeldThroughAnAtomicPointer(t *testing.T) {
+    serviceContainer := NewContainer()
+    collaborator := &atomicallyHeldCollaborator{}
+
+    serviceContainer.MustRegister("app.collaborator", func(_ containercontract.Resolver) (*atomicallyHeldCollaborator, error) { return collaborator, nil })
+    serviceContainer.MustRegister("app.atomic", func(_ containercontract.Resolver) (*atomicPointerHolder, error) {
+        holder := &atomicPointerHolder{}
+        holder.collaborator.Store(collaborator)
+
+        return holder, nil
+    })
+    serviceContainer.MustRegister("app.plain", func(_ containercontract.Resolver) (*plainPointerHolder, error) {
+        return &plainPointerHolder{collaborator: collaborator}, nil
+    })
+
+    if armErr := serviceContainer.(parallelTeardownArmer).ArmParallelTeardown(); nil != armErr {
+        t.Fatalf("unexpected arm error: %v", armErr)
+    }
+
+    MustFromResolver[*atomicallyHeldCollaborator](serviceContainer, "app.collaborator")
+    MustFromResolver[*atomicPointerHolder](serviceContainer, "app.atomic")
+    MustFromResolver[*plainPointerHolder](serviceContainer, "app.plain")
+
+    dependenciesOf := make(map[string][]string)
+    for _, entry := range serviceContainer.(teardownPlanner).TeardownPlan() {
+        dependenciesOf[entry.NodeKey] = entry.Dependencies
+    }
+
+    if 0 != len(dependenciesOf["service:app.atomic"]) {
+        t.Fatalf("expected the collaborator behind the atomic pointer unseen, got %v", dependenciesOf["service:app.atomic"])
+    }
+
+    if "[service:app.collaborator]" != fmt.Sprint(dependenciesOf["service:app.plain"]) {
+        t.Fatalf("expected the collaborator behind the plain pointer seen, got %v", dependenciesOf["service:app.plain"])
+    }
+}
+
+type atomicallyHeldCollaborator struct {
+    label string
+}
+
+func (instance *atomicallyHeldCollaborator) Close() error {
+    return nil
+}
+
+type atomicPointerHolder struct {
+    collaborator atomic.Pointer[atomicallyHeldCollaborator]
+}
+
+func (instance *atomicPointerHolder) Close() error {
+    return nil
+}
+
+type plainPointerHolder struct {
+    collaborator *atomicallyHeldCollaborator
+}
+
+func (instance *plainPointerHolder) Close() error {
+    return nil
+}
+
 /* the hub is named by a pointer the walk reads whole; what the hub holds through an INTERFACE is two words somebody else is replacing, and the walk does not read them. Run under -race, the earlier walk that did reported the race on every run; this one reports none, and the assertion below is what pins the same thing without the detector. */
 func TestHeldPointerIdentities_DoesNotReadAnInterfaceFieldOfForeignMemory(t *testing.T) {
     hub := &foreignHub{backplane: &foreignBackplane{label: "first"}}

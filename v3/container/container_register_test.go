@@ -117,4 +117,73 @@ func TestContainer_Register_RefusesATeardownDependencyOnItself(t *testing.T) {
     }
 }
 
+/* a service of the same Go type as another, registered WITHOUT filing the type, declares on that type and names whoever filed it — the sibling — not itself; the guard that reads the declaration as a self-edge holds only for a registration that files its type */
+func TestContainer_Register_AdmitsATypeDeclarationOnItsOwnGoTypeWhenTheRegistrationDoesNotFileIt(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    serviceContainer.MustRegister(
+        "service.b",
+        func(resolver containercontract.Resolver) (*typedNodeProbeService, error) {
+            return &typedNodeProbeService{label: "b"}, nil
+        },
+    )
+
+    registerErr := serviceContainer.Register(
+        "service.a",
+        func(resolver containercontract.Resolver) (*typedNodeProbeService, error) {
+            return &typedNodeProbeService{label: "a"}, nil
+        },
+        WithoutTypeRegistration(),
+        WithTeardownDependencyOfType[*typedNodeProbeService](),
+    )
+    if nil != registerErr {
+        t.Fatalf("expected the declaration on the sibling's type to be admitted, got %v", registerErr)
+    }
+
+    MustFromResolver[*typedNodeProbeService](serviceContainer, "service.b")
+    MustFromResolver[*typedNodeProbeService](serviceContainer, "service.a")
+
+    for _, entry := range serviceContainer.(teardownPlanner).TeardownPlan() {
+        if "service:service.a" != entry.NodeKey {
+            continue
+        }
+
+        if 1 != len(entry.Dependencies) || "service:service.b" != entry.Dependencies[0] {
+            t.Fatalf("expected service.a closed before service.b through the declaration on its type, got %v", entry.Dependencies)
+        }
+
+        return
+    }
+
+    t.Fatalf("expected the plan to list service.a")
+}
+
+func TestContainer_Register_RefusesATypeDeclarationOnTheTypeTheRegistrationFilesItself(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "service.a",
+        func(resolver containercontract.Resolver) (*typedNodeProbeService, error) {
+            return &typedNodeProbeService{label: "a"}, nil
+        },
+        WithTeardownDependencyOfType[*typedNodeProbeService](),
+    )
+
+    if false == errors.Is(registerErr, ErrTeardownDependencyIsSelf) {
+        t.Fatalf("expected ErrTeardownDependencyIsSelf, got %v", registerErr)
+    }
+
+    if true == serviceContainer.Has("service.a") {
+        t.Fatalf("expected the refused registration to leave no provider behind")
+    }
+}
+
 type registerProbeService struct{}
+
+type typedNodeProbeService struct {
+    label string
+}
+
+func (instance *typedNodeProbeService) Close() error {
+    return nil
+}

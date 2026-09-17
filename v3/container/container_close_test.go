@@ -123,6 +123,59 @@ func TestContainer_Close_ClosesDependentsBeforeDependencies_ByServiceName(t *tes
     }
 }
 
+/* a pin of the fact the plan's WaveIndex documents, not of a guard: the sequential teardown honours the one edge here and still interleaves the waves, closing a wave-one service before a wave-zero one it has no relation to, because it drains creation latest-first among what is free */
+func TestContainer_TheSequentialCloseOrderInterleavesTheWaves(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 3)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    serviceContainer.MustRegister(
+        "service.b",
+        func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+            return &closeOrderServiceB{recorder: recorder}, nil
+        },
+    )
+    serviceContainer.MustRegister(
+        "service.a",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{recorder: recorder}, nil
+        },
+    )
+    serviceContainer.MustRegister(
+        "service.c",
+        func(resolver containercontract.Resolver) (*closeOrderServiceC, error) {
+            if _, resolveErr := resolver.Get("service.a"); nil != resolveErr {
+                return nil, resolveErr
+            }
+
+            return &closeOrderServiceC{recorder: recorder}, nil
+        },
+    )
+
+    MustFromResolver[*closeOrderServiceB](serviceContainer, "service.b")
+    MustFromResolver[*closeOrderServiceC](serviceContainer, "service.c")
+
+    expectedWaves := map[string]int{"service:service.c": 0, "service:service.a": 1, "service:service.b": 0}
+    for _, entry := range serviceContainer.(teardownPlanner).TeardownPlan() {
+        if expectedWave, planned := expectedWaves[entry.NodeKey]; false == planned || expectedWave != entry.WaveIndex {
+            t.Fatalf("expected %s in wave %d, got wave %d", entry.NodeKey, expectedWave, entry.WaveIndex)
+        }
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if "[c a b]" != fmt.Sprint(closeSequence) {
+        t.Fatalf("expected the sequential teardown to close c, a, b — the wave-one a before the wave-zero b — got %v", closeSequence)
+    }
+}
+
 type closeOrderTypeDependency struct {
     recorder *closeOrderRecorder
 }
@@ -2506,6 +2559,74 @@ func TestTeardownCloseOrder_TheWaveIndexesHaveNoHole(t *testing.T) {
     }
 }
 
+/* a dependency shared by two dependents lands one past the LATEST of them, not one past whichever released it last: the drain meets Q, which R released, after P, and Y — depended on by both — is bumped to the wave past Q, not left at the wave past P, or the wave of a dependent and its dependency would coincide and a wave would close a pair the graph orders */
+func TestTeardownCloseOrder_ADependencyLandsOnePastItsLatestDependentNotItsLastReleaser(t *testing.T) {
+    nodeKeys := []string{"service:y", "service:p", "service:q", "service:r"}
+
+    edges := map[string]map[string]struct{}{
+        "service:p": {"service:y": struct{}{}},
+        "service:q": {"service:y": struct{}{}},
+        "service:r": {"service:q": struct{}{}},
+    }
+
+    creationOrderOf := map[string]int{
+        "service:y": 1,
+        "service:p": 2,
+        "service:q": 3,
+        "service:r": 4,
+    }
+
+    closeOrder, closeWaveIndexOf, ringMembers := teardownCloseOrder(nodeKeys, edges, creationOrderOf)
+
+    if 0 != len(ringMembers) {
+        t.Fatalf("expected no ring, got %v", ringMembers)
+    }
+
+    if "[service:r service:q service:p service:y]" != fmt.Sprint(closeOrder) {
+        t.Fatalf("expected the drain to close r, q, p, y, got %v", closeOrder)
+    }
+
+    expectedWaves := map[string]int{"service:p": 0, "service:r": 0, "service:q": 1, "service:y": 2}
+    for nodeKey, expectedWave := range expectedWaves {
+        if expectedWave != closeWaveIndexOf[nodeKey] {
+            t.Fatalf("expected %s in wave %d, got %v", nodeKey, expectedWave, closeWaveIndexOf)
+        }
+    }
+}
+
+/* two rings nothing bridges are closed latest-created first, like any two unrelated services, and each takes a wave of its own */
+func TestTeardownCloseOrder_TwoIndependentRingsCloseLatestFirst(t *testing.T) {
+    nodeKeys := []string{"service:a1", "service:a2", "service:b1", "service:b2"}
+
+    edges := map[string]map[string]struct{}{
+        "service:a1": {"service:a2": struct{}{}},
+        "service:a2": {"service:a1": struct{}{}},
+        "service:b1": {"service:b2": struct{}{}},
+        "service:b2": {"service:b1": struct{}{}},
+    }
+
+    creationOrderOf := map[string]int{
+        "service:a1": 1,
+        "service:a2": 2,
+        "service:b1": 3,
+        "service:b2": 4,
+    }
+
+    closeOrder, closeWaveIndexOf, ringMembers := teardownCloseOrder(nodeKeys, edges, creationOrderOf)
+
+    if 4 != len(ringMembers) {
+        t.Fatalf("expected both rings reported, got %v", ringMembers)
+    }
+
+    if "[service:b2 service:b1 service:a2 service:a1]" != fmt.Sprint(closeOrder) {
+        t.Fatalf("expected the ring created last closed first, got %v", closeOrder)
+    }
+
+    if 0 != closeWaveIndexOf["service:b1"] || 0 != closeWaveIndexOf["service:b2"] || 1 != closeWaveIndexOf["service:a1"] || 1 != closeWaveIndexOf["service:a2"] {
+        t.Fatalf("expected the later ring in wave zero and the earlier in wave one, got %v", closeWaveIndexOf)
+    }
+}
+
 /* the rings are found once and the count of what depends on each is kept as nodes close, so a stall reads the next ring off the counts: found and scanned again at every stall, a teardown of hundreds of disjoint rings spent seconds where the sequential close spent milliseconds — measured, four hundred rings closed in seven milliseconds this way — twenty under the race detector — and in two seconds the other; the bound is a quarter of the retired form's figure and over ten times the honest one under the detector, wide enough for a loaded host and still four times short of the form it retires */
 func TestTeardownCloseOrder_HundredsOfRingsCloseInMilliseconds(t *testing.T) {
     const ringCount = 400
@@ -2567,6 +2688,11 @@ func TestContainer_ArmParallelTeardown_RefusesADeclaredDependencyOnAServiceThatW
 
     if false == strings.Contains(armErr.Error(), "never registered") {
         t.Fatalf("expected the refusal to name what is missing, got: %v", armErr)
+    }
+
+    refusalContext := exception.LogContext(armErr)
+    if "app.reporter" != refusalContext["serviceName"] || "app.stroage" != refusalContext["dependency"] || "service:app.stroage" != refusalContext["dependencyNodeKey"] {
+        t.Fatalf("expected the refusal to carry the declaring service, the spelling it declared and the node key it stands for, got %v", refusalContext)
     }
 }
 
@@ -3177,6 +3303,32 @@ func (instance *budgetSleeper) Close() error {
     return instance.CloseWithContext(context.Background())
 }
 
+/* deadlineNotingCloser answers at once through the context-taking door and notes whether it was handed a deadline at all */
+type deadlineNotingCloser struct {
+    sawDeadline bool
+}
+
+func (instance *deadlineNotingCloser) CloseWithContext(closeContext context.Context) error {
+    _, instance.sawDeadline = closeContext.Deadline()
+
+    return nil
+}
+
+func (instance *deadlineNotingCloser) Close() error {
+    return instance.CloseWithContext(context.Background())
+}
+
+/* refusingSleeper is budgetSleeper's failing twin: it sleeps through its deadline and then refuses, so the teardown that ran it both overran and failed and carries the deadline record in its error. */
+type refusingSleeper struct {
+    sleep time.Duration
+}
+
+func (instance *refusingSleeper) Close() error {
+    time.Sleep(instance.sleep)
+
+    return errors.New("the sleeper refused")
+}
+
 func teardownDeadlineOverrunOf(t *testing.T, serviceContainer containercontract.Container) exceptioncontract.Context {
     t.Helper()
 
@@ -3258,6 +3410,86 @@ func TestContainer_CloseWithContext_AnOverrunNamesTheServiceThatSpentTheBudget(t
 
     if budget := durationOfRecord(t, record, "budget"); budget > 40*time.Millisecond || 0 >= budget {
         t.Fatalf("expected the budget recorded as what was left of forty milliseconds, got %v", budget)
+    }
+}
+
+/* a teardown reached with its budget already gone records a budget of zero, not the negative remainder: the closer it reached is starved, nothing spent anything, and the record still says so */
+func TestContainer_ATeardownReachedWithTheBudgetGoneRecordsAZeroBudget(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    closer := &deadlineNotingCloser{}
+    serviceContainer.MustRegister("app.x", func(_ containercontract.Resolver) (*deadlineNotingCloser, error) { return closer, nil }, WithoutTypeRegistration())
+    MustFromResolver[*deadlineNotingCloser](serviceContainer, "app.x")
+
+    closeContext, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+    defer cancel()
+
+    if closeErr := serviceContainer.(contextCloser).CloseWithContext(closeContext); nil != closeErr {
+        t.Fatalf("expected a spent budget alone not to fail the teardown, got %v", closeErr)
+    }
+
+    if false == closer.sawDeadline {
+        t.Fatalf("expected the closer handed the teardown's deadline")
+    }
+
+    record := teardownDeadlineOverrunOf(t, serviceContainer)
+    if nil == record {
+        t.Fatalf("expected a teardown reached with the budget gone to keep a record")
+    }
+
+    if "0s" != record["budget"] {
+        t.Fatalf("expected the budget floored at zero, got %v", record["budget"])
+    }
+
+    if starved, _ := record["starved"].([]string); "[service:app.x]" != fmt.Sprint(starved) {
+        t.Fatalf("expected the one closer reached after the deadline starved, got %v", record)
+    }
+
+    if 0 != len(namedDurations(t, record, "spentBy")) {
+        t.Fatalf("expected nothing named as running when the deadline passed, got %v", record)
+    }
+}
+
+/* the record travels twice, in the error of a failed teardown and through the door, and a reader may decorate what the door answered before writing it; it must not be decorating the error's record with it */
+func TestContainer_TeardownDeadlineOverrunAnswersItsOwnCopyOfTheRecord(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    serviceContainer.MustRegister("app.slow", func(_ containercontract.Resolver) (*refusingSleeper, error) { return &refusingSleeper{sleep: 30 * time.Millisecond}, nil }, WithoutTypeRegistration())
+    MustFromResolver[*refusingSleeper](serviceContainer, "app.slow")
+
+    closeErr := closeContainerWithin(t, serviceContainer, 5*time.Millisecond)
+    if nil == closeErr {
+        t.Fatalf("expected the refusing closer to fail the teardown")
+    }
+
+    var melodyErr *exception.Error
+    if false == errors.As(closeErr, &melodyErr) {
+        t.Fatalf("expected the failure to carry the record, got %T", closeErr)
+    }
+
+    errorRecord, carriesRecord := melodyErr.Context()["deadline"].(exceptioncontract.Context)
+    if false == carriesRecord {
+        t.Fatalf("expected the error to carry the deadline record, got %v", melodyErr.Context())
+    }
+
+    doorRecord := teardownDeadlineOverrunOf(t, serviceContainer)
+    if nil == doorRecord {
+        t.Fatalf("expected the door to answer the record of the overrun")
+    }
+
+    if _, named := namedDurations(t, errorRecord, "spentBy")["service:app.slow"]; false == named {
+        t.Fatalf("expected the error's record to name the closer running when the deadline passed, got %v", errorRecord)
+    }
+
+    doorRecord["spentBy"] = "edited by a reader"
+    doorRecord["starved"] = []string{"edited by a reader"}
+
+    if _, named := namedDurations(t, errorRecord, "spentBy")["service:app.slow"]; false == named {
+        t.Fatalf("expected the error's record untouched by an edit of what the door answered, got %v", errorRecord)
+    }
+
+    if starved, _ := errorRecord["starved"].([]string); 0 != len(starved) {
+        t.Fatalf("expected the error's starved list untouched by an edit of what the door answered, got %v", starved)
     }
 }
 
