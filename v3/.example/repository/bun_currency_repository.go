@@ -197,6 +197,29 @@ func (instance *bunCurrencyRepository) Update(ctx context.Context, currency *ent
     return affectedAtLeastOneRow(result), nil
 }
 
+func (instance *bunCurrencyRepository) UpdateQuote(ctx context.Context, id string, rate float64, rateAsOf time.Time) (bool, error) {
+    normalizedId := strings.TrimSpace(id)
+    if "" == normalizedId {
+        return false, fmt.Errorf("id is required")
+    }
+
+    /* the instant is written and compared in UTC, the spelling the row holds; the condition is what makes two
+       concurrent documents land in instant order whichever process writes last */
+    result, updateErr := instance.database.
+        NewUpdate().
+        Model((*currencyRow)(nil)).
+        Set("rate = ?", rate).
+        Set("rate_as_of = ?", rateAsOf.UTC()).
+        Where("id = ?", normalizedId).
+        Where("rate_as_of <= ?", rateAsOf.UTC()).
+        Exec(ctx)
+    if nil != updateErr {
+        return false, updateErr
+    }
+
+    return affectedAtLeastOneRow(result), nil
+}
+
 func (instance *bunCurrencyRepository) DeleteById(ctx context.Context, id string) (bool, error) {
     normalizedId := strings.TrimSpace(id)
     if "" == normalizedId {

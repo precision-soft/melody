@@ -75,7 +75,7 @@ func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, co
     }
     /* the unlock failure becomes the command's verdict only when the rollback itself succeeded: a failed rollback keeps its own error, with the unlock failure printed beside it */
     defer func() {
-        unlockErr := unlockMigrations(ctx, migrator, outputInstance)
+        unlockErr := unlockMigrations(ctx, migrator, outputInstance, instance.base.options.CommandPrefix+":unlock")
         if nil == runErr && nil != unlockErr {
             runErr = unlockErr
         }

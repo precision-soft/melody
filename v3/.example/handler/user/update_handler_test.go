@@ -1,6 +1,7 @@
 package user
 
 import (
+    "errors"
     "fmt"
     nethttp "net/http"
     "strings"
@@ -178,5 +179,51 @@ func TestApiUpdateHandlerAnswersTheIndexsRefusalOfATakenUsernameAs400(t *testing
 
     if nethttp.StatusBadRequest != statusCode || false == strings.Contains(body, "username already exists") {
         t.Fatalf("the index's refusal answered %d: %s, wanted 400 username already exists", statusCode, body)
+    }
+}
+
+/* the same refusal at the update door: a misspelt role is refused, and the row keeps its roles */
+func TestApiUpdateHandlerRefusesARoleTheApplicationDoesNotKnow(t *testing.T) {
+    userRepository := newRecordingUserRepository(administrator("admin-1"), editor("editor-1"))
+    runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})
+
+    statusCode, body := callDoor(
+        t,
+        runtimeInstance,
+        ApiUpdateHandler(),
+        nethttp.MethodPut,
+        "/users/api/update/editor-1/",
+        map[string]string{"id": "editor-1"},
+        `{"roles":["ROLE_ADMIM"]}`,
+    )
+
+    if nethttp.StatusBadRequest != statusCode || false == strings.Contains(body, "ROLE_ADMIM is not one this application knows") {
+        t.Fatalf("the misspelt role answered %d: %s", statusCode, body)
+    }
+
+    roles := userRepository.storedRoles(t, "editor-1")
+    if 2 != len(roles) || entity.RoleUser != roles[0] || entity.RoleEditor != roles[1] {
+        t.Fatalf("the refused update reached the row anyway, leaving %v", roles)
+    }
+}
+
+/* the twin of the create door's: a write that failed for any reason but the taken username is the server's fault and answers 500 */
+func TestApiUpdateHandlerAnswersAnyOtherFailedWriteAs500(t *testing.T) {
+    userRepository := newRecordingUserRepository(administrator("admin-1"), editor("editor-1"))
+    userRepository.refuseWrites(errors.New("audited update failed"))
+    runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})
+
+    statusCode, _ := callDoor(
+        t,
+        runtimeInstance,
+        ApiUpdateHandler(),
+        nethttp.MethodPut,
+        "/users/api/update/editor-1/",
+        map[string]string{"id": "editor-1"},
+        `{"username":"renamed"}`,
+    )
+
+    if nethttp.StatusInternalServerError != statusCode {
+        t.Fatalf("a failed write answered %d, wanted 500", statusCode)
     }
 }

@@ -1,6 +1,7 @@
 package service
 
 import (
+    "math"
     "testing"
     "time"
 
@@ -145,5 +146,19 @@ func TestConvertAmount_RefusesAConvertedAmountThatIsNotFinite(t *testing.T) {
 
     if converted, err := ConvertAmount(100, to, to); nil != err || 100 != converted {
         t.Errorf("an identity conversion over a huge rate answered %v, %v; wanted 100", converted, err)
+    }
+}
+
+/* the guard judges the rounded value: the rounding multiplies by a hundred first, so a finite product within
+   a hundredth of the float ceiling became an infinity one line after a guard on the product let it through */
+func TestConvertAmount_RefusesAConvertedAmountThatOnlyTheRoundingOverflows(t *testing.T) {
+    from := entity.NewCurrency("cur-one", "ONE", "One", 1, time.Time{})
+    to := entity.NewCurrency("cur-huge", "HGE", "Huge", 1e9, time.Time{})
+
+    /* 1e300 × 1e9 = 1e309 overflows outright; math.MaxFloat64/1e9/50 × 1e9 is finite and its hundredfold is not */
+    amount := math.MaxFloat64 / 1e9 / 50
+
+    if converted, err := ConvertAmount(amount, from, to); nil == err {
+        t.Fatalf("a conversion whose rounding overflows answered %v with no error", converted)
     }
 }

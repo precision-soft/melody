@@ -110,6 +110,11 @@ func appliedStatusRows() ([]string, [][]driver.Value) {
     return columns, rows
 }
 
+/* pendingStatusRows answers the status select as if nothing had been applied yet, which is what a process waiting on a held lock reads while the holder is still migrating. */
+func pendingStatusRows() ([]string, [][]driver.Value) {
+    return []string{"id", "name", "group_id"}, make([][]driver.Value, 0)
+}
+
 type fakeConnection struct {
     recorder *queryRecorder
 }

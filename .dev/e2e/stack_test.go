@@ -126,7 +126,7 @@ func TestStackScript_AssertsTheExpectedCheckCount(t *testing.T) {
     }
 }
 
-/* the two negatives in the secrets section assert that an entry does NOT carry a value. An entry that is missing entirely — renamed parameter, crashed debug:parameters, dead docker exec — carries nothing either and satisfies both on an empty string. Each has to establish the entry exists before concluding anything from its content. */
+/* the password negative in the secrets section asserts that an entry does NOT carry a value. An entry that is missing entirely — renamed parameter, crashed debug:parameters, dead docker exec — carries nothing either and satisfies it on an empty string, so it has to establish the entry exists before concluding anything from its content. The dsn pair is the other shape: the parameter was removed, so its guard asserts the ABSENCE (over a dump the password check has just proved non-empty), and the tcp( negative that follows it runs over the whole dump, not over the entry — the pair is pinned so the absence check keeps standing after the non-empty proof it leans on. */
 func TestStackScript_SecretNegativesRequireANonEmptyEntry(t *testing.T) {
     script := readStackScript(t)
 
@@ -147,21 +147,22 @@ func TestStackScript_SecretNegativesRequireANonEmptyEntry(t *testing.T) {
         guard    string
         negative string
         name     string
+        reason   string
     }{
-        {guard: "[[ \"\" = \"${MYSQL_PASSWORD_ENTRY_STRING}\" ]]", negative: "grep -q 'melody'", name: "MYSQL_PASSWORD raw-credential"},
-        {guard: "[[ \"\" = \"${DSN_ENTRY_STRING}\" ]]", negative: "grep -q 'tcp('", name: "assembled-dsn"},
+        {guard: "[[ \"\" = \"${MYSQL_PASSWORD_ENTRY_STRING}\" ]]", negative: "grep -q 'melody'", name: "MYSQL_PASSWORD raw-credential", reason: "the non-empty guard must precede (and short-circuit) the negative"},
+        {guard: "[[ \"\" = \"${DSN_ENTRY_STRING}\" ]]", negative: "grep -q 'tcp('", name: "assembled-dsn", reason: "the absence check of the removed parameter must precede the dump-wide negative, after the password entry proved the dump non-empty"},
     } {
         guardIndex := strings.Index(region, testCase.guard)
         negativeIndex := strings.Index(region, testCase.negative)
 
         if -1 == guardIndex {
-            t.Fatalf("the %s negative must first assert the entry is non-empty, or a missing entry passes it", testCase.name)
+            t.Fatalf("could not locate the %s guard", testCase.name)
         }
         if -1 == negativeIndex {
             t.Fatalf("could not locate the %s negative", testCase.name)
         }
         if guardIndex >= negativeIndex {
-            t.Fatalf("the non-empty guard must precede (and short-circuit) the %s negative", testCase.name)
+            t.Fatalf("%s: %s", testCase.name, testCase.reason)
         }
     }
 }

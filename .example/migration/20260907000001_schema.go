@@ -34,26 +34,26 @@ func downSchema(ctx context.Context, database *bun.DB) error {
     return nil
 }
 
-/* the column definitions mirror the tables the bun create-table builder used to produce, captured from a live SHOW CREATE TABLE, so a volume provisioned before the migration set and one provisioned by it hold the same schema */
+/* the column definitions mirror the tables the bun create-table builder used to produce, captured from a live SHOW CREATE TABLE, so a volume provisioned before the migration set and one provisioned by it hold the same schema — with one departure: every column that holds an entity identifier is compared under utf8mb4_bin. The identity of an id is EXACT everywhere else in this application: the in-memory repositories compare it byte for byte and the cache keys carry it as spelled; under the table's default utf8mb4_0900_ai_ci a lookup by id folded case and accents, so `CUR-EUR` found the `cur-eur` row and was cached under a key nothing invalidates, and a product could be stored pointing at a spelling the read door then reported as a currency the catalogue does not carry. A volume provisioned before this collation keeps its own — the tables are created IF NOT EXISTS — and example:db:reset is the door that brings it here. */
 const createCategoryTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v1_category` (" +
-    "`id` VARCHAR(255) NOT NULL, " +
+    "`id` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
     "`name` VARCHAR(255) NOT NULL, " +
     "PRIMARY KEY (`id`))"
 
 const createCurrencyTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v1_currency` (" +
-    "`id` VARCHAR(255) NOT NULL, " +
+    "`id` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
     "`code` VARCHAR(255) NOT NULL, " +
     "`name` VARCHAR(255) NOT NULL, " +
     "PRIMARY KEY (`id`))"
 
 /* the timestamps are DATETIME(6) so the microsecond half of a Go time survives the round trip; DATETIME would silently floor it and the update stamp could compare equal to the creation stamp */
 const createProductTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v1_product` (" +
-    "`id` VARCHAR(255) NOT NULL, " +
+    "`id` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
     "`name` VARCHAR(255) NOT NULL, " +
     "`description` VARCHAR(255) NOT NULL, " +
-    "`category_id` VARCHAR(255) NOT NULL, " +
+    "`category_id` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
     "`price` DOUBLE NOT NULL, " +
-    "`currency_id` VARCHAR(255) NOT NULL, " +
+    "`currency_id` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
     "`stock` BIGINT NOT NULL, " +
     "`created_at` DATETIME(6) NOT NULL, " +
     "`updated_at` DATETIME(6) NOT NULL, " +
@@ -61,7 +61,7 @@ const createProductTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v1_pro
 
 /* the roles column holds the comma-joined role list the user repository writes; it is a single VARCHAR on purpose, the example having no role table to normalize into */
 const createUserTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v1_user` (" +
-    "`id` VARCHAR(255) NOT NULL, " +
+    "`id` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
     "`username` VARCHAR(255) NOT NULL, " +
     "`password` VARCHAR(255) NOT NULL, " +
     "`roles` VARCHAR(255) NOT NULL, " +

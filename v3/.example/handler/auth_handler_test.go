@@ -309,3 +309,37 @@ func TestLogoutHandlerToleratesARequestCarryingNoSession(t *testing.T) {
         t.Fatal("the logout door answered no response")
     }
 }
+
+/* the credentials are read from the body alone: a POST whose query string carries them and whose form body is empty answers as a request without credentials, where FormValue would have read the query and authenticated — with the credentials written into every access log in front of the application. The body form of the same credentials reaches the authentication, which this fixture's cache refuses, so the two arms are told apart by the status. */
+func TestLoginHandler_ReadsTheFormCredentialsFromTheBodyNotTheQuery(t *testing.T) {
+    runtimeInstance := loginRuntimeForEnvironment(t, melodyconfig.EnvProduction)
+
+    login := func(target string, body string) (int, string) {
+        httpRequest := httptest.NewRequest(nethttp.MethodPost, target, bytes.NewBufferString(body))
+        httpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+        request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("login-form-test", time.Now()))
+
+        response, handlerErr := LoginHandler()(runtimeInstance, httptest.NewRecorder(), request)
+        if nil != handlerErr {
+            t.Fatalf("login handler: %v", handlerErr)
+        }
+
+        bodyBytes, readErr := io.ReadAll(response.BodyReader())
+        if nil != readErr {
+            t.Fatalf("read response body: %v", readErr)
+        }
+
+        return response.StatusCode(), string(bodyBytes)
+    }
+
+    statusCode, body := login("/login?username=admin&password=secret", "")
+    if nethttp.StatusBadRequest != statusCode || false == strings.Contains(body, "invalid credentials input") {
+        t.Fatalf("credentials carried by the query were read: status %d, body %s", statusCode, body)
+    }
+
+    statusCode, body = login("/login", "username=admin&password=secret")
+    if nethttp.StatusInternalServerError != statusCode || false == strings.Contains(body, "authentication failed") {
+        t.Fatalf("credentials carried by the body did not reach the authentication: status %d, body %s", statusCode, body)
+    }
+}

@@ -1162,3 +1162,25 @@ func TestComputeBackoffDelayReadsAZeroAttemptAsTheFirst(t *testing.T) {
         t.Fatalf("expected a zero attempt to read as the first, got %s", provider.computeBackoffDelay(0))
     }
 }
+
+/* a bare IPv6 literal joined as host:port reads as an address with too many colons: pgdriver refuses it by name, go-sql-driver re-joins it into a bracketed host that does not exist and dials that through the whole retry budget. The literal is bracketed, one already bracketed is left alone, and a host name or an IPv4 literal is joined as it always was. */
+func TestDialAddressOf_BracketsABareIpv6Literal(t *testing.T) {
+    caseList := []struct {
+        host     string
+        expected string
+    }{
+        {"::1", "[::1]:3306"},
+        {"2001:db8::5", "[2001:db8::5]:3306"},
+        {"fe80::1%eth0", "[fe80::1%eth0]:3306"},
+        {"[::1]", "[::1]:3306"},
+        {"localhost", "localhost:3306"},
+        {"10.0.0.1", "10.0.0.1:3306"},
+        {"", ":3306"},
+    }
+
+    for _, testCase := range caseList {
+        if actual := dialAddressOf(testCase.host, "3306"); testCase.expected != actual {
+            t.Errorf("dialAddressOf(%q) = %q, wanted %q", testCase.host, actual, testCase.expected)
+        }
+    }
+}

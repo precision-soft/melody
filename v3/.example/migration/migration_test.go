@@ -160,3 +160,28 @@ func TestDropUserUsernameIndexDropsTheKeyOnlyWhenItIsThere(t *testing.T) {
         t.Fatalf("expected no DROP when the key is not there, recorded: %v", recorder.recordedQueries())
     }
 }
+
+/* every column that holds an entity identifier is compared under utf8mb4_bin: the identity of an id is exact everywhere else — the in-memory repositories and the cache keys — and under the table's default collation a lookup by id folded case and accents, so an alias spelling found the row and was cached under a key nothing invalidates */
+func TestUpSchemaComparesEveryIdentifierColumnByteForByte(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+
+    if upErr := upSchema(context.Background(), database); nil != upErr {
+        t.Fatalf("expected the up migration to succeed, got %v", upErr)
+    }
+
+    rendered := strings.Join(recorder.recordedQueries(), "\n")
+
+    identifierColumnList := []string{"`id`", "`category_id`", "`currency_id`", "`user_identifier`"}
+    collated := 0
+    for _, column := range identifierColumnList {
+        collated += strings.Count(rendered, column+" VARCHAR(255) COLLATE utf8mb4_bin NOT NULL")
+
+        if uncollated := strings.Count(rendered, column+" VARCHAR(255) NOT NULL"); 0 != uncollated {
+            t.Errorf("%s is declared %d time(s) under the table's default collation", column, uncollated)
+        }
+    }
+
+    if 7 != collated {
+        t.Errorf("%d identifier columns are compared under utf8mb4_bin, wanted 7", collated)
+    }
+}

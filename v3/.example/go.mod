@@ -19,6 +19,7 @@ require (
 	github.com/redis/rueidis v1.0.71
 	github.com/uptrace/bun v1.2.17
 	github.com/uptrace/bun/dialect/mysqldialect v1.2.17
+	github.com/uptrace/bun/dialect/pgdialect v1.2.17
 	golang.org/x/crypto v0.51.0
 )
 
@@ -48,10 +49,9 @@ require (
 	github.com/prometheus/otlptranslator v1.0.0 // indirect
 	github.com/prometheus/procfs v0.20.1 // indirect
 	github.com/puzpuzpuz/xsync/v3 v3.5.1 // indirect
-	github.com/rabbitmq/amqp091-go v1.10.0 // indirect
+	github.com/rabbitmq/amqp091-go v1.13.0 // indirect
 	github.com/rs/xid v1.6.0 // indirect
 	github.com/tmthrgd/go-hex v0.0.0-20190904060850-447a3041c3bc // indirect
-	github.com/uptrace/bun/dialect/pgdialect v1.2.17 // indirect
 	github.com/uptrace/bun/driver/pgdriver v1.2.17 // indirect
 	github.com/urfave/cli/v3 v3.6.1 // indirect
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
@@ -74,7 +74,7 @@ require (
 	golang.org/x/text v0.37.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
-	google.golang.org/grpc v1.82.1 // indirect
+	google.golang.org/grpc v1.83.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	mellium.im/sasl v0.3.2 // indirect
 )

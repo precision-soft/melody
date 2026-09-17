@@ -150,16 +150,22 @@ type clearCountingCache struct {
     mutex      sync.Mutex
     clearCount int
     onClear    func()
+    refusal    error
 }
 
 func (instance *clearCountingCache) Clear() error {
     instance.mutex.Lock()
     instance.clearCount = instance.clearCount + 1
     onClear := instance.onClear
+    refusal := instance.refusal
     instance.mutex.Unlock()
 
     if nil != onClear {
         onClear()
+    }
+
+    if nil != refusal {
+        return refusal
     }
 
     return instance.Cache.Clear()
@@ -475,6 +481,41 @@ func TestDatabaseResetCommandHonoursTheRuntimeContext(t *testing.T) {
     for _, statement := range recorder.recorded() {
         if false == strings.Contains(statement, "version()") {
             t.Fatalf("expected no statement of the reset under a cancelled context, recorded %v", recorder.recorded())
+        }
+    }
+}
+
+/* the archive-only environment has no catalogue to reseed and nothing of its own in the cache, and the cache is
+   cleared all the same: a reset leaves the same state whichever halves are wired */
+func TestDatabaseResetCommandArchiveOnlyEnvironmentClearsTheCacheToo(t *testing.T) {
+    archiveStorage, _ := newRecordingResetStorage("postgres:5432/melody_example_v3_archive")
+    runtimeInstance, cacheInstance := newResetRuntimeWithArchive(t, persistence.NewCatalogStorage(nil), persistence.NewArchiveStorageAt(archiveStorage.Database(), "postgres:5432/melody_example_v3_archive"))
+
+    buffer := &bytes.Buffer{}
+    if runErr := NewDatabaseResetCommand().Run(runtimeInstance, newBoolFlagContext(databaseResetFlagForce, true, buffer)); nil != runErr {
+        t.Fatalf("expected the archive-only reset over the recording handle to complete, got %v", runErr)
+    }
+
+    if 1 != cacheInstance.clears() || false == strings.Contains(buffer.String(), "cache cleared:") {
+        t.Fatalf("expected the archive-only reset to clear the cache once and say so, got %d clears and %q", cacheInstance.clears(), buffer.String())
+    }
+}
+
+/* a clear that fails after the catalogue was reset names what it left undone: the archive after it was not touched */
+func TestDatabaseResetCommandNamesTheUntouchedArchiveWhenTheClearFails(t *testing.T) {
+    storage, _ := newRecordingResetStorage("mysql:3306/melody_example_v3")
+    archiveStorage, archiveRecorder := newRecordingResetStorage("postgres:5432/melody_example_v3_archive")
+    runtimeInstance, cacheInstance := newResetRuntimeWithArchive(t, storage, persistence.NewArchiveStorageAt(archiveStorage.Database(), "postgres:5432/melody_example_v3_archive"))
+    cacheInstance.refusal = errors.New("redis: connection refused")
+
+    runErr := NewDatabaseResetCommand().Run(runtimeInstance, newBoolFlagContext(databaseResetFlagForce, true, nil))
+    if nil == runErr || false == strings.Contains(runErr.Error(), "the archive was not touched") {
+        t.Fatalf("expected the failed clear to name the untouched archive, got %v", runErr)
+    }
+
+    for _, statement := range archiveRecorder.recorded() {
+        if false == strings.Contains(strings.ToLower(statement), "version") {
+            t.Fatalf("expected the archive untouched after the failed clear, recorded %v", archiveRecorder.recorded())
         }
     }
 }

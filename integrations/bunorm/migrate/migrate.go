@@ -105,9 +105,12 @@ func RunQueriesWithOption(ctx context.Context, db *bun.DB, direction string, mig
         return nil
     }
 
+    /* the prefix carries the migration name on every per-query line, and the name is the author's — it is escaped here once, the way the empty and success lines escape it, so the three lines that print the prefix do not repaint the terminal through a name whose query names were escaped beside it */
+    escapedMigrationName := escapeControlCharacters(migrationName, false)
+
     for index, query := range queries {
         step := index + 1
-        prefix := fmt.Sprintf("[migration:%s] %s [%d/%d]", direction, migrationName, step, total)
+        prefix := fmt.Sprintf("[migration:%s] %s [%d/%d]", direction, escapedMigrationName, step, total)
 
         printer.printExecuting(prefix, query.Name)
 

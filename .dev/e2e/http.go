@@ -281,7 +281,6 @@ func requestExample(client *http.Client, method string, baseUrl string, path str
     return response.StatusCode
 }
 
-/* resetExampleRateLimitCounters clears the counters one limiter wrote, so a section starts from a full budget instead of inheriting a spent one. The prefix is a parameter because the applications under test keep separate counters: they share one redis, and a section that measures an exact exhaustion point cannot have another application spending its budget. */
 /* balancerAddressesOf resolves the host of the load balancer url to the addresses the example sees the balancer under; a host that does not resolve fails the section, because an assertion against no address would pass over anything. */
 func balancerAddressesOf(loadBalancerUrl string) []string {
     parsed, parseErr := url.Parse(loadBalancerUrl)
@@ -314,6 +313,7 @@ func exampleRateLimitKeys(label string, redisAddress string, prefix string) []st
     return keys
 }
 
+/* resetExampleRateLimitCounters clears the counters one limiter wrote, so a section starts from a full budget instead of inheriting a spent one. The prefix is a parameter because the applications under test keep separate counters: they share one redis, and a section that measures an exact exhaustion point cannot have another application spending its budget. */
 func resetExampleRateLimitCounters(label string, redisAddress string, prefix string) {
     if "" == redisAddress {
         fail("%s: REDIS_ADDRESS is required to clear the rate limit counters", label)

@@ -11,6 +11,7 @@ import (
     "github.com/precision-soft/melody/v3/.example/repository"
     "github.com/precision-soft/melody/v3/.example/service"
     melodycache "github.com/precision-soft/melody/v3/cache"
+    melodycachecontract "github.com/precision-soft/melody/v3/cache/contract"
     melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
     melodyclock "github.com/precision-soft/melody/v3/clock"
     melodycontainer "github.com/precision-soft/melody/v3/container"
@@ -50,8 +51,9 @@ func newCommandFixture(t *testing.T) *commandFixture {
 
     clockInstance := melodyclock.NewSystemClock()
 
+    cacheBackend := melodycache.NewInMemoryBackend(128, time.Minute, clockInstance)
     cacheInstance := melodycache.NewManagerOwningBackend(
-        melodycache.NewInMemoryBackend(128, time.Minute, clockInstance),
+        cacheBackend,
         examplecache.NewGobSerializer(),
     )
 
@@ -90,6 +92,18 @@ func newCommandFixture(t *testing.T) *commandFixture {
     )
 
     containerInstance := melodycontainer.NewContainer()
+
+    /* the backend is registered under the framework's own name, the way the composition root registers it:
+       the scope helper of the writing commands reads the TYPE of the backend there, and without the
+       registration it answered "this process's own" through its resolution-failure branch — a wiring the
+       application never produces, and one under which the shared-cache sentence could never be tested */
+    melodycontainer.MustRegister(
+        containerInstance,
+        melodycache.ServiceCacheBackend,
+        func(resolver melodycontainercontract.Resolver) (melodycachecontract.Backend, error) {
+            return cacheBackend, nil
+        },
+    )
 
     /* the event dispatcher resolves the logger for every dispatch, so a container without one turns the
        first event a command causes into a panic rather than into whatever the command was being tested for.

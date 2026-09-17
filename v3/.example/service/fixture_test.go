@@ -19,7 +19,8 @@ type ttlRecordingCache struct {
     mutex   sync.Mutex
     values  map[string]any
     writes  []cacheWrite
-    deletes int
+    deletes     int
+    deletedKeys []string
 }
 
 /* deleteCount is how many entries a door dropped by key, the observable of an invalidation done without an
@@ -78,9 +79,19 @@ func (instance *ttlRecordingCache) Delete(key string) error {
     defer instance.mutex.Unlock()
 
     instance.deletes++
+    instance.deletedKeys = append(instance.deletedKeys, key)
     delete(instance.values, key)
 
     return nil
+}
+
+/* deletedKeyList answers WHICH keys were dropped, in order: a count of drops is satisfied by dropping the
+   wrong keys */
+func (instance *ttlRecordingCache) deletedKeyList() []string {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return append([]string{}, instance.deletedKeys...)
 }
 
 func (instance *ttlRecordingCache) Has(key string) (bool, error) {

@@ -141,3 +141,28 @@ func TestApiCreateHandlerAnswersAnyOtherFailedWriteAs500(t *testing.T) {
         t.Fatalf("a failed write answered %d, wanted 500", statusCode)
     }
 }
+
+/* the voter compares a role's spelling exactly, so a spelling outside the closed vocabulary would be stored,
+   reported created and grant nothing: the door refuses it, naming the vocabulary, the way the console grant does */
+func TestApiCreateHandlerRefusesARoleTheApplicationDoesNotKnow(t *testing.T) {
+    userRepository := newRecordingUserRepository(administrator("admin-1"))
+    runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})
+
+    statusCode, body := callDoor(
+        t,
+        runtimeInstance,
+        ApiCreateHandler(),
+        nethttp.MethodPost,
+        "/users/api/create/",
+        nil,
+        `{"username":"misspelt","password":"a-password","roles":["ROLE_ADMIM"]}`,
+    )
+
+    if nethttp.StatusBadRequest != statusCode || false == strings.Contains(body, "ROLE_ADMIM is not one this application knows") {
+        t.Fatalf("the misspelt role answered %d: %s", statusCode, body)
+    }
+
+    if _, exists, _ := userRepository.FindByUsername(context.Background(), "misspelt"); true == exists {
+        t.Fatal("the refused account was created anyway")
+    }
+}

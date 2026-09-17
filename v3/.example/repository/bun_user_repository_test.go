@@ -108,6 +108,17 @@ func TestAsUsernameAlreadyExists_LeavesEveryOtherFailureAlone(t *testing.T) {
         t.Fatalf("expected a duplicate identifier to stay the diagnosis it is, got %q", asUsernameAlreadyExists(primaryKey))
     }
 
+    /* the index is read out of the key clause, not searched for in the whole text: an identifier that happens to spell the index's name is still a duplicate IDENTIFIER */
+    spelledLikeTheIndex := exception.NewError(
+        "audited insert failed",
+        nil,
+        fmt.Errorf("Error 1062 (23000): Duplicate entry '%s' for key 'melody_example_v3_user.PRIMARY'", migration.UserUsernameIndexName),
+    )
+
+    if spelledLikeTheIndex != asUsernameAlreadyExists(spelledLikeTheIndex) {
+        t.Fatalf("expected a duplicate identifier spelled like the index to stay the diagnosis it is, got %q", asUsernameAlreadyExists(spelledLikeTheIndex))
+    }
+
     if nil != asUsernameAlreadyExists(nil) {
         t.Fatalf("expected a write that did not fail to stay unreported")
     }

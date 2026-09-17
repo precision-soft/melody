@@ -11,6 +11,8 @@ import (
     "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/migration"
     "github.com/precision-soft/melody/v3/.example/persistence"
+    "github.com/precision-soft/melody/v3/exception"
+    exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     "github.com/uptrace/bun"
 )
 
@@ -246,13 +248,14 @@ func (instance *bunUserRepository) Update(ctx context.Context, user *entity.User
 /* GrantRole reads the row locked FOR UPDATE and writes the widened set in the same transaction, so a grant
    and an admin update of the same account serialise on the row instead of the last whole-set write winning;
    the audit entry is recorded through the same transaction, the way the tracker records its own. */
-func (instance *bunUserRepository) GrantRole(ctx context.Context, id string, role string) (GrantRoleOutcome, error) {
+func (instance *bunUserRepository) GrantRole(ctx context.Context, id string, role string) (*entity.User, GrantRoleOutcome, error) {
     trimmedId := strings.TrimSpace(id)
     if "" == trimmedId {
-        return GrantRoleAccountAbsent, fmt.Errorf("id is required")
+        return nil, GrantRoleAccountAbsent, fmt.Errorf("id is required")
     }
 
     outcome := GrantRoleAccountAbsent
+    var account *entity.User
 
     txErr := instance.database.RunInTx(auditContext(ctx), nil, func(ctx context.Context, tx bun.Tx) error {
         before := &userRow{Id: trimmedId}
@@ -268,6 +271,7 @@ func (instance *bunUserRepository) GrantRole(ctx context.Context, id string, rol
         current := before.toEntity()
         if true == holdsRole(current.Roles, role) {
             outcome = GrantRoleAlreadyHeld
+            account = current
 
             return nil
         }
@@ -294,15 +298,27 @@ func (instance *bunUserRepository) GrantRole(ctx context.Context, id string, rol
             return recordErr
         }
 
+        /* the account the transaction wrote is the account handed back: a read after the commit, outside
+           the transaction, answered whatever an admin door had written in between — and "not found" for
+           an account that was granted and then deleted, reported as a grant that had not happened */
         outcome = GrantRoleGranted
+        account = after.toEntity()
 
         return nil
     })
     if nil != txErr {
-        return GrantRoleAccountAbsent, txErr
+        /* the transaction's margins and every statement inside it answer the driver's bare text — "dial tcp …:
+           connection refused" — which the tracker's own transaction door titles with the entity and the
+           operation; a grant that ran its own transaction lost that title, and the console line named neither
+           the account nor the write. The driver error stays the cause. */
+        return nil, GrantRoleAccountAbsent, exception.NewError(
+            "granting a role did not complete on the "+persistence.AuditEntityUser+" "+trimmedId,
+            exceptioncontract.Context{"entity": persistence.AuditEntityUser, "operation": "grant role", "id": trimmedId, "role": role},
+            txErr,
+        )
     }
 
-    return outcome, nil
+    return account, outcome, nil
 }
 
 func (instance *bunUserRepository) DeleteById(ctx context.Context, id string) (bool, error) {
@@ -356,27 +372,29 @@ func asUsernameAlreadyExists(writeErr error) error {
         return nil
     }
 
-    if false == errorChainMentions(writeErr, migration.UserUsernameIndexName) {
+    if false == errorChainNamesKey(writeErr, migration.UserUsernameIndexName) {
         return writeErr
     }
 
     return ErrUsernameAlreadyExists
 }
 
-/* errorChainMentions answers whether any link of the chain — the error, its cause, the cause's cause, and
-   every branch of a joined error — renders the text given. */
-func errorChainMentions(err error, text string) bool {
+/* errorChainNamesKey answers whether any link of the chain — the error, its cause, the cause's cause, and
+   every branch of a joined error — is the driver's duplicate refusal FOR the index named: the key is read
+   out of the message's own "for key '<table>.<index>'" clause, not searched for anywhere in the text, so a
+   duplicate on another key whose VALUE happened to spell the index's name stays the diagnosis it is. */
+func errorChainNamesKey(err error, indexName string) bool {
     if nil == err {
         return false
     }
 
-    if true == strings.Contains(err.Error(), text) {
+    if true == duplicateRefusalNamesKey(err.Error(), indexName) {
         return true
     }
 
     if joined, isJoined := err.(interface{ Unwrap() []error }); true == isJoined {
         for _, branch := range joined.Unwrap() {
-            if true == errorChainMentions(branch, text) {
+            if true == errorChainNamesKey(branch, indexName) {
                 return true
             }
         }
@@ -384,7 +402,27 @@ func errorChainMentions(err error, text string) bool {
         return false
     }
 
-    return errorChainMentions(errors.Unwrap(err), text)
+    return errorChainNamesKey(errors.Unwrap(err), indexName)
+}
+
+/* duplicateRefusalNamesKey reads the key clause of a MySQL duplicate refusal — "for key '<table>.<index>'" — and
+   answers whether the key it names is the index given, bare or qualified by its table. */
+func duplicateRefusalNamesKey(text string, indexName string) bool {
+    const keyClause = "for key '"
+
+    clauseStart := strings.Index(text, keyClause)
+    if -1 == clauseStart {
+        return false
+    }
+
+    key := text[clauseStart+len(keyClause):]
+    keyEnd := strings.Index(key, "'")
+    if -1 == keyEnd {
+        return false
+    }
+    key = key[:keyEnd]
+
+    return key == indexName || true == strings.HasSuffix(key, "."+indexName)
 }
 
 func (instance *bunUserRepository) usernameTakenByAnother(ctx context.Context, username string, excludedId string) (bool, error) {

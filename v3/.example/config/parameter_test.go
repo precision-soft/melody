@@ -95,3 +95,19 @@ func TestRegisterParameters_NoTemplateReadsARemovableIntegrationKey(t *testing.T
         }
     }
 }
+
+/* "EUR by default, to match the seed" is a template, not a sentence: the default parameter holds the seed's
+   base and the base parameter reads it through the env processor's default clause under RATES_BASE_CURRENCY */
+func TestRegisterParameters_DefaultsTheRatesBaseToTheSeeds(t *testing.T) {
+    registrar := newRecordingParameterRegistrar()
+
+    moduleWithEnvironment(t, map[string]string{}).RegisterParameters(registrar)
+
+    if "EUR" != fmt.Sprint(registrar.registered[parameterRatesDefaultBaseCurrency]) {
+        t.Fatalf("the default base is %q, wanted the seed's EUR", fmt.Sprint(registrar.registered[parameterRatesDefaultBaseCurrency]))
+    }
+
+    if "%env(default:"+parameterRatesDefaultBaseCurrency+":RATES_BASE_CURRENCY)%" != fmt.Sprint(registrar.registered[parameterRatesBaseCurrency]) {
+        t.Fatalf("the base parameter reads %q, wanted the env key with the seed's default", fmt.Sprint(registrar.registered[parameterRatesBaseCurrency]))
+    }
+}

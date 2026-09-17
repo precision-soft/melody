@@ -1,13 +1,21 @@
 package report
 
 import (
+    "context"
+    "io"
     nethttp "net/http"
     "net/http/httptest"
+    "strings"
     "testing"
     "time"
 
+    melodycontainer "github.com/precision-soft/melody/v3/container"
+    melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
+    melodylogging "github.com/precision-soft/melody/v3/logging"
+    melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
+    melodyruntime "github.com/precision-soft/melody/v3/runtime"
 )
 
 /* the limit door reads nothing off the runtime, so the request is built without one: what it needs is the query bag, which NewRequest fills from the url at construction. */
@@ -90,5 +98,43 @@ func TestHistoryLimitOf_TakesTheFirstValueOfARepeatedKeyWithoutPanicking(t *test
 
     if 2 != limit {
         t.Fatalf("expected the first value of the repeated key, got %d", limit)
+    }
+}
+
+/* a failure of the archive is rendered through the presenter — the envelope every sibling read door answers
+   a repository failure in — as a Response, never returned for the kernel's exception listener to render in a
+   second shape: one client reads one envelope for one class of failure. A container without the report
+   service is the cheapest such failure. */
+func TestApiHistoryHandler_RendersAnArchiveFailureThroughThePresenter(t *testing.T) {
+    containerInstance := melodycontainer.NewContainer()
+    t.Cleanup(func() { _ = containerInstance.Close() })
+    melodycontainer.MustRegister(
+        containerInstance,
+        melodylogging.ServiceLogger,
+        func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
+            return melodylogging.NewNopLogger(), nil
+        },
+    )
+    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+
+    request := melodyhttp.NewRequest(
+        httptest.NewRequest(nethttp.MethodGet, "/reports/api/history/", nil),
+        map[string]string{},
+        runtimeInstance,
+        melodyhttp.NewRequestContext("history-door-test", time.Unix(0, 0).UTC()),
+    )
+
+    response, handlerErr := ApiHistoryHandler()(runtimeInstance, httptest.NewRecorder(), request)
+    if nil != handlerErr {
+        t.Fatalf("the archive's failure was returned for the kernel to render, not answered through the presenter: %v", handlerErr)
+    }
+
+    if nil == response || nethttp.StatusInternalServerError != response.StatusCode() {
+        t.Fatalf("expected the presenter's 500, got %v", response)
+    }
+
+    body, _ := io.ReadAll(response.BodyReader())
+    if false == strings.Contains(string(body), `"success":false`) || false == strings.Contains(string(body), "the reading archive is unavailable") {
+        t.Fatalf("expected the application's envelope, got %s", body)
     }
 }

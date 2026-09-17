@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- a bare IPv6 literal as the host dials the host it names. The dial address was joined as `host:port`, so `::1` became `::1:5432`, which pgdriver refuses as an address with too many colons — a refusal that named the spelling and never the cause; only the bracketed spelling `[::1]` worked. A host carrying a colon is bracketed unless it already is; a host name and an IPv4 literal are joined as before
 - an empty database name or user is refused by name before the driver sees it. `pgdriver.WithDatabase` and `pgdriver.WithUser` panic on an empty string, so a connection parameter left empty reached the caller as a panic out of the open rather than as the refusal every other open failure is. An empty host is left to the driver, which does not panic on it, and an empty password stays a legitimate value.
 - `IsDuplicateKey` reads the SQLSTATE through `SQLState()` as well as through pgdriver's `Field('C')`. pgx's `pgconn.PgError` and lib/pq's `Error` carry the code that way and neither implements `Field`, so a consumer running bun over one of those drivers reached the door with a typed error it could not see: an insert that collided answered false and rendered as a server failure instead of a conflict. The message stays no identity.
 

@@ -1,6 +1,9 @@
 package service
 
 import (
+    "context"
+    "errors"
+    "fmt"
     "net/http"
     "net/http/httptest"
     "strings"
@@ -8,8 +11,11 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v3/.example/entity"
+    "github.com/precision-soft/melody/v3/.example/repository"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
+    melodyeventcontract "github.com/precision-soft/melody/v3/event/contract"
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/httpclient"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -395,9 +401,53 @@ func TestRateRefreshServiceRefresh_WritesTheGoodQuotesPastARefusedOne(t *testing
         t.Errorf("the refusal names %v, wanted RON", refusedList)
     }
 
+    /* the console line — the cli engine prints the message alone — names the currency AND the reason, and the
+       first refusal stays the cause so errors.Is reaches the rate sentinel */
+    if false == strings.Contains(err.Error(), "(RON: ") || false == strings.Contains(err.Error(), "positive, finite number") {
+        t.Errorf("the message reads %q, wanted the refused currency with its reason", err.Error())
+    }
+
+    if false == errors.Is(err, ErrUnusableRate) {
+        t.Errorf("the refusal does not carry the rate sentinel as its cause: %v", err)
+    }
+
+    if false == outcome.AsOf.Equal(time.Date(2026, time.September, 8, 9, 0, 0, 0, time.UTC)) {
+        t.Errorf("the outcome carries %v as the document's instant, wanted the document's", outcome.AsOf)
+    }
+
     usd, _, _ := currencyService.FindById("cur-usd")
     if 1.2 != usd.Rate {
         t.Errorf("the quote after the refused one was not written: cur-usd %v", usd.Rate)
+    }
+}
+
+/* vanishingCurrencyRepository lists a currency and then answers absent when it is looked up — a currency
+   deleted between the sweep's listing and its write */
+type vanishingCurrencyRepository struct {
+    repository.CurrencyRepository
+    vanishedId string
+}
+
+func (instance *vanishingCurrencyRepository) FindById(ctx context.Context, id string) (*entity.Currency, bool, error) {
+    if id == instance.vanishedId {
+        return nil, false, nil
+    }
+
+    return instance.CurrencyRepository.FindById(ctx, id)
+}
+
+/* a currency deleted inside the run is counted skipped — not unchanged, which would say the quote was held */
+func TestRateRefreshServiceRefresh_CountsACurrencyDeletedInsideTheRunAsSkipped(t *testing.T) {
+    refresh, currencyService, runtimeInstance, _ := rateRefreshUnderTest(t, `{"base":"EUR","asOf":"2026-09-08T09:00:00Z","rates":{"EUR":1,"USD":1.0842,"RON":4.9761}}`)
+    currencyService.currencyRepository = &vanishingCurrencyRepository{CurrencyRepository: currencyService.currencyRepository, vanishedId: "cur-ron"}
+
+    outcome, err := refresh.Refresh(runtimeInstance)
+    if nil != err {
+        t.Fatalf("a vanished currency failed the run: %v", err)
+    }
+
+    if 2 != outcome.Updated || 1 != outcome.Skipped || 0 != outcome.Unchanged {
+        t.Fatalf("the refresh reported %+v, wanted two updated and the vanished one skipped", outcome)
     }
 }
 
@@ -437,5 +487,115 @@ func TestRateRefreshServiceRefresh_ReportsAnUnmovedDocumentAsUnchangedWithoutWri
 
     if updatesAfterFirst != recordingRepository.updates.Load() {
         t.Errorf("the second refresh issued %d UPDATE statements, wanted none", recordingRepository.updates.Load()-updatesAfterFirst)
+    }
+}
+
+/* microsecondCurrencyRepository stores a quote's instant the way the DATETIME(6) column does — truncated to
+   the microsecond — so a test can see what the database sees: an instant compared at the nanosecond against
+   the row it wrote was never equal to it. */
+type microsecondCurrencyRepository struct {
+    repository.CurrencyRepository
+}
+
+func (instance *microsecondCurrencyRepository) Update(ctx context.Context, currency *entity.Currency) (bool, error) {
+    stored := *currency
+    stored.RateAsOf = stored.RateAsOf.Truncate(time.Microsecond)
+
+    return instance.CurrencyRepository.Update(ctx, &stored)
+}
+
+func (instance *microsecondCurrencyRepository) UpdateQuote(ctx context.Context, id string, rate float64, rateAsOf time.Time) (bool, error) {
+    return instance.CurrencyRepository.UpdateQuote(ctx, id, rate, rateAsOf.Truncate(time.Microsecond))
+}
+
+/* a provider stamping time.Now() serialises nine decimals, and the column holds six: the second run of the
+   same document has to read as unchanged against the row the first run wrote, not as a full-row update the
+   driver reports as no row — which the sweep counted as the currency having vanished, and which skipped the
+   cache drop the unchanged branch exists for */
+func TestRateRefreshServiceRefresh_JudgesTheInstantAtTheResolutionTheColumnHolds(t *testing.T) {
+    refresh, currencyService, runtimeInstance, _ := rateRefreshUnderTest(t, `{"base":"EUR","asOf":"2026-09-08T09:00:00.123456789Z","rates":{"EUR":1,"USD":1.0842,"RON":4.9761}}`)
+    currencyService.currencyRepository = &microsecondCurrencyRepository{CurrencyRepository: currencyService.currencyRepository}
+
+    if outcome, err := refresh.Refresh(runtimeInstance); nil != err || 3 != outcome.Updated {
+        t.Fatalf("the first refresh reported %+v, %v; wanted three updated", outcome, err)
+    }
+
+    outcome, err := refresh.Refresh(runtimeInstance)
+    if nil != err {
+        t.Fatalf("the second refresh failed: %v", err)
+    }
+
+    if 3 != outcome.Unchanged || 0 != outcome.Skipped || 0 != outcome.Updated {
+        t.Fatalf("the second refresh reported %+v, wanted three unchanged over a column that holds microseconds", outcome)
+    }
+
+    usd, _, _ := currencyService.FindById("cur-usd")
+    if false == usd.RateAsOf.Equal(time.Date(2026, time.September, 8, 9, 0, 0, 123456000, time.UTC)) {
+        t.Fatalf("the stored instant is %v, wanted the document's truncated to the microsecond", usd.RateAsOf)
+    }
+}
+
+/* a catalogue base that is empty — RATES_BASE_CURRENCY present and blank, which the default does not cover —
+   refuses every document rather than folding onto the one that names no base */
+func TestRateRefreshServiceRefresh_RefusesEveryDocumentUnderAnEmptyCatalogueBase(t *testing.T) {
+    refresh, _, runtimeInstance, recordingRepository := rateRefreshUnderTest(t, `{"asOf":"2026-09-08T09:00:00Z","rates":{"EUR":1,"USD":1.0842,"RON":4.9761}}`)
+    refresh.ratesBaseCurrency = ""
+
+    outcome, err := refresh.Refresh(runtimeInstance)
+    if nil == err || false == strings.Contains(err.Error(), "RATES_BASE_CURRENCY is empty") {
+        t.Fatalf("a document without a base was judged against an empty catalogue base: %+v, %v", outcome, err)
+    }
+
+    if 0 != recordingRepository.updates.Load() {
+        t.Fatalf("the refusal came after %d writes, wanted none", recordingRepository.updates.Load())
+    }
+}
+
+/* refusingDispatcher refuses every dispatch, the way a listener whose backend is gone would. */
+type refusingDispatcher struct {
+    melodyeventcontract.EventDispatcher
+}
+
+func (instance *refusingDispatcher) DispatchName(runtimeInstance melodyruntimecontract.Runtime, eventName string, payload any) (melodyeventcontract.Event, error) {
+    return nil, errors.New("redis: connection refused")
+}
+
+/* a backend that fails is not a quote the catalogue refused: the sweep stops and hands the failure back as
+   itself, with the quote written before its dispatch failed counted as written — where the previous form
+   counted every currency refused and told the cron log that every other quote was written */
+func TestRateRefreshServiceRefresh_StopsOnABackendFailureInsteadOfBlamingTheProvider(t *testing.T) {
+    refresh, currencyService, runtimeInstance, recordingRepository := rateRefreshUnderTest(t, `{"base":"EUR","asOf":"2026-09-08T09:00:00Z","rates":{"EUR":1,"USD":1.0842,"RON":4.9761}}`)
+    currencyService.eventDispatcher = &refusingDispatcher{EventDispatcher: currencyService.eventDispatcher}
+
+    outcome, err := refresh.Refresh(runtimeInstance)
+    if nil == err {
+        t.Fatal("a refused dispatch was swallowed")
+    }
+
+    if true == strings.Contains(err.Error(), "the catalogue refused") || false == strings.Contains(err.Error(), "could not be written") {
+        t.Fatalf("the failure reads %q, wanted the backend named rather than the provider", err.Error())
+    }
+
+    if false == strings.Contains(err.Error(), "connection refused") && false == strings.Contains(fmt.Sprint(exception.LogContext(err)), "connection refused") {
+        t.Fatalf("the failure does not carry its cause: %v", err)
+    }
+
+    if 0 != outcome.Refused || 1 != outcome.Updated || 1 != recordingRepository.updates.Load() {
+        t.Fatalf("the sweep reported %+v after %d writes, wanted one written, none refused, and the sweep stopped", outcome, recordingRepository.updates.Load())
+    }
+}
+
+/* a document that names no base is refused as such — the previous line read "(document , catalogue EUR)", a
+   hole where the provider's spelling should be */
+func TestRateRefreshServiceRefresh_RefusesADocumentThatNamesNoBaseAsSuch(t *testing.T) {
+    refresh, _, runtimeInstance, recordingRepository := rateRefreshUnderTest(t, `{"asOf":"2026-09-08T09:00:00Z","rates":{"EUR":1,"USD":1.0842}}`)
+
+    _, err := refresh.Refresh(runtimeInstance)
+    if nil == err || false == strings.Contains(err.Error(), "names no base it is quoted against (the catalogue's is EUR)") {
+        t.Fatalf("a document without a base was refused as %v, wanted the refusal to say it names none", err)
+    }
+
+    if 0 != recordingRepository.updates.Load() {
+        t.Fatalf("the refusal came after %d writes, wanted none", recordingRepository.updates.Load())
     }
 }

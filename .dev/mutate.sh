@@ -13,6 +13,8 @@
 # The mutation is applied to a container-local copy of the tree, never through the mount: writing
 # through /app reaches the host working tree, and a restore that copies back has left mutants
 # accumulated there before.
+# The copy leaves out the module cache and var/log: the supervised instance writes its journal into the
+# tree at the debug level, gigabytes of it, and a copy that carried it filled the daemon's disk.
 #
 # A row is abandoned as BROKEN rather than reported when it cannot prove anything:
 #
@@ -50,7 +52,7 @@ BACKUP="${COPY}.backup"
 
 rm -rf "${COPY}"
 mkdir -p "${COPY}"
-tar -C "${SOURCE}" --exclude=.dev-data --exclude=.git --exclude=node_modules -cf - . | tar -C "${COPY}" -xf -
+tar -C "${SOURCE}" --exclude=.dev-data --exclude=.git --exclude=node_modules --exclude=var/log -cf - . | tar -C "${COPY}" -xf -
 
 cd "${COPY}" || exit 1
 

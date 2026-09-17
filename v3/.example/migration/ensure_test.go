@@ -521,3 +521,51 @@ func TestMigrationStepFailureLeavesAnOwnExceptionUntouched(t *testing.T) {
         t.Fatal("expected the application's own exception to be handed back unwrapped")
     }
 }
+
+/* a lock wait that ends because the process is going away hands back the set's own exception, not a bare
+   context.Canceled: a by-type resolution relabels any foreign error "service not registered in resolver",
+   which is what the console printed for a SIGTERM during the wait. errors.Is still reaches the cancellation. */
+func TestEnsureMigratedNamesTheSetWhenTheLockWaitIsCancelled(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+
+    recorder.execHook = func(query string) error {
+        if true == isMigrationLockInsert(query) {
+            return errors.New("lock row exists")
+        }
+
+        return nil
+    }
+    recorder.queryHook = func(query string) ([]string, [][]driver.Value, error) {
+        if true == isMigrationStatusSelect(query) {
+            columns, rows := pendingStatusRows()
+
+            return columns, rows, nil
+        }
+
+        return []string{}, nil, nil
+    }
+
+    ctx, cancel := context.WithCancel(context.Background())
+    go func() {
+        time.Sleep(50 * time.Millisecond)
+        cancel()
+    }()
+
+    ensureErr := EnsureMigrated(ctx, database)
+    if nil == ensureErr {
+        t.Fatal("expected the cancelled wait to refuse")
+    }
+
+    if false == errors.Is(ensureErr, context.Canceled) {
+        t.Fatalf("expected the cancellation to stay the cause, got %v", ensureErr)
+    }
+
+    var ownException *exception.Error
+    if false == errors.As(ensureErr, &ownException) {
+        t.Fatalf("expected the application's own exception around the cancellation, got %T: %v", ensureErr, ensureErr)
+    }
+
+    if "waiting for the migration lock" != exception.LogContext(ensureErr)["step"] {
+        t.Fatalf("expected the step named, got %v", exception.LogContext(ensureErr))
+    }
+}

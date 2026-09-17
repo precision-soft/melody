@@ -377,7 +377,6 @@ func TestCatalogReportRefreshCommandHandsBackAnUnreachableArchiveAfterReadingAnd
     }
 }
 
-/* with no locker registered there is no archive: the run reads and exports as it did before there was one, and reports the archive as not written rather than failing over it */
 /* the locker is registered on every wiring — in-process without postgres — so a container without one is not a
    state the application can be in: the door hands back the resolution's refusal, and the run goes on without
    the archive and fails at the end, the way an unreachable archive does */
@@ -420,8 +419,8 @@ func TestCatalogReportRefreshCommandArchivesTheReadingEvenWhenTheSinkRefusesIt(t
     }
 }
 
-/* the archive's own refusal — the database named with where it is — reaches the console as it is, not under a second headline about the locker */
-func TestCatalogReportRefreshCommandHandsBackTheArchivesOwnRefusalUnwrapped(t *testing.T) {
+/* the archive's own refusal — the database named with where it is — reaches the console in the message, with the step it stopped, not under a headline that names neither */
+func TestCatalogReportRefreshCommandNamesTheArchivesOwnRefusalOnTheConsole(t *testing.T) {
     own := exception.NewError("the archive database at postgres:1/melody_example_v3 could not be opened", nil, errors.New("connection refused"))
     fixture := newRefreshFixture(t, refreshFixtureOption{
         lockerProvider: func(resolver melodycontainercontract.Resolver) (melodylockcontract.Locker, error) {
@@ -430,8 +429,12 @@ func TestCatalogReportRefreshCommandHandsBackTheArchivesOwnRefusalUnwrapped(t *t
     })
 
     _, runErr := runRefresh(t, fixture)
-    if own != runErr {
-        t.Fatalf("expected the archive's own refusal to be handed back as it is, got %v", runErr)
+    if nil == runErr || false == errors.Is(runErr, own) {
+        t.Fatalf("expected the archive's own refusal to stay the cause, got %v", runErr)
+    }
+
+    if false == strings.Contains(runErr.Error(), "postgres:1/melody_example_v3") || false == strings.Contains(runErr.Error(), "locker could not be resolved") {
+        t.Fatalf("expected the console line to name the database and the step, got %q", runErr.Error())
     }
 }
 
@@ -461,17 +464,21 @@ func TestCatalogReportRefreshCommandReadsAndExportsWhenTheLockCannotBeTaken(t *t
     }
 }
 
-/* the archive's own refusal on the Archive branch reaches the console AS IT IS — the cli engine renders the
-   message alone, and the message is the one that names the database and the step — where the previous form
-   wrapped it under a headline that named neither */
+/* the archive's own refusal on the Archive branch reaches the console — the cli engine renders the message
+   alone — with the database it names and the step that did not complete both in the message, where one
+   form wrapped it under a headline that named neither and the next handed it back without the step */
 func TestCatalogReportRefreshCommandKeepsTheArchivesOwnRefusalOnTheArchiveBranch(t *testing.T) {
     fixture := newRefreshFixture(t, refreshFixtureOption{})
     own := exception.NewError("the archive database at postgres:5432/melody_example_v3 refused the insert", nil, errors.New("connection reset"))
     fixture.archive.refusal = own
 
     _, runErr := runRefresh(t, fixture)
-    if own != runErr {
-        t.Fatalf("expected the archive's own refusal to be handed back as it is, got %v", runErr)
+    if nil == runErr || false == errors.Is(runErr, own) {
+        t.Fatalf("expected the archive's own refusal to stay the cause, got %v", runErr)
+    }
+
+    if false == strings.Contains(runErr.Error(), "postgres:5432/melody_example_v3 refused the insert") || false == strings.Contains(runErr.Error(), "recording the reading in the archive did not complete") {
+        t.Fatalf("expected the console line to name the database and the step, got %q", runErr.Error())
     }
 
     /* a second fixture: the first run's cache holds the product list serialized, and a second run over it reads
@@ -499,6 +506,11 @@ func TestCatalogReportRefreshCommandReportsBothHalvesWhenBothRefuse(t *testing.T
 
     if false == strings.Contains(runErr.Error(), "refused the export") {
         t.Fatalf("expected the exit to carry the sink's refusal as well, got %v", runErr)
+    }
+
+    /* the cli engine escapes a newline in a failure's message, so a joined error's own rendering reached the console as a literal \n between the two halves */
+    if true == strings.Contains(runErr.Error(), "\n") {
+        t.Fatalf("expected the two halves on one line, got %q", runErr.Error())
     }
 
     if false == strings.Contains(output, "postgres:5432/melody_example_v3") {

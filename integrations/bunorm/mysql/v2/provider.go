@@ -5,7 +5,6 @@ import (
     "crypto/tls"
     "database/sql"
     "errors"
-    "fmt"
     "math"
     "net"
     "reflect"
@@ -351,7 +350,7 @@ func (instance *Provider) open(ctx context.Context, params bunorm.ConnectionPara
     poolConfig := instance.resolvedPoolConfig()
     timeoutConfig := instance.resolvedTimeoutConfig()
 
-    address := fmt.Sprintf("%s:%s", params.Host, params.Port)
+    address := dialAddressOf(params.Host, params.Port)
 
     driverConfig := driver.NewConfig()
     driverConfig.User = params.User
@@ -601,4 +600,13 @@ func isNilInterface(value any) bool {
     default:
         return false
     }
+}
+
+/* dialAddressOf joins the host and the port the way a dialer reads them: a host that carries a colon is an IPv6 literal and is bracketed unless it already is, because "::1:5432" is refused by pgdriver as an address with too many colons and re-joined by go-sql-driver into "[::1:5432]:5432" — a host that does not exist, dialled through the whole retry budget under "connection failed" with nothing naming the malformed address. A host name and an IPv4 literal are joined as they are. */
+func dialAddressOf(host string, port string) string {
+    if true == strings.Contains(host, ":") && false == strings.HasPrefix(host, "[") {
+        return "[" + host + "]:" + port
+    }
+
+    return host + ":" + port
 }

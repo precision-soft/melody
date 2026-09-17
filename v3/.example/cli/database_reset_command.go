@@ -99,19 +99,19 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
     /* the catalogue is brought whole — dropped, recreated, its trail emptied and reseeded — BEFORE the archive is touched: the archive is a second, independent database, and a refusal of it that returned between the catalogue's drop and its reseed left an empty catalogue behind a non-zero exit, with nobody able to log in until a second run. Each step reports itself as it completes, so what the operator reads after a failure is what HAPPENED, not only what was planned. */
     if true == storage.IsPersistent() {
         if resetErr := migration.Reset(ctx, storage.Database()); nil != resetErr {
-            return databaseResetStepFailure("dropping and recreating the schema", "catalogue", storage.Location(), resetErr)
+            return databaseResetStepFailure("dropping and recreating the schema", "catalogue", databaseLocationLabel(storage.Location()), resetErr)
         }
 
-        fmt.Fprintln(writer, "catalogue reset: the schema was dropped and recreated on "+storage.Location())
+        fmt.Fprintln(writer, "catalogue reset: the schema was dropped and recreated on "+databaseLocationLabel(storage.Location()))
 
         if trailErr := clearAuditTrail(ctx, storage); nil != trailErr {
-            return databaseResetStepFailure("emptying the audit trail", "catalogue", storage.Location(), trailErr)
+            return databaseResetStepFailure("emptying the audit trail", "catalogue", databaseLocationLabel(storage.Location()), trailErr)
         }
 
         fmt.Fprintln(writer, "catalogue reset: the audit trail was emptied")
 
         if seedErr := repository.SeedAll(ctx, storage); nil != seedErr {
-            return databaseResetStepFailure("reseeding the nomenclature", "catalogue", storage.Location(), seedErr)
+            return databaseResetStepFailure("reseeding the nomenclature", "catalogue", databaseLocationLabel(storage.Location()), seedErr)
         }
 
         fmt.Fprintln(writer, "catalogue reset: the nomenclature was reseeded")
@@ -121,6 +121,12 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
            the catalogue reseeded with every stale entry standing — the very account the reset removed still
            authenticating from the cache, the class the clear exists to close */
         if clearErr := clearCache(runtimeInstance, writer); nil != clearErr {
+            /* the exit names what the failed clear left undone: the archive after it was not touched, and the
+               catalogue before it was */
+            if true == archiveStorage.IsPersistent() {
+                return exception.NewError("database reset: clearing the cache did not complete; the catalogue was reset and the archive was not touched", nil, clearErr)
+            }
+
             return clearErr
         }
     }
@@ -128,10 +134,10 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
     /* the archive is a set of its own on a database of its own, so it is reset through its own door — and it is SKIPPED rather than refused when this environment wired no archive, the way the catalogue half is skipped when only the archive is wired. An operator who never configured postgres is not told their reset failed over a database they never asked for. */
     if true == archiveStorage.IsPersistent() {
         if archiveResetErr := migration.ResetArchive(ctx, archiveStorage.Database()); nil != archiveResetErr {
-            return databaseResetStepFailure("dropping and recreating the reading archive", "archive", archiveStorage.Location(), archiveResetErr)
+            return databaseResetStepFailure("dropping and recreating the reading archive", "archive", databaseLocationLabel(archiveStorage.Location()), archiveResetErr)
         }
 
-        fmt.Fprintln(writer, "archive reset: the reading archive was dropped and recreated on "+archiveStorage.Location())
+        fmt.Fprintln(writer, "archive reset: the reading archive was dropped and recreated on "+databaseLocationLabel(archiveStorage.Location()))
     }
 
     /* an environment that wired the archive alone has no catalogue to reseed and nothing of its own in the cache;
@@ -145,7 +151,7 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
     return nil
 }
 
-/* clearCache empties the cache and says so. The state a fresh volume holds includes an EMPTY cache: the entities are cached under keys with no expiry and are cleared by name, by the listeners that watch the write events — and a reset writes through no door that dispatches one, so without this an account the reset removed kept authenticating on the login door with its old digest, from a cache nothing could clear afterwards. On the shared cache this reaches the running server; on the in-process fallback it reaches this process alone, which the line says. A clear that fails takes the exit code, and the only door that clears the cache again is this reset — a cache:clear command of its own is filed for the harvest. */
+/* clearCache empties the cache and says so. On the redis backend the clear is a SCAN of the whole keyspace filtered on this application's prefix, under the backend's one-second command budget — measured at 0 ms over the development keyspace, and declared here because a keyspace shared with much else could take the reset's exit code after both databases were reset. The state a fresh volume holds includes an EMPTY cache: the entities are cached under keys with no expiry and are cleared by name, by the listeners that watch the write events — and a reset writes through no door that dispatches one, so without this an account the reset removed kept authenticating on the login door with its old digest, from a cache nothing could clear afterwards. On the shared cache this reaches the running server; on the in-process fallback it reaches this process alone, which the line says. A clear that fails takes the exit code, and the only door that clears the cache again is this reset — a cache:clear command of its own is filed for the harvest. */
 func clearCache(runtimeInstance melodyruntimecontract.Runtime, writer io.Writer) error {
     cacheInstance, cacheErr := melodycontainer.FromResolver[melodycachecontract.Cache](
         runtimeInstance.Container(),

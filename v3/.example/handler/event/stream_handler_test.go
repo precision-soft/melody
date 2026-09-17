@@ -3,8 +3,10 @@ package event
 import (
     "context"
     "errors"
+    "net"
     nethttp "net/http"
     "net/http/httptest"
+    "runtime"
     "strings"
     "sync"
     "testing"
@@ -330,9 +332,10 @@ func TestStreamHandler_DeliversAnEventPublishedPastTheServersWriteTimeout(t *tes
     }
 }
 
-/* a failed write is a frame lost only when the SERVER cut the stream — the client leaving is the ordinary
-   end, and the request context says which is which */
-func TestJournalServerSideCut_WarnsOnlyWhileTheClientIsStillThere(t *testing.T) {
+/* a failed write is a frame lost only when the SERVER cut the stream, and the server's cut is a deadline: it
+   reports itself as a net.Error whose Timeout is true. The request context cannot tell the two apart —
+   net/http cancels it on the first write error of any kind — so the guard reads the error alone */
+func TestJournalServerSideCut_WarnsOnTheDeadlineAloneWhoeverHoldsTheContext(t *testing.T) {
     _, _, logger := streamServer(t, time.Second)
     containerInstance := melodycontainer.NewContainer()
     melodycontainer.MustRegister(
@@ -344,18 +347,85 @@ func TestJournalServerSideCut_WarnsOnlyWhileTheClientIsStillThere(t *testing.T) 
     )
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 
-    cancelled, cancel := context.WithCancel(context.Background())
-    cancel()
-    journalServerSideCut(runtimeInstance, cancelled, "visitor", "event", errors.New("write: broken pipe"))
+    journalServerSideCut(runtimeInstance, "visitor", "event", errors.New("write: broken pipe"))
+    journalServerSideCut(runtimeInstance, "visitor", "event", &net.OpError{Op: "write", Err: errors.New("connection reset by peer")})
 
     if 0 != len(logger.recorded()) {
         t.Fatalf("a client that left was journaled as a server cut: %v", logger.recorded())
     }
 
-    journalServerSideCut(runtimeInstance, context.Background(), "visitor", "event", errors.New("write: i/o timeout"))
+    journalServerSideCut(runtimeInstance, "visitor", "event", &net.OpError{Op: "write", Err: &timeoutError{}})
 
     if 1 != len(logger.recorded()) || "event stream cut by the server with a frame in flight" != logger.recorded()[0] {
         t.Fatalf("a server cut with a frame in flight was journaled as %v", logger.recorded())
+    }
+}
+
+/* timeoutError is what a deadline reports through net.OpError */
+type timeoutError struct{}
+
+func (instance *timeoutError) Error() string {
+    return "i/o timeout"
+}
+
+func (instance *timeoutError) Timeout() bool {
+    return true
+}
+
+func (instance *timeoutError) Temporary() bool {
+    return false
+}
+
+/* the real cut: a client that stops reading, frames the socket cannot buffer, the re-armed deadline expires
+   with a frame in flight — one warning. The previous guard read the request context, which net/http had
+   already cancelled on that very write error, so it could never fire on a real connection; a client that
+   closes is the ordinary end and files nothing */
+func TestStreamHandler_JournalsARealServerCutAndNotAClientThatLeft(t *testing.T) {
+    server, hub, logger := streamServer(t, 500*time.Millisecond)
+
+    connection, dialErr := net.Dial("tcp", strings.TrimPrefix(server.URL, "http://"))
+    if nil != dialErr {
+        t.Fatalf("dial: %v", dialErr)
+    }
+    defer connection.Close()
+
+    if _, writeErr := connection.Write([]byte("GET /events/stream/?topic=visitor HTTP/1.1\r\nHost: stream\r\n\r\n")); nil != writeErr {
+        t.Fatalf("request: %v", writeErr)
+    }
+
+    deadline := time.Now().Add(2 * time.Second)
+    for 0 == hub.Broadcast("visitor", melodyhttp.ServerSentEvent{Data: "warm-up"}) && time.Now().Before(deadline) {
+        time.Sleep(10 * time.Millisecond)
+    }
+
+    /* the client reads nothing: the kernel buffers fill under the large frames and the next write meets the deadline */
+    frame := strings.Repeat("x", 256*1024)
+    cutBy := time.Now().Add(10 * time.Second)
+    for time.Now().Before(cutBy) && 0 == len(logger.recorded()) {
+        hub.Broadcast("visitor", melodyhttp.ServerSentEvent{Data: frame})
+        time.Sleep(20 * time.Millisecond)
+    }
+
+    if 1 != len(logger.recorded()) || "event stream cut by the server with a frame in flight" != logger.recorded()[0] {
+        t.Fatalf("a client that stopped reading was cut with %v journaled, wanted the one server-cut warning", logger.recorded())
+    }
+
+    runtime.KeepAlive(connection)
+
+    leaving, leavingErr := nethttp.Get(server.URL + "/events/stream/?topic=leaver")
+    if nil != leavingErr {
+        t.Fatalf("opening the second stream failed: %v", leavingErr)
+    }
+    for 0 == hub.Broadcast("leaver", melodyhttp.ServerSentEvent{Data: "warm-up"}) && time.Now().Before(time.Now().Add(2*time.Second)) {
+        time.Sleep(10 * time.Millisecond)
+    }
+    _ = leaving.Body.Close()
+    time.Sleep(200 * time.Millisecond)
+    hub.Broadcast("leaver", melodyhttp.ServerSentEvent{Data: frame})
+    time.Sleep(200 * time.Millisecond)
+
+    if 1 != len(logger.recorded()) {
+        t.Fatalf("a client that closed its stream was journaled as a server cut: %v", logger.recorded())
     }
 }
 
@@ -364,7 +434,62 @@ func TestKeepaliveIntervalFor_IsHalfTheBudgetOrTheDefault(t *testing.T) {
         t.Errorf("a 30 s budget keeps alive every %s, wanted 15 s", keepaliveIntervalFor(30*time.Second))
     }
 
+    if time.Second != keepaliveIntervalFor(time.Nanosecond) {
+        t.Errorf("a budget too small for a tick keeps alive every %s, wanted the one-second floor", keepaliveIntervalFor(time.Nanosecond))
+    }
+
     if defaultKeepaliveInterval != keepaliveIntervalFor(0) {
         t.Errorf("no budget keeps alive every %s, wanted the default", keepaliveIntervalFor(0))
+    }
+}
+
+/* the keepalive is what finds a client that left without closing, and its cadence is half the server's
+   write budget rather than the default: on a one-second budget an idle stream carries a comment frame every
+   half second, where the fifteen-second default — the form a live delivery test could not tell apart, since
+   the frame's own re-armed deadline delivers the event either way — would carry none within a second */
+func TestStreamHandler_KeepsAnIdleStreamAliveAtHalfTheServersWriteBudget(t *testing.T) {
+    server, hub, _ := streamServer(t, time.Second)
+
+    response, requestErr := nethttp.Get(server.URL + "/events/stream/?topic=idle")
+    if nil != requestErr {
+        t.Fatalf("opening the stream failed: %v", requestErr)
+    }
+    defer response.Body.Close()
+
+    deadline := time.Now().Add(2 * time.Second)
+    for 0 == hub.Broadcast("idle", melodyhttp.ServerSentEvent{Data: "warm-up"}) && time.Now().Before(deadline) {
+        time.Sleep(10 * time.Millisecond)
+    }
+
+    collected := make(chan string, 1)
+    go func() {
+        buffer := make([]byte, 4096)
+        var read []byte
+        stopAt := time.Now().Add(1300 * time.Millisecond)
+        for time.Now().Before(stopAt) {
+            count, readErr := response.Body.Read(buffer)
+            read = append(read, buffer[:count]...)
+            if nil != readErr {
+                break
+            }
+            if 2 <= strings.Count(string(read), "\n:") {
+                break
+            }
+        }
+        collected <- string(read)
+    }()
+
+    var body string
+    select {
+    case body = <-collected:
+    case <-time.After(3 * time.Second):
+        /* the reader is parked on a stream that sends nothing: the keepalive cadence is not half the budget */
+        t.Fatal("an idle stream under a one-second budget carried no keepalive frame in three seconds")
+    }
+
+    /* the connected comment comes first; the keepalives are the comment frames after it */
+    keepalives := strings.Count(body, "\n:")
+    if 2 > keepalives {
+        t.Fatalf("an idle stream under a one-second budget carried %d keepalive frames in 1.3 s, wanted at least two; the stream read %q", keepalives, body)
     }
 }

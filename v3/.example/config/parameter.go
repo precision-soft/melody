@@ -39,8 +39,10 @@ func (instance *Module) RegisterParameters(registrar melodyapplicationcontract.P
     registrar.RegisterParameter(parameterReportExportEndpoint, "%env(default::"+environmentKeyReportExportEndpoint+")%")
     registrar.RegisterParameter(parameterRatesBaseUrl, "%env(default::"+environmentKeyRatesBaseUrl+")%")
 
-    /* the base currency defaults to the seed's rather than to the empty string: an empty base would refuse
-       every document, and a catalogue with no base named is a catalogue quoted against the one it ships with */
+    /* the base currency defaults to the seed's rather than to the empty string: a catalogue with no base named
+       is a catalogue quoted against the one it ships with. The default applies when the key is ABSENT; a key
+       present and empty reaches the refresh as an empty base, which the refresh refuses on every document
+       rather than folding onto — an empty base would otherwise admit exactly the document that names none */
     registrar.RegisterParameter(parameterRatesDefaultBaseCurrency, defaultRatesBaseCurrency)
     registrar.RegisterParameter(
         parameterRatesBaseCurrency,

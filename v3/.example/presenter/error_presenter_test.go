@@ -418,6 +418,28 @@ func (instance *recordingLogger) Error(message string, context melodyloggingcont
     instance.records = append(instance.records, recordedLine{level: "error", message: message, context: context})
 }
 
+func (instance *recordingLogger) Warning(message string, context melodyloggingcontract.Context) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.records = append(instance.records, recordedLine{level: "warning", message: message, context: context})
+}
+
+/* clientLeftLines answers the records filed for a client that left, the warning half of the journal */
+func (instance *recordingLogger) clientLeftLines() []recordedLine {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    var lines []recordedLine
+    for _, line := range instance.records {
+        if "handler answered a server error to a client that left" == line.message {
+            lines = append(lines, line)
+        }
+    }
+
+    return lines
+}
+
 /* lines answers the records of the server-error journal alone, so a presenter record about its own
    collaborators — a serializer it could not resolve — is not counted as the cause of a 500 */
 func (instance *recordingLogger) lines() []recordedLine {
@@ -508,8 +530,13 @@ func TestApiErrorWithErrJournalsTheCauseOfAServerError(t *testing.T) {
         t.Fatalf("the record does not name the route as routed: %v", lines[0].context)
     }
 
-    if false == melodyexception.IsAlreadyLogged(melodyexception.Logged(cause)) {
-        t.Fatal("a plain error cannot carry the mark, and Logged wraps it; the presenter must not rely on the mark alone")
+    /* a cause that CAN carry the mark — the application's own exception — leaves marked: a reader further up
+       that files marked errors once does not file it again. A plain error has nowhere for the mark to live,
+       and the presenter's journal is what stands for it there. */
+    marked := melodyexception.NewError("archive refused", nil, errors.New(causeSecret))
+    _ = ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not read the archive", marked)
+    if false == melodyexception.IsAlreadyLogged(marked) {
+        t.Fatal("the presenter journaled the application's own exception without marking it logged")
     }
 }
 
@@ -531,5 +558,54 @@ func TestApiErrorJournalsNothingWithoutACause(t *testing.T) {
 
     if 0 != len(logger.lines()) {
         t.Fatalf("a 500 without a cause wrote %d records, wanted none", len(logger.lines()))
+    }
+}
+
+/* the kernel installs a logger on the request's SCOPE that stamps every record with the request identifier;
+   the presenter resolves through the runtime, so the record lands there — on the root container's logger
+   it carried no identifier, and nothing tied it to the "request completed 500" line of the same request */
+func TestApiErrorWithErrJournalsThroughTheRequestsScopedLogger(t *testing.T) {
+    runtimeInstance, request, rootLogger := runtimeWithJournal(t)
+
+    scopedLogger := &recordingLogger{Logger: melodylogging.NewNopLogger()}
+    scope, isOverrider := runtimeInstance.Scope().(melodycontainercontract.OverrideService)
+    if false == isOverrider {
+        t.Fatal("the runtime's scope does not accept overrides")
+    }
+    if overrideErr := scope.OverrideProtectedInstance(melodylogging.ServiceLogger, scopedLogger); nil != overrideErr {
+        t.Fatalf("override the scoped logger: %v", overrideErr)
+    }
+
+    _ = ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not verify the code", errors.New(causeSecret))
+
+    if 1 != len(scopedLogger.lines()) {
+        t.Fatalf("the request's scoped logger holds %d records, wanted the one", len(scopedLogger.lines()))
+    }
+
+    if 0 != len(rootLogger.lines()) {
+        t.Fatalf("the root logger holds %d records, wanted none: the record bypassed the scope", len(rootLogger.lines()))
+    }
+}
+
+/* a client that left mid-request is filed at warning, the way the kernel files a returned cancellation, not as
+   an error nobody received: the cause is context.Canceled AND the request's own context has ended; a
+   context.Canceled raised while the request is still alive stays an error */
+func TestApiErrorWithErrFilesAClientThatLeftAtWarning(t *testing.T) {
+    runtimeInstance, request, logger := runtimeWithJournal(t)
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+    leftRequest := melodyhttp.NewRequest(request.HttpRequest().WithContext(cancelledContext), nil, runtimeInstance, melodyhttp.NewRequestContext("test", time.Now()))
+
+    _ = ApiErrorWithErr(runtimeInstance, leftRequest, nethttp.StatusInternalServerError, "could not read the archive", context.Canceled)
+
+    if 1 != len(logger.clientLeftLines()) || "warning" != logger.clientLeftLines()[0].level || 0 != len(logger.lines()) {
+        t.Fatalf("a client that left was filed as %v / %v, wanted one warning and no error", logger.clientLeftLines(), logger.lines())
+    }
+
+    _ = ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not read the archive", context.Canceled)
+
+    if 1 != len(logger.lines()) {
+        t.Fatalf("a cancellation under a live request was filed %d times at error, wanted once", len(logger.lines()))
     }
 }

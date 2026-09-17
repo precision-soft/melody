@@ -1,6 +1,7 @@
 package presenter
 
 import (
+    "context"
     "errors"
     "fmt"
     nethttp "net/http"
@@ -15,6 +16,7 @@ import (
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
     melodylogging "github.com/precision-soft/melody/v3/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
+    melodyruntime "github.com/precision-soft/melody/v3/runtime"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     melodyserializer "github.com/precision-soft/melody/v3/serializer"
     melodyvalidation "github.com/precision-soft/melody/v3/validation"
@@ -114,33 +116,49 @@ func journalServerError(
         return
     }
 
-    context := melodyexception.LogContext(causeErr, map[string]any{
+    logContext := melodyexception.LogContext(causeErr, map[string]any{
         "statusCode":    statusCode,
         "publicMessage": publicMessage,
     })
 
     if nil != request && nil != request.HttpRequest() && nil != request.HttpRequest().URL {
-        context["method"] = request.HttpRequest().Method
-        context["path"] = melodyhttp.RequestPathAsRouted(request.HttpRequest().URL.EscapedPath())
+        logContext["method"] = request.HttpRequest().Method
+        logContext["path"] = melodyhttp.RequestPathAsRouted(request.HttpRequest().URL.EscapedPath())
     }
 
-    serverErrorLoggerOf(runtimeInstance).Error("handler answered a server error", context)
+    /* a client that left mid-request is not a failure of the server: the kernel files a returned
+       context.Canceled as "request cancelled by client" at warning, and a 500 answered as a Response for
+       the same cause — the outbox, storage and two-factor doors run under the request's context — is
+       filed the same way, rather than as an error nobody received */
+    if true == errors.Is(causeErr, context.Canceled) && true == requestContextIsDone(request) {
+        serverErrorLoggerOf(runtimeInstance).Warning("handler answered a server error to a client that left", logContext)
+    } else {
+        serverErrorLoggerOf(runtimeInstance).Error("handler answered a server error", logContext)
+    }
 
     _ = melodyexception.MarkLogged(causeErr)
 }
 
-/* serverErrorLoggerOf is the application's logger, and the emergency logger when the container holds none:
-   the reason a door answered 500 has to reach SOME journal, and a process whose logger is not registered
-   is exactly the process whose operator is reading standard error. */
-func serverErrorLoggerOf(runtimeInstance melodyruntimecontract.Runtime) melodyloggingcontract.Logger {
-    if nil == runtimeInstance.Container() {
-        return melodylogging.EmergencyLogger()
+/* requestContextIsDone answers whether the request's own context has ended, which is how a client that
+   went away is told apart from a context.Canceled raised by something else. */
+func requestContextIsDone(request melodyhttpcontract.Request) bool {
+    if nil == request || nil == request.HttpRequest() || nil == request.HttpRequest().Context() {
+        return false
     }
 
-    logger, resolveErr := melodycontainer.FromResolver[melodyloggingcontract.Logger](
-        runtimeInstance.Container(),
-        melodylogging.ServiceLogger,
-    )
+    return nil != request.HttpRequest().Context().Err()
+}
+
+/* serverErrorLoggerOf is the logger of the REQUEST — resolved through the runtime, whose scope the kernel
+   gave a logger that stamps every record with the request identifier — and the emergency logger when the
+   runtime holds none: the reason a door answered 500 has to reach SOME journal, and a process whose logger
+   is not registered is exactly the process whose operator is reading standard error. Resolved from the
+   root container instead, the record landed on the application's logger without the identifier that ties
+   it to the "request completed 500" line and to the rest of the request's journal. The resolution is
+   asked here rather than through LoggerFromRuntime, which files an emergency record and answers nil when
+   the logger is absent: the fallback is this door's decision. */
+func serverErrorLoggerOf(runtimeInstance melodyruntimecontract.Runtime) melodyloggingcontract.Logger {
+    logger, resolveErr := melodyruntime.FromRuntime[melodyloggingcontract.Logger](runtimeInstance, melodylogging.ServiceLogger)
     if nil != resolveErr || nil == logger {
         return melodylogging.EmergencyLogger()
     }

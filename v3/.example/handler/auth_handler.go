@@ -45,8 +45,9 @@ func LoginHandler() melodyhttpcontract.Handler {
                 return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "invalid form"), nil
             }
 
-            dto.Username = httpRequest.FormValue("username")
-            dto.Password = httpRequest.FormValue("password")
+            /* the credentials are read from the BODY alone: FormValue reads the url query as readily as the body on a POST, and a query string lands in every access log in front of the application */
+            dto.Username = httpRequest.PostFormValue("username")
+            dto.Password = httpRequest.PostFormValue("password")
         }
 
         username := strings.TrimSpace(dto.Username)

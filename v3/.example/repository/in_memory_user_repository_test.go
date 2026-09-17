@@ -159,7 +159,7 @@ func TestInMemoryUserRepositoryGrantRoleAppendsOnceOntoACopy(t *testing.T) {
 
     before, _, _ := repositoryInstance.FindByUsername(ctx, "user")
 
-    outcome, grantErr := repositoryInstance.GrantRole(ctx, before.Id, entity.RoleEditor)
+    granted, outcome, grantErr := repositoryInstance.GrantRole(ctx, before.Id, entity.RoleEditor)
     if nil != grantErr || GrantRoleGranted != outcome {
         t.Fatalf("the grant answered %d, %v; wanted GrantRoleGranted", outcome, grantErr)
     }
@@ -168,7 +168,16 @@ func TestInMemoryUserRepositoryGrantRoleAppendsOnceOntoACopy(t *testing.T) {
         t.Fatalf("the value read before the grant now holds %v: the roles were appended in place", before.Roles)
     }
 
-    outcome, grantErr = repositoryInstance.GrantRole(ctx, before.Id, entity.RoleEditor)
+    /* the door hands back the account it wrote, widened — a copy of its own, so a caller mutating it does not reach the stored value */
+    if nil == granted || 2 != len(granted.Roles) || entity.RoleEditor != granted.Roles[1] {
+        t.Fatalf("the grant handed back %v, wanted the widened account", granted)
+    }
+    granted.Roles[0] = "mutated"
+    if stored, _, _ := repositoryInstance.FindById(ctx, before.Id); "mutated" == stored.Roles[0] {
+        t.Fatal("the account handed back is the stored value")
+    }
+
+    _, outcome, grantErr = repositoryInstance.GrantRole(ctx, before.Id, entity.RoleEditor)
     if nil != grantErr || GrantRoleAlreadyHeld != outcome {
         t.Fatalf("a second grant answered %d, %v; wanted GrantRoleAlreadyHeld", outcome, grantErr)
     }
@@ -178,7 +187,7 @@ func TestInMemoryUserRepositoryGrantRoleAppendsOnceOntoACopy(t *testing.T) {
         t.Fatalf("two grants of one role stored %v, wanted it once", after.Roles)
     }
 
-    outcome, grantErr = repositoryInstance.GrantRole(ctx, "user-none", entity.RoleEditor)
+    _, outcome, grantErr = repositoryInstance.GrantRole(ctx, "user-none", entity.RoleEditor)
     if nil != grantErr || GrantRoleAccountAbsent != outcome {
         t.Fatalf("a grant on a missing account answered %d, %v; wanted GrantRoleAccountAbsent", outcome, grantErr)
     }

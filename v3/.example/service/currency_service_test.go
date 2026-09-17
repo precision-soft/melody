@@ -201,6 +201,13 @@ func TestCurrencyServiceUpdateRate_AnswersUnchangedWithoutWritingAndDropsTheCach
     if 2 != cacheInstance.deleteCount()-deletesBefore {
         t.Errorf("an unchanged quote dropped %d cache entries, wanted the currency's two", cacheInstance.deleteCount()-deletesBefore)
     }
+
+    /* the two are the currency's OWN entries — the heal is pinned on which keys, not on how many */
+    dropped := cacheInstance.deletedKeyList()
+    dropped = dropped[len(dropped)-2:]
+    if CacheKeyCurrencyById("cur-usd") != dropped[0] || CacheKeyCurrencyList != dropped[1] {
+        t.Errorf("an unchanged quote dropped %v, wanted the by-id entry of cur-usd and the list", dropped)
+    }
 }
 
 /* Create stamps the instant from the injected clock, which is the half a wall-clock read could not be
@@ -247,4 +254,65 @@ func (instance *updateCountingCurrencyRepository) Update(ctx context.Context, cu
     instance.updates.Add(1)
 
     return instance.CurrencyRepository.Update(ctx, currency)
+}
+
+func (instance *updateCountingCurrencyRepository) UpdateQuote(ctx context.Context, id string, rate float64, rateAsOf time.Time) (bool, error) {
+    instance.updates.Add(1)
+
+    return instance.CurrencyRepository.UpdateQuote(ctx, id, rate, rateAsOf)
+}
+
+/* staleReadCurrencyRepository serves one FindById from a snapshot taken earlier — the row as a concurrent
+   process read it before another process wrote a newer quote over it */
+type staleReadCurrencyRepository struct {
+    repository.CurrencyRepository
+    snapshot *entity.Currency
+}
+
+func (instance *staleReadCurrencyRepository) FindById(ctx context.Context, id string) (*entity.Currency, bool, error) {
+    if nil != instance.snapshot && instance.snapshot.Id == id {
+        snapshot := instance.snapshot
+        instance.snapshot = nil
+
+        return snapshot, true, nil
+    }
+
+    return instance.CurrencyRepository.FindById(ctx, id)
+}
+
+/* two processes on one schedule, no lock between them: both read the row, both judge their document newer
+   than it, and the one holding the OLDER document writes last. The write is conditional on the row at the
+   moment of the write, so the older document is refused and answered as stale, and the row keeps the newer
+   quote — where a whole-row write let the older document land */
+func TestCurrencyServiceUpdateRate_RefusesAnOlderDocumentThatReadTheRowBeforeANewerOneWroteIt(t *testing.T) {
+    currencyService, dispatcher, runtimeInstance := currencyServiceUnderTest(t)
+
+    before, _, _ := currencyService.currencyRepository.FindById(context.Background(), "cur-usd")
+    stale := &staleReadCurrencyRepository{CurrencyRepository: currencyService.currencyRepository, snapshot: before}
+    currencyService.currencyRepository = stale
+
+    newer := currencyQuoteInstant.Add(2 * time.Hour)
+    older := currencyQuoteInstant.Add(time.Hour)
+
+    /* the newer document lands first, through the real read */
+    stale.snapshot = nil
+    if _, outcome, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", 1.2, newer); nil != err || RateUpdateWritten != outcome {
+        t.Fatalf("the newer document was not written: %d, %v", outcome, err)
+    }
+
+    /* the older document judges itself against the row as it read it BEFORE the newer write */
+    stale.snapshot = before
+    _, outcome, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", 1.1, older)
+    if nil != err || RateUpdateStale != outcome {
+        t.Fatalf("the older document answered %d, %v; wanted stale", outcome, err)
+    }
+
+    stored, _, _ := currencyService.currencyRepository.FindById(context.Background(), "cur-usd")
+    if 1.2 != stored.Rate || false == stored.RateAsOf.Equal(newer) {
+        t.Fatalf("the older document landed over the newer one: %v at %v", stored.Rate, stored.RateAsOf)
+    }
+
+    if 1 != len(dispatcher.names()) {
+        t.Fatalf("the refused older document dispatched an event: %v", dispatcher.names())
+    }
 }

@@ -46,8 +46,8 @@ func (instance *countingUserRepository) Update(ctx context.Context, user *entity
     return false, nil
 }
 
-func (instance *countingUserRepository) GrantRole(ctx context.Context, id string, role string) (repository.GrantRoleOutcome, error) {
-    return repository.GrantRoleAccountAbsent, nil
+func (instance *countingUserRepository) GrantRole(ctx context.Context, id string, role string) (*entity.User, repository.GrantRoleOutcome, error) {
+    return nil, repository.GrantRoleAccountAbsent, nil
 }
 
 func (instance *countingUserRepository) DeleteById(ctx context.Context, id string) (bool, error) {

@@ -84,3 +84,35 @@ func TestInMemoryCurrencyRepositoryConcurrentReadAndDelete(t *testing.T) {
         t.Fatalf("expected the seeded currencies to survive, got %d", len(currencies))
     }
 }
+
+/* the quote write is conditional on the row's instant, judged and written under the one lock: an older
+   document that arrives after a newer one is refused, the same document twice is refused, and a newer one
+   lands — the rule about "never a newer price" is a rule about the row at the moment of the write */
+func TestInMemoryCurrencyRepositoryUpdateQuoteWritesOnlyOverARowThatIsNotNewer(t *testing.T) {
+    repository := newInMemoryCurrencyRepository()
+    ctx := context.Background()
+
+    newer := time.Date(2026, time.September, 8, 11, 0, 0, 0, time.UTC)
+    older := newer.Add(-time.Hour)
+
+    if written, err := repository.UpdateQuote(ctx, "cur-usd", 1.2, newer); nil != err || false == written {
+        t.Fatalf("a newer quote was not written: written=%v err=%v", written, err)
+    }
+
+    if written, err := repository.UpdateQuote(ctx, "cur-usd", 1.1, older); nil != err || true == written {
+        t.Fatalf("an older quote landed over a newer row: written=%v err=%v", written, err)
+    }
+
+    if written, err := repository.UpdateQuote(ctx, "cur-usd", 1.2, newer); nil != err || true == written {
+        t.Fatalf("the same quote was written a second time: written=%v err=%v", written, err)
+    }
+
+    stored, found, _ := repository.FindById(ctx, "cur-usd")
+    if false == found || 1.2 != stored.Rate || false == stored.RateAsOf.Equal(newer) {
+        t.Fatalf("the row holds %v, wanted 1.2 at %v", stored, newer)
+    }
+
+    if written, err := repository.UpdateQuote(ctx, "cur-none", 1, newer); nil != err || true == written {
+        t.Fatalf("a quote for an absent row was written: written=%v err=%v", written, err)
+    }
+}

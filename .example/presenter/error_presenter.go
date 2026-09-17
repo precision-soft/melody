@@ -1,6 +1,7 @@
 package presenter
 
 import (
+    "context"
     "errors"
     "fmt"
     nethttp "net/http"
@@ -13,6 +14,9 @@ import (
     melodyexception "github.com/precision-soft/melody/exception"
     melodyhttp "github.com/precision-soft/melody/http"
     melodyhttpcontract "github.com/precision-soft/melody/http/contract"
+    melodylogging "github.com/precision-soft/melody/logging"
+    melodyloggingcontract "github.com/precision-soft/melody/logging/contract"
+    melodyruntime "github.com/precision-soft/melody/runtime"
     melodyruntimecontract "github.com/precision-soft/melody/runtime/contract"
     melodyserializer "github.com/precision-soft/melody/serializer"
     melodyvalidation "github.com/precision-soft/melody/validation"
@@ -101,6 +105,13 @@ func errorMessage(errorValue error) string {
     return errorValue.Error()
 }
 
+/* ApiErrorWithErr renders a refusal whose cause the handler holds. The cause travels in the body only under
+   the development environment; for a status of the server's own class it is JOURNALED here as well, at
+   error, because a Response is the one thing the kernel never journals: it journals a handler's failure
+   when the failure is RETURNED, and a handler that answered the failure as a 500 reached the terminate
+   listener alone — one info line, "request completed 500", no cause — so outside development the reason a
+   door answered 500 existed nowhere. A client's own refusal, below 500, is not journaled: the request was
+   wrong, and the body says so. */
 func ApiErrorWithErr(
     runtimeInstance melodyruntimecontract.Runtime,
     request melodyhttpcontract.Request,
@@ -110,6 +121,8 @@ func ApiErrorWithErr(
 ) melodyhttpcontract.Response {
     normalizedErrors := normalizeErrors([]string{publicMessage})
     debugEnabled := debugMode(runtimeInstance)
+
+    journalServerError(runtimeInstance, request, statusCode, publicMessage, causeErr)
 
     return buildApiResponse(
         runtimeInstance,
@@ -123,6 +136,71 @@ func ApiErrorWithErr(
             Trace:   buildErrorTrace(causeErr, debugEnabled),
         },
     )
+}
+
+/* journalServerError writes the one record a 500 answered as a Response leaves: the public message the
+   client read, the route and the cause, through the runtime's logger. The cause is marked logged so a
+   reader further up that files marked errors once does not file it again. The path is URL.Path: on this
+   major the router matches the decoded path, so that is the spelling the request was routed on. */
+func journalServerError(
+    runtimeInstance melodyruntimecontract.Runtime,
+    request melodyhttpcontract.Request,
+    statusCode int,
+    publicMessage string,
+    causeErr error,
+) {
+    if nethttp.StatusInternalServerError > statusCode || nil == causeErr || nil == runtimeInstance {
+        return
+    }
+
+    logContext := melodyexception.LogContext(causeErr, map[string]any{
+        "statusCode":    statusCode,
+        "publicMessage": publicMessage,
+    })
+
+    if nil != request && nil != request.HttpRequest() && nil != request.HttpRequest().URL {
+        logContext["method"] = request.HttpRequest().Method
+        logContext["path"] = request.HttpRequest().URL.Path
+    }
+
+    /* a client that left mid-request is not a failure of the server: the kernel files a returned
+       context.Canceled as "request cancelled by client" at warning, and a 500 answered as a Response for
+       the same cause — the outbox, storage and two-factor doors run under the request's context — is
+       filed the same way, rather than as an error nobody received */
+    if true == errors.Is(causeErr, context.Canceled) && true == requestContextIsDone(request) {
+        serverErrorLoggerOf(runtimeInstance).Warning("handler answered a server error to a client that left", logContext)
+    } else {
+        serverErrorLoggerOf(runtimeInstance).Error("handler answered a server error", logContext)
+    }
+
+    _ = melodyexception.MarkLogged(causeErr)
+}
+
+/* requestContextIsDone answers whether the request's own context has ended, which is how a client that
+   went away is told apart from a context.Canceled raised by something else. */
+func requestContextIsDone(request melodyhttpcontract.Request) bool {
+    if nil == request || nil == request.HttpRequest() || nil == request.HttpRequest().Context() {
+        return false
+    }
+
+    return nil != request.HttpRequest().Context().Err()
+}
+
+/* serverErrorLoggerOf is the logger of the REQUEST — resolved through the runtime, whose scope the kernel
+   gave a logger that stamps every record with the request identifier — and the emergency logger when the
+   runtime holds none: the reason a door answered 500 has to reach SOME journal, and a process whose logger
+   is not registered is exactly the process whose operator is reading standard error. Resolved from the
+   root container instead, the record landed on the application's logger without the identifier that ties
+   it to the "request completed 500" line and to the rest of the request's journal. The resolution is
+   asked here rather than through LoggerFromRuntime, which files an emergency record and answers nil when
+   the logger is absent: the fallback is this door's decision. */
+func serverErrorLoggerOf(runtimeInstance melodyruntimecontract.Runtime) melodyloggingcontract.Logger {
+    logger, resolveErr := melodyruntime.FromRuntime[melodyloggingcontract.Logger](runtimeInstance, melodylogging.ServiceLogger)
+    if nil != resolveErr || nil == logger {
+        return melodylogging.EmergencyLogger()
+    }
+
+    return logger
 }
 
 func HtmlError(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, statusCode int, message string) melodyhttpcontract.Response {

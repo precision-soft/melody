@@ -1,6 +1,7 @@
 package config
 
 import (
+    "context"
     "net"
     "net/netip"
     "strings"
@@ -21,8 +22,19 @@ const trustedProxyRefreshInterval = time.Minute
 /* trustedProxyWarningLogger is where an entry of the trusted proxy list that names nothing is reported: the entry is skipped rather than refused because a name that does not resolve in this process — the balancer not started beside a cli command — must not stop the command; skipped, the list trusts one hop fewer, which fails closed onto the peer address. A variable so the test can capture what would otherwise go to standard error. */
 var trustedProxyWarningLogger = melodylogging.EmergencyLogger
 
+/* trustedProxyLookupTimeout bounds one resolution of a trusted proxy name: the lookup runs IN LINE on the
+   request that finds the list stale, and the system resolver retries each nameserver for seconds, so a
+   DNS outage cost that request the whole of it. A lookup that does not answer in time is an entry that
+   names no address for this interval — skipped and reported, the way an unresolvable one is. */
+const trustedProxyLookupTimeout = 2 * time.Second
+
 /* trustedProxyLookup is the name resolution the list goes through; a variable so a test can hand it a table. */
-var trustedProxyLookup = net.LookupHost
+var trustedProxyLookup = func(host string) ([]string, error) {
+    ctx, cancel := context.WithTimeout(context.Background(), trustedProxyLookupTimeout)
+    defer cancel()
+
+    return net.DefaultResolver.LookupHost(ctx, host)
+}
 
 /* trustedProxyResolver answers which client a request came from, the way every budget of this example has to read it: behind a trusted proxy the X-Forwarded-For client, on a direct hit the peer address, and a header sent by a peer outside the trusted list ignored rather than believed. An empty list trusts no header at all, so every request is charged to its peer.
 

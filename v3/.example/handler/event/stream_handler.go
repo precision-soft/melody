@@ -1,7 +1,8 @@
 package event
 
 import (
-    "context"
+    "errors"
+    "net"
     nethttp "net/http"
     "time"
 
@@ -39,8 +40,12 @@ func StreamHandler() melodyhttpcontract.Handler {
 
         /* the server arms its write deadline ONCE, from the request line, so a stream that outlived it lost
            the first event after it and was cut with the client none the wiser; the writer re-arms it per
-           frame, budget from the frame, with the server's own write timeout as the budget — a client that
-           stops reading is still cut, one budget after the last frame it did not take */
+           frame, budget from the frame, with the server's own write timeout as the budget. What that bounds is
+           a WRITE: a client that stops reading is cut one budget after the first frame the socket can no
+           longer buffer, not after the first frame it did not read — the kernel buffers absorb small frames
+           at a slow cadence for a long time, so a stalled client holds its subscription and its connection
+           until they fill. An absolute bound on a stream's life is the application's to declare, and this one
+           declares none. */
         writeBudget := serverWriteTimeoutOf(request)
         serverSentEventWriter.WithWriteBudget(writeBudget)
 
@@ -66,7 +71,7 @@ func StreamHandler() melodyhttpcontract.Handler {
                 return nil, nil
             case <-keepalive.C:
                 if pingErr := serverSentEventWriter.Ping(); nil != pingErr {
-                    journalServerSideCut(runtimeInstance, requestContext, topic, "keepalive", pingErr)
+                    journalServerSideCut(runtimeInstance, topic, "keepalive", pingErr)
 
                     return nil, nil
                 }
@@ -76,10 +81,14 @@ func StreamHandler() melodyhttpcontract.Handler {
                 }
 
                 if sendErr := serverSentEventWriter.Send(event); nil != sendErr {
-                    journalServerSideCut(runtimeInstance, requestContext, topic, "event", sendErr)
+                    journalServerSideCut(runtimeInstance, topic, "event", sendErr)
 
                     return nil, nil
                 }
+
+                /* an event is a write, and a write is what the keepalive exists to guarantee: the tick is
+                   counted from the last frame, so a busy stream does not also pay for keepalives it does not need */
+                keepalive.Reset(keepaliveIntervalFor(writeBudget))
             }
         }
     }
@@ -96,7 +105,8 @@ func keepaliveIntervalFor(writeBudget time.Duration) time.Duration {
         return defaultKeepaliveInterval
     }
 
-    return writeBudget / 2
+    /* a ticker refuses a zero interval, and a budget under two seconds is a server that did not mean a stream: the floor keeps the tick a tick */
+    return max(writeBudget/2, time.Second)
 }
 
 /* serverWriteTimeoutOf reads the write timeout of the server the request arrived on — net/http puts the
@@ -111,12 +121,16 @@ func serverWriteTimeoutOf(request melodyhttpcontract.Request) time.Duration {
     return server.WriteTimeout
 }
 
-/* journalServerSideCut distinguishes the two ways a write fails: the client left, which the request context
-   says and which is the ordinary end of a stream, and the server cut the connection with a frame in flight
-   — a deadline, a broken pipe on a client still there — which is a frame lost and worth a warning. Both
-   used to be swallowed alike into a committed 200. */
-func journalServerSideCut(runtimeInstance melodyruntimecontract.Runtime, requestContext context.Context, topic string, frame string, writeErr error) {
-    if nil != requestContext.Err() {
+/* journalServerSideCut distinguishes the two ways a write fails: the client left — a broken pipe, a reset,
+   the ordinary end of a stream — and the server cut the connection because the write deadline the writer
+   re-arms expired with a frame in flight, which is a frame lost and worth a warning. Both used to be
+   swallowed alike into a committed 200. The two are told apart on the ERROR, not on the request context:
+   net/http cancels the request's context on the first write error of any kind, so by the time a Send or a
+   Ping returns the context is cancelled whoever cut the connection, and a guard on it could never fire; a
+   deadline reports itself as a net.Error whose Timeout is true, and nothing else does. */
+func journalServerSideCut(runtimeInstance melodyruntimecontract.Runtime, topic string, frame string, writeErr error) {
+    var networkErr net.Error
+    if false == errors.As(writeErr, &networkErr) || false == networkErr.Timeout() {
         return
     }
 

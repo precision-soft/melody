@@ -1,6 +1,8 @@
 package service
 
 import (
+    "errors"
+    "strconv"
     "strings"
     "time"
 
@@ -170,8 +172,25 @@ func (instance *RateRefreshService) Refresh(runtimeInstance melodyruntimecontrac
 
         _, updateOutcome, updateErr := instance.currencyService.UpdateRate(runtimeInstance, currency.Id, rate, document.AsOf)
         if nil != updateErr {
-            /* a refused quote is counted and named, and the sweep goes on: the currencies after it are
-               written on this run instead of waiting for a provider that may keep quoting that one badly */
+            /* a refused QUOTE is counted and named, and the sweep goes on: the currencies after it are
+               written on this run instead of waiting for a provider that may keep quoting that one badly.
+               Any other error is the backend's — the repository, the cache drop of an unchanged quote, the
+               dispatch after a written one — and is not the provider's fault: it stops the sweep and is
+               handed back as itself, so a redis outage on a tick reads in the cron log as a redis outage
+               and not as a quote the catalogue refused. A quote already written before its dispatch failed
+               is counted written, which it is. */
+            if false == errors.Is(updateErr, ErrUnusableRate) {
+                if RateUpdateWritten == updateOutcome {
+                    outcome.Updated++
+                }
+
+                return outcome, exception.NewError(
+                    "the rate refresh stopped at "+currency.Code+": the quote could not be written",
+                    exceptioncontract.Context{"currencyCode": currency.Code},
+                    updateErr,
+                )
+            }
+
             outcome.Refused++
             refusedCurrencyList = append(refusedCurrencyList, currency.Code)
             if nil == firstRefusal {
@@ -194,8 +213,11 @@ func (instance *RateRefreshService) Refresh(runtimeInstance melodyruntimecontrac
     }
 
     if 0 < outcome.Refused {
+        /* the console line names the currencies AND why the first was refused: the reason lived in the
+           context alone, which the cli engine does not print, so an operator read "(USD)" and had to open
+           the journal for the rate that was not a price */
         return outcome, exception.NewError(
-            "the rate provider quoted currencies the catalogue refused ("+strings.Join(refusedCurrencyList, ", ")+"); every other quote was written",
+            "the rate provider quoted currencies the catalogue refused ("+strings.Join(refusedCurrencyList, ", ")+": "+firstRefusal.Error()+"); every other quote was written",
             exceptioncontract.Context{
                 "refusedCurrencyList": refusedCurrencyList,
                 "updated":             outcome.Updated,
@@ -214,12 +236,33 @@ func (instance *RateRefreshService) Refresh(runtimeInstance melodyruntimecontrac
    the age of a quote by; and two codes that fold onto one name, since the document then says two things
    about one currency and nothing chooses between them. */
 func (instance *RateRefreshService) usableQuoteListOf(document rateDocument) (map[string]float64, error) {
+    /* a catalogue base that is empty is refused before the document is compared against it: the parameter
+       falls onto its default only when the key is absent, so RATES_BASE_CURRENCY= in a deployment template
+       reached here as "", and a document naming no base folded onto it and was written whole */
+    if "" == instance.ratesBaseCurrency {
+        return nil, exception.NewError(
+            "the catalogue's base currency is not configured (RATES_BASE_CURRENCY is empty), so no rate document can be judged against it",
+            nil,
+            nil,
+        )
+    }
+
     documentBase := foldCurrencyCode(document.Base)
+    if "" == documentBase {
+        return nil, exception.NewError(
+            "the rate document names no base it is quoted against (the catalogue's is "+instance.ratesBaseCurrency+")",
+            exceptioncontract.Context{"catalogueBase": instance.ratesBaseCurrency},
+            nil,
+        )
+    }
+
     if documentBase != instance.ratesBaseCurrency {
         /* both bases travel in the message as well as in the context: the cli engine echoes a failure's
-           message alone, and an operator reading a cron log needs to see WHICH base the provider quoted */
+           message alone, and an operator reading a cron log needs to see WHICH base the provider quoted.
+           The provider's spelling is bounded and its control characters escaped before it reaches a
+           console line: it is the provider's text, not this application's */
         return nil, exception.NewError(
-            "the rate document is quoted against another base than the catalogue's (document "+document.Base+", catalogue "+instance.ratesBaseCurrency+")",
+            "the rate document is quoted against another base than the catalogue's (document "+consoleSpellingOf(document.Base)+", catalogue "+instance.ratesBaseCurrency+")",
             exceptioncontract.Context{
                 "documentBase":  document.Base,
                 "catalogueBase": instance.ratesBaseCurrency,
@@ -333,4 +376,18 @@ func MustGetRateRefreshService(resolver melodycontainercontract.Resolver) *RateR
         resolver,
         ServiceRateRefreshService,
     )
+}
+
+/* consoleSpellingOf bounds a provider-supplied text for a console line — the message of a refusal is printed
+   as it is — to a short prefix with its control characters spelled out, so a base of a thousand bytes or one
+   carrying an escape sequence neither floods nor repaints the terminal. */
+func consoleSpellingOf(text string) string {
+    const consoleSpellingLimit = 16
+
+    spelling := text
+    if consoleSpellingLimit < len(spelling) {
+        spelling = spelling[:consoleSpellingLimit] + "…"
+    }
+
+    return strconv.Quote(spelling)
 }

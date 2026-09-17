@@ -1,6 +1,7 @@
 package cli
 
 import (
+    "slices"
     "bytes"
     "context"
     "io"
@@ -24,7 +25,7 @@ func TestGrantRoleCommandGrantsTheRole(t *testing.T) {
     command := NewGrantRoleCommand(fixture.lazyUserService())
 
     before := storedRoles(t, fixture, "user")
-    if true == holdsRole(before, entity.RoleEditor) {
+    if true == slices.Contains(before, entity.RoleEditor) {
         t.Fatalf("expected the seeded account not to hold the role already, it holds %v", before)
     }
 
@@ -33,14 +34,14 @@ func TestGrantRoleCommandGrantsTheRole(t *testing.T) {
     }
 
     after := storedRoles(t, fixture, "user")
-    if false == holdsRole(after, entity.RoleEditor) {
+    if false == slices.Contains(after, entity.RoleEditor) {
         t.Fatalf("expected the account to hold the granted role, it holds %v", after)
     }
 
     /* the role is ADDED, never substituted: the update door takes the whole set, so a command that passed
        the one role would strip every other the account holds. */
     for _, held := range before {
-        if false == holdsRole(after, held) {
+        if false == slices.Contains(after, held) {
             t.Fatalf("expected the granted role to be added to %v, but the account now holds %v", before, after)
         }
     }
@@ -57,7 +58,7 @@ func TestGrantRoleCommandIsANoOpWhenTheRoleIsAlreadyHeld(t *testing.T) {
     }
 
     granted := storedRoles(t, fixture, "user")
-    if false == holdsRole(granted, entity.RoleEditor) {
+    if false == slices.Contains(granted, entity.RoleEditor) {
         t.Fatalf("expected the first grant to land before the second is judged, the account holds %v", granted)
     }
 
@@ -101,7 +102,7 @@ func TestGrantRoleCommandRefusesARoleCarryingAComma(t *testing.T) {
         t.Fatalf("expected the refusal to name the comma, got %q", runErr.Error())
     }
 
-    if true == holdsRole(storedRoles(t, fixture, "user"), entity.RoleAdmin) {
+    if true == slices.Contains(storedRoles(t, fixture, "user"), entity.RoleAdmin) {
         t.Fatalf("expected the refused grant to write nothing, but the account now holds the administrator role")
     }
 }
@@ -221,7 +222,7 @@ func TestGrantRoleCommandGrantsThroughTheRepositorysAtomicDoor(t *testing.T) {
 
     account, _, _ := fixture.userRepository.FindByUsername(context.Background(), "user")
 
-    outcome, grantErr := fixture.userRepository.GrantRole(context.Background(), account.Id, entity.RoleEditor)
+    _, outcome, grantErr := fixture.userRepository.GrantRole(context.Background(), account.Id, entity.RoleEditor)
     if nil != grantErr || repository.GrantRoleGranted != outcome {
         t.Fatalf("the first grant answered %d, %v", outcome, grantErr)
     }
@@ -238,12 +239,81 @@ func TestGrantRoleCommandGrantsThroughTheRepositorysAtomicDoor(t *testing.T) {
         t.Fatalf("the role was appended a second time: %v", stored)
     }
 
-    if _, grantErr := fixture.userRepository.GrantRole(context.Background(), account.Id, entity.RoleAdmin); nil != grantErr {
+    if _, _, grantErr := fixture.userRepository.GrantRole(context.Background(), account.Id, entity.RoleAdmin); nil != grantErr {
         t.Fatalf("the admin grant failed: %v", grantErr)
     }
 
     stored = storedRoles(t, fixture, "user")
     if 3 != len(stored) || entity.RoleAdmin != stored[2] {
         t.Fatalf("two grants on one account stored %v, wanted user, editor, admin", stored)
+    }
+}
+
+/* the other direction of the arbiter: the command's read says the role is held — a memo from before an
+   admin door removed it — and the directory says it is not. The repository grants, because it is the only
+   judge; a short-cut on the cached roles used to answer "already holds" and leave the row unchanged. */
+func TestGrantRoleCommandGrantsARoleTheCachedReadWronglySaysIsHeld(t *testing.T) {
+    fixture := newCommandFixture(t)
+    userService := fixture.lazyUserService()
+
+    /* the service reads the account once so its memo holds the roles as seeded, editor included */
+    account, _, _ := fixture.userRepository.FindByUsername(context.Background(), "user")
+    if _, _, grantErr := fixture.userRepository.GrantRole(context.Background(), account.Id, entity.RoleEditor); nil != grantErr {
+        t.Fatalf("seed the editor role: %v", grantErr)
+    }
+    if _, _, findErr := userService.Get().FindByUsername("user"); nil != findErr {
+        t.Fatalf("warm the memo: %v", findErr)
+    }
+
+    /* the directory drops the role behind the memo's back, through a door that dispatches nothing */
+    account.Roles = []string{entity.RoleUser}
+    if _, updateErr := fixture.userRepository.Update(context.Background(), account); nil != updateErr {
+        t.Fatalf("remove the role in the directory: %v", updateErr)
+    }
+
+    if runErr := NewGrantRoleCommand(userService).Run(fixture.runtime, newFlagContext(entity.RoleEditor, "user")); nil != runErr {
+        t.Fatalf("the grant over a stale memo failed: %v", runErr)
+    }
+
+    if stored := storedRoles(t, fixture, "user"); false == slices.Contains(stored, entity.RoleEditor) {
+        t.Fatalf("the cached read's word was taken over the directory's: the account holds %v", stored)
+    }
+}
+
+/* the repository's own answer that the role is held is the one the command reports as nothing to do */
+func TestGrantRoleCommandReportsTheRepositorysAlreadyHeld(t *testing.T) {
+    fixture := newCommandFixture(t)
+
+    account, _, _ := fixture.userRepository.FindByUsername(context.Background(), "user")
+    if _, _, grantErr := fixture.userRepository.GrantRole(context.Background(), account.Id, entity.RoleEditor); nil != grantErr {
+        t.Fatalf("seed the editor role: %v", grantErr)
+    }
+
+    previousStdout := os.Stdout
+    reader, writer, pipeErr := os.Pipe()
+    if nil != pipeErr {
+        t.Fatalf("open the capture pipe: %v", pipeErr)
+    }
+    os.Stdout = writer
+
+    runErr := NewGrantRoleCommand(fixture.lazyUserService()).Run(fixture.runtime, newFlagContext(entity.RoleEditor, "user"))
+
+    _ = writer.Close()
+    os.Stdout = previousStdout
+
+    captured := &bytes.Buffer{}
+    _, _ = io.Copy(captured, reader)
+    _ = reader.Close()
+
+    if nil != runErr {
+        t.Fatalf("a grant of a held role failed: %v", runErr)
+    }
+
+    if false == strings.Contains(captured.String(), "already holds role") || true == strings.Contains(captured.String(), "granted role") {
+        t.Fatalf("the repository's already-held answer was reported as %q", captured.String())
+    }
+
+    if stored := storedRoles(t, fixture, "user"); 2 != len(stored) {
+        t.Fatalf("a held role was appended again: %v", stored)
     }
 }

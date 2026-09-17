@@ -92,13 +92,13 @@ func (instance *inMemoryUserRepository) Update(ctx context.Context, user *entity
 
 /* GrantRole appends under the repository's own mutex, onto a COPY of the stored account: the stored value is
    handed out to every reader, so the roles are not appended in place. */
-func (instance *inMemoryUserRepository) GrantRole(ctx context.Context, id string, role string) (GrantRoleOutcome, error) {
+func (instance *inMemoryUserRepository) GrantRole(ctx context.Context, id string, role string) (*entity.User, GrantRoleOutcome, error) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
     trimmedId := strings.TrimSpace(id)
     if "" == trimmedId {
-        return GrantRoleAccountAbsent, fmt.Errorf("id is required")
+        return nil, GrantRoleAccountAbsent, fmt.Errorf("id is required")
     }
 
     for index, existing := range instance.users {
@@ -107,17 +107,24 @@ func (instance *inMemoryUserRepository) GrantRole(ctx context.Context, id string
         }
 
         if true == holdsRole(existing.Roles, role) {
-            return GrantRoleAlreadyHeld, nil
+            held := *existing
+            held.Roles = append([]string{}, existing.Roles...)
+
+            return &held, GrantRoleAlreadyHeld, nil
         }
 
         granted := *existing
         granted.Roles = append(append([]string{}, existing.Roles...), role)
         instance.users[index] = &granted
 
-        return GrantRoleGranted, nil
+        /* the caller gets a copy: the stored value is shared with every reader */
+        answered := granted
+        answered.Roles = append([]string{}, granted.Roles...)
+
+        return &answered, GrantRoleGranted, nil
     }
 
-    return GrantRoleAccountAbsent, nil
+    return nil, GrantRoleAccountAbsent, nil
 }
 
 func (instance *inMemoryUserRepository) DeleteById(ctx context.Context, id string) (bool, error) {

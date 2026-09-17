@@ -297,7 +297,7 @@ func TestMigrationPrinter_PrintFailedEscapesForeignTextButKeepsTheQueryLines(t *
     }
 }
 
-/* the empty and the success lines of a run carry the migration name, which the runner did not write, and they were the two lines of the printer that let it through as sent while the executing, completed and failed lines escaped it; the name is escaped on all five, in both colour modes */
+/* the empty and the success lines of a run carry the migration name, which the runner did not write; they escape it in both colour modes, and the per-query lines — which carry it inside the prefix — are measured on a run of their own below */
 func TestMigrationPrinter_EscapesTheMigrationNameOnTheEmptyAndSuccessLines(t *testing.T) {
     for _, noColor := range []bool{true, false} {
         buffer := &bytes.Buffer{}
@@ -375,5 +375,46 @@ func TestRestoreDefaultRunnerOption_PutsBackOnlyOverItsOwnValue(t *testing.T) {
     restoreDefaultRunnerOption(firstInstalled, firstPrevious)
     if &host != resolveDefaultRunnerOption().Writer {
         t.Fatalf("expected the host's own value back once every command restored, got %v", resolveDefaultRunnerOption().Writer)
+    }
+}
+
+/* the prefix of every per-query line carries the migration name, the author's own text, and the executing, completed and failed lines printed it as sent while escaping the query name beside it: a name carrying an escape sequence repainted the terminal three times per query. Measured on a run whose second query fails, so all three lines print, in both colour modes: the name is escaped on every line and no raw escape byte reaches the writer. */
+func TestRunQueriesWithOption_EscapesTheMigrationNameInsideThePrefixOfEveryPerQueryLine(t *testing.T) {
+    for _, noColor := range []bool{true, false} {
+        database, recorder := newFakeBunDatabase()
+        recorder.execHook = func(query string) error {
+            if true == strings.Contains(query, "CREATE INDEX") {
+                return errors.New("index already exists")
+            }
+
+            return nil
+        }
+
+        buffer := &bytes.Buffer{}
+        queries := []Query{
+            {Name: "create table", SQL: "CREATE TABLE users (id INTEGER)"},
+            {Name: "create index", SQL: "CREATE INDEX users_id ON users (id)"},
+        }
+
+        runErr := RunQueriesWithOption(context.Background(), database, "up", "m\x1b[31mred", queries, RunnerOption{Writer: buffer, NoColor: noColor})
+        if nil == runErr {
+            t.Fatalf("noColor=%v: expected the second query to fail", noColor)
+        }
+
+        rendered := buffer.String()
+
+        /* executing + completed for the first query, executing + FAILED for the second carry the prefix in both modes; the ERROR and QUERY lines carry it only without colour, where the colour is what sets them apart */
+        prefixedLines := 4
+        if true == noColor {
+            prefixedLines = 6
+        }
+
+        if prefixedLines != strings.Count(rendered, `[migration:up] m\x1b[31mred [`) {
+            t.Fatalf("noColor=%v: expected the escaped name in the prefix of all %d per-query lines, got %q", noColor, prefixedLines, rendered)
+        }
+
+        if true == strings.Contains(rendered, "m\x1b[31mred") {
+            t.Fatalf("noColor=%v: the raw escape sequence of the migration name reached the writer: %q", noColor, rendered)
+        }
     }
 }

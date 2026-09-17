@@ -32,7 +32,7 @@ type UserRepository interface {
        that runs beside an admin update of the same account cannot lose the other's write the way a read,
        an append and a whole-set Update can; it answers what it did, and a role the account already holds is
        an answer, not a second entry in the column. */
-    GrantRole(ctx context.Context, id string, role string) (GrantRoleOutcome, error)
+    GrantRole(ctx context.Context, id string, role string) (*entity.User, GrantRoleOutcome, error)
 
     DeleteById(ctx context.Context, id string) (bool, error)
 }

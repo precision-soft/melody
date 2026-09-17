@@ -138,18 +138,18 @@ func (instance *recordingUserRepository) Update(ctx context.Context, user *entit
     return true, nil
 }
 
-func (instance *recordingUserRepository) GrantRole(ctx context.Context, id string, role string) (repository.GrantRoleOutcome, error) {
+func (instance *recordingUserRepository) GrantRole(ctx context.Context, id string, role string) (*entity.User, repository.GrantRoleOutcome, error) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
     user, exists := instance.users[id]
     if false == exists {
-        return repository.GrantRoleAccountAbsent, nil
+        return nil, repository.GrantRoleAccountAbsent, nil
     }
 
     for _, held := range user.Roles {
         if role == held {
-            return repository.GrantRoleAlreadyHeld, nil
+            return user, repository.GrantRoleAlreadyHeld, nil
         }
     }
 
@@ -157,7 +157,7 @@ func (instance *recordingUserRepository) GrantRole(ctx context.Context, id strin
     granted.Roles = append(append([]string{}, user.Roles...), role)
     instance.users[id] = &granted
 
-    return repository.GrantRoleGranted, nil
+    return &granted, repository.GrantRoleGranted, nil
 }
 
 func (instance *recordingUserRepository) DeleteById(ctx context.Context, id string) (bool, error) {

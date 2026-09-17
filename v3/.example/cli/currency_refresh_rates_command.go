@@ -38,10 +38,11 @@ func (instance *CurrencyRefreshRatesCommand) Run(runtimeInstance melodyruntimeco
 
     outcome, refreshErr := refreshService.Refresh(runtimeInstance)
 
-    /* a run that refused some quotes still wrote the others, and the table below is the only place the
-       operator reads how many: it is printed, and the refusal takes the exit code after it. Every other
-       failure — the provider unread, the document refused whole — wrote nothing and has no table to show. */
-    if nil != refreshErr && 0 == outcome.Refused {
+    /* a run that refused some quotes still wrote the others, and one a backend stopped part way wrote the
+       ones before it: the table below is the only place the operator reads how many, so it is printed
+       whenever the sweep touched a currency, and the failure takes the exit code after it. A failure that
+       touched none — the provider unread, the document refused whole — has no table to show. */
+    if nil != refreshErr && 0 == outcome.Updated+outcome.Unchanged+outcome.Stale+outcome.Refused {
         return refreshErr
     }
 

@@ -137,6 +137,28 @@ func (instance *Module) journalDatabaseServiceName() string {
     return ServiceExampleJournalDatabase
 }
 
+/* databaseLocation spells the catalog connection as host:port/schema, the one line that separates a reset of this example's volume from a reset of whatever the host happens to point at; the credentials stay out of it, because it is printed. It is read from the parameters the provider reads, so the plan names the database the drops will reach. */
+func (instance *Module) databaseLocation(kernelInstance melodykernelcontract.Kernel) string {
+    return databaseLocationOf(
+        parameterValue(kernelInstance, ParameterDatabaseHost),
+        parameterValue(kernelInstance, ParameterDatabasePort),
+        parameterValue(kernelInstance, ParameterDatabaseName),
+    )
+}
+
+/* journalDatabaseLocation is the same spelling for the journal connection. */
+func (instance *Module) journalDatabaseLocation(kernelInstance melodykernelcontract.Kernel) string {
+    return databaseLocationOf(
+        parameterValue(kernelInstance, ParameterJournalDatabaseHost),
+        parameterValue(kernelInstance, ParameterJournalDatabasePort),
+        parameterValue(kernelInstance, ParameterJournalDatabaseName),
+    )
+}
+
+func databaseLocationOf(host string, port string, database string) string {
+    return host + ":" + port + "/" + database
+}
+
 func (instance *Module) registerDatabaseServices(registrar melodyapplicationcontract.ServiceRegistrar) {
     if nil == instance.databaseRegistry {
         return

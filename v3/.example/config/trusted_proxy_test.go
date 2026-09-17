@@ -209,6 +209,18 @@ func TestNewExampleModule_HandsBothBudgetsTheSameTrustedProxyResolver(t *testing
     if 1 != len(moduleInstance.trustedProxyResolver.entryList) || "10.1.2.3" != moduleInstance.trustedProxyResolver.entryList[0] {
         t.Fatalf("expected the resolver to hold the configured entries, got %v", moduleInstance.trustedProxyResolver.entryList)
     }
+
+    /* the resolver the request budget INSTALLS is the module's one, read back through the configured door:
+       a wiring that handed a budget a resolver of its own would keep this list and still drift */
+    installed := requestBudgetConfig(1, moduleInstance.trustedProxyResolver).ClientIpResolver()
+    if nil == installed {
+        t.Fatal("expected the request budget to carry a client ip resolver")
+    }
+
+    request := requestForwardedBy(t, "10.1.2.3", "203.0.113.7")
+    if "203.0.113.7" != installed(request) || "203.0.113.7" != moduleInstance.trustedProxyResolver.Resolve(request) {
+        t.Fatalf("expected the budget's resolver and the module's to agree on the client behind the trusted proxy, got %q and %q", installed(request), moduleInstance.trustedProxyResolver.Resolve(request))
+    }
 }
 
 /* slowLookupTable is a lookup that takes as long as it is told and counts, under a lock, how many times it was
@@ -239,9 +251,11 @@ func TestTrustedProxyResolver_DoesNotHoldConcurrentRequestsOnTheFirstLookup(t *t
     resolver := resolverOver(t, "load-balancer", time.Now)
 
     started := make(chan struct{})
+    finished := make(chan struct{})
     go func() {
         close(started)
         resolver.Resolve(requestForwardedBy(t, balancerAddress, "203.0.113.7"))
+        close(finished)
     }()
     <-started
     time.Sleep(20 * time.Millisecond)
@@ -250,7 +264,13 @@ func TestTrustedProxyResolver_DoesNotHoldConcurrentRequestsOnTheFirstLookup(t *t
     key := resolver.Resolve(requestForwardedBy(t, balancerAddress, "203.0.113.7"))
     waited := time.Since(before)
 
-    if 100*time.Millisecond < waited {
+    /* the first lookup outlives the request it was measured against: the test waits for it, so the cleanup
+       that restores the lookup table does not run under a goroutine still inside the table it replaces */
+    <-finished
+
+    /* the form that held the request waited ~280 ms of the 300 ms lookup; a bound at two hundred keeps the
+       two forms apart under a loaded runner where a served-at-once request can still take tens of milliseconds */
+    if 200*time.Millisecond < waited {
         t.Fatalf("a request during the first lookup waited %s for it, wanted it served at once", waited)
     }
 

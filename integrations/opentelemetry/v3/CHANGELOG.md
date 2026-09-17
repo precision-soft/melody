@@ -29,6 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Security
 
+- `go.mod` — `google.golang.org/grpc` is required at v1.83.1, the fix for [GO-2026-6348](https://pkg.go.dev/vuln/GO-2026-6348) (heap exhaustion through HTTP/2 DATA frame fragmentation), which govulncheck reports as reachable from this module through the otlp exporter's transport. Same policy as the v1.82.1 requirement below it
 - `go.mod` — `google.golang.org/grpc` is required at v1.82.1, the fix for [GO-2026-6061](https://pkg.go.dev/vuln/GO-2026-6061), which govulncheck reports as reachable from this module through the otlp exporter path. The dependency pinning policy keeps the oldest version that compiles, and a reachable advisory is the exception that policy exists to admit
 
 ## [v3.1.0] - 2026-07-06 - Lifecycle Handler Decorator and OTLP Trace Export

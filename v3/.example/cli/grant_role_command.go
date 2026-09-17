@@ -14,7 +14,7 @@ import (
 
 /* GrantRoleCommand grants an application role to an account.
 
-   It declares its own --role flag to show that an application command may reuse a name the runtime also understands: the runtime's --mode/--role are recognized only before the command name, so `example:grant:role --role admin` reaches this command intact rather than being captured (and rejected) by the process-role parser. It also holds the user service through a container.Lazy handle built at command-registration time — the service is resolved at the first run, not when the command is constructed, so the boot-phase composition never resolves the container early.
+   It declares its own --role flag to show that an application command may reuse a name the runtime also understands: the runtime's --mode/--role are recognized only before the command name, so `example:grant:role --role ROLE_ADMIN` reaches this command intact rather than being captured (and rejected) by the process-role parser. It also holds the user service through a container.Lazy handle built at command-registration time — the service is resolved at the first run, not when the command is constructed, so the boot-phase composition never resolves the container early.
 
    The grant is a real write. It used to be a print: the command looked the account up and then announced "granted role ... to user ...", for an account it had just been told did not exist as readily as for one it had found, and left the directory untouched. */
 type GrantRoleCommand struct {
@@ -87,19 +87,23 @@ func (instance *GrantRoleCommand) Run(runtimeInstance melodyruntimecontract.Runt
         return fmt.Errorf("user %q does not exist", user)
     }
 
-    if true == holdsRole(account.Roles, role) {
-        fmt.Printf("user %q already holds role %q; nothing to do\n", user, role)
-
-        return nil
-    }
-
     /* the role is ADDED through the repository's atomic door, which reads and writes the account under one
        lock: a grant that ran beside an admin update of the same account used to be a read, an append and a
        whole-set write, and whichever of the two wrote last took the other's change with it. The repository
-       is the arbiter — an account that already held the role by the time the lock was taken is a no-op
-       here too, whatever the cached read above said. */
-    _, outcome, grantErr := userService.GrantRole(runtimeInstance, account.Id, role)
+       is the ONLY arbiter of whether the role is already held: the read above may have been served from a
+       cache, and a short-cut on its roles answered "already holds" over an account the directory no longer
+       showed holding it — the grant never reached the row. */
+    granted, outcome, grantErr := userService.GrantRole(runtimeInstance, account.Id, role)
     if nil != grantErr {
+        /* a grant whose write COMMITTED and whose listeners then refused is not a grant that failed: the
+           role is in the directory, the cache entries of the account were not dropped, and the operator
+           has to read both — a bare failure sent them to re-run a grant the re-run would find held */
+        if nil != granted && repository.GrantRoleGranted == outcome {
+            fmt.Printf("granted role %q to user %q, but the listeners that drop the account's cache entries were not told: %v\n", role, user, grantErr)
+
+            return fmt.Errorf("the role was granted, and the cache entries of user %q could not be dropped: %w", user, grantErr)
+        }
+
         return grantErr
     }
 
@@ -122,15 +126,5 @@ func (instance *GrantRoleCommand) Run(runtimeInstance melodyruntimecontract.Runt
     return nil
 }
 
-/* holdsRole answers whether the account already carries the role, so a second run of the same command is answered without a write; the repository judges the same question again under its lock, which is what makes the answer hold when the read above was served from a cache. */
-func holdsRole(roles []string, role string) bool {
-    for _, held := range roles {
-        if role == held {
-            return true
-        }
-    }
-
-    return false
-}
 
 var _ melodyclicontract.Command = (*GrantRoleCommand)(nil)

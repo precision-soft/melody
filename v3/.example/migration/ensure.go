@@ -117,7 +117,10 @@ func ensureMigratedSet(ctx context.Context, database *bun.DB, migrationSet *migr
             refusedDatabaseList[memoizationKey] = refusedMigrationAttempt{refusal: lockErr, refusedAt: time.Now()}
         }
 
-        return lockErr
+        /* through the same door as every other step: the wait ends bare when the context does — a SIGTERM
+           during a lock wait handed a naked context.Canceled up the by-type resolution, which relabelled it
+           "service not registered in resolver" — and the set's own refusal is left as it is */
+        return migrationStepFailure(setName, "waiting for the migration lock", unlockCommand, lockErr)
     }
 
     if true == locked {

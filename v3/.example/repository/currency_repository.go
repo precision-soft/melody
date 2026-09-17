@@ -4,6 +4,7 @@ import (
     "context"
     "fmt"
     "strings"
+    "time"
 
     "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/migration"
@@ -25,6 +26,13 @@ type CurrencyRepository interface {
     Create(ctx context.Context, currency *entity.Currency) error
 
     Update(ctx context.Context, currency *entity.Currency) (bool, error)
+
+    /* UpdateQuote writes a quote onto the row ONLY if the row's instant is not newer than the quote's, in one
+       statement, and answers whether it wrote: the rule "a reading older than the one stored is never a newer
+       price" is a rule about the row as it is at the moment of the write, and a caller that read the row,
+       judged, and then wrote whole let the older of two concurrent documents land last. A false answer means
+       the row is absent, newer, or already holds the quote — the caller reads it back to tell which. */
+    UpdateQuote(ctx context.Context, id string, rate float64, rateAsOf time.Time) (bool, error)
 
     DeleteById(ctx context.Context, id string) (bool, error)
 }

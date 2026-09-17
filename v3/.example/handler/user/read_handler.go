@@ -143,6 +143,24 @@ func normalizeRoles(roles []string) []string {
     return result
 }
 
+/* roleOutsideTheVocabulary answers the first role the application does not know, trimmed: the voter compares a
+   role's spelling exactly, so a spelling outside the closed vocabulary would be stored, reported and grant
+   nothing — the refusal the console grant makes, at the two doors that write roles from a request */
+func roleOutsideTheVocabulary(roles []string) (string, bool) {
+    for _, role := range roles {
+        normalized := strings.TrimSpace(role)
+        if "" == normalized {
+            continue
+        }
+
+        if false == entity.IsKnownRole(normalized) {
+            return normalized, true
+        }
+    }
+
+    return "", false
+}
+
 /* roleContainingComma reports the first role carrying a comma: the repository stores the role list comma-joined, so a role with one inside would come back as several roles on the next read — among them, possibly, an administrator nobody granted. */
 func roleContainingComma(roles []string) (string, bool) {
     for _, role := range roles {

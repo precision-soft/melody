@@ -467,12 +467,21 @@ func TestNewServerSentEventWriter_FlushesThroughAnIntermediateWrapper(t *testing
 type deadlineRecordingConnection struct {
     *httptest.ResponseRecorder
     deadlineList []time.Time
+    /* the order of deadlines and writes, as the connection saw them: a deadline armed AFTER the bytes it was meant to bound is a deadline on the next frame */
+    sequence []string
 }
 
 func (instance *deadlineRecordingConnection) SetWriteDeadline(deadline time.Time) error {
     instance.deadlineList = append(instance.deadlineList, deadline)
+    instance.sequence = append(instance.sequence, "deadline")
 
     return nil
+}
+
+func (instance *deadlineRecordingConnection) Write(bytes []byte) (int, error) {
+    instance.sequence = append(instance.sequence, "write")
+
+    return instance.ResponseRecorder.Write(bytes)
 }
 
 /* net/http arms the server's write deadline once, from the request line; a stream that lives past it loses
@@ -514,6 +523,11 @@ func TestServerSentEventWriter_RearmsTheWriteDeadlinePerFrameUnderABudget(t *tes
 
     if false == connection.deadlineList[1].Equal(instant.Add(5 * time.Second)) {
         t.Errorf("the second frame armed %s, wanted its own instant plus the budget", connection.deadlineList[1])
+    }
+
+    /* each deadline is armed BEFORE the bytes it bounds: armed after them it would bound the next frame, and the first frame past the server's own deadline would be lost exactly as before */
+    if "deadline,write,deadline,write" != strings.Join(connection.sequence, ",") {
+        t.Errorf("the connection saw %v, wanted the deadline armed before each frame's bytes", connection.sequence)
     }
 }
 

@@ -2,6 +2,7 @@ package service
 
 import (
     "context"
+    "errors"
     "fmt"
     "time"
 
@@ -57,6 +58,11 @@ const (
     maxUsableRate = 1e9
 )
 
+/* ErrUnusableRate is the sentinel beneath every refusal of a rate: a caller sweeping a whole document reads
+   it with errors.Is to tell a quote the catalogue refused — which it counts and goes past — from a backend
+   that failed, which is not the provider's fault and stops the sweep. */
+var ErrUnusableRate = errors.New("the exchange rate must be a positive, finite number within the range a quote can take")
+
 /* refuseUnusableRate is the one spelling of the rule, read by both write doors. A conversion divides by the
    source rate, so a zero divides by zero and a negative flips the price's sign; an infinity or a value the
    range above excludes produces a converted price that is not a finite number, which the read door then
@@ -68,15 +74,25 @@ func refuseUnusableRate(currencyId string, rate float64) error {
     }
 
     return exception.NewError(
-        "the exchange rate must be a positive, finite number within the range a quote can take",
+        ErrUnusableRate.Error(),
         exceptioncontract.Context{
             "currencyId": currencyId,
             "rate":       rate,
             "minimum":    minUsableRate,
             "maximum":    maxUsableRate,
         },
-        nil,
+        ErrUnusableRate,
     )
+}
+
+/* quoteInstantOf is the resolution a quote's instant is held at: the column is DATETIME(6), so the row
+   comes back truncated to the microsecond, and an instant compared at the nanosecond against it was
+   never Equal — a provider stamping time.Now() with nine decimals made every unchanged quote read as a
+   full-row update that changed nothing, which the driver reports as no row and the sweep counted as the
+   currency having vanished, with the cache entries the unchanged branch drops left standing. Both write
+   doors hold the instant at this resolution, so the in-memory repository and the database agree. */
+func quoteInstantOf(instant time.Time) time.Time {
+    return instant.UTC().Truncate(time.Microsecond)
 }
 
 /* isUsableRate is the two comparisons alone: an infinity fails the upper one and a NaN fails both, so
@@ -161,7 +177,7 @@ func (instance *CurrencyService) Create(
         return nil, rateErr
     }
 
-    currency := entity.NewCurrency(currencyId, code, name, rate, instance.clock.Now())
+    currency := entity.NewCurrency(currencyId, code, name, rate, quoteInstantOf(instance.clock.Now()))
 
     createErr := instance.currencyRepository.Create(runtimeInstance.Context(), currency)
     if nil != createErr {
@@ -255,7 +271,10 @@ const (
    front of the provider, never a newer price. A quote equal to the stored one, at the same instant, is
    not written either, and the cache entries of the currency are dropped without an event: the write would
    change nothing and the event would journal a change that did not happen, while the drop is what heals a
-   cache that kept the previous rate after the invalidation of an earlier tick failed. */
+   cache that kept the previous rate after the invalidation of an earlier tick failed. The instant is judged
+   at the microsecond the column holds, so "the same instant" means what the row can say. The drop costs
+   one delete of the list entry per unchanged currency, one delete too many for a sweep — a cost accepted
+   over a door that would have to know it is being swept. */
 func (instance *CurrencyService) UpdateRate(
     runtimeInstance melodyruntimecontract.Runtime,
     currencyId string,
@@ -267,6 +286,7 @@ func (instance *CurrencyService) UpdateRate(
     }
 
     ctx := runtimeInstance.Context()
+    rateAsOf = quoteInstantOf(rateAsOf)
 
     currency, found, findErr := instance.currencyRepository.FindById(ctx, currencyId)
     if nil != findErr {
@@ -289,18 +309,39 @@ func (instance *CurrencyService) UpdateRate(
         return currency, RateUpdateUnchanged, nil
     }
 
-    /* the loaded entity is the repository's own stored value under the in-memory configuration, shared with every concurrent reader, so the changes land on a copy */
-    modified := *currency
-    modified.Rate = rate
-    modified.RateAsOf = rateAsOf
-
-    updated, updateErr := instance.currencyRepository.Update(ctx, &modified)
+    /* the write is CONDITIONAL on the row's instant, in one statement: the read above judged a row as it was,
+       and two processes on one schedule — the refresh takes no lock — each judged their document newer than
+       that row and wrote whole, so the older document landed last. The repository writes only over a row
+       that is not newer; a refusal is read back to tell a row that moved from one that vanished. */
+    written, updateErr := instance.currencyRepository.UpdateQuote(ctx, currencyId, rate, rateAsOf)
     if nil != updateErr {
         return nil, RateUpdateAbsent, updateErr
     }
-    if false == updated {
-        return nil, RateUpdateAbsent, nil
+
+    if false == written {
+        current, stillThere, rereadErr := instance.currencyRepository.FindById(ctx, currencyId)
+        if nil != rereadErr {
+            return nil, RateUpdateAbsent, rereadErr
+        }
+
+        if false == stillThere {
+            return nil, RateUpdateAbsent, nil
+        }
+
+        if true == current.RateAsOf.After(rateAsOf) {
+            return current, RateUpdateStale, nil
+        }
+
+        if dropErr := instance.dropCachedCurrency(currencyId); nil != dropErr {
+            return nil, RateUpdateUnchanged, dropErr
+        }
+
+        return current, RateUpdateUnchanged, nil
     }
+
+    modified := *currency
+    modified.Rate = rate
+    modified.RateAsOf = rateAsOf
 
     updatedEvent := event.NewCurrencyUpdatedEvent(&modified)
     _, dispatchErr := instance.eventDispatcher.DispatchName(

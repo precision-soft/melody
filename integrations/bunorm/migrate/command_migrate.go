@@ -80,7 +80,7 @@ func (instance *MigrateCommand) Run(runtimeInstance runtimecontract.Runtime, com
     }
     /* the unlock failure becomes the command's verdict only when the migration itself succeeded: a failed migration keeps its own error, with the unlock failure printed beside it */
     defer func() {
-        unlockErr := unlockMigrations(ctx, migrator, outputInstance)
+        unlockErr := unlockMigrations(ctx, migrator, outputInstance, instance.base.options.CommandPrefix+":unlock")
         if nil == runErr && nil != unlockErr {
             runErr = unlockErr
         }

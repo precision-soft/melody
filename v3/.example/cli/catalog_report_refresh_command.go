@@ -77,6 +77,16 @@ func (instance *CatalogReportRefreshCommand) Run(runtimeInstance melodyruntimeco
 
     reading, refreshErr := reportService.Refresh(runtimeInstance.Context())
     if nil != refreshErr {
+        /* a reading that failed after the archive had already refused carries both: the second failure
+           used to hide the first, and the first is the one that names the database */
+        if nil != archiveFailure {
+            return exception.NewError(
+                "catalog report refresh: "+refreshErr.Error()+"; "+archiveFailure.Error(),
+                nil,
+                errors.Join(refreshErr, archiveFailure),
+            )
+        }
+
         return refreshErr
     }
 
@@ -130,7 +140,14 @@ func (instance *CatalogReportRefreshCommand) Run(runtimeInstance melodyruntimeco
             fmt.Fprintln(writer, "the archive did not record this reading: "+archiveFailure.Error())
             fmt.Fprintln(writer, "the sink did not receive it either: "+exportErr.Error())
 
-            return errors.Join(archiveFailure, exportErr)
+            /* one message on one line — the cli engine escapes a newline in a failure's message, so the
+               joined error's own rendering reached the console as a literal \n — with the join as the
+               cause, so errors.Is reaches either half */
+            return exception.NewError(
+                "catalog report refresh: "+archiveFailure.Error()+"; "+exportErr.Error(),
+                nil,
+                errors.Join(archiveFailure, exportErr),
+            )
         }
 
         return exportErr
@@ -149,18 +166,15 @@ func (instance *CatalogReportRefreshCommand) Run(runtimeInstance melodyruntimeco
     return nil
 }
 
-/* archiveOwnRefusalOrWrapped hands back this application's own refusal as it is — the archive's database named
-   with where it is, the migration step that did not complete — so the console line, which the cli engine
-   renders from the message alone, keeps naming the database; anything else is wrapped with what was being
-   done. It is the rule archiveLockOf already keeps for the lock's resolution, applied to the two other doors
-   the archive is reached through. */
+/* archiveOwnRefusalOrWrapped wraps a refusal of the archive with what was being done, and carries the
+   refusal's own words in the message: the cli engine renders a failure from its message alone, so the line
+   the operator reads names the step AND whatever the refusal named — the archive's database with where it
+   is, the migration step that did not complete, the advisory lock the pgsql locker could not take. A form
+   that handed this application's own exceptions back untouched kept the database on the console for those
+   and lost the step for every refusal that was an exception of some module's own, the locker's among them.
+   The refusal stays the cause, so errors.Is still reaches it. */
 func archiveOwnRefusalOrWrapped(headline string, cause error) error {
-    var ownException *exception.Error
-    if true == errors.As(cause, &ownException) {
-        return cause
-    }
-
-    return exception.NewError(headline, nil, cause)
+    return exception.NewError(headline+": "+cause.Error(), nil, cause)
 }
 
 var _ melodyclicontract.Command = (*CatalogReportRefreshCommand)(nil)

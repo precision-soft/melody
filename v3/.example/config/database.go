@@ -234,12 +234,21 @@ func (instance *Module) registerDatabaseServices(registrar melodyapplicationcont
     )
 }
 
+/* databaseFunctionOf spells a manager by the function it serves, the word the reset and the plan use: the catalogue's manager is bun's default and read as "default" on the console, beside a reset that called the same database the catalogue. */
+func databaseFunctionOf(managerName string) string {
+    if databaseManagerName == managerName {
+        return "catalogue"
+    }
+
+    return managerName
+}
+
 /* databaseOpenedBy opens one manager's handle and names it when the open refuses: the registry's refusal reads "database connection failed" over a host name, the same words for either database, and the operator reading a console has to know WHICH one — the archive on its first resolution, the catalogue at boot — before knowing why. An exception of the registry's own stays the cause, so errors.Is still reaches its sentinels. */
 func databaseOpenedBy(registry *melodybunorm.ManagerRegistry, managerName string, location string) (*bun.DB, error) {
     database, openErr := registry.Database(managerName)
     if nil != openErr {
         return nil, exception.NewError(
-            "the "+managerName+" database at "+location+" could not be opened",
+            "the "+databaseFunctionOf(managerName)+" database at "+location+" could not be opened",
             exceptioncontract.Context{"manager": managerName, "location": location},
             openErr,
         )

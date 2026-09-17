@@ -64,11 +64,18 @@ func ConvertAmount(amount float64, from *entity.Currency, to *entity.Currency) (
 
     converted := amount / from.Rate * to.Rate
 
+    /* rounded to the cent the way every price this application renders is, at the door that produces the
+       number rather than at the one that prints it, so a converted price and a quoted one are the same kind
+       of value wherever they are read */
+    rounded := math.Round(converted*100.0) / 100.0
+
     /* the write doors bound every rate they admit, but this guard is on the read path for the same reason
        the one above is: a row this application did not write can hold a rate that is positive and still not
        a price, and the product of two such rates is an infinity that encoding/json refuses to render — a 500
-       on the read door for a caller who sent a valid code */
-    if true == math.IsInf(converted, 0) || true == math.IsNaN(converted) {
+       on the read door for a caller who sent a valid code. It is the ROUNDED value that is judged: the
+       rounding multiplies by a hundred first, so a finite product close enough to the ceiling of a float
+       became an infinity one line after a guard on the product had let it through */
+    if true == math.IsInf(rounded, 0) || true == math.IsNaN(rounded) {
         return 0, exception.NewError(
             "the converted amount is not a finite number",
             exceptioncontract.Context{
@@ -82,10 +89,7 @@ func ConvertAmount(amount float64, from *entity.Currency, to *entity.Currency) (
         )
     }
 
-    /* rounded to the cent the way every price this application renders is, at the door that produces the
-       number rather than at the one that prints it, so a converted price and a quoted one are the same kind
-       of value wherever they are read */
-    return math.Round(converted*100.0) / 100.0, nil
+    return rounded, nil
 }
 
 /* foldCurrencyCode is the one spelling of what makes two codes the same name. Trim then upper-case, through

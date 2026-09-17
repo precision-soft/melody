@@ -42,6 +42,7 @@
 #   - V3 MIGRATIONS      the db:* family over the v3 example's own one-migration schema — the catalogue, the
 #                        journal and the two-factor enrollment table — with the machine document asserted
 #                        from a live application and the rollback read straight out of mysql
+#   - V3 ROLE GRANT      example:grant:role writes the widened role set through the repository's atomic door, read out of band; a second grant is answered as held
 #   - V3 DATABASE RESET  example:db:reset refuses without --force, and with it drops the schema, applies it
 #                        again, empties the audit trail the module's table keeps and reseeds all four
 #                        nomenclatures — the one state this application has, restored from the database side
@@ -107,7 +108,7 @@ e2e_require_dev_service
 # mismatch message prints both numbers, so the count to move to is in the failure itself. A run that took one of
 # the degraded early-exit branches (an unreachable supervised app, a cold-cache timeout) legitimately executes
 # fewer checks; it is already red from the check_fail that branch raised
-EXPECTED_CHECK_COUNT_INTEGER=150
+EXPECTED_CHECK_COUNT_INTEGER=152
 readonly EXPECTED_CHECK_COUNT_INTEGER
 
 # state the scope in the output, so a reader never has to infer which major these checks covered
@@ -1329,6 +1330,37 @@ fi
 check_section_end "V3 DATABASE MIGRATIONS" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
+# V3 ROLE GRANT — example:grant:role writes the role through the repository's atomic door, on mysql
+# ---------------------------------------------------------------------------------------------------
+
+check_section_start "V3 ROLE GRANT" "${TAG_VALIDATE}" "e2e"
+
+# the grant is asserted OUT OF BAND, on the row the atomic door wrote: the door runs its own transaction with
+# the row locked, and no test of the package drives it against a database. It sits right before the reset,
+# which is the door that gives the role back — every section before this one reads the seeded directory,
+# and the account it widens is the one the sections above needed narrow
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:grant:role --role ROLE_EDITOR --user user 2>&1 | sed 's/\x1b\[[0-9;]*m//g'"
+V3_GRANTED_ROLES_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT roles FROM melody_example_v3_user WHERE id = 'user-1'")"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'granted role "ROLE_EDITOR" to user "user"' \
+    && [[ "ROLE_USER,ROLE_EDITOR" = "${V3_GRANTED_ROLES_STRING}" ]]; then
+    check_pass "v3 example:grant:role wrote the widened role set through the atomic door (row read out of band)"
+else
+    check_fail "the v3 grant did not land on the row: output ${RUN_IN_DEV_OUTPUT_STRING:-<empty>}, roles ${V3_GRANTED_ROLES_STRING:-<no answer>}"
+fi
+
+# the second run finds the role held by the ROW — the repository is the only arbiter — and writes nothing
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:grant:role --role ROLE_EDITOR --user user 2>&1 | sed 's/\x1b\[[0-9;]*m//g'"
+V3_REGRANTED_ROLES_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT roles FROM melody_example_v3_user WHERE id = 'user-1'")"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'already holds role "ROLE_EDITOR"' \
+    && [[ "ROLE_USER,ROLE_EDITOR" = "${V3_REGRANTED_ROLES_STRING}" ]]; then
+    check_pass "a second grant of the same role is answered as held and appends nothing"
+else
+    check_fail "the second grant did not read the row as held: output ${RUN_IN_DEV_OUTPUT_STRING:-<empty>}, roles ${V3_REGRANTED_ROLES_STRING:-<no answer>}"
+fi
+
+check_section_end "V3 ROLE GRANT" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
 # V3 DATABASE RESET — example:db:reset restores the one state this application has
 # ---------------------------------------------------------------------------------------------------
 
@@ -1836,10 +1868,15 @@ else
     check_fail "the v1 reset refusal did not hold (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
 fi
 
+# the run reports each step as it completes and names the database it ran on — host, port and schema — for
+# the catalogue and for the journal alike, and clears the cache between the two: the half of "the state a
+# fresh volume holds" the databases cannot carry
 run_in_dev_capture "${V1_EXAMPLE_DIRECTORY_STRING}" "go run . example:db:reset --force 2>&1 | sed 's/\x1b\[[0-9;]*m//g'"
 V1_BOOKKEEPING_COUNT_STRING="$(e2e_mysql_scalar "melody_example_v1" "SELECT COUNT(*) FROM bun_migrations")"
 V1_SEEDED_USER_COUNT_STRING="$(e2e_mysql_scalar "melody_example_v1" "SELECT COUNT(*) FROM melody_example_v1_user")"
-if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'the schema was recreated' \
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'catalogue reset: the schema was dropped and recreated on mysql:3306/melody_example_v1' \
+    && printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'journal reset: the journal table was dropped and recreated on postgres:5432/melody_example_v1' \
+    && printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'cache cleared: the shared cache' \
     && [[ "1" = "${V1_BOOKKEEPING_COUNT_STRING}" ]] \
     && [[ "${V1_SEEDED_USER_COUNT_STRING}" =~ ^[1-9][0-9]*$ ]]; then
     check_pass "the v1 reset left one catalog bookkeeping row and a reseeded directory (${V1_SEEDED_USER_COUNT_STRING} accounts, read out of band)"
@@ -2103,10 +2140,13 @@ else
     check_fail "the v2 reset refusal did not hold (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
 fi
 
+# the run reports each step as it completes, names the database it ran on — host, port and schema — and
+# clears the cache last, the half of "the state a fresh volume holds" the database cannot carry
 run_in_dev_capture "${V2_EXAMPLE_DIRECTORY_STRING}" "go run . example:db:reset --force 2>&1 | sed 's/\x1b\[[0-9;]*m//g'"
 V2_BOOKKEEPING_COUNT_STRING="$(e2e_mysql_scalar "melody_example_v2" "SELECT COUNT(*) FROM bun_migrations")"
 V2_SEEDED_USER_COUNT_STRING="$(e2e_mysql_scalar "melody_example_v2" "SELECT COUNT(*) FROM melody_example_v2_user")"
-if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'the schema was recreated' \
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'database reset: the schema was dropped and recreated on mysql:3306/melody_example_v2' \
+    && printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'cache cleared: the shared cache' \
     && [[ "1" = "${V2_BOOKKEEPING_COUNT_STRING}" ]] \
     && [[ "${V2_SEEDED_USER_COUNT_STRING}" =~ ^[1-9][0-9]*$ ]]; then
     check_pass "the v2 reset left one bookkeeping row and a reseeded directory (${V2_SEEDED_USER_COUNT_STRING} accounts, read out of band)"

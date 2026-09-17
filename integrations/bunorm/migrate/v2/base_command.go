@@ -10,6 +10,8 @@ import (
     "github.com/precision-soft/melody/v2/cli/output"
     "github.com/precision-soft/melody/v2/container"
     containercontract "github.com/precision-soft/melody/v2/container/contract"
+    "github.com/precision-soft/melody/v2/exception"
+    exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
     runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/migrate"
@@ -22,15 +24,26 @@ type migrationUnlocker interface {
     Unlock(ctx context.Context) error
 }
 
-/* unlockMigrations reports the failed release through both channels: printed for the operator, returned for the exit code — a lock row that survives refuses every later migration on every replica, and a command that exits 0 over it tells the calling deploy script the opposite of the truth */
-func unlockMigrations(ctx context.Context, unlocker migrationUnlocker, outputInstance *commandOutput) error {
+/* unlockMigrations reports the failed release through both channels: printed for the operator, returned for the exit code — a lock row that survives refuses every later migration on every replica, and a command that exits 0 over it tells the calling deploy script the opposite of the truth.
+
+   The failure is wrapped before it is reported, and the wrap names what bun's bare error does not: that the lock row STAYS HELD, the table it lives in, and the unlock command that clears it. Under json the report is a warning in the document, one string beside "no pending migrations", and under text the cli engine echoes a failure's message alone — so a driver error rendered as sent ("context deadline exceeded") told the operator neither that a lock survived nor what to do about it. The bun error stays the cause, so errors.Is still reaches it. */
+func unlockMigrations(ctx context.Context, unlocker migrationUnlocker, outputInstance *commandOutput, unlockCommand string) error {
     unlockContext, cancelUnlock := context.WithTimeout(context.WithoutCancel(ctx), migrationUnlockTimeout)
     defer cancelUnlock()
 
     if unlockErr := unlocker.Unlock(unlockContext); nil != unlockErr {
-        outputInstance.printError(unlockErr)
+        heldLock := exception.NewError(
+            "migrate: the migration lock could not be released and stays held in "+migrationLocksTable+", refusing every later migration on every replica until "+unlockCommand+" clears it: "+unlockErr.Error(),
+            exceptioncontract.Context{
+                "locksTable":    migrationLocksTable,
+                "unlockCommand": unlockCommand,
+            },
+            unlockErr,
+        )
 
-        return unlockErr
+        outputInstance.printError(heldLock)
+
+        return heldLock
     }
 
     return nil

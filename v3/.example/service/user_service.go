@@ -171,9 +171,15 @@ func (instance *UserService) Create(
 }
 
 /* GrantRole adds one role to an account through the repository's atomic door, so the console grant and the
-   admin update door serialise on the account instead of the last whole-set write winning; the account is
-   read back after the grant, so the event carries what the directory holds and the listeners drop the
-   entries the account is served from. */
+   admin update door serialise on the account instead of the last whole-set write winning; the account the
+   door wrote is what the event carries, so the listeners drop the entries the account is served from.
+
+   A role the directory already holds is answered as held, without an event — and the account's cache
+   entries are dropped all the same: a grant whose write committed and whose dispatch then failed left the
+   entries from before the grant standing, with no expiry, and the re-run that found the role held dispatched
+   nothing either, so the old roles were served for the life of the cache. The drop is what heals that,
+   the way an unchanged quote heals the currency's entries. A dispatch that fails after the write is handed
+   back with the account it did not announce, so a caller can say that the grant IS in the directory. */
 func (instance *UserService) GrantRole(
     runtimeInstance melodyruntimecontract.Runtime,
     userId string,
@@ -181,35 +187,55 @@ func (instance *UserService) GrantRole(
 ) (*entity.User, repository.GrantRoleOutcome, error) {
     ctx := WriteContext(runtimeInstance)
 
-    outcome, grantErr := instance.userRepository.GrantRole(ctx, userId, role)
+    account, outcome, grantErr := instance.userRepository.GrantRole(ctx, userId, role)
     if nil != grantErr {
         return nil, outcome, grantErr
+    }
+
+    if repository.GrantRoleAlreadyHeld == outcome {
+        if dropErr := instance.dropCachedUser(account); nil != dropErr {
+            return nil, outcome, dropErr
+        }
+
+        return account, outcome, nil
     }
 
     if repository.GrantRoleGranted != outcome {
         return nil, outcome, nil
     }
 
-    granted, found, findErr := instance.userRepository.FindById(ctx, userId)
-    if nil != findErr {
-        return nil, outcome, findErr
-    }
-
-    if false == found {
-        return nil, repository.GrantRoleAccountAbsent, nil
-    }
-
-    updatedEvent := event.NewUserUpdatedEvent(granted, granted.Username)
+    updatedEvent := event.NewUserUpdatedEvent(account, account.Username)
     _, dispatchErr := instance.eventDispatcher.DispatchName(
         runtimeInstance,
         event.UserUpdatedEventName,
         updatedEvent,
     )
     if nil != dispatchErr {
-        return nil, outcome, dispatchErr
+        return account, outcome, dispatchErr
     }
 
-    return granted, outcome, nil
+    return account, outcome, nil
+}
+
+/* dropCachedUser drops the entries an account is served from — by id, by username and the list — the same
+   three the updated listener drops, by the keys and without the event. */
+func (instance *UserService) dropCachedUser(account *entity.User) error {
+    if nil == account {
+        return nil
+    }
+
+    keyList := []string{CacheKeyUserById(account.Id), CacheKeyUserList}
+    if normalizedUsername := repository.NormalizedUsername(account.Username); "" != normalizedUsername && true == CacheSafeIdentifier(normalizedUsername) {
+        keyList = append(keyList, CacheKeyUserByUsername(normalizedUsername))
+    }
+
+    for _, key := range keyList {
+        if deleteErr := instance.cache.Delete(key); nil != deleteErr {
+            return deleteErr
+        }
+    }
+
+    return nil
 }
 
 func (instance *UserService) Update(

@@ -43,9 +43,9 @@ func downSchema(ctx context.Context, database *bun.DB) error {
     return nil
 }
 
-/* the column definitions mirror the tables the bun create-table builder used to produce, captured from a live SHOW CREATE TABLE, so a volume provisioned before the migration set and one provisioned by it hold the same schema */
+/* the column definitions mirror the tables the bun create-table builder used to produce, captured from a live SHOW CREATE TABLE, so a volume provisioned before the migration set and one provisioned by it hold the same schema — with one departure: every column that holds an entity identifier is compared under utf8mb4_bin. The identity of an id is EXACT everywhere else in this application: the in-memory repositories compare it byte for byte and the cache keys carry it as spelled; under the table's default utf8mb4_0900_ai_ci a lookup by id folded case and accents, so `CUR-EUR` found the `cur-eur` row and was cached under a key nothing invalidates, and a product could be stored pointing at a spelling the read door then reported as a currency the catalogue does not carry. A volume provisioned before this collation keeps its own — the tables are created IF NOT EXISTS — and example:db:reset is the door that brings it here. */
 const createCategoryTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v3_category` (" +
-    "`id` VARCHAR(255) NOT NULL, " +
+    "`id` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
     "`name` VARCHAR(255) NOT NULL, " +
     "PRIMARY KEY (`id`))"
 
@@ -54,7 +54,7 @@ const createCategoryTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v3_ca
    twice in one second would otherwise collapse into one instant. The instant stored is the PROVIDER's, so
    the column says how old the reading is rather than how long ago this application happened to write it. */
 const createCurrencyTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v3_currency` (" +
-    "`id` VARCHAR(255) NOT NULL, " +
+    "`id` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
     "`code` VARCHAR(255) NOT NULL, " +
     "`name` VARCHAR(255) NOT NULL, " +
     "`rate` DOUBLE NOT NULL, " +
@@ -63,12 +63,12 @@ const createCurrencyTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v3_cu
 
 /* the two instants are DATETIME(6) because the model declares them so: a product created and updated inside the same second is ordered by the microseconds, and a DATETIME without them would collapse the pair */
 const createProductTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v3_product` (" +
-    "`id` VARCHAR(255) NOT NULL, " +
+    "`id` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
     "`name` VARCHAR(255) NOT NULL, " +
     "`description` VARCHAR(255) NOT NULL, " +
-    "`category_id` VARCHAR(255) NOT NULL, " +
+    "`category_id` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
     "`price` DOUBLE NOT NULL, " +
-    "`currency_id` VARCHAR(255) NOT NULL, " +
+    "`currency_id` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
     "`stock` BIGINT NOT NULL, " +
     "`created_at` DATETIME(6) NOT NULL, " +
     "`updated_at` DATETIME(6) NOT NULL, " +
@@ -76,7 +76,7 @@ const createProductTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v3_pro
 
 /* the password column holds a bcrypt digest, never a password; the audit registry is told so by the model's own redact tag, and the width is the one the model produced */
 const createUserTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v3_user` (" +
-    "`id` VARCHAR(255) NOT NULL, " +
+    "`id` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
     "`username` VARCHAR(255) NOT NULL, " +
     "`password` VARCHAR(255) NOT NULL, " +
     "`roles` VARCHAR(255) NOT NULL, " +
@@ -95,7 +95,7 @@ const createCatalogJournalTableSql = "CREATE TABLE IF NOT EXISTS `melody_example
 
 /* the two secret columns are VARBINARY because bunorm's EncryptedString writes a sealed byte string, not text: a character set would try to interpret ciphertext and a collation would compare it. The widths are the ones the model declares, and they hold the sealed spelling rather than the plaintext — the marker, key identifier, nonce and tag travel with it. This table is the one neither frozen major carries. */
 const createTwoFactorTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v3_two_factor` (" +
-    "`user_identifier` VARCHAR(255) NOT NULL, " +
+    "`user_identifier` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
     "`secret` VARBINARY(512) NOT NULL, " +
     "`recovery_codes` VARBINARY(2048) NOT NULL, " +
     "`created_at` DATETIME NOT NULL, " +

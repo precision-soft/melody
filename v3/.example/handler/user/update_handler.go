@@ -98,6 +98,10 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "role "+commaRole+" must not contain commas"), nil
         }
 
+        if unknownRole, hasUnknownRole := roleOutsideTheVocabulary(dto.Roles); true == hasUnknownRole {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "role "+unknownRole+" is not one this application knows ("+strings.Join(entity.KnownRoleList(), ", ")+")"), nil
+        }
+
         targetUser.Roles = rolesForUpdate(dto.Roles, targetUser.Roles)
 
         updatedUser, updated, updateErr := userService.Update(
