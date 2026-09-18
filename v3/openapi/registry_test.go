@@ -4,6 +4,9 @@ import (
     nethttp "net/http"
     "reflect"
     "testing"
+
+    "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/internal/testhelper"
 )
 
 type registryProbePayload struct {
@@ -83,4 +86,52 @@ func TestRegistry_DescribeChainsAndTheLastDescriptionWins(t *testing.T) {
     if "second" != descriptor.Summary {
         t.Fatalf("expected the last description to win, got %q", descriptor.Summary)
     }
+}
+
+/* A Describe after MarkServing is refused at the door, naming the route: the map it would write is read by the spec handler on the request path with nothing synchronizing the two, so the refusal is the same one the router gives a late route */
+func TestRegistry_DescribeIsRefusedOnceTheRegistryIsMarkedServing(t *testing.T) {
+    registry := NewRegistry().Describe("example.one", Descriptor{Summary: "first"})
+
+    registry.MarkServing()
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            registry.Describe("example.late", Descriptor{Summary: "late"})
+        },
+        "may not describe a route after the application started serving",
+    )
+
+    if _, exists := registry.Get("example.late"); true == exists {
+        t.Fatal("expected the refused description to have written nothing")
+    }
+
+    descriptor, exists := registry.Get("example.one")
+    if false == exists || "first" != descriptor.Summary {
+        t.Fatalf("expected the description recorded before serving to stand, got %v %v", descriptor, exists)
+    }
+}
+
+/* the refusal carries the route under routeName, which is what an operator reads to find the module describing too late */
+func TestRegistry_ALateDescribeNamesTheRouteInItsRefusal(t *testing.T) {
+    registry := NewRegistry()
+    registry.MarkServing()
+
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatal("expected the late Describe to be refused")
+        }
+
+        recoveredErr, isError := recoveredValue.(error)
+        if false == isError {
+            t.Fatalf("expected the refusal to be an error, got %T", recoveredValue)
+        }
+
+        if "example.late" != exception.LogContext(recoveredErr)["routeName"] {
+            t.Fatalf("expected the refusal to name the route, got %v", exception.LogContext(recoveredErr))
+        }
+    }()
+
+    registry.Describe("example.late", Descriptor{Summary: "late"})
 }

@@ -46,12 +46,14 @@ type exampleMajor struct {
     loginThrottleProbe bool
     /* journalOnPostgres names where the major keeps its catalog journal: the v1 example runs two live databases in one process — the catalogue on mysql, the journal on postgres — so its out-of-band journal reads go through the postgres door while the later majors keep reading mysql. */
     journalOnPostgres bool
+    /* processServiceInventory names the major whose process services are classified against the stateless-by-default rule: the rule is v3's (and v4 inherits it), and the classification was measured on v3's composition root; the frozen majors carry no inventory to pin. */
+    processServiceInventory bool
 }
 
 var exampleMajorCatalog = []exampleMajor{
     {number: 1, label: "v1", relativeDirectory: ".example", port: 18081, integrationDemos: true, showcaseProbes: true, sessionRestartProbe: true, loginThrottleProbe: true, journalOnPostgres: true},
     {number: 2, label: "v2", relativeDirectory: "v2/.example", port: 18082, integrationDemos: true, showcaseProbes: true, sessionRestartProbe: true, loginThrottleProbe: true},
-    {number: 3, label: "v3", relativeDirectory: "v3/.example", port: 18083, integrationDemos: false},
+    {number: 3, label: "v3", relativeDirectory: "v3/.example", port: 18083, integrationDemos: false, processServiceInventory: true},
 }
 
 /* exampleMysqlDsn answers the dsn of one major's own database. The three examples share the development mysql but not a database in it — each holds its schema in melody_example_v<major> — so a harness section that reads what an application wrote has to ask the database that application writes to. MYSQL_DSN carries v3's, the one the supervised sections use, and this swaps the database segment of it for the major being driven.
@@ -209,6 +211,10 @@ func runExampleApplicationCheck(major exampleMajor, redisAddress string, mysqlDs
 
     runExampleHttpAssertions(major, application, redisAddress, mysqlDsn, postgresDsn)
     runExampleCliAssertions(major, workspace)
+
+    if true == major.processServiceInventory {
+        assertExampleProcessServicesAreClassified(major, workspace)
+    }
 
     if true == major.sessionRestartProbe {
         application = assertExampleSessionSurvivesRestart(major, workspace, application, &stopApplicationOnFailure)

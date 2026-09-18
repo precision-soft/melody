@@ -202,6 +202,38 @@ func example() {
 
 ## Userland API
 
+### Services are stateless by default
+
+A service registered on the container is ONE instance for the whole life of the process and for every request at once — the provider runs once and the value is memoized (see the caveats above) — so it holds nothing that belongs to a request or to a call: not the current user, not the last response, not a working buffer, not a counter the next request reads. Whatever a request needs travels as a method argument, or lives in a scoped service (next section). The rule is the one a Symfony service follows, and it is measured rather than assumed: on 2026-09-18 every process service of this repository's composition root — the 58 the example resolves, the 19 the framework registers on every application, the doors of the integrations, 69 concrete types classified field by field — held no request or call state. What holds state does so in one of these categories, and the GoDoc of the type says which:
+
+- **caches, limiters and stores** — the state IS the product, kept under a lock: the in-memory cache backend, the session storage and manager, the token stores, the lockers, the nonce guard, the event dispatcher's listener lists;
+- **connection and pool holders** — a bun registry, an amqp transport, a rueidis client, a tracer provider, a log file writer: the state is a resource, and the teardown closes it;
+- **boot registries** — written while the application wires, read on the request path, FROZEN once it serves: the configuration ([`MarkServing`](../../config/configuration.go) refuses a late [`Resolve`](../../config/configuration_resolve.go)), the router and its route registry (a late route is refused at the door), the openapi registry ([`MarkServing`](../../openapi/registry.go), a late [`Describe`](../../openapi/registry.go) refused). A registry that could only document "call this at boot" is one process kill away from a module that did not read the sentence, which is why each of these has a door and not a comment;
+- **factories** — the state belongs to the value produced, never to the factory;
+- **scoped services** — the state is the request's by construction.
+
+A process service that holds mutable state says WHY in the GoDoc of its type — the category, and what protects the state. A service whose state fits none of the five is a request-state leak, whatever it is called: make it scoped, or move the state onto the value it produces or the argument it is handed.
+
+```go
+/* WRONG: a process service remembering the caller — every request shares this one instance */
+type Exporter struct {
+    currentUser string
+}
+
+func (instance *Exporter) Export(user string) []byte {
+    instance.currentUser = user
+
+    return instance.render()
+}
+
+/* RIGHT: the request's data travels with the call, or the service is registered scoped */
+func (instance *Exporter) Export(user string) []byte {
+    return instance.renderFor(user)
+}
+```
+
+`debug:container --build` lists every registered service with its lifetime and the concrete type it resolves to, which is the inventory the rule is checked against; the live harness pins the example's inventory — every process service classified by name, concrete type and category, so a service nobody classified fails the band, and so does one whose type changed since its state was measured.
+
 ### Scoped services
 
 A service registered with `RegisterScoped` belongs to one scope — one http request, one command run — instead of to the process. It is built lazily on the first resolution through a scope, shared by everything inside that scope, and closed when the scope closes. The root container never sees it, and two scopes never share one instance.

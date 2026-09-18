@@ -21,6 +21,7 @@ import (
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
+    "github.com/precision-soft/melody/v3/openapi"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
@@ -125,6 +126,83 @@ func TestRun_MarksTheConfigurationServingBeforeItDispatches(t *testing.T) {
 
     if false == strings.Contains(probe.resolveErr.Error(), "begun serving") {
         t.Fatalf("expected the refusal to name the serving phase, got %q", probe.resolveErr.Error())
+    }
+}
+
+/* openApiRegistryServingProbe stands in for the openapi registry under its published name: it records whether Run marked it serving, and when — read from inside the command, the only moment the ordering "before dispatch" is observable. */
+type openApiRegistryServingProbe struct {
+    marked bool
+}
+
+func (instance *openApiRegistryServingProbe) MarkServing() {
+    instance.marked = true
+}
+
+/* openApiServingProbeApplicationCommand reads the registry probe while the command runs, so a marking that happened after dispatch would read as none. */
+type openApiServingProbeApplicationCommand struct {
+    ran         bool
+    markedAtRun bool
+}
+
+func (instance *openApiServingProbeApplicationCommand) Name() string {
+    return "probe:openapi-serving"
+}
+
+func (instance *openApiServingProbeApplicationCommand) Description() string {
+    return "reports whether the openapi registry was marked serving before the command ran"
+}
+
+func (instance *openApiServingProbeApplicationCommand) Flags() []clicontract.Flag {
+    return []clicontract.Flag{}
+}
+
+func (instance *openApiServingProbeApplicationCommand) Run(
+    runtimeInstance runtimecontract.Runtime,
+    commandContext clicontract.Context,
+) error {
+    instance.ran = true
+
+    registry, getErr := runtimeInstance.Container().Get(openapi.ServiceOpenApiRegistry)
+    if nil != getErr {
+        return getErr
+    }
+
+    instance.markedAtRun = registry.(*openApiRegistryServingProbe).marked
+
+    return nil
+}
+
+/* Run tells the openapi registry the wiring phase is over at the same moment it tells the configuration, so a Describe issued from a command or a request is refused at the registry's door instead of writing a plain map under the spec handler's readers. The openapi package tests what MarkServing does; this drives the real Run in cli mode and asks the registry from inside the command, the way the configuration's sister does. */
+func TestRun_MarksTheOpenApiRegistryServingBeforeItDispatches(t *testing.T) {
+    originalArguments := os.Args
+    os.Args = []string{"probe", "probe:openapi-serving"}
+    defer func() { os.Args = originalArguments }()
+
+    applicationInstance := NewApplication(
+        context.Background(),
+        testhelper.NewEmbeddedEnvFs(),
+        testhelper.NewEmbeddedStaticFs(),
+    )
+
+    registryProbe := &openApiRegistryServingProbe{}
+    applicationInstance.RegisterService(
+        openapi.ServiceOpenApiRegistry,
+        func(resolver containercontract.Resolver) (*openApiRegistryServingProbe, error) {
+            return registryProbe, nil
+        },
+    )
+
+    probe := &openApiServingProbeApplicationCommand{}
+    applicationInstance.RegisterCliCommand(probe)
+
+    applicationInstance.Run()
+
+    if false == probe.ran {
+        t.Fatal("the probe command never ran, so the assertion below would be vacuous")
+    }
+
+    if false == probe.markedAtRun {
+        t.Fatal("expected the openapi registry to have been marked serving before the command ran, which means Run never marked it")
     }
 }
 

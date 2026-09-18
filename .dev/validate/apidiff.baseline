@@ -357,6 +357,7 @@ v3 ~ compatible ~ ./messagebus.HandleOptions.AllowMissingHandler ~ added ~ uncla
 v3 ~ compatible ~ ./messagebus.ServiceTransportsCloser ~ added ~ unclassified ~
 v3 ~ compatible ~ ./messagebus.TransportsCloser ~ added ~ unclassified ~
 v3 ~ compatible ~ ./openapi.PathItem.Description ~ added ~ unclassified ~
+v3 ~ compatible ~ ./openapi.(*Registry).MarkServing ~ added ~ unclassified ~
 v3 ~ compatible ~ package ./security/accesscontrol ~ added ~ unclassified ~
 v3 ~ compatible ~ ./security/config.FirewallOverrideConfiguration.WithAccessControl ~ added ~ unclassified ~
 v3 ~ compatible ~ ./security/config.FirewallOverrideConfiguration.WithAccessDecisionManager ~ added ~ unclassified ~

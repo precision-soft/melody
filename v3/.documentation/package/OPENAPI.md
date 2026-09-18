@@ -150,7 +150,7 @@ The example application registers a registry (`config/openapi.go`) and the comma
 
 - Generation is opt-in and userland-wired; routes without a registered descriptor still appear (path, method, path parameters) but with a single `default` response and no body.
 - **The document enumerates every route the router carries** — internal, administrative and authentication routes included, with their methods and path-parameter names. There is no per-route opt-out. An application that mounts [`SpecHandler`](../../openapi/spec_handler.go) decides who can read that enumeration with the same firewall rules as any other route; mounting it public, as the example does, publishes the whole route table deliberately.
-- [`Registry.Describe`](../../openapi/registry.go) belongs to **boot** — module construction, before the application serves. It writes a plain map the spec handler reads on the request path with nothing synchronizing the two, so a `Describe` issued while requests are in flight is a concurrent map write, which Go answers by killing the process.
+- [`Registry.Describe`](../../openapi/registry.go) belongs to **boot** — module construction, before the application serves. It writes a plain map the spec handler reads on the request path with nothing synchronizing the two, so the registry is a boot registry of the same class as the router's route tree: `Application.Run` marks it serving through [`Registry.MarkServing`](../../openapi/registry.go) at the moment it marks the configuration, and a `Describe` issued from then on is refused at the door, naming the route — the way the router refuses a late route — where it used to be a concurrent map write under the spec handler's readers, which Go answers by killing the process. A registry built by hand and never marked keeps admitting descriptions.
 - [`SpecHandler`](../../openapi/spec_handler.go) regenerates the whole document on every request — the full reflection walk included. The document only changes at boot, so a deployment that expects the route to be hammered should cache the response in front of it (a reverse-proxy cache, or a handler of its own that generates once).
 - A `regex` pattern is validated with Go's RE2 and emitted verbatim, while OpenAPI 3.0 prescribes the ECMA-262 dialect for `pattern`; keep to the common subset (no `(?i)` inline flags, no `\p{...}` classes) or the produced document fails downstream validators.
 - The router normalizes trailing slashes, so generated path keys have no trailing slash even when the route pattern does.
@@ -172,6 +172,7 @@ The example application registers a registry (`config/openapi.go`) and the comma
 
 - [`NewRegistry() *Registry`](../../openapi/registry.go)
 - [`(*Registry).Describe(routeName string, descriptor Descriptor) *Registry`](../../openapi/registry.go)
+- [`(*Registry).MarkServing()`](../../openapi/registry.go)
 - [`TypeOf[T any]() reflect.Type`](../../openapi/registry.go)
 - [`DescribeTyped[Req, Resp any](registry *Registry, routeName string, status int, options ...DescribeOption)`](../../openapi/describe_typed.go) with `WithSummary`, `WithDescription`, `WithTags`, `WithResponse[T any](status int)`
 - [`Generate(info Info, routeDefinitions []httpcontract.RouteDefinition, registry *Registry) *Document`](../../openapi/generator.go)

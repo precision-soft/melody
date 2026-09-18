@@ -2,6 +2,9 @@ package openapi
 
 import (
     "reflect"
+    "sync/atomic"
+
+    "github.com/precision-soft/melody/v3/exception"
 )
 
 func TypeOf[T any]() reflect.Type {
@@ -22,14 +25,39 @@ func NewRegistry() *Registry {
     }
 }
 
+/* Registry is a process-lifetime service that holds state — the descriptors of every described route — written at boot and read on the request path, so it belongs to the same class as the router's route tree: a boot registry, frozen once the application serves. The map is plain because every write precedes every read; MarkServing is what makes that ordering a refusal rather than a convention. */
 type Registry struct {
     descriptorsByRoute map[string]Descriptor
+    serving            atomic.Bool
 }
 
-/* Describe records the descriptor of a route. It writes a plain map the spec handler reads on the request path with nothing synchronizing the two, so it belongs to boot — module construction, before the application serves — exactly like the routes it describes; a Describe issued while requests are in flight is a concurrent map write, which Go answers by killing the process. */
+/* Describe records the descriptor of a route. It writes a plain map the spec handler reads on the request path with nothing synchronizing the two, so it belongs to boot — module construction, before the application serves — exactly like the routes it describes. A Describe issued after the application marked the registry serving is refused at the door, the way the router refuses a late route: the alternative is a concurrent map write under readers, which Go answers by killing the process, and there is no degraded mode a lock could offer. */
 func (instance *Registry) Describe(routeName string, descriptor Descriptor) *Registry {
+    instance.refuseDescriptionWhileServing(routeName)
+
     instance.descriptorsByRoute[routeName] = descriptor
     return instance
+}
+
+/* MarkServing records that the wiring phase is over: the application calls it from Run, at the moment it tells the configuration the same thing, and from then on Describe is refused. A registry a test builds by hand and never marks keeps admitting descriptions, which is the honest state of a registry nobody serves from. */
+func (instance *Registry) MarkServing() {
+    instance.serving.Store(true)
+}
+
+func (instance *Registry) refuseDescriptionWhileServing(routeName string) {
+    if false == instance.serving.Load() {
+        return
+    }
+
+    exception.Panic(
+        exception.NewError(
+            "may not describe a route after the application started serving",
+            map[string]any{
+                "routeName": routeName,
+            },
+            nil,
+        ),
+    )
 }
 
 func (instance *Registry) Get(routeName string) (Descriptor, bool) {

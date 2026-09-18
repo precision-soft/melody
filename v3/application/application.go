@@ -14,12 +14,14 @@ import (
     "github.com/precision-soft/melody/v3/clock"
     "github.com/precision-soft/melody/v3/config"
     configcontract "github.com/precision-soft/melody/v3/config/contract"
+    containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/internal"
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     "github.com/precision-soft/melody/v3/logging"
+    "github.com/precision-soft/melody/v3/openapi"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     "github.com/precision-soft/melody/v3/security"
 )
@@ -244,6 +246,7 @@ func (instance *Application) Run() {
 
     /* boot is the last moment a parameter can still change anything: from here the wiring is done and the process is serving requests or executing a command, both against services that already read what they needed. Telling the configuration so is what turns a late Resolve into an error instead of a silent rewrite under those readers. */
     markConfigurationServing(instance.configuration)
+    markOpenApiRegistryServing(instance.kernel.ServiceContainer())
 
     /* one handler owns both the teardown and the exit, because neither of two separate defers can be ordered correctly: the exit helper ends in os.Exit, so a Close deferred below it would never run, and a Close deferred above it runs first and closes the very logger the final record is written through — a file-backed logger dropped every later write and the record of the dying error survived only as a one-line stderr echo. The record is therefore written first, through a logger the teardown has not touched, and the teardown runs between the record and the exit. */
     defer func() {
@@ -529,6 +532,25 @@ type servingMarker interface {
 
 func markConfigurationServing(configuration configcontract.Configuration) {
     marker, isMarker := configuration.(servingMarker)
+    if false == isMarker {
+        return
+    }
+
+    marker.MarkServing()
+}
+
+/* markOpenApiRegistryServing tells the openapi registry the wiring phase is over, so a Describe issued from here on is refused at its door instead of writing a plain map under the spec handler's readers. The registry is the application's to register, under its published name, so it is looked up by that name and asked for the marker the way the configuration is: a registry double without the method, or no registry at all, is left alone. */
+func markOpenApiRegistryServing(serviceContainer containercontract.Container) {
+    if false == serviceContainer.Has(openapi.ServiceOpenApiRegistry) {
+        return
+    }
+
+    registry, getErr := serviceContainer.Get(openapi.ServiceOpenApiRegistry)
+    if nil != getErr {
+        return
+    }
+
+    marker, isMarker := registry.(servingMarker)
     if false == isMarker {
         return
     }
