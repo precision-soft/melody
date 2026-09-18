@@ -93,13 +93,16 @@ const createCatalogJournalTableSql = "CREATE TABLE IF NOT EXISTS `melody_example
     "`recorded_at` DATETIME(6) NOT NULL, " +
     "PRIMARY KEY (`id`))"
 
-/* the two secret columns are VARBINARY because bunorm's EncryptedString writes a sealed byte string, not text: a character set would try to interpret ciphertext and a collation would compare it. The widths are the ones the model declares, and they hold the sealed spelling rather than the plaintext — the marker, key identifier, nonce and tag travel with it. This table is the one neither frozen major carries. */
+/* the two secret columns are VARBINARY because bunorm's EncryptedString writes a sealed byte string, not text: a character set would try to interpret ciphertext and a collation would compare it. The widths are the ones the model declares, and they hold the sealed spelling rather than the plaintext — the marker, key identifier, nonce and tag travel with it. This table is the one neither frozen major carries.
+
+   The enrollment is tied to its account by the schema: the identifier references the user table and the row goes with the account it was enrolled for. The example mints identifiers as the highest suffix plus one, so a row that outlived its account started the next holder of the identifier enrolled with the previous holder's secret; the subscriber that releases the row on the deletion event still runs, but it runs behind a dispatch that stops at the first listener that fails, and the database releases whether or not any listener ran. Both columns compare under utf8mb4_bin, which is what lets the key be declared; a volume provisioned before the constraint keeps its table as it was, and example:db:reset is the door that brings it here. */
 const createTwoFactorTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v3_two_factor` (" +
     "`user_identifier` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
     "`secret` VARBINARY(512) NOT NULL, " +
     "`recovery_codes` VARBINARY(2048) NOT NULL, " +
     "`created_at` DATETIME NOT NULL, " +
-    "PRIMARY KEY (`user_identifier`))"
+    "PRIMARY KEY (`user_identifier`), " +
+    "CONSTRAINT `melody_example_v3_two_factor_user` FOREIGN KEY (`user_identifier`) REFERENCES `melody_example_v3_user` (`id`) ON DELETE CASCADE)"
 
 /* the index is on LOWER(username) cast to the binary collation because that expression, and only that
    expression, is the identity this application gives a username: NormalizedUsername folds case and

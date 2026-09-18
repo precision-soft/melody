@@ -11,6 +11,7 @@ import (
 
     "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/repository"
+    melodyeventcontract "github.com/precision-soft/melody/v3/event/contract"
 )
 
 /* the command announced a grant it never made. It looked the account up, printed "granted role ... to
@@ -315,5 +316,44 @@ func TestGrantRoleCommandReportsTheRepositorysAlreadyHeld(t *testing.T) {
 
     if stored := storedRoles(t, fixture, "user"); 2 != len(stored) {
         t.Fatalf("a held role was appended again: %v", stored)
+    }
+}
+
+/* a grant whose write COMMITTED and whose listeners then refused is not a grant that failed: the role is in the
+   directory, the cache entries of the account were not dropped, and the operator reads both — the output says
+   the role was granted and names the listeners, the exit names the entries that stand, and a re-run would find
+   the role held. A bare failure sent the operator to re-run a grant the re-run would find done. */
+func TestGrantRoleCommandSaysTheRoleWasGrantedWhenTheListenersRefuse(t *testing.T) {
+    fixture := newCommandFixtureWithDispatcher(t, func(dispatcher melodyeventcontract.EventDispatcher) melodyeventcontract.EventDispatcher {
+        return &refusingDispatcher{EventDispatcher: dispatcher}
+    })
+    command := NewGrantRoleCommand(fixture.lazyUserService())
+
+    previousStdout := os.Stdout
+    reader, writer, pipeErr := os.Pipe()
+    if nil != pipeErr {
+        t.Fatalf("open the capture pipe: %v", pipeErr)
+    }
+    os.Stdout = writer
+
+    runErr := command.Run(fixture.runtime, newFlagContext(entity.RoleEditor, "user"))
+
+    _ = writer.Close()
+    os.Stdout = previousStdout
+
+    captured := &bytes.Buffer{}
+    _, _ = io.Copy(captured, reader)
+    _ = reader.Close()
+
+    if nil == runErr || false == strings.Contains(runErr.Error(), `the role was granted, and the cache entries of user "user" could not be dropped`) {
+        t.Fatalf("expected the exit to say the role was granted and the entries stand, got %v", runErr)
+    }
+
+    if false == strings.Contains(captured.String(), `granted role "ROLE_EDITOR" to user "user", but the listeners that drop the account's cache entries were not told`) {
+        t.Fatalf("expected the output to say the role was granted and name the listeners, got %q", captured.String())
+    }
+
+    if after := storedRoles(t, fixture, "user"); false == slices.Contains(after, entity.RoleEditor) {
+        t.Fatalf("expected the committed grant in the directory, it holds %v", after)
     }
 }

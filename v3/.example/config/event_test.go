@@ -127,3 +127,36 @@ func TestRegisterSubscribers_InstallsTheTwoFactorEnrollmentReleaseWhenThereIsASt
         t.Fatalf("expected the enrollment subscriber among the owners of %s, got %v", event.UserDeletedEventName, with)
     }
 }
+
+/* the composition root registers the cache subscriber before the release, and the dispatcher ends a dispatch at the first listener that fails: registered at equal priority, the release ran behind a cache listener whose backend was gone and never ran at all — the row stayed for the next holder of the identifier. Read off the dispatcher the root fills: on the deletion event the release outranks the cache subscriber's listener, whatever order they were registered in. */
+func TestRegisterSubscribers_TheEnrollmentReleaseOutranksTheCacheClearOnUserDeleted(t *testing.T) {
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
+    moduleInstance.twoFactorStore = twofactor.NewStore(newUndialedDatabase())
+
+    eventDispatcher := melodyevent.NewEventDispatcher(melodyclock.NewSystemClock())
+    moduleInstance.registerSubscribers(eventDispatcher)
+
+    releasePriority, cachePriority := 0, 0
+    releaseFound, cacheFound := false, false
+    for _, registered := range eventDispatcher.RegisteredEvents() {
+        if event.UserDeletedEventName != registered.EventName {
+            continue
+        }
+
+        for _, listener := range registered.Listeners {
+            if true == strings.Contains(listener.Owner, "TwoFactorEnrollmentSubscriber") {
+                releasePriority, releaseFound = listener.Priority, true
+            }
+            if true == strings.Contains(listener.Owner, "UserEventSubscriber") {
+                cachePriority, cacheFound = listener.Priority, true
+            }
+        }
+    }
+
+    if false == releaseFound || false == cacheFound {
+        t.Fatalf("expected both the release and the cache subscriber on %s, found release %v and cache %v", event.UserDeletedEventName, releaseFound, cacheFound)
+    }
+    if releasePriority <= cachePriority {
+        t.Fatalf("expected the release (%d) to outrank the cache clear (%d) on %s", releasePriority, cachePriority, event.UserDeletedEventName)
+    }
+}

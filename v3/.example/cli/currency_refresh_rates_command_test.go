@@ -15,6 +15,7 @@ import (
     "github.com/precision-soft/melody/v3/.example/repository"
     "github.com/precision-soft/melody/v3/.example/service"
     melodycache "github.com/precision-soft/melody/v3/cache"
+    melodycachecontract "github.com/precision-soft/melody/v3/cache/contract"
     melodyclock "github.com/precision-soft/melody/v3/clock"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
@@ -27,19 +28,9 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/* refusingRateDispatcher refuses every dispatch, the way a listener whose backend is gone would; the write
-   it follows has already landed. */
-type refusingRateDispatcher struct {
-    melodyeventcontract.EventDispatcher
-}
-
-func (instance *refusingRateDispatcher) DispatchName(runtimeInstance melodyruntimecontract.Runtime, eventName string, payload any) (melodyeventcontract.Event, error) {
-    return nil, errors.New("redis: connection refused")
-}
-
 /* rateRefreshCommandRuntime wires the refresh service over the in-memory catalogue and a provider answering
    the document given, under the names the command resolves. */
-func rateRefreshCommandRuntime(t *testing.T, document string, dispatcherOf func(melodyeventcontract.EventDispatcher) melodyeventcontract.EventDispatcher) melodyruntimecontract.Runtime {
+func rateRefreshCommandRuntime(t *testing.T, document string, dispatcherOf func(melodyeventcontract.EventDispatcher) melodyeventcontract.EventDispatcher, cacheOf func(melodycachecontract.Cache) melodycachecontract.Cache) melodyruntimecontract.Runtime {
     t.Helper()
 
     provider := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
@@ -62,8 +53,12 @@ func rateRefreshCommandRuntime(t *testing.T, document string, dispatcherOf func(
     cacheBackend := melodycache.NewInMemoryBackend(128, time.Minute, clockInstance)
     cacheInstance := melodycache.NewManagerOwningBackend(cacheBackend, examplecache.NewGobSerializer())
     t.Cleanup(func() { _ = cacheInstance.Close() })
+    var cache melodycachecontract.Cache = cacheInstance
+    if nil != cacheOf {
+        cache = cacheOf(cache)
+    }
 
-    currencyService := service.NewCurrencyService(currencyRepository, cacheInstance, dispatcher, clockInstance)
+    currencyService := service.NewCurrencyService(currencyRepository, cache, dispatcher, clockInstance)
     refreshService := service.NewRateRefreshService(currencyService, clockInstance, provider.URL+"/v1/", "EUR")
 
     client := httpclient.NewHttpClient(httpclient.NewHttpClientConfig(provider.URL+"/v1/", 2*time.Second, nil))
@@ -111,7 +106,7 @@ func tableCellsOf(t *testing.T, rendered string) []string {
 /* a run that refused a quote still wrote the others, and the table is the only place the operator reads
    how many: it is printed BEFORE the refusal takes the exit code */
 func TestCurrencyRefreshRatesCommandPrintsTheTableBeforeHandingBackARefusedQuote(t *testing.T) {
-    runtimeInstance := rateRefreshCommandRuntime(t, `{"base":"EUR","asOf":"2026-09-08T09:00:00Z","rates":{"EUR":1,"USD":1.0842,"RON":0}}`, nil)
+    runtimeInstance := rateRefreshCommandRuntime(t, `{"base":"EUR","asOf":"2026-09-08T09:00:00Z","rates":{"EUR":1,"USD":1.0842,"RON":0}}`, nil, nil)
 
     buffer := &bytes.Buffer{}
     runErr := NewCurrencyRefreshRatesCommand().Run(runtimeInstance, newBoolFlagContext("unused", false, buffer))
@@ -125,19 +120,49 @@ func TestCurrencyRefreshRatesCommandPrintsTheTableBeforeHandingBackARefusedQuote
 }
 
 /* a backend that failed part way is not a refused quote: the sweep stops, the table shows what was written
-   before it, and the failure — the backend's, not the provider's — takes the exit code after the table */
+   before it, and the failure — the backend's, not the provider's — takes the exit code after the table. The
+   line agrees with the table it follows: the quote counted UPDATED is named as written, where the operator
+   used to read "could not be written" under UPDATED 1 */
 func TestCurrencyRefreshRatesCommandPrintsTheTableBeforeHandingBackABackendFailure(t *testing.T) {
     runtimeInstance := rateRefreshCommandRuntime(t, `{"base":"EUR","asOf":"2026-09-08T09:00:00Z","rates":{"EUR":1,"USD":1.0842,"RON":4.9761}}`, func(dispatcher melodyeventcontract.EventDispatcher) melodyeventcontract.EventDispatcher {
-        return &refusingRateDispatcher{EventDispatcher: dispatcher}
-    })
+        return &refusingDispatcher{EventDispatcher: dispatcher}
+    }, nil)
 
     buffer := &bytes.Buffer{}
     runErr := NewCurrencyRefreshRatesCommand().Run(runtimeInstance, newBoolFlagContext("unused", false, buffer))
-    if nil == runErr || true == strings.Contains(runErr.Error(), "the catalogue refused") || false == strings.Contains(runErr.Error(), "could not be written") {
-        t.Fatalf("expected the backend failure to take the exit code as itself, got %v", runErr)
+    if nil == runErr || true == strings.Contains(runErr.Error(), "the catalogue refused") || true == strings.Contains(runErr.Error(), "could not be written") || false == strings.Contains(runErr.Error(), "the quote was written, but the listeners that drop its cache entries were not told") {
+        t.Fatalf("expected the backend failure to take the exit code as itself, naming the quote as written, got %v", runErr)
     }
 
     if cells := tableCellsOf(t, buffer.String()); "1" != cells[2] || "0" != cells[6] {
         t.Fatalf("expected the table with the one quote written before the backend failed and none refused, got %v", cells)
+    }
+}
+
+/* refusingRateCache refuses every delete, the way the cache drop of an unchanged quote meets a redis that is gone */
+type refusingRateCache struct {
+    melodycachecontract.Cache
+}
+
+func (instance *refusingRateCache) Delete(key string) error {
+    return errors.New("redis: connection refused")
+}
+
+/* a document the catalogue already holds writes nothing, and the sweep stops on the cache drop the unchanged
+   branch performs: the line names the drop, not a write that never happened, and the table counts the quote
+   UNCHANGED before the failure takes the exit code */
+func TestCurrencyRefreshRatesCommandNamesTheCacheDropThatFailedOverAnUnchangedQuote(t *testing.T) {
+    runtimeInstance := rateRefreshCommandRuntime(t, `{"base":"EUR","asOf":"2026-01-01T00:00:00Z","rates":{"EUR":1,"USD":1.1,"RON":5.05}}`, nil, func(cache melodycachecontract.Cache) melodycachecontract.Cache {
+        return &refusingRateCache{Cache: cache}
+    })
+
+    buffer := &bytes.Buffer{}
+    runErr := NewCurrencyRefreshRatesCommand().Run(runtimeInstance, newBoolFlagContext("unused", false, buffer))
+    if nil == runErr || true == strings.Contains(runErr.Error(), "could not be written") || false == strings.Contains(runErr.Error(), "the cache entries of an unchanged quote could not be dropped") {
+        t.Fatalf("expected the failed cache drop to take the exit code naming the unchanged quote, got %v", runErr)
+    }
+
+    if cells := tableCellsOf(t, buffer.String()); "0" != cells[2] || "1" != cells[4] {
+        t.Fatalf("expected the table with none written and the one unchanged quote before the cache drop failed, got %v", cells)
     }
 }

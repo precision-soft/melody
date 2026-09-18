@@ -2,14 +2,22 @@ package subscriber
 
 import (
     "context"
+    "errors"
     "strings"
     "testing"
+    "time"
 
+    examplecache "github.com/precision-soft/melody/v3/.example/cache"
     "github.com/precision-soft/melody/v3/.example/event"
     "github.com/precision-soft/melody/v3/.example/twofactor"
+    melodycache "github.com/precision-soft/melody/v3/cache"
+    melodycachecontract "github.com/precision-soft/melody/v3/cache/contract"
     melodyclock "github.com/precision-soft/melody/v3/clock"
     melodycontainer "github.com/precision-soft/melody/v3/container"
+    melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
     melodyevent "github.com/precision-soft/melody/v3/event"
+    melodylogging "github.com/precision-soft/melody/v3/logging"
+    melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     melodyruntime "github.com/precision-soft/melody/v3/runtime"
 )
 
@@ -57,5 +65,67 @@ func TestTwoFactorEnrollmentSubscriber_APayloadThatIsNotADeletionReleasesNothing
     var absent *event.UserDeletedEvent
     if statements := deleteEnrollmentStatementsAfter(t, event.UserDeletedEventName, absent); 0 != len(statements) {
         t.Fatalf("expected no statement for a nil deletion, got %v", statements)
+    }
+}
+
+/* refusingCache refuses every delete, the way the cache listener meets its backend under a redis outage */
+type refusingCache struct {
+    melodycachecontract.Cache
+}
+
+func (instance *refusingCache) Delete(key string) error {
+    return errors.New("redis: connection refused")
+}
+
+/* the dispatcher ends a dispatch at the first listener that fails, and the composition root registers the cache subscriber before this one: at the cache listener's own priority a redis outage at the moment of the deletion meant the account was deleted, the door answered 500, the event was never published again for that identifier, and the enrollment stayed for the next holder of it. The release outranks the cache listener on the deletion event, read off the two real subscribers, and with the cache refusing its first delete the enrollment is still released: the dispatch fails on the cache, after the row is gone. */
+func TestTwoFactorEnrollmentSubscriber_ReleasesTheEnrollmentBeforeTheCacheListenerRuns(t *testing.T) {
+    database, recorder := newRecordingDatabase()
+    enrollmentSubscriber := NewTwoFactorEnrollmentSubscriber(twofactor.NewStore(database))
+    cacheSubscriber := NewUserEventSubscriber()
+
+    releasePriority := enrollmentSubscriber.SubscribedEvents()[event.UserDeletedEventName][0].Priority()
+    cachePriority := cacheSubscriber.SubscribedEvents()[event.UserDeletedEventName][0].Priority()
+    if releasePriority <= cachePriority {
+        t.Fatalf("expected the release to outrank the cache listener on %s, got %d against %d", event.UserDeletedEventName, releasePriority, cachePriority)
+    }
+
+    clockInstance := melodyclock.NewSystemClock()
+    dispatcher := melodyevent.NewEventDispatcher(clockInstance)
+    dispatcher.AddSubscriber(cacheSubscriber)
+    dispatcher.AddSubscriber(enrollmentSubscriber)
+
+    containerInstance := melodycontainer.NewContainer()
+    t.Cleanup(func() { _ = containerInstance.Close() })
+    backend := melodycache.NewInMemoryBackend(128, time.Minute, clockInstance)
+    cacheInstance := &refusingCache{Cache: melodycache.NewManagerOwningBackend(backend, examplecache.NewGobSerializer())}
+    melodycontainer.MustRegister(
+        containerInstance,
+        melodycache.ServiceCache,
+        func(resolver melodycontainercontract.Resolver) (melodycachecontract.Cache, error) {
+            return cacheInstance, nil
+        },
+    )
+    melodycontainer.MustRegister(
+        containerInstance,
+        melodylogging.ServiceLogger,
+        func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
+            return melodylogging.NewNopLogger(), nil
+        },
+    )
+    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, event.UserDeletedEventName, event.NewUserDeletedEvent("user-4", "dave"))
+    if nil == dispatchErr {
+        t.Fatalf("expected the dispatch to fail on the refusing cache")
+    }
+
+    released := 0
+    for _, statement := range recorder.recordedQueries() {
+        if true == strings.HasPrefix(statement, "DELETE FROM `melody_example_v3_two_factor`") && true == strings.Contains(statement, "WHERE (user_identifier = 'user-4')") {
+            released++
+        }
+    }
+    if 1 != released {
+        t.Fatalf("expected the enrollment of user-4 released ahead of the cache listener that failed, got %d releases in %v", released, recorder.recordedQueries())
     }
 }

@@ -76,6 +76,7 @@ func runMysqlCheck(baseUrl string, redisAddress string) {
 
     assertMysqlProductAuditTrail(client, baseUrl, database)
     assertMysqlPasswordRedactedInTrail(client, baseUrl, database)
+    assertMysqlDeletedAccountReleasesItsEnrollment(client, baseUrl, database)
 }
 
 func mysqlDsnOrSkip() string {
@@ -330,6 +331,42 @@ func updateMysqlProductProbe(client *http.Client, baseUrl string, productId stri
     body := `{"name":"` + mysqlProductProbeRenamed + `","description":"probe","categoryId":"cat-1","price":11,"currencyId":"cur-eur","stock":2}`
 
     requireMysqlWrite(client, "PUT", baseUrl, "/products/api/update/"+productId+"/", body, "rename the audit probe")
+}
+
+/* assertMysqlDeletedAccountReleasesItsEnrollment enrolls a second factor on a throwaway account and deletes the account through the admin door, then reads the enrollment table the harness's own way. The example mints identifiers as the highest suffix plus one, so a row that outlives its account is the next holder's second factor: the schema cascades the row with the account and a subscriber releases it ahead of the cache listener, and what is asserted is the state, not either mechanism's word for it. The row is read BEFORE the deletion too, so a release is not confused with an enrollment that never landed. */
+func assertMysqlDeletedAccountReleasesItsEnrollment(client *http.Client, baseUrl string, database *bun.DB) {
+    username := liveExampleUnique("e2e-release")
+
+    userId := createMysqlUserProbe(client, baseUrl, username)
+
+    enrolled := newSignedInLiveExampleClient(baseUrl, username, "first-password")
+    response := enrolled.call(mysqlLabel, liveExampleRequest{method: "POST", path: twoFactorEnrollRoute})
+    requireLiveExampleStatus(mysqlLabel, twoFactorEnrollRoute, response, http.StatusOK)
+
+    if before := countMysqlEnrollments(database, userId); 1 != before {
+        fail("%s: the enrollment of %q is held in %d rows before the deletion, wanted the one row the enrollment wrote", mysqlLabel, userId, before)
+    }
+
+    requireMysqlWrite(client, "DELETE", baseUrl, "/users/api/delete/"+userId+"/", "", "delete the enrolled probe account")
+
+    if after := countMysqlEnrollments(database, userId); 0 != after {
+        fail("%s: the enrollment of the deleted account %q still holds %d rows — the next holder of the identifier starts enrolled with this one's secret", mysqlLabel, userId, after)
+    }
+
+    removeExampleV3AuditTrail(mysqlLabel, database, "user", userId)
+
+    pass("deleting an enrolled account through the admin door leaves no row for its identifier in %s (read out of band, one row before)", twoFactorTable)
+}
+
+func countMysqlEnrollments(database *bun.DB, user string) int {
+    query := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s = ?", twoFactorTable, twoFactorPrimaryKeyColumn)
+
+    count := 0
+    if scanErr := database.QueryRowContext(context.Background(), query, user).Scan(&count); nil != scanErr {
+        fail("%s: count the enrollments of %q from the harness's own connection: %v", mysqlLabel, user, scanErr)
+    }
+
+    return count
 }
 
 func createMysqlUserProbe(client *http.Client, baseUrl string, username string) string {

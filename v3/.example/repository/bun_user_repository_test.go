@@ -97,6 +97,28 @@ func TestAsUsernameAlreadyExists_TranslatesOnlyTheUsernameIndexRefusal(t *testin
     }
 }
 
+/* mysql renders the duplicated value BEFORE the key clause and does not escape it, so a username that carries the
+   clause's own spelling — the admin doors admit quotes in a name, and a rename onto `for key 'z'` was measured
+   live — put a first-clause reader onto the value: the key it read was the value's, the refusal stayed the
+   driver's and the door answered 500 over a collision it answers 400. The clause is the tail of the message,
+   and the second row spells a whole clause of ANOTHER index inside the value. */
+func TestAsUsernameAlreadyExists_ReadsTheKeyClauseAtTheTailOfTheMessage(t *testing.T) {
+    for _, value := range []string{
+        "for key 'z'",
+        "for key 'melody_example_v3_user.PRIMARY'",
+    } {
+        collision := exception.NewError(
+            "audited update failed",
+            nil,
+            fmt.Errorf("Error 1062 (23000): Duplicate entry '%s' for key 'melody_example_v3_user.%s'", value, migration.UserUsernameIndexName),
+        )
+
+        if false == errors.Is(asUsernameAlreadyExists(collision), ErrUsernameAlreadyExists) {
+            t.Fatalf("expected the collision on the username index to be read past the value %q, got %v", value, asUsernameAlreadyExists(collision))
+        }
+    }
+}
+
 func TestAsUsernameAlreadyExists_LeavesEveryOtherFailureAlone(t *testing.T) {
     primaryKey := exception.NewError(
         "audited insert failed",

@@ -45,7 +45,7 @@ func (instance *Module) registerSubscribers(eventDispatcher melodyeventcontract.
         subscriber.NewSecurityAuthenticationEventSubscriber(),
     )
 
-    /* the store is nil when the environment gave the example no database, and then there is no enrollment to release — the same switch the enroll and verify routes read */
+    /* the store is nil when the environment gave the example no database, and then there is no enrollment to release — the same switch the enroll and verify routes read. It is registered AFTER the cache subscriber and runs BEFORE it: the release carries a higher priority on the deletion event, because a dispatch ends at the first listener that fails and a cache outage must not leave the enrollment standing */
     if nil != instance.twoFactorStore {
         eventDispatcher.AddSubscriber(
             subscriber.NewTwoFactorEnrollmentSubscriber(instance.twoFactorStore),

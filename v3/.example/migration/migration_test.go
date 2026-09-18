@@ -45,6 +45,29 @@ func TestUpSchemaCreatesEveryTableTolerantlyThenTheConstraint(t *testing.T) {
     })
 }
 
+/* the enrollment goes with its account by the SCHEMA: a listener releases it on the deletion event too, but a
+   dispatch stops at the first listener that fails, and a row left behind starts the next holder of the recycled
+   identifier enrolled with the previous holder's secret. The key is declared on the DDL the up migration emits,
+   and it can only be declared over a user table that already exists, which the order of the statements pins. */
+func TestUpSchemaTiesATwoFactorRowToItsAccount(t *testing.T) {
+    if false == strings.Contains(createTwoFactorTableSql, "FOREIGN KEY (`user_identifier`) REFERENCES `melody_example_v3_user` (`id`) ON DELETE CASCADE") {
+        t.Fatalf("expected the two-factor table to cascade its rows with the account, got %s", createTwoFactorTableSql)
+    }
+
+    userIndex, twoFactorIndex := -1, -1
+    for index, statement := range schemaUpStatementList {
+        if true == strings.HasPrefix(statement, "CREATE TABLE IF NOT EXISTS `melody_example_v3_user`") {
+            userIndex = index
+        }
+        if true == strings.HasPrefix(statement, "CREATE TABLE IF NOT EXISTS `melody_example_v3_two_factor`") {
+            twoFactorIndex = index
+        }
+    }
+    if -1 == userIndex || -1 == twoFactorIndex || twoFactorIndex < userIndex {
+        t.Fatalf("expected the user table created before the two-factor table that references it, got user at %d and two-factor at %d", userIndex, twoFactorIndex)
+    }
+}
+
 func TestDownSchemaDropsTheConstraintFirstAndTheTablesInReverse(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = indexPresenceRows(1)

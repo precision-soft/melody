@@ -562,7 +562,9 @@ func (instance *refusingDispatcher) DispatchName(runtimeInstance melodyruntimeco
 
 /* a backend that fails is not a quote the catalogue refused: the sweep stops and hands the failure back as
    itself, with the quote written before its dispatch failed counted as written — where the previous form
-   counted every currency refused and told the cron log that every other quote was written */
+   counted every currency refused and told the cron log that every other quote was written. The message says
+   what the door did: the quote WAS written and its listeners were not told, where the line under a table
+   counting it UPDATED used to read "could not be written" */
 func TestRateRefreshServiceRefresh_StopsOnABackendFailureInsteadOfBlamingTheProvider(t *testing.T) {
     refresh, currencyService, runtimeInstance, recordingRepository := rateRefreshUnderTest(t, `{"base":"EUR","asOf":"2026-09-08T09:00:00Z","rates":{"EUR":1,"USD":1.0842,"RON":4.9761}}`)
     currencyService.eventDispatcher = &refusingDispatcher{EventDispatcher: currencyService.eventDispatcher}
@@ -572,8 +574,12 @@ func TestRateRefreshServiceRefresh_StopsOnABackendFailureInsteadOfBlamingTheProv
         t.Fatal("a refused dispatch was swallowed")
     }
 
-    if true == strings.Contains(err.Error(), "the catalogue refused") || false == strings.Contains(err.Error(), "could not be written") {
-        t.Fatalf("the failure reads %q, wanted the backend named rather than the provider", err.Error())
+    if true == strings.Contains(err.Error(), "the catalogue refused") || true == strings.Contains(err.Error(), "could not be written") || false == strings.Contains(err.Error(), "stopped after EUR: the quote was written, but the listeners that drop its cache entries were not told") {
+        t.Fatalf("the failure reads %q, wanted the written quote named as written and the backend named rather than the provider", err.Error())
+    }
+
+    if "written" != exception.LogContext(err)["outcome"] {
+        t.Fatalf("the failure does not carry the outcome the message names: %v", exception.LogContext(err))
     }
 
     if false == strings.Contains(err.Error(), "connection refused") && false == strings.Contains(fmt.Sprint(exception.LogContext(err)), "connection refused") {
@@ -597,5 +603,46 @@ func TestRateRefreshServiceRefresh_RefusesADocumentThatNamesNoBaseAsSuch(t *test
 
     if 0 != recordingRepository.updates.Load() {
         t.Fatalf("the refusal came after %d writes, wanted none", recordingRepository.updates.Load())
+    }
+}
+
+/* refusingCache refuses every delete, the way the cache drop of an unchanged quote meets its backend under a
+   redis outage; every other door is the recording cache's. */
+type refusingCache struct {
+    *ttlRecordingCache
+}
+
+func (instance *refusingCache) Delete(key string) error {
+    return errors.New("redis: connection refused")
+}
+
+/* an unchanged quote is never written: the sweep stops on the cache drop the unchanged branch performs, and the
+   message names the drop — the line used to say the quote could not be written, over a quote the door had
+   compared and left as it was — and the quote is counted unchanged, which it is */
+func TestRateRefreshServiceRefresh_NamesTheCacheDropThatFailedOverAnUnchangedQuote(t *testing.T) {
+    refresh, currencyService, runtimeInstance, recordingRepository := rateRefreshUnderTest(t, `{"base":"EUR","asOf":"2026-09-08T09:00:00Z","rates":{"EUR":1,"USD":1.0842,"RON":4.9761}}`)
+
+    if _, err := refresh.Refresh(runtimeInstance); nil != err {
+        t.Fatalf("the first refresh failed: %v", err)
+    }
+    updatesAfterFirst := recordingRepository.updates.Load()
+
+    currencyService.cache = &refusingCache{ttlRecordingCache: currencyService.cache.(*ttlRecordingCache)}
+
+    outcome, err := refresh.Refresh(runtimeInstance)
+    if nil == err {
+        t.Fatal("a refused cache drop was swallowed")
+    }
+
+    if true == strings.Contains(err.Error(), "could not be written") || false == strings.Contains(err.Error(), "stopped at EUR: the cache entries of an unchanged quote could not be dropped") {
+        t.Fatalf("the failure reads %q, wanted the cache drop of an unchanged quote named", err.Error())
+    }
+
+    if "unchanged" != exception.LogContext(err)["outcome"] {
+        t.Fatalf("the failure does not carry the outcome the message names: %v", exception.LogContext(err))
+    }
+
+    if 1 != outcome.Unchanged || 0 != outcome.Updated || updatesAfterFirst != recordingRepository.updates.Load() {
+        t.Fatalf("the sweep reported %+v after %d writes, wanted one unchanged, none written, and the sweep stopped", outcome, recordingRepository.updates.Load()-updatesAfterFirst)
     }
 }

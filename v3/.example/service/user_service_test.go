@@ -3,6 +3,7 @@ package service
 import (
     "context"
     "errors"
+    "slices"
     "strings"
     "testing"
     "time"
@@ -164,5 +165,49 @@ func TestUserService_GrantRoleHealsTheCacheWhenTheRoleIsAlreadyHeld(t *testing.T
     healed, _, _ := userService.FindByUsername("user")
     if 2 != len(healed.Roles) || entity.RoleEditor != healed.Roles[1] {
         t.Fatalf("expected the already-held answer to drop the stale entries so the directory is read again, got %v", healed.Roles)
+    }
+}
+
+/* the already-held answer drops the THREE entries an account is served from, by name: the heal above reads the
+   account by id again and would be satisfied by that one key alone, while the list — served to every reader of
+   the directory — kept the old roles for the life of the cache */
+func TestUserService_GrantRoleAlreadyHeldDropsTheListEntryToo(t *testing.T) {
+    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil))
+    if nil != repositoryErr {
+        t.Fatalf("unexpected repository error: %v", repositoryErr)
+    }
+
+    clockInstance := melodyclock.NewSystemClock()
+    dispatcher := newRecordingDispatcher(clockInstance, event.UserUpdatedEventName)
+
+    containerInstance := melodycontainer.NewContainer()
+    t.Cleanup(func() { _ = containerInstance.Close() })
+    melodycontainer.MustRegister(
+        containerInstance,
+        melodylogging.ServiceLogger,
+        func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
+            return melodylogging.NewNopLogger(), nil
+        },
+    )
+    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+
+    cacheInstance := newTtlRecordingCache()
+    userService := NewUserService(userRepository, cacheInstance, dispatcher.dispatcher)
+
+    cached, found, _ := userService.FindByUsername("editor")
+    if false == found || false == slices.Contains(cached.Roles, entity.RoleEditor) {
+        t.Fatalf("expected the seeded editor holding its role, got %v", cached)
+    }
+
+    dropsBefore := len(cacheInstance.deletedKeyList())
+    if _, outcome, grantErr := userService.GrantRole(runtimeInstance, cached.Id, entity.RoleEditor); nil != grantErr || repository.GrantRoleAlreadyHeld != outcome {
+        t.Fatalf("expected the role found held, got %d, %v", outcome, grantErr)
+    }
+
+    dropped := cacheInstance.deletedKeyList()[dropsBefore:]
+    for _, wanted := range []string{CacheKeyUserById(cached.Id), CacheKeyUserByUsername("editor"), CacheKeyUserList} {
+        if false == slices.Contains(dropped, wanted) {
+            t.Fatalf("expected the already-held answer to drop %q, it dropped %v", wanted, dropped)
+        }
     }
 }

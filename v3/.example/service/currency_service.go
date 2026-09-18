@@ -256,6 +256,21 @@ const (
     RateUpdateWritten
 )
 
+/* rateUpdateOutcomeName spells an outcome the way the refresh reports it, for the context of a failure that
+   stopped the sweep: the word is the heading the same quote is counted under in the table. */
+func rateUpdateOutcomeName(outcome RateUpdateOutcome) string {
+    switch outcome {
+    case RateUpdateWritten:
+        return "written"
+    case RateUpdateUnchanged:
+        return "unchanged"
+    case RateUpdateStale:
+        return "stale"
+    default:
+        return "absent"
+    }
+}
+
 /* UpdateRate is the door the rate refresh writes through, and it goes through the service rather than
    straight to the repository for one reason: the currency list and every currency by id are cached, and
    the listeners that drop those entries are subscribed to the updated event this dispatches. A rate written

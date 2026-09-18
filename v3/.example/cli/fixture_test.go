@@ -2,6 +2,7 @@ package cli
 
 import (
     "context"
+    "errors"
     "io"
     "testing"
     "time"
@@ -40,6 +41,15 @@ type commandFixture struct {
 }
 
 func newCommandFixture(t *testing.T) *commandFixture {
+    t.Helper()
+
+    return newCommandFixtureWithDispatcher(t, nil)
+}
+
+/* newCommandFixtureWithDispatcher is the fixture with the dispatcher the user service dispatches through
+   decorated — a dispatcher that refuses is how a command meets listeners whose backend is gone, after the write
+   they follow has landed. */
+func newCommandFixtureWithDispatcher(t *testing.T, dispatcherOf func(melodyeventcontract.EventDispatcher) melodyeventcontract.EventDispatcher) *commandFixture {
     t.Helper()
 
     storage := persistence.NewCatalogStorage(nil)
@@ -85,10 +95,15 @@ func newCommandFixture(t *testing.T) *commandFixture {
         0,
     )
 
+    var dispatching melodyeventcontract.EventDispatcher = dispatcher
+    if nil != dispatcherOf {
+        dispatching = dispatcherOf(dispatching)
+    }
+
     userService := service.NewUserService(
         userRepository,
         cacheInstance,
-        dispatcher,
+        dispatching,
     )
 
     containerInstance := melodycontainer.NewContainer()
@@ -194,3 +209,13 @@ func (instance *flagContext) Writer() io.Writer {
 }
 
 var _ melodyclicontract.Context = (*flagContext)(nil)
+
+/* refusingDispatcher refuses every dispatch, the way a listener whose backend is gone would; the write it
+   follows has already landed. */
+type refusingDispatcher struct {
+    melodyeventcontract.EventDispatcher
+}
+
+func (instance *refusingDispatcher) DispatchName(runtimeInstance melodyruntimecontract.Runtime, eventName string, payload any) (melodyeventcontract.Event, error) {
+    return nil, errors.New("redis: connection refused")
+}

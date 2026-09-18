@@ -177,16 +177,24 @@ func (instance *RateRefreshService) Refresh(runtimeInstance melodyruntimecontrac
                Any other error is the backend's — the repository, the cache drop of an unchanged quote, the
                dispatch after a written one — and is not the provider's fault: it stops the sweep and is
                handed back as itself, so a redis outage on a tick reads in the cron log as a redis outage
-               and not as a quote the catalogue refused. A quote already written before its dispatch failed
-               is counted written, which it is. */
+               and not as a quote the catalogue refused. The message names what the write door DID, not the
+               class of the failure: a quote written before its dispatch failed is counted written, which it
+               is, and the console said "could not be written" under a table counting it UPDATED; an
+               unchanged quote whose cache drop failed was never written at all. */
             if false == errors.Is(updateErr, ErrUnusableRate) {
-                if RateUpdateWritten == updateOutcome {
+                message := "the rate refresh stopped at " + currency.Code + ": the quote could not be written"
+                switch updateOutcome {
+                case RateUpdateWritten:
                     outcome.Updated++
+                    message = "the rate refresh stopped after " + currency.Code + ": the quote was written, but the listeners that drop its cache entries were not told; the entries stand until the next tick"
+                case RateUpdateUnchanged:
+                    outcome.Unchanged++
+                    message = "the rate refresh stopped at " + currency.Code + ": the cache entries of an unchanged quote could not be dropped"
                 }
 
                 return outcome, exception.NewError(
-                    "the rate refresh stopped at "+currency.Code+": the quote could not be written",
-                    exceptioncontract.Context{"currencyCode": currency.Code},
+                    message,
+                    exceptioncontract.Context{"currencyCode": currency.Code, "outcome": rateUpdateOutcomeName(updateOutcome)},
                     updateErr,
                 )
             }

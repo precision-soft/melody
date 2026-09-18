@@ -406,11 +406,16 @@ func errorChainNamesKey(err error, indexName string) bool {
 }
 
 /* duplicateRefusalNamesKey reads the key clause of a MySQL duplicate refusal — "for key '<table>.<index>'" — and
-   answers whether the key it names is the index given, bare or qualified by its table. */
+   answers whether the key it names is the index given, bare or qualified by its table. The clause is the LAST
+   one in the message: the duplicated value is rendered before the clause, unescaped, and may spell the clause
+   itself — a username carrying "for key '" moved a first-clause reader onto the value, the refusal stayed a
+   bare driver error and the admin doors answered 500 over a collision the check answers 400. Searching the
+   whole text for the index name has the opposite false: a value that spells the index's name over a PRIMARY
+   key collision is a duplicate identifier, which the test pins. */
 func duplicateRefusalNamesKey(text string, indexName string) bool {
     const keyClause = "for key '"
 
-    clauseStart := strings.Index(text, keyClause)
+    clauseStart := strings.LastIndex(text, keyClause)
     if -1 == clauseStart {
         return false
     }

@@ -46,6 +46,9 @@
 #   - V3 DATABASE RESET  example:db:reset refuses without --force, and with it drops the schema, applies it
 #                        again, empties the audit trail the module's table keeps and reseeds all four
 #                        nomenclatures — the one state this application has, restored from the database side
+#   - V3 TWO-FACTOR RELEASE  the schema the reset just applied ties an enrollment to its account with a
+#                        cascading foreign key, read out of information_schema — the half of the release
+#                        that holds when no listener runs
 #   - V3 EXCHANGE RATES  the seeded quote, the refresh that replaces it with the provider's, the quote read
 #                        back out of band, the report export, and the two configurations that gate the door:
 #                        a provider that refuses exits non-zero and moves nothing, an absent one is a no-op
@@ -108,7 +111,7 @@ e2e_require_dev_service
 # mismatch message prints both numbers, so the count to move to is in the failure itself. A run that took one of
 # the degraded early-exit branches (an unreachable supervised app, a cold-cache timeout) legitimately executes
 # fewer checks; it is already red from the check_fail that branch raised
-EXPECTED_CHECK_COUNT_INTEGER=152
+EXPECTED_CHECK_COUNT_INTEGER=153
 readonly EXPECTED_CHECK_COUNT_INTEGER
 
 # state the scope in the output, so a reader never has to infer which major these checks covered
@@ -1434,6 +1437,28 @@ else
 fi
 
 check_section_end "V3 DATABASE RESET" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
+# V3 TWO-FACTOR RELEASE — the enrollment table the reset just recreated cascades its rows with the account
+# ---------------------------------------------------------------------------------------------------
+
+check_section_start "V3 TWO-FACTOR RELEASE" "${TAG_VALIDATE}" "e2e"
+
+# The example mints identifiers as the highest suffix plus one, so an enrollment row that outlives its account
+# is the next holder's second factor. A subscriber releases the row on the deletion event, and the e2e harness
+# drives that door end to end; what this section reads is the OTHER half, the one that holds when no listener
+# runs at all: the foreign key the schema declares, cascading the row with the account. It sits after the
+# reset because CREATE TABLE IF NOT EXISTS leaves a table an older volume already held as it was — the reset
+# is the door that brings such a volume to the schema as it stands, and only the schema the reset applied can
+# be read here as the schema this tree ships.
+V3_TWO_FACTOR_CASCADE_COUNT_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT COUNT(*) FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = 'melody_example_v3' AND TABLE_NAME = 'melody_example_v3_two_factor' AND REFERENCED_TABLE_NAME = 'melody_example_v3_user' AND DELETE_RULE = 'CASCADE'")"
+if [[ "1" = "${V3_TWO_FACTOR_CASCADE_COUNT_STRING}" ]]; then
+    check_pass "the v3 two-factor table cascades its rows with the account they were enrolled for (foreign key read out of information_schema after the reset)"
+else
+    check_fail "the v3 two-factor table declares ${V3_TWO_FACTOR_CASCADE_COUNT_STRING:-<no answer>} cascading keys onto the user table, wanted exactly one"
+fi
+
+check_section_end "V3 TWO-FACTOR RELEASE" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
 # V3 EXCHANGE RATES — the outbound http client, driven through the door that needs one
