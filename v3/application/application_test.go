@@ -206,6 +206,66 @@ func TestRun_MarksTheOpenApiRegistryServingBeforeItDispatches(t *testing.T) {
     }
 }
 
+/* openApiRegistryWithoutMarker stands under the published name and carries no MarkServing: the shape of an application's own registry type, or of a double */
+type openApiRegistryWithoutMarker struct{}
+
+/* the marker is asked for, not demanded: a registry registered under the published name that carries no MarkServing — a double, an application's own registry type — is left alone, and Run goes on to dispatch. Marking the registry also RESOLVES it, so a provider that fails is the sister case: Run leaves it unmarked and the command still runs, the failure being the consumer's to see. */
+func TestRun_LeavesARegistryWithoutTheMarkerAloneAndDispatches(t *testing.T) {
+    originalArguments := os.Args
+    os.Args = []string{"probe", "probe:serving"}
+    defer func() { os.Args = originalArguments }()
+
+    applicationInstance := NewApplication(
+        context.Background(),
+        testhelper.NewEmbeddedEnvFs(),
+        testhelper.NewEmbeddedStaticFs(),
+    )
+
+    applicationInstance.RegisterService(
+        openapi.ServiceOpenApiRegistry,
+        func(resolver containercontract.Resolver) (*openApiRegistryWithoutMarker, error) {
+            return &openApiRegistryWithoutMarker{}, nil
+        },
+    )
+
+    probe := &servingProbeApplicationCommand{}
+    applicationInstance.RegisterCliCommand(probe)
+
+    applicationInstance.Run()
+
+    if false == probe.ran {
+        t.Fatal("expected the command to run beside a registry that carries no marker")
+    }
+}
+
+func TestRun_LeavesARegistryWhoseProviderFailsAloneAndDispatches(t *testing.T) {
+    originalArguments := os.Args
+    os.Args = []string{"probe", "probe:serving"}
+    defer func() { os.Args = originalArguments }()
+
+    applicationInstance := NewApplication(
+        context.Background(),
+        testhelper.NewEmbeddedEnvFs(),
+        testhelper.NewEmbeddedStaticFs(),
+    )
+
+    applicationInstance.RegisterService(
+        openapi.ServiceOpenApiRegistry,
+        func(resolver containercontract.Resolver) (*openApiRegistryServingProbe, error) {
+            return nil, exception.NewError("the probe registry refuses to build", nil, nil)
+        },
+    )
+
+    probe := &servingProbeApplicationCommand{}
+    applicationInstance.RegisterCliCommand(probe)
+
+    applicationInstance.Run()
+
+    if false == probe.ran {
+        t.Fatal("expected the command to run beside a registry whose provider failed")
+    }
+}
+
 /* failingCloser is a container service whose Close always fails, so the test controls which call discovers the teardown failure */
 type failingCloser struct{}
 

@@ -60,6 +60,51 @@ func TestPasswordMatches_RefusesAWrongPasswordAgainstARealDigest(t *testing.T) {
     }
 }
 
+/* countingComparisons routes the comparison through a counter for the duration of the test and hands the real bcrypt back afterwards. */
+func countingComparisons(t *testing.T) *int {
+    t.Helper()
+
+    calls := 0
+    previous := comparePasswordHash
+    comparePasswordHash = func(passwordHash []byte, plaintextPassword []byte) error {
+        calls++
+
+        return previous(passwordHash, plaintextPassword)
+    }
+    t.Cleanup(func() { comparePasswordHash = previous })
+
+    return &calls
+}
+
+/* the equalizing branch fires for a stored value bcrypt cannot read and for nothing else: a wrong password against a real digest pays one comparison, a value bcrypt refuses on the prefix pays two — its own refusal plus the one it skipped. The floors above bound the time; this pins the count, which no loaded machine can move. */
+func TestPasswordMatches_PaysOneComparisonOnAWrongPasswordAndTwoOnAValueBcryptCannotRead(t *testing.T) {
+    calls := countingComparisons(t)
+    passwordHash := MustHashPassword("admin")
+
+    if true == PasswordMatches(passwordHash, "not-the-password") {
+        t.Fatalf("expected a wrong password to be refused")
+    }
+    if 1 != *calls {
+        t.Fatalf("expected a wrong password to pay exactly one comparison, got %d", *calls)
+    }
+
+    *calls = 0
+    if true == PasswordMatches(storedValueBcryptCannotRead("admin"), "admin") {
+        t.Fatalf("expected a stored value that is not a bcrypt digest to be refused")
+    }
+    if 2 != *calls {
+        t.Fatalf("expected a value bcrypt cannot read to pay the comparison it skipped as well, got %d", *calls)
+    }
+
+    *calls = 0
+    if false == PasswordMatches(passwordHash, "admin") {
+        t.Fatalf("expected the password that produced the digest to be accepted")
+    }
+    if 1 != *calls {
+        t.Fatalf("expected a match to pay exactly one comparison, got %d", *calls)
+    }
+}
+
 /* DummyPasswordMatch is what an absent username pays, and it is the yardstick the refusal above is
    equalized against; it runs one comparison against a digest it can read, so the equalizing branch must not
    fire for it. */

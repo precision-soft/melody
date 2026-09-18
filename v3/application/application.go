@@ -539,7 +539,7 @@ func markConfigurationServing(configuration configcontract.Configuration) {
     marker.MarkServing()
 }
 
-/* markOpenApiRegistryServing tells the openapi registry the wiring phase is over, so a Describe issued from here on is refused at its door instead of writing a plain map under the spec handler's readers. The registry is the application's to register, under its published name, so it is looked up by that name and asked for the marker the way the configuration is: a registry double without the method, or no registry at all, is left alone. */
+/* markOpenApiRegistryServing tells the openapi registry the wiring phase is over, so a Describe issued from here on is refused at its door instead of writing a plain map under the spec handler's readers. The registry is the application's to register, under its published name, so it is looked up by that name and asked for the marker the way the configuration is: a registry double without the method, or no registry at all, is left alone. Asking RESOLVES the registry, so its provider runs here, in every mode the application starts in; a provider that fails leaves the registry unmarked and its failure to the first consumer that asks for it. */
 func markOpenApiRegistryServing(serviceContainer containercontract.Container) {
     if false == serviceContainer.Has(openapi.ServiceOpenApiRegistry) {
         return

@@ -111,7 +111,7 @@ e2e_require_dev_service
 # mismatch message prints both numbers, so the count to move to is in the failure itself. A run that took one of
 # the degraded early-exit branches (an unreachable supervised app, a cold-cache timeout) legitimately executes
 # fewer checks; it is already red from the check_fail that branch raised
-EXPECTED_CHECK_COUNT_INTEGER=153
+EXPECTED_CHECK_COUNT_INTEGER=156
 readonly EXPECTED_CHECK_COUNT_INTEGER
 
 # state the scope in the output, so a reader never has to infer which major these checks covered
@@ -893,7 +893,7 @@ else
     if printf '%s' "${SIGNAL_OUTPUT_STRING}" | grep -q 'forced=0'; then
         check_pass "the example left on its own after one SIGINT (no SIGKILL was needed)"
     else
-        check_fail "the example was still running after the shutdown budget and had to be SIGKILLed"
+        check_fail "the example was still running 30 s after the SIGINT — the cap of this section, not the application's teardown budget — and had to be SIGKILLed"
     fi
 
     if printf '%s' "${SIGNAL_OUTPUT_STRING}" | grep -q 'signal_exit_status=0'; then
@@ -904,6 +904,100 @@ else
 fi
 
 check_section_end "GRACEFUL SIGNAL SHUTDOWN" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
+# TEARDOWN BUDGET — MELODY_TEARDOWN_TIMEOUT declared in .env reaches the clean shutdown's shield
+# ---------------------------------------------------------------------------------------------------
+
+check_section_start "TEARDOWN BUDGET" "${TAG_VALIDATE}" "e2e"
+
+# the key has no consumer in the example's own .env, so only the default was ever exercised end to end and a
+# change that ignored a declared value would leave every band green: this section declares the value itself,
+# in the .env.local of a binary built into its own directory (the same shape as the signal section above).
+# Two arms separate the declared value from the default. A budget of 1ms cannot hold the teardown, so the
+# shield abandons it, exits 1 and names the figure it was given — the only way the declared value is seen on
+# the way out. A budget of 0s is the documented "no deadline": a healthy teardown exits zero under it, where a
+# reader folding zero into the default would exit zero as well, which is why the 1ms arm carries the proof of
+# the round trip and the 0s arm only pins that zero is admitted at boot and on the exit path.
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "WORK_DIRECTORY=/tmp/example-teardown-e2e
+    rm -rf \"\${WORK_DIRECTORY}\"
+    mkdir -p \"\${WORK_DIRECTORY}\"
+    if ! go build -o \"\${WORK_DIRECTORY}/example-teardown\" . >/tmp/example-teardown-build.log 2>&1; then
+        echo build_failed=1
+        cat /tmp/example-teardown-build.log
+        exit 0
+    fi
+    cp .env \"\${WORK_DIRECTORY}/.env\"
+    cp -r public \"\${WORK_DIRECTORY}/public\"
+    cd \"\${WORK_DIRECTORY}\" || exit 1
+    for BUDGET in 1ms 0s; do
+        printf 'MELODY_HTTP_ADDRESS=:18081\nMELODY_TEARDOWN_TIMEOUT=%s\n' \"\${BUDGET}\" > .env.local
+        ./example-teardown > /tmp/example-teardown-\${BUDGET}.log 2>&1 &
+        APP_PID=\$!
+        READY=0
+        for _ in \$(seq 1 150); do
+            if wget -q -O /dev/null http://127.0.0.1:18081/health 2>/dev/null; then
+                READY=1
+                break
+            fi
+            if ! kill -0 \${APP_PID} 2>/dev/null; then
+                break
+            fi
+            sleep 0.2
+        done
+        echo \"ready_\${BUDGET}=\${READY}\"
+        if [ \"\${READY}\" -ne 1 ]; then
+            tail -30 /tmp/example-teardown-\${BUDGET}.log
+            kill \${APP_PID} 2>/dev/null || true
+            wait \${APP_PID} 2>/dev/null || true
+            continue
+        fi
+        kill -INT \${APP_PID}
+        for _ in \$(seq 1 150); do
+            if ! kill -0 \${APP_PID} 2>/dev/null; then
+                break
+            fi
+            sleep 0.2
+        done
+        if kill -0 \${APP_PID} 2>/dev/null; then
+            kill -KILL \${APP_PID} 2>/dev/null || true
+        fi
+        wait \${APP_PID}
+        echo \"exit_\${BUDGET}=\$?\"
+        grep -c 'did not return within 1ms' /tmp/example-teardown-\${BUDGET}.log | sed \"s/^/abandoned_names_1ms_\${BUDGET}=/\"
+    done
+    rm -rf \"\${WORK_DIRECTORY}\" /tmp/example-teardown-*.log"
+TEARDOWN_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+
+printf '%s\n' "${TEARDOWN_OUTPUT_STRING}"
+
+if printf '%s' "${TEARDOWN_OUTPUT_STRING}" | grep -q 'build_failed=1'; then
+    check_fail "the example did not build, so the teardown budget was not exercised"
+elif ! printf '%s' "${TEARDOWN_OUTPUT_STRING}" | grep -q 'ready_1ms=1'; then
+    check_fail "the built example never answered /health under a 1ms teardown budget, so the budget was not exercised"
+else
+    if printf '%s' "${TEARDOWN_OUTPUT_STRING}" | grep -q 'exit_1ms=1'; then
+        check_pass "a declared teardown budget of 1ms is abandoned by the shield and the process exits 1"
+    else
+        check_fail "a declared teardown budget of 1ms did not turn the shutdown into an exit 1 ($(printf '%s' "${TEARDOWN_OUTPUT_STRING}" | grep -o 'exit_1ms=[0-9]*' || echo 'no exit status captured')) — the value in .env is not reaching the shield"
+    fi
+
+    if printf '%s' "${TEARDOWN_OUTPUT_STRING}" | grep -q 'abandoned_names_1ms_1ms=1'; then
+        check_pass "the abandon line on stderr names the declared budget (1ms), so the figure the shield ran under is the one .env declared"
+    else
+        check_fail "the abandon line did not name the declared budget of 1ms"
+    fi
+
+    if ! printf '%s' "${TEARDOWN_OUTPUT_STRING}" | grep -q 'ready_0s=1'; then
+        check_fail "the built example never answered /health under a 0s teardown budget — zero must be admitted at boot as the documented no-deadline"
+    elif printf '%s' "${TEARDOWN_OUTPUT_STRING}" | grep -q 'exit_0s=0'; then
+        check_pass "a declared teardown budget of 0s (no deadline) is admitted at boot and a healthy teardown exits zero under it"
+    else
+        check_fail "a declared teardown budget of 0s did not exit zero ($(printf '%s' "${TEARDOWN_OUTPUT_STRING}" | grep -o 'exit_0s=[0-9]*' || echo 'no exit status captured'))"
+    fi
+fi
+
+check_section_end "TEARDOWN BUDGET" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
 # WIRING GENERATE — the generator runs in the real application and reproduces the committed file

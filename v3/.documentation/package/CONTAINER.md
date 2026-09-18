@@ -204,7 +204,7 @@ func example() {
 
 ### Services are stateless by default
 
-A service registered on the container is ONE instance for the whole life of the process and for every request at once — the provider runs once and the value is memoized (see the caveats above) — so it holds nothing that belongs to a request or to a call: not the current user, not the last response, not a working buffer, not a counter the next request reads. Whatever a request needs travels as a method argument, or lives in a scoped service (next section). The rule is the one a Symfony service follows, and it is measured rather than assumed: on 2026-09-18 every process service of this repository's composition root — the 58 the example resolves, the 19 the framework registers on every application, the doors of the integrations, 69 concrete types classified field by field — held no request or call state. What holds state does so in one of these categories, and the GoDoc of the type says which:
+A service registered on the container is ONE instance for the whole life of the process and for every request at once — the provider runs once and the value is memoized (see the caveats above) — so it holds nothing that belongs to a request or to a call: not the current user, not the last response, not a working buffer, not a counter the next request reads. Whatever a request needs travels as a method argument, or lives in a scoped service (next section). The rule is the one a Symfony service follows, and it is measured rather than assumed: on 2026-09-18 every process service of this repository's composition root — the 58 the example resolves, the 19 the framework registers on every application, the doors of the integrations, 66 concrete types classified field by field (69 with the three reached only through them) — held no request or call state. What holds state does so in one of these categories:
 
 - **caches, limiters and stores** — the state IS the product, kept under a lock: the in-memory cache backend, the session storage and manager, the token stores, the lockers, the nonce guard, the event dispatcher's listener lists;
 - **connection and pool holders** — a bun registry, an amqp transport, a rueidis client, a tracer provider, a log file writer: the state is a resource, and the teardown closes it;
@@ -212,7 +212,7 @@ A service registered on the container is ONE instance for the whole life of the 
 - **factories** — the state belongs to the value produced, never to the factory;
 - **scoped services** — the state is the request's by construction.
 
-A process service that holds mutable state says WHY in the GoDoc of its type — the category, and what protects the state. A service whose state fits none of the five is a request-state leak, whatever it is called: make it scoped, or move the state onto the value it produces or the argument it is handed.
+A process service that holds mutable state and is written from here on says WHY in the GoDoc of its type — the category, and what protects the state; of the types the measurement classified, the openapi registry says so and the others are documented by their doors and their locks, not by a category sentence. A service whose state fits none of the five is a request-state leak, whatever it is called: make it scoped, or move the state onto the value it produces or the argument it is handed.
 
 ```go
 /* WRONG: a process service remembering the caller — every request shares this one instance */
@@ -232,7 +232,7 @@ func (instance *Exporter) Export(user string) []byte {
 }
 ```
 
-`debug:container --build` lists every registered service with its lifetime and the concrete type it resolves to, which is the inventory the rule is checked against; the live harness pins the example's inventory — every process service classified by name, concrete type and category, so a service nobody classified fails the band, and so does one whose type changed since its state was measured.
+`debug:container` lists every registered service with its lifetime, and `debug:container --build` the concrete type each one resolves to, which together are the inventory the rule is checked against; the live harness pins the example's inventory — every process service classified by name, concrete type and category, so a service nobody classified fails the band, and so does one whose type changed since its state was measured.
 
 ### Scoped services
 

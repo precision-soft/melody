@@ -61,6 +61,11 @@ func TestWiring_CoversEveryConstructorInTheScannedPackages(t *testing.T) {
         t.Fatalf("the scan found %d constructors, wanted 15 — add or remove one and update this number with it", report.ConstructorCount)
     }
 
+    /* the scoped half is counted apart: a scoped constructor the generator stops emitting moves neither the number above nor the skip list */
+    if 1 != report.ScopedConstructorCount {
+        t.Fatalf("the scan found %d scoped constructors, wanted 1 — the request report trail — add or remove one and update this number with it", report.ScopedConstructorCount)
+    }
+
     if 0 != len(report.Skipped) {
         t.Fatalf("expected no constructor to be skipped, got %v", report.Skipped)
     }

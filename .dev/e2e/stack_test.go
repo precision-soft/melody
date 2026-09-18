@@ -370,3 +370,30 @@ func TestStackScript_MessageBusConsumersAreSignalledAsAProcessGroup(t *testing.T
         )
     }
 }
+
+/* the teardown-budget section is the only consumer of MELODY_TEARDOWN_TIMEOUT end to end: it declares the value itself, in the .env.local of the binary it builds, and reads the declared figure back off the abandon line. Drop the declaration and the section measures the default; drop the 1ms arm and a reader that ignores the declared value stays green on the 0s arm alone, which exits zero either way. */
+func TestStackScript_TeardownBudgetSectionDeclaresTheValueAndReadsItBack(t *testing.T) {
+    script := readStackScript(t)
+
+    sectionIndex := strings.Index(script, "check_section_start \"TEARDOWN BUDGET\"")
+    if -1 == sectionIndex {
+        t.Fatal("could not locate the teardown-budget section")
+    }
+    endIndex := strings.Index(script[sectionIndex:], "check_section_end \"TEARDOWN BUDGET\"")
+    if -1 == endIndex {
+        t.Fatal("could not locate the end of the teardown-budget section")
+    }
+    section := script[sectionIndex : sectionIndex+endIndex]
+
+    for _, required := range []string{
+        "MELODY_TEARDOWN_TIMEOUT=%s",
+        "for BUDGET in 1ms 0s; do",
+        "grep -q 'exit_1ms=1'",
+        "grep -q 'abandoned_names_1ms_1ms=1'",
+        "grep -q 'exit_0s=0'",
+    } {
+        if false == strings.Contains(section, required) {
+            t.Fatalf("the teardown-budget section must carry %q", required)
+        }
+    }
+}

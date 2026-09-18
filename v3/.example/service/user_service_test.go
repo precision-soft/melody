@@ -54,6 +54,40 @@ func TestUserService_FindByUsernameAnswersANameTheTableCannotHoldAsAbsent(t *tes
     }
 }
 
+/* the credential comparison is the one decision of the login door: the seeded administrator signs in with the password that produced the stored digest and with nothing else, and an absent username pays a real comparison — a login that answered "absent" before any bcrypt work would tell an attacker, by its speed, which usernames exist. The floor is the one the security package measured against the cost it separates: a comparison bcrypt performs costs tens of milliseconds, one it skips costs microseconds. */
+func TestUserService_AuthenticateAdmitsTheRightPasswordRefusesAWrongOneAndPaysForAnAbsentUser(t *testing.T) {
+    backend := melodycache.NewInMemoryBackend(0, time.Minute, melodyclock.NewSystemClock())
+    manager := melodycache.NewManagerOwningBackend(backend, examplecache.NewGobSerializer())
+    t.Cleanup(func() { _ = manager.Close() })
+
+    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil))
+    if nil != repositoryErr {
+        t.Fatalf("unexpected repository error: %v", repositoryErr)
+    }
+
+    userService := NewUserService(userRepository, manager, nil)
+
+    user, authenticated, authenticateErr := userService.AuthenticateByUsernameAndPassword("admin", "admin")
+    if nil != authenticateErr || false == authenticated || nil == user || "admin" != user.Username {
+        t.Fatalf("expected the seeded administrator to sign in with its password, got authenticated=%v user=%v err=%v", authenticated, user, authenticateErr)
+    }
+
+    user, authenticated, authenticateErr = userService.AuthenticateByUsernameAndPassword("admin", "not-the-password")
+    if nil != authenticateErr || true == authenticated || nil != user {
+        t.Fatalf("expected a wrong password to be refused without an error, got authenticated=%v user=%v err=%v", authenticated, user, authenticateErr)
+    }
+
+    startedAt := time.Now()
+    user, authenticated, authenticateErr = userService.AuthenticateByUsernameAndPassword("nobody-of-that-name", "anything")
+    absentCost := time.Since(startedAt)
+    if nil != authenticateErr || true == authenticated || nil != user {
+        t.Fatalf("expected an absent username to be refused without an error, got authenticated=%v user=%v err=%v", authenticated, user, authenticateErr)
+    }
+    if 5*time.Millisecond > absentCost {
+        t.Fatalf("expected an absent username to pay a real comparison, but it was refused in %v", absentCost)
+    }
+}
+
 /* a grant is a write of the account, and the listeners that drop the account's cache entries are subscribed
    to the updated event the service dispatches: a grant that dispatched nothing left the old roles served from
    the cache for the life of the entry */

@@ -29,6 +29,27 @@ func newLockRuntimeWithContext(ctx context.Context) runtimecontract.Runtime {
     return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
 }
 
+/* awaitKilledSessionRelease waits until the server has let go of the named lock a killed session held: KILL only flags the thread, and the lock stays held until that thread notices and ends, so a probe or an acquire issued straight after the KILL races that cleanup. The wait is on the server's own answer, bounded in time. */
+func awaitKilledSessionRelease(t *testing.T, sqldb *sql.DB, name string) {
+    t.Helper()
+
+    deadline := time.Now().Add(10 * time.Second)
+    for {
+        var free sql.NullInt64
+        if freeErr := sqldb.QueryRowContext(context.Background(), "SELECT IS_FREE_LOCK(?)", name).Scan(&free); nil != freeErr {
+            t.Fatalf("read lock availability: %v", freeErr)
+        }
+        if true == free.Valid && 1 == free.Int64 {
+            return
+        }
+        if true == time.Now().After(deadline) {
+            t.Fatalf("the killed session never released the lock %q", name)
+        }
+
+        time.Sleep(10 * time.Millisecond)
+    }
+}
+
 func TestMysqlLock_MutualExclusionAndRelease(t *testing.T) {
     dsn := os.Getenv("MYSQL_DSN")
     if "" == dsn {
@@ -151,6 +172,7 @@ func TestMysqlLock_ReacquiresAfterRefreshDetectsLostLock(t *testing.T) {
     if _, killErr := sqldb.ExecContext(runtimeInstance.Context(), "KILL "+strconv.FormatInt(ownerId.Int64, 10)); nil != killErr {
         t.Logf("kill returned (tolerated): %v", killErr)
     }
+    awaitKilledSessionRelease(t, sqldb, name)
 
     if refreshErr := lock.Refresh(runtimeInstance, 0); nil == refreshErr {
         t.Fatalf("expected refresh to detect the lost lock")
@@ -377,24 +399,8 @@ func TestMysqlLock_ReentrantAcquireDetectsLostLockWithoutRefresh(t *testing.T) {
         t.Logf("kill returned (tolerated): %v", killErr)
     }
 
-    /* KILL only flags the session; the GET_LOCK stays held until that session actually ends. Acquire probes with GET_LOCK(?, 0), which never waits, so the competitor below must not run before the kill has landed. */
-    lockFreed := false
-    for attempt := 0; attempt < 100; attempt++ {
-        var free sql.NullInt64
-        if freeErr := sqldb.QueryRowContext(runtimeInstance.Context(), "SELECT IS_FREE_LOCK(?)", name).Scan(&free); nil != freeErr {
-            t.Fatalf("read lock availability: %v", freeErr)
-        }
-        if true == free.Valid && 1 == free.Int64 {
-            lockFreed = true
-
-            break
-        }
-
-        time.Sleep(10 * time.Millisecond)
-    }
-    if false == lockFreed {
-        t.Fatalf("the killed session never released the lock")
-    }
+    /* Acquire probes with GET_LOCK(?, 0), which never waits, so the competitor below must not run before the kill has landed */
+    awaitKilledSessionRelease(t, sqldb, name)
 
     competitor := locker.CreateLock(name, 0)
     competitorAcquired, competitorErr := competitor.Acquire(runtimeInstance)

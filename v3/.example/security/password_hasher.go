@@ -34,18 +34,21 @@ func MustHashPassword(plaintextPassword string) string {
 
    A stored value that is not a bcrypt digest at all is refused before any key is derived, and that refusal is orders of magnitude cheaper than a real comparison: measured here, 228ns against 52ms. Response time would therefore name every account whose column holds such a value — truncated, edited by hand, written by something that is not this application — and those are exactly the accounts this door will refuse whatever is typed, which is the existence oracle DummyPasswordMatch exists to close, inverted. So a refusal bcrypt reached without working spends the comparison it skipped. */
 func PasswordMatches(passwordHash string, plaintextPassword string) bool {
-    compareErr := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(plaintextPassword))
+    compareErr := comparePasswordHash([]byte(passwordHash), []byte(plaintextPassword))
     if nil == compareErr {
         return true
     }
 
     /* a mismatch is the one refusal bcrypt pays for in full; every other one — the wrong prefix, a hash too short, an unreadable cost — is a stored value it could not use */
     if false == errors.Is(compareErr, bcrypt.ErrMismatchedHashAndPassword) {
-        _ = bcrypt.CompareHashAndPassword([]byte(dummyPasswordHash), []byte(plaintextPassword))
+        _ = comparePasswordHash([]byte(dummyPasswordHash), []byte(plaintextPassword))
     }
 
     return false
 }
+
+/* comparePasswordHash is the one comparison every refusal and every match goes through; the tests count its calls, which is how the equalizing branch is pinned on what it does rather than on how long it takes. */
+var comparePasswordHash = bcrypt.CompareHashAndPassword
 
 /* dummyPasswordHash is one bcrypt hash at the default cost, computed once at load. It is the material DummyPasswordMatch compares against so a login for a username that does not exist spends the same bcrypt time as one whose password is merely wrong. */
 var dummyPasswordHash = MustHashPassword("melody-example-absent-user-timing-equalizer")

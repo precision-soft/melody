@@ -31,7 +31,7 @@ type Registry struct {
     serving            atomic.Bool
 }
 
-/* Describe records the descriptor of a route. It writes a plain map the spec handler reads on the request path with nothing synchronizing the two, so it belongs to boot — module construction, before the application serves — exactly like the routes it describes. A Describe issued after the application marked the registry serving is refused at the door, the way the router refuses a late route: the alternative is a concurrent map write under readers, which Go answers by killing the process, and there is no degraded mode a lock could offer. */
+/* Describe records the descriptor of a route. It writes a plain map the spec handler reads on the request path with nothing synchronizing the two, so it belongs to boot — module construction, before the application serves — exactly like the routes it describes. A Describe that STARTS after the application marked the registry serving is refused at the door, the way the router refuses a late route — the door is a flag read before the write, not a lock, so a Describe already past the door when the mark lands still writes: the mark is placed before the listener opens, and a description issued from a goroutine during Run is the caller's ordering to keep. The alternative is a concurrent map write under readers, which Go answers by killing the process, and there is no degraded mode a lock could offer. */
 func (instance *Registry) Describe(routeName string, descriptor Descriptor) *Registry {
     instance.refuseDescriptionWhileServing(routeName)
 

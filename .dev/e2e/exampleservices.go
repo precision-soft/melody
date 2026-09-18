@@ -45,7 +45,7 @@ var exampleProcessServiceInventory = map[string]processServiceClassification{
     "service.cache.serializer":                                                      {typeName: "*cache.gobSerializer", category: processServiceStateless},
     "service.clock":                                                                 {typeName: "*clock.SystemClock", category: processServiceStateless},
     "service.config":                                                                {typeName: "*config.Configuration", category: processServiceBootRegistry},
-    "service.event.dispatcher":                                                      {typeName: "*event.EventDispatcher", category: processServiceBootRegistry},
+    "service.event.dispatcher":                                                      {typeName: "*event.EventDispatcher", category: processServiceStore},
     "service.example.archive.locker":                                                {typeName: "*pgsql.Locker", category: processServiceStore},
     "service.example.archive.storage":                                               {typeName: "*persistence.ArchiveStorage", category: processServiceStateless},
     "service.example.catalog.journal.repository":                                    {typeName: "*repository.bunCatalogJournalRepository", category: processServiceStateless},

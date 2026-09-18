@@ -2290,6 +2290,12 @@ func TestEnsureConsumeChannel_AnswersTheCachedChannelWithItsOwnGeneration(t *tes
     }
 }
 
+/* wedgePublishTimeout is the budget the wedge tests measure their subject against; wedgeWarmupPublishTimeout is the budget of the fixture's healthy send, which opens the channel and takes the shared broker as it comes — a confirmation the broker was slow to give says nothing about the wedge under test, and under the subject's budget it failed the fixture instead. */
+const (
+    wedgePublishTimeout       = 200 * time.Millisecond
+    wedgeWarmupPublishTimeout = 5 * time.Second
+)
+
 func newWedgeTestTransport(t *testing.T, connection *amqp091.Connection, dialer func() (*amqp091.Connection, error)) (*Transport, runtimecontract.Runtime) {
     t.Helper()
 
@@ -2301,7 +2307,7 @@ func newWedgeTestTransport(t *testing.T, connection *amqp091.Connection, dialer 
         Dialer:         dialer,
         Queue:          "melody.amqp.test.wedge",
         Registry:       registry,
-        PublishTimeout: 200 * time.Millisecond,
+        PublishTimeout: wedgeWarmupPublishTimeout,
     })
 
     serviceContainer := container.NewContainer()
@@ -2310,6 +2316,8 @@ func newWedgeTestTransport(t *testing.T, connection *amqp091.Connection, dialer 
     if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "healthy"})); nil != sendErr {
         t.Fatalf("healthy send: %v", sendErr)
     }
+
+    transport.publishTimeout = wedgePublishTimeout
 
     return transport, runtimeInstance
 }

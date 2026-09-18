@@ -32,11 +32,16 @@ func renderedEnrollmentUpsert(t *testing.T) string {
 func TestEnrollmentUpsertReplacesAnEnrollmentThatIsAlreadyThere(t *testing.T) {
     rendered := renderedEnrollmentUpsert(t)
 
-    if false == strings.Contains(rendered, "DUPLICATE KEY UPDATE") {
+    if false == strings.Contains(rendered, " ON DUPLICATE KEY UPDATE secret = VALUES(secret)") {
         t.Fatalf(
-            "expected a second enrollment to replace the first rather than collide with the primary key; got %q",
+            "expected a second enrollment to replace the first rather than collide with the primary key, in the form mysql accepts; got %q",
             rendered,
         )
+    }
+
+    /* the form bun renders for a dialect without the feature — mysql refuses it */
+    if true == strings.Contains(rendered, "UPDATE SET") {
+        t.Fatalf("expected the mysql upsert form, got the generic one mysql refuses: %q", rendered)
     }
 }
 

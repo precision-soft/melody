@@ -72,6 +72,37 @@ func TestExampleProcessServiceProblems_ADeadRowIsNamed(t *testing.T) {
     }
 }
 
+/* the build sweep answers a type only for a service it could build: a service the sweep did not reach and one whose build failed (an empty type) are both named, because a row nothing can be measured against is a row nobody can trust */
+func TestExampleProcessServiceProblems_AServiceTheBuildSweepResolvedNoTypeForIsNamed(t *testing.T) {
+    unbuilt := exampleConcreteTypesProbe()
+    delete(unbuilt, "service.probe.store")
+
+    problems, _, _ := exampleProcessServiceProblems(exampleDescriptionsProbe(), unbuilt, exampleInventoryProbe())
+    if 1 != len(problems) || false == strings.HasPrefix(problems[0], "service.probe.store: the build sweep resolved no type") {
+        t.Fatalf("expected the service the sweep did not reach to be named, got %v", problems)
+    }
+
+    failed := exampleConcreteTypesProbe()
+    failed["service.probe.store"] = ""
+
+    problems, _, _ = exampleProcessServiceProblems(exampleDescriptionsProbe(), failed, exampleInventoryProbe())
+    if 1 != len(problems) || false == strings.HasPrefix(problems[0], "service.probe.store: the build sweep resolved no type") {
+        t.Fatalf("expected the service whose build failed to be named, got %v", problems)
+    }
+}
+
+/* two problems are reported in name order, so the band's output reads the same whatever order the maps were walked in */
+func TestExampleProcessServiceProblems_ProblemsAreReportedInNameOrder(t *testing.T) {
+    inventory := exampleInventoryProbe()
+    delete(inventory, "service.probe.stateless")
+    inventory["service.probe.retired"] = processServiceClassification{typeName: "*probe.Retired", category: processServiceStateless}
+
+    problems, _, _ := exampleProcessServiceProblems(exampleDescriptionsProbe(), exampleConcreteTypesProbe(), inventory)
+    if 2 != len(problems) || false == strings.HasPrefix(problems[0], "service.probe.retired:") || false == strings.HasPrefix(problems[1], "service.probe.stateless:") {
+        t.Fatalf("expected the two problems in name order, got %v", problems)
+    }
+}
+
 /* a scoped service is never asked for a row: its state is the request's by construction, and a row for it would be a dead row */
 func TestExampleProcessServiceProblems_AScopedServiceNeedsNoRow(t *testing.T) {
     descriptions := []exampleContainerDescription{{Name: "service.probe.trail", Lifetime: "scoped", TypeName: "*probe.Trail"}}

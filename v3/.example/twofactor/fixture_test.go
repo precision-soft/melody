@@ -35,8 +35,9 @@ func (instance *renderingDialect) Name() dialect.Name {
     return dialect.SQLite
 }
 
+/* the one feature the statements under test render differently with and without: bun writes the mysql form of the upsert only for a dialect that declares it, and without it writes an ON DUPLICATE KEY UPDATE SET that mysql refuses — a rendering the tests would have read as the production statement. */
 func (instance *renderingDialect) Features() feature.Feature {
-    return 0
+    return feature.InsertOnDuplicateKey
 }
 
 func (instance *renderingDialect) Tables() *schema.Tables {
