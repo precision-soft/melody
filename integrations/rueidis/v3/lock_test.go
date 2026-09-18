@@ -739,3 +739,54 @@ func TestRedisLock_ARefusedAcquireDropsTheClaimItCouldNotKeep(t *testing.T) {
 
     requireStoredToken(t, name, "held-by-somebody-else")
 }
+
+/* the token is minted per attempt, so a lease left by a give-back that failed is a stranger's until it expires: the same handle is refused like any other, and only the ttl ends the lockout. The key is planted with such a token directly, because no sequence of a handle's own doors reaches that state — it takes a lost reply followed by a give-back the store never ran. */
+func TestRedisLock_AFailedDetachedGiveBackLocksTheSameHandleOutUntilTheTtlExpires(t *testing.T) {
+    outOfBand := newTokenStoreClient(t)
+    name := lockTestName(t, "failed-give-back")
+
+    t.Cleanup(func() {
+        _ = outOfBand.Do(context.Background(), outOfBand.B().Del().Key(name).Build()).Error()
+    })
+
+    ttl := 2 * time.Second
+
+    earlierAttemptToken := newLockToken()
+    if plantErr := outOfBand.Do(context.Background(), outOfBand.B().Set().Key(name).Value(earlierAttemptToken).Px(ttl).Build()).Error(); nil != plantErr {
+        t.Fatalf("planting the earlier attempt's token: %v", plantErr)
+    }
+
+    lock := NewLocker(newTokenStoreClient(t)).CreateLock(name, ttl)
+
+    if acquired, acquireErr := lock.Acquire(newLockRuntime()); nil != acquireErr || true == acquired {
+        t.Fatalf("expected the handle to be refused over its earlier attempt's token: %v %v", acquired, acquireErr)
+    }
+
+    if held := lock.(*redisLock).heldToken(); "" != held {
+        t.Fatalf("expected the refused handle to claim nothing, it claims %q", held)
+    }
+
+    deadline := time.Now().Add(ttl + time.Second)
+    for {
+        exists, existsErr := outOfBand.Do(context.Background(), outOfBand.B().Exists().Key(name).Build()).AsInt64()
+        if nil != existsErr {
+            t.Fatalf("reading the key: %v", existsErr)
+        }
+
+        if 0 == exists {
+            break
+        }
+
+        if time.Now().After(deadline) {
+            t.Fatalf("expected the planted lease to lapse on its ttl")
+        }
+
+        time.Sleep(50 * time.Millisecond)
+    }
+
+    if acquired, acquireErr := lock.Acquire(newLockRuntime()); nil != acquireErr || false == acquired {
+        t.Fatalf("expected the handle to be granted once the ttl lapsed: %v %v", acquired, acquireErr)
+    }
+
+    requireStoredToken(t, name, lock.(*redisLock).heldToken())
+}

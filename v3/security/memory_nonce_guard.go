@@ -15,7 +15,7 @@ import (
 /* nonceGuardPurgeInterval bounds how often the expired-entry sweep runs: an O(n) sweep on every Remember would be O(n²) under a high volume of distinct nonces, yet correctness never depends on the sweep (an expired entry is ignored by the per-nonce expiry check at read time regardless). Sweeping at most once per interval keeps reclamation timely while capping the amortized cost; between sweeps the map holds at most the entries added within one interval beyond what has expired. */
 const nonceGuardPurgeInterval = 1 * time.Second
 
-/* MemoryNonceGuard is an in-process NonceGuard backed by a map of nonce expiries. It is suitable for single-instance deployments, tests and local development; a multi-instance deployment must use a shared guard (for example the Redis-backed guard in integrations/rueidis) so a nonce replayed against a different instance is still detected. */
+/* NewMemoryNonceGuard is NewMemoryNonceGuardWithClock on the system clock. */
 func NewMemoryNonceGuard() *MemoryNonceGuard {
     return NewMemoryNonceGuardWithClock(clock.NewSystemClock())
 }
@@ -32,6 +32,7 @@ func NewMemoryNonceGuardWithClock(clockInstance clockcontract.Clock) *MemoryNonc
     }
 }
 
+/* MemoryNonceGuard is an in-process NonceGuard backed by a map of nonce expiries. It is suitable for single-instance deployments, tests and local development; a multi-instance deployment must use a shared guard (for example the Redis-backed guard in integrations/rueidis) so a nonce replayed against a different instance is still detected. */
 type MemoryNonceGuard struct {
     clock         clockcontract.Clock
     mutex         sync.Mutex

@@ -82,6 +82,8 @@ Because each field is defaulted on its own, a partially filled `RetryConfig` can
 
 Every door is one Lua round trip on the caller's runtime context, capped at the locker's call timeout; the framework's `RunExclusive` and `LeaderGate` renew and release under deadlines of their own, and a tighter one always wins. [`NewLockerWithOptions(client, options...)`](./lock.go) takes the options; `NewLocker(client)` builds the same locker at the defaults.
 
+An `Acquire` whose reply was lost gives back, detached and best-effort, the lease it may have taken; when that give-back fails as well, the key keeps a token this handle no longer knows, and the same handle is refused like any other until the ttl lapses — the cost of a lost reply is one lost round, bounded by the ttl.
+
 * [`WithLockerCallTimeout(timeout)`](./lock.go) — bounds one round trip of `Acquire`, `Release` and `Refresh`, default 1s; a non-positive value falls back to the default. Without it a store that accepts connections but stops answering holds each call for the client's own connection timeout — five seconds at the provider's default — which is what a readiness handler taking the lock on the request path, or a leader gate campaigning on the caller's context, then waits on every attempt; melody's http kernel attaches no deadline to a request.
 
 ## Token store

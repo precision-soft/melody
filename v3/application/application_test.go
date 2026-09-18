@@ -917,6 +917,38 @@ func TestCloseAndExitOnFailure_WithoutAConfigurationTheShieldGetsTheDefaultBudge
     }
 }
 
+/* the third sister: a declared budget of zero reaches the shield as zero. Zero is the operator asking for no deadline — the configuration admits it explicitly and refuses only a negative value — so folding it into the package default here would answer a question the operator had already answered. Pinned on the value the shield receives, with the shield's run asserted first, because a zero that never reached it would read the same as a zero it was handed. */
+func TestCloseAndExitOnFailure_AZeroBudgetReachesTheShieldAsNoDeadline(t *testing.T) {
+    originalStep := shieldedCloseStep
+    originalExit := applicationExit
+    defer func() {
+        shieldedCloseStep = originalStep
+        applicationExit = originalExit
+    }()
+
+    shieldRan := false
+    receivedBudget := time.Duration(0)
+    shieldedCloseStep = func(budget time.Duration, stepName string, step func(stepContext context.Context)) bool {
+        shieldRan = true
+        receivedBudget = budget
+
+        return true
+    }
+
+    applicationExit = func(code int) {}
+
+    instance := newTeardownTimeoutTestApplication(t, "0s")
+    instance.closeAndExitOnFailure()
+
+    if false == shieldRan {
+        t.Fatalf("expected the teardown to run through the shield")
+    }
+
+    if 0 != receivedBudget {
+        t.Fatalf("expected a declared budget of zero to reach the shield as no deadline, got %s", receivedBudget)
+    }
+}
+
 func newTeardownTimeoutTestApplication(t *testing.T, teardownTimeout string) *Application {
     t.Helper()
 
