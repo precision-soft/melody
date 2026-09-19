@@ -11,20 +11,31 @@ type RouteManifest struct {
     Routes []RouteManifestEntry `json:"routes"`
 }
 
+/* RouteManifestEntry carries every field the matcher discriminates on that a generated url has to satisfy. Three of them used to be absent — host, schemes and locales — and each absence produced the same outcome: the frontend minted a relative path against the current origin, the current scheme and no locale, and the router refused it. A route bound to api.example.com was advertised to a page served from www; a route restricted to https was advertised to a page served over http; and a route restricted to a locale set was advertised with nothing saying which locales it accepts — or, when it declared locales and carried no locale segment at all, advertised while unreachable by any url whatsoever. Priority travels for the same reason one step further out: two exposed routes can answer one generated path, and the consumer could not see which one the router will pick.
+
+   Requirements are the patterns the developer DECLARED, and they are UNANCHORED: the router compiles each one as ^(?:...)$ and matches the whole segment, so a consumer validating with them has to anchor them itself — a bare new RegExp("\\d+").test("12abc") answers true where the router answers 404. The declared spelling is published rather than the compiled one because the wrapper is not the developer's, it re-wraps on every round trip through NewRequirements, and it would hand RE2-only syntax to an engine that cannot parse it at all. */
 type RouteManifestEntry struct {
     Name         string            `json:"name"`
     Pattern      string            `json:"pattern"`
     Methods      []string          `json:"methods,omitempty"`
+    Host         string            `json:"host,omitempty"`
+    Schemes      []string          `json:"schemes,omitempty"`
+    Locales      []string          `json:"locales,omitempty"`
     Requirements map[string]string `json:"requirements,omitempty"`
     Defaults     map[string]string `json:"defaults,omitempty"`
+    Priority     int               `json:"priority,omitempty"`
     Zone         string            `json:"zone,omitempty"`
 }
 
-/* BuildRouteManifest projects the route definitions into a manifest, keeping only routes that opt in through RouteAttributeExpose and carry a name (an unnamed route cannot be referenced by the frontend). Entries are sorted by name so the output is deterministic across runs. */
+/* BuildRouteManifest projects the route definitions into a manifest, keeping only routes that opt in through RouteAttributeExpose and carry a name (an unnamed route cannot be referenced by the frontend; the registration refuses an exposed route without one, so nothing reaches here that a boot did not already report). Entries are sorted by name, and by pattern under an equal name, so the output is deterministic across runs: sort.Slice is not stable, so a name alone stopped deciding the order for exactly the duplicate-name case in which the order decides which entry a consumer keyed by name keeps — and the consumer keeping the last disagreed with the server's generator, which keeps the first. */
 func BuildRouteManifest(definitions []httpcontract.RouteDefinition) RouteManifest {
     entries := make([]RouteManifestEntry, 0, len(definitions))
 
     for _, definition := range definitions {
+        if nil == definition {
+            continue
+        }
+
         if "" == definition.Name() {
             continue
         }
@@ -37,17 +48,38 @@ func BuildRouteManifest(definitions []httpcontract.RouteDefinition) RouteManifes
             Name:         definition.Name(),
             Pattern:      definition.Pattern(),
             Methods:      definition.Methods(),
+            Host:         definition.Host(),
+            Schemes:      definition.Schemes(),
+            Locales:      definition.Locales(),
             Requirements: definition.Requirements(),
             Defaults:     definition.Defaults(),
+            Priority:     definition.Priority(),
             Zone:         routeZone(definition),
         })
     }
 
     sort.Slice(entries, func(first int, second int) bool {
-        return entries[first].Name < entries[second].Name
+        if entries[first].Name != entries[second].Name {
+            return entries[first].Name < entries[second].Name
+        }
+
+        return entries[first].Pattern < entries[second].Pattern
     })
 
     return RouteManifest{Routes: entries}
+}
+
+/* FilterRouteManifestByZone narrows a manifest to one zone. It is exported because the gate existed only inside the cli command: an application projecting the manifest in-process — into a page, into a bundle — had no way to apply it, so the zone travelled as a label on an artifact that carried every zone to every consumer, the anonymous ones included. */
+func FilterRouteManifestByZone(manifest RouteManifest, zone string) RouteManifest {
+    filtered := make([]RouteManifestEntry, 0, len(manifest.Routes))
+
+    for _, entry := range manifest.Routes {
+        if zone == entry.Zone {
+            filtered = append(filtered, entry)
+        }
+    }
+
+    return RouteManifest{Routes: filtered}
 }
 
 func routeIsExposed(definition httpcontract.RouteDefinition) bool {

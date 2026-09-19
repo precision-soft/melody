@@ -37,7 +37,41 @@ install_push_keepalive() {
 install_git_hooks
 install_push_keepalive
 
+# the one-gesture push. With a valid validation stamp the push goes out at once; without one the full gate
+# runs HERE, in the foreground with its progress on this terminal, and the push follows automatically on
+# green. A gate already in flight — hook-started or hand-started — is followed to its end instead of being
+# doubled against the same service containers. The pre-push hook stays the guard on a bare `git push`; this
+# is the flow that ends with the push actually sent. Extra arguments go to `git push`.
+run_validated_push() {
+    if pgrep -f '\.dev/validate/all\.sh' >/dev/null 2>&1; then
+        info "a full gate is already running — following it to the end"
+        if [[ -f "${ROOT_DIR}/.temp/validate-run.log" ]] && [[ -n "$(find "${ROOT_DIR}/.temp/validate-run.log" -mmin -2 2>/dev/null)" ]]; then
+            tail -f --pid="$(pgrep -of '\.dev/validate/all\.sh')" "${ROOT_DIR}/.temp/validate-run.log" || true
+        else
+            while pgrep -f '\.dev/validate/all\.sh' >/dev/null 2>&1; do
+                sleep 10
+            done
+        fi
+    fi
+
+    if ! validation_stamp_matches_worktree; then
+        info "no valid validation stamp for this worktree — running the full gate before the push"
+        if ! bash "${ROOT_DIR}/.dev/validate/all.sh" --all; then
+            fail "the full gate failed — nothing was pushed"
+        fi
+        if ! validation_stamp_matches_worktree; then
+            fail "the gate finished green but wrote no matching stamp — the worktree changed during the run; settle it and run './dc push' again"
+        fi
+    fi
+
+    git -C "${ROOT_DIR}" push "$@"
+}
+
 case "${1:-}" in
+    push)
+        shift
+        run_validated_push "$@"
+        ;;
     up:minimal)
         shift
         docker_compose up -d dev dev-v1 dev-v2 load-balancer "$@"

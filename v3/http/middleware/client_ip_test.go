@@ -134,7 +134,7 @@ func TestForwardedClientIpResolver_MatchesCidrAndExactEntries(t *testing.T) {
     }
 }
 
-/* @info A proxy may write the same client as 1.2.3.4 or as ::ffff:1.2.3.4. Left mapped, the two forms key two different rate limit buckets, and an IPv4 CIDR in the trusted proxy list never matches a 4-in-6 peer. */
+/* a proxy may write the same client as 1.2.3.4 or as ::ffff:1.2.3.4; left mapped, the two forms key two different rate limit buckets and an IPv4 CIDR never matches a 4-in-6 peer */
 func TestForwardedClientIpResolver_UnmapsIpv4MappedAddresses(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
 
@@ -149,7 +149,7 @@ func TestForwardedClientIpResolver_UnmapsIpv4MappedAddresses(t *testing.T) {
     }
 }
 
-/* @info Proxies such as IIS/ARR and Azure Application Gateway append host:port to X-Forwarded-For. The untrusted client hop must be resolved to its bare address, not rejected as garbage — which would collapse every client into the proxy's own rate-limit bucket. */
+/* proxies such as IIS/ARR and Azure Application Gateway append host:port to X-Forwarded-For, so the untrusted client hop resolves to its bare address rather than being refused as garbage */
 func TestForwardedClientIpResolver_ResolvesPortedForwardedHop(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
 
@@ -159,7 +159,7 @@ func TestForwardedClientIpResolver_ResolvesPortedForwardedHop(t *testing.T) {
     }
 }
 
-/* @info A dual-stack proxy may write its hop as an IPv4-mapped address (::ffff:10.0.0.5) and the operator lists that literal in the trusted proxy list. The mapped trusted entry must still match the unmapped hop, otherwise the trusted hop is treated as the first untrusted client and the proxy's own address leaks as the limiter key. */
+/* a dual-stack proxy may write its hop as an IPv4-mapped address and the operator lists that literal as trusted, so the mapped entry has to match the unmapped hop */
 func TestForwardedClientIpResolver_MatchesMappedTrustedExactEntry(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8", "::ffff:192.168.1.1"))
 
@@ -169,7 +169,7 @@ func TestForwardedClientIpResolver_MatchesMappedTrustedExactEntry(t *testing.T) 
     }
 }
 
-/* @info A trusted proxy CIDR written in IPv4-mapped form (::ffff:192.168.0.0/120) must still contain the unmapped direct peer, otherwise the peer is rejected as untrusted and the forwarded chain is never walked. */
+/* a trusted proxy CIDR written in IPv4-mapped form (::ffff:192.168.0.0/120) still contains the unmapped direct peer */
 func TestForwardedClientIpResolver_MatchesMappedTrustedPrefix(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("::ffff:192.168.0.0/120"))
 
@@ -212,5 +212,62 @@ func TestForwardedClientIpResolver_BracketedAndBareIpv6KeyTheSameClient(t *testi
     }
     if ported != bare {
         t.Fatalf("a ported ipv6 hop must key the same bucket as its bare form: %q vs %q", ported, bare)
+    }
+}
+
+/* the closure reads the trusted list on every request: retained live, a caller reusing its slice rewrote the trust decision mid-serving — the same rule Kernel.SetForwardedHeadersPolicy applies to the same list. */
+func TestForwardedClientIpResolver_CopiesTheTrustedProxyListAtConstruction(t *testing.T) {
+    trustedProxyList := []string{"10.0.0.0/8"}
+    resolver := NewForwardedClientIpResolver(httpcontract.ForwardedHeadersPolicy{
+        TrustForwardedHeaders: true,
+        TrustedProxyList:      trustedProxyList,
+    })
+
+    trustedProxyList[0] = "192.0.2.0/24"
+
+    clientIp := resolver(forwardedRequest("10.0.0.1:4711", "203.0.113.9"))
+    if "203.0.113.9" != clientIp {
+        t.Fatalf("expected the construction-time trusted list to keep deciding, got %q", clientIp)
+    }
+}
+
+/* an entry that parses as neither a CIDR prefix nor an address used to be skipped on every request, which narrowed the trusted list in silence: the hop it named stopped being believed, the framework fell back to the direct peer, and every client behind that proxy collapsed onto one rate-limit bucket with no record anywhere. */
+func TestNewForwardedClientIpResolver_RefusesAMalformedTrustedProxyEntry(t *testing.T) {
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            NewForwardedClientIpResolver(httpcontract.ForwardedHeadersPolicy{
+                TrustForwardedHeaders: true,
+                TrustedProxyList:      []string{"10.0.0.0/8", "10.0.0.0/33"},
+            })
+        },
+        "trusted proxy entry is neither a CIDR prefix nor an address",
+    )
+}
+
+func TestNewForwardedClientIpResolver_KeepsAcceptingAnEmptyEntry(t *testing.T) {
+    /* a list assembled by splitting an environment variable carries a trailing empty field for a trailing separator, and both readers already treat it as absent */
+    resolver := NewForwardedClientIpResolver(httpcontract.ForwardedHeadersPolicy{
+        TrustForwardedHeaders: true,
+        TrustedProxyList:      []string{"10.0.0.0/8", ""},
+    })
+
+    if nil == resolver {
+        t.Fatalf("expected a resolver")
+    }
+}
+
+/* net/http keeps a repeated field as separate values, and that is the shape the chain arrives in when a client sent its own X-Forwarded-For and the trusted edge appended the peer it saw as a new line instead of extending the first one. Reading only the first line ends the right-to-left walk inside the half the client wrote, so the limiter keys on whatever address the client chose to put there and every such client shares one bucket with the victim it names. */
+func TestForwardedClientIpResolver_ReadsEveryForwardedForLine(t *testing.T) {
+    resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    request.RemoteAddr = "10.0.0.1:5555"
+    request.Header.Add("X-Forwarded-For", "198.51.100.99")
+    request.Header.Add("X-Forwarded-For", "203.0.113.7")
+
+    ip := resolver(testhelper.NewHttpTestRequestFromHttpRequest(request))
+    if "203.0.113.7" != ip {
+        t.Fatalf("expected the client the trusted edge attested on the second line, got: %s", ip)
     }
 }

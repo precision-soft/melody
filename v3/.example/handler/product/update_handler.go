@@ -43,7 +43,7 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
                     dto.Stock,
                 )
                 if nil != updateErr {
-                    return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to update product"), nil
+                    return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to update product", updateErr), nil
                 }
 
                 if false == found {

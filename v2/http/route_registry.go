@@ -66,14 +66,15 @@ func (instance *RouteRegistry) RouteDefinitionForUrlGeneration(routeName string)
     return NewUrlGenerationRouteDefinition(routeValue), true
 }
 
-func (instance *RouteRegistry) registerRoute(routeValue route) {
+/* registerRoute answers whether the route was stored. It is not stored when an aggregating boot records it as a dispatch duplicate instead of panicking over it, and the caller needs that answer: the index it puts in the matching tree is the position of the last stored route, so a route the registry declined left the tree pointing an entry at somebody else's route. */
+func (instance *RouteRegistry) registerRoute(routeValue route) bool {
     /* an exact dispatch duplicate is refused before anything is stored: registration was the single channel with no collision handling — services, parameters and cli commands all report duplicates — and the second registration is unreachable by construction, which is precisely the silent kind of shadowing an operator cannot see */
     dispatchIdentity := routeDispatchIdentity(routeValue)
     if _, exists := instance.routeByDispatchIdentity[dispatchIdentity]; true == exists {
         if nil != instance.bootCollisionRecorder {
             instance.bootCollisionRecorder(BootCollisionKindHttpRoute, routeCollisionName(routeValue))
 
-            return
+            return false
         }
 
         exception.Panic(
@@ -93,7 +94,7 @@ func (instance *RouteRegistry) registerRoute(routeValue route) {
     instance.routeByDispatchIdentity[dispatchIdentity] = struct{}{}
 
     if "" == routeValue.name {
-        return
+        return true
     }
 
     if _, exists := instance.routeByName[routeValue.name]; true == exists {
@@ -101,7 +102,7 @@ func (instance *RouteRegistry) registerRoute(routeValue route) {
         if nil != instance.bootCollisionRecorder {
             instance.bootCollisionRecorder(BootCollisionKindHttpRouteName, routeValue.name)
 
-            return
+            return true
         }
 
         exception.Panic(
@@ -116,6 +117,8 @@ func (instance *RouteRegistry) registerRoute(routeValue route) {
     }
 
     instance.routeByName[routeValue.name] = routeValue
+
+    return true
 }
 
 /* routeCollisionName renders the route for the aggregated report: the dispatch identity itself is a NUL-joined machine key, so the report carries the human spelling — the methods and the pattern — that names the route in the application's own code. */

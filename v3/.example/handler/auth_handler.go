@@ -37,7 +37,7 @@ func LoginHandler() melodyhttpcontract.Handler {
         if true == strings.HasPrefix(contentType, "application/json") {
             decoderErr := json.NewDecoder(httpRequest.Body).Decode(&dto)
             if nil != decoderErr {
-                return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "invalid json"), nil
+                return presenter.ApiRefusal(runtimeInstance, request, nethttp.StatusBadRequest, "invalid json", decoderErr), nil
             }
         } else {
             parseFormErr := httpRequest.ParseForm()
@@ -45,8 +45,9 @@ func LoginHandler() melodyhttpcontract.Handler {
                 return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "invalid form"), nil
             }
 
-            dto.Username = httpRequest.FormValue("username")
-            dto.Password = httpRequest.FormValue("password")
+            /* the credentials are read from the BODY alone: FormValue reads the url query as readily as the body on a POST, and a query string lands in every access log in front of the application */
+            dto.Username = httpRequest.PostFormValue("username")
+            dto.Password = httpRequest.PostFormValue("password")
         }
 
         username := strings.TrimSpace(dto.Username)
@@ -56,16 +57,15 @@ func LoginHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "invalid credentials input"), nil
         }
 
-        passwordHash := security.Sha256Hex(password)
-
         userService := service.MustGetUserService(runtimeInstance.Container())
 
-        user, authenticated, authenticationErr := userService.AuthenticateByUsernameAndPasswordHash(
+        user, authenticated, authenticationErr := userService.AuthenticateByUsernameAndPassword(
             username,
-            passwordHash,
+            password,
         )
         if nil != authenticationErr {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "authentication failed", authenticationErr.Error()), nil
+            /* the cause stays out of the errors list on purpose: it names internals — a cache refusal, a store address — and this is an unauthenticated door; ApiErrorWithErr journals it and keeps it in the debug-gated context instead */
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "authentication failed", authenticationErr), nil
         }
 
         if false == authenticated {
@@ -77,8 +77,14 @@ func LoginHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "session is not available"), nil
         }
 
-        sessionInstance.Set(security.SessionKeySecurityUserId, user.Id)
-        sessionInstance.Set(security.SessionKeySecurityRoles, user.Roles)
+        /* rotate the session id before writing the authenticated identity, the defence against session fixation: a pre-login id the client already held — one an attacker could have seeded and planted — must not survive into the authenticated session. RegenerateRequestSession republishes the rotated session on the request, so the identity is written to the id the response emits. */
+        rotatedSession, regenerateErr := melodyhttp.RegenerateRequestSession(request)
+        if nil != regenerateErr {
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "session rotation failed", regenerateErr), nil
+        }
+
+        rotatedSession.Set(security.SessionKeySecurityUserId, user.Id)
+        rotatedSession.Set(security.SessionKeySecurityRoles, user.Roles)
 
         redirectUrl, _ := melodyhttp.UrlGeneratorMustFromContainer(runtimeInstance.Container()).GeneratePath(route.ProductsListPageName, nil)
 
@@ -102,8 +108,8 @@ func LogoutHandler() melodyhttpcontract.Handler {
             return presenter.Redirect(runtimeInstance, request, indexUrl), nil
         }
 
-        sessionInstance.Delete(security.SessionKeySecurityUserId)
-        sessionInstance.Delete(security.SessionKeySecurityRoles)
+        /* the whole session ends here, rather than only the identity in it: deleting the two keys leaves the entry MODIFIED, so the response path saves it back under the same id and re-issues the cookie — the storage keeps an emptied record for the whole session lifetime and the client carries a live session id across its own logout. Clear marks the session cleared, which is what routes the response path to DeleteSession and to the expired cookie. */
+        sessionInstance.Clear()
 
         return presenter.Redirect(runtimeInstance, request, indexUrl), nil
     }

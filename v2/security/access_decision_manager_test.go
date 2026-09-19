@@ -587,14 +587,7 @@ func TestAccessDecisionManager_ARefusalNamesTheStrategyAndTheAttribute(t *testin
     }
 }
 
-/*
-TestAccessDecisionManager_WithRoleHierarchyUpgradesTheRoleVoters pins the
-capability the compilation now asks for instead of asserting on this concrete
-type. The upgrade reaches the built-in role voters and leaves every other voter
-exactly as it was: melody knows what a RoleVoter does with a role and cannot
-know what a foreign voter would do with an expanded set, so wrapping one would
-be a decision taken on the integrator's behalf.
-*/
+/* TestAccessDecisionManager_WithRoleHierarchyUpgradesTheRoleVoters pins the capability the compilation now asks for instead of asserting on this concrete type. The upgrade reaches the built-in role voters and leaves every other voter exactly as it was: melody knows what a RoleVoter does with a role and cannot know what a foreign voter would do with an expanded set, so wrapping one would be a decision taken on the integrator's behalf. */
 func TestAccessDecisionManager_WithRoleHierarchyUpgradesTheRoleVoters(t *testing.T) {
     foreign := &recordingProbeVoter{}
     manager := NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, NewRoleVoter(), foreign)

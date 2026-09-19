@@ -10,8 +10,8 @@ import (
 const (
     ServiceCatalogStorage = "service.example.catalog.storage"
 
-    /* the audit trail of the nomenclature. It is per major, like every other table the example owns, so three applications sharing one database do not write into each other's history. */
-    auditTable = "melody_example_v3_audit"
+    /* AuditTable is the audit trail of the nomenclature. It is per major, like every other table the example owns, so three applications sharing one database do not write into each other's history. It is named here rather than inline because two doors read it: the registry that opens it, and the reset command that empties it. */
+    AuditTable = "melody_example_v3_audit"
 
     /* the entities whose field-level history is kept, named once so the repositories that write them and anyone reading the trail agree. */
     AuditEntityProduct = "product"
@@ -20,7 +20,7 @@ const (
 
 /* actorContextKey carries who is making a change from the service layer down to the repository that writes it.
 
-The repositories take a context rather than a runtime — they know nothing about requests — and the audit trail has to name a person. A key of this package's own is what lets the service put the answer on the context without the service layer having to import an ORM integration to do it. */
+   The repositories take a context rather than a runtime — they know nothing about requests — and the audit trail has to name a person. A key of this package's own is what lets the service put the answer on the context without the service layer having to import an ORM integration to do it. */
 type actorContextKey struct{}
 
 func WithActor(ctx context.Context, actor string) context.Context {
@@ -38,22 +38,29 @@ func ActorFromContext(ctx context.Context) string {
 
 /* CatalogStorage is where the nomenclature is kept, or the absence of anywhere to keep it.
 
-The repositories are wired by melody:wiring:generate, which fills a constructor's arguments by resolving them from the container by type. A constructor asking for a *bun.DB directly could therefore only be generated for an application that has one, and the example is meant to boot without a database as well. This handle is always registered and answers whether there is a connection behind it, so one generated provider serves both environments and the choice stays in the repository package rather than in the configuration.
+   The repositories are wired by melody:wiring:generate, which fills a constructor's arguments by resolving them from the container by type. A constructor asking for a *bun.DB directly could therefore only be generated for an application that has one, and the example is meant to boot without a database as well. This handle is always registered and answers whether there is a connection behind it, so one generated provider serves both environments and the choice stays in the repository package rather than in the configuration.
 
-It also owns the one audit tracker the audited repositories share. There is one because the trail is one: a registry per repository would mean each deciding on its own which fields are too sensitive to record, and the answer belongs to the application rather than to whichever repository asked last. */
+   It also owns the one audit tracker the audited repositories share. There is one because the trail is one: a registry per repository would mean each deciding on its own which fields are too sensitive to record, and the answer belongs to the application rather than to whichever repository asked last. */
 type CatalogStorage struct {
     database      *bun.DB
+    location      string
     auditRegistry *melodyaudit.Registry
     tracker       *melodyaudit.Tracker
+    recorder      *melodyaudit.Recorder
 }
 
 func NewCatalogStorage(database *bun.DB) *CatalogStorage {
+    return NewCatalogStorageAt(database, "")
+}
+
+/* NewCatalogStorageAt is the constructor the composition root uses: it names the database the handle is open on — host, port and schema, as the connection was declared — so a command about to destroy what the handle reaches can say WHICH database that is. A handle without a location is one a test built. */
+func NewCatalogStorageAt(database *bun.DB, location string) *CatalogStorage {
     if nil == database {
         return &CatalogStorage{}
     }
 
     /* updated_at moves on every write of a product and says nothing a trail entry does not already carry through its own timestamp, so it is not recorded as a change */
-    registry := melodyaudit.NewRegistry(auditTable, "updated_at").
+    registry := melodyaudit.NewRegistry(AuditTable, "updated_at").
         Register(AuditEntityProduct, melodyaudit.EntityOptions{}).
         /* a deleted account has to stay answerable for — which roles it held when it was removed is the question a directory is asked after the fact, and the identifier alone cannot answer it */
         Register(AuditEntityUser, melodyaudit.EntityOptions{CaptureDeleteBeforeImage: true})
@@ -62,8 +69,10 @@ func NewCatalogStorage(database *bun.DB) *CatalogStorage {
 
     return &CatalogStorage{
         database:      database,
+        location:      location,
         auditRegistry: registry,
         tracker:       melodyaudit.NewTracker(database, recorder),
+        recorder:      recorder,
     }
 }
 
@@ -76,12 +85,23 @@ func (instance *CatalogStorage) IsPersistent() bool {
     return nil != instance.database
 }
 
+/* Location names the database the handle is open on, as the connection was declared, and is empty for a handle nobody located. */
+func (instance *CatalogStorage) Location() string {
+    return instance.location
+}
+
+/* Recorder is the audit recorder the tracker writes through, for a repository door that runs its own
+   transaction — a read locked FOR UPDATE and the write it decides — and records the change inside it. */
+func (instance *CatalogStorage) Recorder() *melodyaudit.Recorder {
+    return instance.recorder
+}
+
 /* Tracker is the handle the audited repositories write through. It is nil when there is no database, which is the same condition under which those repositories are not built at all. */
 func (instance *CatalogStorage) Tracker() *melodyaudit.Tracker {
     return instance.tracker
 }
 
-/* EnsureAuditSchema creates the trail's tables when they are absent. The example carries no migration runner, so the storage owns the tables it writes, exactly as each repository owns its own. */
+/* EnsureAuditSchema creates the trail's tables when they are absent. They are deliberately outside the example's migration set — the audit registry opens its schema through the door of the module that owns it, as the set's own document says — so the storage that writes the trail is the door that creates it. */
 func (instance *CatalogStorage) EnsureAuditSchema(ctx context.Context) error {
     if nil == instance.auditRegistry {
         return nil

@@ -39,11 +39,18 @@ func NewEventFromEvent(event eventcontract.Event) *Event {
         )
     }
 
-    return NewEventWithTimestamp(
+    copied := NewEventWithTimestamp(
         event.Name(),
         event.Payload(),
         event.Timestamp(),
     )
+
+    /* the stop is part of what the event says about itself, and a copy that drops it tells a listener the propagation is live when it has already been stopped */
+    if true == event.IsPropagationStopped() {
+        copied.StopPropagation()
+    }
+
+    return copied
 }
 
 func NewEventWithTimestamp(name string, payload any, timestamp time.Time) *Event {
@@ -60,6 +67,7 @@ func NewEventWithTimestamp(name string, payload any, timestamp time.Time) *Event
     }
 }
 
+/* Event is not safe for concurrent use. The dispatcher runs the listeners of one dispatch in sequence, so a listener sees every write a listener before it made; dispatching one event value from two goroutines, or writing to it from a goroutine a listener started, races on the propagation flag. Give each dispatch its own event. */
 type Event struct {
     name               string
     payload            any

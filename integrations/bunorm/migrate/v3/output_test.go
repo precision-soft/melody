@@ -2,12 +2,19 @@ package migrate
 
 import (
     "bytes"
+    "encoding/json"
     "errors"
+    "fmt"
+    "os"
     "strings"
     "testing"
+    "time"
+    "unicode/utf8"
 
     "github.com/precision-soft/melody/v3/cli"
     "github.com/precision-soft/melody/v3/cli/output"
+    "github.com/precision-soft/melody/v3/exception"
+    exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
 )
 
 func newBufferedOutput(noColor bool) (*commandOutput, *bytes.Buffer) {
@@ -15,7 +22,7 @@ func newBufferedOutput(noColor bool) (*commandOutput, *bytes.Buffer) {
     option := output.DefaultOption()
     option.NoColor = noColor
 
-    return newCommandOutput(buffer, option), buffer
+    return newCommandOutput(buffer, nil, option), buffer
 }
 
 func TestCommandOutput_PrintSuccess(t *testing.T) {
@@ -176,7 +183,7 @@ func TestCommandOutput_PrintDetailsBlockOrdersAndFiltersKeys(t *testing.T) {
 
 func TestCommandOutput_PrintMigrationsBlock(t *testing.T) {
     empty, emptyBuffer := newBufferedOutput(true)
-    empty.printMigrationsBlock("APPLIED", []string{})
+    empty.printMigrationsBlock("applied", "APPLIED", []string{})
 
     if 0 != emptyBuffer.Len() {
         t.Fatalf("empty migrations list produced output: %q", emptyBuffer.String())
@@ -184,7 +191,7 @@ func TestCommandOutput_PrintMigrationsBlock(t *testing.T) {
 
     instance, buffer := newBufferedOutput(true)
     longName := strings.Repeat("m", 60)
-    instance.printMigrationsBlock("PENDING", []string{"20240101000000_create_users", longName})
+    instance.printMigrationsBlock("pending", "PENDING", []string{"20240101000000_create_users", longName})
 
     rendered := buffer.String()
 
@@ -249,5 +256,530 @@ func TestTruncateString(t *testing.T) {
 
     if 18 != len(truncated) {
         t.Fatalf("truncated string length = %d, want 18", len(truncated))
+    }
+}
+
+/* the format widths pad by rune count, so the budget is runes too: a byte-sliced multi-byte value would be truncated even when it fits the column, with the cut landing mid-rune and rendering as a replacement character */
+func TestTruncateString_CountsRunesNotBytes(t *testing.T) {
+    seventeenRunes := strings.Repeat("愛", 17)
+    if seventeenRunes != truncateString(seventeenRunes, 18) {
+        t.Fatalf("a value that fits the column in runes was truncated: %q", truncateString(seventeenRunes, 18))
+    }
+
+    truncated := truncateString(strings.Repeat("愛", 30), 18)
+    if strings.Repeat("愛", 15)+"..." != truncated {
+        t.Fatalf("truncated string = %q, want 15 runes plus ellipsis", truncated)
+    }
+
+    if false == utf8.ValidString(truncated) {
+        t.Fatalf("truncation split a rune: %q", truncated)
+    }
+}
+
+/* a budget with no room for the ellipsis answers the clipped runes alone instead of slicing negative */
+func TestTruncateString_SurvivesABudgetSmallerThanTheEllipsis(t *testing.T) {
+    if "ab" != truncateString("abcdef", 2) {
+        t.Fatalf("expected the clipped runes alone, got %q", truncateString("abcdef", 2))
+    }
+
+    if "" != truncateString("abcdef", 0) {
+        t.Fatalf("expected nothing for a zero budget, got %q", truncateString("abcdef", 0))
+    }
+
+    if "" != truncateString("abcdef", -1) {
+        t.Fatalf("expected nothing for a negative budget, got %q", truncateString("abcdef", -1))
+    }
+}
+
+/* the machine document is not shaped by a display flag: verbosity decides how the TEXT renders — the readme says so in as many words — while json is the contract, and gating the blocks on --verbose left db:migrate --format=json answering an empty data object for a run that applied five migrations. */
+func TestCommandOutput_WantsDetailFollowsTheFormatNotTheVerbosity(t *testing.T) {
+    for _, testCase := range []struct {
+        format          output.Format
+        verbose         bool
+        expectedOutcome bool
+    }{
+        {output.FormatJson, false, true},
+        {output.FormatJson, true, true},
+        {output.FormatTable, false, false},
+        {output.FormatTable, true, true},
+    } {
+        option := output.DefaultOption()
+        option.Format = testCase.format
+        option.Verbose = testCase.verbose
+
+        if testCase.expectedOutcome != newCommandOutput(&bytes.Buffer{}, nil, option).wantsDetail() {
+            t.Fatalf("format %s verbose %v: expected %v", testCase.format, testCase.verbose, testCase.expectedOutcome)
+        }
+    }
+}
+
+/* the document key and the display title were one string, so the same set of migrations arrived under APPLIED from db:status and under APPLIED MIGRATIONS from db:migrate, with no enumerable set of keys and a rename for readability breaking every consumer in silence */
+func TestCommandOutput_PrintMigrationsBlockKeysTheDocumentApartFromTheTitle(t *testing.T) {
+    jsonOption := output.DefaultOption()
+    jsonOption.Format = output.FormatJson
+
+    jsonBuffer := &bytes.Buffer{}
+    jsonInstance := newCommandOutput(jsonBuffer, nil, jsonOption)
+    jsonInstance.printMigrationsBlock("applied", "APPLIED MIGRATIONS", []string{"20240101000000_create_users"})
+
+    if _, keyedOnTheKey := jsonInstance.migrations["applied"]; false == keyedOnTheKey {
+        t.Fatalf("expected the document to be keyed on the key, got %v", jsonInstance.migrations)
+    }
+
+    if _, keyedOnTheTitle := jsonInstance.migrations["APPLIED MIGRATIONS"]; true == keyedOnTheTitle {
+        t.Fatalf("expected the display title to stay out of the document, got %v", jsonInstance.migrations)
+    }
+
+    /* the title is still what a person reads */
+    textInstance, textBuffer := newBufferedOutput(true)
+    textInstance.printMigrationsBlock("applied", "APPLIED MIGRATIONS", []string{"20240101000000_create_users"})
+
+    if false == strings.Contains(textBuffer.String(), "APPLIED MIGRATIONS") {
+        t.Fatalf("expected the display title in the text block, got %q", textBuffer.String())
+    }
+
+    if true == strings.Contains(textBuffer.String(), "applied\n") {
+        t.Fatalf("expected the document key to stay out of the text block, got %q", textBuffer.String())
+    }
+}
+
+/* "no current database" was the string <null>, indistinguishable from a database named literally <null> and readable only by a consumer who knew melody's own placeholder; the text block keeps rendering it, because a person reads an empty cell as a missing value either way */
+func TestCommandOutput_TheAbsentDatabaseIsJsonNull(t *testing.T) {
+    jsonOption := output.DefaultOption()
+    jsonOption.Format = output.FormatJson
+
+    buffer := &bytes.Buffer{}
+    instance := newCommandOutput(buffer, nil, jsonOption)
+    instance.printDatabaseBlock(&databaseIdentity{Hostname: "localhost", Port: 5432, CurrentUser: "app"})
+
+    if finishErr := instance.finish("db:status", time.Now(), nil); nil != finishErr {
+        t.Fatalf("unexpected error: %v", finishErr)
+    }
+
+    document := struct {
+        Data struct {
+            Database map[string]any `json:"database"`
+        } `json:"data"`
+    }{}
+    if decodeErr := json.Unmarshal(buffer.Bytes(), &document); nil != decodeErr {
+        t.Fatalf("failed to decode the document: %v, got %q", decodeErr, buffer.String())
+    }
+
+    databaseValue, hasDatabaseKey := document.Data.Database["database"]
+    if false == hasDatabaseKey {
+        t.Fatalf("expected the database key to stay present, got %#v", document.Data.Database)
+    }
+
+    if nil != databaseValue {
+        t.Fatalf("expected the absent database to be json null, got %#v", databaseValue)
+    }
+
+    /* a named database still arrives as its name, or the guard above would pass for a field that never carries anything */
+    named := "orders"
+    namedBuffer := &bytes.Buffer{}
+    namedInstance := newCommandOutput(namedBuffer, nil, jsonOption)
+    namedInstance.printDatabaseBlock(&databaseIdentity{CurrentDatabase: &named})
+
+    if finishErr := namedInstance.finish("db:status", time.Now(), nil); nil != finishErr {
+        t.Fatalf("unexpected error: %v", finishErr)
+    }
+
+    namedDocument := struct {
+        Data struct {
+            Database map[string]any `json:"database"`
+        } `json:"data"`
+    }{}
+    if decodeErr := json.Unmarshal(namedBuffer.Bytes(), &namedDocument); nil != decodeErr {
+        t.Fatalf("failed to decode the document: %v, got %q", decodeErr, namedBuffer.String())
+    }
+
+    if "orders" != namedDocument.Data.Database["database"] {
+        t.Fatalf("expected the named database in the document, got %q", namedBuffer.String())
+    }
+}
+
+/* TestCommandOutput_FinishCarriesTheFailureDetailsAndCause pins the two fields the json envelope always declared and always answered null. The machine document is the contract a pipeline reads, and it was the one rendering that threw away what the error already carried: at the same instant, over the same value, the journal filed the connection, the pool sizing and the whole cause chain while stdout answered a single sentence beside `"details":null, "cause":null`. */
+func TestCommandOutput_FinishCarriesTheFailureDetailsAndCause(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    outputInstance := newCommandOutput(buffer, nil, output.Option{Format: output.FormatJson})
+
+    runErr := exception.NewError(
+        "database connection failed",
+        exceptioncontract.Context{"host": "mysql", "port": "3306"},
+        exception.NewError(
+            "Error 1045 (28000): Access denied for user 'melody'",
+            nil,
+            errors.New("dial refused"),
+        ),
+    )
+
+    if finishErr := outputInstance.finish("db:migrate", time.Now(), runErr); nil == finishErr {
+        t.Fatal("expected the command's own failure to stay the verdict")
+    }
+
+    document := struct {
+        Error *struct {
+            Code    string         `json:"code"`
+            Message string         `json:"message"`
+            Details map[string]any `json:"details"`
+            Cause   *struct {
+                Message string              `json:"message"`
+                Details map[string][]string `json:"details"`
+            } `json:"cause"`
+        } `json:"error"`
+    }{}
+    if decodeErr := json.Unmarshal(buffer.Bytes(), &document); nil != decodeErr {
+        t.Fatalf("failed to decode the document: %v; rendered %q", decodeErr, buffer.String())
+    }
+
+    if nil == document.Error {
+        t.Fatalf("expected the failure inside the envelope, got %q", buffer.String())
+    }
+
+    if "mysql" != document.Error.Details["host"] || "3306" != document.Error.Details["port"] {
+        t.Fatalf("expected the failure's own context in the details, got %#v", document.Error.Details)
+    }
+
+    if nil == document.Error.Cause {
+        t.Fatalf("expected the failure to carry its cause, got %q", buffer.String())
+    }
+
+    if false == strings.Contains(document.Error.Cause.Message, "Access denied") {
+        t.Fatalf("expected the cause to be the link under the failure, got %q", document.Error.Cause.Message)
+    }
+
+    if 2 > len(document.Error.Cause.Details["chain"]) {
+        t.Fatalf("expected the whole chain beneath the failure, got %#v", document.Error.Cause.Details)
+    }
+
+    if false == strings.Contains(strings.Join(document.Error.Cause.Details["chain"], " | "), "dial refused") {
+        t.Fatalf("expected the chain to reach the bottom, got %#v", document.Error.Cause.Details["chain"])
+    }
+}
+
+/* an error carrying no context still answers an object, and one carrying no cause answers a null there: a field whose json type changes with the outcome cannot be consumed, while a cause that genuinely does not exist is honestly absent */
+func TestCommandOutput_FinishKeepsTheDetailsAnObjectWithoutAContext(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    outputInstance := newCommandOutput(buffer, nil, output.Option{Format: output.FormatJson})
+
+    if finishErr := outputInstance.finish("db:migrate", time.Now(), errors.New("bare failure")); nil == finishErr {
+        t.Fatal("expected the command's own failure to stay the verdict")
+    }
+
+    document := struct {
+        Error *struct {
+            Details map[string]any `json:"details"`
+            Cause   *struct {
+                Message string `json:"message"`
+            } `json:"cause"`
+        } `json:"error"`
+    }{}
+    if decodeErr := json.Unmarshal(buffer.Bytes(), &document); nil != decodeErr {
+        t.Fatalf("failed to decode the document: %v; rendered %q", decodeErr, buffer.String())
+    }
+
+    if nil == document.Error.Details {
+        t.Fatalf("expected an empty details object rather than null, got %q", buffer.String())
+    }
+
+    if 0 != len(document.Error.Details) {
+        t.Fatalf("expected the details to be empty for a bare failure, got %#v", document.Error.Details)
+    }
+
+    if nil != document.Error.Cause {
+        t.Fatalf("expected no cause for a failure that has none, got %#v", document.Error.Cause)
+    }
+}
+
+/* a typed-nil *exception.Error under a fmt wrap satisfies errors.As and passes a plain nil comparison, and Context() on the nil receiver takes a read lock on a nil pointer. The chain below is the shape bun's migrator produces: it wraps the application's migration-function error with %w after a plain nil test that a typed nil passes, and fmt records the operand before formatting it, so the wrap exists and carries the typed nil while its own text reads "<nil>". The panic would unwind the command's finish defer and the cli runner would re-panic it, so the json document — and with it the real failure — would never be written. */
+func TestCommandOutput_FinishSurvivesATypedNilContextProviderInTheChain(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    outputInstance := newCommandOutput(buffer, nil, output.Option{Format: output.FormatJson})
+
+    runErr := fmt.Errorf("20240101000000_create_users: up: %w", (*exception.Error)(nil))
+
+    var provider exceptioncontract.ContextProvider
+    if false == errors.As(runErr, &provider) {
+        t.Fatal("expected the typed-nil link to satisfy errors.As, otherwise this guard is aimed at nothing")
+    }
+    if nil == provider {
+        t.Fatal("expected the typed nil to pass a plain nil comparison, otherwise this guard is aimed at nothing")
+    }
+
+    if finishErr := outputInstance.finish("db:migrate", time.Now(), runErr); nil == finishErr {
+        t.Fatal("expected the command's own failure to stay the verdict")
+    }
+
+    document := struct {
+        Error *struct {
+            Message string         `json:"message"`
+            Details map[string]any `json:"details"`
+        } `json:"error"`
+    }{}
+    if decodeErr := json.Unmarshal(buffer.Bytes(), &document); nil != decodeErr {
+        t.Fatalf("failed to decode the document: %v; rendered %q", decodeErr, buffer.String())
+    }
+
+    if nil == document.Error {
+        t.Fatalf("expected the failure inside the envelope, got %q", buffer.String())
+    }
+
+    if false == strings.Contains(document.Error.Message, "20240101000000_create_users") {
+        t.Fatalf("expected the wrap's own sentence in the message, got %q", document.Error.Message)
+    }
+
+    if nil == document.Error.Details {
+        t.Fatalf("expected an empty details object rather than null, got %q", buffer.String())
+    }
+
+    if 0 != len(document.Error.Details) {
+        t.Fatalf("expected the typed-nil link to contribute no details, got %#v", document.Error.Details)
+    }
+}
+
+/* the error text came off the wire and the identity fields are the server's own answers, so the terminal rendering must escape control characters — visibly, before the cell widths are measured — while the json branch is left to its encoder. */
+func TestCommandOutput_PrintErrorEscapesControlCharacters(t *testing.T) {
+    plain, plainBuffer := newBufferedOutput(true)
+    plain.printError(errors.New("boom\x1b[2J\rforged"))
+
+    if `ERROR: boom\x1b[2J\rforged`+"\n" != plainBuffer.String() {
+        t.Fatalf("expected the control characters escaped visibly, got %q", plainBuffer.String())
+    }
+}
+
+func TestCommandOutput_PrintDatabaseBlockEscapesBeforeMeasuringTheCell(t *testing.T) {
+    databaseName := "shop"
+    identity := &databaseIdentity{
+        CurrentDatabase: &databaseName,
+        Hostname:        "db-host",
+        Port:            3306,
+        CurrentUser:     "app@%",
+        Version:         "8.4\x1b[2J",
+    }
+
+    plain, plainBuffer := newBufferedOutput(true)
+    plain.printDatabaseBlock(identity)
+
+    rendered := plainBuffer.String()
+
+    expectedVersionRow := `| version  | 8.4\x1b[2J         |`
+    if false == strings.Contains(rendered, expectedVersionRow) {
+        t.Fatalf("expected the version cell padded over its escaped spelling, got:\n%s", rendered)
+    }
+
+    if true == strings.Contains(rendered, "\x1b") {
+        t.Fatalf("a raw escape byte reached the terminal:\n%s", rendered)
+    }
+}
+
+func TestCommandOutput_PrintMigrationsBlockEscapesTheNames(t *testing.T) {
+    plain, plainBuffer := newBufferedOutput(true)
+    plain.printMigrationsBlock("applied", "APPLIED MIGRATIONS", []string{"20240101000000_create\rusers"})
+
+    rendered := plainBuffer.String()
+
+    if false == strings.Contains(rendered, `20240101000000_create\rusers`) {
+        t.Fatalf("expected the carriage return escaped visibly, got:\n%s", rendered)
+    }
+
+    if true == strings.Contains(rendered, "\r") {
+        t.Fatalf("a raw carriage return reached the terminal:\n%s", rendered)
+    }
+}
+
+/* The document is the machine contract a deploy pipeline reads, and a run that DIED must not be
+   able to write a success into it. Rendered from the named return alone it could: a panic never
+   reaches the assignment, so the deferred render saw a nil error and wrote `"error":null` beside
+   every message the run had accumulated before it fell over. */
+func TestCommandOutput_FinishRunRendersAFailureDocumentForAPanickingRun(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    outputInstance := newCommandOutput(buffer, nil, output.NormalizeOption(output.Option{Format: output.FormatJson}))
+
+    outputInstance.printSuccess("applied 2 migrations")
+
+    panicked := func() (didPanic bool) {
+        defer func() {
+            if nil != recover() {
+                didPanic = true
+            }
+        }()
+
+        _ = outputInstance.finishRun("db:migrate", time.Now(), nil, "the migration dereferenced a nil map")
+
+        return false
+    }()
+
+    /* the panic is re-raised unchanged, so the exit path, its status code and the journal record are all exactly what they were */
+    if false == panicked {
+        t.Fatalf("expected the panic to be re-raised once the document said what happened")
+    }
+
+    rendered := buffer.String()
+
+    if true == strings.Contains(rendered, `"error":null`) {
+        t.Fatalf("a run that died reported success to the pipeline: %s", rendered)
+    }
+
+    if false == strings.Contains(rendered, "db:migrate panicked") {
+        t.Fatalf("expected the document to name the panic, got %s", rendered)
+    }
+
+    /* a panic value that is not an error has no cause to give, so it must reach the document as
+       the value it is: without that the operator learns something panicked and never what */
+    if false == strings.Contains(rendered, "the migration dereferenced a nil map") {
+        t.Fatalf("expected the panic value to reach the document, got %s", rendered)
+    }
+}
+
+/* An error-shaped panic value belongs in the CAUSE slot, where its own context and cause chain
+   survive: kept only in a context slot it collapses to its bare message at the render boundary. */
+func TestCommandOutput_FinishRunCarriesAnErrorShapedPanicAsTheCause(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    outputInstance := newCommandOutput(buffer, nil, output.NormalizeOption(output.Option{Format: output.FormatJson}))
+
+    panicValue := exception.NewError(
+        "the migration lock table is missing",
+        map[string]any{"table": "bun_migration_locks"},
+        errors.New("Error 1146: Table 'melody.bun_migration_locks' doesn't exist"),
+    )
+
+    func() {
+        defer func() { _ = recover() }()
+
+        _ = outputInstance.finishRun("db:migrate", time.Now(), nil, panicValue)
+    }()
+
+    rendered := buffer.String()
+
+    if false == strings.Contains(rendered, "the migration lock table is missing") {
+        t.Fatalf("expected the error-shaped panic to reach the document, got %s", rendered)
+    }
+
+    if true == strings.Contains(rendered, `"cause":null`) {
+        t.Fatalf("expected the error-shaped panic to travel as the cause, got %s", rendered)
+    }
+
+    /* the chain beneath it survives too, which is the whole reason the cause slot is not a context slot */
+    if false == strings.Contains(rendered, "Table 'melody.bun_migration_locks' doesn't exist") {
+        t.Fatalf("expected the cause chain beneath the panic to survive, got %s", rendered)
+    }
+}
+
+/* A run that had already failed keeps its own failure as the verdict: the panic came after it, and
+   the reason the command failed is the one the operator needs. */
+func TestCommandOutput_FinishRunKeepsTheRunsOwnFailureWhenAPanicFollowsIt(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    outputInstance := newCommandOutput(buffer, nil, output.NormalizeOption(output.Option{Format: output.FormatJson}))
+
+    runFailure := exception.NewError("the migration lock is held", nil, nil)
+
+    func() {
+        defer func() { _ = recover() }()
+
+        _ = outputInstance.finishRun("db:migrate", time.Now(), runFailure, "a later defer panicked")
+    }()
+
+    rendered := buffer.String()
+
+    if false == strings.Contains(rendered, "the migration lock is held") {
+        t.Fatalf("expected the run's own failure to stay the verdict, got %s", rendered)
+    }
+}
+
+/* The ordinary paths must be untouched: no panic renders exactly what finish rendered before. */
+func TestCommandOutput_FinishRunLeavesTheOrdinaryPathsUnchanged(t *testing.T) {
+    successBuffer := &bytes.Buffer{}
+    successOutput := newCommandOutput(successBuffer, nil, output.NormalizeOption(output.Option{Format: output.FormatJson}))
+    successOutput.printSuccess("applied 2 migrations")
+
+    if runErr := successOutput.finishRun("db:migrate", time.Now(), nil, nil); nil != runErr {
+        t.Fatalf("a clean run must answer no error, got %v", runErr)
+    }
+    if false == strings.Contains(successBuffer.String(), `"error":null`) {
+        t.Fatalf("expected the clean run to render a success document, got %s", successBuffer.String())
+    }
+
+    failureBuffer := &bytes.Buffer{}
+    failureOutput := newCommandOutput(failureBuffer, nil, output.NormalizeOption(output.Option{Format: output.FormatJson}))
+
+    runFailure := exception.NewError("the migration lock is held", nil, nil)
+    if runErr := failureOutput.finishRun("db:migrate", time.Now(), runFailure, nil); nil == runErr {
+        t.Fatalf("a failed run must still answer its failure")
+    }
+    if false == strings.Contains(failureBuffer.String(), "the migration lock is held") {
+        t.Fatalf("expected the failure document, got %s", failureBuffer.String())
+    }
+}
+
+/* recover() answers only when it is called directly by the deferred function itself, so the door
+   takes the recovered value as a parameter. A command that read it one frame deeper would see nil
+   and believe every run ended well — which is the defect, spelled differently. This pins that every
+   command in the family passes recover() at its own defer rather than delegating the call. */
+func TestMigrateCommands_EveryCommandPassesItsOwnRecoverToTheSharedDoor(t *testing.T) {
+    commandFiles := []string{
+        "command_migrate.go",
+        "command_rollback.go",
+        "command_status.go",
+        "command_init.go",
+        "command_unlock.go",
+        "command_create.go",
+    }
+
+    for _, commandFile := range commandFiles {
+        source, readErr := os.ReadFile(commandFile)
+        if nil != readErr {
+            t.Fatalf("read %s: %v", commandFile, readErr)
+        }
+
+        if false == strings.Contains(string(source), "finishRun(instance.Name(), startedAt, runErr, recover())") {
+            t.Fatalf(
+                "%s does not defer to the shared door with its own recover(); a command that renders its document any other way can report success for a run that died",
+                commandFile,
+            )
+        }
+    }
+}
+
+/* the warning is the one text door whose caller carries text off the wire — the close failure of the migration connection — and it let the message through as sent, so a carriage return in it repainted the line and an escape sequence in it was obeyed; every text door escapes what it did not write itself, in both colour modes, and the sequence the DATA carried is what must not survive, the colour's own being the door's to write */
+func TestCommandOutput_PrintWarningEscapesControlCharacters(t *testing.T) {
+    for _, noColor := range []bool{true, false} {
+        instance, buffer := newBufferedOutput(noColor)
+        instance.printWarning("closed\rby the wire\x1b[2J")
+
+        rendered := buffer.String()
+
+        if false == strings.Contains(rendered, `WARNING: closed\rby the wire\x1b[2J`) {
+            t.Fatalf("noColor=%v: expected the escaped spelling, got %q", noColor, rendered)
+        }
+
+        if true == strings.Contains(rendered, "\r") || true == strings.Contains(rendered, "\x1b[2J") {
+            t.Fatalf("noColor=%v: a control character of the data survived: %q", noColor, rendered)
+        }
+    }
+}
+
+/* the applied line names the manager the operator configured and the success lines are composed from names the commands did not write; they escape the same way, so a rule that holds for one door holds for the type */
+func TestCommandOutput_PrintSuccessEscapesControlCharacters(t *testing.T) {
+    for _, noColor := range []bool{true, false} {
+        instance, buffer := newBufferedOutput(noColor)
+        instance.printSuccess("applied to ma\rnager")
+
+        rendered := buffer.String()
+
+        if false == strings.Contains(rendered, `applied to ma\rnager`) || true == strings.Contains(rendered, "\r") {
+            t.Fatalf("noColor=%v: expected the escaped spelling and no raw carriage return, got %q", noColor, rendered)
+        }
+    }
+}
+
+/* the files block names the paths bun answered for the migration it created, built from a name the operator typed */
+func TestCommandOutput_PrintFilesBlockEscapesControlCharacters(t *testing.T) {
+    instance, buffer := newBufferedOutput(true)
+    instance.printFilesBlock([]string{"migrations/20240101_a\rb.go"})
+
+    rendered := buffer.String()
+
+    if false == strings.Contains(rendered, `  migrations/20240101_a\rb.go`) || true == strings.Contains(rendered, "\r") {
+        t.Fatalf("expected the escaped path and no raw carriage return, got %q", rendered)
     }
 }

@@ -1,7 +1,9 @@
 package migrate
 
 import (
+    "bytes"
     "context"
+    "encoding/json"
     "errors"
     "strings"
     "testing"
@@ -10,6 +12,7 @@ import (
 
     "github.com/precision-soft/melody/integrations/bunorm/v2"
     clicontract "github.com/precision-soft/melody/v2/cli/contract"
+    "github.com/precision-soft/melody/v2/cli/output"
     "github.com/precision-soft/melody/v2/container"
     containercontract "github.com/precision-soft/melody/v2/container/contract"
     "github.com/precision-soft/melody/v2/logging"
@@ -191,7 +194,7 @@ func TestUnlockMigrations_RunsOnACancelledCommandContext(t *testing.T) {
     unlocker := &recordingMigrationUnlocker{}
     outputInstance, _ := newBufferedOutput(true)
 
-    if unlockErr := unlockMigrations(cancelledContext, unlocker, outputInstance); nil != unlockErr {
+    if unlockErr := unlockMigrations(cancelledContext, unlocker, outputInstance, "db:unlock"); nil != unlockErr {
         t.Fatalf("expected no error from a successful unlock, got %v", unlockErr)
     }
 
@@ -217,10 +220,15 @@ func TestUnlockMigrations_ReportsAFailedUnlock(t *testing.T) {
     unlocker := &recordingMigrationUnlocker{unlockError: deleteRefused}
     outputInstance, buffer := newBufferedOutput(true)
 
-    unlockErr := unlockMigrations(context.Background(), unlocker, outputInstance)
+    unlockErr := unlockMigrations(context.Background(), unlocker, outputInstance, "db:unlock")
 
     if false == strings.Contains(buffer.String(), "delete refused") {
         t.Fatalf("expected the unlock failure to be reported, got %q", buffer.String())
+    }
+
+    /* bun's bare error says nothing about a lock: the line names the surviving row's table and the command that clears it, or the operator reads a driver error and learns neither */
+    if false == strings.Contains(buffer.String(), "stays held in bun_migration_locks") || false == strings.Contains(buffer.String(), "until db:unlock clears it") {
+        t.Fatalf("expected the report to name the surviving lock and its remedy, got %q", buffer.String())
     }
 
     /* the printed line alone is not enough: the failure must also reach the exit code, or a deploy script reads success over a lock row that refuses every later migration */
@@ -306,19 +314,7 @@ func TestResolveDatabase_PrefersTheDedicatedMigrationConnection(t *testing.T) {
     }
 }
 
-/*
-TestNewMigrator_SqlMigrationExecFailureReachesTheCaller pins the verdict of the
-SQL migration path against the bun version this module requires. The path is
-bun's — a *migrate.Migrations filled by Discover — but melody builds the
-migrator over it and is the layer that prints the result, so a swallowed
-failure here is a green deploy over a schema that never changed. Under
-bun v1.2.16 the deferred conn.Close overwrote the exec failure with its own nil
-return, so Migrate answered nil, the command printed [success], exited 0 and
-marked the migration applied forever, which made the failure unrepeatable. The
-pin drives a .up.sql whose exec the driver refuses and requires the refusal to
-reach the caller, so a bump that reintroduces the swallow fails here rather
-than at three in the morning.
-*/
+/* TestNewMigrator_SqlMigrationExecFailureReachesTheCaller pins the verdict of the SQL migration path against the bun version this module requires. The path is bun's — a *migrate.Migrations filled by Discover — but melody builds the migrator over it and is the layer that prints the result, so a swallowed failure here is a green deploy over a schema that never changed. Under bun v1.2.16 the deferred conn.Close overwrote the exec failure with its own nil return, so Migrate answered nil, the command printed [success], exited 0 and marked the migration applied forever, which made the failure unrepeatable. The pin drives a .up.sql whose exec the driver refuses and requires the refusal to reach the caller, so a bump that reintroduces the swallow fails here rather than at three in the morning. */
 func TestNewMigrator_SqlMigrationExecFailureReachesTheCaller(t *testing.T) {
     const migrationName = "20260101000001"
     const migrationStatement = "CREATE TABLE probe_three (id NOT_A_TYPE)"
@@ -367,5 +363,49 @@ func TestNewMigrator_SqlMigrationExecFailureReachesTheCaller(t *testing.T) {
         if true == strings.HasPrefix(query, "INSERT") && true == strings.Contains(query, "bun_migrations") {
             t.Fatalf("the failed migration was marked applied: %q", query)
         }
+    }
+}
+
+/* under json the failed release is one warning string in the document, the same code as "no pending migrations": the text is what separates a surviving lock from a side remark, so it names the lock table and the unlock command there too, and the same failure, returned as the verdict, carries them in the error object */
+func TestUnlockMigrations_NamesTheSurvivingLockInTheJsonDocument(t *testing.T) {
+    unlocker := &recordingMigrationUnlocker{unlockError: errors.New("context deadline exceeded")}
+    buffer := &bytes.Buffer{}
+    outputInstance := newCommandOutput(buffer, nil, output.Option{Format: output.FormatJson})
+
+    unlockErr := unlockMigrations(context.Background(), unlocker, outputInstance, "db:unlock")
+    if nil == unlockErr {
+        t.Fatal("expected the failed release to be returned")
+    }
+
+    if finishErr := outputInstance.finish("db:migrate", time.Now(), unlockErr); nil == finishErr {
+        t.Fatal("expected the failed release to stay the verdict")
+    }
+
+    document := struct {
+        Warnings []struct {
+            Code    string `json:"code"`
+            Message string `json:"message"`
+        } `json:"warnings"`
+        Error *struct {
+            Message string         `json:"message"`
+            Details map[string]any `json:"details"`
+        } `json:"error"`
+    }{}
+    if decodeErr := json.Unmarshal(buffer.Bytes(), &document); nil != decodeErr {
+        t.Fatalf("failed to decode the document: %v; rendered %q", decodeErr, buffer.String())
+    }
+
+    if 1 != len(document.Warnings) || "migrate.warning" != document.Warnings[0].Code {
+        t.Fatalf("expected one migrate.warning, got %#v", document.Warnings)
+    }
+
+    for _, wanted := range []string{"bun_migration_locks", "db:unlock", "context deadline exceeded"} {
+        if false == strings.Contains(document.Warnings[0].Message, wanted) {
+            t.Errorf("the warning %q does not name %q", document.Warnings[0].Message, wanted)
+        }
+    }
+
+    if nil == document.Error || "db:unlock" != document.Error.Details["unlockCommand"] || "bun_migration_locks" != document.Error.Details["locksTable"] {
+        t.Fatalf("expected the error object to carry the lock table and the remedy, got %q", buffer.String())
     }
 }

@@ -459,8 +459,7 @@ func TestEnvironmentSource_StillResolvesAnUpperCaseReference(t *testing.T) {
     }
 }
 
-/* the double stands in for the source this file mirrors, so it lives here; the other test files of the
-package reach it from the package. */
+/* the double stands in for the source this file mirrors, so it lives here; the other test files of the package reach it from the package. */
 type testEnvironmentSource struct {
     values map[string]string
     err    error

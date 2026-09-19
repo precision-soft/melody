@@ -42,7 +42,7 @@ func scopedProviderCreateFunc(provider providerAny) createWithGuardCreateFunc {
 
 /* scopedServiceByName builds — or hands back — a service this scope owns. Everything about it is the scope's: the provider comes from the scope, the creation guard that serialises concurrent resolutions is the scope's own map, and so is the map the finished value lands in. Two scopes resolving the same name therefore never meet — they contend on nothing, wait on nothing of each other's, and each ends up with the instance that belongs to its own request — while two goroutines of the SAME request still share one instance, because they share one guard.
 
-It runs under the container mutex like every other creation: that is the lock the guard holds and releases around the provider call, and container-then-scope is the only order the two locks are ever taken in. The scope is deliberately left visible for the duration, because a scoped service is the request and may read both levels. */
+   It runs under the container mutex like every other creation: that is the lock the guard holds and releases around the provider call, and container-then-scope is the only order the two locks are ever taken in. The scope is deliberately left visible for the duration, because a scoped service is the request and may read both levels. */
 func (instance *resolverContext) scopedServiceByName(
     scopeInstance *scope,
     serviceName string,

@@ -3,30 +3,13 @@ package migrate
 import (
     "bytes"
     "context"
-    "database/sql"
-    "database/sql/driver"
     "errors"
     "io"
     "os"
     "strings"
-    "sync"
     "testing"
-    "time"
 
-    "github.com/precision-soft/melody/integrations/bunorm/v3"
     "github.com/precision-soft/melody/v3/cli"
-    clicontract "github.com/precision-soft/melody/v3/cli/contract"
-    "github.com/precision-soft/melody/v3/container"
-    containercontract "github.com/precision-soft/melody/v3/container/contract"
-    "github.com/precision-soft/melody/v3/logging"
-    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
-    "github.com/precision-soft/melody/v3/runtime"
-    runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
-    "github.com/uptrace/bun"
-    "github.com/uptrace/bun/dialect"
-    "github.com/uptrace/bun/dialect/feature"
-    "github.com/uptrace/bun/migrate"
-    "github.com/uptrace/bun/schema"
 )
 
 func TestDefaultRunnerOption(t *testing.T) {
@@ -226,334 +209,224 @@ func TestFormatQueryForLog(t *testing.T) {
     }
 }
 
-/* @info migration command harness */
-
-type fakeDatabaseProvider struct {
-    database *bun.DB
-}
-
-func (instance *fakeDatabaseProvider) Open(params bunorm.ConnectionParams, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.database, nil
-}
-
-func newRuntimeWithDatabase(t *testing.T, database *bun.DB) runtimecontract.Runtime {
-    t.Helper()
-
-    registry, registryErr := bunorm.NewManagerRegistry(
-        logging.NewNopLogger(),
-        bunorm.ProviderDefinition{Name: "primary", Provider: &fakeDatabaseProvider{database: database}, IsDefault: true},
-    )
-    if nil != registryErr {
-        t.Fatalf("failed to build manager registry: %s", registryErr.Error())
-    }
-
-    serviceContainer := container.NewContainer()
-    container.MustRegister[*bunorm.ManagerRegistry](
-        serviceContainer,
-        DefaultOptions().ManagerRegistryServiceId,
-        func(resolver containercontract.Resolver) (*bunorm.ManagerRegistry, error) {
-            return registry, nil
-        },
-    )
-
-    return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
-}
-
-/*
-runMigrationCommand drives a migration command exactly like the CLI kernel
-does: the command metadata is mounted on a command context, the arguments are
-parsed and the command's Run receives the parsed context.
-*/
-func runMigrationCommand(
-    t *testing.T,
-    runtimeInstance runtimecontract.Runtime,
-    command clicontract.Command,
-    arguments ...string,
-) (string, error) {
-    t.Helper()
-
+func TestRunQueriesWithOption_EmptySetWarnsInsteadOfReportingSuccess(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
     buffer := &bytes.Buffer{}
 
-    var runErr error
-    commandContext := &clicontract.CommandContext{
-        Name:   command.Name(),
-        Flags:  command.Flags(),
-        Writer: buffer,
-        Action: func(ctx context.Context, innerContext *clicontract.CommandContext) error {
-            runErr = command.Run(runtimeInstance, innerContext)
-
-            return nil
-        },
+    runErr := RunQueriesWithOption(
+        context.Background(),
+        database,
+        "up",
+        "20240101000000_create_users",
+        nil,
+        RunnerOption{Writer: buffer, NoColor: true},
+    )
+    if nil != runErr {
+        t.Fatalf("expected an empty set to still succeed, got %v", runErr)
     }
 
-    if parseErr := commandContext.Run(context.Background(), append([]string{command.Name()}, arguments...)); nil != parseErr {
-        t.Fatalf("failed to parse command arguments: %s", parseErr.Error())
+    rendered := buffer.String()
+    if false == strings.Contains(rendered, "WARNING") {
+        t.Fatalf("expected the empty set to be reported as a warning, got %q", rendered)
     }
 
-    return buffer.String(), runErr
+    if true == strings.Contains(rendered, "executed successfully") {
+        t.Fatalf("expected no success line for a set that executed nothing, got %q", rendered)
+    }
+
+    if 0 != len(recorder.recordedQueries()) {
+        t.Fatalf("expected no statement to reach the database, got %v", recorder.recordedQueries())
+    }
 }
 
-func newSingleMigrationSet(name string, comment string, upCalls *int, downCalls *int) *migrate.Migrations {
-    migrations := migrate.NewMigrations()
-
-    migrations.Add(migrate.Migration{
-        Name:    name,
-        Comment: comment,
-        Up: func(ctx context.Context, migrator *migrate.Migrator, migration *migrate.Migration) error {
-            if nil != upCalls {
-                *upCalls = *upCalls + 1
-            }
-
-            return nil
-        },
-        Down: func(ctx context.Context, migrator *migrate.Migrator, migration *migrate.Migration) error {
-            if nil != downCalls {
-                *downCalls = *downCalls + 1
-            }
-
-            return nil
-        },
+/* RunQueries reads the installed process default when the migration passes no option of its own: the parsed --no-color posture reaches the per-query lines whose signature bun fixes at (ctx, db). */
+func TestRunQueries_ReadsTheInstalledProcessDefault(t *testing.T) {
+    t.Cleanup(func() {
+        processRunnerOption.Store(nil)
     })
 
-    return migrations
+    var buffer bytes.Buffer
+    SetDefaultRunnerOption(RunnerOption{Writer: &buffer, NoColor: true})
+
+    if runErr := RunQueries(context.Background(), nil, "up", "20240101000000_probe", nil); nil != runErr {
+        t.Fatalf("run: %v", runErr)
+    }
+
+    rendered := buffer.String()
+    if "" == rendered {
+        t.Fatal("expected the empty-set warning on the installed writer")
+    }
+
+    if true == strings.Contains(rendered, "\x1b[") {
+        t.Fatalf("expected the installed no-color posture to strip the escape codes, got %q", rendered)
+    }
 }
 
-func appliedMigrationRowsHook(appliedNames ...string) func(query string) ([]string, [][]driver.Value, error) {
-    return func(query string) ([]string, [][]driver.Value, error) {
-        if true == strings.HasPrefix(query, "SELECT") && true == strings.Contains(query, "bun_migrations") {
-            rows := make([][]driver.Value, 0, len(appliedNames))
-            for index, appliedName := range appliedNames {
-                rows = append(rows, []driver.Value{int64(index + 1), appliedName, int64(1), time.Now().UTC()})
+/* the failure rendering hands the terminal three foreign strings — the query name, the driver's error text and the statement — so each is escaped visibly, and the statement alone keeps its real line breaks, which are the readability of the query block. */
+func TestMigrationPrinter_PrintFailedEscapesForeignTextButKeepsTheQueryLines(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    printer := &migrationPrinter{writer: buffer, noColor: true}
+
+    printer.printFailed(
+        "[migration:up] add_users [1/1]",
+        "create\rtable",
+        errors.New("server said\x1b[2J"),
+        "CREATE TABLE users (\n    id INT\x07\n)",
+    )
+
+    rendered := buffer.String()
+
+    if false == strings.Contains(rendered, `create\rtable`) {
+        t.Fatalf("expected the query name escaped, got:\n%s", rendered)
+    }
+
+    if false == strings.Contains(rendered, `server said\x1b[2J`) {
+        t.Fatalf("expected the error text escaped, got:\n%s", rendered)
+    }
+
+    if false == strings.Contains(rendered, `INT\x07`) {
+        t.Fatalf("expected the statement's control byte escaped, got:\n%s", rendered)
+    }
+
+    if false == strings.Contains(rendered, "       CREATE TABLE users (\n") {
+        t.Fatalf("expected the statement to keep its real line breaks, got:\n%s", rendered)
+    }
+
+    if true == strings.Contains(rendered, "\x1b") || true == strings.Contains(rendered, "\x07") {
+        t.Fatalf("a raw control byte reached the terminal:\n%s", rendered)
+    }
+}
+
+/* the empty and the success lines of a run carry the migration name, which the runner did not write; they escape it in both colour modes, and the per-query lines — which carry it inside the prefix — are measured on a run of their own below */
+func TestMigrationPrinter_EscapesTheMigrationNameOnTheEmptyAndSuccessLines(t *testing.T) {
+    for _, noColor := range []bool{true, false} {
+        buffer := &bytes.Buffer{}
+        printer := &migrationPrinter{writer: buffer, noColor: noColor}
+
+        printer.printEmpty("up", "2024\r0101_forged")
+        printer.printSuccess("up", "2024\r0101_forged", 1)
+
+        rendered := buffer.String()
+
+        if 2 != strings.Count(rendered, `2024\r0101_forged`) {
+            t.Fatalf("noColor=%v: expected the escaped name on both lines, got %q", noColor, rendered)
+        }
+
+        if true == strings.Contains(rendered, "\r") {
+            t.Fatalf("noColor=%v: a raw carriage return survived: %q", noColor, rendered)
+        }
+    }
+}
+
+/* the option a command puts on the context is the one a run prints under, ahead of the process-wide fallback: the fallback is one value for the whole process, and a run reading it printed under whichever command had installed it last */
+func TestRunQueries_ReadsTheOptionCarriedByTheContextBeforeTheProcessDefault(t *testing.T) {
+    t.Cleanup(func() {
+        processRunnerOption.Store(nil)
+    })
+
+    var fallback bytes.Buffer
+    SetDefaultRunnerOption(RunnerOption{Writer: &fallback, NoColor: true})
+
+    var carried bytes.Buffer
+    ctx := withRunnerOption(context.Background(), RunnerOption{Writer: &carried, NoColor: true})
+
+    if runErr := RunQueries(ctx, nil, "up", "20240101000000_probe", nil); nil != runErr {
+        t.Fatalf("run: %v", runErr)
+    }
+
+    if false == strings.Contains(carried.String(), "20240101000000_probe") {
+        t.Fatalf("expected the run to print on the writer the context carries, got %q", carried.String())
+    }
+
+    if "" != fallback.String() {
+        t.Fatalf("expected nothing on the process-wide fallback, got %q", fallback.String())
+    }
+}
+
+/* a command puts its posture back on the way out, whichever order overlapping commands finish in: a command that finished while a later one still runs leaves that one's value where it is, and the LAST command to leave puts the host's own value back — the compare-and-swap this replaced restored correctly only last-in first-out, and two commands overlapping the other way round left the first command's finished posture installed for the life of the process */
+func TestRestoreDefaultRunnerOption_PutsTheHostsValueBackWhicheverOrderTheCommandsFinishIn(t *testing.T) {
+    t.Cleanup(func() {
+        processRunnerOption.Store(nil)
+        commandRunnerOptions.depth = 0
+        commandRunnerOptions.host = nil
+    })
+
+    var host bytes.Buffer
+    SetDefaultRunnerOption(RunnerOption{Writer: &host, NoColor: true})
+
+    var first bytes.Buffer
+    var second bytes.Buffer
+
+    /* the later command finishes first: the earlier command's value is live again, then the host's */
+    firstInstalled, firstPrevious := swapDefaultRunnerOption(RunnerOption{Writer: &first, NoColor: true})
+    secondInstalled, secondPrevious := swapDefaultRunnerOption(RunnerOption{Writer: &second, NoColor: true})
+
+    if &second != resolveDefaultRunnerOption().Writer {
+        t.Fatal("expected the swap to install the latest command's value for the length of its run")
+    }
+
+    restoreDefaultRunnerOption(secondInstalled, secondPrevious)
+    if &first != resolveDefaultRunnerOption().Writer {
+        t.Fatal("expected the later command's restore to put the earlier command's value back")
+    }
+
+    restoreDefaultRunnerOption(firstInstalled, firstPrevious)
+    if &host != resolveDefaultRunnerOption().Writer {
+        t.Fatalf("expected the host's own value back once every command restored, got %v", resolveDefaultRunnerOption().Writer)
+    }
+
+    /* the earlier command finishes first: the later command's value stays live, and its own restore puts the host's value back — not the earlier command's finished one */
+    firstInstalled, firstPrevious = swapDefaultRunnerOption(RunnerOption{Writer: &first, NoColor: true})
+    secondInstalled, secondPrevious = swapDefaultRunnerOption(RunnerOption{Writer: &second, NoColor: true})
+
+    restoreDefaultRunnerOption(firstInstalled, firstPrevious)
+    if &second != resolveDefaultRunnerOption().Writer {
+        t.Fatal("expected the first command's restore to leave the later command's value in place")
+    }
+
+    restoreDefaultRunnerOption(secondInstalled, secondPrevious)
+    if &host != resolveDefaultRunnerOption().Writer {
+        t.Fatalf("expected the host's own value back once the last command restored, got %v", resolveDefaultRunnerOption().Writer)
+    }
+}
+
+/* the prefix of every per-query line carries the migration name, the author's own text, and the executing, completed and failed lines printed it as sent while escaping the query name beside it: a name carrying an escape sequence repainted the terminal three times per query. Measured on a run whose second query fails, so all three lines print, in both colour modes: the name is escaped on every line and no raw escape byte reaches the writer. */
+func TestRunQueriesWithOption_EscapesTheMigrationNameInsideThePrefixOfEveryPerQueryLine(t *testing.T) {
+    for _, noColor := range []bool{true, false} {
+        database, recorder := newFakeBunDatabase()
+        recorder.execHook = func(query string) error {
+            if true == strings.Contains(query, "CREATE INDEX") {
+                return errors.New("index already exists")
             }
 
-            return []string{"id", "name", "group_id", "migrated_at"}, rows, nil
+            return nil
         }
 
-        return []string{}, nil, nil
-    }
-}
-
-func isLockInsert(query string) bool {
-    return strings.HasPrefix(query, "INSERT") && strings.Contains(query, "bun_migration_locks")
-}
-
-func isUnlockDelete(query string) bool {
-    return strings.HasPrefix(query, "DELETE") && strings.Contains(query, "bun_migration_locks")
-}
-
-func isMigrationStatusSelect(query string) bool {
-    return strings.HasPrefix(query, "SELECT") && strings.Contains(query, "bun_migrations")
-}
-
-/* @info fake bun database */
-
-/*
-queryRecorder captures every statement sent to the fake driver so tests can
-assert on the exact statements and their relative order (for example that the
-migration lock is taken before any migration work and released afterwards).
-*/
-type queryRecorder struct {
-    mutex     sync.Mutex
-    queries   []string
-    execHook  func(query string) error
-    queryHook func(query string) ([]string, [][]driver.Value, error)
-}
-
-func (instance *queryRecorder) record(query string) {
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    instance.queries = append(instance.queries, query)
-}
-
-func (instance *queryRecorder) recordedQueries() []string {
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    queries := make([]string, len(instance.queries))
-    copy(queries, instance.queries)
-
-    return queries
-}
-
-/*
-firstIndexMatching returns the index of the first recorded query accepted by
-the matcher, or -1 when no recorded query matches.
-*/
-func (instance *queryRecorder) firstIndexMatching(matcher func(query string) bool) int {
-    for index, query := range instance.recordedQueries() {
-        if true == matcher(query) {
-            return index
-        }
-    }
-
-    return -1
-}
-
-type fakeConnection struct {
-    recorder *queryRecorder
-}
-
-func (instance *fakeConnection) Prepare(query string) (driver.Stmt, error) {
-    return nil, errors.New("prepared statements are not supported by the fake driver")
-}
-
-func (instance *fakeConnection) Close() error {
-    return nil
-}
-
-func (instance *fakeConnection) Begin() (driver.Tx, error) {
-    return nil, errors.New("transactions are not supported by the fake driver")
-}
-
-func (instance *fakeConnection) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
-    instance.recorder.record(query)
-
-    if nil != instance.recorder.execHook {
-        if hookErr := instance.recorder.execHook(query); nil != hookErr {
-            return nil, hookErr
-        }
-    }
-
-    return &fakeResult{}, nil
-}
-
-func (instance *fakeConnection) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
-    instance.recorder.record(query)
-
-    if nil != instance.recorder.queryHook {
-        columns, rows, hookErr := instance.recorder.queryHook(query)
-        if nil != hookErr {
-            return nil, hookErr
+        buffer := &bytes.Buffer{}
+        queries := []Query{
+            {Name: "create table", SQL: "CREATE TABLE users (id INTEGER)"},
+            {Name: "create index", SQL: "CREATE INDEX users_id ON users (id)"},
         }
 
-        return &fakeRows{columns: columns, rows: rows}, nil
+        runErr := RunQueriesWithOption(context.Background(), database, "up", "m\x1b[31mred", queries, RunnerOption{Writer: buffer, NoColor: noColor})
+        if nil == runErr {
+            t.Fatalf("noColor=%v: expected the second query to fail", noColor)
+        }
+
+        rendered := buffer.String()
+
+        /* executing + completed for the first query, executing + FAILED for the second carry the prefix in both modes; the ERROR and QUERY lines carry it only without colour, where the colour is what sets them apart */
+        prefixedLines := 4
+        if true == noColor {
+            prefixedLines = 6
+        }
+
+        if prefixedLines != strings.Count(rendered, `[migration:up] m\x1b[31mred [`) {
+            t.Fatalf("noColor=%v: expected the escaped name in the prefix of all %d per-query lines, got %q", noColor, prefixedLines, rendered)
+        }
+
+        if true == strings.Contains(rendered, "m\x1b[31mred") {
+            t.Fatalf("noColor=%v: the raw escape sequence of the migration name reached the writer: %q", noColor, rendered)
+        }
     }
-
-    return &fakeRows{columns: []string{}, rows: nil}, nil
 }
-
-type fakeResult struct{}
-
-func (instance *fakeResult) LastInsertId() (int64, error) {
-    return 1, nil
-}
-
-func (instance *fakeResult) RowsAffected() (int64, error) {
-    return 1, nil
-}
-
-type fakeRows struct {
-    columns []string
-    rows    [][]driver.Value
-    cursor  int
-}
-
-func (instance *fakeRows) Columns() []string {
-    return instance.columns
-}
-
-func (instance *fakeRows) Close() error {
-    return nil
-}
-
-func (instance *fakeRows) Next(destination []driver.Value) error {
-    if instance.cursor >= len(instance.rows) {
-        return io.EOF
-    }
-
-    copy(destination, instance.rows[instance.cursor])
-    instance.cursor = instance.cursor + 1
-
-    return nil
-}
-
-type fakeConnector struct {
-    recorder *queryRecorder
-}
-
-func (instance *fakeConnector) Connect(ctx context.Context) (driver.Conn, error) {
-    return &fakeConnection{recorder: instance.recorder}, nil
-}
-
-func (instance *fakeConnector) Driver() driver.Driver {
-    return &fakeSqlDriver{}
-}
-
-type fakeSqlDriver struct{}
-
-func (instance *fakeSqlDriver) Open(name string) (driver.Conn, error) {
-    return nil, errors.New("open by dsn is not supported by the fake driver")
-}
-
-/*
-fakeDialect is a minimal bun dialect built only from packages that already
-live in the bun core module, so no database driver or dialect dependency is
-required. It reports the sqlite dialect name, which keeps the verbose
-database-identity lookup (a mysql-only feature) out of the command flows.
-*/
-type fakeDialect struct {
-    schema.BaseDialect
-
-    tables *schema.Tables
-}
-
-func newFakeDialect() *fakeDialect {
-    instance := &fakeDialect{}
-    instance.tables = schema.NewTables(instance)
-
-    return instance
-}
-
-func (instance *fakeDialect) Init(db *sql.DB) {
-}
-
-func (instance *fakeDialect) Name() dialect.Name {
-    return dialect.SQLite
-}
-
-func (instance *fakeDialect) Features() feature.Feature {
-    return 0
-}
-
-func (instance *fakeDialect) Tables() *schema.Tables {
-    return instance.tables
-}
-
-func (instance *fakeDialect) OnTable(table *schema.Table) {
-}
-
-func (instance *fakeDialect) IdentQuote() byte {
-    return '"'
-}
-
-func (instance *fakeDialect) AppendSequence(b []byte, t *schema.Table, f *schema.Field) []byte {
-    return b
-}
-
-func (instance *fakeDialect) DefaultVarcharLen() int {
-    return 0
-}
-
-func (instance *fakeDialect) DefaultSchema() string {
-    return "main"
-}
-
-/*
-newFakeBunDatabase returns a real *bun.DB backed by the in-memory fake driver
-together with the recorder observing every statement.
-*/
-func newFakeBunDatabase() (*bun.DB, *queryRecorder) {
-    recorder := &queryRecorder{}
-    sqlDatabase := sql.OpenDB(&fakeConnector{recorder: recorder})
-
-    return bun.NewDB(sqlDatabase, newFakeDialect()), recorder
-}
-
-var (
-    _ driver.Conn           = (*fakeConnection)(nil)
-    _ driver.ExecerContext  = (*fakeConnection)(nil)
-    _ driver.QueryerContext = (*fakeConnection)(nil)
-    _ driver.Connector      = (*fakeConnector)(nil)
-    _ schema.Dialect        = (*fakeDialect)(nil)
-)

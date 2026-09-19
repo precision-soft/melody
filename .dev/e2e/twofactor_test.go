@@ -7,13 +7,10 @@ import (
     "github.com/precision-soft/melody/v3/security/totp"
 )
 
-/* twoFactorTestSecret is a valid base32 TOTP secret; the codes it produces are deterministic for a given instant,
-which is what lets these tests reason about the window without a live enrollment. */
+/* twoFactorTestSecret is a valid base32 TOTP secret; the codes it produces are deterministic for a given instant, which is what lets these tests reason about the window without a live enrollment. */
 const twoFactorTestSecret = "MAVSJVJQLMEMCEVAMYS3AWZXETSUA3EI"
 
-/* The expired-code helper is the only piece of the two-factor section with logic of its own, and its failure mode
-is silent in both directions: a distance shorter than the verification window would make the section assert that a
-VALID code is refused (a red run with no defect), and a code that collided with the current one would do the same. */
+/* The expired-code helper is the only piece of the two-factor section with logic of its own, and its failure mode is silent in both directions: a distance shorter than the verification window would make the section assert that a VALID code is refused (a red run with no defect), and a code that collided with the current one would do the same. */
 func TestTwoFactorExpiredCodeAt_ReachesOutsideTheVerificationWindow(t *testing.T) {
     reference := time.Unix(1785000000, 0)
 
@@ -45,8 +42,7 @@ func TestTwoFactorExpiredCodeAt_ReachesOutsideTheVerificationWindow(t *testing.T
     }
 }
 
-/* the current code has to be accepted at the same instant, or the test above would pass for a broken secret rather
-than for a bounded window. */
+/* the current code has to be accepted at the same instant, or the test above would pass for a broken secret rather than for a bounded window. */
 func TestTwoFactorExpiredCodeAt_TheCurrentCodeIsStillAccepted(t *testing.T) {
     reference := time.Unix(1785000000, 0)
 
@@ -70,9 +66,7 @@ func TestTwoFactorExpiredCodeAt_ReportsAnUnusableSecret(t *testing.T) {
     }
 }
 
-/* the whitespace replay proves the nonce key is normalised, so the spaced form has to be the SAME code with a
-space in it — a helper that returned something else would be probing a different code entirely and the negative
-would pass for the wrong reason. */
+/* the whitespace replay proves the nonce key is normalised, so the spaced form has to be the SAME code with a space in it — a helper that returned something else would be probing a different code entirely and the negative would pass for the wrong reason. */
 func TestTwoFactorSpacedCode_SplitsTheSameCode(t *testing.T) {
     spaced := twoFactorSpacedCode("409643")
 

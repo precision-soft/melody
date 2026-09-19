@@ -2,6 +2,7 @@ package encrypt
 
 import (
     "context"
+    "io"
     "database/sql"
     "database/sql/driver"
     "errors"
@@ -9,6 +10,7 @@ import (
     "strings"
     "testing"
 
+    melodycli "github.com/precision-soft/melody/v3/cli"
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     clockcontract "github.com/precision-soft/melody/v3/clock/contract"
     configcontract "github.com/precision-soft/melody/v3/config/contract"
@@ -119,7 +121,6 @@ func TestModule_RegisterCliCommandsPanicsOnInvalidContext(t *testing.T) {
     })
 }
 
-/* @info database factory wiring */
 
 func newFakeKernel() *fakeKernel {
     return &fakeKernel{serviceContainer: container.NewContainer()}
@@ -170,22 +171,19 @@ func runEncryptCommand(t *testing.T, command clicontract.Command, arguments []st
     serviceContainer := container.NewContainer()
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
-    var runErr error
-    cliCommand := &clicontract.CommandContext{
-        Name:  command.Name(),
-        Flags: command.Flags(),
-        Action: func(ctx context.Context, commandContext *clicontract.CommandContext) error {
-            runErr = command.Run(runtimeInstance, commandContext)
+    capturing := &capturingCommand{Command: command, runtimeInstance: runtimeInstance}
 
-            return nil
-        },
-    }
-
-    if executeErr := cliCommand.Run(context.Background(), arguments); nil != executeErr {
+    if executeErr := melodycli.DispatchCommand(
+        context.Background(),
+        capturing,
+        runtimeInstance,
+        arguments,
+        io.Discard,
+    ); nil != executeErr {
         t.Fatalf("cli command execution failed: %v", executeErr)
     }
 
-    return runErr
+    return capturing.capturedErr
 }
 
 func assertPanicsWithMessage(t *testing.T, expected string, callback func()) {
@@ -423,4 +421,27 @@ type factoryError struct{}
 
 func (instance *factoryError) Error() string {
     return "factory failed"
+}
+
+/* a kernel answering no service container used to be captured silently into the closure and explode at the first command run, far from the registration that produced it */
+func TestModule_RefusesAKernelWithoutAServiceContainer(t *testing.T) {
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatalf("expected the missing service container to be refused at registration")
+        }
+
+        if false == strings.Contains(fmt.Sprintf("%v", recovered), "no service container") {
+            t.Fatalf("expected the panic to name the missing container, got %v", recovered)
+        }
+    }()
+
+    module := NewModule(ModuleConfig{
+        Cipher: NewFakeCipher(),
+        DatabaseFactory: func(resolver containercontract.Resolver) (*bun.DB, error) {
+            return newMysqlDatabase(), nil
+        },
+    })
+
+    module.RegisterCliCommands(&fakeKernel{})
 }

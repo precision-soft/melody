@@ -2,10 +2,10 @@ package container
 
 import (
     "errors"
-    "runtime"
     "strings"
     "sync"
     "testing"
+    "time"
 
     containercontract "github.com/precision-soft/melody/container/contract"
     "github.com/precision-soft/melody/exception"
@@ -556,11 +556,15 @@ type waitingResolverProbe struct {
     value string
 }
 
+/* creationWaiterBudget bounds awaitCreationWaiter in time: the waiter runs on its own thread, which a loaded host can hold off the cpu for far longer than any number of this goroutine's yields takes to spend, and a gate running the modules in parallel is exactly such a host. */
+const creationWaiterBudget = 10 * time.Second
+
 /* awaitCreationWaiter blocks until the creation of serviceName has registered at least the given number of waiters, which is the state a test needs before it can release the owner: the wait registration is what the guard under test then reads. */
 func awaitCreationWaiter(t *testing.T, serviceContainer *container, serviceName string, waiterCount int) {
     t.Helper()
 
-    for attempt := 0; attempt < 20000; attempt++ {
+    deadline := time.Now().Add(creationWaiterBudget)
+    for {
         serviceContainer.mutex.RLock()
         state, exists := serviceContainer.creatingByName[serviceName]
         registered := 0
@@ -573,10 +577,12 @@ func awaitCreationWaiter(t *testing.T, serviceContainer *container, serviceName 
             return
         }
 
-        runtime.Gosched()
-    }
+        if true == time.Now().After(deadline) {
+            t.Fatalf("expected %d waiters on the creation of %q within %s", waiterCount, serviceName, creationWaiterBudget)
+        }
 
-    t.Fatalf("expected %d waiters on the creation of %q", waiterCount, serviceName)
+        time.Sleep(time.Millisecond)
+    }
 }
 
 /* a service the container memoizes is created once and handed to the owner AND to every goroutine that arrived while it was being built — so a creation that FAILED has to reach the waiters as a failure too. Nothing had ever entered that branch: a waiter released after a failed creation used to be proven only by the absence of a crash, and a branch that instead fell through to the lookup would have answered "service was not available after creation finished" and sent the reader looking for a missing registration rather than for the provider that refused. */

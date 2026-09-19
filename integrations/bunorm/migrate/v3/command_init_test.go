@@ -49,7 +49,8 @@ func TestInitCommand_UnknownManagerFails(t *testing.T) {
         t.Fatal("expected an error for an unknown manager name")
     }
 
-    if false == strings.Contains(rendered, "ERROR:") {
-        t.Fatalf("error was not printed to the command output: %q", rendered)
+    /* the command no longer pre-prints the failure it returns: the cli runner's [error] line and the full log record already report it */
+    if true == strings.Contains(rendered, "ERROR:") {
+        t.Fatalf("the returned failure must not be pre-printed by the command, got: %q", rendered)
     }
 }

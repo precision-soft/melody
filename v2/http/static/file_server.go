@@ -15,6 +15,7 @@ import (
     "github.com/precision-soft/melody/v2/exception"
     exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
     httpcontract "github.com/precision-soft/melody/v2/http/contract"
+    "github.com/precision-soft/melody/v2/internal"
     "github.com/precision-soft/melody/v2/logging"
     loggingcontract "github.com/precision-soft/melody/v2/logging/contract"
 )
@@ -77,10 +78,7 @@ func NewFileServer(options *Options) *FileServer {
         }
     }
 
-    /* the configuration is copied here — struct and both lists — so the server is immutable once
-       built: the defaults below land on the copy instead of being written into the caller's struct,
-       and a setter called after construction configures the next server rather than racing the
-       in-flight requests of this one, which read these fields with no lock. */
+    /* the configuration is copied here — struct and both lists — so the server is immutable once built: the defaults below land on the copy instead of being written into the caller's struct, and a setter called after construction configures the next server rather than racing the in-flight requests of this one, which read these fields with no lock. */
     configCopy := *options.fileServerConfig
     configCopy.allowedDotPrefixList = append([]string{}, options.fileServerConfig.allowedDotPrefixList...)
     configCopy.excludedPathList = append([]string{}, options.fileServerConfig.excludedPathList...)
@@ -107,7 +105,7 @@ func (instance *FileServer) ServeReader(
 ) (int, nethttp.Header, io.ReadCloser, bool) {
     logger = logging.EnsureLogger(logger)
 
-    if nil == request {
+    if true == internal.IsNilInterface(request) {
         logger.Warning("static serve reader skipped because request is nil", nil)
 
         return 0, nil, nil, false
@@ -164,7 +162,7 @@ func (instance *FileServer) Serve(
 ) (int, nethttp.Header, []byte, bool) {
     logger = logging.EnsureLogger(logger)
 
-    if nil == request {
+    if true == internal.IsNilInterface(request) {
         logger.Warning("static serve skipped because request is nil", nil)
 
         return 0, nil, nil, false
@@ -481,7 +479,7 @@ func (instance *FileServer) serveForStreaming(
 ) (int, nethttp.Header, fs.File, fs.FileInfo, bool) {
     logger = logging.EnsureLogger(logger)
 
-    if nil == request {
+    if true == internal.IsNilInterface(request) {
         return 0, nil, nil, nil, false
     }
 
@@ -776,7 +774,7 @@ var fallbackContentTypeByExtension = map[string]string{
 
 /* logOpenFailure separates a refusal from a miss, which the level is the only thing that can say. The static server is consulted for every request a route did not answer, so a path that simply names no file is the ordinary case and is recorded at debug along with the successful resolutions; anything louder files one record per request that is not a static asset, and an operator learns to filter the whole message out.
 
-A permission error is not that case. What produces one here are the two containment guards of dirFileSystem.Open — the dot-dot prefix refusal and the check that a path's symlinks resolve inside the base directory — and in the embedded mode neither can fire. Recorded at debug it is byte-identical to a typo in a stylesheet href, which is exactly the indistinguishability the logging on this path exists to end. */
+   A permission error is not that case. What produces one here are the two containment guards of dirFileSystem.Open — the dot-dot prefix refusal and the check that a path's symlinks resolve inside the base directory — and in the embedded mode neither can fire. Recorded at debug it is byte-identical to a typo in a stylesheet href, which is exactly the indistinguishability the logging on this path exists to end. */
 func logOpenFailure(logger loggingcontract.Logger, relativePath string, openErr error) {
     logContext := exception.LogContext(
         openErr,

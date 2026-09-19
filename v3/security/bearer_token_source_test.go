@@ -1,12 +1,14 @@
 package security
 
 import (
+    "errors"
     "net/http/httptest"
     "testing"
     "time"
 
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/internal/testhelper"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
@@ -153,5 +155,85 @@ func TestBearerTokenSource_EnrichmentFailureFallsBackToAnonymous(t *testing.T) {
 
     if true == token.IsAuthenticated() {
         t.Fatalf("expected anonymous token when enrichment fails")
+    }
+}
+
+/* failingTokenStore models the token store's backend being down. */
+type failingTokenStore struct {
+    failure error
+}
+
+func (instance *failingTokenStore) Lookup(
+    _ runtimecontract.Runtime,
+    _ string,
+) (securitycontract.Claims, bool, error) {
+    return securitycontract.Claims{}, false, instance.failure
+}
+
+func TestBearerTokenSource_StoreFailureLogsAtErrorAndFailsClosed(t *testing.T) {
+    source := NewBearerTokenSource(NewOpaqueTokenValidator(&failingTokenStore{failure: errors.New("redis is down")}))
+    runtimeInstance, logger := runtimeWithRecordingLogger()
+
+    token, resolveErr := source.Resolve(runtimeInstance, bearerRequest("opaque-123"))
+    if nil != resolveErr {
+        t.Fatalf("resolve: %v", resolveErr)
+    }
+
+    if true == token.IsAuthenticated() {
+        t.Fatal("an unanswerable token store must fail closed to anonymous")
+    }
+
+    if 1 != len(logger.recordsAtLevel(loggingcontract.LevelError)) {
+        t.Fatal("the store's backend being down degrades every bearer of a valid token to anonymous at once and must be filed at Error")
+    }
+
+    if 0 != len(logger.recordsAtLevel(loggingcontract.LevelInfo)) {
+        t.Fatal("the infrastructure failure must not additionally be filed as a routine Info rejection")
+    }
+}
+
+func TestBearerTokenSource_BadCredentialStaysAtInfo(t *testing.T) {
+    store := NewInMemoryTokenStore()
+    source := NewBearerTokenSource(NewOpaqueTokenValidator(store))
+    runtimeInstance, logger := runtimeWithRecordingLogger()
+
+    token, resolveErr := source.Resolve(runtimeInstance, bearerRequest("token-nobody-stored"))
+    if nil != resolveErr || true == token.IsAuthenticated() {
+        t.Fatalf("an unknown token must resolve anonymous without error: authenticated=%v err=%v", token.IsAuthenticated(), resolveErr)
+    }
+
+    if 0 != len(logger.recordsAtLevel(loggingcontract.LevelError)) {
+        t.Fatal("a bad credential is routine noise and must not be filed at Error")
+    }
+
+    if 1 != len(logger.recordsAtLevel(loggingcontract.LevelInfo)) {
+        t.Fatal("a bad credential must be filed at Info")
+    }
+}
+
+/* markingEnricher stands in for an enricher built on the framework's stores, whose lookup failure carries the infrastructure mark. */
+type markingEnricher struct{}
+
+func (instance *markingEnricher) Enrich(
+    _ runtimecontract.Runtime,
+    _ securitycontract.Claims,
+) (securitycontract.Claims, error) {
+    return securitycontract.Claims{}, exception.NewError("roles lookup failed", nil, markInfrastructureFailure(errors.New("store is down")))
+}
+
+func TestBearerTokenSource_MarkedEnrichmentFailureLogsAtError(t *testing.T) {
+    store := NewInMemoryTokenStore()
+    store.Put("opaque-1", securitycontract.Claims{UserIdentifier: "user-9"})
+
+    source := NewBearerTokenSourceWithEnricher(NewOpaqueTokenValidator(store), &markingEnricher{})
+    runtimeInstance, logger := runtimeWithRecordingLogger()
+
+    token, resolveErr := source.Resolve(runtimeInstance, bearerRequest("opaque-1"))
+    if nil != resolveErr || true == token.IsAuthenticated() {
+        t.Fatalf("a failed enrichment must fail closed to anonymous: authenticated=%v err=%v", token.IsAuthenticated(), resolveErr)
+    }
+
+    if 1 != len(logger.recordsAtLevel(loggingcontract.LevelError)) {
+        t.Fatal("an enrichment failure carrying the infrastructure mark must be filed at Error")
     }
 }

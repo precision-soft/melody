@@ -9,6 +9,8 @@ import (
     "github.com/precision-soft/melody/cli/output"
     "github.com/precision-soft/melody/container"
     containercontract "github.com/precision-soft/melody/container/contract"
+    "github.com/precision-soft/melody/exception"
+    exceptioncontract "github.com/precision-soft/melody/exception/contract"
     "github.com/precision-soft/melody/integrations/bunorm"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
     "github.com/uptrace/bun"
@@ -22,15 +24,26 @@ type migrationUnlocker interface {
     Unlock(ctx context.Context) error
 }
 
-/* unlockMigrations reports the failed release through both channels: printed for the operator, returned for the exit code — a lock row that survives refuses every later migration on every replica, and a command that exits 0 over it tells the calling deploy script the opposite of the truth */
-func unlockMigrations(ctx context.Context, unlocker migrationUnlocker, outputInstance *commandOutput) error {
+/* unlockMigrations reports the failed release through both channels: printed for the operator, returned for the exit code — a lock row that survives refuses every later migration on every replica, and a command that exits 0 over it tells the calling deploy script the opposite of the truth.
+
+   The failure is wrapped before it is reported, and the wrap names what bun's bare error does not: that the lock row STAYS HELD, the table it lives in, and the unlock command that clears it. Under json the report is a warning in the document, one string beside "no pending migrations", and under text the cli engine echoes a failure's message alone — so a driver error rendered as sent ("context deadline exceeded") told the operator neither that a lock survived nor what to do about it. The bun error stays the cause, so errors.Is still reaches it. */
+func unlockMigrations(ctx context.Context, unlocker migrationUnlocker, outputInstance *commandOutput, unlockCommand string) error {
     unlockContext, cancelUnlock := context.WithTimeout(context.WithoutCancel(ctx), migrationUnlockTimeout)
     defer cancelUnlock()
 
     if unlockErr := unlocker.Unlock(unlockContext); nil != unlockErr {
-        outputInstance.printError(unlockErr)
+        heldLock := exception.NewError(
+            "migrate: the migration lock could not be released and stays held in "+migrationLocksTable+", refusing every later migration on every replica until "+unlockCommand+" clears it: "+unlockErr.Error(),
+            exceptioncontract.Context{
+                "locksTable":    migrationLocksTable,
+                "unlockCommand": unlockCommand,
+            },
+            unlockErr,
+        )
 
-        return unlockErr
+        outputInstance.printError(heldLock)
+
+        return heldLock
     }
 
     return nil
@@ -118,4 +131,27 @@ func (instance *baseCommand) newMigrator(db *bun.DB) (*migrate.Migrator, error) 
         instance.migrations,
         migrate.WithMarkAppliedOnSuccess(true),
     ), nil
+}
+
+/* managerLabel answers the name the output labels a manager by — the --manager flag, else the pinned manager, else "<default>" — the same label resolveDatabase answers for a run that opens the connection, for a command that does not. */
+func (instance *baseCommand) managerLabel(commandContext *clicontract.CommandContext) string {
+    managerName := commandContext.String(instance.options.ManagerFlagName)
+    if "" == managerName {
+        managerName = instance.options.ManagerName
+    }
+
+    if "" == managerName {
+        return "<default>"
+    }
+
+    return managerName
+}
+
+/* newFileMigrator is the migrator of a command that only writes a migration FILE: bun's generator reads the collection's directory and writes the template with os.WriteFile, and never touches the database it was handed, so none is opened for it — opening one cost a dial, the handshake, the authentication and the boot ping, some sixteen seconds of retries on a host that was down, to write a file that is written offline. */
+func (instance *baseCommand) newFileMigrator() (*migrate.Migrator, error) {
+    if nil == instance.migrations {
+        return nil, errors.New("migrations collection is nil")
+    }
+
+    return migrate.NewMigrator(nil, instance.migrations), nil
 }

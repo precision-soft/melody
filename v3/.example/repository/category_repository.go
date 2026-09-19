@@ -6,6 +6,7 @@ import (
     "strings"
 
     "github.com/precision-soft/melody/v3/.example/entity"
+    "github.com/precision-soft/melody/v3/.example/migration"
     "github.com/precision-soft/melody/v3/.example/persistence"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
@@ -34,18 +35,23 @@ func MustGetCategoryRepository(resolver melodycontainercontract.Resolver) Catego
 
 /* NewCategoryRepository hands back the nomenclature the environment can actually support: the database-backed one when a connection was configured, and the in-memory one otherwise. The choice is made here rather than in the configuration because the generated wiring fills this constructor from the container, and the storage handle is what carries the answer.
 
-The table is created and seeded on the way out, so the first caller finds a nomenclature rather than an empty one. */
+   The migration set is applied and the table seeded on the way out, so the first caller finds a nomenclature rather than an empty one. */
 //melody:service ServiceCategoryRepository
 func NewCategoryRepository(storage *persistence.CatalogStorage) (CategoryRepository, error) {
     if false == storage.IsPersistent() {
         return newInMemoryCategoryRepository(), nil
     }
 
+    migrateErr := migration.EnsureMigrated(context.Background(), storage.Database())
+    if nil != migrateErr {
+        return nil, migrateErr
+    }
+
     repositoryInstance := newBunCategoryRepository(storage.Database())
 
-    ensureSchemaErr := repositoryInstance.EnsureSchema(context.Background())
-    if nil != ensureSchemaErr {
-        return nil, ensureSchemaErr
+    seedErr := repositoryInstance.seedIfEmpty(context.Background())
+    if nil != seedErr {
+        return nil, seedErr
     }
 
     return repositoryInstance, nil

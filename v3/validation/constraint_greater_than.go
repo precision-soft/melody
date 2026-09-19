@@ -95,7 +95,8 @@ func (instance *GreaterThan) Validate(value any, field string) validationcontrac
 
     case reflect.Float32, reflect.Float64:
         actual := reflectedValue.Float()
-        if true == math.IsNaN(actual) || actual <= float64(instance.min) {
+        /* the comparison is exact at every magnitude: float64(instance.min) rounds a bound above 2^53 before comparing, which misjudged the values adjacent to the declared number */
+        if true == math.IsNaN(actual) || 0 >= compareFloat64ToIntBound(actual, instance.min) {
             return NewValidationError(
                 field,
                 fmt.Sprintf("value must be greater than %d", instance.min),

@@ -2,11 +2,13 @@ package user
 
 import (
     "encoding/json"
+    "errors"
     nethttp "net/http"
     "strings"
 
     "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/presenter"
+    "github.com/precision-soft/melody/v3/.example/repository"
     "github.com/precision-soft/melody/v3/.example/security"
     "github.com/precision-soft/melody/v3/.example/service"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
@@ -23,7 +25,7 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
         var dto adminUserCreateRequest
         decodeErr := json.NewDecoder(request.HttpRequest().Body).Decode(&dto)
         if nil != decodeErr {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "invalid json"), nil
+            return presenter.ApiRefusal(runtimeInstance, request, nethttp.StatusBadRequest, "invalid json", decodeErr), nil
         }
 
         normalizedUsername := strings.TrimSpace(dto.Username)
@@ -31,9 +33,27 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "username is required"), nil
         }
 
+        /* the username becomes a cache key component and a 255-byte column, so a spelling longer than either holds is turned away before the row lands */
+        if false == service.CacheSafeIdentifier(repository.NormalizedUsername(normalizedUsername)) {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "username must stay within 255 bytes"), nil
+        }
+
         normalizedPassword := strings.TrimSpace(dto.Password)
         if "" == normalizedPassword {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "password is required"), nil
+        }
+
+        /* bcrypt reads at most 72 bytes of the plaintext, so a longer password is refused as the caller's mistake instead of surfacing as a hashing failure */
+        if security.PasswordMaximumBytes < len(normalizedPassword) {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "password must not exceed 72 bytes"), nil
+        }
+
+        if commaRole, hasCommaRole := roleContainingComma(dto.Roles); true == hasCommaRole {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "role "+commaRole+" must not contain commas"), nil
+        }
+
+        if unknownRole, hasUnknownRole := roleOutsideTheVocabulary(dto.Roles); true == hasUnknownRole {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "role "+unknownRole+" is not one this application knows ("+strings.Join(entity.KnownRoleList(), ", ")+")"), nil
         }
 
         userService := service.MustGetUserService(runtimeInstance.Container())
@@ -46,14 +66,26 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "username already exists"), nil
         }
 
+        passwordHash, hashErr := security.HashPassword(normalizedPassword)
+        if nil != hashErr {
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to hash password", hashErr), nil
+        }
+
         user, createErr := userService.Create(
             runtimeInstance,
             "",
             normalizedUsername,
-            security.Sha256Hex(normalizedPassword),
+            passwordHash,
             normalizeRoles(dto.Roles),
         )
         if nil != createErr {
+            /* the read above is a check, the unique index is the guard: two callers that both passed the
+               check are told apart here, and the one the index refused is answered the same 400 the check
+               answers, not the 500 of a write that failed */
+            if true == errors.Is(createErr, repository.ErrUsernameAlreadyExists) {
+                return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "username already exists"), nil
+            }
+
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to create user", createErr), nil
         }
 

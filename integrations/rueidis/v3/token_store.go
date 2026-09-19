@@ -22,6 +22,9 @@ const (
 
 const defaultRevocationEpochRetentionMilliseconds = int64(7 * 24 * 60 * 60 * 1000)
 
+/* defaultTokenStoreCallTimeout is the budget of one round trip, the one the server-sent event backplane in this package gives a publish. A token store round trip is one Lua script or one cursor step, so a healthy store answers in a few milliseconds; the budget only has to sit under the client's own connection timeout, which is what bounded a write before this option existed. */
+const defaultTokenStoreCallTimeout = time.Second
+
 const (
     revocationUserField = "user"
 
@@ -33,16 +36,16 @@ var revocationEpochUpperBound = time.Unix(0, math.MaxInt64)
 
 /* tokenIndexExpiryGraceMilliseconds is how much longer a user's index set lives than the longest-lived token in it.
 
-It has to be positive at all so the set's deadline sits behind the token's instead of on the same millisecond: the set is how DeleteByUser finds a user's tokens, so a set that went first would leave a live token unrevocable. A second is generous for that and still short enough that a set outlives its last token only briefly — long enough for PurgeExpired to see the dead member and drop it on purpose, rather than the entry disappearing with the set and a scheduled purge finding nothing to report. */
+   It has to be positive at all so the set's deadline sits behind the token's instead of on the same millisecond: the set is how DeleteByUser finds a user's tokens, so a set that went first would leave a live token unrevocable. A second is generous for that and still short enough that a set outlives its last token only briefly — long enough for PurgeExpired to see the dead member and drop it on purpose, rather than the entry disappearing with the set and a scheduled purge finding nothing to report. */
 const tokenIndexExpiryGraceMilliseconds = 1000
 
 /* tokenPutScript writes the token and adds it to its user's index set, and gives that set an expiry that always covers the longest-lived token it holds.
 
-Without one the set is immortal: only the token keys carry PX, so a user who logs in and out for years leaves an ever-growing set of dead member names behind, and nothing sweeps it unless PurgeExpired is scheduled — which nothing here does.
+   Without one the set is immortal: only the token keys carry PX, so a user who logs in and out for years leaves an ever-growing set of dead member names behind, and nothing sweeps it unless PurgeExpired is scheduled — which nothing here does.
 
-The expiry can only ever be raised, never shortened, because the set is what DeleteByUser reads to find a user's tokens: a set that expired while a token it lists was still alive would make that token unrevocable. So a token with no expiry at all makes the set persistent, and a token with one extends the set only when its own lifetime reaches past what the set already had. A set that exists with no expiry is therefore left persistent — it either holds a non-expiring token or predates this accounting, and both are answered by keeping it.
+   The expiry can only ever be raised, never shortened, because the set is what DeleteByUser reads to find a user's tokens: a set that expired while a token it lists was still alive would make that token unrevocable. So a token with no expiry at all makes the set persistent, and a token with one extends the set only when its own lifetime reaches past what the set already had. A set that exists with no expiry is therefore left persistent — it either holds a non-expiring token or predates this accounting, and both are answered by keeping it.
 
-The set is given the token's lifetime plus a grace (ARGV[5], never the token's own PX) so its deadline is unambiguously behind the token's rather than landing on the same millisecond, and so a token that has just expired still has an index entry for PurgeExpired to prune deliberately instead of taking the whole set with it. */
+   The set is given the token's lifetime plus a grace (ARGV[5], never the token's own PX) so its deadline is unambiguously behind the token's rather than landing on the same millisecond, and so a token that has just expired still has an index entry for PurgeExpired to prune deliberately instead of taking the whole set with it. */
 var tokenPutScript = rueidis.NewLuaScript(`
 local indexKey = ARGV[3] .. ARGV[4]
 local existing = redis.call("get", KEYS[1])
@@ -88,9 +91,9 @@ return 1
 
 /* tokenDeleteByUserScript revokes ONE bounded batch of a user's tokens: KEYS[1] is the index set and KEYS[2..] are the members to settle.
 
-Redis runs a script to completion with every other client blocked, so the batch is the unit that decides how long a revocation stalls the whole server. Reading the entire set inside the script instead makes that stall proportional to how many tokens the user ever held, which for a busy account is a multi-second freeze of every other client of that Redis.
+   Redis runs a script to completion with every other client blocked, so the batch is the unit that decides how long a revocation stalls the whole server. Reading the entire set inside the script instead makes that stall proportional to how many tokens the user ever held, which for a busy account is a multi-second freeze of every other client of that Redis.
 
-A member whose token is gone is dropped from the set as it is met, so the set shrinks as the batch walks it; the set itself is removed once nothing is left in it, rather than unconditionally, so a token re-issued to another user mid-revocation keeps its own index entry. */
+   A member whose token is gone is dropped from the set as it is met, so the set shrinks as the batch walks it; the set itself is removed once nothing is left in it, rather than unconditionally, so a token re-issued to another user mid-revocation keeps its own index entry. */
 var tokenDeleteByUserScript = rueidis.NewLuaScript(`
 local removed = 0
 for index = 2, #KEYS do
@@ -114,11 +117,11 @@ return removed
 
 /* tokenPurgeUserScript prunes ONE bounded batch of a user's index set: KEYS[1] is the set and KEYS[2..] are the members to test.
 
-It carries the same bound as tokenDeleteByUserScript, and for the same reason: a script holds the whole server while it runs, so reading the entire set inside it makes a purge stall every other client of that Redis for as long as the largest user's token history is. Both operations walk the same set, so they walk it the same way.
+   It carries the same bound as tokenDeleteByUserScript, and for the same reason: a script holds the whole server while it runs, so reading the entire set inside it makes a purge stall every other client of that Redis for as long as the largest user's token history is. Both operations walk the same set, so they walk it the same way.
 
-A member whose token is gone is dropped as it is met, and the set itself is removed once nothing is left in it — checked rather than assumed, so a token written into the set between the scan and this batch keeps its index entry.
+   A member whose token is gone is dropped as it is met, and the set itself is removed once nothing is left in it — checked rather than assumed, so a token written into the set between the scan and this batch keeps its index entry.
 
-What is counted is what SREM actually removed, not what was found dead: a walked set may hand the same member back twice, and counting the finding rather than the removal would report more entries pruned than the set ever held. */
+   What is counted is what SREM actually removed, not what was found dead: a walked set may hand the same member back twice, and counting the finding rather than the removal would report more entries pruned than the set ever held. */
 var tokenPurgeUserScript = rueidis.NewLuaScript(`
 local pruned = 0
 for index = 2, #KEYS do
@@ -192,6 +195,7 @@ func NewTokenStore(client rueidis.Client, options ...TokenStoreOption) *RedisTok
         scanCount:                  defaultTokenStoreScanCount,
         clock:                      melodyclock.NewSystemClock(),
         epochRetentionMilliseconds: defaultRevocationEpochRetentionMilliseconds,
+        callTimeout:                defaultTokenStoreCallTimeout,
     }
 
     for _, option := range options {
@@ -235,6 +239,7 @@ func WithTokenStoreScanCount(scanCount int) TokenStoreOption {
     }
 }
 
+/* WithTokenStoreContext supplies the context the contract's context-less doors derive theirs from. Its cancellation and deadline are dropped DELIBERATELY: the store lives as long as the application, and a boot context whose deadline had passed would otherwise fail every Put and Delete for the rest of the process. What is kept are its values. The lifetime of one round trip is the call timeout's, never this context's. */
 func WithTokenStoreContext(ctx context.Context) TokenStoreOption {
     return func(store *RedisTokenStore) {
         if nil == ctx {
@@ -242,6 +247,17 @@ func WithTokenStoreContext(ctx context.Context) TokenStoreOption {
         }
 
         store.ctx = context.WithoutCancel(ctx)
+    }
+}
+
+/* WithTokenStoreCallTimeout bounds one round trip of every door: the contract's context-less half (Put, PutWithTtl, Delete, DeleteByUser, PurgeExpired, RevokeBefore) and the runtime half (Lookup, RevocationEpoch), where it caps the request context so a request carrying no deadline — melody's http kernel attaches none — still fails fast, while a request that already carries a tighter deadline keeps it. Without a bound a store that accepts connections but stops answering holds a write for the client's own connection timeout (five seconds at the provider's default) and a read for good: the client retries a read-only command — the SSCAN behind DeleteByUser, the SCAN behind PurgeExpired, the HMGET behind RevocationEpoch — on a fresh connection for as long as the context allows, and a context without deadline allows forever. The bound is per round trip, not per operation, so a walk over a large user's index gets one budget per batch. A non-positive timeout falls back to the default, following this package's zero-means-default convention, so a config-sourced unset value can never build an already-cancelled context that fails every call; the cache subpackage deliberately reads its command timeout the other way and says so on its own option. */
+func WithTokenStoreCallTimeout(timeout time.Duration) TokenStoreOption {
+    return func(store *RedisTokenStore) {
+        if 0 >= timeout {
+            timeout = defaultTokenStoreCallTimeout
+        }
+
+        store.callTimeout = timeout
     }
 }
 
@@ -257,8 +273,13 @@ func WithTokenStoreClock(clockInstance clockcontract.Clock) TokenStoreOption {
 
 func WithTokenStoreMaximumClockSkew(skew time.Duration) TokenStoreOption {
     return func(store *RedisTokenStore) {
+        /* a negative skew is refused rather than silently ignored: ignored, the operator who configured it believes a tighter policy is in force while the default runs — and had the value been carried instead, it would have NARROWED every revocation boundary, a bypass. */
         if 0 > skew {
-            return
+            exception.Panic(exception.NewError(
+                "redis token store maximum clock skew may not be negative",
+                map[string]any{"skew": skew.String()},
+                nil,
+            ))
         }
 
         store.maximumClockSkew = skew
@@ -267,7 +288,16 @@ func WithTokenStoreMaximumClockSkew(skew time.Duration) TokenStoreOption {
 
 func WithRevocationEpochRetention(retention time.Duration) TokenStoreOption {
     return func(store *RedisTokenStore) {
-        if 0 >= retention {
+        /* a negative retention is refused rather than silently swapped for the default: a boundary expiring earlier than configured is a revocation bypass, and the silent fallback told the operator nothing. A zero keeps the default retention, the "no override" spelling. */
+        if 0 > retention {
+            exception.Panic(exception.NewError(
+                "redis token store revocation epoch retention may not be negative",
+                map[string]any{"retention": retention.String()},
+                nil,
+            ))
+        }
+
+        if 0 == retention {
             return
         }
 
@@ -283,6 +313,17 @@ type RedisTokenStore struct {
     clock                      clockcontract.Clock
     epochRetentionMilliseconds int64
     maximumClockSkew           time.Duration
+    callTimeout                time.Duration
+}
+
+/* callContext bounds one round trip of a door that carries no caller context. */
+func (instance *RedisTokenStore) callContext() (context.Context, context.CancelFunc) {
+    return context.WithTimeout(instance.ctx, instance.callTimeout)
+}
+
+/* runtimeCallContext caps the request context with the call timeout: context.WithTimeout keeps whichever deadline is earlier, so a request that already carries a tighter deadline still wins, while a request whose context has no deadline — as melody's http kernel leaves it — is bounded here rather than retried against an unresponsive store for as long as the client's retry policy allows. */
+func (instance *RedisTokenStore) runtimeCallContext(runtimeInstance runtimecontract.Runtime) (context.Context, context.CancelFunc) {
+    return context.WithTimeout(runtimeInstance.Context(), instance.callTimeout)
 }
 
 func (instance *RedisTokenStore) Put(tokenString string, claims securitycontract.Claims) {
@@ -290,12 +331,24 @@ func (instance *RedisTokenStore) Put(tokenString string, claims securitycontract
 }
 
 func (instance *RedisTokenStore) PutWithTtl(tokenString string, claims securitycontract.Claims, ttl time.Duration) {
+    /* a non-positive ttl is refused instead of falling through to the store-forever spelling: the likeliest caller of a ttl <= 0 computed a remaining lifetime that had already elapsed, and storing that token with no expiry is the exact inversion of what was asked. The token string never joins the context — it is the credential. */
+    if 0 >= ttl {
+        exception.Panic(exception.NewError(
+            "redis token store ttl must be positive",
+            map[string]any{"ttl": ttl.String(), "user": claims.UserIdentifier},
+            nil,
+        ))
+    }
+
     instance.put(tokenString, claims, ttl)
 }
 
 func (instance *RedisTokenStore) Delete(tokenString string) {
+    callContext, cancel := instance.callContext()
+    defer cancel()
+
     result := tokenDeleteScript.Exec(
-        instance.ctx,
+        callContext,
         instance.client,
         []string{instance.tokenKey(tokenString)},
         []string{instance.userKeyPrefix()},
@@ -313,10 +366,12 @@ func (instance *RedisTokenStore) DeleteByUser(userIdentifier string) int {
     cursor := uint64(0)
 
     for {
+        scanContext, scanCancel := instance.callContext()
         scan, scanErr := instance.client.Do(
-            instance.ctx,
+            scanContext,
             instance.client.B().Sscan().Key(indexKey).Cursor(cursor).Count(int64(instance.scanCount)).Build(),
         ).AsScanEntry()
+        scanCancel()
         if nil != scanErr {
             exception.Panic(exception.NewError("redis token store delete by user scan failed", map[string]any{"user": userIdentifier}, scanErr))
         }
@@ -344,7 +399,10 @@ func (instance *RedisTokenStore) deleteTokenBatch(indexKey string, userIdentifie
     keys = append(keys, indexKey)
     keys = append(keys, members...)
 
-    result := tokenDeleteByUserScript.Exec(instance.ctx, instance.client, keys, []string{userIdentifier})
+    callContext, cancel := instance.callContext()
+    defer cancel()
+
+    result := tokenDeleteByUserScript.Exec(callContext, instance.client, keys, []string{userIdentifier})
 
     removed, resultErr := result.AsInt64()
     if nil != resultErr {
@@ -356,20 +414,22 @@ func (instance *RedisTokenStore) deleteTokenBatch(indexKey string, userIdentifie
 
 /* PurgeExpired drops the index entries of tokens that have already expired, walking every user's index set in bounded batches.
 
-The sets carry an expiry of their own, but that only bounds a set whose members have ALL died: an account that keeps logging in keeps raising its set's deadline, so dead member names pile up inside a set that stays alive indefinitely. This is what removes them.
+   The sets carry an expiry of their own, but that only bounds a set whose members have ALL died: an account that keeps logging in keeps raising its set's deadline, so dead member names pile up inside a set that stays alive indefinitely. This is what removes them.
 
-Both loops are cursor walks and neither reads a whole collection into a script. The outer SCAN finds the user sets, and each set is settled by the same bounded batching DeleteByUser uses, so the time any single script holds the server depends on the batch size and not on how many tokens the largest account ever held. SCAN and SSCAN both treat their count as a hint and may return more, so what comes back is sliced down to the batch size before any of it is executed.
+   Both loops are cursor walks and neither reads a whole collection into a script. The outer SCAN finds the user sets, and each set is settled by the same bounded batching DeleteByUser uses, so the time any single script holds the server depends on the batch size and not on how many tokens the largest account ever held. SCAN and SSCAN both treat their count as a hint and may return more, so what comes back is sliced down to the batch size before any of it is executed.
 
-Pruning while scanning is what SSCAN tolerates: a member present throughout is returned at least once, and a removed one may or may not be returned again. A re-visit costs nothing — the member is either still dead and already gone from the set, or alive and left alone. */
+   Pruning while scanning is what SSCAN tolerates: a member present throughout is returned at least once, and a removed one may or may not be returned again. A re-visit costs nothing — the member is either still dead and already gone from the set, or alive and left alone. */
 func (instance *RedisTokenStore) PurgeExpired() int {
     pruned := 0
     cursor := uint64(0)
 
     for {
+        scanContext, scanCancel := instance.callContext()
         scan, scanErr := instance.client.Do(
-            instance.ctx,
+            scanContext,
             instance.client.B().Scan().Cursor(cursor).Match(escapeRedisGlobMeta(instance.userKeyPrefix())+"*").Count(int64(instance.scanCount)).Build(),
         ).AsScanEntry()
+        scanCancel()
         if nil != scanErr {
             exception.Panic(exception.NewError("redis token store purge scan failed", nil, scanErr))
         }
@@ -392,10 +452,12 @@ func (instance *RedisTokenStore) purgeUserIndex(indexKey string) int {
     cursor := uint64(0)
 
     for {
+        scanContext, scanCancel := instance.callContext()
         scan, scanErr := instance.client.Do(
-            instance.ctx,
+            scanContext,
             instance.client.B().Sscan().Key(indexKey).Cursor(cursor).Count(int64(instance.scanCount)).Build(),
         ).AsScanEntry()
+        scanCancel()
         if nil != scanErr {
             exception.Panic(exception.NewError("redis token store purge member scan failed", map[string]any{"set": indexKey}, scanErr))
         }
@@ -423,7 +485,10 @@ func (instance *RedisTokenStore) pruneTokenBatch(indexKey string, members []stri
     keys = append(keys, indexKey)
     keys = append(keys, members...)
 
-    result := tokenPurgeUserScript.Exec(instance.ctx, instance.client, keys, nil)
+    callContext, cancel := instance.callContext()
+    defer cancel()
+
+    result := tokenPurgeUserScript.Exec(callContext, instance.client, keys, nil)
 
     pruned, resultErr := result.AsInt64()
     if nil != resultErr {
@@ -437,8 +502,11 @@ func (instance *RedisTokenStore) Lookup(
     runtimeInstance runtimecontract.Runtime,
     tokenString string,
 ) (securitycontract.Claims, bool, error) {
+    callContext, cancel := instance.runtimeCallContext(runtimeInstance)
+    defer cancel()
+
     values, lookupErr := tokenLookupScript.Exec(
-        runtimeInstance.Context(),
+        callContext,
         instance.client,
         []string{instance.tokenKey(tokenString)},
         []string{instance.epochKeyPrefix(), revocationUserField, revocationDeviceFieldPrefix},
@@ -487,8 +555,11 @@ func (instance *RedisTokenStore) RevokeBefore(userIdentifier string, deviceIdent
         ))
     }
 
+    callContext, cancel := instance.callContext()
+    defer cancel()
+
     result := tokenRevokeEpochScript.Exec(
-        instance.ctx,
+        callContext,
         instance.client,
         []string{instance.epochKey(userIdentifier), instance.userKey(userIdentifier)},
         []string{
@@ -512,8 +583,11 @@ func (instance *RedisTokenStore) RevocationEpoch(
         fields = append(fields, revocationDeviceFieldPrefix+deviceIdentifier)
     }
 
+    callContext, cancel := instance.runtimeCallContext(runtimeInstance)
+    defer cancel()
+
     values, readErr := instance.client.Do(
-        runtimeInstance.Context(),
+        callContext,
         instance.client.B().Hmget().Key(instance.epochKey(userIdentifier)).Field(fields...).Build(),
     ).ToArray()
 
@@ -612,6 +686,7 @@ func (instance *RedisTokenStore) tokenIsRevoked(issuedAt time.Time, epochValues 
 }
 
 func (instance *RedisTokenStore) put(tokenString string, claims securitycontract.Claims, ttl time.Duration) {
+    /* the IssuedAt stamp is read client-side, one round trip before the script lands, BY DESIGN: this store's stamps come from the injected clock (WithTokenStoreClock), and a server-side stamp would swap the clock authority for redis's own. The window a RevokeBefore can slip into is one marshal plus one round trip, it fails CLOSED (the fresh token reads as pre-boundary and is refused, never the reverse), and in a fleet the same interleaving exists between instances regardless — WithTokenStoreMaximumClockSkew is the knob that absorbs it. */
     claims.IssuedAt = instance.clock.Now()
 
     payload, marshalErr := json.Marshal(claims)
@@ -628,8 +703,11 @@ func (instance *RedisTokenStore) put(tokenString string, claims securitycontract
         indexPttl = strconv.FormatInt(tokenMilliseconds+tokenIndexExpiryGraceMilliseconds, 10)
     }
 
+    callContext, cancel := instance.callContext()
+    defer cancel()
+
     result := tokenPutScript.Exec(
-        instance.ctx,
+        callContext,
         instance.client,
         []string{instance.tokenKey(tokenString)},
         []string{string(payload), pttl, instance.userKeyPrefix(), claims.UserIdentifier, indexPttl},

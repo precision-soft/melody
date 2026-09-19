@@ -12,12 +12,12 @@ import (
 
 func PublishHandler(bus melodymessagebuscontract.Bus) melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        topic := queryStringOr(request, "topic", "default")
+        topic := queryStringOr(request, "topic", CatalogTopic)
         text := queryStringOr(request, "text", "hello")
 
         _, dispatchErr := bus.Dispatch(runtimeInstance, message.Notification{Topic: topic, Text: text})
         if nil != dispatchErr {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "could not publish notification"), nil
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not publish notification", dispatchErr), nil
         }
 
         return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusAccepted, map[string]any{

@@ -1,6 +1,8 @@
 package migrate
 
 import (
+    "time"
+
     "strconv"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
@@ -32,26 +34,29 @@ func (instance *StatusCommand) Flags() []clicontract.Flag {
     )
 }
 
-func (instance *StatusCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *StatusCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) (runErr error) {
     option := instance.base.optionFromCommand(commandContext)
-    outputInstance := newCommandOutput(commandContext.Writer, option)
+    outputInstance := newCommandOutput(commandContext.Writer(), commandContext.Arguments(), option)
 
-    db, managerName, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext)
+    startedAt := time.Now()
+    defer func() {
+        runErr = outputInstance.finishRun(instance.Name(), startedAt, runErr, recover())
+    }()
+
+    db, managerName, releaseDatabase, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext, outputInstance)
     if nil != dbErr {
-        outputInstance.printError(dbErr)
         return dbErr
     }
+    defer releaseDatabase()
 
     migrator, migratorErr := instance.base.newMigrator(db)
     if nil != migratorErr {
-        outputInstance.printError(migratorErr)
         return migratorErr
     }
 
-    if option.Verbose {
+    if true == outputInstance.wantsDetail() {
         identity, identityErr := fetchDatabaseIdentity(runtimeInstance.Context(), db)
         if nil != identityErr {
-            outputInstance.printError(identityErr)
             return identityErr
         }
         if nil != identity {
@@ -62,7 +67,6 @@ func (instance *StatusCommand) Run(runtimeInstance runtimecontract.Runtime, comm
 
     items, statusErr := migrator.MigrationsWithStatus(runtimeInstance.Context())
     if nil != statusErr {
-        outputInstance.printError(statusErr)
         return statusErr
     }
 
@@ -81,7 +85,7 @@ func (instance *StatusCommand) Run(runtimeInstance runtimecontract.Runtime, comm
         for _, migration := range applied {
             appliedNames = append(appliedNames, migration.Name)
         }
-        outputInstance.printMigrationsBlock("APPLIED", appliedNames)
+        outputInstance.printMigrationsBlock("applied", "APPLIED", appliedNames)
     }
 
     if 0 < len(unapplied) {
@@ -90,7 +94,7 @@ func (instance *StatusCommand) Run(runtimeInstance runtimecontract.Runtime, comm
         for _, migration := range unapplied {
             pendingNames = append(pendingNames, migration.Name)
         }
-        outputInstance.printMigrationsBlock("PENDING", pendingNames)
+        outputInstance.printMigrationsBlock("pending", "PENDING", pendingNames)
     }
 
     if 0 == len(applied) && 0 == len(unapplied) {

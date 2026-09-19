@@ -19,23 +19,16 @@ const (
     ServiceExampleDatabase         = "service.example.database"
 )
 
-/*
-dialIsInsecure reads a transport switch. The provider negotiates a verified
-TLS handshake by default; the development compose mysql speaks plain TCP, so
-the shipped .env arms the insecure dial explicitly — the decision is visible
-in configuration rather than buried in the wiring. The spelling is exact: any
-value but "true" keeps the verified handshake, because a credential-bearing
-dial downgrades only on an unambiguous instruction.
-*/
+/* dialIsInsecure reads a transport switch. The provider negotiates a verified TLS handshake by default; the development compose mysql speaks plain TCP, so the shipped .env arms the insecure dial explicitly — the decision is visible in configuration rather than buried in the wiring. The spelling is exact: any value but "true" keeps the verified handshake, because a credential-bearing dial downgrades only on an unambiguous instruction. */
 func dialIsInsecure(insecureValue string) bool {
     return "true" == insecureValue
 }
 
 /* buildDatabase declares the connection without opening it. bunorm's registry validates the definitions here and dials on the first Manager call, which lands after the framework has registered its own services.
 
-This major's bunorm takes the connection values and a logger directly, rather than the parameter names v1 resolves through a container, so the values are read here and the emergency logger carries the retry reporting: the framework's own logger does not exist yet while the modules are being wired, and the emergency one is what the framework itself writes through in that window.
+   This major's bunorm takes the connection values and a logger directly, rather than the parameter names v1 resolves through a container, so the values are read here and the emergency logger carries the retry reporting: the framework's own logger does not exist yet while the modules are being wired, and the emergency one is what the framework itself writes through in that window.
 
-An unset host leaves the registry nil and the database unwired: no services, no routes, no dial. */
+   An unset host leaves the registry nil and the database unwired: no services, no routes, no dial. */
 func (instance *Module) buildDatabase(kernelInstance melodykernelcontract.Kernel) {
     host := parameterValue(kernelInstance, ParameterDatabaseHost)
     if "" == host {
@@ -83,6 +76,13 @@ func (instance *Module) databaseServiceName() string {
     }
 
     return ServiceExampleDatabase
+}
+
+/* databaseLocation spells the connection as host:port/schema, the one line that separates a reset of this example's volume from a reset of whatever the host happens to point at; the credentials stay out of it, because it is printed. It is read from the parameters the provider reads, so the plan names the database the drops will reach. */
+func (instance *Module) databaseLocation(kernelInstance melodykernelcontract.Kernel) string {
+    return parameterValue(kernelInstance, ParameterDatabaseHost) +
+        ":" + parameterValue(kernelInstance, ParameterDatabasePort) +
+        "/" + parameterValue(kernelInstance, ParameterDatabaseName)
 }
 
 func (instance *Module) registerDatabaseServices(registrar melodyapplicationcontract.ServiceRegistrar) {

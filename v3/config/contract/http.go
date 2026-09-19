@@ -20,4 +20,8 @@ type HttpConfiguration interface {
     StaticExcludedPaths() []string
 
     SessionTtl() time.Duration
+
+    SessionTombstoneRetention() time.Duration
+
+    ShutdownTimeout() time.Duration
 }

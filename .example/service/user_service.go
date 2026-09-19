@@ -68,10 +68,9 @@ func (instance *UserService) FindById(id string) (*entity.User, bool, error) {
 
     cacheKey := CacheKeyUserById(id)
 
-    cached, rememberErr := melodycache.Remember(
+    cached, rememberErr := rememberEntityOrAbsence(
         instance.cache,
         cacheKey,
-        0,
         func(ctx context.Context) (any, error) {
             user, found, findErr := instance.userRepository.FindById(ctx, id)
             if nil != findErr {
@@ -84,7 +83,6 @@ func (instance *UserService) FindById(id string) (*entity.User, bool, error) {
 
             return user, nil
         },
-        nil,
     )
     if nil != rememberErr {
         return nil, false, rememberErr
@@ -111,10 +109,9 @@ func (instance *UserService) FindByUsername(username string) (*entity.User, bool
 
     cacheKey := CacheKeyUserByUsername(normalizedUsername)
 
-    cached, rememberErr := melodycache.Remember(
+    cached, rememberErr := rememberEntityOrAbsence(
         instance.cache,
         cacheKey,
-        0,
         func(ctx context.Context) (any, error) {
             user, found, findErr := instance.userRepository.FindByUsername(ctx, normalizedUsername)
             if nil != findErr {
@@ -127,7 +124,6 @@ func (instance *UserService) FindByUsername(username string) (*entity.User, bool
 
             return user, nil
         },
-        nil,
     )
     if nil != rememberErr {
         return nil, false, rememberErr
@@ -190,13 +186,15 @@ func (instance *UserService) Update(
         return nil, false, nil
     }
 
+    /* the loaded entity is the repository's own stored value under the in-memory configuration, shared with every concurrent reader, so the changes land on a copy: written in place, a rename the repository then REFUSED ("username already exists") had already renamed the stored account — the directory held two accounts folding onto one username while the caller was told the update failed */
     previousUsername := user.Username
 
-    user.Username = username
-    user.Password = passwordHash
-    user.Roles = roles
+    modified := *user
+    modified.Username = username
+    modified.Password = passwordHash
+    modified.Roles = roles
 
-    updated, updateErr := instance.userRepository.Update(ctx, user)
+    updated, updateErr := instance.userRepository.Update(ctx, &modified)
     if nil != updateErr {
         return nil, false, updateErr
     }
@@ -204,7 +202,7 @@ func (instance *UserService) Update(
         return nil, false, nil
     }
 
-    updatedEvent := event.NewUserUpdatedEvent(user, previousUsername)
+    updatedEvent := event.NewUserUpdatedEvent(&modified, previousUsername)
     _, dispatchErr := instance.eventDispatcher.DispatchName(
         runtimeInstance,
         event.UserUpdatedEventName,
@@ -214,7 +212,7 @@ func (instance *UserService) Update(
         return nil, true, dispatchErr
     }
 
-    return user, true, nil
+    return &modified, true, nil
 }
 
 func (instance *UserService) DeleteById(

@@ -27,7 +27,7 @@ func TestHandlerDecorator_TracesShortCircuitedRequest(t *testing.T) {
         t.Fatalf("unexpected decorator error: %v", decoratorErr)
     }
 
-    /* @important the inner handler stands in for the kernel writing a 401 short-circuit before any middleware ran — the exact request shape the middleware seam never observes */
+    /* the inner handler stands in for the kernel writing a 401 short-circuit before any middleware ran — the exact request shape the middleware seam never observes */
     denied := nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
         writer.WriteHeader(nethttp.StatusUnauthorized)
         _, _ = writer.Write([]byte(`{"error":"unauthorized"}`))

@@ -6,6 +6,7 @@ import (
     "io"
     "os"
     "strings"
+    "sync"
     "sync/atomic"
 
     "github.com/precision-soft/melody/v2/cli"
@@ -29,12 +30,71 @@ func DefaultRunnerOption() RunnerOption {
     }
 }
 
-/* processRunnerOption is the process default RunQueries reads when a migration does not pass its own option: a generated migration's signature is fixed by bun as (ctx, db) and cannot receive the parsed flags any other way, so without this door a --no-color run carried escape codes from exactly the per-query lines the flag was passed to clean. */
+/* runnerOptionContextKey is the key under which a migrate command hands its parsed posture to the migrations it runs. A generated migration's signature is fixed by bun as (ctx, db) and cannot receive the parsed flags any other way, and bun passes the command's context into every migration unchanged, so the context is the one channel that reaches the migration and belongs to that run alone. */
+type runnerOptionContextKey struct{}
+
+/* withRunnerOption returns a context carrying the option RunQueries reads first; the migrate commands derive it from their parsed flags and run the migrator under it. */
+func withRunnerOption(ctx context.Context, option RunnerOption) context.Context {
+    return context.WithValue(ctx, runnerOptionContextKey{}, option)
+}
+
+/* runnerOptionFromContext answers the option a migrate command put on the context, and false when the context carries none — a migration invoked outside any command, or one that dropped the context it was handed. */
+func runnerOptionFromContext(ctx context.Context) (RunnerOption, bool) {
+    if nil == ctx {
+        return RunnerOption{}, false
+    }
+
+    option, present := ctx.Value(runnerOptionContextKey{}).(RunnerOption)
+
+    return option, present
+}
+
+/* processRunnerOption is the process-wide fallback RunQueries reads when the context carries no option. It exists for the migration that drops the context it was handed and for a host process that runs migrations outside melody's commands; it is not how a command reaches its own migrations — that is the context — because a process default is one value for the whole process, so two commands dispatched concurrently overwrote each other's writer and a --format=json run sent a text run's per-query lines into its own discarded writer. */
 var processRunnerOption atomic.Pointer[RunnerOption]
 
-/* SetDefaultRunnerOption installs the process default RunQueries uses when the migration does not pass its own option; the migrate commands call it from their parsed flags before running the migrator. */
+/* SetDefaultRunnerOption installs the process-wide fallback RunQueries uses when the context carries no option. It is the door of a host process that runs migrations on its own; the migrate commands do not leave anything behind in it — each installs its posture for the length of its run and puts back what was there. */
 func SetDefaultRunnerOption(option RunnerOption) {
     processRunnerOption.Store(&option)
+}
+
+/* commandRunnerOptions is the bookkeeping of the commands that hold the process-wide fallback at once: how many are running, and the host's own value, saved when the first of them installed its posture and put back when the last of them leaves. It is what makes the restore exact for commands that OVERLAP — the compare-and-swap it replaces restored correctly only for commands nested last-in first-out, and two commands overlapping the other way round left the FIRST command's finished posture installed for the life of the process: its discarded writer under --format=json, where the host's own value was promised back. */
+var commandRunnerOptions struct {
+    mutex sync.Mutex
+    depth int
+    host  *RunnerOption
+}
+
+/* swapDefaultRunnerOption installs the fallback for the length of a command and answers the pointer it installed and the one that was live before, for restoreDefaultRunnerOption. The fallback is what a migration that drops its context sees, and under --format=json that migration would otherwise print its per-query lines into the document. The first command to install saves the host's own value. */
+func swapDefaultRunnerOption(option RunnerOption) (installed *RunnerOption, previous *RunnerOption) {
+    commandRunnerOptions.mutex.Lock()
+    defer commandRunnerOptions.mutex.Unlock()
+
+    if 0 == commandRunnerOptions.depth {
+        commandRunnerOptions.host = processRunnerOption.Load()
+    }
+    commandRunnerOptions.depth++
+
+    installed = &option
+
+    return installed, processRunnerOption.Swap(installed)
+}
+
+/* restoreDefaultRunnerOption puts back what the command's swap displaced, in whichever order the commands finish: the last command to leave puts the host's own value back, whatever the commands installed in between; a command leaving while others still run puts back the value that was live before it only when its own is the live one, and otherwise leaves the later command's value where it is. Two commands with migrations that drop their context share the one fallback for as long as they overlap — the context is the channel that keeps them apart, and a migration that drops it has opted out of that. */
+func restoreDefaultRunnerOption(installed *RunnerOption, previous *RunnerOption) {
+    commandRunnerOptions.mutex.Lock()
+    defer commandRunnerOptions.mutex.Unlock()
+
+    commandRunnerOptions.depth--
+
+    if 0 >= commandRunnerOptions.depth {
+        commandRunnerOptions.depth = 0
+        processRunnerOption.Store(commandRunnerOptions.host)
+        commandRunnerOptions.host = nil
+
+        return
+    }
+
+    processRunnerOption.CompareAndSwap(installed, previous)
 }
 
 func resolveDefaultRunnerOption() RunnerOption {
@@ -45,8 +105,17 @@ func resolveDefaultRunnerOption() RunnerOption {
     return DefaultRunnerOption()
 }
 
+/* resolveRunnerOption answers the posture a run prints under, in the order the doors are trusted: the option the command put on the context, then the process-wide fallback, then the package default. */
+func resolveRunnerOption(ctx context.Context) RunnerOption {
+    if option, present := runnerOptionFromContext(ctx); true == present {
+        return option
+    }
+
+    return resolveDefaultRunnerOption()
+}
+
 func RunQueries(ctx context.Context, db *bun.DB, direction string, migrationName string, queries []Query) error {
-    return RunQueriesWithOption(ctx, db, direction, migrationName, queries, resolveDefaultRunnerOption())
+    return RunQueriesWithOption(ctx, db, direction, migrationName, queries, resolveRunnerOption(ctx))
 }
 
 func RunQueriesWithOption(ctx context.Context, db *bun.DB, direction string, migrationName string, queries []Query, option RunnerOption) error {
@@ -65,9 +134,12 @@ func RunQueriesWithOption(ctx context.Context, db *bun.DB, direction string, mig
         return nil
     }
 
+    /* the prefix carries the migration name on every per-query line, and the name is the author's — it is escaped here once, the way the empty and success lines escape it, so the three lines that print the prefix do not repaint the terminal through a name whose query names were escaped beside it */
+    escapedMigrationName := escapeControlCharacters(migrationName, false)
+
     for index, query := range queries {
         step := index + 1
-        prefix := fmt.Sprintf("[migration:%s] %s [%d/%d]", direction, migrationName, step, total)
+        prefix := fmt.Sprintf("[migration:%s] %s [%d/%d]", direction, escapedMigrationName, step, total)
 
         printer.printExecuting(prefix, query.Name)
 
@@ -156,7 +228,7 @@ func (instance *migrationPrinter) printFailed(prefix string, queryName string, e
 }
 
 func (instance *migrationPrinter) printEmpty(direction string, migrationName string) {
-    message := fmt.Sprintf("[migration:%s] %s: WARNING no queries to execute; the migration is marked applied without running anything", direction, migrationName)
+    message := fmt.Sprintf("[migration:%s] %s: WARNING no queries to execute; the migration is marked applied without running anything", direction, escapeControlCharacters(migrationName, false))
 
     if instance.noColor {
         _, _ = fmt.Fprintf(instance.writer, "%s\n", message)
@@ -167,7 +239,7 @@ func (instance *migrationPrinter) printEmpty(direction string, migrationName str
 }
 
 func (instance *migrationPrinter) printSuccess(direction string, migrationName string, total int) {
-    message := fmt.Sprintf("[migration:%s] %s: all %d queries executed successfully", direction, migrationName, total)
+    message := fmt.Sprintf("[migration:%s] %s: all %d queries executed successfully", direction, escapeControlCharacters(migrationName, false), total)
 
     if instance.noColor {
         _, _ = fmt.Fprintf(instance.writer, "%s\n", message)

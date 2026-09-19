@@ -69,7 +69,7 @@ The order is decided when the pipeline is built, not at registration:
 2. Registrations at **equal priority** keep **registration order**, the first registered being the outer one. A factory registration and a direct one share one registration sequence, so they compete on the same footing.
 3. `before` / `after` edges declared on a [`pipeline.NewHttpMiddlewareDefinition`](../../http/middleware/pipeline/definition.go) override both. The registrar exposes priority only; edges are for a pipeline assembled directly through [`pipeline.NewBuilder`](../../http/middleware/pipeline/builder.go).
 
-A middleware that answers a request itself, without calling `next`, short-circuits everything ordered inside it — the framework's own static middleware serves a matching file and returns without calling the rest of the chain. It is registered at a priority below the default, which keeps it outermost, so a request for a file that exists is answered before anything registered through the registrar observes it. [`(*HttpMiddleware).LastBuildReport`](../../application/http_middleware.go) reports the chain that was actually built and `debug:middleware` renders it. See [HTTP](HTTP.md) for the full ordering contract and for what a `before`/`after` edge does to the build when it names a definition that is not there.
+A middleware that answers a request itself, without calling `next`, short-circuits everything ordered inside it — the framework's own static middleware serves a matching file and returns without calling the rest of the chain. It is registered at a priority below the default, which keeps it outermost, so a request for a file that exists is answered before anything registered through the registrar observes it. [`(*HttpMiddleware).LastBuildReport`](../../application/http_middleware.go) reports the chain the serving process actually built, for in-process inspection; `debug:middleware` describes and — under `--build` — builds a report of its own rather than reading that record. See [HTTP](HTTP.md) for the full ordering contract and for what a `before`/`after` edge does to the build when it names a definition that is not there.
 
 The chain is not the outermost thing there is, though: a request that a `kernel.request` listener answers never reaches it at all. Wrapping *those* too is what [Handler decorators](#handler-decorators) are for.
 
@@ -158,13 +158,16 @@ package main
 import (
 	"context"
 	"io/fs"
+	nethttp "net/http"
 
 	"github.com/precision-soft/melody/v3/application"
 	applicationcontract "github.com/precision-soft/melody/v3/application/contract"
+	melodyhttp "github.com/precision-soft/melody/v3/http"
 	httpcontract "github.com/precision-soft/melody/v3/http/contract"
 	kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
 	"github.com/precision-soft/melody/v3/logging"
 	loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
+	runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
 type demoModule struct{}
@@ -181,11 +184,11 @@ func (instance *demoModule) RegisterConfigurations(registrar applicationcontract
 	registrar.RegisterConfiguration(
 		loggingcontract.LoggingConfigurationName,
 		logging.NewLoggingConfiguration(loggingcontract.LevelLabels{
-			loggingcontract.LevelDebug:     "100",
-			loggingcontract.LevelInfo:      "200",
-			loggingcontract.LevelWarning:   "300",
-			loggingcontract.LevelError:     "400",
-			loggingcontract.LevelEmergency: "500",
+			loggingcontract.LevelDebug:     loggingcontract.LevelLabelFromInt(100),
+			loggingcontract.LevelInfo:      loggingcontract.LevelLabelFromInt(200),
+			loggingcontract.LevelWarning:   loggingcontract.LevelLabelFromInt(300),
+			loggingcontract.LevelError:     loggingcontract.LevelLabelFromInt(400),
+			loggingcontract.LevelEmergency: loggingcontract.LevelLabelFromInt(500),
 		}),
 	)
 }
@@ -214,21 +217,18 @@ func (instance *demoModule) RegisterHttpRoutes(kernelInstance kernelcontract.Ker
 
 	router.HandleNamed(
 		"health",
-		httpcontract.MethodGet,
+		nethttp.MethodGet,
 		"/health",
-		func(kernelInstance kernelcontract.Kernel) httpcontract.Handler {
-			_ = kernelInstance
+		func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+			_ = runtimeInstance
+			_ = writer
+			_ = request
 
-			return func(writer httpcontract.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-				_ = writer
-				_ = request
-
-				return httpcontract.NewStaticResponse(
-					"ok",
-					200,
-				), nil
-			}
-		}(kernelInstance),
+			return melodyhttp.NewResponse(
+				200,
+				[]byte("ok"),
+			), nil
+		},
 	)
 }
 
@@ -237,10 +237,11 @@ var _ applicationcontract.ParameterModule = (*demoModule)(nil)
 var _ applicationcontract.ServiceModule = (*demoModule)(nil)
 var _ applicationcontract.HttpModule = (*demoModule)(nil)
 
-func buildApplication(embeddedPublicFiles fs.FS, embeddedConfigFiles fs.FS) *application.Application {
+func buildApplication(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS) *application.Application {
 	app := application.NewApplication(
+		ctx,
+		embeddedEnvFiles,
 		embeddedPublicFiles,
-		embeddedConfigFiles,
 	)
 
 	app.RegisterModule(&demoModule{})
@@ -251,15 +252,16 @@ func buildApplication(embeddedPublicFiles fs.FS, embeddedConfigFiles fs.FS) *app
 	 */
 
 	app.RegisterHttpRoute(
-		httpcontract.MethodGet,
+		nethttp.MethodGet,
 		"/ping",
-		func(writer httpcontract.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+		func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+			_ = runtimeInstance
 			_ = writer
 			_ = request
 
-			return httpcontract.NewStaticResponse(
-				"pong",
+			return melodyhttp.NewResponse(
 				200,
+				[]byte("pong"),
 			), nil
 		},
 	)
@@ -267,9 +269,9 @@ func buildApplication(embeddedPublicFiles fs.FS, embeddedConfigFiles fs.FS) *app
 	return app
 }
 
-func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.FS) {
-	app := buildApplication(embeddedPublicFiles, embeddedConfigFiles)
-	app.Run(ctx)
+func run(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS) {
+	app := buildApplication(ctx, embeddedEnvFiles, embeddedPublicFiles)
+	app.Run()
 }
 ```
 
@@ -298,6 +300,8 @@ func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.
 - [`HttpHandlerDecorator`](../../application/contract/http_handler_decorator_module.go)
 - [`CliModule`](../../application/contract/cli_module.go)
 - [`EventModule`](../../application/contract/event_module.go)
+- [`ProcessContext`](../../application/contract/process_context.go)  
+  The console counterpart of the http request context: the identity of one cli run — the generated process id every log record of the run is correlated under, and the moment the run started. It lives on the run's scope, installed by the cli entry point, so a scoped service resolves it exactly the way a request-scoped service resolves the request context; the root container never carries it, and an http process carries the request context instead.
 
 ### Types
 
@@ -317,20 +321,23 @@ func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.
 - [`ServiceProcessRole`](../../application/service_resolver.go) — resolves to the process role string, so a service can gate background work without reaching back to the application instance
     - [`ProcessRoleMustFromContainer(serviceContainer)`](../../application/service_resolver.go)
     - [`ProcessRoleMustFromResolver(resolver)`](../../application/service_resolver.go)
+- [`ServiceProcessContext`](../../application/service_resolver.go) — resolves to the console run's `ProcessContext`. The cli entry point installs it into the run's scope, so it takes a resolver rather than the container
+    - [`ProcessContextMustFromResolver(resolver)`](../../application/service_resolver.go)
+    - [`ProcessContextFromResolver(resolver)`](../../application/service_resolver.go) — the error-tolerant form, for code that runs on both process shapes: absence — an http process, the root container — answers nil
 
 ### Constructors
 
-- [`NewApplication(embeddedPublicFiles, embeddedConfigFiles)`](../../application/application_new.go)
+- [`NewApplication(ctx, embeddedEnvFiles, embeddedPublicFiles)`](../../application/application_new.go)
 - [`NewRuntimeFlags(mode)`](../../application/cli.go)
 - [`ParseRuntimeFlags(defaultMode)`](../../application/cli.go)
 - [`ParseRuntimeFlagsWithRole(defaultMode, defaultRole)`](../../application/cli.go) — the form `ParseRuntimeFlags` delegates to. An explicit `--role`/`-role` wins over the configured default; the flag exists because melody reads configuration only from `.env` artifacts and never from the process environment
-- [`NewSignalContext()`](../../application/signal_context.go) — the context to hand `Run`: cancelled by the first `SIGINT` or `SIGTERM`, giving the application its shutdown window, while a second one prints a line to stderr and forces the conventional `128+signal` exit, so an operator facing a hung shutdown is never reduced to `SIGKILL`. The returned stop function unregisters the notifications and is safe to call more than once and concurrently
+- [`NewSignalContext()`](../../application/signal_context.go) — the context to hand `Run`: cancelled by the first `SIGINT` or `SIGTERM`, giving the application its shutdown window, while a second one prints a line to stderr and forces the conventional `128+signal` exit, so an operator facing a hung shutdown is never reduced to `SIGKILL`. The returned stop function unregisters the notifications and is safe to call more than once and concurrently. Call it whenever the process outlives the application: a watcher left armed makes the next application cycle in the same process run under two watchers, and the older one reads that cycle's first `SIGTERM` as its own escalation — a forced exit 143 where a graceful shutdown was owed
 - [`NewHttpMiddleware(staticOptions, configuration)`](../../application/http_middleware.go)
 
 ### Application lifecycle
 
 - [`(*Application).Boot()`](../../application/application.go)
-- [`(*Application).Run(ctx)`](../../application/application.go)
+- [`(*Application).Run()`](../../application/application.go)
 - [`(*Application).Close()`](../../application/application_close.go)
 - [`(*Application).ProcessRole()`](../../application/application.go) — the role this process resolved to, the same string `ServiceProcessRole` answers
 
@@ -348,6 +355,14 @@ func run(ctx context.Context, embeddedPublicFiles fs.FS, embeddedConfigFiles fs.
 - [`(*Application).RegisterHttpMiddlewareFactories(factories...)`](../../application/application_http.go)
 - [`(*Application).RegisterHttpHandlerDecorator(decorator)`](../../application/application_http.go) — see [Handler decorators](#handler-decorators)
 - [`(*Application).OnHttpShutdown(hook)`](../../application/application_http.go) — runs the moment the http server begins shutting down, before it waits for connections to drain, which is how a Server-Sent Events stream or a websocket is released instead of blocking the whole shutdown timeout
+
+### Boot refusals and the process exit
+
+Boot fails fast where serving would be the widening: an **http** process whose `.env` artifacts contributed **no keys at all** refuses to boot rather than serve on development defaults (a cli process stays permissive — a command takes its configuration with it when it exits). Two more doors close for the boot window itself: a module registered from inside a module boot hook is refused, because the phase loops iterate a snapshot of the module list and such a module would receive only the hooks still ahead of it; and so is a route queued from inside one, because the queue has already drained by then. A configuration registered under any name but `logging` is refused outright, since nothing in this major can read it back.
+
+The http server limits are fixed defaults in this major — read 15s, read-header 5s, write 30s, idle 60s, max header 1 MiB — with no override surface; the shutdown timeout alone is configurable through `MELODY_HTTP_SHUTDOWN_TIMEOUT` (`kernel.http.shutdown_timeout`), defaulting to 5s, because its right value belongs to the supervisor's termination grace rather than to the framework. What `net/http` reports on its own — a connection that fails before a request exists, a request the server rejects before any handler, the listener degrading — reaches the application's journal instead of stderr, so it is structured like every other line the process writes.
+
+**The shutdown budget covers the request scopes as well as the connections.** `net/http`'s own `Shutdown` drains the connections the server still owns — and a **hijacked** connection is not one of them: a handler that upgrades to a websocket or takes the socket for any other reason removes it from the server's accounting, so `Shutdown` returns immediately and reports success while that handler is still running. Melody counts the request scopes the http kernel opened ([`Kernel.OpenRequestScopes`](../../http/kernel.go)) and waits for them under the *same* budget after `Shutdown` returns and the shutdown hooks were joined. A drain that finishes leaves the exit exactly as it was; one that does not is recorded as `http shutdown left request scopes open`, carrying the count, and the process exits non-zero — the same signal an overrun `Shutdown` gives, for the same reason. The `OnHttpShutdown` hooks are what release the long-lived handlers so the drain has something to succeed at; without one, the budget is what bounds the wait.
 
 ### Middleware helpers
 

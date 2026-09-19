@@ -204,6 +204,66 @@ jobs:
                             echo "::endgroup::"
                         done
 
+    # govulncheck over every module, gated on the REACHABLE findings against
+    # `.dev/validate/vulncheck.baseline`. No other job reads a security advisory, so a vulnerable function
+    # this code actually calls is green everywhere else by construction. Mirrors run_vulncheck_checks in
+    # `.dev/validate/all.sh`, through the same entry point, because the baseline is tied to the toolchain
+    # the scan runs against: the standard-library rows name the go version of the DEV IMAGE, so the scan
+    # has to run inside it. A fresh image built here on a newer golang base fails the stale rows loudly —
+    # which is the signal that the local image is behind and the baseline is due a reseed, not a fault of
+    # this job. Kept off pull requests because it builds the dev image; `workflow_dispatch` runs it on a
+    # branch on demand.
+    vulncheck:
+        if: github.event_name != 'pull_request'
+        runs-on: ubuntu-latest
+        timeout-minutes: 20
+        steps:
+            -   uses: actions/checkout@v4
+            -   name: govulncheck over every module against the vulncheck baseline
+                run: .dev/validate/all.sh --vulncheck
+
+    # every integration module against the framework version its own go.mod PINS, mirroring
+    # run_compatibility_checks in `.dev/validate/all.sh`, through the same entry point. The matrix job at
+    # the top of this file builds with go.work active — that is what `go list -m` enumerates — and a
+    # workspace substitutes the LOCAL module for the dependency each go.mod declares, so no job above has
+    # ever compiled an integration against the version it publishes itself as needing, which is what
+    # `go get` resolves for a consumer. Green there is a DEVELOPMENT answer; this job is the PUBLISHING
+    # one. It deliberately does not use `setup-go`: the lane runs inside the dev image, against the
+    # toolchain that builds, exactly as it does locally. Kept off pull requests for the same reason as the
+    # vulnerability job, because it builds that image — the branch is not uncovered meanwhile, since the
+    # local gate runs the lane on every `--all` and on any staged go source outside the examples;
+    # `workflow_dispatch` runs it on a branch on demand.
+    compatibility:
+        if: github.event_name != 'pull_request'
+        runs-on: ubuntu-latest
+        timeout-minutes: 25
+        steps:
+            -   uses: actions/checkout@v4
+            -   name: integration modules against the version each go.mod pins
+                run: .dev/validate/all.sh --compatibility
+
+    # the exported surface of every published module against the surface of its last tag, mirroring
+    # run_apidiff_checks in `.dev/validate/all.sh`, through the same entry point. The compatibility job
+    # above asks what a consumer compiles; this one asks what the publisher moved — a signature, a removed
+    # symbol, a constant's value, a method added to an interface a third party implements — and what it
+    # added, and gates every difference on `.dev/validate/apidiff.baseline`, where each row carries the
+    # decision the release has to make. It runs inside the dev image because apidiff lives there and the
+    # old side is fetched from the module proxy. The checkout is full rather than shallow, because the lane
+    # reads each module's last tag out of git and a depth-one checkout carries no tags at all — the lane
+    # would then skip every module as untagged and pass over nothing. Kept off pull requests for the same
+    # reason as the two jobs above, because it builds that image; `workflow_dispatch` runs it on a branch
+    # on demand.
+    apidiff:
+        if: github.event_name != 'pull_request'
+        runs-on: ubuntu-latest
+        timeout-minutes: 25
+        steps:
+            -   uses: actions/checkout@v4
+                with:
+                    fetch-depth: 0
+            -   name: exported surface of every published module against its last tag
+                run: .dev/validate/all.sh --apidiff
+
     # the live e2e harness and the stack checks: the only lane that drives booted applications over the
     # wire. Every other job compiles the harness and runs its unit tests, so a middleware whose ordering
     # only matters once a real request traverses the chain, a route the router registers but never answers,

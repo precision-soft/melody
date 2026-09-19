@@ -25,7 +25,7 @@ const (
 
 /* CatalogJournalService records what happened to the nomenclature and who did it.
 
-The repository is always there: with a database it writes rows, and without one it keeps the record inside the process. Recording is therefore not something the application does only when it can, and no caller has to ask whether it worked. */
+   The repository is always there: with a database it writes rows, and without one it keeps the record inside the process. Recording is therefore not something the application does only when it can, and no caller has to ask whether it worked. */
 type CatalogJournalService struct {
     journalRepository repository.CatalogJournalRepository
     clock             melodyclockcontract.Clock
@@ -93,7 +93,7 @@ func MustGetCatalogJournalService(resolver melodycontainercontract.Resolver) *Ca
 
 /* WriteContext is the context a change to the nomenclature is made under. It carries who is making it, because a repository is handed a context rather than a runtime and the audit trail still has to name a person.
 
-This is the last layer that knows which request it is serving, so it is where the answer is put on the context. The value travels as a plain string under a key the persistence package owns, which is what keeps the ORM's own actor helper out of the service layer. */
+   This is the last layer that knows which request it is serving, so it is where the answer is put on the context. The value travels as a plain string under a key the persistence package owns, which is what keeps the ORM's own actor helper out of the service layer. */
 func WriteContext(runtimeInstance melodyruntimecontract.Runtime) context.Context {
     return persistence.WithActor(runtimeInstance.Context(), ActorFromRuntime(runtimeInstance))
 }

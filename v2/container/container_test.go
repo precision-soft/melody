@@ -408,6 +408,52 @@ func TestContainer_OverrideTypeIncompatibleValueRefused(t *testing.T) {
     }
 }
 
+/* an override of one name answers the types that name is registered under and not another service's type-keyed resolution: the concrete service keeps answering its own type, and the overridden name's own type answers the override. A container type-keyed resolution prefers the name registration at every door, so this pins the contract; the observable half lives on the scope twin, whose own lookup does read the exposed entry. */
+func TestContainer_OverrideOfOneNameDoesNotAnswerAnotherServicesGetByType(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    interfaceRegisterErr := serviceContainer.Register(
+        "app.poison.contract",
+        func(resolver containercontract.Resolver) (testInterface, error) {
+            return &testImplementation{name: "contract owner"}, nil
+        },
+    )
+    if nil != interfaceRegisterErr {
+        t.Fatalf("unexpected register error: %v", interfaceRegisterErr)
+    }
+
+    concreteRegisterErr := serviceContainer.Register(
+        "app.poison.concrete",
+        func(resolver containercontract.Resolver) (*testImplementation, error) {
+            return &testImplementation{name: "concrete owner"}, nil
+        },
+    )
+    if nil != concreteRegisterErr {
+        t.Fatalf("unexpected register error: %v", concreteRegisterErr)
+    }
+
+    overrideErr := serviceContainer.OverrideProtectedInstance("app.poison.contract", &testImplementation{name: "override"})
+    if nil != overrideErr {
+        t.Fatalf("unexpected override error: %v", overrideErr)
+    }
+
+    concreteValue, concreteErr := serviceContainer.GetByType(reflect.TypeOf((*testImplementation)(nil)))
+    if nil != concreteErr {
+        t.Fatalf("unexpected get by type error: %v", concreteErr)
+    }
+    if implementation, isTyped := concreteValue.(*testImplementation); false == isTyped || "concrete owner" != implementation.name {
+        t.Fatalf("expected the concrete service to keep answering its own type, got %#v", concreteValue)
+    }
+
+    contractValue, contractErr := serviceContainer.GetByType(reflect.TypeOf((*testInterface)(nil)).Elem())
+    if nil != contractErr {
+        t.Fatalf("unexpected get by type error: %v", contractErr)
+    }
+    if implementation, isTyped := contractValue.(*testImplementation); false == isTyped || "override" != implementation.name {
+        t.Fatalf("expected the overridden name's own type to answer the override, got %#v", contractValue)
+    }
+}
+
 /* the identity key of a pointer-to-unnamed-composite type drops its package path, so two such types from same-short-named packages share one key — one creation-guard entry and one close node for two distinct types, which read as false cycles at resolution and merged nodes at teardown. The second type is refused at the boot line that declares it. */
 func TestContainer_RegisterTypeIdentityKeyCollisionRefused(t *testing.T) {
     serviceContainer := NewContainer()
@@ -474,7 +520,8 @@ func TestContainer_MustGetByType_AnswersAndNamesItsOwnFailure(t *testing.T) {
             t.Fatalf("expected the original melody error to travel out whole, got %#v", recoveredValue)
         }
 
-        if "" == melodyErr.Context()["type"] {
+        typeContextValue, hasTypeContextValue := melodyErr.Context()["type"].(string)
+        if false == hasTypeContextValue || "" == typeContextValue {
             t.Fatalf("expected the type written into the original failure's context, got %#v", melodyErr.Context())
         }
     }()
@@ -882,12 +929,21 @@ func TestServiceDescriptions_DescribesBothLifetimesWithoutBuilding(t *testing.T)
         t.Fatalf("unexpected build error: %v", getErr)
     }
 
+    describedBuiltService := false
     for _, description := range reporter.ServiceDescriptions() {
-        if "described.container" == description.Name {
-            if false == description.IsBuilt || "string" != description.TypeName {
-                t.Fatalf("expected the built service to be described as built, got %+v", description)
-            }
+        if "described.container" != description.Name {
+            continue
         }
+
+        describedBuiltService = true
+        if false == description.IsBuilt || "string" != description.TypeName {
+            t.Fatalf("expected the built service to be described as built, got %+v", description)
+        }
+    }
+
+    /* without this the loop asserts nothing at all when the report loses the service, which is the very failure the assertion inside it exists to catch */
+    if false == describedBuiltService {
+        t.Fatalf("expected the built service to be described at all, got %+v", reporter.ServiceDescriptions())
     }
 }
 

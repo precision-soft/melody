@@ -12,10 +12,7 @@ import (
     mailercontract "github.com/precision-soft/melody/v3/mailer/contract"
 )
 
-/* runMailCheck sends a message through melody's SmtpTransport to a real smtp server (mailpit) and confirms
-it arrives, exercising the whole session — auth-less greeting, MAIL/RCPT/DATA, the payload write and QUIT —
-under the per-step session deadline. A configured Timeout bounds every step past the greeting, so a stalled
-relay can no longer pin the sender; here the server is healthy and the message must land intact. */
+/* runMailCheck sends a message through melody's SmtpTransport to a real smtp server (mailpit) and confirms it arrives, exercising the whole session — auth-less greeting, MAIL/RCPT/DATA, the payload write and QUIT — under the per-step session deadline. A configured Timeout bounds every step past the greeting, so a stalled relay can no longer pin the sender; here the server is healthy and the message must land intact. */
 func runMailCheck(smtpAddress string, mailpitApiUrl string) {
     subject := fmt.Sprintf("melody-e2e-%d", time.Now().UnixNano())
 
@@ -50,8 +47,7 @@ func runMailCheck(smtpAddress string, mailpitApiUrl string) {
     pass("mailpit received the message with subject %q", subject)
 }
 
-/* sendWithRetry absorbs the short window where mailpit accepted the container start but is not yet
-listening; a persistent failure still surfaces after the attempts are exhausted. */
+/* sendWithRetry absorbs the short window where mailpit accepted the container start but is not yet listening; a persistent failure still surfaces after the attempts are exhausted. */
 func sendWithRetry(transport mailercontract.Transport, message mailercontract.Message) error {
     var sendErr error
 
@@ -69,8 +65,7 @@ func sendWithRetry(transport mailercontract.Transport, message mailercontract.Me
     return sendErr
 }
 
-/* waitForMailpitMessage reports whether the subject showed up before the deadline; the last poll error is
-returned so an unreachable or broken mailpit api is distinguishable from a message that never arrived. */
+/* waitForMailpitMessage reports whether the subject showed up before the deadline; the last poll error is returned so an unreachable or broken mailpit api is distinguishable from a message that never arrived. */
 func waitForMailpitMessage(mailpitApiUrl string, subject string) (bool, error) {
     deadline := time.Now().Add(10 * time.Second)
 

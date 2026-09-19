@@ -3,11 +3,24 @@ package openapi
 import (
     nethttp "net/http"
     "reflect"
+    "sort"
     "strconv"
     "strings"
 
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
 )
+
+/* pathItemMethods is every verb a path item can carry, in the order the document lists them. A route registered with no method list answers all of them — matchesMethod treats the empty list as a match for every verb — so the document spells that surface out instead of writing an operation-less path item that reads as an endpoint answering nothing. */
+var pathItemMethods = []string{
+    nethttp.MethodGet,
+    nethttp.MethodPost,
+    nethttp.MethodPut,
+    nethttp.MethodPatch,
+    nethttp.MethodDelete,
+    nethttp.MethodOptions,
+    nethttp.MethodHead,
+    nethttp.MethodTrace,
+}
 
 func Generate(
     info Info,
@@ -23,6 +36,9 @@ func Generate(
     components := make(map[string]*Schema)
     componentNames := make(map[reflect.Type]string)
 
+    /* mirrorOwnedSlots remembers which path+method slots were written by the shortened mirror of an optional tail, so a route registered at that path later still displaces the mirror — the mirror may be reached either before or after the route it stands in for */
+    mirrorOwnedSlots := make(map[string]bool)
+
     for _, routeDefinition := range routeDefinitions {
         descriptor := Descriptor{}
         hasDescriptor := false
@@ -31,15 +47,34 @@ func Generate(
         }
 
         methods := routeDefinition.Methods()
+        if 0 == len(methods) {
+            methods = pathItemMethods
+        }
 
         for _, expansion := range expandOptionalTailSegment(routeDefinition.Pattern()) {
             path, pathParameters := convertPattern(expansion.pattern)
 
             pathItem := document.Paths[path]
             for _, method := range methods {
-                /* a route registered at the shortened path itself describes it better than this mirror does, and it may be reached either before or after this route */
-                if true == expansion.omitsParameter && nil != operationFor(&pathItem, method) {
+                /* a verb outside the eight the format models — the router registers any string — has no slot in a path item; the route stays in the document with the undescribed verb named, instead of the operation being built and dropped without a trace */
+                if false == pathItemCarriesMethod(method) {
+                    note := "the route also answers " + strings.ToUpper(method) + ", which an OpenAPI path item cannot describe"
+                    if false == strings.Contains(pathItem.Description, note) {
+                        if "" != pathItem.Description {
+                            pathItem.Description = pathItem.Description + "; "
+                        }
+                        pathItem.Description = pathItem.Description + note
+                    }
+
                     continue
+                }
+
+                /* a taken slot is kept by whoever holds it best: the mirror of an optional tail always yields — a route registered at the shortened path itself describes it better, and it may be reached either before or after this route — while a route yields only to another ROUTE, never to a mirror; and two routes whose patterns converge on one converted path — a placeholder against a brace literal — must not silently replace each other's operations, so the earlier registration wins exactly as it does in the router's match order */
+                slotKey := path + " " + strings.ToUpper(method)
+                if nil != operationFor(&pathItem, method) {
+                    if true == expansion.omitsParameter || false == mirrorOwnedSlots[slotKey] {
+                        continue
+                    }
                 }
 
                 operationId := operationIdFor(routeDefinition.Name(), method, len(methods))
@@ -52,6 +87,7 @@ func Generate(
 
                 operation := buildOperation(operationId, method, pathParameters, descriptor, hasDescriptor, components, componentNames)
                 assignOperation(&pathItem, method, operation)
+                mirrorOwnedSlots[slotKey] = expansion.omitsParameter
             }
 
             document.Paths[path] = pathItem
@@ -100,7 +136,11 @@ func buildOperation(
     if true == hasDescriptor {
         operation.Summary = descriptor.Summary
         operation.Description = descriptor.Description
-        operation.Tags = descriptor.Tags
+
+        /* the document must not alias registry memory: the descriptor arrives by value but its slice shares the registry's backing array, and a caller post-processing the returned document would write through into every later generation */
+        if 0 < len(descriptor.Tags) {
+            operation.Tags = append(make([]string, 0, len(descriptor.Tags)), descriptor.Tags...)
+        }
 
         if nil != descriptor.RequestType && true == methodAcceptsRequestBody(method) {
             operation.RequestBody = &RequestBody{
@@ -111,11 +151,24 @@ func buildOperation(
             }
         }
 
-        for status, responseType := range descriptor.Responses {
+        /* the statuses are visited in order: this range is the one unordered driver of first-touch component naming, and iterating the map directly hands the bare name and its numbered siblings to whichever type a given run visits first, so two runs over one registry disagree on every $ref to a colliding name */
+        statuses := make([]int, 0, len(descriptor.Responses))
+        for status := range descriptor.Responses {
+            statuses = append(statuses, status)
+        }
+        sort.Ints(statuses)
+
+        for _, status := range statuses {
+            /* a code outside the registered table answers an empty status text, and the response description is required by the format */
+            description := nethttp.StatusText(status)
+            if "" == description {
+                description = "response"
+            }
+
             operation.Responses[strconv.Itoa(status)] = ResponseObject{
-                Description: nethttp.StatusText(status),
+                Description: description,
                 Content: map[string]MediaType{
-                    "application/json": {Schema: schemaFromType(responseType, components, names)},
+                    "application/json": {Schema: schemaFromType(descriptor.Responses[status], components, names)},
                 },
             }
         }
@@ -181,6 +234,7 @@ func convertPattern(pattern string) (string, []Parameter) {
     for index, segment := range segments {
         name := ""
         placeholder := false
+        catchAll := false
 
         if true == strings.HasPrefix(segment, ":") {
             placeholder = true
@@ -190,7 +244,16 @@ func convertPattern(pattern string) (string, []Parameter) {
             name = strings.TrimSuffix(segment[1:len(segment)-1], "?")
         } else if true == strings.HasPrefix(segment, "*") {
             placeholder = true
-            name = strings.TrimSuffix(segment[1:], "...")
+            name = segment[1:]
+
+            /* the router reads the "..." suffix — and a trailing bare "*" — as a catch-all, and its registration RETURNS there: every segment written after a catch-all is discarded and never matched. The converted path mirrors that, or the document would advertise a template — "/assets/{rest}/thumbnail" — no request the route answers can ever spell. */
+            if true == strings.HasSuffix(name, "...") {
+                name = strings.TrimSuffix(name, "...")
+                catchAll = true
+            }
+            if index == len(segments)-1 {
+                catchAll = true
+            }
         }
 
         if false == placeholder {
@@ -208,9 +271,26 @@ func convertPattern(pattern string) (string, []Parameter) {
             Required: true,
             Schema:   &Schema{Type: "string"},
         })
+
+        if true == catchAll {
+            segments = segments[:index+1]
+
+            break
+        }
     }
 
     return strings.Join(segments, "/"), parameters
+}
+
+/* pathItemCarriesMethod reports whether the verb has a slot in a path item — the same eight assignOperation writes and operationFor reads. */
+func pathItemCarriesMethod(method string) bool {
+    switch strings.ToUpper(method) {
+    case nethttp.MethodGet, nethttp.MethodPost, nethttp.MethodPut, nethttp.MethodPatch,
+        nethttp.MethodDelete, nethttp.MethodOptions, nethttp.MethodHead, nethttp.MethodTrace:
+        return true
+    }
+
+    return false
 }
 
 func operationFor(pathItem *PathItem, method string) *Operation {

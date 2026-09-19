@@ -205,6 +205,20 @@ func (instance *scope) registerTypeOnScopeLocked(
         return nil
     }
 
+    /* refuse a type whose identity key another, DIFFERENT scoped type already claimed on this scope, the way the container refuses it at its own registration door: scopedTypeNodeKey folds a type through typeIdentityKey, so a colliding pair shares one teardown node and one creation-guard key while holding two instances — one instance's Close is skipped and a resolution of one reads as a cycle through the other. The container door and the boot scope plan already run this check; only the live RegisterScoped path reached the maps without it. */
+    if collidingType, collides := instance.scopedTypeIdentityCollision(canonicalType); true == collides {
+        return exception.NewError(
+            "scoped service type identity key collides with a different registered scoped type",
+            map[string]any{
+                "serviceName":  serviceName,
+                "serviceType":  canonicalType.String(),
+                "existingType": collidingType.String(),
+                "identityKey":  typeIdentityKey(canonicalType),
+            },
+            nil,
+        )
+    }
+
     if false == replacesContainerService {
         if planServiceNames, exists := instance.plan.typeRegistrationNamesByType[canonicalType]; true == exists && 0 < len(planServiceNames) {
             return exception.NewError(
@@ -257,6 +271,23 @@ func (instance *scope) registerTypeOnScopeLocked(
     instance.ownTypeRegistrationNamesByType[canonicalType] = []string{serviceName}
 
     return nil
+}
+
+/* scopedTypeIdentityCollision reports a scoped type already registered on this scope whose identity key equals canonicalType's while being a DIFFERENT type. The same canonicalType registering again is not a collision — that is the ordinary multi-name registration the caller above handles — so the equal-type case is skipped. */
+func (instance *scope) scopedTypeIdentityCollision(canonicalType reflect.Type) (reflect.Type, bool) {
+    identityKey := typeIdentityKey(canonicalType)
+
+    for registeredType := range instance.ownTypeRegistrationNamesByType {
+        if registeredType == canonicalType {
+            continue
+        }
+
+        if typeIdentityKey(registeredType) == identityKey {
+            return registeredType, true
+        }
+    }
+
+    return nil, false
 }
 
 /* scopedProviderByName yields the provider this scope would build the name from: its own registration first, then the plan. The plan is immutable and shared, so it is read without a lock. */

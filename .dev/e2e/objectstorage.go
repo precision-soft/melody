@@ -15,15 +15,10 @@ import (
 /* objectStorageBucket is created on demand, so a fresh localstack volume needs no preparation. */
 const objectStorageBucket = "melody-e2e"
 
-/* objectStorageStreamingDeclaredSize sits just above minio's 16 MiB part size, the boundary the put's size
-check switches on: at or below it the body is spooled and measured in full before any request is issued, above
-it the body goes up multipart and has to prove its size as minio consumes it. The second half is the one that
-matters here, because it is the only one that reaches the bucket at all. */
+/* objectStorageStreamingDeclaredSize sits just above minio's 16 MiB part size, the boundary the put's size check switches on: at or below it the body is spooled and measured in full before any request is issued, above it the body goes up multipart and has to prove its size as minio consumes it. The second half is the one that matters here, because it is the only one that reaches the bucket at all. */
 const objectStorageStreamingDeclaredSize = 16*1024*1024 + 64*1024
 
-/* opaqueReader hides a body's io.Seeker from the put, which is what an http.Request.Body — the natural
-argument of the call — looks like: a seekable body is measured in place before it is uploaded, an opaque one
-has to be checked as it is read. */
+/* opaqueReader hides a body's io.Seeker from the put, which is what an http.Request.Body — the natural argument of the call — looks like: a seekable body is measured in place before it is uploaded, an opaque one has to be checked as it is read. */
 type opaqueReader struct {
     source io.Reader
 }
@@ -32,13 +27,7 @@ func (instance *opaqueReader) Read(buffer []byte) (int, error) {
     return instance.source.Read(buffer)
 }
 
-/* runObjectStorageCheck exercises the awss3 Put size contract against a live s3: the declared size is
-enforced before anything reaches the bucket, so a body that turns out to be longer than its declaration is
-refused and whatever the key already held is still there afterwards. That is the data-loss story no fake
-backend can tell — an s3 put replaces a key atomically, and on a bucket without versioning nothing brings the
-replaced object back — and it is asserted on both halves of the check: the spooled one for a body inside the
-part size and the streaming one for a body above it. A negative size still means "unknown length" and is
-streamed unchecked. */
+/* runObjectStorageCheck exercises the awss3 Put size contract against a live s3: the declared size is enforced before anything reaches the bucket, so a body that turns out to be longer than its declaration is refused and whatever the key already held is still there afterwards. That is the data-loss story no fake backend can tell — an s3 put replaces a key atomically, and on a bucket without versioning nothing brings the replaced object back — and it is asserted on both halves of the check: the spooled one for a body inside the part size and the streaming one for a body above it. A negative size still means "unknown length" and is streamed unchecked. */
 func runObjectStorageCheck(endpoint string, accessKey string, secretKey string) {
     client, clientErr := awss3.NewClient(awss3.Config{
         Endpoint:  endpoint,
@@ -94,8 +83,7 @@ func runObjectStorageCheck(endpoint string, accessKey string, secretKey string) 
 
     preserved := []byte("the object that was already at the key when the rejected put arrived")
 
-    /* (2) the data-loss regression, spooled path: a declaration shorter than the body must be refused before
-       the bucket is touched, so the object already at the key is still the one that is there afterwards */
+    /* (2) the data-loss regression, spooled path: a declaration shorter than the body must be refused before the bucket is touched, so the object already at the key is still the one that is there afterwards */
     spooledKey := prefix + "survivor-spooled.txt"
 
     seedObject(storage, runtimeInstance, spooledKey, preserved)
@@ -118,8 +106,7 @@ func runObjectStorageCheck(endpoint string, accessKey string, secretKey string) 
     }
     pass("(2) short declared size refused on the spooled path and the pre-existing object survived unchanged (%d bytes declared for %d)", len(overlongBody)-1, len(overlongBody))
 
-    /* (3) the same, above the part size, where the body streams straight into a multipart upload instead of
-       being spooled — the only path on which bytes of the rejected body ever reach the bucket */
+    /* (3) the same, above the part size, where the body streams straight into a multipart upload instead of being spooled — the only path on which bytes of the rejected body ever reach the bucket */
     streamingKey := prefix + "survivor-streaming.bin"
 
     seedObject(storage, runtimeInstance, streamingKey, preserved)

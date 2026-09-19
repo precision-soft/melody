@@ -10,6 +10,7 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
     "github.com/precision-soft/melody/v2/http"
     httpcontract "github.com/precision-soft/melody/v2/http/contract"
+    "github.com/precision-soft/melody/v2/internal"
     kernelcontract "github.com/precision-soft/melody/v2/kernel/contract"
     "github.com/precision-soft/melody/v2/logging"
     runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
@@ -23,7 +24,8 @@ func RegisterRateLimitRequestListener(
     eventDispatcher eventcontract.EventDispatcher,
     config *RateLimitConfig,
 ) {
-    if nil == config || nil == config.Limiter() {
+    /* the limiter is read through the interface, the same refusal the middleware door gives a typed nil */
+    if nil == config || true == internal.IsNilInterface(config.Limiter()) {
         exception.Panic(
             exception.NewError("limiter is required for rate limit request listener", nil, nil),
         )
@@ -43,7 +45,7 @@ func RegisterRateLimitRequestListener(
         kernelcontract.EventKernelRequest,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
             requestEvent, ok := eventValue.Payload().(*http.KernelRequestEvent)
-            if false == ok || nil == requestEvent || nil == requestEvent.Request() {
+            if false == ok || nil == requestEvent || true == internal.IsNilInterface(requestEvent.Request()) {
                 return nil
             }
 
@@ -104,7 +106,8 @@ func RegisterRateLimitRequestListener(
                 return nil
             }
 
-            if nil != response {
+            /* IsNilInterface and not `nil !=`: OnLimitExceeded is the application's, so a typed nil of its own response type is a non-nil interface a bare check reads as a live response — SetResponse normalizes it to nil, the fallback below never runs, and the refused request is served unmetered. */
+            if false == internal.IsNilInterface(response) {
                 requestEvent.SetResponse(response)
 
                 return nil

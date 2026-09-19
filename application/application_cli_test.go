@@ -1,9 +1,11 @@
 package application
 
 import (
+    "bytes"
     "context"
     "errors"
     "os"
+    "strings"
     "sync"
     "testing"
     "time"
@@ -281,6 +283,24 @@ func TestSuggestCliCommand_ReturnsTheZeroMatchRefusalUnmarked(t *testing.T) {
     }
     if true == exitError.ErrorValue().AlreadyLogged() {
         t.Fatalf("expected the refusal to travel unmarked")
+    }
+}
+
+/* the command name comes from argv, so a carriage return or an escape sequence embedded there could repaint the header as another verdict in a captured log — the header escapes it the way the run banners and the suggestion table already do */
+func TestPrintCliCommandNotFoundHeader_EscapesTheArgvDerivedName(t *testing.T) {
+    buffer := &bytes.Buffer{}
+
+    printCliCommandNotFoundHeader(buffer, "bad\rname\x1b[2K", time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
+
+    written := buffer.String()
+    if true == strings.Contains(written, "\r") || true == strings.Contains(written, "\x1b") {
+        t.Fatalf("expected no raw control byte in the header, got %q", written)
+    }
+    if false == strings.Contains(written, `bad\rname\x1b[2K`) {
+        t.Fatalf("expected the escaped spelling kept in place, got %q", written)
+    }
+    if false == strings.Contains(written, "[command not found]") {
+        t.Fatalf("expected the header verdict kept, got %q", written)
     }
 }
 

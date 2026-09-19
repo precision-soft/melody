@@ -1281,3 +1281,107 @@ func TestProviderOpen_AnExplicitTlsConfigReachesTheDriverUntouched(t *testing.T)
         t.Fatal("an explicit TLS configuration must reach the driver exactly as it was given")
     }
 }
+
+
+/* TestComputeBackoffDelayFloorsASubMillisecondInitialDelay pins the floor. The guards above refuse a non-positive delay, which left ONE NANOSECOND as the smallest thing a configuration could ask for — and the wait it produces is shorter than the dial it separates, so what the operator gets is the re-dial storm those guards exist to prevent, arriving through the door they left open.
+
+   The growth is asserted from the floor as well as the floor itself: a fix that clamped the ANSWER instead of the starting point would return the floor at every attempt and stop backing off at all. */
+func TestComputeBackoffDelayFloorsASubMillisecondInitialDelay(t *testing.T) {
+    provider := newTestProvider().
+        WithRetryConfig(NewRetryConfig(10, time.Nanosecond, 5*time.Second, 2.0))
+
+    if time.Millisecond != provider.computeBackoffDelay(1) {
+        t.Fatalf("expected a one-nanosecond initial delay to be floored to 1ms, got %s", provider.computeBackoffDelay(1))
+    }
+
+    if 2*time.Millisecond != provider.computeBackoffDelay(2) {
+        t.Fatalf("expected the backoff to keep growing from the floor, got %s", provider.computeBackoffDelay(2))
+    }
+}
+
+/* the floor covers the CEILING too: a sub-millisecond max delay would otherwise cap a perfectly sane initial delay straight back under the floor, which is the same storm reached from the other field. */
+func TestComputeBackoffDelayFloorsASubMillisecondCeiling(t *testing.T) {
+    provider := newTestProvider().
+        WithRetryConfig(NewRetryConfig(10, time.Second, time.Nanosecond, 2.0))
+
+    if time.Millisecond != provider.computeBackoffDelay(1) {
+        t.Fatalf("expected a one-nanosecond max delay to be floored to 1ms, got %s", provider.computeBackoffDelay(1))
+    }
+}
+
+/* TestComputeBackoffDelayAnswersAConstantMultiplierInBoundedTime is the guard on the cost, and it is written as a DEADLINE because that is the only way the cost is observable. A multiplier of exactly 1 is a valid constant backoff, and it is the one value a growth walked attempt by attempt never leaves early: the delay does not move, so the walk runs once per attempt already made and a run costs its own square. At the largest attempt the counter can reach that walk is billions of float multiplications; the closed form is a single one.
+
+   The window is MEASURED, not guessed: the walk it must not fit inside costs 1.02s on the development container at the largest attempt, so 250ms separates the two by four times in the failing direction while leaving the closed form — one math.Pow — a quarter of a second of scheduling slack it can never need. A window picked by eye at two seconds would have let the walk finish comfortably inside it, which is a probe that certifies nothing.
+
+   The value is asserted beside the deadline so the probe cannot pass by answering quickly and wrongly. */
+func TestComputeBackoffDelayAnswersAConstantMultiplierInBoundedTime(t *testing.T) {
+    provider := newTestProvider().
+        WithRetryConfig(NewRetryConfig(0, 10*time.Millisecond, 5*time.Second, 1.0))
+
+    answered := make(chan time.Duration, 1)
+    go func() {
+        answered <- provider.computeBackoffDelay(4000000000)
+    }()
+
+    select {
+    case delay := <-answered:
+        if 10*time.Millisecond != delay {
+            t.Fatalf("expected a constant backoff to stay at the initial delay, got %s", delay)
+        }
+    case <-time.After(250 * time.Millisecond):
+        t.Fatal("the constant backoff did not answer in bounded time: the growth is being walked one attempt at a time")
+    }
+}
+
+/* an attempt of zero is not an attempt already made: it reads as the first one, which is the answer the growth this replaced gave it by never running. Without the reading the unsigned subtraction wraps to four billion steps of growth and the delay leaves for the ceiling. */
+func TestComputeBackoffDelayReadsAZeroAttemptAsTheFirst(t *testing.T) {
+    provider := newTestProvider().
+        WithRetryConfig(NewRetryConfig(3, 100*time.Millisecond, 250*time.Millisecond, 2.0))
+
+    if 100*time.Millisecond != provider.computeBackoffDelay(0) {
+        t.Fatalf("expected a zero attempt to read as the first, got %s", provider.computeBackoffDelay(0))
+    }
+}
+
+/* a bare IPv6 literal joined as host:port reads as an address with too many colons: pgdriver refuses it by name, go-sql-driver re-joins it into a bracketed host that does not exist and dials that through the whole retry budget. The literal is bracketed, one already bracketed is left alone, and a host name or an IPv4 literal is joined as it always was. */
+func TestDialAddressOf_BracketsABareIpv6Literal(t *testing.T) {
+    caseList := []struct {
+        host     string
+        expected string
+    }{
+        {"::1", "[::1]:3306"},
+        {"2001:db8::5", "[2001:db8::5]:3306"},
+        {"fe80::1%eth0", "[fe80::1%eth0]:3306"},
+        {"[::1]", "[::1]:3306"},
+        {"localhost", "localhost:3306"},
+        {"10.0.0.1", "10.0.0.1:3306"},
+        {"", ":3306"},
+    }
+
+    for _, testCase := range caseList {
+        if actual := dialAddressOf(testCase.host, "3306"); testCase.expected != actual {
+            t.Errorf("dialAddressOf(%q) = %q, wanted %q", testCase.host, actual, testCase.expected)
+        }
+    }
+}
+
+/* an unset host made the driver dial ":port", which is the local system: the open connected to whatever listened there with the configured credentials instead of failing. It is refused by name before the driver configuration is built. */
+func TestProviderOpen_RefusesAnEmptyHostBeforeBuildingTheDriverConfig(t *testing.T) {
+    provider := newTestProvider(
+        WithPostBuildHook(func(ctx context.Context, resolver containercontract.Resolver, driverConfig *driver.Config) error {
+            t.Fatal("the driver configuration was built for an empty host")
+
+            return nil
+        }),
+    )
+
+    database, openErr := provider.Open(newStubResolver("", "3306", "melody", "melody_user", "melody_password"))
+    if nil != database {
+        _ = database.Close()
+        t.Fatal("expected no database handle for an empty host")
+    }
+
+    if nil == openErr || false == strings.Contains(openErr.Error(), "the host is empty") {
+        t.Fatalf("expected the refusal to name the host, got %v", openErr)
+    }
+}

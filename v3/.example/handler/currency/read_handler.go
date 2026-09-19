@@ -2,6 +2,7 @@ package currency
 
 import (
     nethttp "net/http"
+    "time"
 
     "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/presenter"
@@ -10,10 +11,16 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
+/* the rate travels with the code because the nomenclature holds one: a client shown a list of currencies and
+   no rates cannot tell which of them the catalogue can convert into, nor how old the quote is. RateAsOf is
+   rendered in RFC 3339 like every other instant this application publishes, and it is the instant the
+   PROVIDER took the reading rather than the one this application wrote it at. */
 type CurrencyResponse struct {
-    Id   string `json:"id"`
-    Code string `json:"code"`
-    Name string `json:"name"`
+    Id       string  `json:"id"`
+    Code     string  `json:"code"`
+    Name     string  `json:"name"`
+    Rate     float64 `json:"rate"`
+    RateAsOf string  `json:"rateAsOf"`
 }
 
 func ApiReadAllHandler() melodyhttpcontract.Handler {
@@ -40,9 +47,11 @@ func MapCurrencies(currencies []*entity.Currency) []CurrencyResponse {
         }
 
         payload = append(payload, CurrencyResponse{
-            Id:   currency.Id,
-            Code: currency.Code,
-            Name: currency.Name,
+            Id:       currency.Id,
+            Code:     currency.Code,
+            Name:     currency.Name,
+            Rate:     currency.Rate,
+            RateAsOf: currency.RateAsOf.UTC().Format(time.RFC3339),
         })
     }
 

@@ -5,6 +5,7 @@ import (
     "fmt"
     "strings"
     "sync"
+    "time"
 
     "github.com/precision-soft/melody/v3/.example/entity"
 )
@@ -18,8 +19,7 @@ type inMemoryCurrencyRepository struct {
     currencies []*entity.Currency
 }
 
-/* @info the returned slice is a copy, but a shallow one: the entity pointers stay shared with the
-repository, so a caller that mutates an entity in place bypasses the lock */
+/* the returned slice is a copy, but a shallow one: the entity pointers stay shared with the repository, so a caller that mutates an entity in place bypasses the lock */
 func (instance *inMemoryCurrencyRepository) All(ctx context.Context) ([]*entity.Currency, error) {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
@@ -96,6 +96,40 @@ func (instance *inMemoryCurrencyRepository) Update(ctx context.Context, currency
         }
 
         instance.currencies[index] = currency
+        return true, nil
+    }
+
+    return false, nil
+}
+
+func (instance *inMemoryCurrencyRepository) UpdateQuote(ctx context.Context, id string, rate float64, rateAsOf time.Time) (bool, error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    normalizedId := strings.TrimSpace(id)
+    if "" == normalizedId {
+        return false, fmt.Errorf("id is required")
+    }
+
+    for index, existing := range instance.currencies {
+        if nil == existing || normalizedId != existing.Id {
+            continue
+        }
+
+        /* the judgement and the write are one step under the lock, the way the database's conditional statement is one */
+        if true == existing.RateAsOf.After(rateAsOf) {
+            return false, nil
+        }
+
+        if rate == existing.Rate && true == existing.RateAsOf.Equal(rateAsOf) {
+            return false, nil
+        }
+
+        quoted := *existing
+        quoted.Rate = rate
+        quoted.RateAsOf = rateAsOf
+        instance.currencies[index] = &quoted
+
         return true, nil
     }
 

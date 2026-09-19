@@ -5,6 +5,7 @@ import (
     "errors"
     "net"
     nethttp "net/http"
+    "slices"
     "strings"
     "sync"
     "sync/atomic"
@@ -648,11 +649,7 @@ func TestKernelHasErrorHandler_ReadsTheHasDoor(t *testing.T) {
     }
 }
 
-/* the gate is proven through the boot-end registration itself: after it the exception listener
-either answers a kernel.exception dispatch or leaves it unanswered, which is the observable
-difference between the listener registered and skipped. The handler is installed BEFORE the
-registration runs, because that is the contract — an error handler installed by boot takes the
-listener's place. */
+/* the gate is proven through the boot-end registration itself: after it the exception listener either answers a kernel.exception dispatch or leaves it unanswered, which is the observable difference between the listener registered and skipped. The handler is installed BEFORE the registration runs, because that is the contract — an error handler installed by boot takes the listener's place. */
 func TestRegisterKernelHttpListeners_SkipsTheExceptionListenerWhenAnErrorHandlerIsInstalled(t *testing.T) {
     applicationInstance := newCacheWarningTestApplication(t, config.ModeHttp, logging.NewNopLogger())
 
@@ -686,8 +683,9 @@ func TestRegisterKernelHttpListeners_SkipsTheExceptionListenerWhenAnErrorHandler
     }
 }
 
+/* a console never reaches runHttp, so boot-end is where it decides: its dispatcher has to carry the exception listener for the introspection command to report the set a serving process runs */
 func TestRegisterKernelHttpListeners_RegistersTheExceptionListenerWithoutAnErrorHandler(t *testing.T) {
-    applicationInstance := newCacheWarningTestApplication(t, config.ModeHttp, logging.NewNopLogger())
+    applicationInstance := newCacheWarningTestApplication(t, config.ModeCli, logging.NewNopLogger())
 
     applicationInstance.registerKernelHttpListeners()
 
@@ -713,10 +711,107 @@ func TestRegisterKernelHttpListeners_RegistersTheExceptionListenerWithoutAnError
     }
 }
 
-/* the contrast half of the move: running the http server registers nothing — the listeners belong
-to Boot, in every process shape, so what the server runs is exactly what the console inspects */
-func TestRunHttp_RegistersNoKernelListeners(t *testing.T) {
+/* the property the boot-end move was made for, asserted directly instead of through the timing that used to carry it: what a serving process ends up running is exactly what a console process exposes to the introspection command. The exception listener is the one decision an http process defers to runHttp, because a handler may still be installed after Boot returned; the set has to come out the same either way. */
+func TestRunHttp_ExposesTheSameListenerSetAConsoleProcessInspects(t *testing.T) {
+    servingApplication := newCacheWarningTestApplication(t, config.ModeHttp, logging.NewNopLogger())
+    servingApplication.registerKernelHttpListeners()
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if runErr := servingApplication.runHttp(cancelledContext); nil != runErr {
+        t.Fatalf("unexpected run http error: %v", runErr)
+    }
+
+    consoleApplication := newCacheWarningTestApplication(t, config.ModeCli, logging.NewNopLogger())
+    consoleApplication.registerKernelHttpListeners()
+
+    servingListeners := registeredListenerNames(t, servingApplication)
+    consoleListeners := registeredListenerNames(t, consoleApplication)
+
+    if 0 == len(consoleListeners) {
+        t.Fatalf("expected the console dispatcher to expose the kernel listeners")
+    }
+
+    if false == slices.Equal(servingListeners, consoleListeners) {
+        t.Fatalf("expected the serving set %v to equal the inspected set %v", servingListeners, consoleListeners)
+    }
+}
+
+/* registeredListenerNames reads the dispatcher through the same door the introspection command uses, so the comparison is over what an operator would actually see. */
+func registeredListenerNames(t *testing.T, applicationInstance *Application) []string {
+    t.Helper()
+
+    dispatcher, ok := applicationInstance.kernel.EventDispatcher().(*event.EventDispatcher)
+    if false == ok {
+        t.Fatalf("expected the framework dispatcher, got %T", applicationInstance.kernel.EventDispatcher())
+    }
+
+    names := make([]string, 0)
+    for _, registeredEvent := range dispatcher.RegisteredEvents() {
+        for _, listener := range registeredEvent.Listeners {
+            names = append(names, registeredEvent.EventName+"/"+listener.ListenerName)
+        }
+    }
+
+    slices.Sort(names)
+
+    return names
+}
+
+/* the kernel accepts SetErrorHandler after Boot returned, and that handler has to take the framework listener's place exactly as one installed before boot ended does; deciding at boot-end accepted it and never consulted it */
+func TestRunHttp_AnErrorHandlerInstalledAfterBootTakesTheListenersPlace(t *testing.T) {
     applicationInstance := newCacheWarningTestApplication(t, config.ModeHttp, logging.NewNopLogger())
+
+    applicationInstance.registerKernelHttpListeners()
+
+    applicationInstance.kernel.HttpKernel().SetErrorHandler(
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request, err error) httpcontract.Response {
+            return nil
+        },
+    )
+
+    /* the decision is driven through runHttp rather than through the door it calls: what has to be
+       proved is that serving makes it at all, and a probe that calls the door itself passes over a
+       runHttp that never does (§5.35) */
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if runErr := applicationInstance.runHttp(cancelledContext); nil != runErr {
+        t.Fatalf("unexpected run http error: %v", runErr)
+    }
+
+    runtimeInstance := runtime.New(
+        context.Background(),
+        applicationInstance.kernel.ServiceContainer().NewScope(),
+        applicationInstance.kernel.ServiceContainer(),
+    )
+
+    exceptionEvent := http.NewKernelExceptionEvent(
+        runtimeInstance,
+        testhelper.NewHttpTestRequest(nethttp.MethodGet, "http://example.com/fail"),
+        exception.NewError("post-boot handler", nil, nil),
+    )
+
+    _, dispatchErr := applicationInstance.kernel.EventDispatcher().DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if nil != exceptionEvent.Response() {
+        t.Fatalf("expected the framework exception listener to stand aside for a handler installed after boot")
+    }
+}
+
+/* the sister of the test above, and the one that proves serving makes the decision at all: with no
+   handler installed, an http process registers nothing at boot-end, so the framework listener has to
+   arrive at runHttp or the application serves errors with nothing rendering them. With a handler
+   installed both the correct form and a runHttp that never decides register nothing, so that case
+   cannot tell them apart (§5.26). */
+func TestRunHttp_RegistersTheExceptionListenerWhenNoHandlerWasInstalled(t *testing.T) {
+    applicationInstance := newCacheWarningTestApplication(t, config.ModeHttp, logging.NewNopLogger())
+
+    applicationInstance.registerKernelHttpListeners()
 
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
@@ -734,7 +829,7 @@ func TestRunHttp_RegistersNoKernelListeners(t *testing.T) {
     exceptionEvent := http.NewKernelExceptionEvent(
         runtimeInstance,
         testhelper.NewHttpTestRequest(nethttp.MethodGet, "http://example.com/fail"),
-        exception.NewError("run http gate failure", nil, nil),
+        exception.NewError("serving without a handler", nil, nil),
     )
 
     _, dispatchErr := applicationInstance.kernel.EventDispatcher().DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
@@ -742,8 +837,8 @@ func TestRunHttp_RegistersNoKernelListeners(t *testing.T) {
         t.Fatalf("unexpected dispatch error: %v", dispatchErr)
     }
 
-    if nil != exceptionEvent.Response() {
-        t.Fatalf("expected runHttp to register no listener; the boot-end registration owns them")
+    if nil == exceptionEvent.Response() {
+        t.Fatalf("expected the framework exception listener to answer once serving began")
     }
 }
 
@@ -969,5 +1064,63 @@ func TestRunHttp_RefusesToReportACleanStopWhileAHijackedHandlerIsStillServed(t *
 
     if false == strings.Contains(runErr.Error(), "http shutdown left request scopes open") {
         t.Fatalf("expected the undrained scopes in the failure, got %q", runErr.Error())
+    }
+}
+
+
+/* the drain exists for the connection the server's own Shutdown does not drain — a hijacked one — and that connection is exactly what makes Shutdown report a budget overrun, so returning on the overrun skipped the wait in the situation it was written for and closed the application container under a handler still on the wire. Both causes are independently actionable, so both have to survive.
+
+   The error channel is filled by the Serve goroutine rather than ahead of the call: with a value already in it, both arms of the select are ready at once and the branch taken is a coin flip. */
+func TestAwaitHttpServerEnd_DrainsOpenScopesEvenWhenTheShutdownOverran(t *testing.T) {
+    handlerStarted := make(chan struct{})
+    releaseHandler := make(chan struct{})
+
+    serveMux := nethttp.NewServeMux()
+    serveMux.HandleFunc("/", func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+        close(handlerStarted)
+        <-releaseHandler
+    })
+
+    listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+    if nil != listenErr {
+        t.Fatalf("unexpected listen error: %v", listenErr)
+    }
+
+    httpServer := &nethttp.Server{Handler: serveMux}
+
+    errorChannel := make(chan error, 1)
+    go func() {
+        errorChannel <- httpServer.Serve(listener)
+    }()
+
+    go func() {
+        response, requestErr := nethttp.Get("http://" + listener.Addr().String() + "/")
+        if nil == requestErr {
+            _ = response.Body.Close()
+        }
+    }()
+
+    <-handlerStarted
+
+    httpKernel := &countingHttpKernel{}
+    httpKernel.openScopes.Store(1)
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    endErr := awaitHttpServerEnd(cancelledContext, httpServer, errorChannel, &warningRecordingLogger{}, 50*time.Millisecond, httpKernel)
+
+    close(releaseHandler)
+
+    if nil == endErr {
+        t.Fatalf("expected the overrun shutdown to be reported as a failure")
+    }
+
+    if false == strings.Contains(endErr.Error(), "context deadline exceeded") {
+        t.Fatalf("expected the budget overrun to survive, got %q", endErr.Error())
+    }
+
+    if false == strings.Contains(endErr.Error(), "http shutdown left request scopes open") {
+        t.Fatalf("expected the drain to have run and reported the open scopes, got %q", endErr.Error())
     }
 }

@@ -20,4 +20,7 @@ type Session interface {
     IsModified() bool
 
     IsCleared() bool
+
+    /* Snapshot answers the values, the modified flag and the cleared flag read under ONE critical section. The response path decides between deleting and saving a session from these three, and reading them through the individual accessors lets a concurrent Clear land between the reads: the decision then pairs a pre-logout flag with post-logout values — or saves a session the caller was just told is gone — while both calls report success. */
+    Snapshot() (values map[string]any, modified bool, cleared bool)
 }

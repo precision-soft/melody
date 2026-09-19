@@ -45,8 +45,9 @@ func LoginHandler() melodyhttpcontract.Handler {
                 return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "invalid form"), nil
             }
 
-            dto.Username = httpRequest.FormValue("username")
-            dto.Password = httpRequest.FormValue("password")
+            /* the credentials are read from the BODY alone: FormValue reads the url query as readily as the body on a POST, and a query string lands in every access log in front of the application */
+            dto.Username = httpRequest.PostFormValue("username")
+            dto.Password = httpRequest.PostFormValue("password")
         }
 
         username := strings.TrimSpace(dto.Username)
@@ -63,7 +64,7 @@ func LoginHandler() melodyhttpcontract.Handler {
             password,
         )
         if nil != authenticationErr {
-            /* the cause stays out of the errors list on purpose: it names internals — a cache refusal, a store address — and this is an unauthenticated door; ApiErrorWithErr keeps it in the debug-gated context instead */
+            /* the cause stays out of the errors list on purpose: it names internals — a cache refusal, a store address — and this is an unauthenticated door; ApiErrorWithErr journals it and keeps it in the debug-gated context instead */
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "authentication failed", authenticationErr), nil
         }
 
@@ -107,8 +108,8 @@ func LogoutHandler() melodyhttpcontract.Handler {
             return presenter.Redirect(runtimeInstance, request, indexUrl), nil
         }
 
-        sessionInstance.Delete(security.SessionKeySecurityUserId)
-        sessionInstance.Delete(security.SessionKeySecurityRoles)
+        /* the whole session ends here, rather than only the identity in it: deleting the two keys leaves the entry MODIFIED, so the response path saves it back under the same id and re-issues the cookie — the storage keeps an emptied record for the whole session lifetime and the client carries a live session id across its own logout. Clear marks the session cleared, which is what routes the response path to DeleteSession and to the expired cookie. */
+        sessionInstance.Clear()
 
         return presenter.Redirect(runtimeInstance, request, indexUrl), nil
     }

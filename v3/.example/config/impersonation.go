@@ -6,10 +6,7 @@ import (
     melodysecuritycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
-/* the impersonation wiring lets an admin holding the switch role act as another user by sending an
-X-Switch-User header on the token-protected /secure api. The resolver below is the application-supplied
-piece that maps a target identifier to that user's token (a real app queries its user store); an unknown
-identifier denies the switch. */
+/* the impersonation wiring lets an admin holding the switch role act as another user by sending an X-Switch-User header on the token-protected /secure api. The resolver below is the application-supplied piece that maps a target identifier to that user's token (a real app queries its user store); an unknown identifier denies the switch. */
 func (instance *Module) buildImpersonation() {
     instance.impersonatedUsers = &staticImpersonatedUserResolver{
         rolesByIdentifier: map[string][]string{

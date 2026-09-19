@@ -3,11 +3,15 @@ package cron
 import (
     applicationcontract "github.com/precision-soft/melody/v3/application/contract"
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
+    "github.com/precision-soft/melody/v3/exception"
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
 )
 
 type ModuleConfig struct {
-    Configuration         *Configuration
+    /* Configuration drives the generator and the runner; ConfigurationFactory, when set, takes precedence and Configuration is ignored. With neither set the module registers no commands — legal only while nothing else asks for them: RunnerCommands alongside a missing configuration is refused at registration, because accepted it produced a module that silently registered nothing and the operator discovered the wiring error as "unknown command" at invocation. */
+    Configuration *Configuration
+
+    /* ConfigurationFactory builds the configuration against the booted kernel. A factory that answers nil is refused at registration for the same reason a missing configuration beside RunnerCommands is: nil here is a wiring error, not a way to disable the module. */
     ConfigurationFactory  func(kernelInstance kernelcontract.Kernel) *Configuration
     WithDefaultParameters bool
 
@@ -46,9 +50,27 @@ func (instance *Module) RegisterCliCommands(kernelInstance kernelcontract.Kernel
     configuration := instance.config.Configuration
     if nil != instance.config.ConfigurationFactory {
         configuration = instance.config.ConfigurationFactory(kernelInstance)
+
+        if nil == configuration {
+            exception.Panic(
+                exception.NewError("cron module configuration factory returned nil", nil, nil),
+            )
+        }
     }
 
     if nil == configuration {
+        if 0 < len(instance.config.RunnerCommands) {
+            exception.Panic(
+                exception.NewError(
+                    "cron module has runner commands but no configuration to schedule them from",
+                    map[string]any{
+                        "runnerCommandCount": len(instance.config.RunnerCommands),
+                    },
+                    nil,
+                ),
+            )
+        }
+
         return nil
     }
 

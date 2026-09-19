@@ -124,3 +124,14 @@ func LastStampOfType[T messagebuscontract.Stamp](envelopeInstance messagebuscont
 
     return found, exists
 }
+
+var (
+    _ messagebuscontract.Stamp = BusNameStamp{}
+    _ messagebuscontract.Stamp = SentStamp{}
+    _ messagebuscontract.Stamp = ReceivedStamp{}
+    _ messagebuscontract.Stamp = HandledStamp{}
+    _ messagebuscontract.Stamp = RedeliveryStamp{}
+    _ messagebuscontract.Stamp = DelayStamp{}
+    _ messagebuscontract.Stamp = DeadLetterAttemptStamp{}
+    _ messagebuscontract.Stamp = MessageIdStamp{}
+)

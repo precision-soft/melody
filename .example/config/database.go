@@ -27,12 +27,7 @@ const (
     databaseProviderNameJournal = "journal"
 )
 
-/*
-databaseWiring is the decision of which connections the environment armed. The
-two switches are independent on purpose — the catalog on mysql and the journal
-on postgres each follow their own empty-means-unwired key, so every
-combination boots: both live, either one alone, or none at all.
-*/
+/* databaseWiring is the decision of which connections the environment armed. The two switches are independent on purpose — the catalog on mysql and the journal on postgres each follow their own empty-means-unwired key, so every combination boots: both live, either one alone, or none at all. */
 type databaseWiring struct {
     catalog bool
     journal bool
@@ -45,22 +40,14 @@ func databaseWiringFromHosts(catalogHost string, journalHost string) databaseWir
     }
 }
 
-/*
-dialIsInsecure reads a transport switch. Both providers negotiate a verified
-TLS handshake by default; the development compose mysql and postgres both
-speak plain TCP, so the shipped .env arms the insecure dial explicitly for
-each — the decision is visible in configuration rather than buried in the
-wiring. The spelling is exact: any value but "true" keeps the verified
-handshake, because a credential-bearing dial downgrades only on an
-unambiguous instruction.
-*/
+/* dialIsInsecure reads a transport switch. Both providers negotiate a verified TLS handshake by default; the development compose mysql and postgres both speak plain TCP, so the shipped .env arms the insecure dial explicitly for each — the decision is visible in configuration rather than buried in the wiring. The spelling is exact: any value but "true" keeps the verified handshake, because a credential-bearing dial downgrades only on an unambiguous instruction. */
 func dialIsInsecure(insecureValue string) bool {
     return "true" == insecureValue
 }
 
 /* buildDatabase declares the connections without opening them. bunorm's registry validates the definitions here and dials each one on the first Manager call, which lands after the framework has registered its own services — so the providers find the configuration and the logger they read while connecting, and the retry backoff is reported through the real logger instead of the emergency one.
 
-An unset host leaves its definition out; with both hosts unset the registry stays nil and nothing is wired: no services, no dial. */
+   An unset host leaves its definition out; with both hosts unset the registry stays nil and nothing is wired: no services, no dial. */
 func (instance *Module) buildDatabase(kernelInstance melodykernelcontract.Kernel) {
     wiring := databaseWiringFromHosts(
         parameterValue(kernelInstance, ParameterDatabaseHost),
@@ -139,6 +126,37 @@ func (instance *Module) databaseServiceName() string {
     }
 
     return ServiceExampleDatabase
+}
+
+/* journalDatabaseServiceName is the same answer for the journal connection, which is a switch of its own: the catalog can be wired without it, and the reset command then leaves that set alone rather than failing over a database this environment never asked for. */
+func (instance *Module) journalDatabaseServiceName() string {
+    if false == instance.databaseWiring.journal {
+        return ""
+    }
+
+    return ServiceExampleJournalDatabase
+}
+
+/* databaseLocation spells the catalog connection as host:port/schema, the one line that separates a reset of this example's volume from a reset of whatever the host happens to point at; the credentials stay out of it, because it is printed. It is read from the parameters the provider reads, so the plan names the database the drops will reach. */
+func (instance *Module) databaseLocation(kernelInstance melodykernelcontract.Kernel) string {
+    return databaseLocationOf(
+        parameterValue(kernelInstance, ParameterDatabaseHost),
+        parameterValue(kernelInstance, ParameterDatabasePort),
+        parameterValue(kernelInstance, ParameterDatabaseName),
+    )
+}
+
+/* journalDatabaseLocation is the same spelling for the journal connection. */
+func (instance *Module) journalDatabaseLocation(kernelInstance melodykernelcontract.Kernel) string {
+    return databaseLocationOf(
+        parameterValue(kernelInstance, ParameterJournalDatabaseHost),
+        parameterValue(kernelInstance, ParameterJournalDatabasePort),
+        parameterValue(kernelInstance, ParameterJournalDatabaseName),
+    )
+}
+
+func databaseLocationOf(host string, port string, database string) string {
+    return host + ":" + port + "/" + database
 }
 
 func (instance *Module) registerDatabaseServices(registrar melodyapplicationcontract.ServiceRegistrar) {

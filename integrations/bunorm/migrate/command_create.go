@@ -33,25 +33,23 @@ func (instance *CreateCommand) Flags() []clicontract.Flag {
 
 func (instance *CreateCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) (runErr error) {
     option := instance.base.optionFromCommand(commandContext)
-    outputInstance := newCommandOutput(commandContext.Writer, option)
+    outputInstance := newCommandOutput(commandContext.Writer, commandContext.Args().Slice(), option)
 
     startedAt := time.Now()
     defer func() {
-        runErr = outputInstance.finish(instance.Name(), startedAt, runErr)
+        runErr = outputInstance.finishRun(instance.Name(), startedAt, runErr, recover())
     }()
 
     migrationName := commandContext.Args().First()
     if "" == migrationName {
-        err := errors.New("migration name is required (usage: db:create <name>)")
+        err := errors.New("migration name is required (usage: " + instance.Name() + " <name>)")
         return err
     }
 
-    db, managerName, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext)
-    if nil != dbErr {
-        return dbErr
-    }
+    /* no database is opened: the file is written from the migrations collection alone, and the manager name only labels the detail line below */
+    managerName := instance.base.managerLabel(commandContext)
 
-    migrator, migratorErr := instance.base.newMigrator(db)
+    migrator, migratorErr := instance.base.newFileMigrator()
     if nil != migratorErr {
         return migratorErr
     }

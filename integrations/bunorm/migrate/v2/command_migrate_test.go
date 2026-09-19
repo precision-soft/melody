@@ -1,12 +1,15 @@
 package migrate
 
 import (
+    "bytes"
     "context"
     "encoding/json"
     "errors"
+    "io"
     "strings"
     "testing"
 
+    "github.com/precision-soft/melody/v2/exception"
     exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
     "github.com/uptrace/bun/migrate"
 )
@@ -296,14 +299,7 @@ func TestMigrateCommand_JsonCarriesTheDetailAtTheDefaultVerbosity(t *testing.T) 
     }
 }
 
-/*
-TestMigrateCommand_ARunThatChangedTheSchemaSaysSoOnTheText pins the line a
-deploy log captures. The success line lived inside wantsDetail(), so a plain
-run — the shape a deploy script invokes — printed a warning for the run that
-did nothing and not one byte for the run that applied migrations: the log was
-empty exactly when something had happened, and the operator reading it could
-not tell the two apart. The rollback sibling has always printed its line.
-*/
+/* TestMigrateCommand_ARunThatChangedTheSchemaSaysSoOnTheText pins the line a deploy log captures. The success line lived inside wantsDetail(), so a plain run — the shape a deploy script invokes — printed a warning for the run that did nothing and not one byte for the run that applied migrations: the log was empty exactly when something had happened, and the operator reading it could not tell the two apart. The rollback sibling has always printed its line. */
 func TestMigrateCommand_ARunThatChangedTheSchemaSaysSoOnTheText(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = appliedMigrationRowsHook()
@@ -493,5 +489,121 @@ func TestMigrateCommand_AGroupThatLandedNothingReportsNoAppliedBlock(t *testing.
     /* the details block is the half of the report that the empty-set guard actually defends: printMigrationsBlock refuses an empty list on its own, but printDetailsBlock would happily render "applied | 0" beside a group id, which reads as a partial state where there is none */
     if true == strings.Contains(rendered, "DETAILS") {
         t.Fatalf("a run that landed nothing must print no applied-group detail block, got: %q", rendered)
+    }
+}
+
+/* the command's writer reaches the migrations through the context the migrator hands them, not through the process-wide fallback: with the fallback pointing elsewhere, the only way the per-query line lands on the command's writer is the context */
+func TestMigrateCommand_HandsItsPostureToTheMigrationsThroughTheContext(t *testing.T) {
+    t.Cleanup(func() {
+        processRunnerOption.Store(nil)
+    })
+
+    var elsewhere bytes.Buffer
+    SetDefaultRunnerOption(RunnerOption{Writer: &elsewhere, NoColor: true})
+
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = appliedMigrationRowsHook()
+    runtimeInstance := newRuntimeWithDatabase(t, database)
+
+    var seenDuringTheRun io.Writer
+    carriedByTheContext := false
+    migrations := migrate.NewMigrations()
+    migrations.Add(migrate.Migration{
+        Name:    "20240101000000",
+        Comment: "create_users",
+        Up: func(ctx context.Context, migrator *migrate.Migrator, migration *migrate.Migration) error {
+            seenDuringTheRun = resolveDefaultRunnerOption().Writer
+            _, carriedByTheContext = runnerOptionFromContext(ctx)
+
+            return RunQueries(ctx, database, "up", "20240101000000", []Query{{Name: "create-users", SQL: "CREATE TABLE users (id BIGINT)"}})
+        },
+    })
+
+    rendered, runErr := runMigrationCommand(t, runtimeInstance, NewMigrateCommand(migrations, DefaultOptions()), "--no-color")
+    if nil != runErr {
+        t.Fatalf("unexpected error: %s", runErr.Error())
+    }
+
+    if false == strings.Contains(rendered, "[migration:up] 20240101000000 [1/1] executing: create-users") {
+        t.Fatalf("the per-query line did not reach the command's writer through the context: %q", rendered)
+    }
+
+    if "" != elsewhere.String() {
+        t.Fatalf("the per-query line reached the process-wide fallback instead: %q", elsewhere.String())
+    }
+
+    /* the context is the channel, not the fallback: with the fallback installed for the run, a migration handed the plain runtime context would still print on the command's writer, so what separates the two is the option the context carries */
+    if false == carriedByTheContext {
+        t.Fatal("the migration was not handed the context carrying the command's posture")
+    }
+
+    if &elsewhere == seenDuringTheRun {
+        t.Fatal("expected the command to install its own posture as the fallback for the length of the run")
+    }
+
+    if &elsewhere != resolveDefaultRunnerOption().Writer {
+        t.Fatalf("expected the command to put the fallback back on the way out, got %v", resolveDefaultRunnerOption().Writer)
+    }
+}
+
+/* failingOnWriter refuses every payload that carries the marker and writes the rest through: the truncation lands on ONE line, so which line decides which door is being proven — a writer that failed for good after the first refusal would have the command's own banner refuse on behalf of the runner's line */
+type failingOnWriter struct {
+    marker string
+    buffer bytes.Buffer
+}
+
+func (instance *failingOnWriter) Write(payload []byte) (int, error) {
+    if true == strings.Contains(string(payload), instance.marker) {
+        return 0, errors.New("write: broken pipe")
+    }
+
+    return instance.buffer.Write(payload)
+}
+
+/* every text write of the report went `_, _ =`, and finish returned the command's own error alone, so a report cut short by a closed pipe or a full disk ended with exit zero — the class the framework's table printer documents fixing with its error-tracking writer. The first lost write is what finish now refuses on, in text mode and under the json document alike; the command's own failure still wins when there is one. */
+func TestMigrateCommand_AReportCutShortIsRefusedInsteadOfExitingZero(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = appliedMigrationRowsHook()
+    runtimeInstance := newRuntimeWithDatabase(t, database)
+
+    migrations := migrate.NewMigrations()
+    migrations.Add(migrate.Migration{
+        Name:    "20240101000000",
+        Comment: "create_users",
+        Up: func(ctx context.Context, migrator *migrate.Migrator, migration *migrate.Migration) error {
+            return RunQueries(ctx, database, "up", "20240101000000", []Query{{Name: "create-users", SQL: "CREATE TABLE users (id BIGINT)"}})
+        },
+    })
+
+    /* the text report cut on the command's own banner */
+    banner := &failingOnWriter{marker: "applied 1 migration"}
+    runErr := runMigrationCommandTo(t, banner, runtimeInstance, NewMigrateCommand(migrations, DefaultOptions()), "--no-color")
+    if nil == runErr || false == strings.Contains(runErr.Error(), "could not be written in full") {
+        t.Fatalf("expected the truncated text report refused, got %v (written: %q)", runErr, banner.buffer.String())
+    }
+
+    var reported *exception.Error
+    if false == errors.As(runErr, &reported) || nil == reported.CauseErr() || false == strings.Contains(reported.CauseErr().Error(), "broken pipe") {
+        t.Fatalf("expected the refusal to carry the lost write, got %v", runErr)
+    }
+
+    /* the text report cut on a per-query line of the migration itself, which prints through the command's writer */
+    queryLine := &failingOnWriter{marker: "executing:"}
+    runErr = runMigrationCommandTo(t, queryLine, runtimeInstance, NewMigrateCommand(migrations, DefaultOptions()), "--no-color")
+    if nil == runErr || false == strings.Contains(runErr.Error(), "could not be written in full") {
+        t.Fatalf("expected the report cut on the runner's line refused, got %v (written: %q)", runErr, queryLine.buffer.String())
+    }
+
+    /* the json document cut mid-way */
+    document := &failingOnWriter{marker: "\"meta\""}
+    runErr = runMigrationCommandTo(t, document, runtimeInstance, NewMigrateCommand(migrations, DefaultOptions()), "--format=json")
+    if nil == runErr || false == strings.Contains(runErr.Error(), "could not be written in full") {
+        t.Fatalf("expected the truncated json document refused, got %v (written: %q)", runErr, document.buffer.String())
+    }
+
+    /* a report written whole is not refused */
+    var whole bytes.Buffer
+    if runErr = runMigrationCommandTo(t, &whole, runtimeInstance, NewMigrateCommand(migrations, DefaultOptions()), "--no-color"); nil != runErr {
+        t.Fatalf("expected a report written whole to pass, got %v", runErr)
     }
 }

@@ -296,3 +296,137 @@ func TestMigrationPrinter_PrintFailedEscapesForeignTextButKeepsTheQueryLines(t *
         t.Fatalf("a raw control byte reached the terminal:\n%s", rendered)
     }
 }
+
+/* the empty and the success lines of a run carry the migration name, which the runner did not write; they escape it in both colour modes, and the per-query lines — which carry it inside the prefix — are measured on a run of their own below */
+func TestMigrationPrinter_EscapesTheMigrationNameOnTheEmptyAndSuccessLines(t *testing.T) {
+    for _, noColor := range []bool{true, false} {
+        buffer := &bytes.Buffer{}
+        printer := &migrationPrinter{writer: buffer, noColor: noColor}
+
+        printer.printEmpty("up", "2024\r0101_forged")
+        printer.printSuccess("up", "2024\r0101_forged", 1)
+
+        rendered := buffer.String()
+
+        if 2 != strings.Count(rendered, `2024\r0101_forged`) {
+            t.Fatalf("noColor=%v: expected the escaped name on both lines, got %q", noColor, rendered)
+        }
+
+        if true == strings.Contains(rendered, "\r") {
+            t.Fatalf("noColor=%v: a raw carriage return survived: %q", noColor, rendered)
+        }
+    }
+}
+
+/* the option a command puts on the context is the one a run prints under, ahead of the process-wide fallback: the fallback is one value for the whole process, and a run reading it printed under whichever command had installed it last */
+func TestRunQueries_ReadsTheOptionCarriedByTheContextBeforeTheProcessDefault(t *testing.T) {
+    t.Cleanup(func() {
+        processRunnerOption.Store(nil)
+    })
+
+    var fallback bytes.Buffer
+    SetDefaultRunnerOption(RunnerOption{Writer: &fallback, NoColor: true})
+
+    var carried bytes.Buffer
+    ctx := withRunnerOption(context.Background(), RunnerOption{Writer: &carried, NoColor: true})
+
+    if runErr := RunQueries(ctx, nil, "up", "20240101000000_probe", nil); nil != runErr {
+        t.Fatalf("run: %v", runErr)
+    }
+
+    if false == strings.Contains(carried.String(), "20240101000000_probe") {
+        t.Fatalf("expected the run to print on the writer the context carries, got %q", carried.String())
+    }
+
+    if "" != fallback.String() {
+        t.Fatalf("expected nothing on the process-wide fallback, got %q", fallback.String())
+    }
+}
+
+/* a command puts its posture back on the way out, whichever order overlapping commands finish in: a command that finished while a later one still runs leaves that one's value where it is, and the LAST command to leave puts the host's own value back — the compare-and-swap this replaced restored correctly only last-in first-out, and two commands overlapping the other way round left the first command's finished posture installed for the life of the process */
+func TestRestoreDefaultRunnerOption_PutsTheHostsValueBackWhicheverOrderTheCommandsFinishIn(t *testing.T) {
+    t.Cleanup(func() {
+        processRunnerOption.Store(nil)
+        commandRunnerOptions.depth = 0
+        commandRunnerOptions.host = nil
+    })
+
+    var host bytes.Buffer
+    SetDefaultRunnerOption(RunnerOption{Writer: &host, NoColor: true})
+
+    var first bytes.Buffer
+    var second bytes.Buffer
+
+    /* the later command finishes first: the earlier command's value is live again, then the host's */
+    firstInstalled, firstPrevious := swapDefaultRunnerOption(RunnerOption{Writer: &first, NoColor: true})
+    secondInstalled, secondPrevious := swapDefaultRunnerOption(RunnerOption{Writer: &second, NoColor: true})
+
+    if &second != resolveDefaultRunnerOption().Writer {
+        t.Fatal("expected the swap to install the latest command's value for the length of its run")
+    }
+
+    restoreDefaultRunnerOption(secondInstalled, secondPrevious)
+    if &first != resolveDefaultRunnerOption().Writer {
+        t.Fatal("expected the later command's restore to put the earlier command's value back")
+    }
+
+    restoreDefaultRunnerOption(firstInstalled, firstPrevious)
+    if &host != resolveDefaultRunnerOption().Writer {
+        t.Fatalf("expected the host's own value back once every command restored, got %v", resolveDefaultRunnerOption().Writer)
+    }
+
+    /* the earlier command finishes first: the later command's value stays live, and its own restore puts the host's value back — not the earlier command's finished one */
+    firstInstalled, firstPrevious = swapDefaultRunnerOption(RunnerOption{Writer: &first, NoColor: true})
+    secondInstalled, secondPrevious = swapDefaultRunnerOption(RunnerOption{Writer: &second, NoColor: true})
+
+    restoreDefaultRunnerOption(firstInstalled, firstPrevious)
+    if &second != resolveDefaultRunnerOption().Writer {
+        t.Fatal("expected the first command's restore to leave the later command's value in place")
+    }
+
+    restoreDefaultRunnerOption(secondInstalled, secondPrevious)
+    if &host != resolveDefaultRunnerOption().Writer {
+        t.Fatalf("expected the host's own value back once the last command restored, got %v", resolveDefaultRunnerOption().Writer)
+    }
+}
+
+/* the prefix of every per-query line carries the migration name, the author's own text, and the executing, completed and failed lines printed it as sent while escaping the query name beside it: a name carrying an escape sequence repainted the terminal three times per query. Measured on a run whose second query fails, so all three lines print, in both colour modes: the name is escaped on every line and no raw escape byte reaches the writer. */
+func TestRunQueriesWithOption_EscapesTheMigrationNameInsideThePrefixOfEveryPerQueryLine(t *testing.T) {
+    for _, noColor := range []bool{true, false} {
+        database, recorder := newFakeBunDatabase()
+        recorder.execHook = func(query string) error {
+            if true == strings.Contains(query, "CREATE INDEX") {
+                return errors.New("index already exists")
+            }
+
+            return nil
+        }
+
+        buffer := &bytes.Buffer{}
+        queries := []Query{
+            {Name: "create table", SQL: "CREATE TABLE users (id INTEGER)"},
+            {Name: "create index", SQL: "CREATE INDEX users_id ON users (id)"},
+        }
+
+        runErr := RunQueriesWithOption(context.Background(), database, "up", "m\x1b[31mred", queries, RunnerOption{Writer: buffer, NoColor: noColor})
+        if nil == runErr {
+            t.Fatalf("noColor=%v: expected the second query to fail", noColor)
+        }
+
+        rendered := buffer.String()
+
+        /* executing + completed for the first query, executing + FAILED for the second carry the prefix in both modes; the ERROR and QUERY lines carry it only without colour, where the colour is what sets them apart */
+        prefixedLines := 4
+        if true == noColor {
+            prefixedLines = 6
+        }
+
+        if prefixedLines != strings.Count(rendered, `[migration:up] m\x1b[31mred [`) {
+            t.Fatalf("noColor=%v: expected the escaped name in the prefix of all %d per-query lines, got %q", noColor, prefixedLines, rendered)
+        }
+
+        if true == strings.Contains(rendered, "m\x1b[31mred") {
+            t.Fatalf("noColor=%v: the raw escape sequence of the migration name reached the writer: %q", noColor, rendered)
+        }
+    }
+}

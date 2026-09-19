@@ -18,8 +18,7 @@ type inMemoryUserRepository struct {
     users []*entity.User
 }
 
-/* @info the returned slice is a copy, but a shallow one: the entity pointers stay shared with the
-repository, so a caller that mutates an entity in place bypasses the lock */
+/* the returned slice is a copy, but a shallow one: the entity pointers stay shared with the repository, so a caller that mutates an entity in place bypasses the lock */
 func (instance *inMemoryUserRepository) All(ctx context.Context) ([]*entity.User, error) {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
@@ -38,11 +37,18 @@ func (instance *inMemoryUserRepository) Create(ctx context.Context, user *entity
 
     _, usernameExists := instance.findByUsernameLocked(user.Username)
     if true == usernameExists {
-        return fmt.Errorf("username already exists")
+        return ErrUsernameAlreadyExists
     }
 
     if "" == strings.TrimSpace(user.Id) {
         user.Id = nextUserId(instance.identifierListLocked())
+    }
+
+    /* the same guard the three sibling repositories carry: without it an occupied id is appended as a
+       second row, FindById and DeleteById reach only the first, and the account behind it can be neither
+       read nor removed by id. */
+    if _, occupied := instance.findByIdLocked(user.Id); true == occupied {
+        return fmt.Errorf("id already exists")
     }
 
     instance.users = append(instance.users, user)
@@ -74,7 +80,7 @@ func (instance *inMemoryUserRepository) Update(ctx context.Context, user *entity
         }
 
         if true == instance.usernameTakenByAnotherLocked(user.Username, id) {
-            return false, fmt.Errorf("username already exists")
+            return false, ErrUsernameAlreadyExists
         }
 
         instance.users[index] = user
@@ -82,6 +88,43 @@ func (instance *inMemoryUserRepository) Update(ctx context.Context, user *entity
     }
 
     return false, nil
+}
+
+/* GrantRole appends under the repository's own mutex, onto a COPY of the stored account: the stored value is
+   handed out to every reader, so the roles are not appended in place. */
+func (instance *inMemoryUserRepository) GrantRole(ctx context.Context, id string, role string) (*entity.User, GrantRoleOutcome, error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    trimmedId := strings.TrimSpace(id)
+    if "" == trimmedId {
+        return nil, GrantRoleAccountAbsent, fmt.Errorf("id is required")
+    }
+
+    for index, existing := range instance.users {
+        if nil == existing || trimmedId != existing.Id {
+            continue
+        }
+
+        if true == holdsRole(existing.Roles, role) {
+            held := *existing
+            held.Roles = append([]string{}, existing.Roles...)
+
+            return &held, GrantRoleAlreadyHeld, nil
+        }
+
+        granted := *existing
+        granted.Roles = append(append([]string{}, existing.Roles...), role)
+        instance.users[index] = &granted
+
+        /* the caller gets a copy: the stored value is shared with every reader */
+        answered := granted
+        answered.Roles = append([]string{}, granted.Roles...)
+
+        return &answered, GrantRoleGranted, nil
+    }
+
+    return nil, GrantRoleAccountAbsent, nil
 }
 
 func (instance *inMemoryUserRepository) DeleteById(ctx context.Context, id string) (bool, error) {
@@ -142,7 +185,7 @@ func (instance *inMemoryUserRepository) FindByUsername(ctx context.Context, user
 }
 
 func (instance *inMemoryUserRepository) findByUsernameLocked(username string) (*entity.User, bool) {
-    wanted := normalizedUsername(username)
+    wanted := NormalizedUsername(username)
 
     if "" == wanted {
         return nil, false
@@ -153,7 +196,7 @@ func (instance *inMemoryUserRepository) findByUsernameLocked(username string) (*
             continue
         }
 
-        if wanted == normalizedUsername(user.Username) {
+        if wanted == NormalizedUsername(user.Username) {
             return user, true
         }
     }
@@ -176,7 +219,7 @@ func (instance *inMemoryUserRepository) identifierListLocked() []string {
 }
 
 func (instance *inMemoryUserRepository) usernameTakenByAnotherLocked(username string, excludedId string) bool {
-    wanted := normalizedUsername(username)
+    wanted := NormalizedUsername(username)
     if "" == wanted {
         return false
     }
@@ -190,7 +233,7 @@ func (instance *inMemoryUserRepository) usernameTakenByAnotherLocked(username st
             continue
         }
 
-        if wanted == normalizedUsername(user.Username) {
+        if wanted == NormalizedUsername(user.Username) {
             return true
         }
     }

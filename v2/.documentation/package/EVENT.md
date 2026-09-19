@@ -146,6 +146,8 @@ A listener that means to serve the request without authorization running should 
     - [`NewEventDispatcherAdapter(eventcontract.EventDispatcher) *EventDispatcherAdapter`](../../event/event_dispatcher_adapter.go)
 - [`type RequiredListenerSkippedError`](../../event/required_listener_skipped_error.go)
     - [`NewRequiredListenerSkippedError(eventName string, stoppedByListenerName string) *RequiredListenerSkippedError`](../../event/required_listener_skipped_error.go)
+    - [`NewRequiredListenerSkippedErrorWithStoppedListenerFailure(eventName string, stoppedByListenerName string, cause error) *RequiredListenerSkippedError`](../../event/required_listener_skipped_error.go)
+    - [`NewRequiredListenerSkippedErrorWithCause(eventName string, failedListenerName string, cause error) *RequiredListenerSkippedError`](../../event/required_listener_skipped_error.go)
 
 ### Container helpers (`event`)
 
