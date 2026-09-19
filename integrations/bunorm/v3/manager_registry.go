@@ -18,8 +18,9 @@ type ManagerRegistry struct {
     logger loggingcontract.Logger
     /* the destination SetLogger routed bun's diagnostics to, kept so Close hands back exactly that one even for a logger that has no identity to be recognised by */
     routedDiagnostics *diagnosticsTarget
-    /* openContext bounds the lazy opens of providers that implement ContextOpener, so a shutdown that cancels it reaches a retry loop in flight instead of sleeping through the whole retry budget. */
+    /* openContext bounds the lazy opens of providers that implement ContextOpener, so a shutdown that cancels it reaches a retry loop in flight instead of sleeping through the whole retry budget. It is a child of the context the registry was built on, and openCancel is the registry's own door to it: CloseWithContext ends every open still in flight through it the moment the refusal is published, so an open the teardown would otherwise have to wait out or abandon does not go on dialling — and re-routing bun's diagnostics onto the logger this registry hands back — after the registry is gone. */
     openContext context.Context
+    openCancel  context.CancelFunc
 
     providerDefinitionByName      map[string]ProviderDefinition
     defaultProviderDefinitionName string
@@ -93,9 +94,12 @@ func NewManagerRegistryWithContext(ctx context.Context, logger loggingcontract.L
         defaultProviderDefinitionName = providerDefinitions[0].Name
     }
 
+    openContext, openCancel := context.WithCancel(ctx)
+
     return &ManagerRegistry{
         logger:                        logger,
-        openContext:                   ctx,
+        openContext:                   openContext,
+        openCancel:                    openCancel,
         providerDefinitionByName:      providerDefinitionByName,
         defaultProviderDefinitionName: defaultProviderDefinitionName,
         managers:                      make(map[string]*Manager),
@@ -533,6 +537,9 @@ func (instance *ManagerRegistry) CloseWithContext(closeContext context.Context) 
 
     instance.closed = true
 
+    /* an open still in flight is ended here, with the refusal: it has no consumer left — a database it opens after this is ended against the closed flag — and left to itself it went on retrying under the registry's own context, each attempt routing bun's diagnostics back onto the logger the teardown below hands back and the container then closes. Cancelled, the retry loop returns at its next sleep or dial, which is also what makes the wait below short on the plain constructor, where nothing else could cut it. */
+    instance.openCancel()
+
     /* both maps are walked in sorted name order so the carried cause and the failed-name list are the same for the same failing teardown on every run: a map walk let two identical failures report different causes and different orders, and the rueidis batch reporting sorts for the same reason */
     managerNames := make([]string, 0, len(instance.managers))
     for name := range instance.managers {
@@ -556,7 +563,7 @@ func (instance *ManagerRegistry) CloseWithContext(closeContext context.Context) 
         migrationDatabases = append(migrationDatabases, instance.migrationDatabases[name])
     }
 
-    /* the opens still in flight are photographed alongside the pools, so the teardown can WAIT for them below. Close used to return while a dial was still in the air: the open publishes afterwards, reads the closed flag and ends its own database — nothing leaks — but the caller was told the teardown was over while it was not, and a process exiting on that answer left the dial outstanding, its server-side session to be reaped by a timeout rather than ended. On the context-bound constructor a cancellation shortens the wait; on the plain one there is nothing to cancel, which is exactly the case this wait exists for. */
+    /* the opens still in flight are photographed alongside the pools, so the teardown can WAIT for them below. Close used to return while a dial was still in the air: the open publishes afterwards, reads the closed flag and ends its own database — nothing leaks — but the caller was told the teardown was over while it was not, and a process exiting on that answer left the dial outstanding, its server-side session to be reaped by a timeout rather than ended. The registry cancels the opens' context itself when the refusal is published, so what is waited for here is the retry loop noticing that — a dial already in the driver's hands ends when the driver honours the cancellation, which the providers of this repository do. */
     pendingOpens := make([]*managerOpen, 0, len(instance.pendingOpenByName))
     for _, pendingOpen := range instance.pendingOpenByName {
         pendingOpens = append(pendingOpens, pendingOpen)

@@ -1184,3 +1184,71 @@ func TestDialAddressOf_BracketsABareIpv6Literal(t *testing.T) {
         }
     }
 }
+
+/* an unset host made the driver dial ":port", which is the local system: the open connected to whatever listened there with the configured credentials instead of failing. It is refused by name before the driver configuration is built. */
+func TestProviderOpen_RefusesAnEmptyHostBeforeBuildingTheDriverConfig(t *testing.T) {
+    provider := NewProvider(
+        WithInsecure(true),
+        WithPostBuildHook(func(ctx context.Context, driverConfig *driver.Config) error {
+            t.Fatal("the driver configuration was built for an empty host")
+
+            return nil
+        }),
+    )
+
+    database, openErr := provider.Open(newTestParams("", "3306", "melody", "melody_user", "melody_password"), nil)
+    if nil != database {
+        _ = database.Close()
+        t.Fatal("expected no database handle for an empty host")
+    }
+
+    if nil == openErr || false == strings.Contains(openErr.Error(), "the host is empty") {
+        t.Fatalf("expected the refusal to name the host, got %v", openErr)
+    }
+}
+
+/* an outage the provider could not get past — the retry-less open of a closed port, and the retry budget spent on it — is filed under bunorm.ErrDatabaseUnreachable, the one class a read/write splitter absorbs by reading from the primary; a refusal given by name is not, so a misconfigured replica is refused instead of served from the primary in silence. The driver failure stays reachable under the class. */
+func TestOpenContext_AnOutageIsFiledAsUnreachableAndARefusalIsNot(t *testing.T) {
+    unreachable := newTestParams("127.0.0.1", "1", "melody_unreachable", "melody", "melody")
+
+    retryless := NewProvider(WithInsecure(true), WithTimeoutConfig(NewTimeoutConfig(100*time.Millisecond, 0, 0)))
+    database, openErr := retryless.Open(unreachable, nil)
+    if nil != database {
+        _ = database.Close()
+        t.Fatal("expected no database handle for a closed port")
+    }
+
+    if false == errors.Is(openErr, bunorm.ErrDatabaseUnreachable) {
+        t.Fatalf("expected the retry-less open of a closed port filed as unreachable, got %v", openErr)
+    }
+
+    var netErr net.Error
+    if false == errors.As(openErr, &netErr) {
+        t.Fatalf("expected the driver failure reachable under the class, got %v", openErr)
+    }
+
+    retrying := NewProvider(WithInsecure(true), WithTimeoutConfig(NewTimeoutConfig(100*time.Millisecond, 0, 0)), WithRetryConfig(NewRetryConfig(2, time.Millisecond, time.Millisecond, 1)))
+    database, openErr = retrying.Open(unreachable, nil)
+    if nil != database {
+        _ = database.Close()
+        t.Fatal("expected no database handle for a closed port")
+    }
+
+    if false == errors.Is(openErr, bunorm.ErrDatabaseUnreachable) {
+        t.Fatalf("expected the exhausted retry budget filed as unreachable, got %v", openErr)
+    }
+
+    if false == exception.IsAlreadyLogged(openErr) {
+        t.Fatalf("expected the terminal record's mark kept on the unreachable failure, got %v", openErr)
+    }
+
+    database, openErr = retryless.Open(newTestParams("", "3306", "melody", "melody", "melody"), nil)
+    if nil != database {
+        _ = database.Close()
+        t.Fatal("expected no database handle for an empty host")
+    }
+
+    if nil == openErr || true == errors.Is(openErr, bunorm.ErrDatabaseUnreachable) {
+        t.Fatalf("expected a refusal by name NOT filed as unreachable, got %v", openErr)
+    }
+}

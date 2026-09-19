@@ -915,10 +915,16 @@ check_section_start "TEARDOWN BUDGET" "${TAG_VALIDATE}" "e2e"
 # change that ignored a declared value would leave every band green: this section declares the value itself,
 # in the .env.local of a binary built into its own directory (the same shape as the signal section above).
 # Two arms separate the declared value from the default. A budget of 1ms cannot hold the teardown, so the
-# shield abandons it, exits 1 and names the figure it was given — the only way the declared value is seen on
-# the way out. A budget of 0s is the documented "no deadline": a healthy teardown exits zero under it, where a
-# reader folding zero into the default would exit zero as well, which is why the 1ms arm carries the proof of
-# the round trip and the 0s arm only pins that zero is admitted at boot and on the exit path.
+# process exits 1 — the proof of the round trip, since the 10s default exits zero on a teardown that takes a
+# millisecond, as the 0s arm shows. The figure itself is read back off whichever of two records the race
+# between the shield's two clocks leaves: the step is handed a cooperative deadline of half the budget, and
+# when the container close returns on it first the emergency record of that close carries the sub-millisecond
+# budget it was cut by, while when the shield's own hard timer fires first the abandon line names the 1ms —
+# measured 5 of 8 and 3 of 8 rounds, so pinning one face alone was a check red one run in three. A budget of
+# 0s is the documented "no deadline": a healthy teardown exits zero under it, where a reader folding zero into
+# the default would exit zero as well, which is why the 0s arm only pins that zero is admitted at boot and on
+# the exit path. The port is 18084: 18081–18083 are the Go harness's three examples and 18080 the signal
+# section's, and the two scripts run in sequence today, not by contract.
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "WORK_DIRECTORY=/tmp/example-teardown-e2e
     rm -rf \"\${WORK_DIRECTORY}\"
     mkdir -p \"\${WORK_DIRECTORY}\"
@@ -931,12 +937,12 @@ run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "WORK_DIRECTORY=/tmp/example-te
     cp -r public \"\${WORK_DIRECTORY}/public\"
     cd \"\${WORK_DIRECTORY}\" || exit 1
     for BUDGET in 1ms 0s; do
-        printf 'MELODY_HTTP_ADDRESS=:18081\nMELODY_TEARDOWN_TIMEOUT=%s\n' \"\${BUDGET}\" > .env.local
+        printf 'MELODY_HTTP_ADDRESS=:18084\nMELODY_TEARDOWN_TIMEOUT=%s\n' \"\${BUDGET}\" > .env.local
         ./example-teardown > /tmp/example-teardown-\${BUDGET}.log 2>&1 &
         APP_PID=\$!
         READY=0
         for _ in \$(seq 1 150); do
-            if wget -q -O /dev/null http://127.0.0.1:18081/health 2>/dev/null; then
+            if wget -q -O /dev/null http://127.0.0.1:18084/health 2>/dev/null; then
                 READY=1
                 break
             fi
@@ -965,6 +971,7 @@ run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "WORK_DIRECTORY=/tmp/example-te
         wait \${APP_PID}
         echo \"exit_\${BUDGET}=\$?\"
         grep -c 'did not return within 1ms' /tmp/example-teardown-\${BUDGET}.log | sed \"s/^/abandoned_names_1ms_\${BUDGET}=/\"
+        grep -c 'failed to close service container.*\"budget\":\"[0-9.]*µs\"' /tmp/example-teardown-\${BUDGET}.log | sed \"s/^/close_cut_under_a_millisecond_\${BUDGET}=/\"
     done
     rm -rf \"\${WORK_DIRECTORY}\" /tmp/example-teardown-*.log"
 TEARDOWN_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
@@ -976,21 +983,21 @@ if printf '%s' "${TEARDOWN_OUTPUT_STRING}" | grep -q 'build_failed=1'; then
 elif ! printf '%s' "${TEARDOWN_OUTPUT_STRING}" | grep -q 'ready_1ms=1'; then
     check_fail "the built example never answered /health under a 1ms teardown budget, so the budget was not exercised"
 else
-    if printf '%s' "${TEARDOWN_OUTPUT_STRING}" | grep -q 'exit_1ms=1'; then
-        check_pass "a declared teardown budget of 1ms is abandoned by the shield and the process exits 1"
+    if printf '%s' "${TEARDOWN_OUTPUT_STRING}" | grep -qx 'exit_1ms=1'; then
+        check_pass "a declared teardown budget of 1ms cuts the teardown short and the process exits 1"
     else
         check_fail "a declared teardown budget of 1ms did not turn the shutdown into an exit 1 ($(printf '%s' "${TEARDOWN_OUTPUT_STRING}" | grep -o 'exit_1ms=[0-9]*' || echo 'no exit status captured')) — the value in .env is not reaching the shield"
     fi
 
-    if printf '%s' "${TEARDOWN_OUTPUT_STRING}" | grep -q 'abandoned_names_1ms_1ms=1'; then
-        check_pass "the abandon line on stderr names the declared budget (1ms), so the figure the shield ran under is the one .env declared"
+    if printf '%s' "${TEARDOWN_OUTPUT_STRING}" | grep -qx 'abandoned_names_1ms_1ms=1' || printf '%s' "${TEARDOWN_OUTPUT_STRING}" | grep -qx 'close_cut_under_a_millisecond_1ms=1'; then
+        check_pass "the declared budget of 1ms is the figure read back on the way out: the shield's abandon line names it, or the container close's record carries the sub-millisecond deadline it was cut by"
     else
-        check_fail "the abandon line did not name the declared budget of 1ms"
+        check_fail "neither the abandon line nor the container close's record named the declared budget of 1ms ($(printf '%s' "${TEARDOWN_OUTPUT_STRING}" | grep -o 'abandoned_names_1ms_1ms=[0-9]*\|close_cut_under_a_millisecond_1ms=[0-9]*' | tr '\n' ' '))"
     fi
 
     if ! printf '%s' "${TEARDOWN_OUTPUT_STRING}" | grep -q 'ready_0s=1'; then
         check_fail "the built example never answered /health under a 0s teardown budget — zero must be admitted at boot as the documented no-deadline"
-    elif printf '%s' "${TEARDOWN_OUTPUT_STRING}" | grep -q 'exit_0s=0'; then
+    elif printf '%s' "${TEARDOWN_OUTPUT_STRING}" | grep -qx 'exit_0s=0'; then
         check_pass "a declared teardown budget of 0s (no deadline) is admitted at boot and a healthy teardown exits zero under it"
     else
         check_fail "a declared teardown budget of 0s did not exit zero ($(printf '%s' "${TEARDOWN_OUTPUT_STRING}" | grep -o 'exit_0s=[0-9]*' || echo 'no exit status captured'))"

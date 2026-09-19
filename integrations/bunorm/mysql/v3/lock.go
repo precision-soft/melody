@@ -187,7 +187,7 @@ func (instance *mysqlLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl 
     defer instance.mutex.Unlock()
 
     if nil == instance.connection {
-        return exception.NewError("mysql lock is no longer held", map[string]any{"name": instance.name}, nil)
+        return exception.NewError("mysql lock is no longer held", map[string]any{"name": instance.name, "lockName": instance.lockName}, nil)
     }
 
     /* probe on a fresh, bounded context so a transient cause (a canceled or expired request context) is never mistaken for a lost lock and does not actively release a still-held lock — a MySQL GET_LOCK is held for as long as the pinned session lives, so there is no lease to renew and nothing to lose on a transient error, mirroring the pgsql advisory-lock locker */

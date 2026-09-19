@@ -2185,6 +2185,49 @@ func TestAtomicWriteFileRollsBackTemporaryOnRenameFailure(t *testing.T) {
     }
 }
 
+/* a destination already in place keeps the mode it carries across the atomic rewrite — a crontab narrowed to 0600 stayed 0600 on the framework's and the migrate module's atomic writers and was widened back to 0644 by this one on every regeneration and every --prune; a destination that does not exist yet is created with the mode the caller chose */
+func TestAtomicWriteFileKeepsTheModeOfAnExistingDestination(t *testing.T) {
+    tempDir := t.TempDir()
+
+    narrowed := filepath.Join(tempDir, "narrowed")
+    if writeErr := os.WriteFile(narrowed, []byte("before"), 0o600); nil != writeErr {
+        t.Fatalf("setup: %v", writeErr)
+    }
+    if chmodErr := os.Chmod(narrowed, 0o600); nil != chmodErr {
+        t.Fatalf("setup: %v", chmodErr)
+    }
+
+    if writeErr := atomicWriteFile(narrowed, []byte("after"), 0o644); nil != writeErr {
+        t.Fatalf("atomicWriteFile: %v", writeErr)
+    }
+
+    info, statErr := os.Stat(narrowed)
+    if nil != statErr {
+        t.Fatalf("stat: %v", statErr)
+    }
+    if os.FileMode(0o600) != info.Mode().Perm() {
+        t.Fatalf("expected the narrowed destination to keep 0600 across the rewrite, got %#o", info.Mode().Perm())
+    }
+
+    content, readErr := os.ReadFile(narrowed)
+    if nil != readErr || "after" != string(content) {
+        t.Fatalf("expected the content rewritten, got %q (%v)", content, readErr)
+    }
+
+    fresh := filepath.Join(tempDir, "fresh")
+    if writeErr := atomicWriteFile(fresh, []byte("new"), 0o644); nil != writeErr {
+        t.Fatalf("atomicWriteFile: %v", writeErr)
+    }
+
+    info, statErr = os.Stat(fresh)
+    if nil != statErr {
+        t.Fatalf("stat: %v", statErr)
+    }
+    if os.FileMode(0o644) != info.Mode().Perm() {
+        t.Fatalf("expected a fresh destination created with the caller's mode, got %#o", info.Mode().Perm())
+    }
+}
+
 func TestRunCrontabNoUserTemplateWithHeartbeatAndNoUserSucceeds(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")

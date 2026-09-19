@@ -1,13 +1,21 @@
 package migrate
 
 import (
+    "context"
     "encoding/json"
+    "errors"
     "os"
     "path/filepath"
     "regexp"
     "strings"
     "testing"
 
+    "github.com/precision-soft/melody/container"
+    containercontract "github.com/precision-soft/melody/container/contract"
+    "github.com/precision-soft/melody/integrations/bunorm"
+    "github.com/precision-soft/melody/runtime"
+    runtimecontract "github.com/precision-soft/melody/runtime/contract"
+    "github.com/uptrace/bun"
     "github.com/uptrace/bun/migrate"
 )
 
@@ -107,5 +115,81 @@ func TestCreateCommand_TheMachineDocumentCarriesTheArguments(t *testing.T) {
 
     if 1 != len(document.Meta.Arguments) || "create_users" != document.Meta.Arguments[0] {
         t.Fatalf("meta.arguments = %v, want [create_users]", document.Meta.Arguments)
+    }
+}
+
+/* refusingCountingProvider refuses every open and counts them — the provider of a host that is down, where an open costs the whole retry budget */
+type refusingCountingProvider struct {
+    opens int
+}
+
+func (instance *refusingCountingProvider) Open(resolver containercontract.Resolver) (*bun.DB, error) {
+    instance.opens++
+
+    return nil, errors.New("database connection failed")
+}
+
+/* newRuntimeWithProvider wires a registry whose one manager opens through the given provider, the way newRuntimeWithDatabase does for a database already opened */
+func newRuntimeWithProvider(t *testing.T, provider bunorm.Provider) runtimecontract.Runtime {
+    t.Helper()
+
+    registry, registryErr := bunorm.NewManagerRegistry(
+        &stubResolver{},
+        bunorm.ProviderDefinition{Name: "primary", Provider: provider, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("failed to build manager registry: %s", registryErr.Error())
+    }
+
+    serviceContainer := container.NewContainer()
+    container.MustRegister[*bunorm.ManagerRegistry](
+        serviceContainer,
+        DefaultOptions().ManagerRegistryServiceId,
+        func(resolver containercontract.Resolver) (*bunorm.ManagerRegistry, error) {
+            return registry, nil
+        },
+    )
+
+    return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+}
+
+/* the file is written from the migrations collection alone: bun's generator never touches the database, so none is opened for it — an open used to cost a dial and, on a host that was down, the whole retry budget, to write a file that is written offline */
+func TestCreateCommand_WritesTheFileWithoutOpeningTheDatabase(t *testing.T) {
+    provider := &refusingCountingProvider{}
+    runtimeInstance := newRuntimeWithProvider(t, provider)
+
+    directory := t.TempDir()
+    migrations := migrate.NewMigrations(migrate.WithMigrationsDirectory(directory))
+
+    rendered, runErr := runMigrationCommand(t, runtimeInstance, NewCreateGoCommand(migrations, DefaultOptions()), "--no-color", "create_users")
+    if nil != runErr {
+        t.Fatalf("expected the file written without a database, got: %v", runErr)
+    }
+
+    if 0 != provider.opens {
+        t.Fatalf("expected no database open for a file the generator writes offline, got %d", provider.opens)
+    }
+
+    entries, readErr := os.ReadDir(directory)
+    if nil != readErr || 1 != len(entries) {
+        t.Fatalf("expected exactly one generated file, got %d (%v)", len(entries), readErr)
+    }
+
+    if false == strings.Contains(rendered, "migration file created") {
+        t.Fatalf("missing success message in %q", rendered)
+    }
+}
+
+/* the usage in the missing-name refusal names the command's own family: the archive family of an application printed the other family's usage */
+func TestCreateCommand_MissingNameNamesTheCommandsOwnFamily(t *testing.T) {
+    database, _ := newFakeBunDatabase()
+    runtimeInstance := newRuntimeWithDatabase(t, database)
+
+    options := DefaultOptions()
+    options.CommandPrefix = "db:archive"
+
+    _, runErr := runMigrationCommand(t, runtimeInstance, NewCreateGoCommand(migrate.NewMigrations(), options), "--no-color")
+    if nil == runErr || false == strings.Contains(runErr.Error(), "usage: db:archive:create <name>") {
+        t.Fatalf("expected the usage to name db:archive:create, got %v", runErr)
     }
 }

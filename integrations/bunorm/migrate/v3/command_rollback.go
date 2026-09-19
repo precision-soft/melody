@@ -44,7 +44,8 @@ func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, co
         runErr = outputInstance.finishRun(instance.Name(), startedAt, runErr, recover())
     }()
 
-    runnerOption := runnerOptionForCommand(commandContext.Writer(), option)
+    /* the per-query lines print through the command output's writer, so a write the report lost there is remembered by finish too */
+    runnerOption := runnerOptionForCommand(outputInstance.writer, option)
     ctx := withRunnerOption(runtimeInstance.Context(), runnerOption)
     /* the parsed posture reaches the migrations through the context the migrator hands them, so this run's writer and colour choice belong to this run alone; the process-wide fallback is installed only for the length of the run, for a migration that drops the context it was handed, and put back on the way out */
     defer restoreDefaultRunnerOption(swapDefaultRunnerOption(runnerOption))

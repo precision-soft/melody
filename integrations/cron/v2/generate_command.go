@@ -649,7 +649,7 @@ func printPrunedDestinations(commandContext *clicontract.CommandContext, pruned 
     }
 }
 
-/* atomicWriteFile writes the content to a temporary file beside the destination and renames it into place, removing the temporary file on every failure it can see. A process killed between the create and the rename leaves the temporary file behind, carrying the rendered content and with it the ownership marker; a later --prune then empties it down to its header and reports it, which is the one thing that can honestly be done with a file this generator wrote and nothing references — an orphan of a crash is garbage, and emptying garbage costs nothing. */
+/* atomicWriteFile writes the content to a temporary file beside the destination and renames it into place, removing the temporary file on every failure it can see. The mode is the one a destination that does not exist yet is created with; a destination already there keeps the mode it carries, so a crontab an operator narrowed to 0600 — environment lines under /etc/cron.d — is not widened back to 0644 by every regeneration and every --prune, which the unconditional chmod of the temporary file did. A process killed between the create and the rename leaves the temporary file behind, carrying the rendered content and with it the ownership marker; a later --prune then empties it down to its header and reports it, which is the one thing that can honestly be done with a file this generator wrote and nothing references — an orphan of a crash is garbage, and emptying garbage costs nothing. */
 func atomicWriteFile(destination string, content []byte, mode os.FileMode) error {
     tmpFile, createErr := os.CreateTemp(filepath.Dir(destination), filepath.Base(destination)+".*.tmp")
     if nil != createErr {
@@ -694,7 +694,7 @@ func atomicWriteFile(destination string, content []byte, mode os.FileMode) error
         )
     }
 
-    if chmodErr := os.Chmod(tmpPath, mode); nil != chmodErr {
+    if chmodErr := os.Chmod(tmpPath, destinationFileMode(destination, mode)); nil != chmodErr {
         return exception.NewError(
             "cron: could not chmod temporary crontab",
             exceptioncontract.Context{
@@ -723,6 +723,16 @@ func atomicWriteFile(destination string, content []byte, mode os.FileMode) error
     }
 
     return nil
+}
+
+/* destinationFileMode reads the permission the destination already carries so an atomic rewrite keeps it, and answers the mode the caller chose for a new file when there is no destination to read — the shape the framework's atomic writer and the migrate writer carry for the same reason. */
+func destinationFileMode(destination string, newFileMode os.FileMode) os.FileMode {
+    info, statErr := os.Stat(destination)
+    if nil != statErr {
+        return newFileMode
+    }
+
+    return info.Mode().Perm()
 }
 
 func syncDir(path string) error {

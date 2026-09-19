@@ -69,11 +69,26 @@ func runMigrationCommand(
 
     buffer := &bytes.Buffer{}
 
+    runErr := runMigrationCommandTo(t, buffer, runtimeInstance, command, arguments...)
+
+    return buffer.String(), runErr
+}
+
+/* runMigrationCommandTo is runMigrationCommand over a writer the test supplies — one that fails, for the report the command could not write in full */
+func runMigrationCommandTo(
+    t *testing.T,
+    writer io.Writer,
+    runtimeInstance runtimecontract.Runtime,
+    command clicontract.Command,
+    arguments ...string,
+) error {
+    t.Helper()
+
     var runErr error
     commandContext := &clicontract.CommandContext{
         Name:   command.Name(),
         Flags:  command.Flags(),
-        Writer: buffer,
+        Writer: writer,
         Action: func(ctx context.Context, innerContext *clicontract.CommandContext) error {
             runErr = command.Run(runtimeInstance, innerContext)
 
@@ -85,7 +100,7 @@ func runMigrationCommand(
         t.Fatalf("failed to parse command arguments: %s", parseErr.Error())
     }
 
-    return buffer.String(), runErr
+    return runErr
 }
 
 func newSingleMigrationSet(name string, comment string, upCalls *int, downCalls *int) *migrate.Migrations {

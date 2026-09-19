@@ -2578,3 +2578,69 @@ func TestManagerRegistry_CloseWithContext_AnOpenThatEndedIsNotCountedAbandonedUn
         }
     }
 }
+
+/* contextWatchingProvider parks its open until the context the registry hands it is cancelled, and records what ended it — the shape of a retry loop sleeping through its budget against a host that is down */
+type contextWatchingProvider struct {
+    entered chan struct{}
+    once    sync.Once
+    endedBy error
+}
+
+func (instance *contextWatchingProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.OpenContext(context.Background(), params, logger)
+}
+
+func (instance *contextWatchingProvider) OpenContext(ctx context.Context, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    instance.once.Do(func() {
+        close(instance.entered)
+    })
+
+    <-ctx.Done()
+    instance.endedBy = ctx.Err()
+
+    return nil, ctx.Err()
+}
+
+/* the registry ends an open still in flight when it closes: left to itself the open went on retrying under the registry's own context after the teardown — each attempt routing bun's diagnostics back onto the logger the teardown had handed back and the container then closed — and the close either waited it out or reported it abandoned. The open now ends with the refusal, so the close of a registry built on the plain constructor has nothing to abandon */
+func TestManagerRegistry_CloseEndsAnOpenStillInFlightInsteadOfAbandoningIt(t *testing.T) {
+    provider := &contextWatchingProvider{entered: make(chan struct{})}
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{Name: "x", Provider: provider, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("unexpected error: %v", registryErr)
+    }
+
+    opened := make(chan error, 1)
+    go func() {
+        _, openErr := registry.Database("x")
+        opened <- openErr
+    }()
+
+    select {
+    case <-provider.entered:
+    case <-time.After(2 * time.Second):
+        t.Fatal("the provider was never reached; there is no open in flight to end")
+    }
+
+    closeContext, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+    defer cancel()
+
+    if closeErr := registry.CloseWithContext(closeContext); nil != closeErr {
+        t.Fatalf("expected the close to end the open instead of abandoning it, got: %v", closeErr)
+    }
+
+    select {
+    case openErr := <-opened:
+        if false == errors.Is(openErr, context.Canceled) {
+            t.Fatalf("expected the open ended by the registry's cancellation, got: %v", openErr)
+        }
+    case <-time.After(time.Second):
+        t.Fatal("the open in flight did not end with the close")
+    }
+
+    if false == errors.Is(provider.endedBy, context.Canceled) {
+        t.Fatalf("expected the provider to see its context cancelled, got %v", provider.endedBy)
+    }
+}

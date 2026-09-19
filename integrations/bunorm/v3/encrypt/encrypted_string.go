@@ -29,7 +29,7 @@ func (instance EncryptedString) GoString() string {
     return redactedPlaceholder
 }
 
-/* Format redacts under the numeric verbs (%d %o %b %c %U) that fmt routes through neither Stringer nor GoStringer — it consults those only for %v %s %q %x %X and %#v — so a numeric verb would otherwise print the underlying string through the badverb form (`%!d(encrypt.EncryptedString=<plaintext>)`), carrying the secret. Every verb is answered with the same redacted rendering, the way the encrypt key provider closes the same gap. */
+/* Format redacts under the numeric verbs (%d %o %b %c %U) that fmt routes through neither Stringer nor GoStringer — it consults those only for %v %s %q %x %X and %#v — so a numeric verb would otherwise print the underlying string through the badverb form (`%!d(encrypt.EncryptedString=<plaintext>)`), carrying the secret. Every verb that reaches Format is answered with the same redacted rendering, the way the encrypt key provider closes the same gap. Two verbs never reach it: %p and %w take fmt's badverb path before any method is consulted and print the underlying string by reflection (`%!p(encrypt.EncryptedString=<plaintext>)`), a misuse go vet refuses in a literal format and a dynamic format slips past. And a value held in an UNEXPORTED field of a struct rendered with %v or %+v is walked by reflection too, with no method called on it — the redaction is a property of this value's own rendering, not of every rendering that can contain it. */
 func (instance EncryptedString) Format(state fmt.State, verb rune) {
     _, _ = state.Write([]byte(redactedPlaceholder))
 }

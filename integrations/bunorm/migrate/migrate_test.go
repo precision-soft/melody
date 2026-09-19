@@ -343,24 +343,41 @@ func TestRunQueries_ReadsTheOptionCarriedByTheContextBeforeTheProcessDefault(t *
     }
 }
 
-/* a command puts its posture back on the way out, and only when its own value is still the live one: the value installed for the run does not survive the run, and a command that finished while a later one still runs leaves that one's value where it is */
-func TestRestoreDefaultRunnerOption_PutsBackOnlyOverItsOwnValue(t *testing.T) {
+/* a command puts its posture back on the way out, whichever order overlapping commands finish in: a command that finished while a later one still runs leaves that one's value where it is, and the LAST command to leave puts the host's own value back — the compare-and-swap this replaced restored correctly only last-in first-out, and two commands overlapping the other way round left the first command's finished posture installed for the life of the process */
+func TestRestoreDefaultRunnerOption_PutsTheHostsValueBackWhicheverOrderTheCommandsFinishIn(t *testing.T) {
     t.Cleanup(func() {
         processRunnerOption.Store(nil)
+        commandRunnerOptions.depth = 0
+        commandRunnerOptions.host = nil
     })
 
     var host bytes.Buffer
     SetDefaultRunnerOption(RunnerOption{Writer: &host, NoColor: true})
 
     var first bytes.Buffer
-    firstInstalled, firstPrevious := swapDefaultRunnerOption(RunnerOption{Writer: &first, NoColor: true})
+    var second bytes.Buffer
 
-    if &first != resolveDefaultRunnerOption().Writer {
-        t.Fatal("expected the swap to install the command's value for the length of its run")
+    /* the later command finishes first: the earlier command's value is live again, then the host's */
+    firstInstalled, firstPrevious := swapDefaultRunnerOption(RunnerOption{Writer: &first, NoColor: true})
+    secondInstalled, secondPrevious := swapDefaultRunnerOption(RunnerOption{Writer: &second, NoColor: true})
+
+    if &second != resolveDefaultRunnerOption().Writer {
+        t.Fatal("expected the swap to install the latest command's value for the length of its run")
     }
 
-    var second bytes.Buffer
-    secondInstalled, secondPrevious := swapDefaultRunnerOption(RunnerOption{Writer: &second, NoColor: true})
+    restoreDefaultRunnerOption(secondInstalled, secondPrevious)
+    if &first != resolveDefaultRunnerOption().Writer {
+        t.Fatal("expected the later command's restore to put the earlier command's value back")
+    }
+
+    restoreDefaultRunnerOption(firstInstalled, firstPrevious)
+    if &host != resolveDefaultRunnerOption().Writer {
+        t.Fatalf("expected the host's own value back once every command restored, got %v", resolveDefaultRunnerOption().Writer)
+    }
+
+    /* the earlier command finishes first: the later command's value stays live, and its own restore puts the host's value back — not the earlier command's finished one */
+    firstInstalled, firstPrevious = swapDefaultRunnerOption(RunnerOption{Writer: &first, NoColor: true})
+    secondInstalled, secondPrevious = swapDefaultRunnerOption(RunnerOption{Writer: &second, NoColor: true})
 
     restoreDefaultRunnerOption(firstInstalled, firstPrevious)
     if &second != resolveDefaultRunnerOption().Writer {
@@ -368,13 +385,8 @@ func TestRestoreDefaultRunnerOption_PutsBackOnlyOverItsOwnValue(t *testing.T) {
     }
 
     restoreDefaultRunnerOption(secondInstalled, secondPrevious)
-    if firstInstalled != processRunnerOption.Load() {
-        t.Fatal("expected the second command's restore to put back what it found, the first command's value")
-    }
-
-    restoreDefaultRunnerOption(firstInstalled, firstPrevious)
     if &host != resolveDefaultRunnerOption().Writer {
-        t.Fatalf("expected the host's own value back once every command restored, got %v", resolveDefaultRunnerOption().Writer)
+        t.Fatalf("expected the host's own value back once the last command restored, got %v", resolveDefaultRunnerOption().Writer)
     }
 }
 

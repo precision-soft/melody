@@ -48,11 +48,12 @@ func TestExampleMajorList_AcceptsSpaceCommaAndVPrefixedEntries(t *testing.T) {
     }
 }
 
-/* the ports have to stay distinct from each other, from the :8080 the dev container supervises and from the :18080 stack.sh's signal check uses, or two applications fight for one socket and the section that loses reports a boot failure that has nothing to do with the code under test. */
+/* the ports have to stay distinct from each other, from the :8080 the dev container supervises and from the :18080 and :18084 stack.sh's signal and teardown-budget checks use, or two applications fight for one socket and the section that loses reports a boot failure that has nothing to do with the code under test. */
 func TestExampleMajorCatalog_PortsAreDistinctAndReserved(t *testing.T) {
     seen := map[int]bool{
         8080:  true,
         18080: true,
+        18084: true,
     }
 
     for _, major := range exampleMajorCatalog {

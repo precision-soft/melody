@@ -418,6 +418,11 @@ func (instance *Provider) open(ctx context.Context, resolver containercontract.R
     user := configuration.MustGet(instance.userParameterName).MustString()
     password := configuration.MustGet(instance.passwordParameterName).MustString()
 
+    /* an empty host is refused here, before the driver sees it: the address ":port" it would make is the LOCAL system to a dialer, so a host left unset connected the application to whatever listened on that port on its own machine — with the configured credentials — instead of failing; measured, six accepted connections through one open, the dialect handshake included. The database and the user are left to the server, which refuses an empty one by name, and an empty password is a legitimate value. */
+    if "" == host {
+        return nil, exception.NewError("mysql database open refused: the host is empty", map[string]any{"parameter": instance.hostParameterName}, nil)
+    }
+
     connectionConfig := NewConnectionConfig(host, port, databaseName, user, password)
 
     poolConfig := instance.resolvedPoolConfig()

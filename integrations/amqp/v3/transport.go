@@ -819,7 +819,7 @@ func (instance *Transport) publishOnce(
 
    The budget expiring and the write ending are two events with no order between them, so this branch is reached for a write that finished a moment earlier as readily as for one that is blocked — and the abandon below is wrong for a publish that is done: it cuts a healthy connection, reports a fault to a caller whose message the broker has, and names a write nobody is waiting on. The sister branch at the top of publishOnce has always re-read writeStarted under the turn lock for exactly this reason; this half went without one, so the window was not the instant of a tie but the whole stretch from the timer firing to the abandon reaching the socket.
 
-   The check cannot make the window vanish — a write that returns one instruction later is genuinely still in flight when it is read — and it is not meant to: what it removes is the stretch, which is the part a caller can lose a message to. It is a door rather than two inline lines because a branch reached only when two events land in the same instant cannot be driven from outside, while a door can be handed the state that instant produces (§5.34). */
+   The check cannot make the window vanish — a write that returns one instruction later is genuinely still in flight when it is read — and it is not meant to: what it removes is the stretch, which is the part a caller can lose a message to. It is a door rather than two inline lines because a branch reached only when two events land in the same instant cannot be driven from outside, while a door can be handed the state that instant produces — the way its test hands it a write that has already returned. */
 func (instance *Transport) resolveExpiredWrite(
     exchange string,
     routingKey string,

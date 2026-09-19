@@ -8,13 +8,22 @@ import (
 
     "github.com/uptrace/bun"
 
+    "github.com/precision-soft/melody/v3/exception"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
-type failingSplitProvider struct{}
+/* unreachableSplitProvider fails the way a provider fails on an outage it could not get past: filed under ErrDatabaseUnreachable, the one class the splitter absorbs */
+type unreachableSplitProvider struct{}
 
-func (instance *failingSplitProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return nil, errors.New("replica is down")
+func (instance *unreachableSplitProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return nil, exception.NewError("database connection failed", nil, DatabaseUnreachable(errors.New("replica is down")))
+}
+
+/* refusingSplitProvider fails the way a provider refuses by name — a parameter left empty, a password the server refused — or the way a provider that files nothing under the class fails: a plain error, terminal by nature */
+type refusingSplitProvider struct{}
+
+func (instance *refusingSplitProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return nil, errors.New("pgsql database open refused: the user is empty")
 }
 
 func TestReadWriteSplitter_WriterIsPrimaryReaderRoundRobins(t *testing.T) {
@@ -67,11 +76,11 @@ func TestReadWriteSplitter_ReaderRefusesAnUnknownReplicaName(t *testing.T) {
     }
 }
 
-func TestReadWriteSplitter_ReaderFallsBackToPrimaryWhenTheReplicaFailsToOpen(t *testing.T) {
+func TestReadWriteSplitter_ReaderFallsBackToPrimaryWhenTheReplicaIsUnreachable(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
         &fakeLogger{},
         ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, IsDefault: true},
-        ProviderDefinition{Name: "replica", Provider: &failingSplitProvider{}},
+        ProviderDefinition{Name: "replica", Provider: &unreachableSplitProvider{}},
     )
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)
@@ -97,8 +106,8 @@ func TestReadWriteSplitter_ReaderFallsBackToPrimaryWhenTheReplicaFailsToOpen(t *
 func TestReadWriteSplitter_ReaderNamesBothFailuresWhenThePrimaryFailsToo(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
         &fakeLogger{},
-        ProviderDefinition{Name: "primary", Provider: &failingSplitProvider{}, IsDefault: true},
-        ProviderDefinition{Name: "replica", Provider: &failingSplitProvider{}},
+        ProviderDefinition{Name: "primary", Provider: &unreachableSplitProvider{}, IsDefault: true},
+        ProviderDefinition{Name: "replica", Provider: &unreachableSplitProvider{}},
     )
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)
@@ -166,5 +175,33 @@ func TestReadWriteSplitter_ReaderRefusesAReplicaWhoseProviderAnsweredNoDatabase(
 
     if nil != database {
         t.Fatal("expected no database beside the refusal")
+    }
+}
+
+/* a replica whose provider REFUSED — a parameter left empty, a password the server refused, a database that does not exist, or a provider that files nothing under the unreachable class — is refused with the provider's own answer, not served from the primary: the denylist of registry sentinels this replaced let every refusal it did not name fall to the primary, silently and for the life of the process */
+func TestReadWriteSplitter_ReaderRefusesAReplicaWhoseProviderRefused(t *testing.T) {
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, IsDefault: true},
+        ProviderDefinition{Name: "replica", Provider: &refusingSplitProvider{}},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry: %v", registryErr)
+    }
+    t.Cleanup(func() { _ = registry.Close() })
+
+    splitter := NewReadWriteSplitter(registry, "primary", "replica")
+
+    database, readerErr := splitter.Reader()
+    if nil != database {
+        t.Fatal("expected no database beside the refusal")
+    }
+
+    if nil == readerErr || false == strings.Contains(readerErr.Error(), "the user is empty") {
+        t.Fatalf("expected the provider's own refusal handed back, got %v", readerErr)
+    }
+
+    if primary, primaryErr := registry.Database("primary"); nil != primaryErr || nil == primary {
+        t.Fatalf("the primary itself stays reachable: %v", primaryErr)
     }
 }

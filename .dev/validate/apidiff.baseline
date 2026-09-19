@@ -108,6 +108,8 @@ integrations/bunorm/v3 ~ compatible ~ ./encrypt.EncryptedDeterministicString.For
 integrations/bunorm/v3 ~ compatible ~ ./encrypt.EncryptedStringFor[R].Format ~ added ~ keep ~ the same numeric-verb redaction on the compartment-bound column type, the same reason as the sibling row
 integrations/bunorm/v3 ~ compatible ~ ./encrypt.EncryptedDeterministicStringFor[R].Format ~ added ~ keep ~ the same numeric-verb redaction on the compartment-bound deterministic column type, the same reason as the sibling row
 integrations/bunorm/v3 ~ compatible ~ ErrProviderReturnedNilDatabase ~ added ~ unclassified ~
+integrations/bunorm/v3 ~ compatible ~ ErrDatabaseUnreachable ~ added ~ keep ~ the class of an open failure the provider classified as transient and could not get past, the one outage ReadWriteSplitter.Reader absorbs by reading from the primary; every refusal given by name is handed back instead, where a denylist of registry sentinels let it fall to the primary in silence
+integrations/bunorm/v3 ~ compatible ~ DatabaseUnreachable ~ added ~ keep ~ the door a provider files an outage through, so a provider outside this repository can take part in the same fallback rule
 integrations/bunorm/v3 ~ compatible ~ (*ManagerRegistry).CloseWithContext ~ added ~ keep ~ the optional context-taking close the container's teardown prefers, so the budget an operator declares reaches the stretches this component spends instead of stopping at a constant it invented; Close stays as the door for a caller with no budget, and v3.14.0 is the last minor that ships features
 integrations/bunorm/v3 ~ compatible ~ (*ManagerRegistry).CloseMigrationDatabase ~ added ~ unclassified ~
 integrations/bunorm/v3 ~ compatible ~ (*ManagerRegistry).MigrationDatabase ~ added ~ unclassified ~

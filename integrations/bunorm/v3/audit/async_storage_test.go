@@ -7,6 +7,7 @@ import (
     "path/filepath"
     "strings"
     "sync"
+    "sync/atomic"
     "syscall"
     "testing"
     "time"
@@ -433,6 +434,11 @@ func TestAsyncStorage_CloseCancelsAWedgedSaveAfterTheGrace(t *testing.T) {
 
     if 2 != storage.Failed() {
         t.Fatalf("expected both entries to be recorded as failed, got %d", storage.Failed())
+    }
+
+    var reported *exception.Error
+    if false == errors.As(closeErr, &reported) || int64(2) != reported.Context()["outstanding"] || int64(2) != reported.Context()["deadLettered"] || int64(0) != reported.Context()["stored"] {
+        t.Fatalf("expected the verdict to count outstanding=2 deadLettered=2 stored=0, got %v", reported.Context())
     }
 }
 
@@ -1013,5 +1019,287 @@ func TestAsyncStorage_TheRefusalNamesTheJournalTheEntryWasDeadLetteredThrough(t 
 
     if true == journaledThrough(saveErr, first.next) {
         t.Fatal("expected the refusal not to name the logger installed after the record was written")
+    }
+}
+
+/* refusedIdentities reads the entries a refusal names, in the order they were refused */
+func refusedIdentities(t *testing.T, refusal error) []map[string]any {
+    t.Helper()
+
+    var reported *exception.Error
+    if false == errors.As(refusal, &reported) {
+        t.Fatalf("expected an exception, got %T: %v", refusal, refusal)
+    }
+
+    refused, isList := reported.Context()["refused"].([]map[string]any)
+    if false == isList {
+        t.Fatalf("expected the refusal to carry the refused entries, got %v", reported.Context()["refused"])
+    }
+
+    return refused
+}
+
+/* a call of several entries is admitted one by one, so a full queue splits it: the refusal has to say WHICH entries were dropped, or a caller that retries the batch on the count stores the admitted ones twice */
+func TestAsyncStorage_TheRefusalNamesEachEntryItDropped(t *testing.T) {
+    installDefaultAsyncStorageLogger(t)
+
+    ignoring := newContextIgnoringStorage()
+    defer close(ignoring.release)
+
+    storage := NewAsyncStorage(ignoring, 1)
+
+    if saveErr := storage.Save(context.Background(), "audit", Entry{Entity: "order", EntityId: "in-hand", Operation: OperationInsert}); nil != saveErr {
+        t.Fatalf("the first entry was not queued: %v", saveErr)
+    }
+
+    select {
+    case <-ignoring.entered:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("the delegate was never reached; the queue cannot be filled behind a parked save")
+    }
+
+    if saveErr := storage.Save(context.Background(), "audit", Entry{Entity: "order", EntityId: "queued", Operation: OperationInsert}); nil != saveErr {
+        t.Fatalf("the second entry did not fill the queue: %v", saveErr)
+    }
+
+    saveErr := storage.Save(context.Background(), "audit",
+        Entry{Entity: "order", EntityId: "third", Operation: OperationUpdate},
+        Entry{Entity: "invoice", EntityId: "fourth", Operation: OperationDelete},
+    )
+    if false == errors.Is(saveErr, ErrAsyncStorageQueueFull) {
+        t.Fatalf("expected the full queue to refuse, got %v", saveErr)
+    }
+
+    refused := refusedIdentities(t, saveErr)
+    if 2 != len(refused) || "third" != refused[0]["entityId"] || "order" != refused[0]["entity"] || OperationUpdate != refused[0]["operation"] || "fourth" != refused[1]["entityId"] || "invoice" != refused[1]["entity"] || OperationDelete != refused[1]["operation"] {
+        t.Fatalf("expected the two refused entries named in order, got %v", refused)
+    }
+
+    if 2 != storage.Dropped() {
+        t.Fatalf("expected two entries counted dropped, got %d", storage.Dropped())
+    }
+}
+
+func TestAsyncStorage_TheRefusalAfterCloseNamesEachEntryItDropped(t *testing.T) {
+    installDefaultAsyncStorageLogger(t)
+
+    storage := NewAsyncStorage(newRecordingStorage(), 4)
+    if closeErr := storage.Close(); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    saveErr := storage.Save(context.Background(), "audit", Entry{Entity: "order", EntityId: "late", Operation: OperationDelete})
+    if false == errors.Is(saveErr, ErrAsyncStorageClosed) {
+        t.Fatalf("expected the closed storage to refuse, got %v", saveErr)
+    }
+
+    refused := refusedIdentities(t, saveErr)
+    if 1 != len(refused) || "late" != refused[0]["entityId"] || OperationDelete != refused[0]["operation"] {
+        t.Fatalf("expected the refused entry named, got %v", refused)
+    }
+}
+
+/* closeWithin runs CloseWithContext on its own goroutine and refuses to wait past the bound, so a wait that stopped reading the caller's context fails in a second instead of parking the suite for the package graces */
+func closeWithin(t *testing.T, storage *AsyncStorage, closeContext context.Context, bound time.Duration) error {
+    t.Helper()
+
+    closeDone := make(chan error, 1)
+    go func() {
+        closeDone <- storage.CloseWithContext(closeContext)
+    }()
+
+    select {
+    case closeErr := <-closeDone:
+        return closeErr
+    case <-time.After(bound):
+        t.Fatalf("CloseWithContext did not return within %s; the wait no longer reads the caller's context", bound)
+        return nil
+    }
+}
+
+/* the caller's context was read once, at entry: a cancellation landing during the drain was noticed by nobody, and a close under WithCancel spent both package graces over a wedged delegate where the registry beside it, on the same context, returned at once */
+func TestAsyncStorage_CloseWithContext_ACancellationDuringTheDrainEndsIt(t *testing.T) {
+    installDefaultAsyncStorageLogger(t)
+
+    previous := asyncStorageCloseGrace
+    asyncStorageCloseGrace = 2 * time.Second
+    t.Cleanup(func() {
+        asyncStorageCloseGrace = previous
+    })
+
+    ignoring := newContextIgnoringStorage()
+    defer close(ignoring.release)
+
+    storage := NewAsyncStorage(ignoring, 4)
+    if saveErr := storage.Save(context.Background(), "audit", Entry{Entity: "order", EntityId: "1"}); nil != saveErr {
+        t.Fatalf("the entry was not queued: %v", saveErr)
+    }
+
+    select {
+    case <-ignoring.entered:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("the delegate was never reached; there is no wedged save to cancel")
+    }
+
+    closeContext, cancel := context.WithCancel(context.Background())
+    go func() {
+        time.Sleep(100 * time.Millisecond)
+        cancel()
+    }()
+
+    started := time.Now()
+    closeErr := closeWithin(t, storage, closeContext, time.Second)
+    elapsed := time.Since(started)
+
+    if nil == closeErr || false == strings.Contains(closeErr.Error(), "cancelled by its caller during the drain") {
+        t.Fatalf("expected the close to say its caller cancelled it during the drain, got: %v", closeErr)
+    }
+
+    var reported *exception.Error
+    if false == errors.As(closeErr, &reported) || int64(1) != reported.Context()["outstanding"] {
+        t.Fatalf("expected the save in hand counted outstanding, got %v", closeErr)
+    }
+
+    /* the drain grace is two seconds; a close that returned well under it returned on the cancellation, not on the timer */
+    if time.Second <= elapsed {
+        t.Fatalf("expected the close to return on the cancellation, it took %s", elapsed)
+    }
+}
+
+/* the second stretch reads the caller's context too: a cancellation landing while the close waits for the delegate to react is answered as unobserved, not as ignored */
+func TestAsyncStorage_CloseWithContext_ACancellationDuringTheCancellationGraceEndsIt(t *testing.T) {
+    installDefaultAsyncStorageLogger(t)
+
+    previous := asyncStorageCloseGrace
+    asyncStorageCloseGrace = 300 * time.Millisecond
+    t.Cleanup(func() {
+        asyncStorageCloseGrace = previous
+    })
+
+    ignoring := newContextIgnoringStorage()
+    defer close(ignoring.release)
+
+    storage := NewAsyncStorage(ignoring, 4)
+    if saveErr := storage.Save(context.Background(), "audit", Entry{Entity: "order", EntityId: "1"}); nil != saveErr {
+        t.Fatalf("the entry was not queued: %v", saveErr)
+    }
+
+    select {
+    case <-ignoring.entered:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("the delegate was never reached; there is no wedged save to cancel")
+    }
+
+    closeContext, cancel := context.WithCancel(context.Background())
+    go func() {
+        /* inside the second stretch: after the 300 ms drain grace, before its 300 ms cancellation grace ends */
+        time.Sleep(450 * time.Millisecond)
+        cancel()
+    }()
+
+    closeErr := closeWithin(t, storage, closeContext, 2*time.Second)
+    if nil == closeErr || false == strings.Contains(closeErr.Error(), "while it waited for the save in hand to react") {
+        t.Fatalf("expected the close to say its caller cancelled it during the cancellation grace, got: %v", closeErr)
+    }
+}
+
+/* the third verdict used to say "the remaining entries were dead-lettered" on the clock alone: a delegate that never read its cancellation and stored every entry after it was reported as having dead-lettered them */
+func TestAsyncStorage_CloseCountsWhatTheDelegateStoredAfterTheCancellation(t *testing.T) {
+    installDefaultAsyncStorageLogger(t)
+
+    previous := asyncStorageCloseGrace
+    asyncStorageCloseGrace = 200 * time.Millisecond
+    t.Cleanup(func() {
+        asyncStorageCloseGrace = previous
+    })
+
+    ignoring := newContextIgnoringStorage()
+    storage := NewAsyncStorage(ignoring, 4)
+
+    if saveErr := storage.Save(context.Background(), "audit", Entry{Entity: "order", EntityId: "in-hand"}); nil != saveErr {
+        t.Fatalf("the first entry was not queued: %v", saveErr)
+    }
+
+    select {
+    case <-ignoring.entered:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("the delegate was never reached")
+    }
+
+    if saveErr := storage.Save(context.Background(), "audit", Entry{Entity: "order", EntityId: "queued"}); nil != saveErr {
+        t.Fatalf("the second entry was not queued: %v", saveErr)
+    }
+
+    /* released inside the second stretch — after the 200 ms drain grace has cancelled the worker, before its 200 ms cancellation grace ends — so the delegate, which never reads the context, stores both entries after the cancellation */
+    go func() {
+        time.Sleep(300 * time.Millisecond)
+        close(ignoring.release)
+    }()
+
+    closeErr := closeWithin(t, storage, context.Background(), 2*time.Second)
+    if nil == closeErr || false == strings.Contains(closeErr.Error(), "stored every entry then outstanding") {
+        t.Fatalf("expected the close to say the delegate stored the entries after the cancellation, got: %v", closeErr)
+    }
+
+    var reported *exception.Error
+    if false == errors.As(closeErr, &reported) || int64(2) != reported.Context()["outstanding"] || int64(0) != reported.Context()["deadLettered"] || int64(2) != reported.Context()["stored"] {
+        t.Fatalf("expected outstanding=2 deadLettered=0 stored=2, got %v", reported.Context())
+    }
+
+    if 0 != storage.Failed() {
+        t.Fatalf("expected nothing counted failed, got %d", storage.Failed())
+    }
+}
+
+/* firstSaveHonouringStorage reads the cancellation on the save it has in hand and ignores it on every save after — the delegate whose driver aborts the statement in flight and then accepts the next one on a fresh connection */
+type firstSaveHonouringStorage struct {
+    entered chan struct{}
+    once    sync.Once
+    calls   atomic.Int64
+}
+
+func (instance *firstSaveHonouringStorage) Save(ctx context.Context, table string, entries ...Entry) error {
+    instance.once.Do(func() {
+        close(instance.entered)
+    })
+
+    if 1 == instance.calls.Add(1) {
+        <-ctx.Done()
+
+        return ctx.Err()
+    }
+
+    return nil
+}
+
+func TestAsyncStorage_CloseCountsTheDeadLetteredAndTheStoredApart(t *testing.T) {
+    installDefaultAsyncStorageLogger(t)
+    shortenCloseGrace(t)
+
+    delegate := &firstSaveHonouringStorage{entered: make(chan struct{})}
+    storage := NewAsyncStorage(delegate, 4)
+
+    if saveErr := storage.Save(context.Background(), "audit", Entry{Entity: "order", EntityId: "in-hand"}); nil != saveErr {
+        t.Fatalf("the first entry was not queued: %v", saveErr)
+    }
+
+    select {
+    case <-delegate.entered:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("the delegate was never reached")
+    }
+
+    if saveErr := storage.Save(context.Background(), "audit", Entry{Entity: "order", EntityId: "queued"}); nil != saveErr {
+        t.Fatalf("the second entry was not queued: %v", saveErr)
+    }
+
+    closeErr := closeWithin(t, storage, context.Background(), 2*time.Second)
+    if nil == closeErr || false == strings.Contains(closeErr.Error(), "some were dead-lettered and the delegate stored the rest") {
+        t.Fatalf("expected the close to count both outcomes apart, got: %v", closeErr)
+    }
+
+    var reported *exception.Error
+    if false == errors.As(closeErr, &reported) || int64(2) != reported.Context()["outstanding"] || int64(1) != reported.Context()["deadLettered"] || int64(1) != reported.Context()["stored"] {
+        t.Fatalf("expected outstanding=2 deadLettered=1 stored=1, got %v", reported.Context())
     }
 }

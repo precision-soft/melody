@@ -402,13 +402,17 @@ func (instance *Provider) open(ctx context.Context, resolver containercontract.R
     user := configuration.MustGet(instance.userParameterName).MustString()
     password := configuration.MustGet(instance.passwordParameterName).MustString()
 
-    /* an empty database or user is refused here, by name, before the driver sees it: pgdriver.WithDatabase and pgdriver.WithUser PANIC on an empty string, so a connection parameter left empty in the configuration reached the caller as a panic out of the open, not as the refusal every other open failure is. An empty host is left to the driver — it does not panic, the address "<empty>:port" simply fails to dial — and an empty password is a legitimate value. */
+    /* an empty database or user is refused here, by name, before the driver sees it: pgdriver.WithDatabase and pgdriver.WithUser PANIC on an empty string, so a connection parameter left empty in the configuration reached the caller as a panic out of the open, not as the refusal every other open failure is. An empty host is refused here too, for the opposite reason: the driver does not panic on it, and the address ":port" it makes is the LOCAL system to a dialer, so a host left unset connected the application to whatever listened on that port on its own machine — with the configured credentials, under the insecure posture — instead of failing; measured, one accepted connection per open. An empty password is a legitimate value. */
     if "" == databaseName {
         return nil, exception.NewError("pgsql database open refused: the database name is empty", map[string]any{"parameter": instance.databaseParameterName}, nil)
     }
 
     if "" == user {
         return nil, exception.NewError("pgsql database open refused: the user is empty", map[string]any{"parameter": instance.userParameterName}, nil)
+    }
+
+    if "" == host {
+        return nil, exception.NewError("pgsql database open refused: the host is empty", map[string]any{"parameter": instance.hostParameterName}, nil)
     }
 
     connectionConfig := NewConnectionConfig(host, port, databaseName, user, password)

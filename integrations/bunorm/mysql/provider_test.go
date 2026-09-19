@@ -1364,3 +1364,24 @@ func TestDialAddressOf_BracketsABareIpv6Literal(t *testing.T) {
         }
     }
 }
+
+/* an unset host made the driver dial ":port", which is the local system: the open connected to whatever listened there with the configured credentials instead of failing. It is refused by name before the driver configuration is built. */
+func TestProviderOpen_RefusesAnEmptyHostBeforeBuildingTheDriverConfig(t *testing.T) {
+    provider := newTestProvider(
+        WithPostBuildHook(func(ctx context.Context, resolver containercontract.Resolver, driverConfig *driver.Config) error {
+            t.Fatal("the driver configuration was built for an empty host")
+
+            return nil
+        }),
+    )
+
+    database, openErr := provider.Open(newStubResolver("", "3306", "melody", "melody_user", "melody_password"))
+    if nil != database {
+        _ = database.Close()
+        t.Fatal("expected no database handle for an empty host")
+    }
+
+    if nil == openErr || false == strings.Contains(openErr.Error(), "the host is empty") {
+        t.Fatalf("expected the refusal to name the host, got %v", openErr)
+    }
+}

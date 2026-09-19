@@ -1336,7 +1336,8 @@ func TestComputeBackoffDelayReadsAZeroAttemptAsTheFirst(t *testing.T) {
 }
 
 /* pgdriver.WithDatabase and pgdriver.WithUser panic on an empty string, so a parameter left empty in the configuration reached the caller as a panic out of the open rather than as the refusal every other open failure is; the refusal names the field, before the driver sees it */
-func TestProviderOpen_RefusesAnEmptyDatabaseOrUserInsteadOfPanicking(t *testing.T) {
+/* an empty database or user would panic inside pgdriver; an empty host would not — it dials the local system — so all three are refused by name before any connector is built */
+func TestProviderOpen_RefusesAnEmptyDatabaseUserOrHostBeforeBuildingTheConnector(t *testing.T) {
     provider := newTestProvider(
         WithInsecure(true),
         WithPostBuildHook(func(ctx context.Context, resolver containercontract.Resolver, connector *pgdriver.Connector) error {
@@ -1353,6 +1354,7 @@ func TestProviderOpen_RefusesAnEmptyDatabaseOrUserInsteadOfPanicking(t *testing.
     }{
         {name: "empty database", resolver: newStubResolver("db.internal", "5432", "", "melody_user", "melody_password"), expected: "the database name is empty"},
         {name: "empty user", resolver: newStubResolver("db.internal", "5432", "melody", "", "melody_password"), expected: "the user is empty"},
+        {name: "empty host", resolver: newStubResolver("", "5432", "melody", "melody_user", "melody_password"), expected: "the host is empty"},
     }
 
     for _, testCase := range testCases {

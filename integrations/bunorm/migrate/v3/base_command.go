@@ -151,3 +151,26 @@ func (instance *baseCommand) newMigrator(db *bun.DB) (*migrate.Migrator, error) 
         migrate.WithMarkAppliedOnSuccess(true),
     ), nil
 }
+
+/* managerLabel answers the name the output labels a manager by — the --manager flag, else the pinned manager, else "<default>" — the same label resolveDatabase answers for a run that opens the connection, for a command that does not. */
+func (instance *baseCommand) managerLabel(commandContext clicontract.Context) string {
+    managerName := commandContext.String(instance.options.ManagerFlagName)
+    if "" == managerName {
+        managerName = instance.options.ManagerName
+    }
+
+    if "" == managerName {
+        return "<default>"
+    }
+
+    return managerName
+}
+
+/* newFileMigrator is the migrator of a command that only writes a migration FILE: bun's generator reads the collection's directory and writes the template with os.WriteFile, and never touches the database it was handed, so none is opened for it — opening one cost a dial, the handshake, the authentication and the boot ping, some sixteen seconds of retries on a host that was down, to write a file that is written offline. */
+func (instance *baseCommand) newFileMigrator() (*migrate.Migrator, error) {
+    if nil == instance.migrations {
+        return nil, errors.New("migrations collection is nil")
+    }
+
+    return migrate.NewMigrator(nil, instance.migrations), nil
+}

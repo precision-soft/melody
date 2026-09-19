@@ -371,7 +371,7 @@ func TestStackScript_MessageBusConsumersAreSignalledAsAProcessGroup(t *testing.T
     }
 }
 
-/* the teardown-budget section is the only consumer of MELODY_TEARDOWN_TIMEOUT end to end: it declares the value itself, in the .env.local of the binary it builds, and reads the declared figure back off the abandon line. Drop the declaration and the section measures the default; drop the 1ms arm and a reader that ignores the declared value stays green on the 0s arm alone, which exits zero either way. */
+/* the teardown-budget section is the only consumer of MELODY_TEARDOWN_TIMEOUT end to end: it declares the value itself, in the .env.local of the binary it builds, and reads the declared figure back off whichever record the race between the shield's two clocks leaves — the abandon line or the container close's record. Drop the declaration and the section measures the default; drop the 1ms arm and a reader that ignores the declared value stays green on the 0s arm alone, which exits zero either way; pin one record alone and the check is red one run in three. The exit statuses are matched as whole lines, since a killed teardown's 137 carries the digit 1 too. */
 func TestStackScript_TeardownBudgetSectionDeclaresTheValueAndReadsItBack(t *testing.T) {
     script := readStackScript(t)
 
@@ -388,9 +388,11 @@ func TestStackScript_TeardownBudgetSectionDeclaresTheValueAndReadsItBack(t *test
     for _, required := range []string{
         "MELODY_TEARDOWN_TIMEOUT=%s",
         "for BUDGET in 1ms 0s; do",
-        "grep -q 'exit_1ms=1'",
-        "grep -q 'abandoned_names_1ms_1ms=1'",
-        "grep -q 'exit_0s=0'",
+        "grep -qx 'exit_1ms=1'",
+        "grep -qx 'abandoned_names_1ms_1ms=1' || ",
+        "grep -qx 'close_cut_under_a_millisecond_1ms=1'",
+        "grep -qx 'exit_0s=0'",
+        "MELODY_HTTP_ADDRESS=:18084",
     } {
         if false == strings.Contains(section, required) {
             t.Fatalf("the teardown-budget section must carry %q", required)

@@ -1169,7 +1169,8 @@ func TestComputeBackoffDelayReadsAZeroAttemptAsTheFirst(t *testing.T) {
 }
 
 /* pgdriver.WithDatabase and pgdriver.WithUser panic on an empty string, so a parameter left unset by the configuration reached the caller as a panic out of the open rather than as the refusal every other open failure is; the refusal names the field, before the driver sees it */
-func TestProviderOpen_RefusesAnEmptyDatabaseOrUserInsteadOfPanicking(t *testing.T) {
+/* an empty database or user would panic inside pgdriver; an empty host would not — it dials the local system — so all three are refused by name before any connector is built */
+func TestProviderOpen_RefusesAnEmptyDatabaseUserOrHostBeforeBuildingTheConnector(t *testing.T) {
     provider := NewProvider(
         WithInsecure(true),
         WithPostBuildHook(func(ctx context.Context, connector *pgdriver.Connector) error {
@@ -1186,6 +1187,7 @@ func TestProviderOpen_RefusesAnEmptyDatabaseOrUserInsteadOfPanicking(t *testing.
     }{
         {name: "empty database", params: newTestParams("db.internal", "5432", "", "melody_user", "melody_password"), expected: "the database name is empty"},
         {name: "empty user", params: newTestParams("db.internal", "5432", "melody", "", "melody_password"), expected: "the user is empty"},
+        {name: "empty host", params: newTestParams("", "5432", "melody", "melody_user", "melody_password"), expected: "the host is empty"},
     }
 
     for _, testCase := range testCases {
@@ -1222,5 +1224,51 @@ func TestDialAddressOf_BracketsABareIpv6Literal(t *testing.T) {
         if actual := dialAddressOf(testCase.host, "5432"); testCase.expected != actual {
             t.Errorf("dialAddressOf(%q) = %q, wanted %q", testCase.host, actual, testCase.expected)
         }
+    }
+}
+
+/* an outage the provider could not get past — the retry-less open of a closed port, and the retry budget spent on it — is filed under bunorm.ErrDatabaseUnreachable, the one class a read/write splitter absorbs by reading from the primary; a refusal given by name is not, so a misconfigured replica is refused instead of served from the primary in silence. The driver failure stays reachable under the class. */
+func TestOpenContext_AnOutageIsFiledAsUnreachableAndARefusalIsNot(t *testing.T) {
+    unreachable := newTestParams("127.0.0.1", "1", "melody_unreachable", "melody", "melody")
+
+    retryless := NewProvider(WithInsecure(true), WithTimeoutConfig(NewTimeoutConfig(100*time.Millisecond, 0, 0)))
+    database, openErr := retryless.Open(unreachable, nil)
+    if nil != database {
+        _ = database.Close()
+        t.Fatal("expected no database handle for a closed port")
+    }
+
+    if false == errors.Is(openErr, bunorm.ErrDatabaseUnreachable) {
+        t.Fatalf("expected the retry-less open of a closed port filed as unreachable, got %v", openErr)
+    }
+
+    var netErr net.Error
+    if false == errors.As(openErr, &netErr) {
+        t.Fatalf("expected the driver failure reachable under the class, got %v", openErr)
+    }
+
+    retrying := NewProvider(WithInsecure(true), WithTimeoutConfig(NewTimeoutConfig(100*time.Millisecond, 0, 0)), WithRetryConfig(NewRetryConfig(2, time.Millisecond, time.Millisecond, 1)))
+    database, openErr = retrying.Open(unreachable, nil)
+    if nil != database {
+        _ = database.Close()
+        t.Fatal("expected no database handle for a closed port")
+    }
+
+    if false == errors.Is(openErr, bunorm.ErrDatabaseUnreachable) {
+        t.Fatalf("expected the exhausted retry budget filed as unreachable, got %v", openErr)
+    }
+
+    if false == exception.IsAlreadyLogged(openErr) {
+        t.Fatalf("expected the terminal record's mark kept on the unreachable failure, got %v", openErr)
+    }
+
+    database, openErr = retryless.Open(newTestParams("", "5432", "melody", "melody", "melody"), nil)
+    if nil != database {
+        _ = database.Close()
+        t.Fatal("expected no database handle for an empty host")
+    }
+
+    if nil == openErr || true == errors.Is(openErr, bunorm.ErrDatabaseUnreachable) {
+        t.Fatalf("expected a refusal by name NOT filed as unreachable, got %v", openErr)
     }
 }

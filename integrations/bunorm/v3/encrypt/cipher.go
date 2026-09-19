@@ -75,6 +75,7 @@ func (instance *aes256Cipher) EncryptDeterministic(plaintext string) (string, er
     return instance.sealDeterministic(plaintext, instance.keys.CurrentKeyId())
 }
 
+/* EncryptDeterministicWithKeyId seals the plaintext deterministically under the named key. The key id is honoured for a plaintext this cipher has not sealed; a value that is already one of its seals is converted in place under the key id THAT value carries — a random-nonce seal becomes deterministic under its own key, a deterministic one passes through — never under the named key, so the conversion is not a rotation. The rule and its reason are on sealDeterministic. */
 func (instance *aes256Cipher) EncryptDeterministicWithKeyId(plaintext string, keyId string) (string, error) {
     return instance.sealDeterministic(plaintext, keyId)
 }

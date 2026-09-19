@@ -70,6 +70,21 @@ func runMigrationCommand(
 
     buffer := &bytes.Buffer{}
 
+    runErr := runMigrationCommandTo(t, buffer, runtimeInstance, command, arguments...)
+
+    return buffer.String(), runErr
+}
+
+/* runMigrationCommandTo is runMigrationCommand over a writer the test supplies — one that fails, for the report the command could not write in full */
+func runMigrationCommandTo(
+    t *testing.T,
+    writer io.Writer,
+    runtimeInstance runtimecontract.Runtime,
+    command clicontract.Command,
+    arguments ...string,
+) error {
+    t.Helper()
+
     capturing := &capturingCommand{Command: command, runtimeInstance: runtimeInstance}
 
     if parseErr := melodycli.DispatchCommand(
@@ -77,12 +92,12 @@ func runMigrationCommand(
         capturing,
         runtimeInstance,
         append([]string{command.Name()}, arguments...),
-        buffer,
+        writer,
     ); nil != parseErr {
         t.Fatalf("failed to parse command arguments: %s", parseErr.Error())
     }
 
-    return buffer.String(), capturing.capturedErr
+    return capturing.capturedErr
 }
 
 func newSingleMigrationSet(name string, comment string, upCalls *int, downCalls *int) *migrate.Migrations {

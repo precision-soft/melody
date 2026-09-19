@@ -13,7 +13,7 @@ import (
     "github.com/uptrace/bun/migrate"
 )
 
-/* migrationNamePattern is the grammar a migration name is held to before it reaches bun's generator: the same set bun's own nameRE accepts, kept here so the confinement of the file path is this command's, not the pinned dependency's. */
+/* migrationNamePattern is the grammar a migration name is held to before it reaches bun's generator: the same set bun's own nameRE accepts, kept here so the confinement of the file path is this command's, not the pinned dependency's. It is deliberately this major's alone: the two frozen majors rely on bun's nameRE, which the version all three pin (v1.2.17) applies before any path is joined, so a name such as ../x is refused there as well — a defence in depth is not a defect of the majors that lack it, and a patch on them is reserved for behaviour that is wrong. */
 var migrationNamePattern = regexp.MustCompile(`^[0-9a-z_\-]+$`)
 
 func NewCreateGoCommand(migrations *migrate.Migrations, options Options) *CreateCommand {
@@ -52,7 +52,7 @@ func (instance *CreateCommand) Run(runtimeInstance runtimecontract.Runtime, comm
     }
 
     if "" == migrationName {
-        err := errors.New("migration name is required (usage: db:create <name>)")
+        err := errors.New("migration name is required (usage: " + instance.Name() + " <name>)")
         return err
     }
 
@@ -65,13 +65,10 @@ func (instance *CreateCommand) Run(runtimeInstance runtimecontract.Runtime, comm
         )
     }
 
-    db, managerName, releaseDatabase, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext, outputInstance)
-    if nil != dbErr {
-        return dbErr
-    }
-    defer releaseDatabase()
+    /* no database is opened: the file is written from the migrations collection alone, and the manager name only labels the detail line below */
+    managerName := instance.base.managerLabel(commandContext)
 
-    migrator, migratorErr := instance.base.newMigrator(db)
+    migrator, migratorErr := instance.base.newFileMigrator()
     if nil != migratorErr {
         return migratorErr
     }

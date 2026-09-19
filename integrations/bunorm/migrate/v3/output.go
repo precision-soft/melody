@@ -15,7 +15,7 @@ import (
 )
 
 type commandOutput struct {
-    writer    io.Writer
+    writer    *errorTrackingWriter
     arguments []string
     option    output.Option
 
@@ -31,10 +31,29 @@ type commandOutput struct {
 /* newCommandOutput takes the command's positional arguments beside its writer and flags: the machine document declares an arguments field, and built without them it answered an empty list for every command, db:create included, whose one argument names the migration the document reports on. */
 func newCommandOutput(writer io.Writer, arguments []string, option output.Option) *commandOutput {
     return &commandOutput{
-        writer:    writer,
+        writer:    &errorTrackingWriter{writer: writer},
         arguments: append([]string{}, arguments...),
         option:    option,
     }
+}
+
+/* errorTrackingWriter remembers the first write failure and swallows the rest, the shape the framework's table printer carries for the same reason: the text report is printed through dozens of small writes whose results nothing read, so a report cut short by a closed pipe or a full disk ended with its success banner and exit zero. The remembered failure is what lets finish refuse instead, and the per-query lines of a run print through the same writer so a truncation there is remembered too. */
+type errorTrackingWriter struct {
+    writer   io.Writer
+    firstErr error
+}
+
+func (instance *errorTrackingWriter) Write(payload []byte) (int, error) {
+    if nil != instance.firstErr {
+        return len(payload), nil
+    }
+
+    _, writeErr := instance.writer.Write(payload)
+    if nil != writeErr {
+        instance.firstErr = writeErr
+    }
+
+    return len(payload), nil
 }
 
 /* runnerOptionForCommand derives the per-query printer posture from the command's parsed flags: the command's writer and colour choice in text mode, a discarded writer under json — the document is the only byte the command may emit there. */
@@ -88,10 +107,18 @@ func (instance *commandOutput) finishRun(commandName string, startedAt time.Time
     panic(recovered)
 }
 
-/* finish is the command's one exit door: under --format=json it renders the accumulated document — the failure included — and in every mode it answers the error the command should return. The command's own failure stays the verdict; a rendering failure becomes one only when the command itself succeeded. */
+/* finish is the command's one exit door: under --format=json it renders the accumulated document — the failure included — and in every mode it answers the error the command should return. The command's own failure stays the verdict; a rendering failure becomes one only when the command itself succeeded — in text mode the first write the report lost, which used to be swallowed line by line so a truncated report exited zero. */
 func (instance *commandOutput) finish(command string, startedAt time.Time, runErr error) error {
     if false == instance.isJson() {
-        return runErr
+        if nil != runErr {
+            return runErr
+        }
+
+        if nil != instance.writer.firstErr {
+            return exception.NewError("the report could not be written in full", map[string]any{"command": command}, instance.writer.firstErr)
+        }
+
+        return nil
     }
 
     meta := output.NewMeta(command, instance.arguments, instance.option, startedAt, time.Since(startedAt), output.Version{})
@@ -140,7 +167,12 @@ func (instance *commandOutput) finish(command string, startedAt time.Time, runEr
         )
     }
 
+    /* the document renders through the tracking writer too, which swallows the write it lost; the renderer's own answer is read first and the remembered write failure second, so a json report cut short is refused the way the text report is */
     renderErr := output.Render(instance.writer, envelope, instance.option)
+    if nil == renderErr && nil != instance.writer.firstErr {
+        renderErr = exception.NewError("the report could not be written in full", map[string]any{"command": command}, instance.writer.firstErr)
+    }
+
     if nil != runErr {
         return runErr
     }

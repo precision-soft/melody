@@ -345,6 +345,11 @@ func (instance *Provider) open(ctx context.Context, params bunorm.ConnectionPara
     /* the routing lives here because open is the one funnel every door shares — Open, OpenContext, the retry loop and the migration door all pass through it. Routed only on the retry path, the default retry-less open left bun's declaration mistakes on standard error. RouteDiagnostics is once per process, so repeated attempts cost nothing. */
     bunorm.RouteDiagnostics(logger)
 
+    /* an empty host is refused here, before the driver sees it: the address ":port" it would make is the LOCAL system to a dialer, so a host left unset connected the application to whatever listened on that port on its own machine — with the configured credentials — instead of failing; measured, six accepted connections through one open, the dialect handshake included. The database and the user are left to the server, which refuses an empty one by name, and an empty password is a legitimate value. */
+    if "" == params.Host {
+        return nil, exception.NewError("mysql database open refused: the host is empty", params.SafeContext(), nil)
+    }
+
     connectionConfig := NewConnectionConfig(params.Host, params.Port, params.Database, params.User, params.Password)
 
     poolConfig := instance.resolvedPoolConfig()
