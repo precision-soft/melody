@@ -716,12 +716,12 @@ func closeCreatedScopeInstances(
             closedValues[value] = struct{}{}
         }
 
-        closeable, isCloseable := value.(closer)
-        if false == isCloseable {
+        closeable, contextCloseable, carriesADoor := closeDoorsOf(value)
+        if false == carriesADoor {
             return
         }
 
-        closeErr := closeServiceValueWithin(closeContext, value, closeable)
+        closeErr := closeServiceValueWithin(closeContext, closeable, contextCloseable)
         if nil != closeErr {
             failures[nodeKey] = errorText(closeErr)
         }

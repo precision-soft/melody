@@ -2191,3 +2191,47 @@ func TestScope_Close_ContainsAPanickingContextDoor(t *testing.T) {
         }
     }
 }
+
+/* scopedContextDoorOnlyService is the scoped twin of the container test's fixture: the context-taking close door alone, no Close. */
+type scopedContextDoorOnlyService struct {
+    closes      int
+    hadDeadline bool
+}
+
+func (instance *scopedContextDoorOnlyService) CloseWithContext(closeContext context.Context) error {
+    instance.closes = instance.closes + 1
+    _, instance.hadDeadline = closeContext.Deadline()
+
+    return nil
+}
+
+func TestScope_Close_ClosesAServiceThatCarriesOnlyCloseWithContextAndHandsItTheDeadline(t *testing.T) {
+    serviceContainer := NewContainer()
+    service := &scopedContextDoorOnlyService{}
+
+    MustRegisterScoped[*scopedContextDoorOnlyService](
+        serviceContainer,
+        "scoped.context.door.only",
+        func(resolver containercontract.Resolver) (*scopedContextDoorOnlyService, error) {
+            return service, nil
+        },
+    )
+
+    scopeInstance := serviceContainer.NewScope()
+    _ = MustFromResolver[*scopedContextDoorOnlyService](scopeInstance, "scoped.context.door.only")
+
+    closeContext, cancel := context.WithTimeout(context.Background(), time.Second)
+    defer cancel()
+
+    if closeErr := scopeInstance.(containercontract.ContextCloser).CloseWithContext(closeContext); nil != closeErr {
+        t.Fatalf("expected a clean scope close, got %v", closeErr)
+    }
+
+    if 1 != service.closes {
+        t.Fatalf("expected the scoped service carrying only CloseWithContext to be closed once, got %d closes", service.closes)
+    }
+
+    if false == service.hadDeadline {
+        t.Fatalf("expected the scope's deadline to reach the service through its only door")
+    }
+}

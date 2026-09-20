@@ -3,6 +3,7 @@ package container
 import (
     "testing"
 
+    containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
 )
 
@@ -18,4 +19,28 @@ func refusalStageOf(t *testing.T, err error) string {
     stage, _ := melodyErr.Context()["refusedAt"].(string)
 
     return stage
+}
+
+/* armParallelTeardown reaches the opt-in the way an application does: through a type assertion on the concrete container, because the Container contract declares neither this door nor IsClosed nor CloseWithContext, for the reason written at each of them. */
+func armParallelTeardown(t *testing.T, serviceContainer containercontract.Container) {
+    t.Helper()
+
+    armable, isArmable := serviceContainer.(interface{ ArmParallelTeardown() error })
+    if false == isArmable {
+        t.Fatalf("expected the container to carry the parallel teardown door")
+    }
+
+    if armErr := armable.ArmParallelTeardown(); nil != armErr {
+        t.Fatalf("unexpected arm error: %v", armErr)
+    }
+}
+
+func buildEveryRegisteredService(t *testing.T, serviceContainer containercontract.Container, serviceNames ...string) {
+    t.Helper()
+
+    for _, serviceName := range serviceNames {
+        if _, getErr := serviceContainer.Get(serviceName); nil != getErr {
+            t.Fatalf("unexpected get error for %s: %v", serviceName, getErr)
+        }
+    }
 }

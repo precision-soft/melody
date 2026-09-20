@@ -745,7 +745,7 @@ func printPrunedDestinations(commandContext clicontract.Context, pruned []string
     }
 }
 
-/* atomicWriteFile writes the content to a temporary file beside the destination and renames it into place, removing the temporary file on every failure it can see. The mode is the one a destination that does not exist yet is created with; a destination already there keeps the permission bits it carries — the setuid, setgid and sticky bits are not carried over, which is what the framework's and the migrate module's writers do and what a crontab never needs — so a crontab an operator narrowed to 0600 — environment lines under /etc/cron.d — is not widened back to 0644 by every regeneration and every --prune, which the unconditional chmod of the temporary file did. A process killed between the create and the rename leaves the temporary file behind, carrying the rendered content and with it the ownership marker; a later --prune then empties it down to its header and reports it, which is the one thing that can honestly be done with a file this generator wrote and nothing references — an orphan of a crash is garbage, and emptying garbage costs nothing. */
+/* atomicWriteFile writes the content to a temporary file beside the destination and renames it into place, removing the temporary file on every failure it can see. The mode is the one a destination that does not exist yet is created with; a destination already there keeps the permission bits it carries — the setuid, setgid and sticky bits are not carried over, which is what every atomic writer of this repository does and what a crontab never needs — so a crontab an operator narrowed to 0600 — environment lines under /etc/cron.d — is not widened back to 0644 by every regeneration and every --prune, which the unconditional chmod of the temporary file did. A process killed between the create and the rename leaves the temporary file behind, carrying the rendered content and with it the ownership marker; a later --prune then empties it down to its header and reports it, which is the one thing that can honestly be done with a file this generator wrote and nothing references — an orphan of a crash is garbage, and emptying garbage costs nothing. */
 func atomicWriteFile(destination string, content []byte, mode os.FileMode) error {
     tmpFile, createErr := os.CreateTemp(filepath.Dir(destination), filepath.Base(destination)+".*.tmp")
     if nil != createErr {
@@ -821,7 +821,7 @@ func atomicWriteFile(destination string, content []byte, mode os.FileMode) error
     return nil
 }
 
-/* destinationFileMode reads the permission bits the destination already carries (Perm: the setuid, setgid and sticky bits are dropped) so an atomic rewrite keeps them, and answers the mode the caller chose for a new file when there is no destination to read — the shape the framework's atomic writer and the migrate writer carry for the same reason. */
+/* destinationFileMode reads the permission bits the destination already carries (Perm: the setuid, setgid and sticky bits are dropped) so an atomic rewrite keeps them, and answers the mode the caller chose for a new file when there is no destination to read — the shape every atomic writer of this repository carries for the same reason. */
 func destinationFileMode(destination string, newFileMode os.FileMode) os.FileMode {
     info, statErr := os.Stat(destination)
     if nil != statErr {
@@ -1181,18 +1181,22 @@ func applicationIdentity(configuration configcontract.Configuration) (string, er
     return applicationName, nil
 }
 
-/* templateOwnedBy hands the application's name to a template that can carry it and answers the copy that renders and answers that application's ownership line; a template that cannot — a custom dialect — is used as it is, with whatever line it declares, and an empty name leaves every template unowned. */
+/* templateOwnedBy hands the application's name to a template that can carry it and answers the copy that renders and answers that application's ownership line; a template that cannot — a custom dialect — is used as it is, with whatever line it declares, and an empty name leaves every template unowned.
+
+   The copy is derived for the package's OWN dialects, by their concrete type, and for nothing else. Asked through the interface the two share, the door took a wrapper that EMBEDS a builtin — the shape an application writes to decorate a builtin's rendering and registers under the builtin's name, through the replacement RegisterTemplate names for exactly that — for a builtin: the embedding promotes the copy door onto the wrapper, the copy is of the embedded builtin alone, and the wrapper, its rendering included, was dropped from the run in silence. A wrapper is used as it is; the line it answers is its embedded builtin's bare prefix, which no named application's sweep matches. */
 func templateOwnedBy(template Template, applicationName string) Template {
     if "" == applicationName {
         return template
     }
 
-    ownedTemplate, isApplicationOwned := template.(applicationOwnedTemplate)
-    if false == isApplicationOwned {
-        return template
+    switch ownedTemplate := template.(type) {
+    case *CrontabTemplate:
+        return ownedTemplate.ownedBy(applicationName)
+    case *K8sTemplate:
+        return ownedTemplate.ownedBy(applicationName)
     }
 
-    return ownedTemplate.ownedBy(applicationName)
+    return template
 }
 
 func resolveDefault(

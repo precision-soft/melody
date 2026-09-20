@@ -127,9 +127,7 @@ func (instance *TransportsCloser) closeOne(closeContext context.Context, name st
     transport := instance.transports[name]
 
     /* the transport's own context-taking door is preferred when it carries one, which is what makes the deadline reach the amqp stretches rather than stopping at this loop */
-    contextCloseable, isContextCloseable := transport.(interface {
-        CloseWithContext(closeContext context.Context) error
-    })
+    contextCloseable, isContextCloseable := transport.(containercontract.ContextCloser)
     if true == isContextCloseable {
         return contextCloseable.CloseWithContext(closeContext)
     }

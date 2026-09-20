@@ -244,6 +244,7 @@ v3 ~ compatible ~ ./container.WithTeardownDependencyOfType ~ added ~ unclassifie
 v3 ~ compatible ~ ./container/contract.OverrideOption ~ added ~ unclassified ~
 v3 ~ compatible ~ ./container/contract.RegisterOptions.TeardownDependencyTypes ~ added ~ unclassified ~
 v3 ~ compatible ~ ./container/contract.TeardownPlanEntry ~ added ~ unclassified ~
+v3 ~ compatible ~ ./container/contract.ContextCloser ~ added ~ unclassified ~
 v3 ~ compatible ~ ./container/contract.OverrideOptions ~ added ~ unclassified ~
 v3 ~ compatible ~ ./container/contract.OverrideServiceWithOptions ~ added ~ unclassified ~
 v3 ~ compatible ~ ./container/contract.RegisterOptions.ReplacesContainerService ~ added ~ unclassified ~

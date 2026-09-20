@@ -2226,20 +2226,6 @@ func TestContainer_Close_ReachesTheContextTakingDoorWithoutADeadline(t *testing.
     }
 }
 
-/* armParallelTeardown reaches the opt-in the way an application does: through a type assertion on the concrete container, because the Container contract declares neither this door nor IsClosed nor CloseWithContext, for the reason written at each of them. */
-func armParallelTeardown(t *testing.T, serviceContainer containercontract.Container) {
-    t.Helper()
-
-    armable, isArmable := serviceContainer.(interface{ ArmParallelTeardown() error })
-    if false == isArmable {
-        t.Fatalf("expected the container to carry the parallel teardown door")
-    }
-
-    if armErr := armable.ArmParallelTeardown(); nil != armErr {
-        t.Fatalf("unexpected arm error: %v", armErr)
-    }
-}
-
 /* waveMateCloser closes by announcing that it started and then waiting, for a bounded moment, to be told that its wave-mate started too. Serially the first one to close waits the whole moment out and reports it, because the second has not begun; in one wave both announce before either waits. The bound is what keeps the failing arm a failure rather than a hung suite. */
 type waveMateCloser struct {
     started      chan struct{}
@@ -2845,16 +2831,6 @@ func registerAmbiguousTypeWiring(t *testing.T, serviceContainer containercontrac
     }
 }
 
-func buildEveryRegisteredService(t *testing.T, serviceContainer containercontract.Container, serviceNames ...string) {
-    t.Helper()
-
-    for _, serviceName := range serviceNames {
-        if _, getErr := serviceContainer.Get(serviceName); nil != getErr {
-            t.Fatalf("unexpected get error for %s: %v", serviceName, getErr)
-        }
-    }
-}
-
 /* a teardown dependency declared on a TYPE that more than one service is registered under orders NOTHING, and a close that reached it does not report a cycle nobody declared. Expanded onto every name of the type it wrote an edge the declaring code never asked for, and where one service of that type had already ordered itself before the declarer that edge closed a ring: the close then answered "dependency cycle detected" over a teardown in which all three services closed and every Close returned nil, and it did so with the parallel opt-in NOT armed, on the path this commit promised to leave alone. */
 func TestContainer_Close_ADeclarationOnAnAmbiguousTypeOrdersNothingAndReportsNoCycle(t *testing.T) {
     serviceContainer := NewContainer()
@@ -2939,9 +2915,11 @@ func TestContainer_Close_ADeclarationOnAnUnambiguousTypeStillOrdersAndStillRepor
 }
 
 /* concurrentCloser records how many closes were inside their Close at the same moment, over a bounded moment of its own. */
+/* concurrentCloser records how many closes run at once — the peak is what tells a wave from a serial loop — and, where a test hands it a counter, how many closes it answered. */
 type concurrentCloser struct {
     running *atomic.Int64
     peak    *atomic.Int64
+    closed  *atomic.Int64
 }
 
 func (instance *concurrentCloser) Close() error {
@@ -2956,6 +2934,10 @@ func (instance *concurrentCloser) Close() error {
 
     time.Sleep(50 * time.Millisecond)
     instance.running.Add(-1)
+
+    if nil != instance.closed {
+        instance.closed.Add(1)
+    }
 
     return nil
 }
@@ -3116,29 +3098,6 @@ func TestContainer_ArmParallelTeardown_RefusesADeclaredDependencyOnAScopedServic
     }
 }
 
-type countingConcurrentCloser struct {
-    running *atomic.Int64
-    peak    *atomic.Int64
-    closed  *atomic.Int64
-}
-
-func (instance *countingConcurrentCloser) Close() error {
-    now := instance.running.Add(1)
-
-    for {
-        peak := instance.peak.Load()
-        if now <= peak || true == instance.peak.CompareAndSwap(peak, now) {
-            break
-        }
-    }
-
-    time.Sleep(50 * time.Millisecond)
-    instance.running.Add(-1)
-    instance.closed.Add(1)
-
-    return nil
-}
-
 /* the built instances an override evicted carry no edges, so nothing can be said about what they hold — of one another either; they used to share one wave and close at once. */
 func TestContainer_Close_ArmedTheReplacedInstancesCloseOneAfterTheOther(t *testing.T) {
     serviceContainer := NewContainer()
@@ -3150,8 +3109,8 @@ func TestContainer_Close_ArmedTheReplacedInstancesCloseOneAfterTheOther(t *testi
     for _, serviceName := range []string{"app.replaced.first", "app.replaced.second"} {
         if registerErr := serviceContainer.Register(
             serviceName,
-            func(resolver containercontract.Resolver) (*countingConcurrentCloser, error) {
-                return &countingConcurrentCloser{running: &running, peak: &peak, closed: &closed}, nil
+            func(resolver containercontract.Resolver) (*concurrentCloser, error) {
+                return &concurrentCloser{running: &running, peak: &peak, closed: &closed}, nil
             },
             WithoutTypeRegistration(),
         ); nil != registerErr {
@@ -3188,7 +3147,7 @@ type mutualConcurrentCloser struct {
 }
 
 func (instance *mutualConcurrentCloser) Close() error {
-    return (&countingConcurrentCloser{running: instance.running, peak: instance.peak, closed: instance.closed}).Close()
+    return (&concurrentCloser{running: instance.running, peak: instance.peak, closed: instance.closed}).Close()
 }
 
 /* two services that hold each other gain no edge, because no ordering between them is true — but they are not unrelated, and under waves "no edge" used to mean "same wave", so the two closed at once, each Close entering the other. They are one group inside the wave, closed one after the other. */
@@ -3424,7 +3383,7 @@ func TestContainer_ATeardownReachedWithTheBudgetGoneRecordsAZeroBudget(t *testin
     closeContext, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
     defer cancel()
 
-    if closeErr := serviceContainer.(contextCloser).CloseWithContext(closeContext); nil != closeErr {
+    if closeErr := serviceContainer.(containercontract.ContextCloser).CloseWithContext(closeContext); nil != closeErr {
         t.Fatalf("expected a spent budget alone not to fail the teardown, got %v", closeErr)
     }
 
@@ -3880,5 +3839,44 @@ func TestContainer_Close_TheViewLeavesNoExpandedTypeEdgeBehindOnTheDefaultPath(t
 
     if closeErr := serviceContainer.Close(); nil != closeErr {
         t.Fatalf("expected a clean teardown once the declaration turned ambiguous, got %v", closeErr)
+    }
+}
+
+/* contextDoorOnlyService carries the context-taking close door and NOT Close: the shape a service grows when the deadline is the only reason it closes at all. */
+type contextDoorOnlyService struct {
+    closes      int
+    hadDeadline bool
+}
+
+func (instance *contextDoorOnlyService) CloseWithContext(closeContext context.Context) error {
+    instance.closes = instance.closes + 1
+    _, instance.hadDeadline = closeContext.Deadline()
+
+    return nil
+}
+
+func TestContainer_Close_ClosesAServiceThatCarriesOnlyCloseWithContextAndHandsItTheDeadline(t *testing.T) {
+    serviceContainer := NewContainer()
+    service := &contextDoorOnlyService{}
+
+    MustRegister[*contextDoorOnlyService](
+        serviceContainer,
+        "context.door.only",
+        func(resolver containercontract.Resolver) (*contextDoorOnlyService, error) {
+            return service, nil
+        },
+    )
+    _ = MustFromResolver[*contextDoorOnlyService](serviceContainer, "context.door.only")
+
+    if closeErr := closeContainerWithin(t, serviceContainer, time.Second); nil != closeErr {
+        t.Fatalf("expected a clean teardown, got %v", closeErr)
+    }
+
+    if 1 != service.closes {
+        t.Fatalf("expected the service carrying only CloseWithContext to be closed once, got %d closes", service.closes)
+    }
+
+    if false == service.hadDeadline {
+        t.Fatalf("expected the teardown's deadline to reach the service through its only door")
     }
 }

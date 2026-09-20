@@ -1,7 +1,6 @@
 package container
 
 import (
-    "context"
     "sort"
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
@@ -79,10 +78,6 @@ type teardownPlanner interface {
     TeardownPlan() []containercontract.TeardownPlanEntry
     TeardownRunsInWaves() bool
     TeardownDeadlineOverrun() exceptioncontract.Context
-}
-
-type contextCloser interface {
-    CloseWithContext(closeContext context.Context) error
 }
 
 type closedContainerChecker interface {

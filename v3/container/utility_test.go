@@ -159,3 +159,42 @@ func TestOverrideValueFitsRegisteredType_JudgesRawAssignabilityAndCanonicalIdent
         t.Fatalf("expected the identical pointer type to fit")
     }
 }
+
+/* the key of an UNNAMED composite type — a slice, a map, a channel of a named type — reaches the import path of the named element it is built from; read through pointers alone it carried no path, so a slice of one package's Bus and a slice of another package's Bus of the same short name shared one key, and a declaration on the first passed as registered through the second. */
+func TestTypeIdentityKey_KeepsTwoSameNamedPackagesApartOnACompositeType(t *testing.T) {
+    pairs := [][2]reflect.Type{
+        {reflect.TypeOf(&[]collisionalpha.Bus{}), reflect.TypeOf(&[]collisionbeta.Bus{})},
+        {reflect.TypeOf(map[string]*collisionalpha.Bus{}), reflect.TypeOf(map[string]*collisionbeta.Bus{})},
+        {reflect.TypeOf(make(chan collisionalpha.Bus)), reflect.TypeOf(make(chan collisionbeta.Bus))},
+        {reflect.TypeOf([2]collisionalpha.Bus{}), reflect.TypeOf([2]collisionbeta.Bus{})},
+    }
+
+    for _, pair := range pairs {
+        if pair[0].String() != pair[1].String() {
+            t.Fatalf("expected the two probe types to share a String(), which is what makes this test meaningful, got %q and %q", pair[0].String(), pair[1].String())
+        }
+
+        if typeIdentityKey(pair[0]) == typeIdentityKey(pair[1]) {
+            t.Fatalf("expected %s of two same-named packages to hold distinct keys, both read %q", pair[0].String(), typeIdentityKey(pair[0]))
+        }
+    }
+}
+
+/* the keys of named types, of pointers to them and of a builtin are exactly what they were: the identity key is what the creation guard, the type index and every teardown node key are keyed on, so a key that moved would be a node that moved. */
+func TestTypeIdentityKey_LeavesTheKeysOfNamedTypesAndPointersUnchanged(t *testing.T) {
+    alphaPath := "github.com/precision-soft/melody/v3/container/internal/collisionalpha/contract"
+
+    expected := map[reflect.Type]string{
+        reflect.TypeOf(&collisionalpha.Bus{}):      alphaPath + "\x00*contract.Bus",
+        reflect.TypeOf(collisionalpha.Bus{}):       alphaPath + "\x00contract.Bus",
+        reflect.TypeOf(new(*collisionalpha.Bus)):   alphaPath + "\x00**contract.Bus",
+        reflect.TypeOf(""):                         "\x00string",
+        reflect.TypeOf(func() {}):                  "\x00func()",
+    }
+
+    for targetType, expectedKey := range expected {
+        if expectedKey != typeIdentityKey(targetType) {
+            t.Fatalf("expected the key of %s to read %q, got %q", targetType.String(), expectedKey, typeIdentityKey(targetType))
+        }
+    }
+}

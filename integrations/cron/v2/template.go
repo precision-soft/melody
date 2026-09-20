@@ -14,7 +14,7 @@ type OwnedTemplate interface {
     OwnershipMarker() string
 }
 
-/* applicationOwnedTemplate is the capability, internal to the package, of producing a copy of this template that renders and answers the ownership line of one application. The generator asks it of the template it resolved, once per run, with the application's cli name, and uses the copy for the run's rendering and for its sweep, so the line a destination carries and the line the sweep asks for come from one object. A custom dialect that wants a per-application line carries the name from its construction, the way the readme's example carries its other knobs: the door stays internal until a major can add it to the public contract. */
+/* applicationOwnedTemplate is the capability, internal to the package, of producing a copy of this template that renders and answers the ownership line of one application. The generator asks it of the template it resolved, once per run, with the application's cli name, and uses the copy for the run's rendering and for its sweep, so the line a destination carries and the line the sweep asks for come from one object. A custom dialect that wants a per-application line carries the name from its construction, the way the readme's example carries its other knobs: the door stays internal until a major can add it to the public contract. The generator derives the copy by the concrete type of each builtin rather than through this interface, which an embedding promotes onto a wrapper that is not a builtin; the interface names the shape the builtins share. */
 type applicationOwnedTemplate interface {
     ownedBy(applicationName string) Template
 }

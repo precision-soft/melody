@@ -2,6 +2,7 @@ package bunorm
 
 import (
     "context"
+    "errors"
     "fmt"
     "reflect"
     "runtime/debug"
@@ -421,8 +422,8 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
                 _ = database.Close()
             }
 
-            /* an open the registry itself ended — CloseWithContext cancelled openContext while this one was in flight — reaches its waiter as the registry's refusal, with the cancellation under it: the provider's refusal read on its own said the CALLER had cancelled, which the caller had not, and named no registry for the operator to look at */
-            if true == instance.closed && nil != instance.openContext.Err() {
+            /* an open the registry itself ended — CloseWithContext cancelled openContext while this one was in flight — reaches its waiter as the registry's refusal, with the cancellation under it: the provider's refusal read on its own said the CALLER had cancelled, which the caller had not, and named no registry for the operator to look at. The refusal has to CARRY the cancellation for that: a provider that never read its context and refused on its own grounds after the close — a password the server turned down — answered the same guard, read on the registry's state alone, and its waiter was told the registry had ended an open the registry never touched */
+            if true == instance.closed && nil != instance.openContext.Err() && true == errors.Is(openErr, context.Canceled) {
                 pendingOpen.openError = exception.NewError(
                     fmt.Sprintf("bunorm manager %s open ended by the registry closing while it was in flight", name),
                     map[string]any{"manager": name},

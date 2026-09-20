@@ -12,6 +12,7 @@ import (
     "sync"
     "time"
 
+    containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     "github.com/precision-soft/melody/v3/internal"
@@ -67,19 +68,12 @@ func (instance *container) ArmParallelTeardown() error {
 }
 
 /* recordDeclaredTeardownEdgeLocked keeps a note of a hand-declared ordering beside the graph, and writes the NAME form into the same graph a resolution writes into, in the same key space, so the teardown reads one graph. The TYPE form is not written: what a type stands for is the plan's to expand, for one plan, and the raw edge towards "type:<T>" left in the graph outlived the expansion that dropped it — a declaration turned ambiguous by a second, non-strict registration under the type expanded to nothing, while the raw edge was translated through the alias of the first service the moment that type had been resolved through itself, and the close reported a cycle on the default path over a teardown in which every service closed. The refusal below still names the spelling somebody wrote, from the note. */
-func (instance *container) recordDeclaredTeardownEdgeLocked(serviceName string, dependencyNodeKey string, dependencySpelling string) {
-    if true == strings.HasPrefix(dependencyNodeKey, containerNameNodeKeyPrefix) {
-        instance.registerDependencyLocked(containerNameNodeKey(serviceName), dependencyNodeKey)
+func (instance *container) recordDeclaredTeardownEdgeLocked(declaredEdge declaredTeardownEdge) {
+    if true == strings.HasPrefix(declaredEdge.dependencyNodeKey, containerNameNodeKeyPrefix) {
+        instance.registerDependencyLocked(containerNameNodeKey(declaredEdge.dependentServiceName), declaredEdge.dependencyNodeKey)
     }
 
-    instance.declaredTeardownEdges = append(
-        instance.declaredTeardownEdges,
-        declaredTeardownEdge{
-            dependentServiceName: serviceName,
-            dependencyNodeKey:    dependencyNodeKey,
-            dependencySpelling:   dependencySpelling,
-        },
-    )
+    instance.declaredTeardownEdges = append(instance.declaredTeardownEdges, declaredEdge)
 }
 
 /* expandedDeclaredTypeEdgesLocked makes a declaration keyed by TYPE name the same service the name form would. A type node exists only where a service was resolved THROUGH its type; a service registered under a name and resolved by that name has one node, the name's, however many types it is filed under. So a declared type edge would point at a node that was never created and be dropped by the walk. On the default path a declaration the container cannot resolve — a type nothing registered, or one several services share — is dropped with the silence register_option.go promises; on the armed path that silence cannot happen, because arming and every registration after it refuse the declaration first.
@@ -134,25 +128,23 @@ func (instance *container) teardownNodeWasRegisteredLocked(nodeKey string) bool 
         return false
     }
 
-    for registeredType := range instance.typeProviders {
-        if containerTypeNodeKey(registeredType) == nodeKey {
-            return true
-        }
+    /* a type spelling is answered through the identity index rather than by scanning the type maps for a key that renders equal: every type those maps hold was filed in the index by the registration that put it there, so a key the index does not know names a type nothing registered */
+    registeredType, known := instance.typeIdentityKeyToType[strings.TrimPrefix(nodeKey, containerTypeNodeKeyPrefix)]
+    if false == known {
+        return false
     }
 
-    for registeredType := range instance.typeInstances {
-        if containerTypeNodeKey(registeredType) == nodeKey {
-            return true
-        }
+    if _, provided := instance.typeProviders[registeredType]; true == provided {
+        return true
     }
 
-    for registeredType := range instance.typeRegistrationNamesByType {
-        if containerTypeNodeKey(registeredType) == nodeKey {
-            return true
-        }
+    if _, built := instance.typeInstances[registeredType]; true == built {
+        return true
     }
 
-    return false
+    _, named := instance.typeRegistrationNamesByType[registeredType]
+
+    return named
 }
 
 /* teardownNodeIsScopedLocked answers whether a node key names a SCOPED registration, under either spelling: a name in the scoped providers, or a type a scoped registration filed. The two spellings of one declaration used to part company here — the name form was refused as scoped and the type form of the same dependency as never registered, which is false, the service being registered one lifetime away — against the package document's word that everything said of the name form holds for the type form word for word. */
@@ -163,13 +155,12 @@ func (instance *container) teardownNodeIsScopedLocked(nodeKey string) bool {
         return scoped
     }
 
-    for registeredType, serviceNames := range instance.scopedTypeRegistrationNamesByType {
-        if 0 < len(serviceNames) && containerTypeNodeKey(registeredType) == nodeKey {
-            return true
-        }
+    registeredType, known := instance.typeIdentityKeyToType[strings.TrimPrefix(nodeKey, containerTypeNodeKeyPrefix)]
+    if false == known {
+        return false
     }
 
-    return false
+    return 0 < len(instance.scopedTypeRegistrationNamesByType[registeredType])
 }
 
 /* refuseUnregisteredDeclaredTeardownEdgesLocked is the half of the parallel opt-in that has to fail CLOSED. A declared edge naming a service nobody registered is dropped by the teardown walk, deliberately, so that naming an optional collaborator is not an error — and while the teardown is sequential that silence costs nothing, because the creation order carries the ordering anyway. Under waves it costs the ordering itself: the edge that was supposed to hold two services apart is not there, they land in one wave, and a misspelling reads exactly like a service that has no dependencies.
@@ -312,12 +303,9 @@ func (instance *container) teardownPlanLocked() teardownPlan {
         createdNodeKeys = append(createdNodeKeys, containerTypeNodeKeyPrefix+typeKey)
     }
 
-    sort.Slice(
-        createdNodeKeys,
-        func(leftIndex int, rightIndex int) bool {
-            return createdNodeKeys[leftIndex] > createdNodeKeys[rightIndex]
-        },
-    )
+    slices.SortFunc(createdNodeKeys, func(left string, right string) int {
+        return strings.Compare(right, left)
+    })
 
     resolveNodeValue := func(nodeKey string) (any, bool) {
         if true == strings.HasPrefix(nodeKey, containerNameNodeKeyPrefix) {
@@ -479,6 +467,16 @@ func (instance *container) teardownPlanLocked() teardownPlan {
     /* the graph is stated in the container's own node keys, so it is translated into the canonical keys the teardown walks — the ones an alias of the same instance was collapsed onto — before the shared ordering runs over it. A declaration keyed by a type is expanded onto the name that type is registered under at the same moment, for this plan, and translated with the rest: after this the graph is one graph, and it is built ONCE, here, before the walk reads it — the walk used to translate the raw graph a second time for its own ring check, and the expansion, being this plan's, never reached that copy: a pointer held back against a declaration keyed by a type was written as an inference over a declaration the ring check could not see, the plan carried both directions, and the armed close reported a cycle over a teardown in which every service closed. An edge that collapses onto itself — a resolution between two names of one instance — is no edge, and used to reach the plan as a service closed before itself */
     canonicalEdges := make(map[string]map[string]struct{}, len(canonicalNodeKeys))
 
+    addEdge := func(canonicalDependent string, canonicalDependency string) {
+        dependencies, exists := canonicalEdges[canonicalDependent]
+        if false == exists {
+            dependencies = make(map[string]struct{})
+            canonicalEdges[canonicalDependent] = dependencies
+        }
+
+        dependencies[canonicalDependency] = struct{}{}
+    }
+
     addCanonicalEdge := func(dependentKey string, dependencyKey string) {
         canonicalDependent, dependentCreated := representativeOf[dependentKey]
         canonicalDependency, dependencyCreated := representativeOf[dependencyKey]
@@ -487,13 +485,7 @@ func (instance *container) teardownPlanLocked() teardownPlan {
             return
         }
 
-        dependencies, exists := canonicalEdges[canonicalDependent]
-        if false == exists {
-            dependencies = make(map[string]struct{})
-            canonicalEdges[canonicalDependent] = dependencies
-        }
-
-        dependencies[canonicalDependency] = struct{}{}
+        addEdge(canonicalDependent, canonicalDependency)
     }
 
     for dependentKey, dependencySet := range instance.dependencyGraph {
@@ -509,14 +501,9 @@ func (instance *container) teardownPlanLocked() teardownPlan {
     /* what the providers HELD joins what they resolved and declared, in the one canonical graph — merged AFTER the walk read it, since that is the graph the drain runs over and the one place a second source of edges could otherwise silently do nothing. The inferences are this plan's and are not written into the container's graph, where the view would leave them to outlive the state they were drawn from. The pairs the walk could NOT order — held both ways, or around a ring — come back as canonical keys too, and are grouped so that a wave closes each group one service at a time */
     inferredEdges, unorderedPairs := instance.teardownEdgesFromHeldIdentitiesLocked(valueOfNodeKey, representativeOf, canonicalEdges)
 
+    /* the inferred edges come back in canonical keys with no self-edge among them, so they are written past the translation */
     for _, inferredEdge := range inferredEdges {
-        dependencies, exists := canonicalEdges[inferredEdge[0]]
-        if false == exists {
-            dependencies = make(map[string]struct{})
-            canonicalEdges[inferredEdge[0]] = dependencies
-        }
-
-        dependencies[inferredEdge[1]] = struct{}{}
+        addEdge(inferredEdge[0], inferredEdge[1])
     }
 
     /* an alias group is as old as its OLDEST member: the same instance filed under a name and under a type came into being once, and the stamp of the later filing would claim it was built after services that were in fact built from it */
@@ -580,6 +567,10 @@ func (instance *container) teardownPlanLocked() teardownPlan {
 
 /* unorderedGroupsOf joins the pairs the walk saw holding each other into groups: two services linked by such a pair, directly or through others, belong to one group, and a group is closed one service at a time by the wave that holds it. The group index is assigned in the order the pairs arrive, which the caller keeps deterministic. */
 func unorderedGroupsOf(unorderedPairs [][2]string) map[string]int {
+    if 0 == len(unorderedPairs) {
+        return nil
+    }
+
     groupParent := make(map[string]string, 2*len(unorderedPairs))
 
     var rootOf func(key string) string
@@ -709,13 +700,13 @@ func (instance *container) closeInternal(closeContext context.Context) error {
 
     /* the books of the deadline: what every close cost, the closes that were running when the deadline passed, and the closes reached after it. They are what names the service that ate the budget, which the failure map cannot, since spending it is not a failure. */
     closeDurations := make(map[string]time.Duration)
-    spentBy := make(map[string]time.Duration)
+    spentBy := make(map[string]struct{})
     starved := make([]string, 0)
 
     /* the books above are written by every closer, and under the waves that is more than one goroutine at a time. The claim is taken BEFORE the close rather than after it, which is what makes "closed exactly once" hold when two candidates carrying one value land in the same wave; on the serial path the two orders cannot be told apart, since nothing else runs between them. */
     var teardownBookMutex sync.Mutex
 
-    claimCandidate := func(candidate closeCandidate) (closer, bool) {
+    claimCandidate := func(candidate closeCandidate) (closer, containercontract.ContextCloser, bool) {
         pointerKey, hasPointer := pointerKeyOf(candidate.value)
         if true == hasPointer && true == isZeroSizePointerIdentity(pointerKey) {
             hasPointer = false
@@ -728,11 +719,11 @@ func (instance *container) closeInternal(closeContext context.Context) error {
 
         if true == hasPointer {
             if _, alreadyClosed := closedPointers[pointerKey]; true == alreadyClosed {
-                return nil, false
+                return nil, nil, false
             }
         } else if true == comparableValue {
             if _, alreadyClosed := closedValues[candidate.value]; true == alreadyClosed {
-                return nil, false
+                return nil, nil, false
             }
         }
 
@@ -742,23 +733,23 @@ func (instance *container) closeInternal(closeContext context.Context) error {
             closedValues[candidate.value] = struct{}{}
         }
 
-        closeable, isCloseable := candidate.value.(closer)
-        if false == isCloseable {
-            return nil, false
+        closeable, contextCloseable, carriesADoor := closeDoorsOf(candidate.value)
+        if false == carriesADoor {
+            return nil, nil, false
         }
 
-        return closeable, true
+        return closeable, contextCloseable, true
     }
 
     closeOneCandidate := func(candidate closeCandidate) {
-        closeable, shouldClose := claimCandidate(candidate)
+        closeable, contextCloseable, shouldClose := claimCandidate(candidate)
         if false == shouldClose {
             return
         }
 
         /* the stamps are the goroutine's own, so a wave's closers are timed side by side; what is classified is where each close stood against the deadline — running when it passed, or reached after it */
         startedAt := time.Now()
-        closeErr := closeServiceValueWithin(closeContext, candidate.value, closeable)
+        closeErr := closeServiceValueWithin(closeContext, closeable, contextCloseable)
         finishedAt := time.Now()
 
         teardownBookMutex.Lock()
@@ -770,7 +761,7 @@ func (instance *container) closeInternal(closeContext context.Context) error {
             if false == startedAt.Before(deadline) {
                 starved = append(starved, candidate.nodeKey)
             } else if true == finishedAt.After(deadline) {
-                spentBy[candidate.nodeKey] = finishedAt.Sub(startedAt)
+                spentBy[candidate.nodeKey] = struct{}{}
             }
         }
 
@@ -813,13 +804,12 @@ func (instance *container) closeInternal(closeContext context.Context) error {
                 continue
             }
 
-            /* a service the walk saw holding another that holds it back — a pair, or a ring — has no edge, because no ordering between them is true; but it is not unrelated to it, and closing the two at once is each Close entering the other. Those form a group inside the wave, closed one after the other in the wave's own order, while the rest of the wave and the other groups still start at once.
+            /* a service the walk saw holding another that holds it back — a pair, or a ring — has no edge, because no ordering between them is true; but it is not unrelated to it, and closing the two at once is each Close entering the other. Those form a group inside the wave, closed one after the other in the wave's own order, while the rest of the wave and the other groups still start at once. So three things are closed one after the other, each for its own reason and by its own mechanism: a ring's wave, by the plan that marked it; a group, inside its wave; and the evicted instances, each a wave of its own past the graph.
 
-               The goroutines below carry no recover of their own, and that is measured rather than assumed: everything that runs on one is closeOneCandidate, whose claim reads kinds and pointers through reflect and keys the value book only after Comparable() said it may, whose close is contained by closeServiceValue and its context-taking twin, and whose failure text is produced under errorText's own recover. Nothing on that path can panic uncontained, so a recover here would be a mechanism guarding nothing. */
-            var waveGroup sync.WaitGroup
-
+               The goroutines below carry no recover of their own, and that is measured rather than assumed: everything that runs on one is closeOneCandidate, whose claim reads kinds and pointers through reflect and keys the value book only after Comparable() said it may, whose close is contained by containedClose through either door, and whose failure text is produced under errorText's own recover. Nothing on that path can panic uncontained, so a recover here would be a mechanism guarding nothing. A wave with ONE thing to run — one free service, or one group — runs it on this goroutine: a goroutine and a wait for a single runnable is the cost of parallelism with nothing to run alongside, and the ordinary wave of a small application is exactly that. */
             serialGroups := make(map[int][]closeCandidate)
             serialGroupOrder := make([]int, 0)
+            runnables := make([]func(), 0, len(wave))
 
             for _, candidate := range wave {
                 groupIndex, linked := plan.unorderedGroupOf[candidate.nodeKey]
@@ -833,25 +823,39 @@ func (instance *container) closeInternal(closeContext context.Context) error {
                     continue
                 }
 
-                waveGroup.Add(1)
+                waveCandidate := candidate
 
-                go func(waveCandidate closeCandidate) {
-                    defer waveGroup.Done()
-
+                runnables = append(runnables, func() {
                     closeOneCandidate(waveCandidate)
-                }(candidate)
+                })
             }
 
             for _, groupIndex := range serialGroupOrder {
-                waveGroup.Add(1)
+                group := serialGroups[groupIndex]
 
-                go func(group []closeCandidate) {
-                    defer waveGroup.Done()
-
+                runnables = append(runnables, func() {
                     for _, waveCandidate := range group {
                         closeOneCandidate(waveCandidate)
                     }
-                }(serialGroups[groupIndex])
+                })
+            }
+
+            if 1 == len(runnables) {
+                runnables[0]()
+
+                continue
+            }
+
+            var waveGroup sync.WaitGroup
+
+            for _, runnable := range runnables {
+                waveGroup.Add(1)
+
+                go func(run func()) {
+                    defer waveGroup.Done()
+
+                    run()
+                }(runnable)
             }
 
             waveGroup.Wait()
@@ -914,7 +918,7 @@ func teardownDeadlineContext(
     startedAt time.Time,
     finishedAt time.Time,
     closeDurations map[string]time.Duration,
-    spentBy map[string]time.Duration,
+    spentBy map[string]struct{},
     starved []string,
 ) exceptioncontract.Context {
     if false == hasDeadline || false == finishedAt.After(deadline) || 0 == len(closeDurations) {
@@ -937,12 +941,19 @@ func teardownDeadlineContext(
         return rendered
     }
 
+    /* the closers running when the deadline passed are rendered with the durations every closer wrote, so the record keeps one figure per close rather than the same figure filed twice */
+    spentByDurations := make(map[string]time.Duration, len(spentBy))
+
+    for nodeKey := range spentBy {
+        spentByDurations[nodeKey] = closeDurations[nodeKey]
+    }
+
     sort.Strings(starved)
 
     return exceptioncontract.Context{
         "budget":    budget.String(),
         "spent":     finishedAt.Sub(startedAt).String(),
-        "spentBy":   renderDurations(spentBy),
+        "spentBy":   renderDurations(spentByDurations),
         "starved":   starved,
         "durations": renderDurations(closeDurations),
     }
@@ -975,51 +986,41 @@ func cloneDeadlineRecord(record exceptioncontract.Context) exceptioncontract.Con
     return copied
 }
 
+/* closeDoorsOf answers which close doors a service value carries — Close, the context-taking ContextCloser, either or both — and whether it carries any at all. It is asked once, where the value is claimed for closing, so the container and the scope answer the same question about the same value: a value carrying ONLY the context door used to be claimed on Close alone and skipped in silence, with no failure recorded, against the package document's word that the deadline reaches every service whose value carries the door. */
+func closeDoorsOf(value any) (closeable interface{ Close() error }, contextCloseable containercontract.ContextCloser, carriesADoor bool) {
+    closeable, _ = value.(interface{ Close() error })
+    contextCloseable, _ = value.(containercontract.ContextCloser)
+
+    return closeable, contextCloseable, nil != closeable || nil != contextCloseable
+}
+
 /* closeServiceValueWithin runs one service's close under the teardown's deadline when the service can take one, and under its own terms otherwise. The preference is asked of the VALUE rather than declared on any contract, the way bunorm's registry prefers a provider's OpenContext over its Open: a service that grows the door does not have to be re-registered, and one that never grows it is not broken by the door existing.
 
    The context-taking form is preferred whole rather than being given the plain form as a fallback for an expired deadline: a service told its deadline has already passed can still say what it did not manage to release, which is the half of a teardown an operator actually reads, and calling the unbounded form instead would spend a budget that is already gone. */
-func closeServiceValueWithin(closeContext context.Context, value any, closeable interface{ Close() error }) error {
-    contextCloseable, isContextCloseable := value.(interface {
-        CloseWithContext(closeContext context.Context) error
-    })
-    if true == isContextCloseable {
+func closeServiceValueWithin(closeContext context.Context, closeable interface{ Close() error }, contextCloseable containercontract.ContextCloser) error {
+    if nil != contextCloseable {
         return closeServiceValueWithContext(closeContext, contextCloseable)
     }
 
     return closeServiceValue(closeable)
 }
 
-/* closeServiceValueWithContext is closeServiceValue's twin for the context-taking door, containing a panicking close the same way and for the same reasons. */
-func closeServiceValueWithContext(
-    closeContext context.Context,
-    closeable interface {
-        CloseWithContext(closeContext context.Context) error
-    },
-) (closeErr error) {
-    defer func() {
-        recoveredValue := recover()
-        if nil == recoveredValue {
-            return
-        }
-
-        closeErr = exception.NewError(
-            "service close panicked",
-            exceptioncontract.Context{
-                "recoveredType":  fmt.Sprintf("%T", recoveredValue),
-                "recoveredValue": fmt.Sprintf("%v", recoveredValue),
-                "panicStack":     string(debug.Stack()),
-            },
-            exception.PanicCause(recoveredValue),
-        )
-    }()
-
-    return closeable.CloseWithContext(closeContext)
+/* closeServiceValueWithContext is closeServiceValue's twin for the context-taking door, contained the same way and for the same reasons. */
+func closeServiceValueWithContext(closeContext context.Context, closeable containercontract.ContextCloser) error {
+    return containedClose(func() error {
+        return closeable.CloseWithContext(closeContext)
+    })
 }
 
-/* contain a panicking Close() as a recorded failure so the teardown loop still closes the remaining services and closeErr is assigned.
+/* closeServiceValue runs a service's Close under the containment below. */
+func closeServiceValue(closeable interface{ Close() error }) error {
+    return containedClose(closeable.Close)
+}
+
+/* containedClose contains a panicking close as a recorded failure so the teardown loop still closes the remaining services and the error is assigned. It is the one containment for both doors: written twice, the two blocks had to say the same thing about the same failure.
 
    What the failure carries is the whole of what the operator will ever learn about it: this is a containment boundary, so nothing above it sees the panic and nothing below it survives. An error-shaped panic value therefore travels as the CAUSE rather than only as its own stringified message — kept only in a context slot it collapses to one line at the render boundary, so the context map and the cause chain of the very error the Close raised reached no record at all — and the stack is captured here, inside the recover, because it is the only place the frames that ran still exist. The recovery boundaries of the event dispatcher and of the http kernel make the same two decisions for the same reason. */
-func closeServiceValue(closeable interface{ Close() error }) (closeErr error) {
+func containedClose(close func() error) (closeErr error) {
     defer func() {
         recoveredValue := recover()
         if nil == recoveredValue {
@@ -1037,7 +1038,7 @@ func closeServiceValue(closeable interface{ Close() error }) (closeErr error) {
         )
     }()
 
-    return closeable.Close()
+    return close()
 }
 
 /* a user error whose Error() panics must not abort the teardown loop, so the recorded failure text is produced under a recover. */
@@ -1300,12 +1301,13 @@ func teardownCloseOrder(
             ringClosed = make([]bool, len(rings))
 
             for ringIndex, ring := range rings {
-                sort.Slice(
-                    ring,
-                    func(leftIndex int, rightIndex int) bool {
-                        return closesBefore(creationOrderOf, ring[leftIndex], ring[rightIndex])
-                    },
-                )
+                slices.SortFunc(ring, func(left string, right string) int {
+                    if true == closesBefore(creationOrderOf, left, right) {
+                        return -1
+                    }
+
+                    return 1
+                })
 
                 for _, nodeKey := range ring {
                     ringIndexOf[nodeKey] = ringIndex

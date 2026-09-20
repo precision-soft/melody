@@ -50,16 +50,17 @@ func (instance *Application) close(closeContext context.Context) error {
 
     serviceContainerCloseErr := closeServiceContainerWithin(closeContext, serviceContainer)
 
-    if nil != serviceContainerCloseErr && false == alreadyClosed {
-        emergencyLogger.Emergency("failed to close service container", exception.LogContext(serviceContainerCloseErr))
-
-        logging.CloseEmergencyLogger()
-
-        return serviceContainerCloseErr
-    }
-
-    /* a teardown that ran past its deadline and failed nothing is a diagnostic, not a failure: it returns nil and exits clean, and the record of who spent the budget would be lost with it — the only close that could have named the service was the one that answered nil. The container keeps that record behind a door, read here under the same discoverer-only rule as the failure above, and written to the same journal as a warning; a Container implementation without the door has nothing to say, and a close with no deadline leaves no record. */
+    /* a container already closed before this close reached it answers for a teardown somebody else performed: neither its failure nor its deadline record is this close's to report */
     if false == alreadyClosed {
+        if nil != serviceContainerCloseErr {
+            emergencyLogger.Emergency("failed to close service container", exception.LogContext(serviceContainerCloseErr))
+
+            logging.CloseEmergencyLogger()
+
+            return serviceContainerCloseErr
+        }
+
+        /* a teardown that ran past its deadline and failed nothing is a diagnostic, not a failure: it returns nil and exits clean, and the record of who spent the budget would be lost with it — the only close that could have named the service was the one that answered nil. The container keeps that record behind a door, read here under the same discoverer-only rule as the failure above, and written to the same journal as a warning; a Container implementation without the door has nothing to say, and a close with no deadline leaves no record. */
         overrunReporter, reportsOverrun := serviceContainer.(interface {
             TeardownDeadlineOverrun() exceptioncontract.Context
         })
@@ -86,9 +87,7 @@ func (instance *Application) closeDoneChannel() chan struct{} {
 
 /* closeServiceContainerWithin prefers the container's context-taking teardown when it has one, exactly the way this file already discovers IsClosed on the same value: the contract declares Close alone, so a method added to it would be a method every application carrying its own Container implementation would have to grow, and the door is reached by asking the value instead. A container that carries only Close is closed with it, and the budget then bounds the shield around this step rather than the closes inside it — which is the state every container was in before the door existed. */
 func closeServiceContainerWithin(closeContext context.Context, serviceContainer containercontract.Container) error {
-    contextCloser, isContextCloser := serviceContainer.(interface {
-        CloseWithContext(closeContext context.Context) error
-    })
+    contextCloser, isContextCloser := serviceContainer.(containercontract.ContextCloser)
     if true == isContextCloser {
         return contextCloser.CloseWithContext(closeContext)
     }

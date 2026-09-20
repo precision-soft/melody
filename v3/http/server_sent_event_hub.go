@@ -5,6 +5,7 @@ import (
     "sync"
     "sync/atomic"
 
+    containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     "github.com/precision-soft/melody/v3/internal"
@@ -404,9 +405,7 @@ func recoverServerSentEventBackplaneClose(closeContext context.Context, backplan
     }()
 
     /* the backplane's own context-taking door is preferred when it carries one, so the teardown's deadline reaches the amqp and redis stretches underneath instead of stopping at the hub that owns them */
-    contextCloseable, isContextCloseable := backplane.(interface {
-        CloseWithContext(closeContext context.Context) error
-    })
+    contextCloseable, isContextCloseable := backplane.(containercontract.ContextCloser)
     if true == isContextCloseable {
         return contextCloseable.CloseWithContext(closeContext)
     }

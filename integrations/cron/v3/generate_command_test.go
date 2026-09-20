@@ -4212,3 +4212,58 @@ func TestFileCarriesOwnershipMarker_KeepsOneApplicationsLineApartFromAnothersAnd
         }
     }
 }
+
+/* decoratingCrontabTemplate embeds the builtin crontab dialect and decorates its rendering: the shape an application writes to override a builtin, registered under the builtin's own name through RegisterTemplate. The embedding promotes the builtin's unexported doors onto it — the per-application copy door included. */
+type decoratingCrontabTemplate struct {
+    *CrontabTemplate
+}
+
+func (instance *decoratingCrontabTemplate) Render(entries []Entry, options RenderOptions) (string, error) {
+    rendered, renderErr := instance.CrontabTemplate.Render(entries, options)
+
+    return "# decorated by the application\n" + rendered, renderErr
+}
+
+func TestRunLeavesADialectEmbeddingABuiltinAsItIsInsteadOfReplacingItWithTheBareCopy(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+
+    var builtin *CrontabTemplate
+    for _, template := range BuiltinTemplates() {
+        if candidate, isCrontab := template.(*CrontabTemplate); true == isCrontab && "crontab" == candidate.Name() {
+            builtin = candidate
+        }
+    }
+    if nil == builtin {
+        t.Fatalf("expected the builtin crontab dialect among the builtins")
+    }
+
+    generateCommand := NewGenerateCommand(buildConfigurationFromFakeCommands([]clicontract.Command{newFakeCommandWithConfig("reports:daily", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})}))
+    generateCommand.RegisterTemplate(&decoratingCrontabTemplate{CrontabTemplate: builtin})
+
+    _, runErr := dispatchGenerateCommand(
+        generateCommand,
+        newStubConfigurationNamed(nil, "billing"),
+        append(ownershipLineArguments(tempDir, "crontab", nil), "--out", outputPath),
+    )
+    if nil != runErr {
+        t.Fatalf("the generation failed: %v", runErr)
+    }
+
+    content, readErr := os.ReadFile(outputPath)
+    if nil != readErr {
+        t.Fatalf("the generation wrote no %s: %v", outputPath, readErr)
+    }
+
+    if false == strings.Contains(string(content), "# decorated by the application") {
+        t.Fatalf("expected the registered dialect's own rendering, got the bare copy's: %s", content)
+    }
+
+    if false == containsExactLeadingLine(string(content), CrontabOwnershipMarker) {
+        t.Fatalf("expected the wrapper's destination to carry the bare prefix its embedded builtin answers, got: %s", content)
+    }
+
+    if true == containsExactLeadingLine(string(content), CrontabOwnershipMarker+" for billing") {
+        t.Fatalf("expected no application line on a dialect the generator does not own, got: %s", content)
+    }
+}

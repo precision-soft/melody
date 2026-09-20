@@ -166,6 +166,15 @@ func runGenerateCommandWithConfiguration(
 
     generateCommand := NewGenerateCommand(buildConfigurationFromFakeCommands(providedCommands))
 
+    return dispatchGenerateCommand(generateCommand, configuration, extraArgs)
+}
+
+/* dispatchGenerateCommand runs a generate command a test has already built — and may have registered its own dialect on — through the cli engine, with the configuration injected. */
+func dispatchGenerateCommand(
+    generateCommand *GenerateCommand,
+    configuration configcontract.Configuration,
+    extraArgs []string,
+) (string, error) {
     var stdout bytes.Buffer
 
     subCommand := &urfavecli.Command{

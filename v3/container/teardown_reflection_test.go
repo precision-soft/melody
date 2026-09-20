@@ -1769,3 +1769,84 @@ func TestContainer_TeardownPlan_NamesTheSerialGroupOfAMutuallyHeldPair(t *testin
         t.Fatalf("expected the service in no group to read zero, got %v", groupOf)
     }
 }
+
+/* zeroSizeHeldService is a service of zero size: every such allocation shares one address, so a pointer to one cannot say which service it names. */
+type zeroSizeHeldService struct{}
+
+func (instance *zeroSizeHeldService) Close() error {
+    return nil
+}
+
+/* zeroSizeHolder holds a pointer to a zero-size value of the service's type that is NOT the service — its own allocation, which lands on the shared zero-size address all the same. */
+type zeroSizeHolder struct {
+    held *zeroSizeHeldService
+}
+
+func (instance *zeroSizeHolder) Close() error {
+    return nil
+}
+
+func TestContainer_ArmParallelTeardown_AHeldZeroSizePointerNamesNoServiceAndGainsNoEdge(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    armParallelTeardown(t, serviceContainer)
+
+    MustRegister[*zeroSizeHeldService](
+        serviceContainer,
+        "zero.size.service",
+        func(resolver containercontract.Resolver) (*zeroSizeHeldService, error) {
+            return &zeroSizeHeldService{}, nil
+        },
+    )
+
+    MustRegister[*zeroSizeHolder](
+        serviceContainer,
+        "zero.size.holder",
+        func(resolver containercontract.Resolver) (*zeroSizeHolder, error) {
+            return &zeroSizeHolder{held: &zeroSizeHeldService{}}, nil
+        },
+    )
+
+    _ = MustFromResolver[*zeroSizeHeldService](serviceContainer, "zero.size.service")
+    _ = MustFromResolver[*zeroSizeHolder](serviceContainer, "zero.size.holder")
+
+    planned, carriesPlan := serviceContainer.(interface {
+        TeardownPlan() []containercontract.TeardownPlanEntry
+    })
+    if false == carriesPlan {
+        t.Fatalf("expected the container to carry the teardown plan door")
+    }
+
+    for _, entry := range planned.TeardownPlan() {
+        if "service:zero.size.holder" != entry.NodeKey {
+            continue
+        }
+
+        if 0 != len(entry.Dependencies) {
+            t.Fatalf("expected the zero-size pointer the holder carries to name no service, got dependencies %v", entry.Dependencies)
+        }
+
+        return
+    }
+
+    t.Fatalf("expected the holder in the teardown plan")
+}
+
+/* selfPointingNode is the one recursive shape Go admits — a struct holding a POINTER to itself — and the reason the descent needs no visiting set: the pointer answers before the recursion could begin. */
+type selfPointingNode struct {
+    next *selfPointingNode
+}
+
+func TestTypeCanHoldIdentity_AnswersTrueForAStructPointingAtItselfWithoutRecursing(t *testing.T) {
+    if false == typeCanHoldIdentity(reflect.TypeOf(selfPointingNode{})) {
+        t.Fatalf("expected a struct holding a pointer to itself to be able to hold an identity")
+    }
+
+    if false == typeCanHoldIdentity(reflect.TypeOf([2]selfPointingNode{})) {
+        t.Fatalf("expected an array of such structs to be able to hold an identity")
+    }
+
+    if true == typeCanHoldIdentity(reflect.TypeOf([3]struct{ count int }{})) {
+        t.Fatalf("expected an array of scalar structs to hold no identity")
+    }
+}

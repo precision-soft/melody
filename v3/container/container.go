@@ -89,11 +89,27 @@ type container struct {
     teardownDeadline exceptioncontract.Context
 }
 
-/* declaredTeardownEdge is one hand-written ordering: the service that declared it, the node it named, and the spelling it used, which is what a refusal has to quote back. */
+/* declaredTeardownEdge is one hand-written ordering: the service that declared it, the node it named, and the spelling it used, which is what a refusal has to quote back. The two spellings a declaration can take are built by declaredNameEdge and declaredTypeEdge, once each, so the refusal at arming, the refusal at a registration after arming and the note the plan expands all read the same edge. */
 type declaredTeardownEdge struct {
     dependentServiceName string
     dependencyNodeKey    string
     dependencySpelling   string
+}
+
+func declaredNameEdge(serviceName string, dependencyName string) declaredTeardownEdge {
+    return declaredTeardownEdge{
+        dependentServiceName: serviceName,
+        dependencyNodeKey:    containerNameNodeKey(dependencyName),
+        dependencySpelling:   dependencyName,
+    }
+}
+
+func declaredTypeEdge(serviceName string, dependencyType reflect.Type) declaredTeardownEdge {
+    return declaredTeardownEdge{
+        dependentServiceName: serviceName,
+        dependencyNodeKey:    containerTypeNodeKey(dependencyType),
+        dependencySpelling:   dependencyType.String(),
+    }
 }
 
 func (instance *container) Get(serviceName string) (any, error) {
@@ -561,25 +577,13 @@ func (instance *container) register(
     /* once the waves are armed, the rule arming asked of every declared edge is asked of each new one here, at the door that declares it: arming validated a snapshot, and a declaration registered after it used to land, silently, in one wave with the service it named */
     if true == instance.teardownInWaves {
         for _, dependencyName := range registerOption.TeardownDependencyNames {
-            declaredEdge := declaredTeardownEdge{
-                dependentServiceName: serviceName,
-                dependencyNodeKey:    containerNameNodeKey(dependencyName),
-                dependencySpelling:   dependencyName,
-            }
-
-            if refusalErr := instance.refuseDeclaredTeardownEdgeLocked(declaredEdge); nil != refusalErr {
+            if refusalErr := instance.refuseDeclaredTeardownEdgeLocked(declaredNameEdge(serviceName, dependencyName)); nil != refusalErr {
                 return refusalErr
             }
         }
 
         for _, dependencyType := range registerOption.TeardownDependencyTypes {
-            declaredEdge := declaredTeardownEdge{
-                dependentServiceName: serviceName,
-                dependencyNodeKey:    containerTypeNodeKey(dependencyType),
-                dependencySpelling:   dependencyType.String(),
-            }
-
-            if refusalErr := instance.refuseDeclaredTeardownEdgeLocked(declaredEdge); nil != refusalErr {
+            if refusalErr := instance.refuseDeclaredTeardownEdgeLocked(declaredTypeEdge(serviceName, dependencyType)); nil != refusalErr {
                 return refusalErr
             }
         }
@@ -611,11 +615,11 @@ func (instance *container) register(
 
     /* the declared edges are written last, once the registration cannot fail anymore: the graph is never pruned, so an edge left behind by a refused registration would outlive it for the life of the process. A declaration keyed by a NAME goes into the very graph a resolution writes into, in the same key space, so the teardown reads one graph and cannot order two ways; one keyed by a type is kept beside the graph and expanded onto the name that type stands for when each plan is built. */
     for _, dependencyName := range registerOption.TeardownDependencyNames {
-        instance.recordDeclaredTeardownEdgeLocked(serviceName, containerNameNodeKey(dependencyName), dependencyName)
+        instance.recordDeclaredTeardownEdgeLocked(declaredNameEdge(serviceName, dependencyName))
     }
 
     for _, dependencyType := range registerOption.TeardownDependencyTypes {
-        instance.recordDeclaredTeardownEdgeLocked(serviceName, containerTypeNodeKey(dependencyType), dependencyType.String())
+        instance.recordDeclaredTeardownEdgeLocked(declaredTypeEdge(serviceName, dependencyType))
     }
 
     return nil
@@ -739,6 +743,6 @@ var (
     _ containercontract.ScopedRegistrar = (*container)(nil)
     _ parallelTeardownArmer             = (*container)(nil)
     _ teardownPlanner                   = (*container)(nil)
-    _ contextCloser                     = (*container)(nil)
+    _ containercontract.ContextCloser   = (*container)(nil)
     _ closedContainerChecker            = (*container)(nil)
 )

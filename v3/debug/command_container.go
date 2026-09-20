@@ -5,6 +5,7 @@ import (
     "errors"
     "fmt"
     "reflect"
+    "slices"
     "sort"
     "strings"
     "time"
@@ -175,7 +176,10 @@ func (instance *ContainerCommand) describeServiceList(
 
     for index := range items {
         items[index].Teardown = view.forService(items[index].Name, items[index].Lifetime)
-        shownNames[items[index].Name] = struct{}{}
+
+        if containercontract.ServiceLifetimeContainer == items[index].Lifetime {
+            shownNames[items[index].Name] = struct{}{}
+        }
     }
 
     if output.FormatTable == option.Format {
@@ -366,7 +370,7 @@ func readableAliases(aliases []string) []string {
     return readable
 }
 
-/* addBlock renders the plan for the nodes the listing shows: a node filed under a name is kept when that name — or the name of any alias collapsed onto it — is in the window, a node filed only under its type has no name a window could name and is kept always. The wave index is the plan's, not the window's, so a windowed listing still says where each shown service stands in the whole teardown. */
+/* addBlock renders the plan for the nodes the listing shows: a node filed under a name is kept when that name — or the name of any alias collapsed onto it — is in the window, a node filed only under its type has no name a window could name and is kept always. The wave index is the plan's, not the window's, so a windowed listing still says where each shown service stands in the whole teardown. The window holds the names of the CONTAINER services shown: a scoped registration has no node in the plan, and a scoped registration sharing its name with a built container service used to put that service's row into a window that held only the scoped one. */
 func (instance *teardownView) addBlock(builder *output.TableBuilder, shownNames map[string]struct{}) {
     if nil == instance {
         return
@@ -420,7 +424,7 @@ func (instance *teardownView) addBlock(builder *output.TableBuilder, shownNames 
     )
 
     for _, row := range rows {
-        teardownBlock.AddRow(row[0], row[1], row[2], row[3], row[4], row[5])
+        teardownBlock.AddRow(row...)
     }
 }
 
@@ -453,6 +457,7 @@ func renderServiceDescriptionState(item containerServiceDescriptionItem) string 
 
 type containerServiceListItem struct {
     Name             string                        `json:"name"`
+    Lifetime         string                        `json:"lifetime"`
     TypeName         string                        `json:"typeName"`
     ErrorString      string                        `json:"error"`
     ErrorCauseChain  []string                      `json:"errorCauseChain"`
@@ -575,13 +580,10 @@ func resolveErrorCauseChain(resolveErr error) []string {
     return chain[1:]
 }
 
-/* lifetimeOfName answers the lifetime the sweep resolved a name under, from the scoped names it collected before resolving */
-func lifetimeOfName(serviceName string, scopedNames map[string]struct{}) string {
-    if _, scoped := scopedNames[serviceName]; true == scoped {
-        return containercontract.ServiceLifetimeScoped
-    }
-
-    return containercontract.ServiceLifetimeContainer
+/* sweepRegistration is one registration the --build sweep resolves: its name and the lifetime it was registered under, read off the container's description so that a scoped registration sharing its name with a built container service is two registrations with two lifetimes — keyed by name alone, both read as scoped, both resolved through the scope, and both lost their teardown. */
+type sweepRegistration struct {
+    name     string
+    lifetime string
 }
 
 /* populateServiceList is the --build sweep: every windowed service is resolved and the failures report their causes. A scoped registration resolves through the run's own scope — the scope a console command's services live in — never through the container that refuses it. */
@@ -591,42 +593,46 @@ func (instance *ContainerCommand) populateServiceList(
     option output.Option,
     envelope *output.Envelope,
 ) {
-    scopedNames := map[string]struct{}{}
-    serviceNames := ([]string)(nil)
+    registrations := ([]sweepRegistration)(nil)
 
     if reporter, ok := serviceContainer.(serviceDescriptionReporter); true == ok {
         descriptions := reporter.ServiceDescriptions()
 
-        serviceNames = make([]string, 0, len(descriptions))
+        registrations = make([]sweepRegistration, 0, len(descriptions))
         for _, description := range descriptions {
-            serviceNames = append(serviceNames, description.Name)
-
-            if containercontract.ServiceLifetimeScoped == description.Lifetime {
-                scopedNames[description.Name] = struct{}{}
-            }
+            registrations = append(registrations, sweepRegistration{name: description.Name, lifetime: description.Lifetime})
         }
     } else {
-        serviceNames = serviceContainer.Names()
+        for _, name := range serviceContainer.Names() {
+            registrations = append(registrations, sweepRegistration{name: name, lifetime: containercontract.ServiceLifetimeContainer})
+        }
     }
 
-    sort.Strings(serviceNames)
+    /* sorted by name and STABLY, so two registrations of one name keep the order the description gave them — the container's before the scoped one */
+    slices.SortStableFunc(registrations, func(left sweepRegistration, right sweepRegistration) int {
+        return strings.Compare(left.name, right.name)
+    })
 
-    output.ApplySortOrder(serviceNames, option.Order)
+    output.ApplySortOrder(registrations, option.Order)
 
-    total := len(serviceNames)
+    total := len(registrations)
 
-    selected := output.WindowItems(serviceNames, option.Limit, option.Offset)
+    selected := output.WindowItems(registrations, option.Limit, option.Offset)
 
     okItems := make([]containerServiceListItem, 0, len(selected))
     errorItems := make([]containerServiceListItem, 0, len(selected))
 
-    /* the view is read AFTER the sweep resolved the window, because the plan lists what is built and the sweep is what builds it */
+    /* the view is read AFTER the sweep resolved the window, because the plan lists what is built and the sweep is what builds it; the window names the CONTAINER services shown, since a scoped registration has no node the plan could show */
     shownNames := make(map[string]struct{}, len(selected))
 
-    for _, name := range selected {
-        shownNames[name] = struct{}{}
+    for _, registration := range selected {
+        name := registration.name
 
-        serviceInstance, getErr := resolveServiceForLifetime(serviceContainer, runScope, name, scopedNames)
+        if containercontract.ServiceLifetimeContainer == registration.lifetime {
+            shownNames[name] = struct{}{}
+        }
+
+        serviceInstance, getErr := resolveServiceForLifetime(serviceContainer, runScope, name, registration.lifetime)
 
         typeName := ""
         errorString := ""
@@ -645,6 +651,7 @@ func (instance *ContainerCommand) populateServiceList(
 
         item := containerServiceListItem{
             Name:             name,
+            Lifetime:         registration.lifetime,
             TypeName:         typeName,
             ErrorString:      errorString,
             ErrorCauseChain:  errorCauseChain,
@@ -661,11 +668,11 @@ func (instance *ContainerCommand) populateServiceList(
     view := newTeardownView(serviceContainer)
 
     for index := range okItems {
-        okItems[index].Teardown = view.forService(okItems[index].Name, lifetimeOfName(okItems[index].Name, scopedNames))
+        okItems[index].Teardown = view.forService(okItems[index].Name, okItems[index].Lifetime)
     }
 
     for index := range errorItems {
-        errorItems[index].Teardown = view.forService(errorItems[index].Name, lifetimeOfName(errorItems[index].Name, scopedNames))
+        errorItems[index].Teardown = view.forService(errorItems[index].Name, errorItems[index].Lifetime)
     }
 
     reportServiceSweepFailures(errorItems, envelope)
@@ -807,14 +814,14 @@ func reportServiceSweepFailures(
     )
 }
 
-/* resolveServiceForLifetime routes a build to the owner of the name: the container for its own services, the run's scope for a scoped registration — the same resolution a scoped service gets everywhere else in a console process */
+/* resolveServiceForLifetime routes a build to the owner of the registration: the container for its own services, the run's scope for a scoped registration — the same resolution a scoped service gets everywhere else in a console process */
 func resolveServiceForLifetime(
     serviceContainer containercontract.Container,
     runScope containercontract.Scope,
     serviceName string,
-    scopedNames map[string]struct{},
+    lifetime string,
 ) (any, error) {
-    if _, isScoped := scopedNames[serviceName]; true == isScoped && false == internal.IsNilInterface(runScope) {
+    if containercontract.ServiceLifetimeScoped == lifetime && false == internal.IsNilInterface(runScope) {
         return runScope.Get(serviceName)
     }
 
@@ -1201,18 +1208,19 @@ func (instance *ContainerCommand) populateSingleService(
     option output.Option,
     envelope *output.Envelope,
 ) {
-    scopedNames := map[string]struct{}{}
+    /* a name a scoped registration answers to is resolved as scoped, through the run's scope, even where a built container service shares the name: the door answers one registration, and the scoped one is the one a console process reaches */
+    lifetime := containercontract.ServiceLifetimeContainer
     if reporter, ok := serviceContainer.(serviceDescriptionReporter); true == ok {
         for _, description := range reporter.ServiceDescriptions() {
-            if containercontract.ServiceLifetimeScoped == description.Lifetime {
-                scopedNames[description.Name] = struct{}{}
+            if serviceName == description.Name && containercontract.ServiceLifetimeScoped == description.Lifetime {
+                lifetime = containercontract.ServiceLifetimeScoped
             }
         }
     }
 
-    _, isScoped := scopedNames[serviceName]
+    isScoped := containercontract.ServiceLifetimeScoped == lifetime
 
-    serviceInstance, getErr := resolveServiceForLifetime(serviceContainer, runScope, serviceName, scopedNames)
+    serviceInstance, getErr := resolveServiceForLifetime(serviceContainer, runScope, serviceName, lifetime)
 
     typeName := ""
     errorString := ""
@@ -1255,11 +1263,6 @@ func (instance *ContainerCommand) populateSingleService(
 
     if nil != serviceInstance {
         typeName = fmt.Sprintf("%T", serviceInstance)
-    }
-
-    lifetime := containercontract.ServiceLifetimeContainer
-    if true == isScoped {
-        lifetime = containercontract.ServiceLifetimeScoped
     }
 
     view := newTeardownView(serviceContainer)
@@ -1308,7 +1311,13 @@ func (instance *ContainerCommand) populateSingleService(
             block.AddRow("errorContextJson", details.ErrorContextJson)
         }
 
-        view.addBlock(builder, map[string]struct{}{serviceName: {}})
+        /* the block is windowed on this service only where the plan can list it: a scoped registration has no node, and the row of a container service of the same name is not its row */
+        shownNames := map[string]struct{}{}
+        if false == isScoped {
+            shownNames[serviceName] = struct{}{}
+        }
+
+        view.addBlock(builder, shownNames)
 
         envelope.Table = builder.Build()
 

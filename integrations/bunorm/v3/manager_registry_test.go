@@ -2649,3 +2649,70 @@ func TestManagerRegistry_CloseEndsAnOpenStillInFlightInsteadOfAbandoningIt(t *te
         t.Fatalf("expected the provider to see its context cancelled, got %v", provider.endedBy)
     }
 }
+
+/* ownRefusalAfterCloseProvider never reads its context: it waits to be released and then refuses on grounds of its own, the way a provider whose server turned the password down after the registry closed would. */
+type ownRefusalAfterCloseProvider struct {
+    entered chan struct{}
+    release chan struct{}
+    once    sync.Once
+}
+
+var errProviderOwnRefusal = errors.New("password authentication failed for user probe")
+
+func (instance *ownRefusalAfterCloseProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.OpenContext(context.Background(), params, logger)
+}
+
+func (instance *ownRefusalAfterCloseProvider) OpenContext(ctx context.Context, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    instance.once.Do(func() {
+        close(instance.entered)
+    })
+
+    <-instance.release
+
+    return nil, errProviderOwnRefusal
+}
+
+func TestManagerRegistry_AnOpenRefusedOnTheProvidersOwnGroundsAfterTheCloseKeepsThatRefusal(t *testing.T) {
+    provider := &ownRefusalAfterCloseProvider{entered: make(chan struct{}), release: make(chan struct{})}
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{Name: "x", Provider: provider, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("unexpected error: %v", registryErr)
+    }
+
+    opened := make(chan error, 1)
+    go func() {
+        _, openErr := registry.Database("x")
+        opened <- openErr
+    }()
+
+    select {
+    case <-provider.entered:
+    case <-time.After(2 * time.Second):
+        t.Fatal("the provider was never reached; there is no open in flight")
+    }
+
+    closeContext, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+    defer cancel()
+
+    /* the provider ignores its cancellation, so the close reports the open it stopped waiting for; the refusal the waiter then gets is the provider's own */
+    _ = registry.CloseWithContext(closeContext)
+
+    close(provider.release)
+
+    select {
+    case openErr := <-opened:
+        if false == errors.Is(openErr, errProviderOwnRefusal) {
+            t.Fatalf("expected the provider's own refusal to reach the waiter, got: %v", openErr)
+        }
+
+        if true == errors.Is(openErr, ErrManagerRegistryClosed) || true == errors.Is(openErr, context.Canceled) {
+            t.Fatalf("expected a refusal the registry did not cause to keep its own class, got: %v", openErr)
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatal("the released open never answered its waiter")
+    }
+}

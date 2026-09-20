@@ -1994,3 +1994,109 @@ func TestContainerCommand_TheTeardownBlockNamesATypeAliasByTheTypesOwnString(t *
         t.Fatalf("expected no raw identity key in the block, got %q", rendered)
     }
 }
+
+/* newTwinRegistrationContainer files one name under both lifetimes — a built container service and a scoped registration replacing it — beside one ordinary service, which is the shape every door of the command has to answer without handing the scoped twin the container twin's row. */
+func newTwinRegistrationContainer(t *testing.T) containercontract.Container {
+    t.Helper()
+
+    serviceContainer := container.NewContainer()
+
+    serviceContainer.MustRegister(
+        "view.shared",
+        func(_ containercontract.Resolver) (*teardownViewStorage, error) { return &teardownViewStorage{label: "container"}, nil },
+        container.WithoutTypeRegistration(),
+    )
+
+    serviceContainer.MustRegister(
+        "view.other",
+        func(_ containercontract.Resolver) (*teardownViewStorage, error) { return &teardownViewStorage{label: "other"}, nil },
+        container.WithoutTypeRegistration(),
+    )
+
+    for _, name := range []string{"view.shared", "view.other"} {
+        if _, resolveErr := container.FromResolver[*teardownViewStorage](serviceContainer, name); nil != resolveErr {
+            t.Fatalf("resolve %s: %v", name, resolveErr)
+        }
+    }
+
+    serviceContainer.MustRegisterScoped(
+        "view.shared",
+        func(_ containercontract.Resolver) (*teardownViewStorage, error) { return &teardownViewStorage{label: "scoped"}, nil },
+        container.WithoutTypeRegistration(),
+        container.Replacing(),
+    )
+
+    return serviceContainer
+}
+
+/* the --build sweep resolves each registration under ITS lifetime and carries that lifetime on the row: keyed by name alone, both twins read as scoped, both were resolved through the scope, and both lost the teardown the built container service has */
+func TestContainerCommand_BuildSweepKeepsTheContainerTwinsTeardownAndCarriesEachLifetime(t *testing.T) {
+    rendered, runErr := runDebugCommand(&ContainerCommand{}, newTestRuntime(newTwinRegistrationContainer(t)), []string{"--build", "--format=json"})
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    var envelope containerCommandAliasTestEnvelope
+    if unmarshalErr := json.Unmarshal([]byte(rendered), &envelope); nil != unmarshalErr {
+        t.Fatalf("expected a json document, got %v over %q", unmarshalErr, rendered)
+    }
+
+    lifetimesSeen := map[string]bool{}
+
+    for _, item := range envelope.Data.Items {
+        if "view.shared" != item.Name {
+            continue
+        }
+
+        lifetimesSeen[item.Lifetime] = true
+
+        if containercontract.ServiceLifetimeContainer == item.Lifetime && nil == item.Teardown {
+            t.Fatalf("expected the built container twin to keep its teardown on the --build sweep")
+        }
+
+        if containercontract.ServiceLifetimeScoped == item.Lifetime && nil != item.Teardown {
+            t.Fatalf("expected the scoped twin to carry no teardown on the --build sweep, got %+v", item.Teardown)
+        }
+    }
+
+    if false == lifetimesSeen[containercontract.ServiceLifetimeContainer] || false == lifetimesSeen[containercontract.ServiceLifetimeScoped] {
+        t.Fatalf("expected the sweep to list the twin under both lifetimes, got %v", lifetimesSeen)
+    }
+}
+
+/* a window that holds only the scoped twin shows no teardown row: the row it used to show was the container twin's, a service the window had excluded */
+func TestContainerCommand_AWindowHoldingOnlyTheScopedTwinRendersNoTeardownRow(t *testing.T) {
+    for _, arguments := range [][]string{
+        {"--format=table", "--limit=1", "--offset=2"},
+        {"--build", "--format=table", "--limit=1", "--offset=2"},
+    } {
+        rendered, runErr := runDebugCommand(&ContainerCommand{}, newTestRuntime(newTwinRegistrationContainer(t)), arguments)
+        if nil != runErr {
+            t.Fatalf("%v: expected no error, got %v", arguments, runErr)
+        }
+
+        if false == strings.Contains(rendered, "view.shared") {
+            t.Fatalf("%v: expected the window to hold the scoped twin, got %q", arguments, rendered)
+        }
+
+        if true == strings.Contains(rendered, "TEARDOWN") {
+            t.Fatalf("%v: expected no teardown block for a window holding only the scoped registration, got %q", arguments, rendered)
+        }
+    }
+}
+
+/* the single-service door answers the scoped registration a console process reaches, and shows no teardown row for it: the row it used to show under `lifetime: scoped` was the container twin's */
+func TestContainerCommand_TheSingleDoorOnATwinNameAnswersScopedWithoutTheContainerTwinsRow(t *testing.T) {
+    rendered, runErr := runDebugCommand(&ContainerCommand{}, newTestRuntime(newTwinRegistrationContainer(t)), []string{"view.shared", "--format=table"})
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    if false == strings.Contains(rendered, "| lifetime | scoped") {
+        t.Fatalf("expected the door to answer the scoped registration, got %q", rendered)
+    }
+
+    if true == strings.Contains(rendered, "TEARDOWN") {
+        t.Fatalf("expected no teardown block beside a scoped registration, got %q", rendered)
+    }
+}

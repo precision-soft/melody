@@ -2,7 +2,8 @@ package container
 
 import (
     "reflect"
-    "sort"
+    "slices"
+    "strings"
     "sync"
 )
 
@@ -85,9 +86,7 @@ func heldPointerIdentities(root any) []heldPointer {
 
             seen[identity] = struct{}{}
 
-            if false == isZeroSizePointerIdentity(identity) {
-                found = append(found, heldPointer{identity: identity, keepAlive: target})
-            }
+            found = append(found, heldPointer{identity: identity, keepAlive: target})
 
             if true == childrenInReach {
                 enqueue(target, item.depth+1)
@@ -142,7 +141,7 @@ func typeCanHoldIdentity(valueType reflect.Type) bool {
         return answer.(bool)
     }
 
-    answer := typeCanHoldIdentityUncached(valueType, map[reflect.Type]struct{}{})
+    answer := typeCanHoldIdentityUncached(valueType)
 
     typeIdentityCapability.Store(valueType, answer)
 
@@ -151,22 +150,16 @@ func typeCanHoldIdentity(valueType reflect.Type) bool {
 
 var typeIdentityCapability sync.Map
 
-/* the visiting set stops a recursive type — a struct holding an array of itself cannot exist, but a struct holding a pointer to itself answers true at the pointer before the recursion could begin — from being asked forever; a type met again on the way down answers false for that branch, and the branch that actually holds a pointer answers for the whole */
-func typeCanHoldIdentityUncached(valueType reflect.Type, visiting map[reflect.Type]struct{}) bool {
+/* typeCanHoldIdentityUncached descends through arrays and struct fields only, and needs no guard against a recursive type: a struct cannot hold itself by value or inside an array — Go refuses the declaration — and a struct holding a pointer to itself answers true at the pointer, before any recursion could begin, so the descent always ends. */
+func typeCanHoldIdentityUncached(valueType reflect.Type) bool {
     switch valueType.Kind() {
     case reflect.Pointer:
         return true
     case reflect.Array:
-        return typeCanHoldIdentityUncached(valueType.Elem(), visiting)
+        return typeCanHoldIdentityUncached(valueType.Elem())
     case reflect.Struct:
-        if _, alreadyVisiting := visiting[valueType]; true == alreadyVisiting {
-            return false
-        }
-
-        visiting[valueType] = struct{}{}
-
         for fieldIndex := 0; fieldIndex < valueType.NumField(); fieldIndex = fieldIndex + 1 {
-            if true == typeCanHoldIdentityUncached(valueType.Field(fieldIndex).Type, visiting) {
+            if true == typeCanHoldIdentityUncached(valueType.Field(fieldIndex).Type) {
                 return true
             }
         }
@@ -223,7 +216,7 @@ func (instance *container) recordHeldIdentitiesOfBuiltServicesLocked() {
 
    The identity map is built from the node values themselves, so a match means "this pointer IS that service" rather than "this pointer has that type". A node holding its own identity is skipped: the walk starts at the value, so every node holds itself.
 
-   An inferred edge that lies on a CYCLE is not written. Two services that hold each other give this walk two true statements and no ordering; a ring of them gives it one statement per link and no ordering either; and a held pointer running against an edge a provider resolved or an application declared is an inference contradicting an assertion. In every one of those the graph read a cycle and failed a teardown in which every service had closed — measured on a parent and a child with a back-pointer, the plainest shape in Go, and on a ring longer than the walk's reach, which the pair rule alone left standing. So an inferred edge is written only where the graph, with every inferred edge added, offers no way back from its dependency to its dependent — every inferred edge except those of a pair held BOTH ways, which are no ordering and therefore no way back either: with them in the graph, a service holding one member of such a pair had its own edge dropped for a ring that ran through the pair's edge, an inference that did not survive itself, and landed in a wave after what it holds, twenty times out of twenty. What is dropped is always an inference: the resolved and declared edges are in the graph before any of these is, and a cycle those close by themselves is reported exactly as before. The test is a reachability in the combined graph, which no iteration order can change — asked in the CANONICAL key space, where a service filed under its name and under its type is one node, because a ring that exists only once the aliases are folded together is the ring the drain will read.
+   An inferred edge that lies on a CYCLE is not written. Two services that hold each other give this walk two true statements and no ordering; a ring of them gives it one statement per link and no ordering either; and a held pointer running against an edge a provider resolved or an application declared is an inference contradicting an assertion. In every one of those the graph read a cycle and failed a teardown in which every service had closed — measured on a parent and a child with a back-pointer, the plainest shape in Go, and on a ring longer than the walk's reach, which the pair rule alone left standing. So an inferred edge is written only where the graph, with every inferred edge added, offers no way back from its dependency to its dependent — every inferred edge except those of a pair held BOTH ways, which are no ordering and therefore no way back either: with them in the graph, a service holding one member of such a pair had its own edge dropped for a ring that ran through the pair's edge, an inference that did not survive itself, and landed in a wave after what it holds, twenty times out of twenty. What is dropped is always an inference: the resolved and declared edges are in the graph before any of these is, and a cycle those close by themselves is reported exactly as before. The test is whether the edge lies on a ring of the combined graph, which no iteration order can change — asked in the CANONICAL key space, where a service filed under its name and under its type is one node, because a ring that exists only once the aliases are folded together is the ring the drain will read.
 
    The ring is looked for among the nodes that were CREATED, which are the ones the drain will read: a declared edge towards a service nobody built is dropped by the drain, so a way back that runs through such a node is not a way back — measured, it dropped a true inference on a pair the graph then left in one wave.
 
@@ -237,6 +230,7 @@ func (instance *container) teardownEdgesFromHeldIdentitiesLocked(valueOfNodeKey 
 
     nodeKeyOfIdentity := make(map[pointerIdentity]string, len(valueOfNodeKey))
 
+    /* a pointer of zero size names no identity: every zero-size allocation shares one address, so a held pointer to one cannot say WHICH such service it holds — the walk records them like any other pointer, and this is where they are left out */
     for nodeKey, value := range valueOfNodeKey {
         identity, hasPointer := pointerKeyOf(value)
         if false == hasPointer || true == isZeroSizePointerIdentity(identity) {
@@ -296,11 +290,37 @@ func (instance *container) teardownEdgesFromHeldIdentitiesLocked(valueOfNodeKey 
         }
     }
 
+    /* a way back from the dependency to the dependent exists exactly when the two stand in one ring of the combined graph: the held edge itself is in that graph, so a path back closes a ring through it. The rings are computed ONCE, by the same walk the drain uses to find them, instead of one search per held edge */
+    combinedNodes := make(map[string]struct{}, len(combined))
+
+    for dependentKey, dependencySet := range combined {
+        combinedNodes[dependentKey] = struct{}{}
+
+        for dependencyKey := range dependencySet {
+            combinedNodes[dependencyKey] = struct{}{}
+        }
+    }
+
+    ringOf := make(map[string]int)
+
+    for ringIndex, ring := range stronglyConnectedRings(combinedNodes, combined) {
+        for _, member := range ring {
+            ringOf[member] = ringIndex
+        }
+    }
+
+    liesOnARing := func(edge [2]string) bool {
+        dependentRing, dependentOnRing := ringOf[edge[0]]
+        dependencyRing, dependencyOnRing := ringOf[edge[1]]
+
+        return true == dependentOnRing && true == dependencyOnRing && dependentRing == dependencyRing
+    }
+
     inferred = make([][2]string, 0)
     unordered = make([][2]string, 0)
 
     for edge := range heldCanonical {
-        if true == isMutual(edge) || true == reachesNodeKey(combined, edge[1], edge[0]) {
+        if true == isMutual(edge) || true == liesOnARing(edge) {
             unordered = append(unordered, edge)
 
             continue
@@ -316,41 +336,11 @@ func (instance *container) teardownEdgesFromHeldIdentitiesLocked(valueOfNodeKey 
 }
 
 func sortNodeKeyPairs(pairs [][2]string) {
-    sort.Slice(
-        pairs,
-        func(leftIndex int, rightIndex int) bool {
-            if pairs[leftIndex][0] != pairs[rightIndex][0] {
-                return pairs[leftIndex][0] < pairs[rightIndex][0]
-            }
-
-            return pairs[leftIndex][1] < pairs[rightIndex][1]
-        },
-    )
-}
-
-/* reachesNodeKey answers whether the graph offers a path from one node to another, which for an edge about to be written from the second to the first is the question "would this edge lie on a cycle". */
-func reachesNodeKey(edges map[string]map[string]struct{}, fromKey string, toKey string) bool {
-    visited := make(map[string]struct{})
-    pending := []string{fromKey}
-
-    for 0 < len(pending) {
-        current := pending[len(pending)-1]
-        pending = pending[:len(pending)-1]
-
-        if current == toKey {
-            return true
+    slices.SortFunc(pairs, func(left [2]string, right [2]string) int {
+        if left[0] != right[0] {
+            return strings.Compare(left[0], right[0])
         }
 
-        if _, already := visited[current]; true == already {
-            continue
-        }
-
-        visited[current] = struct{}{}
-
-        for next := range edges[current] {
-            pending = append(pending, next)
-        }
-    }
-
-    return false
+        return strings.Compare(left[1], right[1])
+    })
 }

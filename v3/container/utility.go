@@ -20,18 +20,29 @@ func canonicalServiceType(targetType reflect.Type) reflect.Type {
     return targetType
 }
 
-/* typeIdentityKey is a stable map/stack key that is unique per type identity, unlike String(), which two same-named types from different packages share. A package cannot declare two types of the same name, so the named type's import path — reached through any pointer wrapping — plus the full String() distinguishes them without a registry or a lock. */
+/* typeIdentityKey is a stable map/stack key that is unique per type identity, unlike String(), which two same-named types from different packages share. A package cannot declare two types of the same name, so the named type's import path — reached through any pointer, slice, array, channel or map wrapping — plus the full String() distinguishes them without a registry or a lock. Reached through pointers alone, the key of an unnamed composite type carried no path at all, so a slice of one package's Bus and a slice of another package's Bus of the same short name were one key: a declaration on the first passed as registered through the second, and the plan wrote an edge onto a service nothing had named. */
 func typeIdentityKey(targetType reflect.Type) string {
     if nil == targetType {
         return ""
     }
 
-    named := targetType
-    for reflect.Ptr == named.Kind() {
-        named = named.Elem()
+    return typeIdentityPath(targetType) + "\x00" + targetType.String()
+}
+
+/* typeIdentityPath is the import path a type's identity comes from: its own when it is named, and its named element's when it is a pointer, slice, array or channel of one — a map's is the paths of its key and its element, joined. A type built of nothing named — a function, an unnamed struct, an unnamed interface — has no path, and String() alone is what tells two of them apart. */
+func typeIdentityPath(targetType reflect.Type) string {
+    if "" != targetType.PkgPath() {
+        return targetType.PkgPath()
     }
 
-    return named.PkgPath() + "\x00" + targetType.String()
+    switch targetType.Kind() {
+    case reflect.Ptr, reflect.Slice, reflect.Array, reflect.Chan:
+        return typeIdentityPath(targetType.Elem())
+    case reflect.Map:
+        return typeIdentityPath(targetType.Key()) + "|" + typeIdentityPath(targetType.Elem())
+    }
+
+    return ""
 }
 
 func defaultServiceNameForType(targetType reflect.Type) string {
