@@ -11,7 +11,7 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
 )
 
-/* ansibleCronOwnershipMarker is this template's own marker, distinct from the builtin one: --prune empties only files whose first bytes carry the marker of the template generating now, so a dialect of the integrator's own declares a line of its own. */
+/* ansibleCronOwnershipMarker opens this template's own ownership line, distinct from the builtin one: --prune empties only files whose leading lines carry the line of the template generating now, so a dialect of the integrator's own declares a line of its own — and, like the builtin line, names the application after it, because two applications sharing a playbook directory would otherwise have each other's files emptied by the other's sweep. */
 const ansibleCronOwnershipMarker = "# owned by melody:cron:generate (ansible-cron)"
 
 /* ansibleCronHeartbeatName is the cron name of the heartbeat task, the identity ansible.builtin.cron keeps for the crontab line it writes for it. */
@@ -33,18 +33,23 @@ var ansibleCronNameForbiddenCharacters = []melodycron.ForbiddenCharacter{
 
    The dialect lives under crontab semantics, because that is where the module puts the values: ansible.builtin.cron writes the crontab line itself as the seven arguments joined on a space — minute, hour, day, month, weekday, user, job — with no validation of the schedule fields, no escaping of the job (a % is the crontab line continuation there as anywhere else; the module's documentation asks the caller to escape it), and the name as the "#Ansible: <name>" comment line by which it finds the entry again. So the template holds the schedule fields, the user and the job to exactly what the builtin crontab dialect holds them to, through the binding's exported validators, and renders the job through the binding's shell quoting: a field carrying a space would otherwise render a second crontab line, an argument carrying a space would arrive at the process as two, and a % would end the command where it stands.
 
-   TaskNamePrefix is the template's own configuration, injected at construction the way every custom template carries its knobs. It reaches only the play's task name, which ansible prints and never writes anywhere, so it is not validated. */
+   TaskNamePrefix and ApplicationName are the template's own configuration, injected at construction the way every custom template carries its knobs. The prefix reaches only the play's task name, which ansible prints and never writes anywhere, so it is not validated. The application name — the cli name the composition root reads off the configuration — completes the ownership line, the way the generator completes the builtin dialects' line: a custom dialect is handed no name by the generator, so it carries the one it was built with. */
 type AnsibleCronTemplate struct {
-    TaskNamePrefix string
+    TaskNamePrefix  string
+    ApplicationName string
 }
 
 func (instance *AnsibleCronTemplate) Name() string {
     return "ansible-cron"
 }
 
-/* OwnershipMarker opts this dialect into --prune: a playbook file this generator wrote earlier and no longer produces is emptied down to the marker comment instead of running its retired tasks forever. */
+/* OwnershipMarker opts this dialect into --prune: a playbook file this generator wrote earlier for this application and no longer produces is emptied down to the marker comment instead of running its retired tasks forever, while a file another application wrote under the same dialect, carrying its own name, is left alone. */
 func (instance *AnsibleCronTemplate) OwnershipMarker() string {
-    return ansibleCronOwnershipMarker
+    if "" == instance.ApplicationName {
+        return ansibleCronOwnershipMarker
+    }
+
+    return ansibleCronOwnershipMarker + " for " + instance.ApplicationName
 }
 
 /* RendersUserColumn answers true because every task carries the cron module's user argument, so a heartbeat line rendered here needs the user exactly as the /etc/cron.d dialect does. */
@@ -54,7 +59,7 @@ func (instance *AnsibleCronTemplate) RendersUserColumn() bool {
 
 func (instance *AnsibleCronTemplate) Render(entries []melodycron.Entry, options melodycron.RenderOptions) (string, error) {
     var builder strings.Builder
-    builder.WriteString(ansibleCronOwnershipMarker + "\n---\n")
+    builder.WriteString(instance.OwnershipMarker() + "\n---\n")
 
     /* ansible.builtin.cron keeps one crontab line per name, and find_job answers the first "#Ansible: <name>" comment it meets — so two tasks sharing a name are one line, the last one written, and the entry that lost is gone in silence */
     namesSeen := make(map[string]string, len(entries))

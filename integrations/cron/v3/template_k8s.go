@@ -30,13 +30,15 @@ var k8sScheduleForbiddenCharacters = []ForbiddenCharacter{
     {Char: '\r', Reason: "a carriage return terminates the YAML scalar on parsers that treat CR as a line break; remove it before rendering"},
 }
 
-/* k8sHeaderBlock opens every rendered manifest file with the ownership marker as leading YAML comments, so --prune can reconcile the FILE set of a k8s output directory as it does a crontab one: a stale manifest is emptied down to this header. What that does NOT do — unlike a crontab, which crond re-reads — is retire the CronJob object already applied to a cluster: `kubectl apply -f` over a comments-only file changes nothing, so cluster-level retirement needs `kubectl apply --prune` or an explicit delete in the deployment. */
-const k8sHeaderBlock = `# GENERATED FILE
-# DO NOT EDIT LOCALLY
-` + CrontabOwnershipMarker + `
-`
+/* k8sHeaderBlock opens every rendered manifest file with the ownership line as leading YAML comments, so --prune can reconcile the FILE set of a k8s output directory as it does a crontab one: a stale manifest is emptied down to this header. What that does NOT do — unlike a crontab, which crond re-reads — is retire the CronJob object already applied to a cluster: `kubectl apply -f` over a comments-only file changes nothing, so cluster-level retirement needs `kubectl apply --prune` or an explicit delete in the deployment. */
+func k8sHeaderBlock(marker string) string {
+    return "# GENERATED FILE\n# DO NOT EDIT LOCALLY\n" + marker + "\n"
+}
 
-type K8sTemplate struct{}
+type K8sTemplate struct {
+    /* the application whose ownership line this template renders and answers; empty on the builtin singleton, set on the copy the generator derives for a run through ownedBy */
+    applicationName string
+}
 
 var defaultK8sTemplate = &K8sTemplate{}
 
@@ -44,9 +46,17 @@ func (instance *K8sTemplate) Name() string {
     return TemplateNameK8s
 }
 
-/* OwnershipMarker names the comment line every rendered manifest file opens with; the marker is the generating command's, shared with the crontab dialects, because --prune proves who wrote a file, not which dialect rendered it. */
+/* OwnershipMarker names the comment line every rendered manifest file opens with; the line is the generating command's and the application's, shared with the crontab dialects, because --prune proves who wrote a file, not which dialect rendered it. */
 func (instance *K8sTemplate) OwnershipMarker() string {
-    return CrontabOwnershipMarker
+    return ownershipMarkerLine(instance.applicationName)
+}
+
+/* ownedBy answers a copy of this template that renders and answers the named application's ownership line, the way the crontab dialects do, leaving the shared singleton unowned */
+func (instance *K8sTemplate) ownedBy(applicationName string) Template {
+    owned := *instance
+    owned.applicationName = applicationName
+
+    return &owned
 }
 
 /* RendersUserColumn answers false: a CronJob manifest has no user column, so the generator must not demand a heartbeat user this dialect could never place. */
@@ -58,7 +68,7 @@ func (instance *K8sTemplate) RendersUserColumn() bool {
 func (instance *K8sTemplate) Render(entries []Entry, options RenderOptions) (string, error) {
     /* an empty render needs no image: it is what --prune writes into a stale manifest file, and demanding the container image to render zero containers would fail the sweep exactly when the configuration was emptied — the version in which every previously written manifest is stale */
     if 0 == len(entries) {
-        return k8sHeaderBlock, nil
+        return k8sHeaderBlock(instance.OwnershipMarker()), nil
     }
 
     if "" == options.Image {
@@ -123,7 +133,7 @@ func (instance *K8sTemplate) Render(entries []Entry, options RenderOptions) (str
     }
 
     var builder strings.Builder
-    builder.WriteString(k8sHeaderBlock)
+    builder.WriteString(k8sHeaderBlock(instance.OwnershipMarker()))
 
     documentsWritten := 0
 
@@ -389,7 +399,8 @@ func yamlQuote(value string) string {
 }
 
 var (
-    _ Template           = (*K8sTemplate)(nil)
-    _ OwnedTemplate      = (*K8sTemplate)(nil)
-    _ UserColumnTemplate = (*K8sTemplate)(nil)
+    _ Template                 = (*K8sTemplate)(nil)
+    _ OwnedTemplate            = (*K8sTemplate)(nil)
+    _ UserColumnTemplate       = (*K8sTemplate)(nil)
+    _ applicationOwnedTemplate = (*K8sTemplate)(nil)
 )

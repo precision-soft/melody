@@ -7,6 +7,7 @@ import (
     "fmt"
     "os"
     "strings"
+    "sync"
     "testing"
     "time"
     "unicode/utf8"
@@ -781,5 +782,46 @@ func TestCommandOutput_PrintFilesBlockEscapesControlCharacters(t *testing.T) {
 
     if false == strings.Contains(rendered, `  migrations/20240101_a\rb.go`) || true == strings.Contains(rendered, "\r") {
         t.Fatalf("expected the escaped path and no raw carriage return, got %q", rendered)
+    }
+}
+
+/* refusingAfterSink refuses every write after the first it accepts; the writer under test is what has to keep the remembered failure one value when several goroutines write through it */
+type refusingAfterSink struct {
+    mutex    sync.Mutex
+    accepted int
+}
+
+func (instance *refusingAfterSink) Write(payload []byte) (int, error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    if 0 < instance.accepted {
+        return 0, errors.New("sink refused")
+    }
+    instance.accepted++
+
+    return len(payload), nil
+}
+
+/* the writer is the per-query printer of the command and the process-wide fallback for the run's duration, so a migration emitting queries from several goroutines writes through it at once; the guard is a lock, proven under the race detector rather than by a mutant */
+func TestErrorTrackingWriter_ConcurrentWritesKeepOneRememberedFailure(t *testing.T) {
+    writer := &errorTrackingWriter{writer: &refusingAfterSink{}}
+
+    var writers sync.WaitGroup
+    for index := 0; index < 8; index++ {
+        writers.Add(1)
+        go func() {
+            defer writers.Done()
+            for round := 0; round < 64; round++ {
+                if _, writeErr := writer.Write([]byte("line\n")); nil != writeErr {
+                    t.Errorf("the tracking writer must swallow the sink's refusal, got: %v", writeErr)
+                }
+            }
+        }()
+    }
+    writers.Wait()
+
+    if lostWrite := writer.lostWrite(); nil == lostWrite || "sink refused" != lostWrite.Error() {
+        t.Fatalf("expected the first refusal to be remembered, got: %v", lostWrite)
     }
 }

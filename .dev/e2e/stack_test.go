@@ -399,3 +399,35 @@ func TestStackScript_TeardownBudgetSectionDeclaresTheValueAndReadsItBack(t *test
         }
     }
 }
+
+/* the ownership line names the application, and the only band that can prove the sweep keeps two applications apart is one that runs two: the crontab-no-user section builds a NEIGHBOUR from the example, declaring another cli name in the .env.local of the binary it builds (the process environment is ignored by design), writes its crontab beside the example's, plants a file carrying the bare marker an earlier release wrote, and reads all three survivors back from the directory after the example sweeps. Drop the neighbour's name and the two binaries are one application again, whose sweep legitimately empties the other file; drop the bare-marker plant and the legacy arm is vacuous; read the sweep's report instead of the files and a sweep that reports nothing and empties everything stays green. The lines are matched whole (-x), since the bare marker is a prefix of every named line. */
+func TestStackScript_CronPruneSectionRunsASecondApplicationAndReadsTheSurvivorsBack(t *testing.T) {
+    script := readStackScript(t)
+
+    sectionIndex := strings.Index(script, "check_section_start \"CRON CRONTAB-NO-USER TEMPLATE\"")
+    if -1 == sectionIndex {
+        t.Fatal("could not locate the crontab-no-user section")
+    }
+    endIndex := strings.Index(script[sectionIndex:], "check_section_end \"CRON CRONTAB-NO-USER TEMPLATE\"")
+    if -1 == endIndex {
+        t.Fatal("could not locate the end of the crontab-no-user section")
+    }
+    section := script[sectionIndex : sectionIndex+endIndex]
+
+    for _, required := range []string{
+        "grep -qxF '# owned by melody:cron:generate for melody-example'",
+        "MELODY_CLI_NAME=melody-example-neighbour",
+        "./example-neighbour melody:cron:generate --out /tmp/cron-prune-band/neighbour.crontab",
+        "# owned by melody:cron:generate\\n#\\n*/5 * * * * root /usr/local/bin/legacy-job",
+        "grep -qxF '# owned by melody:cron:generate for melody-example-neighbour' /tmp/cron-prune-band/neighbour.crontab",
+        "grep -qx 'neighbour_intact=1'",
+        "grep -qxF '# owned by melody:cron:generate' /tmp/cron-prune-band/legacy.crontab",
+        "grep -qx 'legacy_intact=1'",
+        "grep -qxF '# owned by melody:cron:generate for melody-example' /tmp/cron-prune-band/stale.crontab",
+        "grep -qx 'own_stale_emptied=1'",
+    } {
+        if false == strings.Contains(section, required) {
+            t.Fatalf("the crontab-no-user section must carry %q", required)
+        }
+    }
+}

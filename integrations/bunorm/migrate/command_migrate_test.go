@@ -560,7 +560,7 @@ func (instance *failingOnWriter) Write(payload []byte) (int, error) {
     return instance.buffer.Write(payload)
 }
 
-/* every text write of the report went `_, _ =`, and finish returned the command's own error alone, so a report cut short by a closed pipe or a full disk ended with exit zero — the class the framework's table printer documents fixing with its error-tracking writer. The first lost write is what finish now refuses on, in text mode and under the json document alike; the command's own failure still wins when there is one. */
+/* every text write of the report went `_, _ =`, and finish returned the command's own error alone, so a report cut short by a full disk ended with exit zero — the class the framework's table printer documents fixing with its error-tracking writer. The first lost write is what finish now refuses on, in text mode and under the json document alike; the command's own failure still wins when there is one. */
 func TestMigrateCommand_AReportCutShortIsRefusedInsteadOfExitingZero(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = appliedMigrationRowsHook()

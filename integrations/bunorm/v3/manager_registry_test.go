@@ -2636,6 +2636,11 @@ func TestManagerRegistry_CloseEndsAnOpenStillInFlightInsteadOfAbandoningIt(t *te
         if false == errors.Is(openErr, context.Canceled) {
             t.Fatalf("expected the open ended by the registry's cancellation, got: %v", openErr)
         }
+
+        /* the waiter is told the REGISTRY ended its open — the provider's refusal alone blamed a cancellation the caller never issued */
+        if false == errors.Is(openErr, ErrManagerRegistryClosed) {
+            t.Fatalf("expected the waiter's refusal to carry the registry's closed class, got: %v", openErr)
+        }
     case <-time.After(time.Second):
         t.Fatal("the open in flight did not end with the close")
     }

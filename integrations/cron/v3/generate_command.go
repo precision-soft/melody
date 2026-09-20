@@ -113,7 +113,7 @@ func (instance *GenerateCommand) ownFlags() []clicontract.Flag {
         },
         &clicontract.BoolFlag{
             Name:  flagNamePrune,
-            Usage: "empty the destinations in dir(--out) that this generator wrote earlier and this run no longer produces, so an entry retired or moved between versions stops running. Only files carrying the current template's ownership marker are touched, and destinations outside dir(--out) are never swept",
+            Usage: "empty the destinations in dir(--out) that this generator wrote earlier for this application and this run no longer produces, so an entry retired or moved between versions stops running. Only files carrying the current template's ownership line for this application are touched — a file another application wrote, or one written before the line named the application, is left alone — and destinations outside dir(--out) are never swept",
         },
         &clicontract.StringFlag{
             Name:  flagNameImage,
@@ -175,6 +175,7 @@ type runOptions struct {
     heartbeatRequested []string
     heartbeatEnabled   bool
     prune              bool
+    applicationName    string
     image              string
     namespace          string
     restartPolicy      string
@@ -242,6 +243,15 @@ func (instance *GenerateCommand) resolveRunOptions(
     if nil != templateLookupErr {
         return nil, templateLookupErr
     }
+
+    applicationName, applicationNameErr := applicationIdentity(configuration)
+    if nil != applicationNameErr {
+        return nil, applicationNameErr
+    }
+    options.applicationName = applicationName
+
+    /* the run renders and sweeps through one template owned by this application, so the ownership line every destination carries and the line the sweep asks for come from the same object */
+    template = templateOwnedBy(template, applicationName)
     options.template = template
 
     /* the builtin k8s template ignores the heartbeat (it logs to stdout and models liveness with a dedicated CronJob), so a heartbeat path is never auto-derived for it; an explicitly requested heartbeat still flows through so the run can warn that it is dropped */
@@ -511,12 +521,21 @@ func (instance *GenerateCommand) writeDestinations(
 
 /* pruneStaleDestinations empties the destinations this generator wrote earlier and this run no longer produces. Without it a version that retires an entry leaves its file untouched and crond keeps running the retired job forever, and a version that MOVES an entry to another destination leaves it live in both — the double execution the runner refuses at construction, produced silently by the generator.
 
-   Three rules bound what it may touch, because emptying a file is not reversible. It is opt-in, so a deployment that manages the directory itself is unaffected. It reads only the output directory, never recursing and never following a destination an entry placed elsewhere by absolute path — those live where the operator put them and are not this directory's to reconcile. And it empties only a file whose leading lines carry the ownership marker of the template generating now as an exact line of their own, so a file this generator cannot prove it wrote — one that merely quotes the marker included — is left exactly as it is.
+   Three rules bound what it may touch, because emptying a file is not reversible. It is opt-in, so a deployment that manages the directory itself is unaffected. It reads only the output directory, never recursing and never following a destination an entry placed elsewhere by absolute path — those live where the operator put them and are not this directory's to reconcile. And it empties only a file whose leading lines carry the ownership line of the template generating now FOR THIS APPLICATION as an exact line of their own, so a file this application cannot prove it wrote — one another melody application wrote into the same directory, one written before the line named the application, one that merely quotes the line — is left exactly as it is. The application's name is what makes the line its own, so a run without one cannot sweep at all and says so.
 
    Emptying means rendering the template with no entries: the destination keeps its header and with it the marker, so it stays recognizable to the next run rather than becoming an unowned file the sweep would refuse to touch ever again. */
 func pruneStaleDestinations(options *runOptions, writes []destinationWrite) ([]string, error) {
     if false == options.prune {
         return nil, nil
+    }
+
+    /* without a name there is no line that separates this application's destinations from another's, and a sweep on the bare prefix is exactly the form under which one application emptied another's files — refused, before the directory is read */
+    if "" == options.applicationName {
+        return nil, exception.NewError(
+            "cron: --prune needs the name the application runs under to tell its own destinations from another application's, and the cli configuration carries none",
+            exceptioncontract.Context{"flag": flagNamePrune},
+            nil,
+        )
     }
 
     ownedTemplate, isOwnedTemplate := options.template.(OwnedTemplate)
@@ -592,7 +611,7 @@ const ownershipMarkerReadLimit = 8 * 1024
 /* ownershipMarkerLineLimit bounds WHERE in that head the marker may stand: every builtin template renders it inside the leading comment block, within the first few lines. The old check was a substring search over the whole 8KiB head, and emptying is irreversible — an operator's README, playbook or commented backup that merely QUOTED the marker anywhere in its opening kilobytes was emptied as if this generator had written it. */
 const ownershipMarkerLineLimit = 10
 
-/* fileCarriesOwnershipMarker recognises ownership by an EXACT marker line among the file's leading lines. Exactness is what keeps two markers apart when one extends the other: a custom dialect that declares its own marker by suffixing the builtin one (the ansible example does) documents its files as its own, and a substring match read the builtin marker inside the longer line and emptied the custom dialect's files from a builtin run. The builtin dialects share one identical marker line, so the deliberate cross-dialect reconciliation between them is untouched. */
+/* fileCarriesOwnershipMarker recognises ownership by an EXACT marker line among the file's leading lines. Exactness is what keeps two markers apart when one extends the other: a custom dialect that declares its own marker by suffixing the builtin one (the ansible example does) documents its files as its own, and a substring match read the builtin marker inside the longer line and emptied the custom dialect's files from a builtin run; and it is what keeps one application's line apart from another's and from the bare prefix a file written before the line named the application carries, which extend the shared prefix the same way. The builtin dialects render one identical line for one application, so the deliberate cross-dialect reconciliation between them is untouched. */
 func fileCarriesOwnershipMarker(path string, marker string) (bool, error) {
     fileInstance, openErr := os.Open(path)
     if nil != openErr {
@@ -726,7 +745,7 @@ func printPrunedDestinations(commandContext clicontract.Context, pruned []string
     }
 }
 
-/* atomicWriteFile writes the content to a temporary file beside the destination and renames it into place, removing the temporary file on every failure it can see. The mode is the one a destination that does not exist yet is created with; a destination already there keeps the mode it carries, so a crontab an operator narrowed to 0600 — environment lines under /etc/cron.d — is not widened back to 0644 by every regeneration and every --prune, which the unconditional chmod of the temporary file did. A process killed between the create and the rename leaves the temporary file behind, carrying the rendered content and with it the ownership marker; a later --prune then empties it down to its header and reports it, which is the one thing that can honestly be done with a file this generator wrote and nothing references — an orphan of a crash is garbage, and emptying garbage costs nothing. */
+/* atomicWriteFile writes the content to a temporary file beside the destination and renames it into place, removing the temporary file on every failure it can see. The mode is the one a destination that does not exist yet is created with; a destination already there keeps the permission bits it carries — the setuid, setgid and sticky bits are not carried over, which is what the framework's and the migrate module's writers do and what a crontab never needs — so a crontab an operator narrowed to 0600 — environment lines under /etc/cron.d — is not widened back to 0644 by every regeneration and every --prune, which the unconditional chmod of the temporary file did. A process killed between the create and the rename leaves the temporary file behind, carrying the rendered content and with it the ownership marker; a later --prune then empties it down to its header and reports it, which is the one thing that can honestly be done with a file this generator wrote and nothing references — an orphan of a crash is garbage, and emptying garbage costs nothing. */
 func atomicWriteFile(destination string, content []byte, mode os.FileMode) error {
     tmpFile, createErr := os.CreateTemp(filepath.Dir(destination), filepath.Base(destination)+".*.tmp")
     if nil != createErr {
@@ -802,7 +821,7 @@ func atomicWriteFile(destination string, content []byte, mode os.FileMode) error
     return nil
 }
 
-/* destinationFileMode reads the permission the destination already carries so an atomic rewrite keeps it, and answers the mode the caller chose for a new file when there is no destination to read — the shape the framework's atomic writer and the migrate writer carry for the same reason. */
+/* destinationFileMode reads the permission bits the destination already carries (Perm: the setuid, setgid and sticky bits are dropped) so an atomic rewrite keeps them, and answers the mode the caller chose for a new file when there is no destination to read — the shape the framework's atomic writer and the migrate writer carry for the same reason. */
 func destinationFileMode(destination string, newFileMode os.FileMode) os.FileMode {
     info, statErr := os.Stat(destination)
     if nil != statErr {
@@ -1141,6 +1160,39 @@ func configurationFromRuntime(runtimeInstance runtimecontract.Runtime) (configco
     }
 
     return configuration, nil
+}
+
+/* applicationIdentity reads the name the application runs under — its cli name, the one meta carries — which is what the ownership line names. A configuration whose cli configuration is absent (a double; every configuration the framework builds carries one) answers the empty name, which the sweep refuses rather than reads as an identity; a name spanning lines is refused here, because the ownership line has to be one whole line for the reconciliation to read it back. */
+func applicationIdentity(configuration configcontract.Configuration) (string, error) {
+    cliConfiguration := configuration.Cli()
+    if true == isNilInterface(cliConfiguration) {
+        return "", nil
+    }
+
+    applicationName := strings.TrimSpace(cliConfiguration.Name())
+    if true == strings.ContainsAny(applicationName, "\r\n") {
+        return "", exception.NewError(
+            "cron: the name the application runs under spans lines, so it cannot open the ownership line of a generated destination; configure a single-line cli name",
+            exceptioncontract.Context{"applicationName": applicationName},
+            nil,
+        )
+    }
+
+    return applicationName, nil
+}
+
+/* templateOwnedBy hands the application's name to a template that can carry it and answers the copy that renders and answers that application's ownership line; a template that cannot — a custom dialect — is used as it is, with whatever line it declares, and an empty name leaves every template unowned. */
+func templateOwnedBy(template Template, applicationName string) Template {
+    if "" == applicationName {
+        return template
+    }
+
+    ownedTemplate, isApplicationOwned := template.(applicationOwnedTemplate)
+    if false == isApplicationOwned {
+        return template
+    }
+
+    return ownedTemplate.ownedBy(applicationName)
 }
 
 func resolveDefault(

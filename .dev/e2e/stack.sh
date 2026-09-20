@@ -111,7 +111,7 @@ e2e_require_dev_service
 # mismatch message prints both numbers, so the count to move to is in the failure itself. A run that took one of
 # the degraded early-exit branches (an unreachable supervised app, a cold-cache timeout) legitimately executes
 # fewer checks; it is already red from the check_fail that branch raised
-EXPECTED_CHECK_COUNT_INTEGER=156
+EXPECTED_CHECK_COUNT_INTEGER=161
 readonly EXPECTED_CHECK_COUNT_INTEGER
 
 # state the scope in the output, so a reader never has to infer which major these checks covered
@@ -363,15 +363,81 @@ else
     check_fail "--prune touched a file it cannot prove it wrote"
 fi
 
+# the ownership line names the APPLICATION, not just the command: the line is read back off the file the run
+# wrote, as the exact line the sweep asks for, under the cli name the example declares in its .env
+if printf '%s' "${CRONTAB_WITH_USER_STRING}" | grep -qxF '# owned by melody:cron:generate for melody-example'; then
+    check_pass "the generated crontab's ownership line names the application (melody-example)"
+else
+    check_fail "the generated crontab's ownership line does not name the application"
+fi
+
+# two applications sharing one output directory: a NEIGHBOUR is a second binary of the example, built into its
+# own directory and declaring another cli name in its .env.local (the process environment is ignored by
+# design; the same shape as the teardown-budget section). It writes its crontab beside the example's, a
+# LEGACY file written before the line named the application is planted with the bare marker, and then the
+# example sweeps: its own stale destination is emptied, the neighbour's and the legacy file are left byte
+# for byte — the very files the bare, application-blind marker used to empty on every deploy. Both
+# survivors are read back from the directory afterwards, not from the sweep's report of itself.
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "WORK_DIRECTORY=/tmp/example-neighbour-e2e
+    rm -rf \"\${WORK_DIRECTORY}\"
+    mkdir -p \"\${WORK_DIRECTORY}\"
+    if ! go build -o \"\${WORK_DIRECTORY}/example-neighbour\" . >/tmp/example-neighbour-build.log 2>&1; then
+        echo build_failed=1
+        cat /tmp/example-neighbour-build.log
+        exit 0
+    fi
+    cp .env \"\${WORK_DIRECTORY}/.env\"
+    cp -r public \"\${WORK_DIRECTORY}/public\"
+    printf 'MELODY_CLI_NAME=melody-example-neighbour\n' > \"\${WORK_DIRECTORY}/.env.local\"
+    rm -rf /tmp/cron-prune-band && mkdir -p /tmp/cron-prune-band
+    (cd \"\${WORK_DIRECTORY}\" && ./example-neighbour melody:cron:generate --out /tmp/cron-prune-band/neighbour.crontab >/dev/null 2>&1; echo neighbour_status=\$?)
+    printf '#\n# GENERATED FILE\n# DO NOT EDIT LOCALLY\n#\n# owned by melody:cron:generate\n#\n*/5 * * * * root /usr/local/bin/legacy-job\n' > /tmp/cron-prune-band/legacy.crontab
+    go run . melody:cron:generate --out /tmp/cron-prune-band/stale.crontab >/dev/null 2>&1
+    NEIGHBOUR_BEFORE=\$(md5sum < /tmp/cron-prune-band/neighbour.crontab)
+    LEGACY_BEFORE=\$(md5sum < /tmp/cron-prune-band/legacy.crontab)
+    go run . melody:cron:generate --out /tmp/cron-prune-band/crontab --prune >/dev/null 2>&1
+    echo prune_status=\$?
+    NEIGHBOUR_AFTER=\$(md5sum < /tmp/cron-prune-band/neighbour.crontab 2>/dev/null)
+    LEGACY_AFTER=\$(md5sum < /tmp/cron-prune-band/legacy.crontab 2>/dev/null)
+    if grep -qxF '# owned by melody:cron:generate for melody-example-neighbour' /tmp/cron-prune-band/neighbour.crontab && grep -q 'product:list' /tmp/cron-prune-band/neighbour.crontab; then echo neighbour_named_and_live=1; else echo neighbour_named_and_live=0; fi
+    if [ \"\${NEIGHBOUR_BEFORE}\" = \"\${NEIGHBOUR_AFTER}\" ]; then echo neighbour_intact=1; else echo neighbour_intact=0; fi
+    if [ \"\${LEGACY_BEFORE}\" = \"\${LEGACY_AFTER}\" ] && grep -qxF '# owned by melody:cron:generate' /tmp/cron-prune-band/legacy.crontab; then echo legacy_intact=1; else echo legacy_intact=0; fi
+    if grep -qxF '# owned by melody:cron:generate for melody-example' /tmp/cron-prune-band/stale.crontab && ! grep -q 'product:list' /tmp/cron-prune-band/stale.crontab; then echo own_stale_emptied=1; else echo own_stale_emptied=0; fi"
+NEIGHBOUR_SWEEP_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+
+if printf '%s' "${NEIGHBOUR_SWEEP_STRING}" | grep -qx 'neighbour_named_and_live=1' && printf '%s' "${NEIGHBOUR_SWEEP_STRING}" | grep -qx 'prune_status=0'; then
+    check_pass "a second application built from the example writes its own ownership line (melody-example-neighbour) beside the example's"
+else
+    check_fail "the neighbour application did not write a crontab under its own ownership line: ${NEIGHBOUR_SWEEP_STRING}"
+fi
+
+if printf '%s' "${NEIGHBOUR_SWEEP_STRING}" | grep -qx 'neighbour_intact=1'; then
+    check_pass "--prune left the neighbour application's crontab byte for byte"
+else
+    check_fail "--prune touched the neighbour application's crontab: ${NEIGHBOUR_SWEEP_STRING}"
+fi
+
+if printf '%s' "${NEIGHBOUR_SWEEP_STRING}" | grep -qx 'legacy_intact=1'; then
+    check_pass "--prune left a crontab written before the line named the application byte for byte, bare marker still on it"
+else
+    check_fail "--prune touched a crontab carrying the bare marker: ${NEIGHBOUR_SWEEP_STRING}"
+fi
+
+if printf '%s' "${NEIGHBOUR_SWEEP_STRING}" | grep -qx 'own_stale_emptied=1'; then
+    check_pass "--prune still emptied the example's own stale destination down to its named header"
+else
+    check_fail "--prune no longer sweeps the example's own stale destination: ${NEIGHBOUR_SWEEP_STRING}"
+fi
+
 # the k8s manifests open with the same marker as a leading YAML comment, which is what makes a k8s output
 # directory reconcilable by the same sweep
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "rm -f /tmp/cron-band-k8s.yaml; go run . melody:cron:generate --template k8s --image registry.example/app:1 --out /tmp/cron-band-k8s.yaml >/dev/null 2>&1; cat /tmp/cron-band-k8s.yaml 2>/dev/null"
 K8S_MANIFEST_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 
-if printf '%s' "${K8S_MANIFEST_STRING}" | grep -qF '# owned by melody:cron:generate' && printf '%s' "${K8S_MANIFEST_STRING}" | grep -q 'apiVersion: batch/v1'; then
-    check_pass "the k8s manifests carry the ownership marker beside their CronJob documents"
+if printf '%s' "${K8S_MANIFEST_STRING}" | grep -qxF '# owned by melody:cron:generate for melody-example' && printf '%s' "${K8S_MANIFEST_STRING}" | grep -q 'apiVersion: batch/v1'; then
+    check_pass "the k8s manifests carry the application's ownership line beside their CronJob documents"
 else
-    check_fail "the k8s manifests do not carry the ownership marker (or rendered no CronJob)"
+    check_fail "the k8s manifests do not carry the application's ownership line (or rendered no CronJob)"
 fi
 
 check_section_end "CRON CRONTAB-NO-USER TEMPLATE" "${TAG_VALIDATE}" "e2e"
@@ -920,7 +986,10 @@ check_section_start "TEARDOWN BUDGET" "${TAG_VALIDATE}" "e2e"
 # between the shield's two clocks leaves: the step is handed a cooperative deadline of half the budget, and
 # when the container close returns on it first the emergency record of that close carries the sub-millisecond
 # budget it was cut by, while when the shield's own hard timer fires first the abandon line names the 1ms —
-# measured 5 of 8 and 3 of 8 rounds, so pinning one face alone was a check red one run in three. A budget of
+# measured 5 of 8 and 3 of 8 rounds on one host, and 24 of 24 abandon lines with 2 close records BESIDE them on
+# another: the two faces are not exclusive, either or both may appear, and pinning one alone was a check red one
+# run in three. The budget the close record carries is the cooperative deadline's remainder, which is cut to 0s
+# when it has already passed and rendered in ns below a microsecond, so the record is read in all three spellings. A budget of
 # 0s is the documented "no deadline": a healthy teardown exits zero under it, where a reader folding zero into
 # the default would exit zero as well, which is why the 0s arm only pins that zero is admitted at boot and on
 # the exit path. The port is 18084: 18081–18083 are the Go harness's three examples and 18080 the signal
@@ -971,7 +1040,7 @@ run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "WORK_DIRECTORY=/tmp/example-te
         wait \${APP_PID}
         echo \"exit_\${BUDGET}=\$?\"
         grep -c 'did not return within 1ms' /tmp/example-teardown-\${BUDGET}.log | sed \"s/^/abandoned_names_1ms_\${BUDGET}=/\"
-        grep -c 'failed to close service container.*\"budget\":\"[0-9.]*µs\"' /tmp/example-teardown-\${BUDGET}.log | sed \"s/^/close_cut_under_a_millisecond_\${BUDGET}=/\"
+        grep -c 'failed to close service container.*\"budget\":\"\([0-9.]*[µn]s\|0s\)\"' /tmp/example-teardown-\${BUDGET}.log | sed \"s/^/close_cut_under_a_millisecond_\${BUDGET}=/\"
     done
     rm -rf \"\${WORK_DIRECTORY}\" /tmp/example-teardown-*.log"
 TEARDOWN_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"

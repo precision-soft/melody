@@ -3945,3 +3945,270 @@ func TestRunKeepsARelativeBinaryFlagRelativeToTheWorkingDirectory(t *testing.T) 
         t.Fatalf("a flag path must not be anchored at the project directory, got:\n%s", string(body))
     }
 }
+
+/* ownershipLineDialects lists the builtin dialects whose rendering the ownership-line tests read back, with the arguments each needs to render an entry */
+func ownershipLineDialects() []struct {
+    name  string
+    extra []string
+} {
+    return []struct {
+        name  string
+        extra []string
+    }{
+        {TemplateNameCrontab, nil},
+        {TemplateNameCrontabNoUser, nil},
+        {TemplateNameK8s, []string{"--image", "registry.example/app:1"}},
+    }
+}
+
+/* containsExactLeadingLine answers whether the content carries the line as a whole trimmed line of its own among the leading lines the sweep reads, which is the only reading the reconciliation performs */
+func containsExactLeadingLine(content string, line string) bool {
+    lines := strings.SplitN(content, "\n", ownershipMarkerLineLimit+1)
+    if ownershipMarkerLineLimit < len(lines) {
+        lines = lines[:ownershipMarkerLineLimit]
+    }
+
+    for _, candidate := range lines {
+        if line == strings.TrimSpace(candidate) {
+            return true
+        }
+    }
+
+    return false
+}
+
+func ownershipLineArguments(tempDir string, dialect string, extra []string) []string {
+    return append([]string{
+        "--logs-dir", filepath.Join(tempDir, "logs"),
+        "--binary", "/usr/local/bin/fakeapp",
+        "--user", "deploy",
+        "--template", dialect,
+    }, extra...)
+}
+
+func TestRunWritesTheOwnershipLineWithTheApplicationsName(t *testing.T) {
+    for _, dialect := range ownershipLineDialects() {
+        tempDir := t.TempDir()
+        outputPath := filepath.Join(tempDir, "crontab")
+
+        _, runErr := runGenerateCommandWithConfiguration(
+            t,
+            []clicontract.Command{newFakeCommandWithConfig("reports:daily", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})},
+            append(ownershipLineArguments(tempDir, dialect.name, dialect.extra), "--out", outputPath),
+            newStubConfigurationNamed(nil, "billing"),
+        )
+        if nil != runErr {
+            t.Fatalf("%s: the generation failed: %v", dialect.name, runErr)
+        }
+
+        content, readErr := os.ReadFile(outputPath)
+        if nil != readErr {
+            t.Fatalf("%s: the generation wrote no %s: %v", dialect.name, outputPath, readErr)
+        }
+
+        if false == containsExactLeadingLine(string(content), CrontabOwnershipMarker+" for billing") {
+            t.Fatalf("%s: expected the destination to open with the application's ownership line, got: %s", dialect.name, content)
+        }
+
+        if true == containsExactLeadingLine(string(content), CrontabOwnershipMarker) {
+            t.Fatalf("%s: expected the bare marker not to stand as a line of its own beside the application's, got: %s", dialect.name, content)
+        }
+    }
+}
+
+func TestRunPruneLeavesTheDestinationsOfAnotherApplication(t *testing.T) {
+    for _, dialect := range ownershipLineDialects() {
+        tempDir := t.TempDir()
+        neighbourPath := filepath.Join(tempDir, "neighbour.crontab")
+
+        _, neighbourErr := runGenerateCommandWithConfiguration(
+            t,
+            []clicontract.Command{newFakeCommandWithConfig("neighbour:job", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})},
+            append(ownershipLineArguments(tempDir, dialect.name, dialect.extra), "--out", neighbourPath),
+            newStubConfigurationNamed(nil, "neighbour"),
+        )
+        if nil != neighbourErr {
+            t.Fatalf("%s: the neighbour's generation failed: %v", dialect.name, neighbourErr)
+        }
+
+        before, beforeErr := os.ReadFile(neighbourPath)
+        if nil != beforeErr {
+            t.Fatalf("%s: the neighbour wrote no %s: %v", dialect.name, neighbourPath, beforeErr)
+        }
+
+        stdout, runErr := runGenerateCommandWithConfiguration(
+            t,
+            []clicontract.Command{newFakeCommandWithConfig("billing:job", &EntryConfig{Schedule: &Schedule{Minute: "5", Hour: "4"}})},
+            append(ownershipLineArguments(tempDir, dialect.name, dialect.extra), "--out", filepath.Join(tempDir, "billing.crontab"), "--prune"),
+            newStubConfigurationNamed(nil, "billing"),
+        )
+        if nil != runErr {
+            t.Fatalf("%s: the sweeping generation failed: %v", dialect.name, runErr)
+        }
+
+        after, afterErr := os.ReadFile(neighbourPath)
+        if nil != afterErr {
+            t.Fatalf("%s: the neighbour's destination is gone: %v", dialect.name, afterErr)
+        }
+
+        if string(before) != string(after) {
+            t.Fatalf("%s: expected the neighbour's destination to be left byte for byte, got:\n%s\nwas:\n%s", dialect.name, after, before)
+        }
+
+        if true == strings.Contains(stdout, "pruned ") {
+            t.Fatalf("%s: expected nothing to be swept, got: %q", dialect.name, stdout)
+        }
+    }
+}
+
+func TestRunPruneLeavesADestinationWrittenBeforeTheLineNamedTheApplication(t *testing.T) {
+    tempDir := t.TempDir()
+    legacyPath := filepath.Join(tempDir, "legacy.crontab")
+    legacyContent := "#############################################################################\n#\n# GENERATED FILE\n# DO NOT EDIT LOCALLY\n#\n" + CrontabOwnershipMarker + "\n#############################################################################\n0 3 * * * deploy /usr/local/bin/fakeapp legacy:job\n"
+    if writeErr := os.WriteFile(legacyPath, []byte(legacyContent), 0o644); nil != writeErr {
+        t.Fatalf("write legacy: %v", writeErr)
+    }
+
+    stdout, runErr := runGenerateCommandWithConfiguration(
+        t,
+        []clicontract.Command{newFakeCommandWithConfig("billing:job", &EntryConfig{Schedule: &Schedule{Minute: "5", Hour: "4"}})},
+        append(ownershipLineArguments(tempDir, TemplateNameCrontab, nil), "--out", filepath.Join(tempDir, "billing.crontab"), "--prune"),
+        newStubConfigurationNamed(nil, "billing"),
+    )
+    if nil != runErr {
+        t.Fatalf("the sweeping generation failed: %v", runErr)
+    }
+
+    after, afterErr := os.ReadFile(legacyPath)
+    if nil != afterErr {
+        t.Fatalf("the legacy destination is gone: %v", afterErr)
+    }
+
+    if legacyContent != string(after) {
+        t.Fatalf("expected the destination written under the bare marker to be left byte for byte, got: %s", after)
+    }
+
+    if true == strings.Contains(stdout, "pruned ") {
+        t.Fatalf("expected nothing to be swept, got: %q", stdout)
+    }
+}
+
+func TestRunPruneEmptiesTheApplicationsOwnStaleDestinationDownToItsLine(t *testing.T) {
+    for _, dialect := range ownershipLineDialects() {
+        tempDir := t.TempDir()
+        stalePath := filepath.Join(tempDir, "stale.crontab")
+
+        _, firstErr := runGenerateCommandWithConfiguration(
+            t,
+            []clicontract.Command{newFakeCommandWithConfig("reports:daily", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})},
+            append(ownershipLineArguments(tempDir, dialect.name, dialect.extra), "--out", stalePath),
+            newStubConfigurationNamed(nil, "billing"),
+        )
+        if nil != firstErr {
+            t.Fatalf("%s: the first generation failed: %v", dialect.name, firstErr)
+        }
+
+        stdout, secondErr := runGenerateCommandWithConfiguration(
+            t,
+            []clicontract.Command{newFakeCommandWithConfig("reports:daily", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})},
+            append(ownershipLineArguments(tempDir, dialect.name, dialect.extra), "--out", filepath.Join(tempDir, "current.crontab"), "--prune"),
+            newStubConfigurationNamed(nil, "billing"),
+        )
+        if nil != secondErr {
+            t.Fatalf("%s: the second generation failed: %v", dialect.name, secondErr)
+        }
+
+        stale, staleErr := os.ReadFile(stalePath)
+        if nil != staleErr {
+            t.Fatalf("%s: expected the pruned destination to survive as an empty manifest: %v", dialect.name, staleErr)
+        }
+
+        if true == strings.Contains(string(stale), "reports:daily") {
+            t.Fatalf("%s: expected the retired destination to stop naming the job, got: %s", dialect.name, stale)
+        }
+
+        if false == containsExactLeadingLine(string(stale), CrontabOwnershipMarker+" for billing") {
+            t.Fatalf("%s: expected the emptied destination to keep the application's ownership line, got: %s", dialect.name, stale)
+        }
+
+        if false == strings.Contains(stdout, "pruned "+stalePath) {
+            t.Fatalf("%s: expected the sweep to be reported, got: %q", dialect.name, stdout)
+        }
+    }
+}
+
+func TestRunPruneIsRefusedWhenTheApplicationHasNoName(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+    stalePath := filepath.Join(tempDir, "stale.crontab")
+    staleContent := "#\n" + CrontabOwnershipMarker + "\n0 3 * * * deploy /usr/local/bin/fakeapp stale:job\n"
+    if writeErr := os.WriteFile(stalePath, []byte(staleContent), 0o644); nil != writeErr {
+        t.Fatalf("write stale: %v", writeErr)
+    }
+
+    _, runErr := runGenerateCommandWithConfiguration(
+        t,
+        []clicontract.Command{newFakeCommandWithConfig("reports:daily", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})},
+        append(ownershipLineArguments(tempDir, TemplateNameCrontab, nil), "--out", outputPath, "--prune"),
+        newStubConfigurationNamed(nil, ""),
+    )
+    if nil == runErr || false == strings.Contains(runErr.Error(), "the cli configuration carries none") {
+        t.Fatalf("expected the sweep to be refused for want of an application name, got: %v", runErr)
+    }
+
+    /* the writes precede the sweep, so the run's own destination is on disk under the bare marker — recognisable, and no application's */
+    content, readErr := os.ReadFile(outputPath)
+    if nil != readErr {
+        t.Fatalf("expected the destination to be written before the sweep was refused: %v", readErr)
+    }
+
+    if false == containsExactLeadingLine(string(content), CrontabOwnershipMarker) {
+        t.Fatalf("expected a nameless run to write the bare marker, got: %s", content)
+    }
+
+    after, afterErr := os.ReadFile(stalePath)
+    if nil != afterErr || staleContent != string(after) {
+        t.Fatalf("expected the refused sweep to touch nothing, got err=%v content=%s", afterErr, after)
+    }
+}
+
+func TestRunRefusesAnApplicationNameThatSpansLines(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+
+    _, runErr := runGenerateCommandWithConfiguration(
+        t,
+        []clicontract.Command{newFakeCommandWithConfig("reports:daily", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})},
+        append(ownershipLineArguments(tempDir, TemplateNameCrontab, nil), "--out", outputPath),
+        newStubConfigurationNamed(nil, "billing\n0 * * * * root /bin/sh"),
+    )
+    if nil == runErr || false == strings.Contains(runErr.Error(), "spans lines") {
+        t.Fatalf("expected a name spanning lines to be refused before anything is written, got: %v", runErr)
+    }
+
+    if _, statErr := os.Stat(outputPath); nil == statErr {
+        t.Fatalf("expected nothing to be written under a refused name")
+    }
+}
+
+func TestFileCarriesOwnershipMarker_KeepsOneApplicationsLineApartFromAnothersAndFromTheBarePrefix(t *testing.T) {
+    tempDir := t.TempDir()
+
+    files := map[string]string{
+        "billing":   CrontabOwnershipMarker + " for billing",
+        "neighbour": CrontabOwnershipMarker + " for neighbour",
+        "bare":      CrontabOwnershipMarker,
+    }
+    for name, line := range files {
+        if writeErr := os.WriteFile(filepath.Join(tempDir, name), []byte("# GENERATED FILE\n"+line+"\n0 3 * * * job\n"), 0o644); nil != writeErr {
+            t.Fatalf("write %s: %v", name, writeErr)
+        }
+    }
+
+    for name, expected := range map[string]bool{"billing": true, "neighbour": false, "bare": false} {
+        carries, checkErr := fileCarriesOwnershipMarker(filepath.Join(tempDir, name), CrontabOwnershipMarker+" for billing")
+        if nil != checkErr || expected != carries {
+            t.Fatalf("expected the %s file to answer carries=%v for billing's line, got carries=%v err=%v", name, expected, carries, checkErr)
+        }
+    }
+}

@@ -837,6 +837,14 @@ The refusal existed because the flag types were the parsing engine's own — `cl
 
 **Remedy.** Drop the `errors.Is` branch; there is no failure left for it to match. A `Flags()` that memoizes needs no rewrite on this major, and one that already builds fresh instances per call keeps working unchanged. On v1 and v2 the refusal and the hazard both remain.
 
+### Cron: the ownership line names the application
+
+**What changed.** The ownership line every generated destination opens with — the two crontab dialects in their header block, the `k8s` dialect as a leading YAML comment — reads `# owned by melody:cron:generate for <cli name>`, the name the application runs under after the command, instead of the bare `# owned by melody:cron:generate`. `melody:cron:generate --prune` matches the whole line, so it empties only the destinations this application wrote: the bare line was a package constant, identical in every melody binary, and two applications sharing an output directory had each other's crontabs emptied by the other's sweep. `CrontabOwnershipMarker` keeps its value as the line's prefix. A run whose configuration carries no application name writes the bare prefix and refuses to sweep; a name spanning lines is refused before anything is written.
+
+**Symptom.** Generated files gain the application's name on their ownership line; a byte-exact comparison against previously generated files sees the difference. A destination written by an earlier release carries the bare line and is no longer swept by `--prune`: an entry retired before the upgrade keeps running until its file is removed.
+
+**Remedy.** Regenerate — every destination the current configuration names receives the line with the name and is swept by later runs as before. Remove once, by hand, the destinations a version before the upgrade retired. A custom dialect that two applications may share carries the application's name in its own ownership line from construction; the umbrella readme's example shows the shape.
+
 ### Cron: the generated k8s manifests open with the ownership marker
 
 **What changed.** Every file the builtin `k8s` template renders starts with three comment lines carrying `# owned by melody:cron:generate`, the same marker the crontab dialects carry in their header block, and the template renders the marker header alone — demanding no container image — when it has no entries. That is what lets `--prune` reconcile a k8s output directory: the sweep empties only a file whose first bytes prove this generator wrote it.

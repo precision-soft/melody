@@ -421,6 +421,17 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
                 _ = database.Close()
             }
 
+            /* an open the registry itself ended — CloseWithContext cancelled openContext while this one was in flight — reaches its waiter as the registry's refusal, with the cancellation under it: the provider's refusal read on its own said the CALLER had cancelled, which the caller had not, and named no registry for the operator to look at */
+            if true == instance.closed && nil != instance.openContext.Err() {
+                pendingOpen.openError = exception.NewError(
+                    fmt.Sprintf("bunorm manager %s open ended by the registry closing while it was in flight", name),
+                    map[string]any{"manager": name},
+                    &openEndedByClose{openErr: openErr},
+                )
+
+                return
+            }
+
             pendingOpen.openError = openErr
 
             return

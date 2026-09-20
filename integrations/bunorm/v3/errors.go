@@ -18,6 +18,23 @@ var ErrLoggerIsRequired = errors.New("logger is required")
 
 var ErrManagerRegistryClosed = errors.New("manager registry is closed")
 
+/* openEndedByClose files, under ErrManagerRegistryClosed, the refusal a provider answered when the registry cancelled its open in flight at close: errors.Is answers the registry's class, and the link unwraps to the provider's refusal — the cancellation of the registry's own context — so the cause chain still says how the open ended. */
+type openEndedByClose struct {
+    openErr error
+}
+
+func (instance *openEndedByClose) Error() string {
+    return ErrManagerRegistryClosed.Error()
+}
+
+func (instance *openEndedByClose) Is(target error) bool {
+    return target == ErrManagerRegistryClosed
+}
+
+func (instance *openEndedByClose) Unwrap() error {
+    return instance.openErr
+}
+
 var ErrProviderReturnedNilDatabase = errors.New("provider returned neither a database nor an error")
 
 /* ErrDatabaseUnreachable is the class of an open failure the provider classified as TRANSIENT — a dial refused, a name that would not resolve, a timeout — and could not get past: the outage a ReadWriteSplitter absorbs by reading from the primary. Every other open failure is terminal by nature — a parameter the provider refused, a password the server refused, a database that does not exist — and reaches the caller as it is, so a replica whose configuration is wrong is refused instead of served silently from the primary. A provider that does not mark its failures has them read as terminal, which is the direction that surfaces a misconfiguration. */

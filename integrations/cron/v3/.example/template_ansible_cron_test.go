@@ -26,7 +26,7 @@ func ansibleSampleEntry(mutate func(entry *melodycron.Entry)) melodycron.Entry {
 }
 
 func ansibleSampleTemplate() *AnsibleCronTemplate {
-    return &AnsibleCronTemplate{TaskNamePrefix: "billing cron: "}
+    return &AnsibleCronTemplate{TaskNamePrefix: "billing cron: ", ApplicationName: "billing"}
 }
 
 func renderAnsibleEntry(t *testing.T, mutate func(entry *melodycron.Entry)) string {
@@ -66,7 +66,7 @@ func assertRefusal(t *testing.T, err error, sentinel error, fragment string) {
 func TestAnsibleCronRenderEmitsOneTaskPerEntryUnderTheMarker(t *testing.T) {
     content := renderAnsibleEntry(t, nil)
 
-    expected := ansibleCronOwnershipMarker + "\n---\n" +
+    expected := ansibleCronOwnershipMarker + " for billing\n---\n" +
         "- name: \"billing cron: billing:cleanup\"\n" +
         "  ansible.builtin.cron:\n" +
         "    name: \"billing:cleanup\"\n" +
@@ -89,7 +89,7 @@ func TestAnsibleCronRenderWithoutEntriesCarriesTheMarkerAlone(t *testing.T) {
         t.Fatalf("Render returned unexpected error: %v", err)
     }
 
-    if ansibleCronOwnershipMarker+"\n---\n" != content {
+    if ansibleCronOwnershipMarker+" for billing\n---\n" != content {
         t.Fatalf("expected the marker and the document start alone, got:\n%s", content)
     }
 }

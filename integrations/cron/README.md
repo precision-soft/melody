@@ -291,7 +291,7 @@ A run writes the destinations the **current** configuration names, and by defaul
 `--prune` closes that. It empties, in `dir(--out)`, the destinations this run did not produce, so the retired job stops. Three rules bound it, because emptying a file is not reversible:
 
 * **Opt-in.** Without the flag the behaviour is exactly what it was. A deployment that manages the output directory itself — a release directory built fresh every time — needs nothing here.
-* **Proof of ownership.** Only a file whose head carries the current template's ownership marker is touched. The built-in dialects render `cron.CrontabOwnershipMarker` — the two crontab dialects in their header block, the v3 binding's `k8s` template as a leading YAML comment header on every manifest file; a file you or another tool put in the same directory carries no marker and is left alone. A template of your own opts in by implementing `cron.OwnedTemplate` and including the string it returns in **everything** `Render` produces, entries or none — a template that does not implement it is never pruned.
+* **Proof of ownership.** Only a file whose head carries the current template's ownership line for **this application** is touched. The built-in dialects render `cron.CrontabOwnershipMarker` followed by ` for ` and the name the application runs under — its cli name — as one line: `# owned by melody:cron:generate for <cli name>`, the two crontab dialects in their header block, the v3 binding's `k8s` template as a leading YAML comment header on every manifest file. The name is what keeps two melody applications sharing `/etc/cron.d` apart: the command alone proved who WROTE a file and not which application, so each application's sweep used to empty the other's destinations. A file you or another tool put in the same directory carries no line and is left alone; so is a destination another application wrote, and a destination written by a release before the line named the application (it carries the bare prefix) — regenerate to give it the line, and remove once by hand the ones an earlier version retired. A template of your own opts in by implementing `cron.OwnedTemplate` and including the string it returns in **everything** `Render` produces, entries or none — a template that does not implement it is never pruned; and if two applications may share its directory, it carries the application's name in its line from construction, as the example below does, because the generator hands the name only to the built-in dialects.
 * **The output directory only.** The sweep reads `dir(--out)` and does not recurse. An entry that named an absolute `DestinationFile` outside that directory is written where you asked and is never swept: those files live where the operator put them.
 
 Emptying means re-rendering the template with no entries, so the destination keeps its header — and with it its marker — and stays recognisable to the next run instead of becoming an unowned file the sweep would refuse to touch ever again. An empty configuration sweeps too: that is precisely the version in which every previously written destination is stale. The run stays a success either way, and the destinations it emptied are named on stdout and under `data.pruned` in the `--format=json` envelope, which is a list on every run.
@@ -343,8 +343,11 @@ melodycron "github.com/precision-soft/melody/integrations/cron/v3"
 
 const ansibleCronOwnershipMarker = "# owned by melody:cron:generate (ansible-cron)"
 
+/* the application's name completes the ownership line, the way the generator completes the builtin dialects' line:
+   a custom dialect is handed no name, so it carries the one it was built with */
 type AnsibleCronTemplate struct {
-TaskNamePrefix string
+TaskNamePrefix  string
+ApplicationName string
 }
 
 func (instance *AnsibleCronTemplate) Name() string {
@@ -356,7 +359,7 @@ return "ansible-cron"
    it to, through the binding's exported validators, and quotes the job through the binding's shell quoting */
 func (instance *AnsibleCronTemplate) Render(entries []melodycron.Entry, options melodycron.RenderOptions) (string, error) {
 var builder strings.Builder
-builder.WriteString(ansibleCronOwnershipMarker + "\n---\n")
+builder.WriteString(instance.OwnershipMarker() + "\n---\n")
 
 for _, entry := range entries {
 if userErr := melodycron.ValidateUserField("ansible-cron entry "+entry.Name+" user", entry.User); nil != userErr {
@@ -386,7 +389,7 @@ return builder.String(), nil
 /* the optional capabilities: the marker opts the dialect into --prune, and the user-column answer
    keeps the generator's heartbeat-user demand honest for a dialect it knows nothing about */
 func (instance *AnsibleCronTemplate) OwnershipMarker() string {
-return ansibleCronOwnershipMarker
+return ansibleCronOwnershipMarker + " for " + instance.ApplicationName
 }
 
 func (instance *AnsibleCronTemplate) RendersUserColumn() bool {
@@ -415,7 +418,10 @@ Schedule: &melodycron.Schedule{Minute: "0", Hour: "3"},
 })
 
 generateCommand := melodycron.NewGenerateCommand(cronConfiguration)
-generateCommand.RegisterTemplate(&AnsibleCronTemplate{TaskNamePrefix: "app cron: "})
+generateCommand.RegisterTemplate(&AnsibleCronTemplate{
+TaskNamePrefix:  "app cron: ",
+ApplicationName: melodyconfig.ConfigMustFromContainer(kernelInstance.ServiceContainer()).Cli().Name(),
+})
 
 return append(commands, generateCommand)
 }
@@ -519,7 +525,7 @@ A copy-pasteable end-to-end module wiring — scheduled command, custom `Kuberne
     --heartbeat-path=var/log/cron/heartbeat.crontab
 ```
 
-Producing:
+Producing (the ownership line names the application by its cli name, `melody-example` here):
 
 ```
 #############################################################################
@@ -527,7 +533,7 @@ Producing:
 # GENERATED FILE
 # DO NOT EDIT LOCALLY
 #
-# owned by melody:cron:generate
+# owned by melody:cron:generate for melody-example
 #############################################################################
 # Example of job definition:
 # .---------------- minute (0 - 59)

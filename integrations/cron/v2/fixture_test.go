@@ -201,17 +201,43 @@ func runWithInjectedConfiguration(
     return generateCommand.runWithConfiguration(commandContext, configuration)
 }
 
+/* stubApplicationName is the cli name the stub configuration answers, the identity the ownership line of every generated destination carries: every configuration the framework builds carries a non-empty one, so the double does too, and a test about the nameless case builds its stub without one. */
+const stubApplicationName = "melody-cron-test"
+
+type stubCliConfiguration struct {
+    name string
+}
+
+func (instance *stubCliConfiguration) Name() string {
+    return instance.name
+}
+
+func (instance *stubCliConfiguration) Description() string {
+    return "cron test application"
+}
+
 type stubConfiguration struct {
     parameters map[string]configcontract.Parameter
+    cli        configcontract.CliConfiguration
 }
 
 func newStubConfiguration(values map[string]string) *stubConfiguration {
+    return newStubConfigurationNamed(values, stubApplicationName)
+}
+
+/* newStubConfigurationNamed answers the stub under the given application name; an empty name leaves the cli configuration absent, the shape of a double that never declared one */
+func newStubConfigurationNamed(values map[string]string, applicationName string) *stubConfiguration {
     parameters := make(map[string]configcontract.Parameter, len(values))
     for name, value := range values {
         parameters[name] = melodyconfig.NewParameter(name, value, value, false)
     }
 
-    return &stubConfiguration{parameters: parameters}
+    configuration := &stubConfiguration{parameters: parameters}
+    if "" != applicationName {
+        configuration.cli = &stubCliConfiguration{name: applicationName}
+    }
+
+    return configuration
 }
 
 func (instance *stubConfiguration) Get(name string) configcontract.Parameter {
@@ -236,7 +262,7 @@ func (instance *stubConfiguration) Resolve() error {
 }
 
 func (instance *stubConfiguration) Cli() configcontract.CliConfiguration {
-    return nil
+    return instance.cli
 }
 
 func (instance *stubConfiguration) Kernel() configcontract.KernelConfiguration {

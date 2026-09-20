@@ -6,6 +6,7 @@ import (
     "io"
     "reflect"
     "strconv"
+    "sync"
     "time"
 
     "github.com/precision-soft/melody/v2/cli"
@@ -37,13 +38,17 @@ func newCommandOutput(writer io.Writer, arguments []string, option output.Option
     }
 }
 
-/* errorTrackingWriter remembers the first write failure and swallows the rest, the shape the framework's table printer carries for the same reason: the text report is printed through dozens of small writes whose results nothing read, so a report cut short by a closed pipe or a full disk ended with its success banner and exit zero. The remembered failure is what lets finish refuse instead, and the per-query lines of a run print through the same writer so a truncation there is remembered too. */
+/* errorTrackingWriter remembers the first write failure and swallows the rest, the shape the framework's table printer carries for the same reason: the text report is printed through dozens of small writes whose results nothing read, so a report cut short by a full disk, or by a writer that is not the process's own standard output, ended with its success banner and exit zero — a standard output whose pipe has closed is not among those cases, since a process that has not asked to be notified of SIGPIPE is ended by the runtime at that write, before any result could be read. The remembered failure is what lets finish refuse instead, and the per-query lines of a run print through the same writer so a truncation there is remembered too. The writer is shared: it is the command's per-query printer and, for the run's duration, the process-wide fallback, so a migration emitting queries from several goroutines writes through it concurrently — the lock keeps the remembered failure one value. */
 type errorTrackingWriter struct {
     writer   io.Writer
+    mutex    sync.Mutex
     firstErr error
 }
 
 func (instance *errorTrackingWriter) Write(payload []byte) (int, error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
     if nil != instance.firstErr {
         return len(payload), nil
     }
@@ -54,6 +59,14 @@ func (instance *errorTrackingWriter) Write(payload []byte) (int, error) {
     }
 
     return len(payload), nil
+}
+
+/* lostWrite answers the first write failure the writer remembered, under the same lock the writes take, so finish reads a settled value rather than one a late query line is still writing */
+func (instance *errorTrackingWriter) lostWrite() error {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return instance.firstErr
 }
 
 /* runnerOptionForCommand derives the per-query printer posture from the command's parsed flags: the command's writer and colour choice in text mode, a discarded writer under json — the document is the only byte the command may emit there. */
@@ -114,8 +127,8 @@ func (instance *commandOutput) finish(command string, startedAt time.Time, runEr
             return runErr
         }
 
-        if nil != instance.writer.firstErr {
-            return exception.NewError("the report could not be written in full", map[string]any{"command": command}, instance.writer.firstErr)
+        if lostWrite := instance.writer.lostWrite(); nil != lostWrite {
+            return exception.NewError("the report could not be written in full", map[string]any{"command": command}, lostWrite)
         }
 
         return nil
@@ -169,8 +182,8 @@ func (instance *commandOutput) finish(command string, startedAt time.Time, runEr
 
     /* the document renders through the tracking writer too, which swallows the write it lost; the renderer's own answer is read first and the remembered write failure second, so a json report cut short is refused the way the text report is */
     renderErr := output.Render(instance.writer, envelope, instance.option)
-    if nil == renderErr && nil != instance.writer.firstErr {
-        renderErr = exception.NewError("the report could not be written in full", map[string]any{"command": command}, instance.writer.firstErr)
+    if lostWrite := instance.writer.lostWrite(); nil == renderErr && nil != lostWrite {
+        renderErr = exception.NewError("the report could not be written in full", map[string]any{"command": command}, lostWrite)
     }
 
     if nil != runErr {
