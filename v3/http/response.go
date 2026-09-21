@@ -282,19 +282,29 @@ func confineFileToRoot(rootDirectory string, name string) (string, error) {
         )
     }
 
-    fullPath := filepath.Join(rootDirectory, cleanedName)
+    absoluteRoot, absoluteErr := filepath.Abs(rootDirectory)
+    if nil != absoluteErr {
+        return "", absoluteErr
+    }
+
+    fullPath := filepath.Join(absoluteRoot, cleanedName)
 
     realPath, evalErr := filepath.EvalSymlinks(fullPath)
     if nil != evalErr {
         return "", evalErr
     }
 
-    realRoot, evalRootErr := filepath.EvalSymlinks(rootDirectory)
+    realRoot, evalRootErr := filepath.EvalSymlinks(absoluteRoot)
     if nil != evalRootErr {
         return "", evalRootErr
     }
 
-    if realPath != realRoot && false == strings.HasPrefix(realPath, realRoot+string(os.PathSeparator)) {
+    relativePath, relativeErr := filepath.Rel(realRoot, realPath)
+    if nil != relativeErr {
+        return "", relativeErr
+    }
+
+    if ".." == relativePath || true == strings.HasPrefix(relativePath, ".."+string(os.PathSeparator)) {
         return "", exception.NewError(
             "the file resolves outside the root directory",
             map[string]any{

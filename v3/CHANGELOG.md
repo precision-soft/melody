@@ -314,6 +314,8 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ### Fixed
 
+- `http`: confined file and attachment responses accept the current directory and filesystem root while continuing to reject files outside the resolved root.
+
 - example: scheduled product/tick output uses the command writer; product relationship lookup and table write failures are returned. Concurrent PostgreSQL bookkeeping initialization retries catalog-name collisions, and failed resets invalidate migration memoization. Live MySQL probes cover token-owned 2FA enrollment and recovery. Test helpers are grouped in fixture files; reporting reads the cache once and documents snapshot, role and retry limits.
 - container: remove the redundant visited-type map from finite by-value identity inspection.
 

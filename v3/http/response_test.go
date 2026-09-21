@@ -489,6 +489,52 @@ func TestConfinedFileResponse_ServesANameUnderTheRootAndNothingOutsideIt(t *test
     }
 }
 
+func TestConfinedFileResponse_CurrentDirectoryAndFilesystemRoot(t *testing.T) {
+    directory := t.TempDir()
+    t.Chdir(directory)
+
+    if err := os.WriteFile("invoice.txt", []byte("invoice body"), 0o600); nil != err {
+        t.Fatal(err)
+    }
+
+    absoluteDirectory, err := filepath.Abs(".")
+    if nil != err {
+        t.Fatal(err)
+    }
+    filesystemRoot := filepath.VolumeName(absoluteDirectory) + string(os.PathSeparator)
+    rootRelativeName, err := filepath.Rel(filesystemRoot, filepath.Join(absoluteDirectory, "invoice.txt"))
+    if nil != err {
+        t.Fatal(err)
+    }
+
+    cases := []struct {
+        name string
+        root string
+        file string
+    }{
+        {"current directory", ".", "invoice.txt"},
+        {"absolute directory", absoluteDirectory, "invoice.txt"},
+        {"filesystem root", filesystemRoot, rootRelativeName},
+    }
+    for _, testCase := range cases {
+        t.Run(testCase.name, func(t *testing.T) {
+            response, serveErr := ConfinedFileResponse(200, testCase.root, testCase.file)
+            if nil != serveErr {
+                t.Fatalf("serve contained file: %v", serveErr)
+            }
+            body, readErr := io.ReadAll(response.BodyReader())
+            if nil != readErr || "invoice body" != string(body) {
+                t.Fatalf("body = %q, error = %v", body, readErr)
+            }
+            if closer, ok := response.BodyReader().(io.Closer); true == ok {
+                if closeErr := closer.Close(); nil != closeErr {
+                    t.Fatal(closeErr)
+                }
+            }
+        })
+    }
+}
+
 func TestConfinedFileResponse_ASymlinkPointingOutsideTheRootIsRefused(t *testing.T) {
     rootDirectory := t.TempDir()
     outsideDirectory := t.TempDir()
