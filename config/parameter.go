@@ -72,7 +72,7 @@ func (instance *Parameter) loadValue() any {
     if true == instance.deferred.Load() {
         exception.Panic(
             exception.NewError(
-                "cannot read a parameter whose resolution was deferred to boot; its value references a parameter that was not defined at construction, and the boot resolution has not run yet",
+                "cannot read a parameter whose resolution was deferred to boot; its value carries a template the boot resolution has not settled yet — a reference to a parameter that was not defined at construction, or a runtime registration made before boot",
                 instance.diagnosticContext(),
                 nil,
             ),

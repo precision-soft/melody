@@ -845,9 +845,66 @@ func TestResolveTemplate_UnclosedParameterReferenceIsRefused(t *testing.T) {
         t.Fatalf("expected the malformed reference report, got: %v", resolveErr)
     }
 
-    /* the sentence alone does not say WHICH percent was refused: the trailing percent of this same template opens no reference and, with the guard reading the flag the other way round, produces the identical sentence — so the named reference is the observable that tells the two paths apart */
-    if "%app" != contextOfError(t, resolveErr)["reference"] {
-        t.Fatalf("expected the name-shaped run to be the refused reference, got: %v", contextOfError(t, resolveErr)["reference"])
+    /* the sentence alone does not say WHICH percent was refused: the trailing percent of this same template opens no reference and, with the guard reading the flag the other way round, produces the identical sentence from offset 17 — so the offset of the percent is the observable that tells the two paths apart, where the name-shaped run used to be, until a password holding a percent had its tail carried into the log through it */
+    if 8 != contextOfError(t, resolveErr)["offset"] {
+        t.Fatalf("expected the percent that opened the name-shaped run to be the refused one, got offset %v", contextOfError(t, resolveErr)["offset"])
+    }
+    if _, carried := contextOfError(t, resolveErr)["reference"]; true == carried {
+        t.Fatalf("expected no slice of the value in the context, got reference %v", contextOfError(t, resolveErr)["reference"])
+    }
+}
+
+/* the name-shaped run an unclosed reference opens is a slice of the value by construction — it stops at the first byte outside the name grammar or at the end — so for a password holding a single percent it is the password's tail */
+func TestResolveTemplate_UnclosedReferenceInsideACredentialStaysOutOfTheContext(t *testing.T) {
+    configuration := &Configuration{
+        environment: &Environment{values: map[string]string{}},
+        parameters:  ParameterMap{},
+    }
+
+    _, resolveErr := configuration.resolveTemplate(
+        "Pa%SSword1",
+        "database.password",
+        make(map[string]bool),
+        make(map[string]bool),
+    )
+    if nil == resolveErr {
+        t.Fatalf("expected the unclosed reference to be refused")
+    }
+
+    renderedLogContext := fmt.Sprintf("%v", exception.LogContext(resolveErr, nil))
+    if true == strings.Contains(renderedLogContext, "SSword1") {
+        t.Fatalf("expected the credential's tail to stay out of the rendered log context: %s", renderedLogContext)
+    }
+    if 2 != contextOfError(t, resolveErr)["offset"] {
+        t.Fatalf("expected the offset of the percent, got %v", contextOfError(t, resolveErr)["offset"])
+    }
+}
+
+/* the tail of an unterminated %env( runs to the end of the value, so a tail spelled in key-grammar characters — a password made of letters and digits — was carried into the log where one holding any other byte was redacted; neither is carried now, the offset locates the placeholder */
+func TestResolveTemplate_UnterminatedEnvPlaceholderTailStaysOutOfTheContext(t *testing.T) {
+    configuration := &Configuration{
+        environment: &Environment{values: map[string]string{}},
+        parameters:  ParameterMap{},
+    }
+
+    for _, template := range []string{"x%env(hunter2", "x%env(hunter2@host"} {
+        _, resolveErr := configuration.resolveTemplate(
+            template,
+            "database.password",
+            make(map[string]bool),
+            make(map[string]bool),
+        )
+        if nil == resolveErr {
+            t.Fatalf("%q: expected the unterminated placeholder to be refused", template)
+        }
+
+        renderedLogContext := fmt.Sprintf("%v", exception.LogContext(resolveErr, nil))
+        if true == strings.Contains(renderedLogContext, "hunter2") {
+            t.Fatalf("%q: expected the tail to stay out of the rendered log context: %s", template, renderedLogContext)
+        }
+        if 1 != contextOfError(t, resolveErr)["offset"] {
+            t.Fatalf("%q: expected the offset of the percent, got %v", template, contextOfError(t, resolveErr)["offset"])
+        }
     }
 }
 

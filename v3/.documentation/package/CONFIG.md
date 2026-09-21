@@ -37,6 +37,8 @@ A `Configuration` instance is created early (typically at application bootstrap)
 3. `.env.<env>`
 4. `.env.<env>.local`
 
+A `#` opens a comment when it is preceded by a space byte or by nothing: a whole line, or the tail of a value once the value has begun (`KEY=value # note` reads `value`, by godotenv's own countback), or the whole value region when nothing precedes it (`KEY= # fill this in` reads the empty string); a hash glued to what precedes it is data (`COLOR=#ffffff`, `KEY=#glued`), as it is for a shell.
+
 The environment name is resolved from `MELODY_ENV` inside the loaded `.env` values (defaults to `"dev"` when missing or empty). See [`EnvKey`](../../config/environment.go) and [`EnvironmentSource`](../../config/environment_source.go).
 
 ### Empty string semantics
@@ -94,6 +96,8 @@ A parameter value is a template resolved left to right, positionally. Each perce
 - anything else — a lone percent is data.
 
 A self-reference — direct or through any chain of parameters and environment keys — is a circular-reference error at resolution. A value that must hold a literal percent doubles it: `pa%%ss%%word` resolves to `pa%ss%word`.
+
+The grammar fails closed on what would otherwise survive as literal text: an `%env(...)%` whose closing `)%` is malformed or missing (`%env(A))%`, a dsn whose final percent was forgotten), and a `%name` reference a percent opened and nothing closed (`%app-name%`), are boot errors naming the parameter and the byte offset of the percent — the name-shaped run and the unterminated tail are slices of the value and are never carried, while the bounded `%env(...)%` candidate is echoed when it is spelled in key-grammar characters. A percent in front of a character no name may start with stays data, so `50% overall` needs no escaping. In `.env` values, a braced `${...}` reference whose name is outside the key grammar (`${DB-PASS}`) is refused the same way, while the bare dollar stays data (`pa$sword`, `$1.50`); a literal dollar is written `\$`.
 
 ### Secret parameters
 
@@ -281,8 +285,8 @@ func example() configcontract.Configuration {
 
 - `ConfigMustFromContainer` is a fail-fast helper and will panic if `ServiceConfig` is missing or has an invalid type.
 - `Application.Boot()` calls `Resolve()` after all runtime parameters are registered via `Application.RegisterParameter`.
-- Runtime parameters are preserved during `Resolve()` because they store non-string values.
-- Templates (e.g., `%kernel.project_dir%`, `%env(MELODY_ENV)%`) resolve only string environment-backed parameters; do not reference runtime parameters inside templates.
+- The boot `Resolve()` passes through any parameter whose value is not a string — which is what a runtime parameter registered with a native value is; a runtime parameter registered with a string template is resolved like any other, eagerly at registration once the boot resolution has run.
+- A template reference (e.g., `%kernel.project_dir%`, `%env(MELODY_ENV)%`) resolves only against a parameter whose value is a string; a parameter registered after construction is deferred by the constructor's tolerant pass and settled by the boot `Resolve()`, so the composition root may reference what it registers before boot. The deferral is **not** transparent while it lasts: between construction and boot every accessor on a deferred parameter panics naming it, because the alternative is handing out the raw `%app.user%` template as though it were the value. Read such a parameter after `Resolve()` has run. A runtime registration made before boot is deferred only when its value carries a template construct — a doubled percent, an `%env(...)%`, a `%name%` reference or a name-shaped run a percent opened; a literal such as `Coverage 95%` is its own resolved value and reads at once.
 
 ## Userland API
 

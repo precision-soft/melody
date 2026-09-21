@@ -89,6 +89,22 @@ func TestExitError_CarriesItsErrorThroughUnwrapAndErrorValue(t *testing.T) {
     }
 }
 
+/* Unwrap is the one door errors.Is calls on every link, so a typed-nil *ExitError stored as a cause reached it before any guard */
+func TestExitError_UnwrapOnANilReceiverAnswersNil(t *testing.T) {
+    var typedNil *ExitError
+
+    if nil != typedNil.Unwrap() {
+        t.Fatalf("expected a nil receiver to answer no cause")
+    }
+
+    sentinel := errors.New("sentinel")
+    chain := NewError("outer", nil, typedNil)
+
+    if true == errors.Is(chain, sentinel) {
+        t.Fatalf("expected the walk to end on the typed-nil link, not to match anything")
+    }
+}
+
 func TestExitError_NilReceiverAccessorsAnswerInsteadOfDereferencing(t *testing.T) {
     var typedNil *ExitError
 

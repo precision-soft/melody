@@ -21,7 +21,7 @@ func (instance *Error) Error() string {
     return instance.message
 }
 
-/* Unwrap is called by errors.Is and errors.As on EVERY link of a chain, so it is the one method of this type that runs on a nil receiver in ordinary use: FromError(nil) answers a typed nil, and a typed nil stored as another error's cause is a link the walk reaches before any caller's guard can. It answers nil on a nil receiver, so the walk ends there instead of dereferencing it — the typed-nil link itself stays in the chain, where errors.As matches it and the nil-receiver accessors of ExitError answer for it; the guards on AsHttpException and the From* doors cover only the top of the chain. */
+/* Unwrap is called by errors.Is and errors.As on EVERY link of a chain, so it is the one method of this type that runs on a nil receiver in ordinary use: FromError(nil) answers a typed nil, and a typed nil stored as another error's cause is a link the walk reaches before any caller's guard can. It answers nil on a nil receiver, so the walk ends there instead of dereferencing it — the typed-nil link itself stays in the chain, where errors.As matches it and the nil-receiver accessors of ExitError — its Unwrap included — answer for it; the guards on AsHttpException and the From* doors cover only the top of the chain. */
 func (instance *Error) Unwrap() error {
     if nil == instance {
         return nil

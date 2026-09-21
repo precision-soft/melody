@@ -109,6 +109,10 @@ func (instance *CreateCommand) Run(runtimeInstance runtimecontract.Runtime, comm
         }
     }
 
+    if nil != files {
+        outputInstance.resultWrittenTo(files.Path)
+    }
+
     outputInstance.printSuccess("migration file created")
 
     fileLines := instance.formatMigrationFiles(files)

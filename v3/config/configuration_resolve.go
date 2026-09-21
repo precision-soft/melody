@@ -67,7 +67,7 @@ func (instance *Configuration) resolveAll(deferUnresolvedReferences bool) error 
             make(map[string]bool),
         )
         if nil != resolveTemplateErr {
-            /* only the undefined-reference failure is deferrable, recognized by the sentinel cause, and only outside the reserved namespace: a kernel.* parameter is registered by melody itself before this pass, so an undefined reference in one is a settled error no later registration repairs — deferring it would move the failure from the constructor to whichever kernel view reads it next */
+            /* only the undefined-reference failure is deferrable, recognized by the sentinel cause, and only outside the reserved namespace: a kernel.* parameter is registered by melody itself before this pass, so an undefined reference in one is a settled error no later registration repairs — deferring it would move the failure from the constructor to whichever kernel view reads it next. The kernel, http and cli views are built by the constructor right after this pass and read the reserved parameters there, which is why a MELODY_* key — the same *Parameter under its kernel.* alias — can only reference what exists at construction: the tolerant pass defers it under its environment spelling, and the reserved spelling, walked after it, refuses with the environment key named. */
             if true == deferUnresolvedReferences &&
                 false == instance.isReserved(name) &&
                 true == errors.Is(resolveTemplateErr, errUndefinedParameterReference) {
@@ -157,6 +157,7 @@ func (instance *Configuration) scanTemplate(
         if true == strings.HasPrefix(value[index:], "%env(") {
             resolvedEnvironment, consumedLength, environmentErr := instance.resolveEnvironmentPlaceholder(
                 value[index:],
+                index,
                 currentKey,
                 resolvingParameters,
                 resolvingEnvironmentKeys,
@@ -181,13 +182,13 @@ func (instance *Configuration) scanTemplate(
 
         parameterKey, consumedLength, referenceOpened := parseParameterPlaceholder(value[index:])
         if 0 == consumedLength {
-            /* a name-shaped run that a percent opened but nothing closed is a reference with a typo, not data: the contract already demands a literal percent be doubled, so refusing here is what keeps %app-name% from surviving as literal text. A percent in front of a character no name may start with stays data. */
+            /* a name-shaped run that a percent opened but nothing closed is a reference with a typo, not data: the contract already demands a literal percent be doubled, so refusing here is what keeps %app-name% from surviving as literal text. A percent in front of a character no name may start with stays data. The run itself is not reported: it stops at the end of the value or at the first byte outside the name grammar, so it is a slice of the value by construction — "Pa%SSword1" used to put "%SSword1" in the log — and the offset of the percent locates the typo without carrying any of the value. */
             if true == referenceOpened {
                 return "", exception.NewError(
                     "malformed parameter reference in template; a reference closes with a percent (%name%) and a literal percent is written doubled (a password written as pa%%ss%%word resolves to pa%ss%word)",
                     map[string]any{
                         "parameter": currentKey,
-                        "reference": "%" + parameterKey,
+                        "offset":    index,
                     },
                     nil,
                 )
@@ -216,9 +217,10 @@ func (instance *Configuration) scanTemplate(
     return builder.String(), nil
 }
 
-/* resolveEnvironmentPlaceholder resolves one %env(...)% construct sitting at the start of the fragment. A fragment whose candidate is interrupted by another percent before any ")%" is reported as consuming nothing, so the caller treats the percent as data; a fragment that runs out with no closer at all, and a closed fragment that is not a well-formed placeholder, are errors, because a typo that silently survived as literal text is exactly what this reporting exists to catch. */
+/* resolveEnvironmentPlaceholder resolves one %env(...)% construct sitting at the start of the fragment. A fragment whose candidate is interrupted by another percent before any ")%" is reported as consuming nothing, so the caller treats the percent as data; a fragment that runs out with no closer at all, and a closed fragment that is not a well-formed placeholder, are errors, because a typo that silently survived as literal text is exactly what this reporting exists to catch. The offset is the position of the opening percent in the template being scanned — the parameter's own value, or the environment value an %env(...)% read, which is scanned under the reading parameter's name — and is what the unterminated refusal carries in place of the text. */
 func (instance *Configuration) resolveEnvironmentPlaceholder(
     fragment string,
+    percentOffset int,
     currentKey string,
     resolvingParameters map[string]bool,
     resolvingEnvironmentKeys map[string]bool,
@@ -234,17 +236,12 @@ func (instance *Configuration) resolveEnvironmentPlaceholder(
     }
 
     if innerEnd >= len(fragment) {
-        /* only a span spelled in key-grammar characters is carried into the error context: the fragment may hold arbitrary pasted text — a credential typed where the key belongs — and that must not reach the logs */
-        reportedPlaceholder := "%env(<redacted>"
-        if true == isKeyGrammarText(fragment[len("%env("):]) {
-            reportedPlaceholder = fragment
-        }
-
+        /* nothing of the fragment is carried into the error context: it runs to the end of the value with no closer, so whatever follows "%env(" is a slice of the value by construction — a credential typed where the key belongs, or the tail of a password holding the five characters — and a tail spelled in key-grammar characters is no safer than one that is not. The offset locates the placeholder. */
         return "", 0, exception.NewError(
             "unterminated environment placeholder in template; %env( opens a placeholder that must close with )%, and a literal percent is written doubled (%%)",
             map[string]any{
-                "parameter":   currentKey,
-                "placeholder": reportedPlaceholder,
+                "parameter": currentKey,
+                "offset":    percentOffset,
             },
             nil,
         )
@@ -258,7 +255,7 @@ func (instance *Configuration) resolveEnvironmentPlaceholder(
 
     submatches := envPlaceholderPattern.FindStringSubmatch(candidate)
     if nil == submatches || candidate != submatches[0] {
-        /* only a candidate spelled in key-grammar characters is carried into the error context: the bounded span may hold arbitrary pasted text — a credential typed where the key belongs — and that must not reach the logs */
+        /* only a candidate spelled in key-grammar characters is carried into the error context: the bounded span may hold arbitrary pasted text — a credential typed where the key belongs — and that must not reach the logs. The span is bounded on both sides by what the operator typed, which is what makes the misspelling worth echoing here where the unterminated form above echoes nothing. */
         reportedPlaceholder := "%env(<redacted>)%"
         if true == isKeyGrammarText(candidate[len("%env("):len(candidate)-len(")%")]) {
             reportedPlaceholder = candidate
@@ -408,6 +405,36 @@ func (instance *Configuration) resolveParameterReference(
     }
 
     return resolvedReferencedValue, nil
+}
+
+/* templateCarriesConstruct answers whether a scan of the value would do anything at all — a doubled percent to fold, an %env(...)% placeholder, a %name% reference or a name-shaped run a percent opened — so that a pre-boot registration is deferred exactly when its raw value is not its resolved value. It walks the value the way scanTemplate dispatches on each percent, and resolves nothing: the constructor's tolerant pass deliberately leaves a registration made before boot for the batch resolution, so that a forward reference is not reported as a failure by the order the composition root happened to register in. A percent in front of a character no name may start with is data, as it is for the scan. */
+func templateCarriesConstruct(value string) bool {
+    index := 0
+    for index < len(value) {
+        percentOffset := strings.IndexByte(value[index:], '%')
+        if 0 > percentOffset {
+            return false
+        }
+
+        index = index + percentOffset
+
+        if index+1 < len(value) && '%' == value[index+1] {
+            return true
+        }
+
+        if true == strings.HasPrefix(value[index:], "%env(") {
+            return true
+        }
+
+        _, consumedLength, referenceOpened := parseParameterPlaceholder(value[index:])
+        if 0 < consumedLength || true == referenceOpened {
+            return true
+        }
+
+        index = index + 1
+    }
+
+    return false
 }
 
 /* parseParameterPlaceholder reads a %name% reference at the start of the fragment and reports the name and the consumed length — a name may be a single character, since the default processor's fallback accepts one. Zero consumed with the opened flag raised means a name-shaped run began and nothing closed it; zero consumed without it means the percent opened no reference at all and is data. */

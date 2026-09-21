@@ -31,6 +31,14 @@ type commandOutput struct {
 
     /* lostReportJournal is set by a command whose RESULT is not its report — db:create, whose result is the file it wrote — and it is where finish records a report the writer lost instead of refusing the run: the file is in place, and an exit of one sent the operator to a re-run that created a second migration under a new timestamp beside it. The loss cannot be told on the writer that lost it, so it goes to the journal; every other command keeps the refusal, because its report is what the run was for. */
     lostReportJournal loggingcontract.Logger
+
+    /* resultPath is where that command's result went — the migration file — named in the warning beside the loss, since a cut document on stdout is the one place the operator cannot read it from */
+    resultPath string
+}
+
+/* resultWrittenTo names the file a command whose result is elsewhere than its report has written, so the warning of a lost report tells the operator where to look. */
+func (instance *commandOutput) resultWrittenTo(path string) {
+    instance.resultPath = path
 }
 
 /* reportLostWritesTo tells finish that the command's result is elsewhere than its report, and where a report the writer lost is recorded instead of failing the run. */
@@ -44,6 +52,10 @@ func (instance *commandOutput) lostReport(command string, lostWrite error) error
 
     if nil == instance.lostReportJournal {
         return lost
+    }
+
+    if "" != instance.resultPath {
+        lost = exception.NewError("the report could not be written in full", map[string]any{"command": command, "path": instance.resultPath}, lostWrite)
     }
 
     instance.lostReportJournal.Warning("the report could not be written in full; the command's result is in place", exception.LogContext(lost))

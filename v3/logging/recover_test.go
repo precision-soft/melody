@@ -425,6 +425,39 @@ func TestResolveRecoveredExit_TypedNilValuesNormalizeAsPanics(t *testing.T) {
     }
 }
 
+type recoveredMessagePanicsError struct{}
+
+func (instance recoveredMessagePanicsError) Error() string {
+    panic("Error() panics")
+}
+
+/* the recovery defers of the process boundary render the recovered error's message themselves, outside the recover the exception package's doors use, so an Error() that panics — on the nil field that made it panic-worthy — raised a second panic there, past the teardown and the exit code */
+func TestResolveRecoveredExit_AnErrorWhoseMessagePanicsIsStillResolved(t *testing.T) {
+    err, exitCode, needsLogging := resolveRecoveredExit(recoveredMessagePanicsError{}, 5)
+
+    if nil == err || false == strings.Contains(err.Message(), "error message panicked") {
+        t.Fatalf("expected the recovered rendering as the message, got %v", err)
+    }
+
+    if 5 != exitCode || false == needsLogging {
+        t.Fatalf("expected the caller's exit code and a record, got %d %v", exitCode, needsLogging)
+    }
+}
+
+func TestLogOnRecover_AnErrorWhoseMessagePanicsIsStillRecorded(t *testing.T) {
+    logger := &captureLogger{}
+
+    func() {
+        defer LogOnRecover(logger, false)
+
+        panic(recoveredMessagePanicsError{})
+    }()
+
+    if 1 != logger.calls || false == strings.Contains(logger.lastMessage, "error message panicked") {
+        t.Fatalf("expected one record carrying the recovered rendering, got %d %q", logger.calls, logger.lastMessage)
+    }
+}
+
 func TestResolveRecoveredExit_ForeignErrorCarriesThePanicStack(t *testing.T) {
     err, _, _ := resolveRecoveredExit(errors.New("boom"), 5)
 
@@ -1061,7 +1094,7 @@ func TestLogOnRecoverAndExitAfter_WritesTheCertificateForAnAlreadyLoggedError(t 
     }
 }
 
-/* the resolve step runs under its own shield, honouring the comment beside the other steps: a recovered value whose Error() panics used to unwind into main and the process died with the Go runtime's exit code 2 — no record, no certificate, no teardown. The shield answers a generic record under the caller's own code. */
+/* the resolve step runs under its own shield, honouring the comment beside the other steps: a recovered value whose methods panic used to unwind into main and the process died with the Go runtime's exit code 2 — no record, no certificate, no teardown. The shield answers a generic record under the caller's own code. The probe panics in Unwrap, which the already-logged probe calls: an Error() that panics is rendered by the resolve itself now and never reaches the shield */
 func TestResolveRecoveredExitShielded_AnswersTheCallersCodeWhenTheValueItselfPanics(t *testing.T) {
     err, resolvedExitCode, needsLogging := resolveRecoveredExitShielded(&panickingResolveError{}, 3)
 
@@ -1085,10 +1118,14 @@ func TestResolveRecoveredExitShielded_AnswersTheCallersCodeWhenTheValueItselfPan
 type panickingResolveError struct{}
 
 func (instance *panickingResolveError) Error() string {
+    return "a value whose Unwrap panics"
+}
+
+func (instance *panickingResolveError) Unwrap() error {
     var m map[string]string
     m["boom"] = "boom"
 
-    return "unreachable"
+    return nil
 }
 
 /* RunShieldedStep answers whether the step finished, which is what lets the clean shutdown tell a teardown that completed from one it had to abandon: the budget exists so a process holding something it cannot release ends anyway, and a caller told nothing would have no reason to exit non-zero */

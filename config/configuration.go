@@ -256,8 +256,8 @@ func (instance *Configuration) registerRuntimeParameter(name string, value any, 
 
             parameter.storeValue(resolvedValue)
         }
-    } else if stringValue, isString := value.(string); true == isString && true == strings.Contains(stringValue, "%") {
-        /* a pre-boot registration whose value still carries a template is marked deferred, so a module that reads it before the boot pass refuses loudly the way a .env parameter with an unsettled reference does, instead of receiving the raw %env(...)% as the value. The boot pass resolves every parameter's environmentValue and clears the flag; a value with no percent carries no template and stays readable. */
+    } else if stringValue, isString := value.(string); true == isString && true == templateCarriesConstruct(stringValue) {
+        /* a pre-boot registration whose value carries a template construct is marked deferred, so a module that reads it before the boot pass refuses loudly the way a .env parameter with an unsettled reference does, instead of receiving the raw %env(...)% as the value. The boot pass resolves every parameter's environmentValue and clears the flag. The question is put to the same grammar the resolution reads, not to the presence of a percent: "Coverage 95%" carries no template and used to be refused until boot for a percent the scan treats as data. */
         parameter.deferred.Store(true)
     }
 }

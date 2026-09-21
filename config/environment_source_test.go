@@ -124,7 +124,7 @@ func TestPreprocessDotEnvContent_InlineHashWithoutLeadingSpaceIsKept(t *testing.
     }
 }
 
-/* the preprocessor does not cut the trailing comment itself: godotenv performs its own countback on the produced line, and two cuts in a row read "hello # world # x" as "hello" where godotenv reads "hello # world". Only the whole-line comment is dropped here. */
+/* the preprocessor does not cut the trailing comment of a NON-EMPTY value itself: godotenv performs its own countback on the produced line, and two cuts in a row read "hello # world # x" as "hello" where godotenv reads "hello # world". The whole-line comment, and the comment that opens before any value byte, are dropped here. */
 func TestPreprocessDotEnvContent_WhitespacePrecededHashIsComment(t *testing.T) {
     processed, err := preprocessDotEnvContent("KEY=value # trailing comment\n# full line comment\nOTHER=1")
     if nil != err {
@@ -146,6 +146,92 @@ func TestPreprocessDotEnvContent_WhitespacePrecededHashIsComment(t *testing.T) {
     }
     if "value" != values["KEY"] {
         t.Fatalf("expected godotenv's own countback to cut the trailing comment, got %q", values["KEY"])
+    }
+}
+
+/* godotenv trims the leading spaces of the value region and its countback skips index zero, so a comment that opens before any value byte is the one cut the countback can never make — "APP_SECRET= # fill this in" used to boot the application with the comment as the secret */
+func TestLoad_EmptyValueFollowedByAComment_ReadsEmpty(t *testing.T) {
+    cases := []struct {
+        line     string
+        expected string
+    }{
+        {"APP_SECRET= # fill this in", ""},
+        {"APP_SECRET=   # set to something", ""},
+        {"APP_SECRET=\t# tab before the hash", ""},
+        {"APP_SECRET=real # trailing comment", "real"},
+        {"APP_SECRET=", ""},
+    }
+
+    for _, oneCase := range cases {
+        source := writeDotEnvFiles(t, map[string]string{
+            ".env": oneCase.line + "\n",
+        })
+
+        values, loadErr := source.Load()
+        if nil != loadErr {
+            t.Fatalf("%q: load error: %v", oneCase.line, loadErr)
+        }
+        if oneCase.expected != values["APP_SECRET"] {
+            t.Fatalf("%q: expected %q, got %q", oneCase.line, oneCase.expected, values["APP_SECRET"])
+        }
+    }
+}
+
+/* the dollar handling runs on everything after the separator, so a comment left in the produced line had its "$WORD" turned into a reference marker and the boot failed naming a key that was comment text */
+func TestLoad_DollarInsideTheCommentOfAnEmptyValueIsNotAReference(t *testing.T) {
+    source := writeDotEnvFiles(t, map[string]string{
+        ".env": "APP_SECRET=   # set to $SECRET_VALUE\n",
+    })
+
+    values, loadErr := source.Load()
+    if nil != loadErr {
+        t.Fatalf("expected the comment to be cut before its dollar is read as a reference, got: %v", loadErr)
+    }
+    if "" != values["APP_SECRET"] {
+        t.Fatalf("expected the empty value, got %q", values["APP_SECRET"])
+    }
+}
+
+/* a hash glued to the separator opens no comment, for godotenv and for a shell alike: the cut of the empty value is under the same space-before rule as the whole-line comment */
+func TestPreprocessDotEnvContent_HashGluedToTheSeparatorIsData(t *testing.T) {
+    processed, err := preprocessDotEnvContent("KEY=#glued\n")
+    if nil != err {
+        t.Fatalf("unexpected error: %s", err.Error())
+    }
+    if "KEY=#glued" != processed {
+        t.Fatalf("expected the glued hash kept as data, got %q", processed)
+    }
+
+    source := writeDotEnvFiles(t, map[string]string{
+        ".env": "KEY=#glued\n",
+    })
+
+    values, loadErr := source.Load()
+    if nil != loadErr {
+        t.Fatalf("load error: %v", loadErr)
+    }
+    if "#glued" != values["KEY"] {
+        t.Fatalf("expected %q, got %q", "#glued", values["KEY"])
+    }
+}
+
+/* godotenv builds the unterminated-value failure from the raw first line of the value, so a credential containing " near " had its head copied into the log by the sanitizer that cut at those two words first */
+func TestLoad_UnterminatedQuotedValueContainingNearCarriesNoFileContent(t *testing.T) {
+    source := writeDotEnvFiles(t, map[string]string{
+        ".env": "PASSWORD=\"hunter2 near the door\n",
+    })
+
+    _, loadErr := source.Load()
+    if nil == loadErr {
+        t.Fatalf("expected the unterminated quoted value to fail the parse")
+    }
+
+    renderedLogContext := fmt.Sprintf("%v", exception.LogContext(loadErr, nil))
+    if false == strings.Contains(renderedLogContext, "parseFailure:unterminated quoted value") {
+        t.Fatalf("expected the failure reported by its shape, got: %s", renderedLogContext)
+    }
+    if true == strings.Contains(renderedLogContext, "hunter2") {
+        t.Fatalf("expected the credential to stay out of the rendered log context: %s", renderedLogContext)
     }
 }
 

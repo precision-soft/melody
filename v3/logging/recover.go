@@ -76,7 +76,7 @@ func LogOnRecover(
             err = newRecoveredPanicError(value)
         } else {
             err = exception.NewError(
-                value.Error(),
+                recoveredErrorMessage(value),
                 map[string]any{
                     "panicStack": string(debug.Stack()),
                 },
@@ -94,6 +94,20 @@ func LogOnRecover(
     if true == panicAgain {
         exception.Panic(err)
     }
+}
+
+/* recoveredErrorMessage reads the message of a recovered error value under a recover of its own: these helpers run inside the recovery defers of the process boundary — a cli command, an application hook, the exit path — where an Error() that dereferences what the first panic left nil would raise a second panic past the defer that was reporting the first, before the teardown and the exit code; the exception package renders the same way behind its From* doors and LogContext, through a door it does not export, and the frozen majors admit no new one. */
+func recoveredErrorMessage(value error) (text string) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            return
+        }
+
+        text = fmt.Sprintf("error message panicked: %v", recoveredValue)
+    }()
+
+    return value.Error()
 }
 
 /* newRecoveredPanicError wraps a panic payload that carries no usable error together with the stack of the panic still in flight: the deferred handler runs with the panicking frames intact, and this is the only moment the origin of a runtime panic can be captured. */
@@ -369,7 +383,7 @@ func resolveRecoveredExit(
             err = newRecoveredPanicError(value)
         } else {
             err = exception.NewError(
-                value.Error(),
+                recoveredErrorMessage(value),
                 map[string]any{
                     "panicStack": string(debug.Stack()),
                 },

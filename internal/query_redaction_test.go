@@ -72,8 +72,9 @@ func TestRedactQueryValuesForDiagnostics_KeepsOrderAndMultiplicity(t *testing.T)
         t.Fatalf("expected every occurrence of a repeated name kept, got %q", RedactQueryValuesForDiagnostics("a=1&a=2"))
     }
 
-    if "flag&a=xxxxx" != RedactQueryValuesForDiagnostics("flag&a=1") {
-        t.Fatalf("expected a bare name kept as it is, got %q", RedactQueryValuesForDiagnostics("flag&a=1"))
+    /* a pair with no "=" is the shape of a capability token — "?9f8a7b3c" — so it is redacted whole rather than kept as a name that names no value */
+    if "xxxxx&a=xxxxx" != RedactQueryValuesForDiagnostics("9f8a7b3c&a=1") {
+        t.Fatalf("expected a pair with no equals redacted whole, got %q", RedactQueryValuesForDiagnostics("9f8a7b3c&a=1"))
     }
 
     if "a=xxxxx" != RedactQueryValuesForDiagnostics("a=1;b=2") {

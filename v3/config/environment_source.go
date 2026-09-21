@@ -187,16 +187,16 @@ func (instance *EnvironmentSource) loadExistingDotEnvFile(values map[string]stri
     return nil
 }
 
-/* sanitizeDotEnvParseFailure keeps the failure's shape and drops the file content it quotes. */
+/* sanitizeDotEnvParseFailure keeps the failure's shape and drops the file content it quotes. The unterminated-value failure is read by its prefix BEFORE the " near " cut: godotenv appends the first line of the value to that prefix raw, with no " near " of its own, so a value that happens to contain the two words — a password among them — would otherwise have everything before them copied into the log by the very function written to keep it out. The malformed-name failure carries " near " in its own format, ahead of the content it quotes, which is why cutting there is safe for it. */
 func sanitizeDotEnvParseFailure(parseErr error) string {
     message := parseErr.Error()
 
-    if index := strings.Index(message, " near "); 0 <= index {
-        return message[:index]
-    }
-
     if true == strings.HasPrefix(message, "unterminated quoted value") {
         return "unterminated quoted value"
+    }
+
+    if index := strings.Index(message, " near "); 0 <= index {
+        return message[:index]
     }
 
     return "env file content did not parse"
@@ -467,8 +467,8 @@ func preprocessDotEnvContent(content string) (string, error) {
             }
 
             if false == inQuotes {
-                /* a comment that opens before any separator comments the whole line out; a '#' after the separator stays in the produced line, and godotenv's own countback decides where the value ends — cutting here as well would cut TWICE, and cutting at the first one read "hello # world # x" as "hello" where godotenv reads "hello # world" */
-                if '#' == character && false == sawSeparator {
+                /* a comment that opens before any separator comments the whole line out; a '#' after the separator stays in the produced line once the value has begun, and godotenv's own countback decides where the value ends — cutting here as well would cut TWICE, and cutting at the first one read "hello # world # x" as "hello" where godotenv reads "hello # world". The one case the countback cannot reach is the EMPTY value: godotenv trims the leading spaces of the value region before it looks, so a '#' that opens a comment before any value byte sits at its index zero, which the countback skips, and "APP_SECRET= # fill this in" read "# fill this in" as the secret. That one is cut here, once, under the same rule as everywhere else — a '#' preceded by a space byte or by nothing — so "KEY=#glued" stays the data it is for godotenv and for a shell. */
+                if '#' == character && (false == sawSeparator || false == valueStarted) {
                     if 0 == previousChar || true == isDotEnvSpaceByte(previousChar) {
                         break
                     }

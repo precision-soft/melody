@@ -751,7 +751,7 @@ Every section below shipped in the `[v1.19.0]` block of [`CHANGELOG.md`](../CHAN
 
 **What changed.** Three constructs that survived as literal text now fail the boot with a named error: an `%env(...)%` whose closing `)%` is malformed or missing (`%env(A))%`, `postgres://user:%env(DB_PASS)@db` with the forgotten percent), a `%name` reference a percent opened and nothing closed (`%app-name%`), and — in `.env` values — a braced `${...}` reference whose name breaks the key grammar (`${DB-PASS}`). Each used to keep its literal spelling in the resolved value, so the application connected with `%env(DB_PASS)` as its password and nothing said so. A literal percent is written doubled (`pa%%ss`), a literal dollar as `\$` — both already documented; the bare-dollar grammar (`pa$sword`, `$1.50`) is untouched.
 
-**Symptom.** A boot that used to come up with placeholder text in a value now fails at the line naming the parameter (content is redacted where it may hold a credential).
+**Symptom.** A boot that used to come up with placeholder text in a value now fails at the line naming the parameter (content is redacted where it may hold a credential — and, since the patch that followed this release, the name-shaped run of an unclosed reference and the tail of an unterminated `%env(` are never carried at all, the refusal naming the byte offset of the percent instead: `Pa%SSword1` put `%SSword1` in the boot record).
 
 **Remedy.** Fix the placeholder, or escape the literal percent/dollar as documented.
 
@@ -759,7 +759,7 @@ Every section below shipped in the `[v1.19.0]` block of [`CHANGELOG.md`](../CHAN
 
 **What changed.** Two divergences from godotenv's own reading are gone. The trailing-comment cut now happens once, by godotenv's countback — the value ends at the LAST whitespace-preceded `#` — where the preprocessor's own first-`#` cut read `GREETING=hello # world # x` as `hello` instead of godotenv's `hello # world`. And the preprocessor walks bytes instead of runes, so a `.env` saved in a non-UTF-8 encoding keeps its bytes exactly — a Latin-1 password was silently re-encoded through U+FFFD and the credential sent to the database differed from the one in the file.
 
-**Symptom.** Values with multiple hash marks or non-UTF-8 bytes read as godotenv alone would read them.
+**Symptom.** Values with multiple hash marks or non-UTF-8 bytes read as godotenv alone would read them. (Since the patch that followed this release, a value that is EMPTY before a trailing comment — `APP_SECRET= # fill this in` — reads as the empty string: the countback skips index zero, so this release loaded the comment as the value and read a `$WORD` inside it as a reference; `KEY=#glued` stays data.)
 
 **Remedy.** None for UTF-8 files with single comments — the overwhelming case is byte-identical.
 

@@ -156,6 +156,49 @@ func TestRegister_PanicsOnDuplicateCommandName(t *testing.T) {
 }
 
 /* the scope close is weighed beside the container close: its failure reached nothing before, so a scoped service whose teardown failed — a transaction left unfinished, a file left unflushed — ended a command that reported success */
+type closeCountingScope struct {
+    containercontract.Scope
+    closeCalls int
+}
+
+func (instance *closeCountingScope) Close() error {
+    instance.closeCalls++
+
+    return instance.Scope.Close()
+}
+
+/* the positive half of the action's teardown: the failing double proves the failure is reported, this one proves the close is made — on a fixture that hands the action an open scope, where the shared double used to hand it one closed in its constructor */
+func TestRegister_ActionClosesTheScopeOnce(t *testing.T) {
+    serviceContainer := container.NewContainer()
+    scope := &closeCountingScope{Scope: serviceContainer.NewScope()}
+
+    command := &testCommand{
+        nameValue:        "hello",
+        descriptionValue: "hello command",
+        flagsValue:       output.DebugFlags(),
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+            return nil
+        },
+    }
+
+    _, runErr := runRegisteredCommandWithRuntime(
+        &testRuntime{
+            contextValue:   context.Background(),
+            scopeValue:     scope,
+            containerValue: serviceContainer,
+        },
+        command,
+        []string{"--format=json"},
+    )
+    if nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
+    }
+
+    if 1 != scope.closeCalls {
+        t.Fatalf("expected the action to close the scope once, got %d", scope.closeCalls)
+    }
+}
+
 func TestRegister_ActionReportsAFailingScopeClose(t *testing.T) {
     closeErr := errors.New("scope close failed")
 

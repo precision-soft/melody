@@ -300,10 +300,14 @@ func TestCreateCommand_RefusesAManagerTheRegistryDoesNotKnowWithoutOpeningIt(t *
 type journalRecorder struct {
     loggingcontract.Logger
     warnings []string
+    paths    []string
 }
 
 func (instance *journalRecorder) Warning(message string, context loggingcontract.Context) {
     instance.warnings = append(instance.warnings, message)
+
+    path, _ := context["path"].(string)
+    instance.paths = append(instance.paths, path)
 }
 
 /* the result of db:create is the file it writes, not its report: a report the writer lost used to fail the run with the file already in place, and the re-run an exit of one invites created a second migration under a new timestamp beside the first. The loss goes to the journal — it cannot be told on the writer that lost it — and the run answers nil; db:migrate keeps the refusal, its report being its result. */
@@ -351,6 +355,11 @@ func TestCreateCommand_ALostReportWriteIsAWarningInTheJournalNotAFailure(t *test
 
     if 1 != len(journal.warnings) || "the report could not be written in full; the command's result is in place" != journal.warnings[0] {
         t.Fatalf("expected the lost report recorded once in the journal, got %v", journal.warnings)
+    }
+
+    /* the warning is the one place the operator can read the file's path from when the document on stdout was cut */
+    if filepath.Join(directory, entries[0].Name()) != journal.paths[0] {
+        t.Fatalf("expected the warning to name the file the run wrote, got %q", journal.paths[0])
     }
 
     document := &failingOnWriter{marker: "\"meta\""}

@@ -205,6 +205,103 @@ func TestConfigurationRegisterRuntime_PreBootTemplateIsDeferredThenResolves(t *t
     }
 }
 
+/* a percent the scan treats as data carries no template, so the value is its own resolved form and a module may read it before boot — the deferral used to be decided on the presence of a percent */
+func TestConfigurationRegisterRuntime_PreBootLiteralPercentIsReadable(t *testing.T) {
+    for _, literal := range []string{"Coverage 95%", "a%2Fb", "50% off"} {
+        environment, err := NewEnvironment(&testEnvironmentSource{values: map[string]string{}})
+        if nil != err {
+            t.Fatalf("new environment error: %v", err)
+        }
+
+        configuration, err := NewConfiguration(environment, "/tmp/melody")
+        if nil != err {
+            t.Fatalf("new configuration error: %v", err)
+        }
+
+        configuration.RegisterRuntime("app.literal", literal)
+
+        if literal != configuration.MustGet("app.literal").String() {
+            t.Fatalf("%q: expected the literal readable before boot, got %q", literal, configuration.MustGet("app.literal").String())
+        }
+
+        if resolveErr := configuration.Resolve(); nil != resolveErr {
+            t.Fatalf("%q: unexpected resolve error: %v", literal, resolveErr)
+        }
+
+        if literal != configuration.MustGet("app.literal").String() {
+            t.Fatalf("%q: expected the literal unchanged after boot, got %q", literal, configuration.MustGet("app.literal").String())
+        }
+    }
+}
+
+/* the doubled percent is a template construct: the raw value is not the resolved one, so it stays deferred until the boot pass folds it */
+func TestConfigurationRegisterRuntime_PreBootDoubledPercentIsDeferredThenResolves(t *testing.T) {
+    environment, err := NewEnvironment(&testEnvironmentSource{values: map[string]string{}})
+    if nil != err {
+        t.Fatalf("new environment error: %v", err)
+    }
+
+    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    if nil != err {
+        t.Fatalf("new configuration error: %v", err)
+    }
+
+    configuration.RegisterRuntime("app.password", "pa%%ss")
+
+    func() {
+        defer func() {
+            if nil == recover() {
+                t.Fatalf("expected a pre-boot read of a doubled-percent value to refuse, not serve the escaped form")
+            }
+        }()
+
+        _ = configuration.MustGet("app.password").String()
+    }()
+
+    if resolveErr := configuration.Resolve(); nil != resolveErr {
+        t.Fatalf("unexpected resolve error: %v", resolveErr)
+    }
+
+    if "pa%ss" != configuration.MustGet("app.password").String() {
+        t.Fatalf("expected the folded percent after boot, got %q", configuration.MustGet("app.password").String())
+    }
+}
+
+/* a %name% reference registered before the parameter it names is the case the deferral exists for: refused until boot, settled by the batch resolution whichever order the composition root registered in */
+func TestConfigurationRegisterRuntime_PreBootParameterReferenceIsDeferredThenResolves(t *testing.T) {
+    environment, err := NewEnvironment(&testEnvironmentSource{values: map[string]string{}})
+    if nil != err {
+        t.Fatalf("new environment error: %v", err)
+    }
+
+    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    if nil != err {
+        t.Fatalf("new configuration error: %v", err)
+    }
+
+    configuration.RegisterRuntime("app.banner", "service-%app.name%")
+
+    func() {
+        defer func() {
+            if nil == recover() {
+                t.Fatalf("expected a pre-boot read of a forward reference to refuse, not serve the raw template")
+            }
+        }()
+
+        _ = configuration.MustGet("app.banner").String()
+    }()
+
+    configuration.RegisterRuntime("app.name", "melody")
+
+    if resolveErr := configuration.Resolve(); nil != resolveErr {
+        t.Fatalf("unexpected resolve error: %v", resolveErr)
+    }
+
+    if "service-melody" != configuration.MustGet("app.banner").String() {
+        t.Fatalf("expected the reference settled after boot, got %q", configuration.MustGet("app.banner").String())
+    }
+}
+
 func TestConfigurationRegisterRuntime_ConcurrentCallsDoNotPanic(t *testing.T) {
     source := &testEnvironmentSource{values: map[string]string{}}
 

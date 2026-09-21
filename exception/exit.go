@@ -45,8 +45,8 @@ func (instance *ExitError) Error() string {
 }
 
 func (instance *ExitError) Unwrap() error {
-    /* returning the nil field through the interface would box a typed nil that passes every nil comparison downstream */
-    if nil == instance.err {
+    /* errors.Is and errors.As call Unwrap on every link of a chain, and a typed-nil *ExitError stored as a cause is a link they reach before any guard; the receiver is answered for the way the accessors beside it are. Returning the nil field through the interface would box a typed nil that passes every nil comparison downstream. */
+    if nil == instance || nil == instance.err {
         return nil
     }
 
