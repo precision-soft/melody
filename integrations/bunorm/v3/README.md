@@ -119,6 +119,8 @@ Bun's logger is one variable for the whole process, so it is SET once — but wh
 
 `CloseMigrationDatabase(name)` ends the dedicated migration connection for one definition and forgets it, so the next `MigrationDatabase` for that name opens a fresh one. That connection is not a request pool and must not live like one: it deliberately lifts the driver's read and write deadlines and recycles nothing, which is right for a DDL statement that runs for minutes and wrong for anything that then sits idle. The migration commands call it on their way out; the registry's `Close` stays the net underneath for whatever did not. An empty name selects the default definition, a name with no migration connection is not an error, and a closed registry refuses it.
 
+[`HasProviderDefinition(name)`](./manager_registry.go) answers whether a definition is registered under the name, without opening anything — the question of a command that only labels a manager. The `migrate` module's `db:create` asks it, since it writes its file from the migrations collection alone and no longer opens the database that used to validate `--manager`.
+
 ### Consuming the default database
 
 ```go

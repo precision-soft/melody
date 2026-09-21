@@ -2716,3 +2716,27 @@ func TestManagerRegistry_AnOpenRefusedOnTheProvidersOwnGroundsAfterTheCloseKeeps
         t.Fatal("the released open never answered its waiter")
     }
 }
+
+func TestManagerRegistry_HasProviderDefinitionAnswersWithoutOpening(t *testing.T) {
+    provider := &fakeProvider{}
+
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{Name: "primary", Provider: provider, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("failed to build manager registry: %s", registryErr.Error())
+    }
+
+    if false == registry.HasProviderDefinition("primary") {
+        t.Fatal("expected the registered definition answered")
+    }
+
+    if true == registry.HasProviderDefinition("nope") || true == registry.HasProviderDefinition("") {
+        t.Fatal("expected an unregistered name and the empty name refused")
+    }
+
+    if 0 != provider.openCount {
+        t.Fatalf("expected no open behind the question, got %d", provider.openCount)
+    }
+}

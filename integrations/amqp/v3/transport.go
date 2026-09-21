@@ -8,7 +8,6 @@ import (
     "reflect"
     "strconv"
     "sync"
-    "sync/atomic"
     "time"
 
     "github.com/precision-soft/melody/v3/exception"
@@ -148,18 +147,14 @@ type Transport struct {
     closing           bool
     reconnecting      bool
     ownsConnection    bool
-    /* wedged is set while a publish write that outlived the publish timeout is still blocked on a connection this transport does not own and so cannot cut: every send until it returns is refused at once, instead of parking one more goroutine behind it per send */
-    wedged bool
+    /* the publish side — the mutex, the writes in flight and the wedged flag — is the publishHalf every consumer of this package embeds; wedged is guarded by mutex above, beside closing and connection, as the type's doc says */
+    publishHalf
     closeSignal       chan struct{}
     closeOnce         sync.Once
 
     wait sync.WaitGroup
 
-    publishMutex sync.Mutex
     consumeMutex sync.Mutex
-
-    /* writesInFlight counts the publishes currently inside the amqp client's blocking write. A publish half that a join could not take is BUSY, which is not the same as wedged — it can equally be a healthy confirmation still in its budget — and teardown reports and decides on the difference rather than on the join alone. */
-    writesInFlight atomic.Int64
 }
 
 func (instance *Transport) Send(
@@ -279,8 +274,8 @@ func (instance *Transport) CloseWithContext(closeContext context.Context) error 
 
     instance.awaitConsumeLoopWithin(teardownStretchWithin(closeContext, closeJoinTimeout))
 
-    publishJoined := lockWithin(&instance.publishMutex, teardownStretchWithin(closeContext, instance.resolvedPublishTimeout()))
-    if true == publishJoined {
+    join := instance.joinPublishWithin(closeContext, instance.resolvedPublishTimeout())
+    if true == join.joined {
         defer instance.publishMutex.Unlock()
     }
 
@@ -299,27 +294,14 @@ func (instance *Transport) CloseWithContext(closeContext context.Context) error 
 
     var closeErrs []error
 
-    writeInFlight := 0 < instance.writesInFlight.Load()
-
     if true == ownsConnection && nil != connection {
-        /* a write this close could not join is CUT: the deadline is now, deliberately, and whatever the client answers about it is the record of that cut. Every other close is given what is left of the caller's budget. */
-        cutWedgedWrite := false == publishJoined && true == writeInFlight
-
-        closeStretch := time.Duration(0)
-        if false == cutWedgedWrite {
-            closeStretch = teardownStretchWithin(closeContext, instance.resolvedPublishTimeout())
-        }
-
-        connectionCloseErr := ignoringAlreadyClosed(connection.CloseDeadline(time.Now().Add(closeStretch)))
-
-        /* a close the caller gave NO time is not a close that FAILED. The stretch is zero on every teardown whose budget an earlier component already spent, and the client then cuts the closing handshake at a deadline already behind it and answers an i/o timeout — over a live connection the broker was reading, measured 20 times out of 20, where the same connection closed clean with no deadline at all. Reported, it named this connection for a budget somebody else spent, and the teardown's own record already names that budget. A stretch that was POSITIVE and still ran out says something different, and so does the cut above: both are reported. */
-        if true == cutWedgedWrite || 0 < closeStretch {
+        if connectionCloseErr, reported := instance.closeOwnedConnectionWithin(closeContext, instance.resolvedPublishTimeout(), join, connection); true == reported {
             closeErrs = append(closeErrs, connectionCloseErr)
         }
     }
 
     switch {
-    case false == ownsConnection && false == publishJoined && true == writeInFlight:
+    case false == ownsConnection && true == join.wedgedWrite():
         /* a caller-owned connection with a wedged write cannot be cut from here, and a channel close over it would join the write in blocking; the channels die with the connection, by the owner's hand */
         closeErrs = append(closeErrs, exception.NewError(
             "amqp transport close left a publish write blocked on a caller-owned connection; the channels were not closed and end with that connection",
@@ -715,25 +697,17 @@ func (instance *Transport) publishOnce(
     }
 
     budget := instance.resolvedPublishTimeout()
-
-    turn := newPublishTurn()
-    written := make(chan struct{})
     outcome := make(chan publishOutcome, 1)
+    attempt := instance.beginPublish(budget)
 
-    go func() {
-        instance.publishMutex.Lock()
-        defer instance.publishMutex.Unlock()
+    var confirmation *amqp091.DeferredConfirmation
+    var publishErr error
 
-        if false == turn.begin() {
-            return
-        }
-
+    attempt.run(func() {
         _, _ = drainPublishReturn(returns)
 
-        instance.writesInFlight.Add(1)
-        confirmation, publishErr := channel.PublishWithDeferredConfirmWithContext(ctx, exchange, routingKey, true, false, publishing)
-        instance.writesInFlight.Add(-1)
-        close(written)
+        confirmation, publishErr = channel.PublishWithDeferredConfirmWithContext(ctx, exchange, routingKey, true, false, publishing)
+    }, func() {
         if nil != publishErr {
             outcome <- publishOutcome{disposition: publishDisposition{channelFaulted: true, furtherAttemptMayRecover: true}, err: exception.NewError("amqp publish failed", map[string]any{"queue": instance.queue, "exchange": exchange, "routingKey": routingKey}, publishErr)}
 
@@ -780,73 +754,49 @@ func (instance *Transport) publishOnce(
         }
 
         outcome <- publishOutcome{}
-    }()
+    })
 
-    turnTimer := time.NewTimer(budget)
-    defer turnTimer.Stop()
-
-    select {
-    case <-turn.started():
-    case <-turnTimer.C:
-        if true == turn.abandon() {
-            /* the socket was never touched by this publish, so nothing here may mark the transport wedged or name a blocked write: what ran out was this send's wait for its turn behind the publishes ahead of it. Nothing is faulted and nothing is torn down — and a further attempt is exactly what this failure is worth, because the queue it waited behind is the one condition a later attempt can find gone. */
-            return channel, publishDisposition{furtherAttemptMayRecover: true}, exception.NewError(
-                "amqp publish did not reach the socket within the publish timeout while earlier publishes on this transport still held it",
-                map[string]any{"queue": instance.queue, "exchange": exchange, "routingKey": routingKey, "publishTimeout": budget.String()},
-                errPublishTimedOut,
-            )
-        }
-
-        <-turn.started()
+    if true == attempt.awaitTurn() {
+        /* the socket was never touched by this publish, so nothing here may mark the transport wedged or name a blocked write: what ran out was this send's wait for its turn behind the publishes ahead of it. Nothing is faulted and nothing is torn down — and a further attempt is exactly what this failure is worth, because the queue it waited behind is the one condition a later attempt can find gone. */
+        return channel, publishDisposition{furtherAttemptMayRecover: true}, exception.NewError(
+            "amqp publish did not reach the socket within the publish timeout while earlier publishes on this transport still held it",
+            map[string]any{"queue": instance.queue, "exchange": exchange, "routingKey": routingKey, "publishTimeout": budget.String()},
+            errPublishTimedOut,
+        )
     }
 
-    writeTimer := time.NewTimer(budget)
-    defer writeTimer.Stop()
-
-    select {
-    case <-written:
+    if true == attempt.awaitWrite() {
         result := <-outcome
 
         return channel, result.disposition, result.err
-    case <-writeTimer.C:
-        disposition, expiredErr := instance.resolveExpiredWrite(exchange, routingKey, written, outcome)
-
-        return channel, disposition, expiredErr
     }
+
+    disposition, expiredErr := instance.resolveExpiredWrite(exchange, routingKey, attempt.written, outcome)
+
+    return channel, disposition, expiredErr
 }
 
-/* resolveExpiredWrite is the branch the write budget expiring leads to, and its first act is to ask whether the write has ALREADY returned.
-
-   The budget expiring and the write ending are two events with no order between them, so this branch is reached for a write that finished a moment earlier as readily as for one that is blocked — and the abandon below is wrong for a publish that is done: it cuts a healthy connection, reports a fault to a caller whose message the broker has, and names a write nobody is waiting on. The sister branch at the top of publishOnce has always re-read writeStarted under the turn lock for exactly this reason; this half went without one, so the window was not the instant of a tie but the whole stretch from the timer firing to the abandon reaching the socket.
-
-   The check cannot make the window vanish — a write that returns one instruction later is genuinely still in flight when it is read — and it is not meant to: what it removes is the stretch, which is the part a caller can lose a message to. It is a door rather than two inline lines because a branch reached only when two events land in the same instant cannot be driven from outside, while a door can be handed the state that instant produces — the way its test hands it a write that has already returned. */
+/* resolveExpiredWrite is the branch the write budget expiring leads to, and its first act is to ask whether the write has ALREADY returned — writeReturned says why. It is a door rather than two inline lines because a branch reached only when two events land in the same instant cannot be driven from outside, while a door can be handed the state that instant produces — the way its test hands it a write that has already returned. */
 func (instance *Transport) resolveExpiredWrite(
     exchange string,
     routingKey string,
     written <-chan struct{},
     outcome <-chan publishOutcome,
 ) (publishDisposition, error) {
-    select {
-    case <-written:
+    if true == writeReturned(written) {
         result := <-outcome
 
         return result.disposition, result.err
-    default:
     }
 
     return instance.abandonWedgedPublish(exchange, routingKey, written)
 }
 
-/* abandonWedgedPublish is the timed-out branch of publishOnce. On a connection this transport dialed itself the socket is cut with a deadline already passed, which is the one door the amqp client leaves open once its send locks are held: the blocked write returns, the client's shutdown completes, and the one retry redials through connect — the fault is retryable, exactly like any other channel fault. On a caller-owned connection nothing here may cut the socket, so the transport marks itself wedged until the write returns — by the owner's hand, or never — and refuses every send in between at once rather than parking one goroutine per send behind the held mutex; that fault is not retryable, since the retry would meet the same refusal. */
+/* abandonWedgedPublish is the timed-out branch of publishOnce, mapping the verdict of the shared abandon onto this transport's dispositions: a cut owned connection is redialed through connect on the one retry, so that fault is retryable exactly like any other channel fault; a caller-owned connection marked wedged refuses every send until the write returns, and that fault is not retryable, since the retry would meet the same refusal. */
 func (instance *Transport) abandonWedgedPublish(exchange string, routingKey string, written <-chan struct{}) (publishDisposition, error) {
-    instance.mutex.Lock()
-    closing := instance.closing
-    ownsConnection := instance.ownsConnection
-    connection := instance.connection
-    if false == closing && false == ownsConnection {
-        instance.wedged = true
-    }
-    instance.mutex.Unlock()
+    verdict := instance.abandonWedgedWrite(&instance.mutex, func() publishOwnerState {
+        return publishOwnerState{closing: instance.closing, ownsConnection: instance.ownsConnection, connection: instance.connection}
+    }, written)
 
     errorContext := map[string]any{
         "queue":          instance.queue,
@@ -855,41 +805,20 @@ func (instance *Transport) abandonWedgedPublish(exchange string, routingKey stri
         "publishTimeout": instance.resolvedPublishTimeout().String(),
     }
 
-    /* a write still blocked while Close runs is Close's to end — it cuts an owned connection itself and cannot cut another's — so nothing is marked here and nothing is retried */
-    if true == closing {
+    switch verdict {
+    case wedgedWriteWhileClosing:
         return publishDisposition{}, exception.NewError(
             "amqp publish did not return within the publish timeout while the transport was closing",
             errorContext,
             errPublishTimedOut,
         )
-    }
-
-    if true == ownsConnection && nil != connection {
-        _ = connection.CloseDeadline(time.Now())
-
-        /* the write returns as soon as the deadline lands on the socket; the wait is bounded all the same, because a Dial-injected conn that ignores deadlines is not this transport's to reason about */
-        timer := time.NewTimer(closeJoinTimeout)
-        defer timer.Stop()
-
-        select {
-        case <-written:
-        case <-timer.C:
-        }
-
+    case wedgedWriteCut:
         return publishDisposition{channelFaulted: true, furtherAttemptMayRecover: true}, exception.NewError(
             "amqp publish did not return within the publish timeout; the owned connection was closed and is redialed on retry",
             errorContext,
             errPublishTimedOut,
         )
     }
-
-    go func() {
-        <-written
-
-        instance.mutex.Lock()
-        instance.wedged = false
-        instance.mutex.Unlock()
-    }()
 
     return publishDisposition{}, exception.NewError(
         "amqp publish did not return within the publish timeout on a caller-owned connection; sends are refused until that write returns",

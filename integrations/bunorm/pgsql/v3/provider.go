@@ -66,7 +66,8 @@ func (instance *Provider) OpenContext(ctx context.Context, params bunorm.Connect
 
     if nil == instance.retryConfig {
         database, openErr := instance.open(ctx, params, logger)
-        if nil != openErr && true == instance.isTransientError(openErr) {
+        /* the caller's context is read before the failure is classified: a budget the caller had already spent refuses the open before the attempt with a deadline as its cause, and a deadline satisfies the net.Error timeout the classifier admits — so the caller's own expired budget was filed as an unreachable database, the one class the read/write splitter absorbs by serving the primary. A context that is done is the caller's stop, whatever class its refusal wears. */
+        if nil != openErr && nil == ctx.Err() && true == instance.isTransientError(openErr) {
             return nil, unreachable(openErr)
         }
 
@@ -217,8 +218,8 @@ func (instance *Provider) openWithRetry(ctx context.Context, params bunorm.Conne
             return database, nil
         }
 
-        /* the caller's own cancellation is not a database outage. The transient classifier reads messages and error types, none of which a cancellation carries, so a SIGTERM that cancelled the open mid-deploy fell through to the terminal branch and paged whoever was on call with "database connection failed with non-transient error" against a perfectly healthy database. It is a clean stop: recorded at warning under its own name and not retried, because the context that would carry the retry is already gone. Only Canceled, never DeadlineExceeded — the ping budget is derived from the connect timeout, so a deadline here can be the database itself. */
-        if true == errors.Is(openErr, context.Canceled) {
+        /* the caller's own cancellation is not a database outage. The transient classifier reads messages and error types, none of which a cancellation carries, so a SIGTERM that cancelled the open mid-deploy fell through to the terminal branch and paged whoever was on call with "database connection failed with non-transient error" against a perfectly healthy database. It is a clean stop: recorded at warning under its own name and not retried, because the context that would carry the retry is already gone. Whether the caller is done is read off the caller's CONTEXT, not off the class of the failure: the ping budget is derived from the connect timeout, so a DeadlineExceeded in the failure can be the database itself, and that one is retried — but a deadline the caller's own context has passed is the caller's, and it used to be classified as transient by its timeout, retried once for nothing and reported as a retry the caller cancelled. */
+        if nil != ctx.Err() || true == errors.Is(openErr, context.Canceled) {
             cancelledErr := exception.FromError(openErr)
             logger.Warning(
                 "database open cancelled by the caller's context",
@@ -510,6 +511,20 @@ func isWordCharacterAt(value string, index int) bool {
         '_' == character
 }
 
+/* isTransientSqlState answers on the class of a SQLSTATE the server sent: 08 (connection exception), 53 (insufficient resources — too many connections) and 57 (operator intervention — the database system is starting up, or shutting down) are the server saying it cannot take the connection NOW; every other class with an identity — 3D000 for an unknown database, 28P01 for a refused password, a permission — is the server saying no, and a message that happens to carry a transient marker does not make it an outage. */
+func isTransientSqlState(sqlState string) bool {
+    if 2 > len(sqlState) {
+        return false
+    }
+
+    switch sqlState[:2] {
+    case "08", "53", "57":
+        return true
+    }
+
+    return false
+}
+
 /* unreachable files an open failure the transient classifier admitted — and the retry budget could not get past — under bunorm.ErrDatabaseUnreachable, the class a read/write splitter absorbs. The exception keeps its message and its context; the link sits under it as the cause, so a journal renders the class once, where the driver failure stood, and errors.As still reaches that failure through it. */
 func unreachable(openErr error) *exception.Error {
     failure := exception.FromError(openErr)
@@ -517,9 +532,14 @@ func unreachable(openErr error) *exception.Error {
     return exception.NewError(failure.Message(), failure.Context(), bunorm.DatabaseUnreachable(failure.CauseErr()))
 }
 
+/* isTransientError answers whether an open failure is worth another attempt and, on the retry-less door, whether it is filed as an unreachable database. A failure carrying the SERVER's identity is classified on that identity before any message is read: the server quotes the operand in its message — a database named "timeout", a user named "eof" — so a permanent refusal spelled around a marker read as an outage, was retried for the whole budget and then had the read/write splitter serve the primary for it in silence, while the same refusal spelled around another name was terminal at once. Without an identity the failure is a dial or a socket, and the net.Error checks and the markers below are what is known about it. */
 func (instance *Provider) isTransientError(inputErr error) bool {
     if nil == inputErr {
         return false
+    }
+
+    if sqlState := sqlStateOf(inputErr); "" != sqlState {
+        return isTransientSqlState(sqlState)
     }
 
     var dnsErr *net.DNSError

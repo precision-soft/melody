@@ -3691,6 +3691,49 @@ func (instance *decoratingCrontabTemplate) Render(entries []Entry, options Rende
     return "# decorated by the application\n" + rendered, renderErr
 }
 
+/* the wrapper is used as it is, and so is the line it answers: the bare prefix, promoted from the builtin it embeds, which is the line an earlier release or another application's wrapper wrote as well. A named application's --prune swept on it and emptied those destinations, the cross-release and cross-application emptying the named line exists to prevent; the sweep is refused, the destination is written. */
+func TestRunPruneIsRefusedOnADialectWhoseLineDoesNotNameTheApplication(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+    legacyPath := filepath.Join(tempDir, "legacy.crontab")
+    legacyContent := "#\n" + CrontabOwnershipMarker + "\n0 3 * * * deploy /usr/local/bin/old legacy:job\n"
+    if writeErr := os.WriteFile(legacyPath, []byte(legacyContent), 0o644); nil != writeErr {
+        t.Fatalf("write legacy: %v", writeErr)
+    }
+
+    var builtin *CrontabTemplate
+    for _, template := range BuiltinTemplates() {
+        if candidate, isCrontab := template.(*CrontabTemplate); true == isCrontab && "crontab" == candidate.Name() {
+            builtin = candidate
+        }
+    }
+    if nil == builtin {
+        t.Fatalf("expected the builtin crontab dialect among the builtins")
+    }
+
+    generateCommand := NewGenerateCommand(buildConfigurationFromFakeCommands([]clicontract.Command{newFakeCommandWithConfig("reports:daily", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})}))
+    generateCommand.RegisterTemplate(&decoratingCrontabTemplate{CrontabTemplate: builtin})
+
+    _, runErr := dispatchGenerateCommand(
+        generateCommand,
+        newStubConfigurationNamed(nil, "billing"),
+        append(ownershipLineArguments(tempDir, "crontab", nil), "--out", outputPath, "--prune"),
+    )
+    if nil == runErr || false == strings.Contains(runErr.Error(), "the template's line does not") {
+        t.Fatalf("expected the sweep refused on a line that does not name the application, got: %v", runErr)
+    }
+
+    content, readErr := os.ReadFile(outputPath)
+    if nil != readErr || false == strings.Contains(string(content), "# decorated by the application") {
+        t.Fatalf("expected the wrapper's destination written before the sweep was refused, got %q (%v)", content, readErr)
+    }
+
+    after, afterErr := os.ReadFile(legacyPath)
+    if nil != afterErr || legacyContent != string(after) {
+        t.Fatalf("expected the bare-marker neighbour left byte for byte, got %q (%v)", after, afterErr)
+    }
+}
+
 func TestRunLeavesADialectEmbeddingABuiltinAsItIsInsteadOfReplacingItWithTheBareCopy(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")

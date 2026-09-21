@@ -1252,3 +1252,119 @@ func TestOpenContext_AnOutageIsFiledAsUnreachableAndARefusalIsNot(t *testing.T) 
         t.Fatalf("expected a refusal by name NOT filed as unreachable, got %v", openErr)
     }
 }
+
+/* serverRefusal builds the driver's own error type with the MESSAGE the server sends — one that quotes the operand, so a database named "timeout" or a user named "eof" made a permanent refusal an outage when the classifier read the message */
+func serverRefusal(number uint16, sqlState string, message string) error {
+    refusal := &driver.MySQLError{Number: number, Message: message}
+    copy(refusal.SQLState[:], sqlState)
+
+    return exception.NewError("database connection failed", nil, refusal)
+}
+
+func TestIsTransientError_AServerRefusalWithAnIdentityIsTerminalWhateverItsMessageSays(t *testing.T) {
+    provider := newTestProvider()
+
+    refusals := []error{
+        serverRefusal(1049, "42000", "Unknown database 'timeout'"),
+        serverRefusal(1045, "28000", "Access denied for user 'eof'@'172.18.0.5' (using password: YES)"),
+        serverRefusal(1044, "42000", "Access denied for user 'melody'@'%' to database 'connection refused'"),
+    }
+
+    for _, refusal := range refusals {
+        if true == provider.isTransientError(refusal) {
+            t.Fatalf("expected the server refusal to be terminal whatever its message says, got transient for %v", refusal)
+        }
+    }
+}
+
+func TestIsTransientError_AServerOutageWithAnIdentityIsTransient(t *testing.T) {
+    provider := newTestProvider()
+
+    outages := []error{
+        serverRefusal(1040, "08004", "Too many connections"),
+        serverRefusal(1053, "08S01", "Server shutdown in progress"),
+        serverRefusal(1203, "42000", "User melody already has more than 'max_user_connections' active connections"),
+    }
+
+    for _, outage := range outages {
+        if false == provider.isTransientError(outage) {
+            t.Fatalf("expected the server outage to be transient, got terminal for %v", outage)
+        }
+    }
+}
+
+/* a budget the caller had already spent refuses the open before the attempt with a deadline as its cause, which satisfies the timeout the classifier admits — so the caller's own expired budget was filed under the class the read/write splitter serves the primary for */
+func TestOpenContext_ACallersExpiredDeadlineIsNotAnUnreachableDatabase(t *testing.T) {
+    expired, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+    defer cancel()
+
+    _, openErr := newTestProvider().OpenContext(expired, newTestParams("203.0.113.1", "3306", "melody", "melody", "melody"), nil)
+    if nil == openErr {
+        t.Fatal("expected the open under an expired deadline to be refused")
+    }
+
+    if true == errors.Is(openErr, bunorm.ErrDatabaseUnreachable) {
+        t.Fatalf("expected the caller's expired budget NOT filed as an unreachable database, got %v", openErr)
+    }
+
+    if false == errors.Is(openErr, context.DeadlineExceeded) {
+        t.Fatalf("expected the caller's deadline kept as the cause, got %v", openErr)
+    }
+}
+
+/* with a retry policy the same refusal was classified transient by its timeout, retried once for nothing and reported as a retry the caller cancelled — two warnings for a caller whose context was done before the first attempt */
+func TestOpenWithRetry_ACallersExpiredDeadlineIsACleanStopWithoutARetry(t *testing.T) {
+    logger := &capturingProviderLogger{}
+
+    expired, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+    defer cancel()
+
+    _, openErr := newTestProvider(WithRetryConfig(DefaultRetryConfig())).OpenContext(expired, newTestParams("203.0.113.1", "3306", "melody", "melody", "melody"), logger)
+    if nil == openErr || false == errors.Is(openErr, context.DeadlineExceeded) {
+        t.Fatalf("expected the caller's deadline kept as the cause, got %v", openErr)
+    }
+
+    if 1 != len(logger.entries) || "database open cancelled by the caller's context" != logger.entries[0].message {
+        t.Fatalf("expected one clean-stop warning and no retry, got %+v", logger.entries)
+    }
+}
+
+/* against a live server, the refusal quotes the operand: a database named after a transient marker is still a refusal by name, handed back instead of filed as the outage a replica falls back to the primary for */
+func TestOpenContext_ALiveServerRefusalSpelledAroundAMarkerIsNotFiledAsUnreachable(t *testing.T) {
+    dsn := os.Getenv("MYSQL_DSN")
+    if "" == dsn {
+        t.Skip("MYSQL_DSN not set; skipping mysql provider integration test")
+    }
+
+    dsnConfig, parseErr := driver.ParseDSN(dsn)
+    if nil != parseErr {
+        t.Fatalf("parse dsn: %v", parseErr)
+    }
+
+    host, port, splitErr := net.SplitHostPort(dsnConfig.Addr)
+    if nil != splitErr {
+        t.Skipf("MYSQL_DSN address %q is not host:port; skipping", dsnConfig.Addr)
+    }
+
+    provider := newTestProvider(WithTimeoutConfig(NewTimeoutConfig(5*time.Second, 0, 0)))
+
+    for _, params := range []bunorm.ConnectionParameters{
+        newTestParams(host, port, "timeout", dsnConfig.User, dsnConfig.Passwd),
+        newTestParams(host, port, dsnConfig.DBName, "eof", "eof"),
+    } {
+        database, openErr := provider.Open(params, nil)
+        if nil != database {
+            _ = database.Close()
+            t.Fatalf("expected the refusal for %s/%s", params.Database, params.User)
+        }
+
+        var serverErr *driver.MySQLError
+        if false == errors.As(openErr, &serverErr) {
+            t.Fatalf("expected the server's own refusal, got %v", openErr)
+        }
+
+        if true == errors.Is(openErr, bunorm.ErrDatabaseUnreachable) {
+            t.Fatalf("expected the refusal for %s/%s handed back by name, got it filed as unreachable: %v", params.Database, params.User, openErr)
+        }
+    }
+}

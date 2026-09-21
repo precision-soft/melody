@@ -296,6 +296,16 @@ func providerDefinitionRefusal(sentinel error, position int, name string) error 
     )
 }
 
+/* HasProviderDefinition answers whether a definition is registered under the name, without opening anything: it is the question of a command that only LABELS a manager — db:create writes its file from the migrations collection alone and stopped opening the database to do it — so a misspelt --manager is refused where it is typed rather than discovered at the first db:migrate. A closed registry still answers what it was built with; the refusal a closed registry gives belongs to the doors that open. */
+func (instance *ManagerRegistry) HasProviderDefinition(name string) bool {
+    instance.lock.Lock()
+    defer instance.lock.Unlock()
+
+    _, exists := instance.providerDefinitionByName[name]
+
+    return exists
+}
+
 /* providerDefinitionNotFoundErrorLocked names the definition that was asked for and the ones that are registered, the way the framework's own container names an unregistered service id rather than answering a bare sentinel. It is called with the registry lock held, because it reads the definition map. The sentinel stays the CAUSE: every caller testing errors.Is(err, ErrProviderDefinitionNotFound) keeps its answer through Unwrap, and a replacement that dropped it would break them silently. */
 func (instance *ManagerRegistry) providerDefinitionNotFoundErrorLocked(name string) error {
     registered := make([]string, 0, len(instance.providerDefinitionByName))
@@ -422,7 +432,7 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
                 _ = database.Close()
             }
 
-            /* an open the registry itself ended — CloseWithContext cancelled openContext while this one was in flight — reaches its waiter as the registry's refusal, with the cancellation under it: the provider's refusal read on its own said the CALLER had cancelled, which the caller had not, and named no registry for the operator to look at. The refusal has to CARRY the cancellation for that: a provider that never read its context and refused on its own grounds after the close — a password the server turned down — answered the same guard, read on the registry's state alone, and its waiter was told the registry had ended an open the registry never touched */
+            /* an open the registry itself ended — CloseWithContext cancelled openContext while this one was in flight — reaches its waiter as the registry's refusal, with the cancellation under it: the provider's refusal read on its own said the CALLER had cancelled, which the caller had not, and named no registry for the operator to look at. The refusal has to CARRY the cancellation for that: a provider that never read its context and refused on its own grounds after the close — a password the server turned down — answered the same guard, read on the registry's state alone, and its waiter was told the registry had ended an open the registry never touched. The cancellation is necessary and not sufficient: a provider that cancels a context of its own after the close and refuses with that cancellation is still read as ended by the registry, since nothing on the error says whose cancellation it carries; neither shipped driver does that — their retry loops wrap the context the registry handed them */
             if true == instance.closed && nil != instance.openContext.Err() && true == errors.Is(openErr, context.Canceled) {
                 pendingOpen.openError = exception.NewError(
                     fmt.Sprintf("bunorm manager %s open ended by the registry closing while it was in flight", name),

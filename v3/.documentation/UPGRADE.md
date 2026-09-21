@@ -659,6 +659,30 @@ debug.NewMiddlewareCommand(
 
 **Remedy.** None is required, and the change is in the safe direction: the failure was permanent in both cases and the retries only delayed the report. The `io.EOF` and `net.Error` checks that run ahead of the message scan are untouched, so a genuine end-of-file or timeout is classified by type as before, and every marker that appears as its own word — `i/o timeout`, `connection refused`, `bad connection`, a bare `EOF` — matches exactly as it did. An operator who wants a permanent failure retried anyway raises the retry budget rather than relying on a substring collision.
 
+### Bunorm: `ReadWriteSplitter.Reader` falls back to the primary on an unreachable replica only
+
+**What changed.** [`ReadWriteSplitter.Reader`](../../integrations/bunorm/v3/split.go) serves the primary in place of a replica only when the replica's provider filed its open failure under [`ErrDatabaseUnreachable`](../../integrations/bunorm/v3/errors.go) — an outage the transient classifier admitted and the retry budget could not get past. Every other failure of the replica is handed back. It used to refuse a denylist of four registry sentinels and absorb everything else.
+
+**Symptom.** A replica whose user was left unset, whose password the server refused or which points at a database that does not exist used to be served from the primary on every read, silently and for the life of the process; the read now fails with the replica's own refusal. An unreachable replica — a host that is down, a closed port, the retry budget spent — still falls back to the primary as before.
+
+**Remedy.** Repair the replica's configuration; the refusal names what the server refused. A provider of your own takes part in the fallback by filing an outage through [`DatabaseUnreachable`](../../integrations/bunorm/v3/errors.go) under its exception's cause — a provider that files nothing has every failure read as a refusal, the direction that surfaces a misconfiguration.
+
+### Bunorm mysql and pgsql: a refusal the server gave by name is never an outage
+
+**What changed.** The transient classifier of the [`mysql`](../../integrations/bunorm/mysql/v3/provider.go) and [`pgsql`](../../integrations/bunorm/pgsql/v3/provider.go) providers reads the identity a server refusal carries — the SQLSTATE on PostgreSQL, the error number on MySQL — before it scans the message for markers, and the caller's own context before it classifies at all. A refusal with an identity is transient only for the classes that mean the server cannot take the connection now (PostgreSQL `08`, `53`, `57`; MySQL 1040, 1053, 1203, 1226) and terminal for every other; a context the caller had already cancelled or let expire is the caller's stop, whichever class its refusal wears.
+
+**Symptom.** A database named `timeout` or a user named `eof` — any operand the server quotes into its message that happens to carry a transient marker — used to be retried for the whole budget, reported as "failed after max retry attempts", and, behind a read/write splitter, served from the primary in silence; such a refusal now fails on the first attempt under its own name. An outage whose message carried no marker — a `57P03` "cannot connect now", MySQL's 1203 — used to be terminal and is now retried. A caller's expired deadline used to be filed as an unreachable database on the retry-less door and, on the retrying one, cost one retry and two warnings; it is now one warning and no attempt.
+
+**Remedy.** None is required. An operator who wants a permanent refusal retried anyway cannot get that by naming the database after a marker; the retry budget applies to outages only.
+
+### Bunorm mysql and pgsql: an empty host is refused
+
+**What changed.** The six providers of the [`mysql`](../../integrations/bunorm/mysql/v3/provider.go) and [`pgsql`](../../integrations/bunorm/pgsql/v3/provider.go) families refuse an empty host by name before the driver configuration is built, beside the empty database and user the pgsql provider already refused.
+
+**Symptom.** A configuration whose host was left unset used to connect: the dial address the drivers made from an empty host, `:port`, is the local system, so the application connected to whatever listened on that port on its own machine — with the configured credentials, the dialect handshake included — instead of failing. The open now fails, naming the empty host.
+
+**Remedy.** Set the host — `MYSQL_HOST`, `PGSQL_HOST` in the example's spelling — on every environment that boots the application. A deployment that relied on the local dial by accident names `127.0.0.1` explicitly.
+
 ### Bunorm mysql: the provider negotiates verified TLS by default
 
 **What changed.** The mysql provider set no TLS on its connector, so it connected in plaintext and offered no option to enable TLS. It now builds a verifying `tls.Config` by default — the system roots, the configured host as the name to verify against, `MinVersion` TLS 1.2 — the same posture its pgsql sibling already carried, and refuses the driver spellings that would downgrade silently.
@@ -843,7 +867,7 @@ The refusal existed because the flag types were the parsing engine's own — `cl
 
 **Symptom.** Generated files gain the application's name on their ownership line; a byte-exact comparison against previously generated files sees the difference. A destination written by an earlier release carries the bare line and is no longer swept by `--prune`: an entry retired before the upgrade keeps running until its file is removed.
 
-**Remedy.** Regenerate — every destination the current configuration names receives the line with the name and is swept by later runs as before. Remove once, by hand, the destinations a version before the upgrade retired. A custom dialect that two applications may share carries the application's name in its own ownership line from construction; the umbrella readme's example shows the shape.
+**Remedy.** Regenerate — every destination the current configuration names receives the line with the name and is swept by later runs as before. Remove once, by hand, the destinations a version before the upgrade retired. A custom dialect that two applications may share carries the application's name in its own ownership line from construction; the umbrella readme's example shows the shape. `--prune` sweeps only on a line that ends in ` for ` and this application's cli name, whichever template answered it: a dialect of yours that embeds a builtin and is registered under its name answers the bare prefix and is written but not swept — the run is refused at the sweep, naming the line.
 
 ### Cron: the generated k8s manifests open with the ownership marker
 

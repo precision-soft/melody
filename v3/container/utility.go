@@ -29,7 +29,7 @@ func typeIdentityKey(targetType reflect.Type) string {
     return typeIdentityPath(targetType) + "\x00" + targetType.String()
 }
 
-/* typeIdentityPath is the import path a type's identity comes from: its own when it is named, and its named element's when it is a pointer, slice, array or channel of one — a map's is the paths of its key and its element, joined. A type built of nothing named — a function, an unnamed struct, an unnamed interface — has no path, and String() alone is what tells two of them apart. */
+/* typeIdentityPath is the import path a type's identity comes from: its own when it is named, and its named element's when it is a pointer, slice, array or channel of one — a map's is the paths of its key and its element, joined. A type built of nothing named — a function, an unnamed struct, an unnamed interface — has no path, and two of them built of same-named types from two packages key identically, String() included: that residue is bounded by the boot refusal recordTypeIdentityKeyLocked gives a colliding key, so the second such registration fails the boot rather than answering the first's teardown declaration. */
 func typeIdentityPath(targetType reflect.Type) string {
     if "" != targetType.PkgPath() {
         return targetType.PkgPath()

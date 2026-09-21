@@ -125,4 +125,4 @@ With the default prefix (`db`), the commands are:
 * `db:rollback` – rolls back the last migration group.
 * `db:status` – shows applied and pending migrations.
 * `db:unlock` – unlocks the migrations table.
-* `db:create <migration-name>` – creates a go migrations file.
+* `db:create <migration-name>` – creates a go migrations file. No database is opened for it; on the third major a `--manager` the registry does not know is refused before the file is written, while the first two majors label the file with the name as typed and refuse it at the first `db:migrate`.

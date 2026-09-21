@@ -390,6 +390,58 @@ func TestRestoreDefaultRunnerOption_PutsTheHostsValueBackWhicheverOrderTheComman
     }
 }
 
+/* SetDefaultRunnerOption promises to install the host's posture; the last restore put the value saved before the FIRST command back over it, so a host that reconfigured its fallback while a command ran had that value overwritten on the command's way out. The restore now puts the saved value back only over a value one of the commands installed. */
+func TestRestoreDefaultRunnerOption_KeepsAValueTheHostInstalledWhileACommandRan(t *testing.T) {
+    t.Cleanup(func() {
+        processRunnerOption.Store(nil)
+        commandRunnerOptions.depth = 0
+        commandRunnerOptions.host = nil
+        commandRunnerOptions.installed = nil
+    })
+
+    var host bytes.Buffer
+    var reconfigured bytes.Buffer
+    var command bytes.Buffer
+
+    SetDefaultRunnerOption(RunnerOption{Writer: &host, NoColor: true})
+
+    installed, previous := swapDefaultRunnerOption(RunnerOption{Writer: &command, NoColor: true})
+    SetDefaultRunnerOption(RunnerOption{Writer: &reconfigured, NoColor: true})
+    restoreDefaultRunnerOption(installed, previous)
+
+    if &reconfigured != resolveDefaultRunnerOption().Writer {
+        t.Fatalf("expected the value the host installed mid-run kept, got %v", resolveDefaultRunnerOption().Writer)
+    }
+}
+
+/* three overlapping commands leaving out of order — the second, then the third, then the first — leave the second command's value live under nobody's name at the last restore: a compare-and-swap on the last command's own value would leave it there for the life of the process, which is why the restore asks whether the live value was installed by ANY command of the group */
+func TestRestoreDefaultRunnerOption_ThreeOverlappingCommandsLeavingOutOfOrderStillPutTheHostsValueBack(t *testing.T) {
+    t.Cleanup(func() {
+        processRunnerOption.Store(nil)
+        commandRunnerOptions.depth = 0
+        commandRunnerOptions.host = nil
+        commandRunnerOptions.installed = nil
+    })
+
+    var host, first, second, third bytes.Buffer
+    SetDefaultRunnerOption(RunnerOption{Writer: &host, NoColor: true})
+
+    firstInstalled, firstPrevious := swapDefaultRunnerOption(RunnerOption{Writer: &first, NoColor: true})
+    secondInstalled, secondPrevious := swapDefaultRunnerOption(RunnerOption{Writer: &second, NoColor: true})
+    thirdInstalled, thirdPrevious := swapDefaultRunnerOption(RunnerOption{Writer: &third, NoColor: true})
+
+    restoreDefaultRunnerOption(secondInstalled, secondPrevious)
+    restoreDefaultRunnerOption(thirdInstalled, thirdPrevious)
+    if &second != resolveDefaultRunnerOption().Writer {
+        t.Fatalf("expected the third command's restore to put the second command's value back while the first still runs, got %v", resolveDefaultRunnerOption().Writer)
+    }
+
+    restoreDefaultRunnerOption(firstInstalled, firstPrevious)
+    if &host != resolveDefaultRunnerOption().Writer {
+        t.Fatalf("expected the host's own value back once the last command restored, got %v", resolveDefaultRunnerOption().Writer)
+    }
+}
+
 /* the prefix of every per-query line carries the migration name, the author's own text, and the executing, completed and failed lines printed it as sent while escaping the query name beside it: a name carrying an escape sequence repainted the terminal three times per query. Measured on a run whose second query fails, so all three lines print, in both colour modes: the name is escaped on every line and no raw escape byte reaches the writer. */
 func TestRunQueriesWithOption_EscapesTheMigrationNameInsideThePrefixOfEveryPerQueryLine(t *testing.T) {
     for _, noColor := range []bool{true, false} {

@@ -52,16 +52,17 @@ func runnerOptionFromContext(ctx context.Context) (RunnerOption, bool) {
 /* processRunnerOption is the process-wide fallback RunQueries reads when the context carries no option. It exists for the migration that drops the context it was handed and for a host process that runs migrations outside melody's commands; it is not how a command reaches its own migrations — that is the context — because a process default is one value for the whole process, so two commands dispatched concurrently overwrote each other's writer and a --format=json run sent a text run's per-query lines into its own discarded writer. */
 var processRunnerOption atomic.Pointer[RunnerOption]
 
-/* SetDefaultRunnerOption installs the process-wide fallback RunQueries uses when the context carries no option. It is the door of a host process that runs migrations on its own; the migrate commands do not leave anything behind in it — each installs its posture for the length of its run and puts back what was there. */
+/* SetDefaultRunnerOption installs the process-wide fallback RunQueries uses when the context carries no option. It is the door of a host process that runs migrations on its own; the migrate commands do not leave anything behind in it — each installs its posture for the length of its run and puts back what was there, and a posture the host installs through this door while a command runs is left where the host put it. */
 func SetDefaultRunnerOption(option RunnerOption) {
     processRunnerOption.Store(&option)
 }
 
-/* commandRunnerOptions is the bookkeeping of the commands that hold the process-wide fallback at once: how many are running, and the host's own value, saved when the first of them installed its posture and put back when the last of them leaves. It is what makes the restore exact for commands that OVERLAP — the compare-and-swap it replaces restored correctly only for commands nested last-in first-out, and two commands overlapping the other way round left the FIRST command's finished posture installed for the life of the process: its discarded writer under --format=json, where the host's own value was promised back. */
+/* commandRunnerOptions is the bookkeeping of the commands that hold the process-wide fallback at once: how many are running, the host's own value, saved when the first of them installed its posture and put back when the last of them leaves, and every pointer the commands of that group installed. It is what makes the restore exact for commands that OVERLAP — the compare-and-swap it replaces restored correctly only for commands nested last-in first-out, and two commands overlapping the other way round left the FIRST command's finished posture installed for the life of the process: its discarded writer under --format=json, where the host's own value was promised back. The installed set is what keeps the last restore from overwriting a value the HOST installed while the commands ran: the saved value is put back only over a value one of the commands installed, and a SetDefaultRunnerOption made in the meantime is left where the host put it. */
 var commandRunnerOptions struct {
-    mutex sync.Mutex
-    depth int
-    host  *RunnerOption
+    mutex     sync.Mutex
+    depth     int
+    host      *RunnerOption
+    installed map[*RunnerOption]struct{}
 }
 
 /* swapDefaultRunnerOption installs the fallback for the length of a command and answers the pointer it installed and the one that was live before, for restoreDefaultRunnerOption. The fallback is what a migration that drops its context sees, and under --format=json that migration would otherwise print its per-query lines into the document. The first command to install saves the host's own value. */
@@ -71,15 +72,17 @@ func swapDefaultRunnerOption(option RunnerOption) (installed *RunnerOption, prev
 
     if 0 == commandRunnerOptions.depth {
         commandRunnerOptions.host = processRunnerOption.Load()
+        commandRunnerOptions.installed = make(map[*RunnerOption]struct{})
     }
     commandRunnerOptions.depth++
 
     installed = &option
+    commandRunnerOptions.installed[installed] = struct{}{}
 
     return installed, processRunnerOption.Swap(installed)
 }
 
-/* restoreDefaultRunnerOption puts back what the command's swap displaced, in whichever order the commands finish: the last command to leave puts the host's own value back, whatever the commands installed in between; a command leaving while others still run puts back the value that was live before it only when its own is the live one, and otherwise leaves the later command's value where it is. Two commands with migrations that drop their context share the one fallback for as long as they overlap — the context is the channel that keeps them apart, and a migration that drops it has opted out of that. */
+/* restoreDefaultRunnerOption puts back what the command's swap displaced, in whichever order the commands finish: the last command to leave puts the host's own value back over whatever the commands installed in between; a command leaving while others still run puts back the value that was live before it only when its own is the live one, and otherwise leaves the later command's value where it is. A value the HOST installed while the commands ran is neither: the last restore finds it live, sees it was installed by no command, and leaves it — SetDefaultRunnerOption promises to install the host's posture, and putting the older one back over it broke that promise for a host that reconfigures its fallback while a command runs. A compare-and-swap on the last command's own value is not enough for that, because three commands leaving out of order can leave a value of the group live under nobody's name. Two commands with migrations that drop their context share the one fallback for as long as they overlap — the context is the channel that keeps them apart, and a migration that drops it has opted out of that. */
 func restoreDefaultRunnerOption(installed *RunnerOption, previous *RunnerOption) {
     commandRunnerOptions.mutex.Lock()
     defer commandRunnerOptions.mutex.Unlock()
@@ -88,8 +91,13 @@ func restoreDefaultRunnerOption(installed *RunnerOption, previous *RunnerOption)
 
     if 0 >= commandRunnerOptions.depth {
         commandRunnerOptions.depth = 0
-        processRunnerOption.Store(commandRunnerOptions.host)
+
+        if _, installedByACommand := commandRunnerOptions.installed[processRunnerOption.Load()]; true == installedByACommand {
+            processRunnerOption.Store(commandRunnerOptions.host)
+        }
+
         commandRunnerOptions.host = nil
+        commandRunnerOptions.installed = nil
 
         return
     }

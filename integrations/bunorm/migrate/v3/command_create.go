@@ -6,6 +6,7 @@ import (
     "regexp"
     "time"
 
+    "github.com/precision-soft/melody/integrations/bunorm/v3"
     "github.com/precision-soft/melody/v3/exception"
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/cli/output"
@@ -40,6 +41,9 @@ func (instance *CreateCommand) Run(runtimeInstance runtimecontract.Runtime, comm
     option := instance.base.optionFromCommand(commandContext)
     outputInstance := newCommandOutput(commandContext.Writer(), commandContext.Arguments(), option)
 
+    /* the result of this command is the file it writes, not the report: a report the writer lost is recorded in the journal rather than failing a run whose file is already in place — the re-run an exit of one invites creates a second migration beside the first */
+    outputInstance.reportLostWritesTo(instance.base.journal(runtimeInstance))
+
     startedAt := time.Now()
     defer func() {
         runErr = outputInstance.finishRun(instance.Name(), startedAt, runErr, recover())
@@ -65,8 +69,23 @@ func (instance *CreateCommand) Run(runtimeInstance runtimecontract.Runtime, comm
         )
     }
 
-    /* no database is opened: the file is written from the migrations collection alone, and the manager name only labels the detail line below */
+    /* no database is opened: the file is written from the migrations collection alone, and the manager name only labels the detail line below. A name given explicitly is still asked of the registry — without opening, through the door that reads what the registry was built with — because the open this command stopped paying was also the only thing that validated the flag: a misspelt --manager wrote the file, labelled it with the misspelling, and left the operator to discover it at the first db:migrate. */
     managerName := instance.base.managerLabel(commandContext)
+
+    if defaultManagerLabel != managerName {
+        registry, registryErr := instance.base.resolveRegistry(runtimeInstance.Scope())
+        if nil != registryErr {
+            return registryErr
+        }
+
+        if nil == registry || false == registry.HasProviderDefinition(managerName) {
+            return exception.NewError(
+                "manager is not registered in the manager registry",
+                map[string]any{"manager": managerName},
+                bunorm.ErrProviderDefinitionNotFound,
+            )
+        }
+    }
 
     migrator, migratorErr := instance.base.newFileMigrator()
     if nil != migratorErr {

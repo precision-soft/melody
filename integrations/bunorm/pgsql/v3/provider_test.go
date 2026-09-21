@@ -1272,3 +1272,120 @@ func TestOpenContext_AnOutageIsFiledAsUnreachableAndARefusalIsNot(t *testing.T) 
         t.Fatalf("expected a refusal by name NOT filed as unreachable, got %v", openErr)
     }
 }
+
+/* serverRefusal plays a PostgreSQL protocol error whose MESSAGE quotes the operand, the way the server does: the classifier used to read the message, and a database named "timeout" or a user named "eof" made a permanent refusal an outage. */
+type serverRefusal struct {
+    sqlState string
+    message  string
+}
+
+func (instance *serverRefusal) Error() string {
+    return instance.message
+}
+
+func (instance *serverRefusal) Field(field byte) string {
+    if 'C' == field {
+        return instance.sqlState
+    }
+
+    return ""
+}
+
+func TestIsTransientError_AServerRefusalWithAnIdentityIsTerminalWhateverItsMessageSays(t *testing.T) {
+    provider := NewProvider()
+
+    refusals := []*serverRefusal{
+        {sqlState: "3D000", message: `FATAL: database "timeout" does not exist (SQLSTATE=3D000)`},
+        {sqlState: "28P01", message: `FATAL: password authentication failed for user "eof" (SQLSTATE=28P01)`},
+        {sqlState: "42501", message: `ERROR: permission denied for database "connection refused" (SQLSTATE=42501)`},
+    }
+
+    for _, refusal := range refusals {
+        wrapped := exception.NewError("database connection failed", nil, refusal)
+
+        if true == provider.isTransientError(wrapped) {
+            t.Fatalf("expected the server refusal %s to be terminal whatever its message says, got transient for %q", refusal.sqlState, refusal.message)
+        }
+    }
+}
+
+func TestIsTransientError_AServerOutageWithAnIdentityIsTransient(t *testing.T) {
+    provider := NewProvider()
+
+    outages := []*serverRefusal{
+        {sqlState: "53300", message: `FATAL: too many connections for role "melody" (SQLSTATE=53300)`},
+        {sqlState: "57P03", message: `FATAL: the database system is starting up (SQLSTATE=57P03)`},
+        {sqlState: "08006", message: `FATAL: connection failure (SQLSTATE=08006)`},
+    }
+
+    for _, outage := range outages {
+        if false == provider.isTransientError(exception.NewError("database connection failed", nil, outage)) {
+            t.Fatalf("expected the server outage %s to be transient, got terminal for %q", outage.sqlState, outage.message)
+        }
+    }
+}
+
+/* a budget the caller had already spent refuses the open before the attempt with a deadline as its cause, which satisfies the timeout the classifier admits — so the caller's own expired budget was filed under the class the read/write splitter serves the primary for */
+func TestOpenContext_ACallersExpiredDeadlineIsNotAnUnreachableDatabase(t *testing.T) {
+    expired, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+    defer cancel()
+
+    _, openErr := NewProvider().OpenContext(expired, newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"), nil)
+    if nil == openErr {
+        t.Fatal("expected the open under an expired deadline to be refused")
+    }
+
+    if true == errors.Is(openErr, bunorm.ErrDatabaseUnreachable) {
+        t.Fatalf("expected the caller's expired budget NOT filed as an unreachable database, got %v", openErr)
+    }
+
+    if false == errors.Is(openErr, context.DeadlineExceeded) {
+        t.Fatalf("expected the caller's deadline kept as the cause, got %v", openErr)
+    }
+}
+
+/* with a retry policy the same refusal was classified transient by its timeout, retried once for nothing and reported as a retry the caller cancelled — two warnings for a caller whose context was done before the first attempt */
+func TestOpenWithRetry_ACallersExpiredDeadlineIsACleanStopWithoutARetry(t *testing.T) {
+    logger := &capturingProviderLogger{}
+
+    expired, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+    defer cancel()
+
+    _, openErr := NewProvider(WithRetryConfig(DefaultRetryConfig())).OpenContext(expired, newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"), logger)
+    if nil == openErr || false == errors.Is(openErr, context.DeadlineExceeded) {
+        t.Fatalf("expected the caller's deadline kept as the cause, got %v", openErr)
+    }
+
+    if 1 != len(logger.entries) || "database open cancelled by the caller's context" != logger.entries[0].message {
+        t.Fatalf("expected one clean-stop warning and no retry, got %+v", logger.entries)
+    }
+}
+
+/* against a live server, the refusal quotes the operand: a database named after a transient marker is still a refusal by name, handed back instead of filed as the outage a replica falls back to the primary for */
+func TestOpenContext_ALiveServerRefusalSpelledAroundAMarkerIsNotFiledAsUnreachable(t *testing.T) {
+    host := os.Getenv("PGSQL_HOST")
+    if "" == host {
+        t.Skip("PGSQL_HOST not set; skipping pgsql provider integration test")
+    }
+
+    provider := NewProvider(WithInsecure(true), WithTimeoutConfig(NewTimeoutConfig(5*time.Second, 0, 0)))
+
+    for _, params := range []bunorm.ConnectionParameters{
+        newTestParams(host, os.Getenv("PGSQL_PORT"), "timeout", os.Getenv("PGSQL_USER"), os.Getenv("PGSQL_PASSWORD")),
+        newTestParams(host, os.Getenv("PGSQL_PORT"), os.Getenv("PGSQL_DATABASE"), "eof", "eof"),
+    } {
+        database, openErr := provider.Open(params, nil)
+        if nil != database {
+            _ = database.Close()
+            t.Fatalf("expected the refusal for %s/%s", params.Database, params.User)
+        }
+
+        if "" == sqlStateOf(openErr) {
+            t.Fatalf("expected the server's own refusal, got %v", openErr)
+        }
+
+        if true == errors.Is(openErr, bunorm.ErrDatabaseUnreachable) {
+            t.Fatalf("expected the refusal for %s/%s handed back by name, got it filed as unreachable: %v", params.Database, params.User, openErr)
+        }
+    }
+}

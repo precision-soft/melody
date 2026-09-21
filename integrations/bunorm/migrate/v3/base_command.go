@@ -12,6 +12,9 @@ import (
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
+    "github.com/precision-soft/melody/v3/logging"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
+    "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/migrate"
@@ -117,7 +120,7 @@ func (instance *baseCommand) resolveDatabase(
 
     label := managerName
     if "" == label {
-        label = "<default>"
+        label = defaultManagerLabel
     }
 
     release := noRelease
@@ -152,7 +155,10 @@ func (instance *baseCommand) newMigrator(db *bun.DB) (*migrate.Migrator, error) 
     ), nil
 }
 
-/* managerLabel answers the name the output labels a manager by — the --manager flag, else the pinned manager, else "<default>" — the same label resolveDatabase answers for a run that opens the connection, for a command that does not. */
+/* defaultManagerLabel is what managerLabel answers when neither the flag nor the options name a manager: the registry's default, which is asked for by no name. */
+const defaultManagerLabel = "<default>"
+
+/* managerLabel answers the name the output labels a manager by — the --manager flag, else the pinned manager, else defaultManagerLabel — the same label resolveDatabase answers for a run that opens the connection, for a command that does not. */
 func (instance *baseCommand) managerLabel(commandContext clicontract.Context) string {
     managerName := commandContext.String(instance.options.ManagerFlagName)
     if "" == managerName {
@@ -160,10 +166,20 @@ func (instance *baseCommand) managerLabel(commandContext clicontract.Context) st
     }
 
     if "" == managerName {
-        return "<default>"
+        return defaultManagerLabel
     }
 
     return managerName
+}
+
+/* journal answers the application's logger, resolved through the runtime so the scope's logger wins over the root's, and the emergency logger when the runtime carries none — a process that runs migrations without wiring a logger still has a journal of last resort. It resolves for itself rather than through the framework's LoggerFromRuntime, which files an emergency record of its own and answers nil where this door wants a fallback. */
+func (instance *baseCommand) journal(runtimeInstance runtimecontract.Runtime) loggingcontract.Logger {
+    logger, resolveErr := runtime.FromRuntime[loggingcontract.Logger](runtimeInstance, logging.ServiceLogger)
+    if nil != resolveErr || nil == logger || true == isNilInterface(logger) {
+        return logging.EmergencyLogger()
+    }
+
+    return logger
 }
 
 /* newFileMigrator is the migrator of a command that only writes a migration FILE: bun's generator reads the collection's directory and writes the template with os.WriteFile, and never touches the database it was handed, so none is opened for it — opening one cost a dial, the handshake, the authentication and the boot ping, some sixteen seconds of retries on a host that was down, to write a file that is written offline. */

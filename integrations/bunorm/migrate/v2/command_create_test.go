@@ -195,3 +195,67 @@ func TestCreateCommand_MissingNameNamesTheCommandsOwnFamily(t *testing.T) {
         t.Fatalf("expected the usage to name db:archive:create, got %v", runErr)
     }
 }
+
+/* journalRecorder is the application's logger as the create command resolves it, keeping the warnings it was handed */
+type journalRecorder struct {
+    loggingcontract.Logger
+    warnings []string
+}
+
+func (instance *journalRecorder) Warning(message string, context loggingcontract.Context) {
+    instance.warnings = append(instance.warnings, message)
+}
+
+/* the result of db:create is the file it writes, not its report: a report the writer lost used to fail the run with the file already in place, and the re-run an exit of one invites created a second migration under a new timestamp beside the first. The loss goes to the journal — it cannot be told on the writer that lost it — and the run answers nil; db:migrate keeps the refusal, its report being its result. */
+func TestCreateCommand_ALostReportWriteIsAWarningInTheJournalNotAFailure(t *testing.T) {
+    journal := &journalRecorder{Logger: logging.NewNopLogger()}
+
+    registry, registryErr := bunorm.NewManagerRegistry(
+        logging.NewNopLogger(),
+        bunorm.ProviderDefinition{Name: "primary", Provider: &refusingCountingProvider{}, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("failed to build manager registry: %s", registryErr.Error())
+    }
+
+    serviceContainer := container.NewContainer()
+    container.MustRegister[*bunorm.ManagerRegistry](
+        serviceContainer,
+        DefaultOptions().ManagerRegistryServiceId,
+        func(resolver containercontract.Resolver) (*bunorm.ManagerRegistry, error) {
+            return registry, nil
+        },
+    )
+    container.MustRegister[loggingcontract.Logger](
+        serviceContainer,
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return journal, nil
+        },
+    )
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    directory := t.TempDir()
+    migrations := migrate.NewMigrations(migrate.WithMigrationsDirectory(directory))
+
+    banner := &failingOnWriter{marker: "migration file created"}
+    runErr := runMigrationCommandTo(t, banner, runtimeInstance, NewCreateGoCommand(migrations, DefaultOptions()), "--no-color", "create_users")
+    if nil != runErr {
+        t.Fatalf("expected the run to succeed with its file in place, got: %v", runErr)
+    }
+
+    entries, readErr := os.ReadDir(directory)
+    if nil != readErr || 1 != len(entries) {
+        t.Fatalf("expected the one generated file in place, got %d (%v)", len(entries), readErr)
+    }
+
+    if 1 != len(journal.warnings) || "the report could not be written in full; the command's result is in place" != journal.warnings[0] {
+        t.Fatalf("expected the lost report recorded once in the journal, got %v", journal.warnings)
+    }
+
+    document := &failingOnWriter{marker: "\"meta\""}
+    runErr = runMigrationCommandTo(t, document, runtimeInstance, NewCreateGoCommand(migrations, DefaultOptions()), "--format=json", "create_orders")
+    if nil != runErr || 2 != len(journal.warnings) {
+        t.Fatalf("expected the lost json document journaled the same way, got err=%v warnings=%v", runErr, journal.warnings)
+    }
+}

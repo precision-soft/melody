@@ -35,6 +35,9 @@ func (instance *CreateCommand) Run(runtimeInstance runtimecontract.Runtime, comm
     option := instance.base.optionFromCommand(commandContext)
     outputInstance := newCommandOutput(commandContext.Writer, commandContext.Args().Slice(), option)
 
+    /* the result of this command is the file it writes, not the report: a report the writer lost is recorded in the journal rather than failing a run whose file is already in place — the re-run an exit of one invites creates a second migration beside the first */
+    outputInstance.reportLostWritesTo(instance.base.journal(runtimeInstance))
+
     startedAt := time.Now()
     defer func() {
         runErr = outputInstance.finishRun(instance.Name(), startedAt, runErr, recover())

@@ -1303,3 +1303,80 @@ func TestAsyncStorage_CloseCountsTheDeadLetteredAndTheStoredApart(t *testing.T) 
         t.Fatalf("expected outstanding=2 deadLettered=1 stored=1, got %v", reported.Context())
     }
 }
+
+/* two entries of one call can carry the same entity, id and operation — two updates of one row in one batch — and a caller retrying "the refused ones" could not tell which of the twins was refused: the index is the entry's position in the call */
+func TestAsyncStorage_TheRefusalCarriesTheIndexOfEachTwinItRefused(t *testing.T) {
+    installDefaultAsyncStorageLogger(t)
+
+    ignoring := newContextIgnoringStorage()
+    defer close(ignoring.release)
+
+    storage := NewAsyncStorage(ignoring, 1)
+
+    if saveErr := storage.Save(context.Background(), "audit", Entry{Entity: "order", EntityId: "in-hand", Operation: OperationInsert}); nil != saveErr {
+        t.Fatalf("the first entry was not queued: %v", saveErr)
+    }
+
+    select {
+    case <-ignoring.entered:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("the delegate was never reached; the queue cannot be filled behind a parked save")
+    }
+
+    /* the first twin fills the one slot the queue has; the second and the third are refused, and only their positions tell them apart */
+    saveErr := storage.Save(context.Background(), "audit",
+        Entry{Entity: "order", EntityId: "twin", Operation: OperationUpdate},
+        Entry{Entity: "order", EntityId: "twin", Operation: OperationUpdate},
+        Entry{Entity: "order", EntityId: "twin", Operation: OperationUpdate},
+    )
+    if false == errors.Is(saveErr, ErrAsyncStorageQueueFull) {
+        t.Fatalf("expected the full queue to refuse, got %v", saveErr)
+    }
+
+    refused := refusedIdentities(t, saveErr)
+    if 2 != len(refused) || 1 != refused[0]["index"] || 2 != refused[1]["index"] || "twin" != refused[0]["entityId"] || "twin" != refused[1]["entityId"] {
+        t.Fatalf("expected the second and the third twin refused under their positions, got %v", refused)
+    }
+
+    storageClosed := NewAsyncStorage(newRecordingStorage(), 4)
+    if closeErr := storageClosed.Close(); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    afterClose := refusedIdentities(t, storageClosed.Save(context.Background(), "audit",
+        Entry{Entity: "order", EntityId: "twin", Operation: OperationDelete},
+        Entry{Entity: "order", EntityId: "twin", Operation: OperationDelete},
+    ))
+    if 2 != len(afterClose) || 0 != afterClose[0]["index"] || 1 != afterClose[1]["index"] {
+        t.Fatalf("expected the closed storage to name both twins under their positions, got %v", afterClose)
+    }
+}
+
+/* outstanding and failed are one state: a save failing between two separate reads of them was counted in neither, and the close's verdict credited the delegate with storing an entry it had dead-lettered. The pair is settled by the worker and read by the close under one lock; the race detector is the proof — with the lock taken off the snapshot it reports the worker's settle against the close's read. */
+func TestAsyncStorage_TheCloseReadsTheCountersInOneSnapshotWhileTheWorkerSettlesThem(t *testing.T) {
+    installDefaultAsyncStorageLogger(t)
+
+    storage := NewAsyncStorage(&failingStorage{saveErr: errors.New("save refused")}, 4096)
+
+    for index := 0; index < 2000; index++ {
+        if saveErr := storage.Save(context.Background(), "audit", Entry{Entity: "order", EntityId: "racing", Operation: OperationInsert}); nil != saveErr {
+            t.Fatalf("entry %d was not queued: %v", index, saveErr)
+        }
+    }
+
+    closeContext, cancel := context.WithTimeout(context.Background(), time.Microsecond)
+    defer cancel()
+
+    for index := 0; index < 200; index++ {
+        outstanding, failed := storage.counterSnapshot()
+        if 2000 != outstanding+int64(failed) {
+            t.Fatalf("expected every entry counted exactly once across the pair, got outstanding=%d failed=%d", outstanding, failed)
+        }
+    }
+
+    _ = closeWithin(t, storage, closeContext, 5*time.Second)
+
+    if closeErr := storage.Close(); nil != closeErr {
+        t.Fatalf("second close: %v", closeErr)
+    }
+}

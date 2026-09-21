@@ -480,6 +480,15 @@ func pruneStaleDestinations(options *runOptions, writes []destinationWrite) ([]s
         return nil, nil
     }
 
+    /* the sweep runs only on a line that names THIS application, whatever template answered it. A template the generator could not hand the name to still answers a line — a dialect of yours that embeds a builtin and is registered under its name answers the builtin's bare prefix through the embedding — and that line is the one an earlier release, or another application's copy of the same dialect, wrote as well: a sweep on it emptied their destinations, irreversibly, with the nameless refusal above never reached because this application does have a name. The destination is written all the same; what is refused, naming the line, is the sweep. */
+    if false == strings.HasSuffix(marker, " for "+options.applicationName) {
+        return nil, exception.NewError(
+            "cron: --prune sweeps only on an ownership line that names this application, and the template's line does not; give the dialect a line ending in \" for \" and the application's cli name, or generate without --prune",
+            exceptioncontract.Context{"flag": flagNamePrune, "ownershipMarker": marker, "application": options.applicationName},
+            nil,
+        )
+    }
+
     written := make(map[string]bool, len(writes))
     for _, write := range writes {
         written[write.Destination] = true
@@ -1097,7 +1106,7 @@ func applicationIdentity(configuration configcontract.Configuration) (string, er
 
 /* templateOwnedBy hands the application's name to a template that can carry it and answers the copy that renders and answers that application's ownership line; a template that cannot — a custom dialect — is used as it is, with whatever line it declares, and an empty name leaves every template unowned.
 
-   The copy is derived for the package's OWN dialects, by their concrete type, and for nothing else. Asked through the interface the two share, the door took a wrapper that EMBEDS a builtin — the shape an application writes to decorate a builtin's rendering and registers under the builtin's name, through the replacement RegisterTemplate names for exactly that — for a builtin: the embedding promotes the copy door onto the wrapper, the copy is of the embedded builtin alone, and the wrapper, its rendering included, was dropped from the run in silence. A wrapper is used as it is; the line it answers is its embedded builtin's bare prefix, which no named application's sweep matches. */
+   The copy is derived for the package's OWN dialects, by their concrete type, and for nothing else. Asked through the interface the two share, the door took a wrapper that EMBEDS a builtin — the shape an application writes to decorate a builtin's rendering and registers under the builtin's name, through the replacement RegisterTemplate names for exactly that — for a builtin: the embedding promotes the copy door onto the wrapper, the copy is of the embedded builtin alone, and the wrapper, its rendering included, was dropped from the run in silence. A wrapper is used as it is; the line it answers is its embedded builtin's bare prefix, on which pruneStaleDestinations refuses to sweep, since it names no application. */
 func templateOwnedBy(template Template, applicationName string) Template {
     if "" == applicationName {
         return template

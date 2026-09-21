@@ -13,6 +13,7 @@ import (
     "github.com/precision-soft/melody/v2/cli/output"
     "github.com/precision-soft/melody/v2/exception"
     exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
+    loggingcontract "github.com/precision-soft/melody/v2/logging/contract"
 )
 
 type commandOutput struct {
@@ -27,6 +28,27 @@ type commandOutput struct {
     details    map[string]string
     migrations map[string][]string
     files      []string
+
+    /* lostReportJournal is set by a command whose RESULT is not its report — db:create, whose result is the file it wrote — and it is where finish records a report the writer lost instead of refusing the run: the file is in place, and an exit of one sent the operator to a re-run that created a second migration under a new timestamp beside it. The loss cannot be told on the writer that lost it, so it goes to the journal; every other command keeps the refusal, because its report is what the run was for. */
+    lostReportJournal loggingcontract.Logger
+}
+
+/* reportLostWritesTo tells finish that the command's result is elsewhere than its report, and where a report the writer lost is recorded instead of failing the run. */
+func (instance *commandOutput) reportLostWritesTo(journal loggingcontract.Logger) {
+    instance.lostReportJournal = journal
+}
+
+/* lostReport answers what a report the writer lost is worth: the run's failure for a command whose report is its result, and a warning in the journal — with nil as the run's answer — for one that told finish its result is elsewhere. */
+func (instance *commandOutput) lostReport(command string, lostWrite error) error {
+    lost := exception.NewError("the report could not be written in full", map[string]any{"command": command}, lostWrite)
+
+    if nil == instance.lostReportJournal {
+        return lost
+    }
+
+    instance.lostReportJournal.Warning("the report could not be written in full; the command's result is in place", exception.LogContext(lost))
+
+    return nil
 }
 
 /* newCommandOutput takes the command's positional arguments beside its writer and flags: the machine document declares an arguments field, and built without them it answered an empty list for every command, db:create included, whose one argument names the migration the document reports on. */
@@ -120,7 +142,7 @@ func (instance *commandOutput) finishRun(commandName string, startedAt time.Time
     panic(recovered)
 }
 
-/* finish is the command's one exit door: under --format=json it renders the accumulated document — the failure included — and in every mode it answers the error the command should return. The command's own failure stays the verdict; a rendering failure becomes one only when the command itself succeeded — in text mode the first write the report lost, which used to be swallowed line by line so a truncated report exited zero. */
+/* finish is the command's one exit door: under --format=json it renders the accumulated document — the failure included — and in every mode it answers the error the command should return. The command's own failure stays the verdict; a rendering failure becomes one only when the command itself succeeded — in text mode the first write the report lost, which used to be swallowed line by line so a truncated report exited zero — and only for a command whose report is its result; one that told finish otherwise, through reportLostWritesTo, has the loss journaled and its run answered nil. */
 func (instance *commandOutput) finish(command string, startedAt time.Time, runErr error) error {
     if false == instance.isJson() {
         if nil != runErr {
@@ -128,7 +150,7 @@ func (instance *commandOutput) finish(command string, startedAt time.Time, runEr
         }
 
         if lostWrite := instance.writer.lostWrite(); nil != lostWrite {
-            return exception.NewError("the report could not be written in full", map[string]any{"command": command}, lostWrite)
+            return instance.lostReport(command, lostWrite)
         }
 
         return nil
@@ -183,7 +205,7 @@ func (instance *commandOutput) finish(command string, startedAt time.Time, runEr
     /* the document renders through the tracking writer too, which swallows the write it lost; the renderer's own answer is read first and the remembered write failure second, so a json report cut short is refused the way the text report is */
     renderErr := output.Render(instance.writer, envelope, instance.option)
     if lostWrite := instance.writer.lostWrite(); nil == renderErr && nil != lostWrite {
-        renderErr = exception.NewError("the report could not be written in full", map[string]any{"command": command}, lostWrite)
+        renderErr = instance.lostReport(command, lostWrite)
     }
 
     if nil != runErr {
