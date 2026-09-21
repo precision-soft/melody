@@ -3,6 +3,7 @@ package output
 import (
     "bytes"
     "errors"
+    "io"
     "strings"
     "testing"
     "time"
@@ -419,6 +420,39 @@ func (instance *failingTableWriter) Write(payload []byte) (int, error) {
     }
 
     return len(payload), nil
+}
+
+/* a writer that answers fewer bytes than it was handed, with no error, has truncated the report exactly as a full disk does; the sink is the application's, so the wrapper cannot trust it to say so */
+type shortTableWriter struct {
+    dropped int
+}
+
+func (instance *shortTableWriter) Write(payload []byte) (int, error) {
+    if 0 == len(payload) {
+        return 0, nil
+    }
+
+    instance.dropped = instance.dropped + 1
+
+    return len(payload) - 1, nil
+}
+
+func TestTablePrinter_ReportsAShortWriteAsAFailure(t *testing.T) {
+    envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
+
+    builder := NewTableBuilder()
+    builder.AddBlock("BLOCK", []string{"name"}).AddRow("value")
+    envelope.Table = builder.Build()
+
+    writer := &shortTableWriter{}
+
+    printErr := NewDefaultTablePrinter().Print(writer, envelope, DefaultOption())
+    if nil == printErr {
+        t.Fatalf("expected the short write to be reported after %d truncated writes", writer.dropped)
+    }
+    if false == errors.Is(printErr, io.ErrShortWrite) {
+        t.Fatalf("expected io.ErrShortWrite, got %v", printErr)
+    }
 }
 
 func TestTablePrinter_ReturnsTheFirstWriteFailure(t *testing.T) {

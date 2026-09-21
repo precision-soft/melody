@@ -40,7 +40,7 @@ type TablePrinter struct {
     tableMaxWidth int
 }
 
-/* errorTrackingWriter remembers the first write failure and swallows the rest: the table is printed through dozens of small writes, and threading every result through the row and cell helpers would bury the layout code. A report truncated by a full disk used to end with a success banner and exit zero; the remembered failure is what lets Print refuse instead. */
+/* errorTrackingWriter remembers the first write failure and swallows the rest: the table is printed through dozens of small writes, and threading every result through the row and cell helpers would bury the layout code. A report truncated by a full disk used to end with a success banner and exit zero; the remembered failure is what lets Print refuse instead. A short write is a failure too: the sink is the application's — Root.SetWriter, the writer handed to DispatchCommand, the cron runner's capture buffer — so this wrapper measures writers it does not own, and one that answers fewer bytes than it was handed without an error has truncated the report just as a full disk does; it is remembered as io.ErrShortWrite, the way io.Copy reads the same answer. */
 type errorTrackingWriter struct {
     writer   io.Writer
     firstErr error
@@ -51,9 +51,11 @@ func (instance *errorTrackingWriter) Write(payload []byte) (int, error) {
         return len(payload), nil
     }
 
-    _, writeErr := instance.writer.Write(payload)
+    written, writeErr := instance.writer.Write(payload)
     if nil != writeErr {
         instance.firstErr = writeErr
+    } else if written < len(payload) {
+        instance.firstErr = io.ErrShortWrite
     }
 
     return len(payload), nil

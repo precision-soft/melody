@@ -111,7 +111,7 @@ e2e_require_dev_service
 # mismatch message prints both numbers, so the count to move to is in the failure itself. A run that took one of
 # the degraded early-exit branches (an unreachable supervised app, a cold-cache timeout) legitimately executes
 # fewer checks; it is already red from the check_fail that branch raised
-EXPECTED_CHECK_COUNT_INTEGER=161
+EXPECTED_CHECK_COUNT_INTEGER=162
 readonly EXPECTED_CHECK_COUNT_INTEGER
 
 # state the scope in the output, so a reader never has to infer which major these checks covered
@@ -1141,6 +1141,15 @@ if [[ "${OPENAPI_OPERATION_COUNT_STRING:-0}" -gt 0 ]] && printf '%s' "${OPENAPI_
     check_pass "the generated document carries the application's operations and component schemas"
 else
     check_fail "the generated document is missing operations or schemas (${OPENAPI_OUTPUT_STRING})"
+fi
+
+# the documented stdout mode is a redirection into a file a parser reads: the first byte of the stream has to be the
+# document's, not the run banner's escape sequence — the command declares --quiet defaulting to true for exactly this
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . melody:openapi:generate 2>/dev/null | head -c 1 | od -An -c | tr -d ' '"
+if [[ "$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | tr -d '[:space:]')" == "{" ]]; then
+    check_pass "melody:openapi:generate on stdout begins with the document, not with the run banner"
+else
+    check_fail "melody:openapi:generate on stdout does not begin with the document (first byte: ${RUN_IN_DEV_OUTPUT_STRING})"
 fi
 
 check_section_end "OPENAPI GENERATE" "${TAG_VALIDATE}" "e2e"

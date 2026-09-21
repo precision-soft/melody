@@ -94,6 +94,23 @@ func TestGenerate_TheOperationsOfOneRouteDoNotShareTheirTags(t *testing.T) {
     }
 }
 
+/* the same class one field over: the path parameters were built once per expansion and handed to every method by reference, schema included, so a post-processor writing into the GET parameter rewrote the POST beside it */
+func TestGenerate_TheOperationsOfOneRouteDoNotShareTheirPathParameters(t *testing.T) {
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "thing.handle", pattern: "/thing/:id/", methods: []string{"GET", "POST"}},
+    }
+
+    document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, NewRegistry())
+    pathItem := document.Paths["/thing/{id}/"]
+
+    pathItem.Get.Parameters[0].Name = "x"
+    pathItem.Get.Parameters[0].Schema.Type = "integer"
+
+    if "id" != pathItem.Post.Parameters[0].Name || "string" != pathItem.Post.Parameters[0].Schema.Type {
+        t.Fatalf("expected the POST operation to keep its own parameters, got %+v", pathItem.Post.Parameters[0])
+    }
+}
+
 func TestGenerate_BuildsPathsParametersAndSchemas(t *testing.T) {
     registry := NewRegistry()
     registry.Describe("products.create", Descriptor{

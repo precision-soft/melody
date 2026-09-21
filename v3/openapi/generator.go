@@ -118,6 +118,24 @@ func methodAcceptsRequestBody(method string) bool {
     }
 }
 
+/* copyPathParameters answers the parameters as a slice of the operation's own, each schema a copy: a nil slice stays nil, so a path without parameters keeps the shape it had. */
+func copyPathParameters(parameters []Parameter) []Parameter {
+    if nil == parameters {
+        return nil
+    }
+
+    copied := make([]Parameter, len(parameters))
+    for index, parameter := range parameters {
+        copied[index] = parameter
+        if nil != parameter.Schema {
+            schema := *parameter.Schema
+            copied[index].Schema = &schema
+        }
+    }
+
+    return copied
+}
+
 func buildOperation(
     operationId string,
     method string,
@@ -127,9 +145,10 @@ func buildOperation(
     components map[string]*Schema,
     names map[reflect.Type]string,
 ) *Operation {
+    /* the path parameters are copied per operation, schema included, for the reason the tags are: the pattern is converted once per expansion and this runs once per method of it, so a post-processor writing into the GET operation's parameter — a description, a schema facet — must not rewrite the POST beside it. The schemas of a path parameter are the string schemas convertPattern builds and carry no nested schema to copy. */
     operation := &Operation{
         OperationId: operationId,
-        Parameters:  pathParameters,
+        Parameters:  copyPathParameters(pathParameters),
         Responses:   make(map[string]ResponseObject),
     }
 

@@ -2,7 +2,6 @@ package debug
 
 import (
     "encoding/json"
-    "errors"
     "fmt"
     "reflect"
     "slices"
@@ -15,7 +14,6 @@ import (
     "github.com/precision-soft/melody/v3/cli/output"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
-    exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     "github.com/precision-soft/melody/v3/internal"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
@@ -475,25 +473,23 @@ type containerServiceDetails struct {
     Teardown         *containerServiceTeardownItem `json:"teardown,omitempty"`
 }
 
+/* errorCauseChainDepth bounds the links the report walks, for the cause chain and for the context read off it alike */
+const errorCauseChainDepth = 9
+
 func resolveErrorContextJson(resolveErr error, option output.Option) string {
     if nil == resolveErr {
         return emptyErrorContextJsonForFormat(option)
     }
 
-    /* the context is read through the ContextProvider contract rather than the concrete *exception.Error: an HttpException — or any userland error carrying a context — in the resolution chain used to contribute nothing, so its context was silently absent from the one report built to show it */
-    var provider exceptioncontract.ContextProvider
-    if false == errors.As(resolveErr, &provider) || true == internal.IsNilInterface(provider) {
-        return emptyErrorContextJsonForFormat(option)
-    }
-
-    contextValue := provider.Context()
+    /* the context is read through the ContextProvider contract rather than the concrete *exception.Error, so an HttpException — or any userland error carrying a context — in the resolution chain contributes its context; and it is read from the first provider in the chain that HAS one, not from the nearest provider: a provider without a context answers an empty map, not nil, so a search that stopped at the nearest one rendered {} for an HttpException wrapping the very error that carried the host and the dsn. The walk is the breadth-first one of the cause chain, bounded like it, so a joined failure is read on every branch. */
+    contextValue := firstErrorContextInChain(resolveErr)
     if nil == contextValue {
         return emptyErrorContextJsonForFormat(option)
     }
 
-    /* sanitize BEFORE marshalling: both fallbacks below print the value they were handed, so walking only the happy path would leak exactly the stack and trace entries the noise filter strips whenever json.Marshal or json.Unmarshal fails. The defined exceptioncontract.Context type is converted to its plain map[string]any underlying because the walk matches via value.(map[string]any) first; nested named types are converted inside the tracked walk itself. */
+    /* sanitize BEFORE marshalling: both fallbacks below print the value they were handed, so walking only the happy path would leak exactly the stack and trace entries the noise filter strips whenever json.Marshal or json.Unmarshal fails. The context is a plain map[string]any because the walk matches via value.(map[string]any) first; nested named types are converted inside the tracked walk itself. */
     keepNoiseKeys := 3 <= option.VerbosityLevel
-    redactedContext := sanitizeErrorContextValueTracked(map[string]any(contextValue), map[errorContextVisitKey]struct{}{}, 0, keepNoiseKeys)
+    redactedContext := sanitizeErrorContextValueTracked(contextValue, map[errorContextVisitKey]struct{}{}, 0, keepNoiseKeys)
 
     normalizedContextBytes, normalizeMarshalErr := json.Marshal(redactedContext)
     if nil != normalizeMarshalErr {
@@ -516,6 +512,17 @@ func resolveErrorContextJson(resolveErr error, option output.Option) string {
     }
 
     return truncateErrorContextForFormat(string(contextJsonBytes), option)
+}
+
+/* firstErrorContextInChain answers the context of the first link of the chain that carries one, walking from the error itself through both unwrap shapes, and nil when no link does; the depth bound is the cause chain's, so the context the report renders can only come from a link the cause chain names */
+func firstErrorContextInChain(resolveErr error) map[string]any {
+    for _, linkContext := range exception.BuildCauseContextChain(resolveErr, errorCauseChainDepth) {
+        if 0 < len(linkContext) {
+            return linkContext
+        }
+    }
+
+    return nil
 }
 
 /* emptyErrorContextJsonForFormat answers "nothing to report" in the grammar of the format asking. The json document declares a string of json, so the absence has to be a parseable one: `.errorContextJson | fromjson` died with "Cannot parse ''" on every healthy row of the very sweep built to be read by a machine, and a field whose type changes with the value of the row cannot be consumed at all. The table keeps the empty cell, where a literal {} would be noise in a column read by a person. */
@@ -572,7 +579,7 @@ func resolveErrorCauseChain(resolveErr error) []string {
     }
 
     /* built from the failure itself with the head dropped, rather than from a bare errors.Unwrap: a joined failure answers Unwrap with nothing — its causes live behind the []error shape — so the whole chain vanished from the report exactly when there was more than one cause to show. BuildCauseChain walks both unwrap shapes. */
-    chain := exception.BuildCauseChain(resolveErr, 9)
+    chain := exception.BuildCauseChain(resolveErr, errorCauseChainDepth)
     if 1 >= len(chain) {
         return nil
     }
@@ -747,8 +754,7 @@ func (instance *ContainerCommand) populateServiceList(
                 for _, item := range errorItems {
                     errorBlock.AddRow(output.TableRowSeparatorToken)
 
-                    errorLines := buildContainerServiceErrorLines(item)
-                    errorLines = limitLinesByVerbosity(errorLines, option.VerbosityLevel)
+                    errorLines := buildContainerServiceErrorLines(item, option.VerbosityLevel)
 
                     for index := 0; index < len(errorLines); index++ {
                         nameCell := ""
@@ -1063,8 +1069,7 @@ func buildContainerServiceTableRows(
         }
     }
 
-    errorLines := buildContainerServiceErrorLines(item)
-    errorLines = limitLinesByVerbosity(errorLines, option.VerbosityLevel)
+    errorLines := buildContainerServiceErrorLines(item, option.VerbosityLevel)
 
     rowCount := len(errorLines)
     if 1 > rowCount {
@@ -1092,28 +1097,56 @@ func buildContainerServiceTableRows(
     return rows
 }
 
-func buildContainerServiceErrorLines(item containerServiceListItem) []string {
-    lines := make([]string, 0, 8)
-
+/* buildContainerServiceErrorLines renders one failed service's error cell under the verbosity the operator asked for: the message and the context json are cut by the verbosity ladder, the causes are not. The causes explain the message above them — the dial refusal, the missing credential — and they are the one thing the operator runs the sweep to learn; under the ladder they were cut with the rest, so at the default verbosity the list said a build failed and withheld why, while the single-service door rendered every cause, and the same run answered differently by whether a name was given. */
+func buildContainerServiceErrorLines(item containerServiceListItem, verbosityLevel int) []string {
+    messageLines := []string{}
     if "" != item.ErrorString {
-        lines = append(lines, splitLines(item.ErrorString)...)
+        messageLines = splitLines(item.ErrorString)
     }
 
-    /* the causes explain the message above them: without these lines the table said a build failed and withheld the dial refusal or missing credential that failed it */
+    causeLines := make([]string, 0, len(item.ErrorCauseChain))
     for _, causeEntry := range item.ErrorCauseChain {
-        causeLines := splitLines("caused by: " + causeEntry)
-        lines = append(lines, causeLines...)
+        causeLines = append(causeLines, splitLines("caused by: "+causeEntry)...)
     }
 
+    contextLines := []string{}
     if "" != item.ErrorContextJson {
-        contextLines := wrapFixedWidth(item.ErrorContextJson, 80)
-        for _, contextLine := range contextLines {
-            lines = append(lines, contextLine)
-        }
+        contextLines = wrapFixedWidth(item.ErrorContextJson, 80)
     }
+
+    lines := limitErrorLinesByVerbosity(messageLines, causeLines, contextLines, verbosityLevel)
 
     if 0 == len(lines) {
         return []string{""}
+    }
+
+    return lines
+}
+
+/* limitErrorLinesByVerbosity applies the verbosity ladder to the message and the context together, as one budget, and splices the cause lines whole between them: the cut marker stays on the last rendered line, so it still says that something below was left out, and it is never a cause */
+func limitErrorLinesByVerbosity(messageLines []string, causeLines []string, contextLines []string, verbosityLevel int) []string {
+    budgeted := make([]string, 0, len(messageLines)+len(contextLines))
+    budgeted = append(budgeted, messageLines...)
+    budgeted = append(budgeted, contextLines...)
+
+    limited := limitLinesByVerbosity(budgeted, verbosityLevel)
+    cut := len(limited) < len(budgeted)
+    if true == cut && 0 < len(limited) {
+        limited[len(limited)-1] = strings.TrimSuffix(limited[len(limited)-1], verbosityCutMarker)
+    }
+
+    messageShown := len(messageLines)
+    if messageShown > len(limited) {
+        messageShown = len(limited)
+    }
+
+    lines := make([]string, 0, len(limited)+len(causeLines))
+    lines = append(lines, limited[:messageShown]...)
+    lines = append(lines, causeLines...)
+    lines = append(lines, limited[messageShown:]...)
+
+    if true == cut && 0 < len(lines) {
+        lines[len(lines)-1] = lines[len(lines)-1] + verbosityCutMarker
     }
 
     return lines
@@ -1181,11 +1214,14 @@ func limitLinesByVerbosity(lines []string, verbosityLevel int) []string {
     }
 
     if 0 < len(limited) {
-        limited[len(limited)-1] = limited[len(limited)-1] + " ..."
+        limited[len(limited)-1] = limited[len(limited)-1] + verbosityCutMarker
     }
 
     return limited
 }
+
+/* verbosityCutMarker is the suffix a line carries when the verbosity ladder left lines out below it */
+const verbosityCutMarker = " ..."
 
 func errorMaxLinesForVerbosityLevel(verbosityLevel int) int {
     if 3 <= verbosityLevel {

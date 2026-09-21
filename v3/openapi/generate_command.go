@@ -6,7 +6,10 @@ import (
     "path/filepath"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
+    "github.com/precision-soft/melody/v3/cli/output"
     "github.com/precision-soft/melody/v3/config"
+    configcontract "github.com/precision-soft/melody/v3/config/contract"
+    "github.com/precision-soft/melody/v3/container"
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/internal"
     "github.com/precision-soft/melody/v3/http"
@@ -42,11 +45,17 @@ func (instance *GenerateCommand) Description() string {
     return "generate an OpenAPI 3 document from the registered routes"
 }
 
+/* Flags declares the quiet flag beside the command's own, defaulting to true as StandardFlags does: the document is the command's essential output and the run banner is decoration, and a command that declares no quiet flag keeps the banner it always had — around a document printed to stdout, that banner made the documented redirection write a file no parser read. */
 func (instance *GenerateCommand) Flags() []clicontract.Flag {
     return []clicontract.Flag{
         &clicontract.StringFlag{
             Name:  "out",
             Usage: "path to write the OpenAPI document to; prints to stdout when empty",
+        },
+        &clicontract.BoolFlag{
+            Name:  output.FlagNameQuiet,
+            Usage: "suppress the run banner around the document (--quiet=false brings it back)",
+            Value: true,
         },
     }
 }
@@ -129,13 +138,14 @@ func (instance *GenerateCommand) journal(runtimeInstance runtimecontract.Runtime
     return logger
 }
 
-/* journalSharesStdout reads the fact the container reads when it builds the logger: an empty log path means the journal writes to stdout. A runtime without the configuration answers false, so the application's logger is asked as before. */
+/* journalSharesStdout reads the fact the container reads when it builds the logger: an empty log path means the journal writes to stdout. A runtime without the configuration, or one whose configuration does not resolve, answers false, so the application's logger is asked as before — this door must not be the one that fails a command written never to fail on its journal. What it cannot read is a logger the application substituted for the container's: the contract exposes no writer, so a substituted logger that writes to stdout under a non-empty log path still receives the warning, ahead of the document; keeping such a logger off stdout, or passing --out, is the application's side of that bargain, and OPENAPI.md says so. */
 func journalSharesStdout(runtimeInstance runtimecontract.Runtime) bool {
-    if false == runtimeInstance.Container().Has(config.ServiceConfig) {
+    configuration, resolveErr := container.FromResolver[configcontract.Configuration](runtimeInstance.Container(), config.ServiceConfig)
+    if nil != resolveErr || nil == configuration {
         return false
     }
 
-    return "" == config.ConfigMustFromContainer(runtimeInstance.Container()).Kernel().LogPath()
+    return "" == configuration.Kernel().LogPath()
 }
 
 var _ clicontract.Command = (*GenerateCommand)(nil)

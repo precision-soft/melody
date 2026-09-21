@@ -2436,6 +2436,42 @@ func TestValidator_AConstraintErrorOfItsOwnTypeKeepsItsTypeAndItsPathUnderEveryP
     }
 }
 
+type pathPrefixedOwnFieldConstraint struct{}
+
+/* the own field begins with the text of the walked path — BillingLine under Billing — without lying under it in the walk's grammar */
+func (instance *pathPrefixedOwnFieldConstraint) Validate(value any, field string) validationcontract.ValidationError {
+    return NewValidationError("BillingLine", "own message", "own_code", nil)
+}
+
+/* "under the walked path" is a question of the walk's grammar — a member or an element of the path — not of text: an own field that merely begins with the path's spelling was memoized as its textual remainder and recalled glued onto the sibling path, naming a field that does not exist */
+func TestValidator_AnOwnFieldThatOnlyBeginsWithThePathTextIsAnsweredVerbatimUnderEveryPath(t *testing.T) {
+    type sharedAddress struct {
+        Zip string `validate:"pathPrefixedOwnField"`
+    }
+    type order struct {
+        Billing  *sharedAddress
+        Shipping *sharedAddress
+    }
+
+    validator := NewValidator()
+    validator.RegisterConstraint("pathPrefixedOwnField", &pathPrefixedOwnFieldConstraint{})
+
+    shared := &sharedAddress{}
+    errors := requireValidationErrors(t, validator.Validate(&order{Billing: shared, Shipping: shared}))
+
+    if 2 != len(errors) || "BillingLine" != errors[0].Field() || "BillingLine" != errors[1].Field() {
+        t.Fatalf("expected the constraint's own field kept verbatim under both paths, got %v", errors)
+    }
+}
+
+func TestFieldLiesUnderPath_ReadsTheWalksGrammarNotTheText(t *testing.T) {
+    for field, expected := range map[string]bool{"Billing": true, "Billing.Zip": true, "Billing[0]": true, "BillingLine": false, "Bill": false, "Shipping.Zip": false} {
+        if expected != fieldLiesUnderPath(field, "Billing") {
+            t.Fatalf("expected %q under Billing to answer %v", field, expected)
+        }
+    }
+}
+
 func TestValidator_APackageErrorUnderAFieldOfItsOwnIsAnsweredVerbatimUnderEveryPath(t *testing.T) {
     type sharedAddress struct {
         Zip string `validate:"ownFieldPackageType"`

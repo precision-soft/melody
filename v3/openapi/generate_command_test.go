@@ -4,6 +4,7 @@ import (
     "bytes"
     "context"
     "encoding/json"
+    "errors"
     "io"
     nethttp "net/http"
     "os"
@@ -187,6 +188,46 @@ func TestGenerateCommand_PrintsTheDocumentToTheWriterWhenOutIsEmpty(t *testing.T
     }
 }
 
+/* registered through cli.Register, the command runs inside the run banner, and a command that declares no quiet flag keeps that banner: printed to stdout, the document began with the banner's escape sequence, so the documented redirection wrote a file no parser read; the quiet flag defaults to true here as it does under StandardFlags, and --quiet=false brings the frame back */
+func TestGenerateCommand_TheStdoutDocumentIsNotWrappedInTheBanner(t *testing.T) {
+    written := runRegisteredOpenApiGenerateCommand(t, nil)
+
+    if false == strings.HasPrefix(written, "{") {
+        t.Fatalf("expected the document alone on stdout, got %q", written[:min(len(written), 80)])
+    }
+    if true == strings.Contains(written, "[melody:openapi:generate] [finished]") {
+        t.Fatalf("expected no finish banner after the document, got %q", written)
+    }
+
+    written = runRegisteredOpenApiGenerateCommand(t, []string{"--quiet=false"})
+
+    if false == strings.Contains(written, "[melody:openapi:generate] [started]") {
+        t.Fatalf("expected the banner back under --quiet=false, got %q", written[:min(len(written), 80)])
+    }
+}
+
+func runRegisteredOpenApiGenerateCommand(t *testing.T, arguments []string) string {
+    t.Helper()
+
+    runtimeInstance := newCommandFixtureRuntime(t, t.TempDir(), false, false)
+    command := NewGenerateCommand(Info{Title: "Example", Version: "1.0.0"}, NewRegistry())
+
+    rootCommand := melodycli.NewRoot("app", "desc")
+    buffer := &bytes.Buffer{}
+
+    melodycli.Register(rootCommand, command, runtimeInstance)
+
+    rootCommand.SetWriter(buffer)
+    rootCommand.SetErrorWriter(buffer)
+
+    runErr := rootCommand.Run(context.Background(), append([]string{"app", command.Name()}, arguments...))
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    return buffer.String()
+}
+
 /* the write replaces the file whole; an existing file that is not a JSON document is someone's source a mistyped --out points at, not a previous output of this command. */
 func TestGenerateCommand_RefusesToOverwriteAForeignFile(t *testing.T) {
     projectDirectory := t.TempDir()
@@ -292,6 +333,54 @@ func TestGenerateCommand_TheStdoutDocumentStaysValidJsonWithoutTheInfoService(t 
 
     if 1 != len(journal.warnings) || false == strings.Contains(journal.warnings[0], "no openapi info service is registered") {
         t.Fatalf("expected the missing info to be journaled once, got %v", journal.warnings)
+    }
+}
+
+/* the journal door reads the configuration to learn whether the journal is stdout, and a configuration registered but failing to resolve must not become the one failure of a command written never to fail on its journal: it answers "not stdout" and the application's logger is asked, where the must-door panicked with no document and no warning */
+func TestGenerateCommand_AConfigurationThatDoesNotResolveDoesNotFailTheStdoutMode(t *testing.T) {
+    serviceContainer := container.NewContainer()
+    serviceContainer.MustRegister(
+        melodyhttp.ServiceRouter,
+        func(resolver containercontract.Resolver) (httpcontract.Router, error) {
+            return melodyhttp.NewRouter(), nil
+        },
+    )
+    container.MustRegister[configcontract.Configuration](
+        serviceContainer,
+        config.ServiceConfig,
+        func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
+            return nil, errors.New("the configuration does not resolve")
+        },
+    )
+    container.MustRegister[*Registry](
+        serviceContainer,
+        ServiceOpenApiRegistry,
+        func(resolver containercontract.Resolver) (*Registry, error) {
+            return NewRegistry(), nil
+        },
+    )
+    withoutInfo := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    journal := &recordingOpenApiLogger{}
+    withoutInfo.Container().MustRegister(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return journal, nil
+        },
+    )
+
+    output, runErr := runOpenApiGenerateCommand(t, NewGenerateCommandFromContainer(), withoutInfo)
+    if nil != runErr {
+        t.Fatalf("run without a resolvable configuration: %v", runErr)
+    }
+
+    var document map[string]any
+    if unmarshalErr := json.Unmarshal([]byte(output), &document); nil != unmarshalErr {
+        t.Fatalf("expected the writer to carry the document alone, got %v over:\n%s", unmarshalErr, output)
+    }
+
+    if 1 != len(journal.warnings) {
+        t.Fatalf("expected the application's logger asked as before, got %v", journal.warnings)
     }
 }
 

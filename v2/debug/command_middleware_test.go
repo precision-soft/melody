@@ -2,6 +2,7 @@ package debug
 
 import (
     "encoding/json"
+    "errors"
     "fmt"
     "strings"
     "testing"
@@ -344,6 +345,33 @@ func TestMiddlewareCommand_ZeroValueProvider_ReturnsANamedError(t *testing.T) {
 
     if false == strings.Contains(runErr.Error(), "middleware provider is nil") {
         t.Fatalf("expected the named refusal, got %v", runErr)
+    }
+}
+
+/* the refusal of the zero-value command is written on the envelope before the command fails: returned ahead of Render it left zero bytes where a machine consumer waits for a document, and the exit-coded error is the one the envelope's own failure carries */
+func TestMiddlewareCommand_ZeroValueProviderRendersTheEnvelopeBeforeItFails(t *testing.T) {
+    rendered, runErr := runDebugCommand(
+        &MiddlewareCommand{},
+        newTestRuntime(container.NewContainer()),
+        []string{"--format=json"},
+    )
+
+    decoded := struct {
+        Error struct {
+            Code    string `json:"code"`
+            Message string `json:"message"`
+        } `json:"error"`
+    }{}
+    if decodeErr := json.Unmarshal([]byte(rendered), &decoded); nil != decodeErr {
+        t.Fatalf("expected a json document on the stream, got %q (%v)", rendered, decodeErr)
+    }
+    if "debug.providerNil" != decoded.Error.Code || "middleware provider is nil" != decoded.Error.Message {
+        t.Fatalf("expected the named refusal on the envelope, got %+v", decoded.Error)
+    }
+
+    var exitError *exception.ExitError
+    if false == errors.As(runErr, &exitError) || 1 != exitError.ExitCode() {
+        t.Fatalf("expected the envelope's exit-coded error, got %v", runErr)
     }
 }
 

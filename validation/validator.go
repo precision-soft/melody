@@ -63,7 +63,7 @@ func (instance *validationWalk) remember(key validationMemoKey, path string, err
             return
         }
 
-        if false == strings.HasPrefix(validationError.Field(), path) {
+        if false == fieldLiesUnderPath(validationError.Field(), path) {
             memoized = append(memoized, memoizedValidationError{verbatim: validationError})
 
             continue
@@ -78,6 +78,15 @@ func (instance *validationWalk) remember(key validationMemoKey, path string, err
     }
 
     instance.memo[key] = memoized
+}
+
+/* fieldLiesUnderPath asks whether a field is the walked path or a descendant of it in the walk's own grammar — a member (`.`) or an element (`[`) — and not merely a string that begins with the path's text: a constraint answering its own field `BillingLine` under the path `Billing` is not under it, and read as a textual prefix it was memoized as the relative `Line` and recalled as `ShippingLine` under the sibling path, a field that does not exist. */
+func fieldLiesUnderPath(field string, path string) bool {
+    if field == path {
+        return true
+    }
+
+    return strings.HasPrefix(field, path+".") || strings.HasPrefix(field, path+"[")
 }
 
 /* recall answers a memoized walk under a new path, or reports that the key was never walked. */

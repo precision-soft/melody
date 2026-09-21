@@ -255,7 +255,7 @@ func (instance *noDefaultFlag) Definition() clicontract.FlagDefinition {
     }
 }
 
-/* a flag declaring no validator must install none: one that always passes would also be run over the declared default, which is not what "no validator" means */
+/* a flag declaring no validator must install none: the engine tells a nil validator from one that accepts everything, and the shape a reader of the engine's flag sees has to say the flag has nothing to refuse */
 func TestEngineFlagValidator_AFlagWithoutAValidatorInstallsNone(t *testing.T) {
     engineFlag := newEngineFlag(&clicontract.StringFlag{Name: "format"})
 
@@ -265,6 +265,88 @@ func TestEngineFlagValidator_AFlagWithoutAValidatorInstallsNone(t *testing.T) {
     }
     if nil != stringFlag.Validator {
         t.Fatalf("expected no validator to be installed")
+    }
+}
+
+/* the contract promises a plain decimal integer: with the base inferred from the literal, a zero-padded number from a shell loop or a cron entry read as octal or was refused, and a hexadecimal literal was accepted */
+func TestNewEngineFlag_ReadsAnIntegerFlagAsDecimal(t *testing.T) {
+    parsed := runFlagProbe(t, []clicontract.Flag{&clicontract.IntFlag{Name: "limit"}}, "--limit=010")
+    if 10 != parsed.Int("limit") {
+        t.Fatalf("expected a zero-padded literal to read as decimal ten, got %d", parsed.Int("limit"))
+    }
+
+    parsed = runFlagProbe(t, []clicontract.Flag{&clicontract.IntFlag{Name: "limit"}}, "--limit=08")
+    if 8 != parsed.Int("limit") {
+        t.Fatalf("expected a zero-padded eight to read as eight, got %d", parsed.Int("limit"))
+    }
+
+    runErr := runFlagProbeError(t, []clicontract.Flag{&clicontract.IntFlag{Name: "limit"}}, "--limit=0x10")
+    if nil == runErr {
+        t.Fatalf("expected a hexadecimal literal to be refused under the decimal base")
+    }
+}
+
+/* the engine validates only a value it parsed, so a declared default the declared validator refuses was never seen by anyone: every invocation that left the flag out ran on the refused value while the declaration read as honoured — it is refused where the mistyped default is, at registration */
+func TestNewEngineFlag_PanicsOnADefaultTheDeclaredValidatorRefuses(t *testing.T) {
+    testhelper.AssertPanicsWithError(t, func() {
+        newEngineFlag(&clicontract.IntFlag{
+            Name:  "limit",
+            Value: -1,
+            Validator: func(value int) error {
+                if 0 > value {
+                    return errors.New("negative refused")
+                }
+
+                return nil
+            },
+        })
+    }, "cli flag default value is refused by the flag's own validator")
+}
+
+/* a shipped flag always declares its default — the typed field, zero when left unset — so a validator that refuses that zero is refused at registration like any other refused default; the command would otherwise run on a value its own validator refuses whenever the flag is left out */
+func TestNewEngineFlag_PanicsOnAnUnsetDefaultTheDeclaredValidatorRefuses(t *testing.T) {
+    testhelper.AssertPanicsWithError(t, func() {
+        newEngineFlag(&clicontract.IntFlag{
+            Name: "limit",
+            Validator: func(value int) error {
+                if 1 > value {
+                    return errors.New("a positive limit is required")
+                }
+
+                return nil
+            },
+        })
+    }, "cli flag default value is refused by the flag's own validator")
+}
+
+/* a definition written by hand that carries no default at all declares nothing to validate: the zero value it means is nobody's declaration, so it is not refused at registration, and a value given on the command line is validated by the engine as before */
+func TestNewEngineFlag_ADefinitionWithoutADefaultIsNotValidatedAtRegistration(t *testing.T) {
+    flags := []clicontract.Flag{&positiveLimitFlagWithoutADefault{}}
+
+    parsed := runFlagProbe(t, flags, "--limit=3")
+    if 3 != parsed.Int("limit") {
+        t.Fatalf("expected the given value, got %d", parsed.Int("limit"))
+    }
+
+    runErr := runFlagProbeError(t, flags, "--limit=0")
+    if nil == runErr || false == strings.Contains(runErr.Error(), "a positive limit is required") {
+        t.Fatalf("expected the engine to refuse the parsed zero, got %v", runErr)
+    }
+}
+
+type positiveLimitFlagWithoutADefault struct{}
+
+func (instance *positiveLimitFlagWithoutADefault) Definition() clicontract.FlagDefinition {
+    return clicontract.FlagDefinition{
+        Kind: clicontract.FlagKindInt,
+        Name: "limit",
+        Validator: func(value any) error {
+            if 1 > value.(int) {
+                return errors.New("a positive limit is required")
+            }
+
+            return nil
+        },
     }
 }
 

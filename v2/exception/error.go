@@ -35,7 +35,7 @@ func (instance *Error) Unwrap() error {
     return instance.causeErr
 }
 
-/* the accessors answer the nil receiver as Error and Unwrap above do, and as every accessor of ExitError does: the typed nil FromError(nil) produces is a link errors.As matches, and a caller that read it through the interface reached these before any guard. */
+/* the accessors answer the nil receiver as Error and Unwrap above do, and as every accessor of ExitError does: the typed nil FromError(nil) produces is a link errors.As matches, and a caller that read it through the interface reached these before any guard. Message answers the empty string where Error answers a placeholder, because Message is the text the producer set and the nil set none, while Error is the rendering a chain shows; Level answers error rather than the zero level or unknown, because a record built from this link is a failure that reached a reader through a value that should not exist, and the journal weighs it as one. */
 func (instance *Error) Message() string {
     if nil == instance {
         return ""

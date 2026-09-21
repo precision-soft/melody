@@ -9,6 +9,7 @@ import (
     "unicode"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
+    "github.com/precision-soft/melody/v3/cli/output"
     "github.com/precision-soft/melody/v3/config"
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/internal"
@@ -34,11 +35,17 @@ func (instance *GenerateCommand) Description() string {
     return "generate the container registrations for the scanned packages"
 }
 
+/* Flags declares the quiet flag beside the command's own, defaulting to true as StandardFlags does: the generated source is the command's essential output and the run banner is decoration, and a command that declares no quiet flag keeps the banner it always had — around a source printed to stdout, that banner was the first bytes of the stream, ahead of the report lines the stdout mode prints before the package clause. */
 func (instance *GenerateCommand) Flags() []clicontract.Flag {
     return []clicontract.Flag{
         &clicontract.StringFlag{
             Name:  "out",
             Usage: "path to write the generated file to; prints to stdout when empty",
+        },
+        &clicontract.BoolFlag{
+            Name:  output.FlagNameQuiet,
+            Usage: "suppress the run banner around the document (--quiet=false brings it back)",
+            Value: true,
         },
         &clicontract.StringFlag{
             Name:  "package",

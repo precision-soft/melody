@@ -41,7 +41,7 @@ func (instance *HttpException) Unwrap() error {
     return instance.causeErr
 }
 
-/* the accessors answer the nil receiver as Error and Unwrap above do, and as every accessor of ExitError does: the typed nil FromError(nil) produces is a link errors.As matches, and a caller that read it through the interface reached these before any guard. */
+/* the accessors answer the nil receiver as Error and Unwrap above do, and as every accessor of ExitError does: the typed nil FromError(nil) produces is a link errors.As matches, and a caller that read it through the interface reached these before any guard. Message answers the empty string where Error answers a placeholder, because Message is the text the producer set and the nil set none, while Error is the rendering a chain shows; StatusCode answers zero, no status at all, since a status a reader would map to a response is exactly what the nil does not carry. */
 func (instance *HttpException) Message() string {
     if nil == instance {
         return ""

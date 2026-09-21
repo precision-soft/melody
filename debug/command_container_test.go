@@ -7,6 +7,7 @@ import (
     "fmt"
     "os"
     "os/exec"
+    "slices"
     "strings"
     "testing"
     "time"
@@ -659,15 +660,48 @@ func TestContainerCommand_ReportsTheCauseChainOfAFailedBuild(t *testing.T) {
         t.Fatalf("expected the cause line in the table, got %q", tableRendered)
     }
 
-    /* the list view limits error lines by verbosity, so the cause line needs the raised level the operator would use to read a failure; the sweep itself is opt-in, since a bare listing no longer builds */
+    /* the list view cuts the message and the context by verbosity, never the causes: the sweep is run to learn why a service failed, and at the default verbosity it used to say only that one did; the sweep itself is opt-in, since a bare listing no longer builds */
     listTableRendered, _ := runDebugCommand(
         &ContainerCommand{},
         newTestRuntime(serviceContainer),
-        []string{"--verbosity=2", "--build"},
+        []string{"--build"},
     )
 
     if false == strings.Contains(listTableRendered, "caused by: connection refused") {
-        t.Fatalf("expected the cause line in the list table, got %q", listTableRendered)
+        t.Fatalf("expected the cause line in the list table at the default verbosity, got %q", listTableRendered)
+    }
+}
+
+/* the message and the context share the verbosity budget and the causes are exempt: at the default verbosity a two-line message is cut to one, every cause is kept whole between the message and the context, and the cut marker sits on the last rendered line, saying that the context below was left out */
+func TestLimitErrorLinesByVerbosity_CutsTheMessageAndTheContextAndKeepsEveryCause(t *testing.T) {
+    message := []string{"build failed", "second line of the message"}
+    causes := []string{"caused by: dial refused", "caused by: connection refused"}
+    contextLines := []string{"{\"host\":\"redis\"}"}
+
+    lines := limitErrorLinesByVerbosity(message, causes, contextLines, 0)
+
+    expected := []string{"build failed", "caused by: dial refused", "caused by: connection refused ..."}
+    if false == slices.Equal(expected, lines) {
+        t.Fatalf("expected %q at the default verbosity, got %q", expected, lines)
+    }
+
+    lines = limitErrorLinesByVerbosity(message, causes, contextLines, 1)
+
+    expected = []string{"build failed", "second line of the message", "caused by: dial refused", "caused by: connection refused ..."}
+    if false == slices.Equal(expected, lines) {
+        t.Fatalf("expected the whole message and the context cut at verbosity one, got %q", lines)
+    }
+
+    lines = limitErrorLinesByVerbosity(message, causes, contextLines, 3)
+
+    expected = []string{"build failed", "second line of the message", "caused by: dial refused", "caused by: connection refused", "{\"host\":\"redis\"}"}
+    if false == slices.Equal(expected, lines) {
+        t.Fatalf("expected every line at the highest verbosity, got %q", lines)
+    }
+
+    whole := limitErrorLinesByVerbosity([]string{"build failed"}, causes, nil, 0)
+    if false == slices.Equal([]string{"build failed", "caused by: dial refused", "caused by: connection refused"}, whole) {
+        t.Fatalf("expected no cut marker when nothing was left out, got %q", whole)
     }
 }
 
@@ -680,6 +714,26 @@ func TestResolveErrorContextJson_ReadsAnHttpExceptionContext(t *testing.T) {
 
     if false == strings.Contains(result, "redis") {
         t.Fatalf("expected the http exception context, got %q", result)
+    }
+}
+
+/* a provider without a context answers an empty map, not nil, so a search that stopped at the nearest provider rendered {} for an HttpException wrapping the very error that carried the host: the context is read from the first link of the chain that has one, and a link above it that has one of its own still wins */
+func TestResolveErrorContextJson_ReadsTheFirstContextBelowAnEmptyProvider(t *testing.T) {
+    inner := exception.NewError("dial", exceptioncontract.Context{"host": "redis"}, nil)
+
+    result := resolveErrorContextJson(exception.NewHttpExceptionWithCause(503, "backend down", inner), fullVerbosityTableOption())
+
+    if "{\"host\":\"redis\"}" != result {
+        t.Fatalf("expected the inner context below the empty provider, got %q", result)
+    }
+
+    outer := exception.NewHttpExceptionWithCause(503, "backend down", inner)
+    outer.SetContextValue("outer", "yes")
+
+    result = resolveErrorContextJson(outer, fullVerbosityTableOption())
+
+    if "{\"outer\":\"yes\"}" != result {
+        t.Fatalf("expected the nearest context that has keys to win, got %q", result)
     }
 }
 

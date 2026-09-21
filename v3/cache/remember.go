@@ -338,7 +338,7 @@ func normalizeRememberedValue(cacheInstance cachecontract.Cache, key string, val
 
     normalized, normalizeErr := normalizer.NormalizeStoredValue(value)
     if nil != normalizeErr {
-        /* the refusal names the key and the framework's message, in the store's own spelling: the round-trip now runs before the store, so a value the serializer cannot encode — a NaN, a func field — is refused here, where the store refused it before, and a reader of the message sees one class under one text whichever door refused */
+        /* the refusal names the key and the framework's message, in the store's own spelling: the round-trip now runs before the store, so a value the serializer cannot encode — a NaN, a func field — is refused here, where the store refused it before, and a reader of the message sees one class under one text whichever door refused — the text names the class, a value the serializer cannot carry through the store, and covers the decode half of the round-trip too, which the store never raises on its own; the cause says which half failed */
         return nil, exception.NewError(
             "cache value serialization failed",
             map[string]any{"key": key},

@@ -36,7 +36,7 @@ type TransportConfig struct {
 
     MaxIdleConns *int
 
-    /* MaxIdleConnsPerHost bounds the idle pool of a single host. net/http defaults it to two, which caps the whole pool for a client bound to one BaseUrl: every connection past the second is closed as soon as it goes idle, so a burst dials as many sockets as it has requests and leaves almost all of them in TIME_WAIT for the MSL, until the ephemeral port range runs out and every request fails to connect. It defaults to MaxIdleConns and follows an override of it, in its meaning: an unbounded total (zero) makes the host unbounded too, spelled as the largest count because net/http reads a per-host zero as its default of two. */
+    /* MaxIdleConnsPerHost bounds the idle pool of a single host. net/http defaults it to two, which caps the whole pool for a client bound to one BaseUrl: every connection past the second is closed as soon as it goes idle, so a burst dials as many sockets as it has requests and leaves almost all of them in TIME_WAIT for the MSL, until the ephemeral port range runs out and every request fails to connect. It defaults to MaxIdleConns and follows an override of it, in its meaning: an unbounded total (zero) makes the host unbounded too, spelled as the largest count because net/http reads a per-host zero as its default of two, and a negative total makes the host negative, which net/http reads as keep-alives disabled — every request dials. */
     MaxIdleConnsPerHost *int
 
     IdleConnTimeout       *time.Duration

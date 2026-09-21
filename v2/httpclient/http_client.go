@@ -513,8 +513,9 @@ func newRequestFailedError(method string, requestUrl *url.URL, err error) error 
         urlForDiagnostics = sanitizeUrlForDiagnostics(requestUrl.String())
     }
 
+    /* the link is rebuilt whatever its Err holds: net/http never answers a *url.Error with a nil Err, but the one shape a caller of this package could hand over that way would be the one shape whose url reached the record unsanitized */
     cause := err
-    if urlErr, ok := err.(*url.Error); true == ok && nil != urlErr.Err {
+    if urlErr, ok := err.(*url.Error); true == ok {
         cause = &url.Error{Op: urlErr.Op, URL: sanitizeUrlForDiagnostics(urlErr.URL), Err: urlErr.Err}
     }
 

@@ -91,9 +91,12 @@ func (instance *MiddlewareCommand) Run(
 
     envelope := output.NewEnvelope(meta)
 
-    /* the zero-value command is constructible outside the constructor that refuses nil providers; a named refusal reaches the report where a nil-function call reached the recover */
+    /* the zero-value command is constructible outside the constructor that refuses nil providers; a named refusal reaches the report where a nil-function call reached the recover — and it reaches it through the envelope, so the document a machine consumer waits for is written before the command fails: returned ahead of Render, the refusal left zero bytes on the stream, the one failure path of the debug family that bypassed the envelope contract, and Render answers the exit-coded error the envelope's own failure carries */
     if nil == instance.descriptionProvider || nil == instance.buildProvider {
-        return exception.NewError("middleware provider is nil", nil, nil)
+        envelope.SetError("debug.providerNil", "middleware provider is nil", nil, nil)
+        envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
+
+        return output.Render(commandContext.Writer, envelope, option)
     }
 
     if true == commandContext.Bool(middlewareCommandBuildFlagName) {
