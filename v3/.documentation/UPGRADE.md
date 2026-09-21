@@ -249,7 +249,15 @@ The full width is what makes the stamps sortable as text, which is the whole of 
 
 **Symptom.** A callback that outlives all its waiters now receives a canceled context and is recomputed by the next caller, where it previously kept running detached with its eventual result written into a record nothing reads; a callback that ignores its context changes nothing for itself, but its key stops being pinned once its waiters are gone. Callers on the old default and callers with `WithCancelable(true)` never shared a flight — the single-flight unit keys on cancelability — so nothing coalesces differently.
 
-**Remedy.** A callback whose computation must survive the departure of every caller asks for the detached shape explicitly: `NewDefaultRememberOption().WithCancelable(false)`. Long callbacks still want their own deadlines — the default bounds the computation's ownership of the key, not the wait, which stays unbounded without `WithWaitTimeout` or a caller context.
+**Remedy.** A callback whose computation must survive the departure of every caller asks for the detached shape explicitly: `NewDefaultRememberOption().WithCancelable(false)`. Long callbacks still want their own deadlines — the default bounds the computation's ownership of the key, not the wait, which stays unbounded without `WithWaitTimeout` or a caller context. One pairing changes meaning under the new default: a `WithWaitTimeout` **shorter than the callback** never stores — the lone waiter's timeout leaves the flight without waiters, the flight is canceled, the callback that honours its context returns the cancellation, and every later call leads a fresh flight to the same end, so the key is never populated where it used to be populated by the detached computation once it finished. Pair such a wait with `WithCancelable(false)`, or give the callback its own deadline instead of the waiters.
+
+### Cache: `WithContext` answers a copy of the option
+
+**What changed.** [`RememberOption.WithContext`](../cache/remember.go) answers a copy of the option carrying the context and leaves the receiver as it was. On the frozen majors every setter, `WithContext` included, writes the receiver.
+
+**Symptom.** A service that keeps one option and calls `WithContext` on it per request no longer hands the context of one request to the wait of every concurrent request on that option, and no longer races on the field when two requests derive at once; the chained spelling `NewDefaultRememberOption().WithContext(ctx)` behaves as it did. A caller that called `shared.WithContext(ctx)` for its side effect and then passed `shared` keeps an option without a context — an unbounded wait, the default.
+
+**Remedy.** Pass the value `WithContext` answers: `option := shared.WithContext(request.HttpRequest().Context())`, then `Remember(cache, key, ttl, callback, option)`.
 
 ### Cache: a value-kind Cache no longer coalesces in Remember
 

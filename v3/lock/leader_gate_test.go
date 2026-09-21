@@ -9,7 +9,10 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v3/clock"
+    "github.com/precision-soft/melody/v3/container"
+    containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/internal/testhelper"
     lockcontract "github.com/precision-soft/melody/v3/lock/contract"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
@@ -991,12 +994,10 @@ func TestLeaderGate_PanickingOnElectedHookIsShieldedAndLogged(t *testing.T) {
         close(runDone)
     }()
 
-    /* the panic is recovered and recorded; the gate keeps its term — a hook failure is not a lost lease — and above all the process survives, where the unshielded form killed it with the lock held for the rest of its ttl on every peer */
+    /* the panic is recovered and recorded, and above all the process survives, where the unshielded form killed it with the lock held for the rest of its ttl on every peer; the term it was leading ends with it, which the sibling tests below pin */
     waitUntil(t, 2*time.Second, func() bool { return logger.hasMessageContaining("leader gate hook panicked") }, "expected the hook panic to be logged")
 
-    if false == gate.IsLeader() {
-        t.Fatalf("expected the gate to keep leading after a recovered hook panic")
-    }
+    waitUntil(t, 2*time.Second, func() bool { return false == gate.IsLeader() }, "expected the term to end after the recovered hook panic")
 
     cancel()
 
@@ -1109,5 +1110,142 @@ func TestLeaderGate_IsLeaderAnswersFromTheAcquireLeaseBeforeAnyRenewal(t *testin
         }
     case <-time.After(2 * time.Second):
         t.Fatalf("the gate was never elected")
+    }
+}
+
+/* the shield keeps the process alive; what it must not keep alive is the term — a gate parked on a term whose work died renews a lease under nothing, answers IsLeader and reports no failure, where a crashed process used to hand the work to another replica */
+func TestLeaderGate_APanickingOnElectedEndsTheTermAndReleasesTheLock(t *testing.T) {
+    locker := NewInMemoryLocker(clock.NewSystemClock())
+
+    runContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    runtimeInstance, _ := runtimeWithRecordingLogger(runContext)
+
+    lostCauses := make(chan error, 4)
+    gate := NewLeaderGateWithOptions(locker, "worker:hook-panics-term", time.Minute, LeaderGateOptions{
+        RetryInterval:   time.Second,
+        RefreshInterval: 5 * time.Millisecond,
+        OnElected: func(electedRuntime runtimecontract.Runtime) {
+            panic(exception.NewError("hook exploded", nil, nil))
+        },
+        OnLost: func(lostRuntime runtimecontract.Runtime, cause error) {
+            lostCauses <- cause
+        },
+    })
+
+    go func() { _ = gate.Run(runtimeInstance) }()
+
+    var lostCause error
+    select {
+    case lostCause = <-lostCauses:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("expected OnLost to receive the panicking hook as a lost term")
+    }
+
+    if nil == lostCause {
+        t.Fatalf("expected the lost term to carry a cause")
+    }
+
+    if false == strings.Contains(lostCause.Error(), "leader gate hook panicked") {
+        t.Fatalf("expected the lost cause to name the hook panic, got %v", lostCause)
+    }
+
+    if "OnElected" != exception.LogContext(lostCause)["hook"] {
+        t.Fatalf("expected the lost cause to name the hook, got %v", exception.LogContext(lostCause))
+    }
+
+    if true == gate.IsLeader() {
+        t.Fatalf("expected the gate to have left its term")
+    }
+
+    /* the lock is free between the ended term and the next campaign, a whole RetryInterval away: another replica can take it now */
+    acquired, acquireErr := locker.CreateLock("worker:hook-panics-term", time.Minute).Acquire(testRuntimeWithContext(context.Background()))
+    if nil != acquireErr || false == acquired {
+        t.Fatalf("expected the lock to be released with the ended term, got acquired=%v err=%v", acquired, acquireErr)
+    }
+}
+
+func TestLeaderGate_APanickingOnElectedIsCampaignedAgainAfterRetryInterval(t *testing.T) {
+    locker := NewInMemoryLocker(clock.NewSystemClock())
+
+    runContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    runtimeInstance, _ := runtimeWithRecordingLogger(runContext)
+
+    var elections atomic.Int32
+    gate := NewLeaderGateWithOptions(locker, "worker:hook-panics-again", time.Minute, LeaderGateOptions{
+        RetryInterval:   5 * time.Millisecond,
+        RefreshInterval: 5 * time.Millisecond,
+        OnElected: func(electedRuntime runtimecontract.Runtime) {
+            elections.Add(1)
+            panic("hook exploded")
+        },
+    })
+
+    go func() { _ = gate.Run(runtimeInstance) }()
+
+    waitUntil(t, 2*time.Second, func() bool { return 2 <= elections.Load() }, "expected the gate to campaign again after the panicking term ended")
+}
+
+/* OnLost runs after the term has already ended and OnCampaignError outside any term, so their panics have no term to end: the shield journals them and the loop goes on — the mutant that would demote on every hook is told apart here */
+func TestLeaderGate_APanickingOnLostDoesNotStopTheCampaigns(t *testing.T) {
+    locker := NewInMemoryLocker(clock.NewSystemClock())
+
+    runContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    runtimeInstance, logger := runtimeWithRecordingLogger(runContext)
+
+    var elections atomic.Int32
+    gate := NewLeaderGateWithOptions(locker, "worker:lost-panics", time.Minute, LeaderGateOptions{
+        RetryInterval:   5 * time.Millisecond,
+        RefreshInterval: 5 * time.Millisecond,
+        OnElected: func(electedRuntime runtimecontract.Runtime) {
+            elections.Add(1)
+            panic("elected exploded")
+        },
+        OnLost: func(lostRuntime runtimecontract.Runtime, cause error) {
+            panic("lost exploded")
+        },
+    })
+
+    go func() { _ = gate.Run(runtimeInstance) }()
+
+    waitUntil(t, 2*time.Second, func() bool { return 2 <= elections.Load() }, "expected the campaigns to go on past a panicking OnLost")
+
+    if false == logger.hasMessageContaining("leader gate hook panicked") {
+        t.Fatalf("expected the panicking hooks to be journaled")
+    }
+}
+
+type nilableTestScope struct {
+    containercontract.Scope
+}
+
+type typedNilScopeRuntime struct {
+    ctx       context.Context
+    container containercontract.Container
+}
+
+func (instance *typedNilScopeRuntime) Context() context.Context                { return instance.ctx }
+func (instance *typedNilScopeRuntime) Scope() containercontract.Scope          { return (*nilableTestScope)(nil) }
+func (instance *typedNilScopeRuntime) Container() containercontract.Container { return instance.container }
+
+/* the runtime package's resolution doors tolerate a typed-nil scope by falling back to the container, so such a runtime reaches the gate; runtime.New refuses it, and the refusal used to fire inside the deferred release — a second panic in the unwind of the first, with the lock kept until its ttl lapsed */
+func TestLeaderGateRun_RefusesATypedNilScopeBeforeCampaigning(t *testing.T) {
+    locker := NewInMemoryLocker(clock.NewSystemClock())
+    serviceContainer := container.NewContainer()
+
+    gate := NewLeaderGate(locker, "worker:typed-nil-scope", time.Minute)
+
+    testhelper.AssertPanicsWithError(t, func() {
+        _ = gate.Run(&typedNilScopeRuntime{ctx: context.Background(), container: serviceContainer})
+    }, "leader gate runtime scope is nil")
+
+    acquired, acquireErr := locker.CreateLock("worker:typed-nil-scope", time.Minute).Acquire(testRuntimeWithContext(context.Background()))
+    if nil != acquireErr || false == acquired {
+        t.Fatalf("expected no lock to be held by the refused run, got acquired=%v err=%v", acquired, acquireErr)
     }
 }

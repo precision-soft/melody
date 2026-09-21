@@ -33,7 +33,7 @@ type LeaderGateOptions struct {
     /* RefreshInterval is the lease-renewal cadence while leading; defaults to half the ttl, or defaultSessionProbeInterval when the ttl is non-positive (session-style locks whose Refresh is a liveness probe). */
     RefreshInterval time.Duration
 
-    /* OnElected runs on the Run goroutine right after the gate becomes leader, with the lease renewal already running underneath it. Its runtime carries a context cancelled when the lease is lost, so leader-only work stops instead of running alongside whoever holds the lock now; while it blocks, the gate cannot campaign again. */
+    /* OnElected runs on the Run goroutine right after the gate becomes leader, with the lease renewal already running underneath it. Its runtime carries a context cancelled when the lease is lost, so leader-only work stops instead of running alongside whoever holds the lock now; while it blocks, the gate cannot campaign again. A panic out of it ends the term: the lock is released, OnLost (or the journal) receives the panic as the cause, and the gate campaigns again after RetryInterval — the work is handed to whichever replica wins next, as a crashed process used to hand it over, instead of a gate that keeps renewing a lease under no work and reports itself leader. */
     OnElected func(runtimeInstance runtimecontract.Runtime)
 
     /* OnLost runs on the Run goroutine right after leadership is lost to a failed renewal; cause is the renewal error. It does not run on a clean shutdown. Left nil, the gate logs the lost term through the runtime's logger instead; wiring the hook replaces that record. */
@@ -154,6 +154,8 @@ func (instance *LeaderGate) Run(runtimeInstance runtimecontract.Runtime) error {
         exception.Panic(exception.NewError("leader gate runtime is nil", nil, nil))
     }
 
+    refuseARuntimeThatCannotBeRewrapped(runtimeInstance, "leader gate")
+
     runContext := runtimeInstance.Context()
     campaignBackoff := instance.options.RetryInterval
 
@@ -254,34 +256,34 @@ func (instance *LeaderGate) reportLost(runtimeInstance runtimecontract.Runtime, 
     )
 }
 
-/* runHookShielded runs a user hook behind a recover, because every hook runs on the Run goroutine and Run's own documentation says to start it bare: an unshielded panic would unwind a goroutine with no recover and take the whole process down on user code the gate merely notifies. */
-func (instance *LeaderGate) runHookShielded(runtimeInstance runtimecontract.Runtime, hookName string, hook func()) {
+/* runHookShielded runs a user hook behind a recover, because every hook runs on the Run goroutine and Run's own documentation says to start it bare: an unshielded panic would unwind a goroutine with no recover and take the whole process down on user code the gate merely notifies. The panic is journaled here and answered as an error, so the caller that holds a term on the hook's behalf can end it. */
+func (instance *LeaderGate) runHookShielded(runtimeInstance runtimecontract.Runtime, hookName string, hook func()) (hookErr error) {
     defer func() {
         recoveredValue := recover()
         if nil == recoveredValue {
             return
         }
 
-        recoveredErr, _ := recoveredValue.(error)
+        hookErr = exception.NewError(
+            "leader gate hook panicked",
+            exceptioncontract.Context{
+                "hook":           hookName,
+                "name":           instance.name,
+                "recoveredValue": recoveredValue,
+                "panicStack":     string(debug.Stack()),
+            },
+            exception.PanicCause(recoveredValue),
+        )
 
         instance.gateLogger(runtimeInstance).Error(
             "leader gate hook panicked",
-            exception.LogContext(
-                exception.NewError(
-                    "leader gate hook panicked",
-                    exceptioncontract.Context{
-                        "hook":           hookName,
-                        "name":           instance.name,
-                        "recoveredValue": recoveredValue,
-                        "panicStack":     string(debug.Stack()),
-                    },
-                    recoveredErr,
-                ),
-            ),
+            exception.LogContext(hookErr),
         )
     }()
 
     hook()
+
+    return nil
 }
 
 func (instance *LeaderGate) gateLogger(runtimeInstance runtimecontract.Runtime) loggingcontract.Logger {
@@ -293,7 +295,7 @@ func (instance *LeaderGate) gateLogger(runtimeInstance runtimecontract.Runtime) 
     return logger
 }
 
-/* lead holds the leadership term: it starts the lease renewal, runs OnElected underneath it, and blocks until the run context ends (returns nil) or a renewal fails (returns the cause, so the gate demotes itself and re-campaigns). The renewal must be running before OnElected is invoked — nothing would renew the lease while the hook works, so a hook that merely takes longer than the ttl lets a second instance acquire while this one still reports leadership and never demotes, since demotion only follows a failed renewal. */
+/* lead holds the leadership term: it starts the lease renewal, runs OnElected underneath it, and blocks until the run context ends (returns nil), a renewal fails, or OnElected panics (returns the cause, so the gate demotes itself and re-campaigns). A panicking hook has to end the term because the recover that keeps the process alive would otherwise leave the gate parked on the term context, renewing a lease under no work, IsLeader answering true and no error anywhere — the false leader the crash used to prevent by handing the work to another replica. The renewal must be running before OnElected is invoked — nothing would renew the lease while the hook works, so a hook that merely takes longer than the ttl lets a second instance acquire while this one still reports leadership and never demotes, since demotion only follows a failed renewal. */
 func (instance *LeaderGate) lead(runtimeInstance runtimecontract.Runtime, lock lockcontract.Lock) error {
     termContext, cancel := context.WithCancel(runtimeInstance.Context())
     defer cancel()
@@ -328,10 +330,15 @@ func (instance *LeaderGate) lead(runtimeInstance runtimecontract.Runtime, lock l
         }
     }()
 
+    var hookFailure error
     if nil != instance.options.OnElected {
-        instance.runHookShielded(termRuntime, "OnElected", func() {
+        hookFailure = instance.runHookShielded(termRuntime, "OnElected", func() {
             instance.options.OnElected(termRuntime)
         })
+        if nil != hookFailure {
+            instance.leaveTerm()
+            cancel()
+        }
     }
 
     <-termContext.Done()
@@ -340,7 +347,12 @@ func (instance *LeaderGate) lead(runtimeInstance runtimecontract.Runtime, lock l
     cancel()
     waitGroup.Wait()
 
-    return refreshFailure
+    /* a lost lease is the older and the stronger fact: the renewal goroutine dropped the claim itself, and it is the failure the operator has to see first */
+    if nil != refreshFailure {
+        return refreshFailure
+    }
+
+    return hookFailure
 }
 
 /* refreshWhileLeading renews the held lease at the configured cadence until the term context ends, returning the first renewal failure. Every renewal is issued under a deadline of its own (resolveRefreshTimeout), because a call that never answers is the one failure mode this loop cannot otherwise see: it would sit in Refresh while the lease lapses and a second instance takes the lock, with no error to return and nothing to demote on. Each renewal that lands moves the lease deadline IsLeader answers from, dated from the instant the call was issued rather than from when it answered, so the claim never outlives the lease the store actually wrote. */

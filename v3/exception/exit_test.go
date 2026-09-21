@@ -132,3 +132,11 @@ func TestExitError_NilReceiverAccessorsAnswerInsteadOfDereferencing(t *testing.T
         t.Fatalf("expected the matched typed nil to answer instead of panicking")
     }
 }
+
+func TestExitError_ErrorOnANilReceiverAnswersInsteadOfDereferencing(t *testing.T) {
+    var typedNil *ExitError
+
+    if "exit error carries no error value" != typedNil.Error() {
+        t.Fatalf("expected the nil receiver to answer the placeholder message, got %q", typedNil.Error())
+    }
+}

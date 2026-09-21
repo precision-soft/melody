@@ -217,7 +217,26 @@ func (instance *Configuration) scanTemplate(
     return builder.String(), nil
 }
 
-/* resolveEnvironmentPlaceholder resolves one %env(...)% construct sitting at the start of the fragment. A fragment whose candidate is interrupted by another percent before any ")%" is reported as consuming nothing, so the caller treats the percent as data; a fragment that runs out with no closer at all, and a closed fragment that is not a well-formed placeholder, are errors, because a typo that silently survived as literal text is exactly what this reporting exists to catch. The offset is the position of the opening percent in the template being scanned — the parameter's own value, or the environment value an %env(...)% read, which is scanned under the reading parameter's name — and is what the unterminated refusal carries in place of the text. */
+/* nameEnvironmentValueRefusal adds the environment key to a refusal raised while the environment VALUE was being scanned: that scan runs under the reading parameter's name, so a refusal carrying an offset named the reader and an offset into a string the reader's own template is not — APP_DSN reading %env(DB_PASSWORD)% over Pa%SSword1 was reported as parameter APP_DSN, offset 2, which in the dsn is a colon. The key is added only once, by the innermost read: an environment value that itself reads another environment key keeps the key whose value the offset indexes. */
+func nameEnvironmentValueRefusal(refusalErr error, environmentKey string) {
+    var refusal *exception.Error
+    if false == errors.As(refusalErr, &refusal) || nil == refusal {
+        return
+    }
+
+    refusalContext := refusal.Context()
+    if _, carriesOffset := refusalContext["offset"]; false == carriesOffset {
+        return
+    }
+
+    if _, alreadyNamed := refusalContext["environmentKey"]; true == alreadyNamed {
+        return
+    }
+
+    refusal.SetContextValue("environmentKey", environmentKey)
+}
+
+/* resolveEnvironmentPlaceholder resolves one %env(...)% construct sitting at the start of the fragment. A fragment whose candidate is interrupted by another percent before any ")%" is reported as consuming nothing, so the caller treats the percent as data; a fragment that runs out with no closer at all, and a closed fragment that is not a well-formed placeholder, are errors, because a typo that silently survived as literal text is exactly what this reporting exists to catch. The offset is the position of the opening percent in the template being scanned — the parameter's own value, or the environment value an %env(...)% read, which is scanned under the reading parameter's name and is then named by its key beside the offset — and is what the unterminated refusal carries in place of the text. */
 func (instance *Configuration) resolveEnvironmentPlaceholder(
     fragment string,
     percentOffset int,
@@ -301,6 +320,8 @@ func (instance *Configuration) resolveEnvironmentPlaceholder(
         delete(resolvingEnvironmentKeys, environmentKey)
 
         if nil != envValueErr {
+            nameEnvironmentValueRefusal(envValueErr, environmentKey)
+
             return "", 0, envValueErr
         }
 

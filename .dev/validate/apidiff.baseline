@@ -202,6 +202,7 @@ v3 ~ compatible ~ ./cache.NewDeserializationError ~ added ~ unclassified ~
 v3 ~ compatible ~ ./cache.NewManagerOwningBackend ~ added ~ unclassified ~
 v3 ~ compatible ~ ./cache.(*RememberOption).Context ~ added ~ unclassified ~
 v3 ~ compatible ~ ./cache.(*RememberOption).WithContext ~ added ~ unclassified ~
+v3 ~ compatible ~ ./cache/contract.StoredValueNormalizer ~ added ~ unclassified ~
 v3 ~ compatible ~ ./cli/contract.Context ~ added ~ unclassified ~
 v3 ~ compatible ~ ./cli/contract.ErrFlagValueTypeMismatch ~ added ~ unclassified ~
 v3 ~ compatible ~ ./cli/contract.FlagDefinition ~ added ~ unclassified ~

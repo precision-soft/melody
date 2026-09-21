@@ -276,15 +276,15 @@ func executeRememberInFlightLeader(
         return
     }
 
-    setErr := normalizeThirdPartyError(cacheInstance.Set(key, computedValue, ttl))
-    if nil != setErr {
-        call.Complete(nil, setErr)
-        return
-    }
-
     normalizedValue, normalizeErr := normalizeRememberedValue(cacheInstance, computedValue)
     if nil != normalizeErr {
         call.Complete(nil, normalizeErr)
+        return
+    }
+
+    setErr := normalizeThirdPartyError(cacheInstance.Set(key, computedValue, ttl))
+    if nil != setErr {
+        call.Complete(nil, setErr)
         return
     }
 
@@ -308,20 +308,27 @@ func rememberWithoutStampedeProtection(
         return nil, callbackErr
     }
 
+    normalizedValue, normalizeErr := normalizeRememberedValue(cacheInstance, value)
+    if nil != normalizeErr {
+        return nil, normalizeErr
+    }
+
     setErr := normalizeThirdPartyError(cacheInstance.Set(key, value, ttl))
     if nil != setErr {
         return nil, setErr
     }
 
-    return normalizeRememberedValue(cacheInstance, value)
+    return normalizedValue, nil
 }
 
-/* storedValueNormalizer is the optional door through which Remember learns what shape a stored value reads back as; the cache manager implements it with one local serializer round-trip. */
+/* storedValueNormalizer is the optional door through which Remember learns what shape a stored value reads back as; the cache manager implements it with one local serializer round-trip. The door is asked of the Cache VALUE Remember was handed, so a decorator over the manager that does not forward NormalizeStoredValue silently loses the uniform shape — the miss answers the callback's value again and the hit the decoded one. The frozen majors keep the interface unexported, a patch admitting no new public symbol; a decorator forwards the method by name, which is exported on Manager. The third major names the door on its contract package. */
 type storedValueNormalizer interface {
     NormalizeStoredValue(value any) (any, error)
 }
 
-/* normalizeRememberedValue makes the computing call answer the exact shape every cached call will answer: without it one key had two shapes — the callback's own value on the miss, the decoded generic form on every hit — so a type assertion worked on the cold path and failed on the warm one, from the second call on. A cache that does not expose its stored shape answers the callback's value unchanged. */
+/* normalizeRememberedValue makes the computing call answer the exact shape every cached call will answer: without it one key had two shapes — the callback's own value on the miss, the decoded generic form on every hit — so a type assertion worked on the cold path and failed on the warm one, from the second call on. A cache that does not expose its stored shape answers the callback's value unchanged.
+
+   It runs BEFORE the store, on both paths. The round-trip is also the only place where a value the serializer encodes but cannot decode is found out — the default JSON serializer has no depth ceiling on the way in and one on the way out — and a value like that, stored first, was written and then read back as a miss on every later call: recomputed, rewritten, refused again, a loop with one write per call that no ttl ends. Refused before the store, the key stays empty and the caller gets the refusal once per call and nothing else. */
 func normalizeRememberedValue(cacheInstance cachecontract.Cache, value any) (any, error) {
     normalizer, isNormalizer := cacheInstance.(storedValueNormalizer)
     if false == isNormalizer {

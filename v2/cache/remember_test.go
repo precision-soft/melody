@@ -1754,3 +1754,69 @@ func TestRemember_WithoutStampedeProtectionTheCallbackRunsUnderTheCallerContext(
         t.Fatalf("expected the uncoalesced callback to run under the caller context, saw %v", observedContextError)
     }
 }
+
+func deeplyNestedValue(depth int) any {
+    var value any = "leaf"
+
+    for level := 0; level < depth; level = level + 1 {
+        value = map[string]any{"nested": value}
+    }
+
+    return value
+}
+
+/* the round-trip that makes one shape is also where a value the serializer encodes but cannot decode is found out — the JSON serializer has no depth ceiling on the way in and one on the way out; stored first, such a value was read back as a miss on every later call, recomputed, rewritten and refused again, so the refusal has to come before the store on both paths */
+func TestRemember_AValueTheSerializerCannotReadBackIsNotStored(t *testing.T) {
+    for _, option := range []*RememberOption{
+        NewDefaultRememberOption(),
+        NewDefaultRememberOption().WithStampedeProtectionEnabled(false),
+    } {
+        backend := NewInMemoryBackend(0, time.Minute, clock.NewSystemClock())
+        manager := NewManager(backend, NewJsonSerializer())
+
+        calls := 0
+        callback := func(ctx context.Context) (any, error) {
+            calls = calls + 1
+
+            return deeplyNestedValue(20000), nil
+        }
+
+        _, rememberErr := Remember(manager, "remember:unreadable", time.Minute, callback, option)
+        if nil == rememberErr {
+            t.Fatalf("expected the value the serializer cannot read back to be refused (protection %v)", option.EnableStampedeProtection())
+        }
+
+        if _, exists, _ := backend.Get("remember:unreadable"); true == exists {
+            t.Fatalf("expected the refused value to stay out of the backend (protection %v)", option.EnableStampedeProtection())
+        }
+
+        if 1 != calls {
+            t.Fatalf("expected the callback to run once, ran %d times (protection %v)", calls, option.EnableStampedeProtection())
+        }
+
+        _ = backend.Close()
+    }
+}
+
+/* the setters write the receiver, so an option shared across requests must not receive a request's context; the documented derivation is a copy of the struct, whose context never reaches the shared value */
+func TestRememberOption_ACopyOfTheStructCarriesItsOwnContext(t *testing.T) {
+    shared := NewDefaultRememberOption().WithWaitTimeout(time.Second)
+
+    callerContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    copied := *shared
+    derived := copied.WithContext(callerContext)
+
+    if callerContext != derived.Context() {
+        t.Fatalf("expected the copy to carry the context it was given")
+    }
+
+    if time.Second != derived.WaitTimeout() {
+        t.Fatalf("expected the copy to keep the shared configuration, got %v", derived.WaitTimeout())
+    }
+
+    if context.Background() != shared.Context() {
+        t.Fatalf("expected the shared option to stay without a context")
+    }
+}

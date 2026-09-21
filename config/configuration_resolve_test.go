@@ -1037,3 +1037,47 @@ func TestResolve_TheFailureNamesTheEnvironmentKeyBesideTheInternalAlias(t *testi
         t.Fatalf("expected the key the operator actually wrote, got %v", resolutionContext["environmentKey"])
     }
 }
+
+/* the environment value is scanned under the reading parameter's name, so the offset of a refusal raised inside it indexes a string the record did not name — APP_DSN, offset 2, was the colon of pg:// while the percent sat at offset 2 of DB_PASSWORD; the key is named beside the offset, once, by the innermost read */
+func TestResolveTemplate_ARefusalInsideAnEnvironmentValueNamesTheEnvironmentKey(t *testing.T) {
+    configuration := &Configuration{
+        environment: &Environment{values: map[string]string{
+            "DB_PASSWORD": "Pa%SSword1",
+            "DB_OUTER":    "outer-%env(DB_PASSWORD)%",
+        }},
+        parameters: ParameterMap{},
+    }
+
+    _, resolveErr := configuration.resolveTemplate(
+        "pg://u:%env(DB_PASSWORD)%@h",
+        "app.dsn",
+        make(map[string]bool),
+        make(map[string]bool),
+    )
+    if nil == resolveErr {
+        t.Fatalf("expected the unclosed reference inside the environment value to be refused")
+    }
+
+    refusalContext := contextOfError(t, resolveErr)
+    if "app.dsn" != refusalContext["parameter"] || 2 != refusalContext["offset"] || "DB_PASSWORD" != refusalContext["environmentKey"] {
+        t.Fatalf("expected the reader, the offset into the environment value and the environment key, got %v", refusalContext)
+    }
+
+    if true == strings.Contains(fmt.Sprintf("%v", exception.LogContext(resolveErr, nil)), "SSword1") {
+        t.Fatalf("expected the credential's tail to stay out of the rendered log context")
+    }
+
+    _, nestedErr := configuration.resolveTemplate(
+        "%env(DB_OUTER)%",
+        "app.nested",
+        make(map[string]bool),
+        make(map[string]bool),
+    )
+    if nil == nestedErr {
+        t.Fatalf("expected the nested environment value to be refused")
+    }
+
+    if "DB_PASSWORD" != contextOfError(t, nestedErr)["environmentKey"] {
+        t.Fatalf("expected the innermost environment key, the one whose value the offset indexes, got %v", contextOfError(t, nestedErr))
+    }
+}

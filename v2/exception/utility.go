@@ -192,7 +192,7 @@ func renderErrorText(err error) (text string) {
     return err.Error()
 }
 
-/* MarkLogged marks the nearest AlreadyLogged implementer in the chain — the depth IsAlreadyLogged reads the mark back from — and returns the error unchanged. */
+/* MarkLogged marks the nearest AlreadyLogged implementer in the chain — the depth IsAlreadyLogged reads the mark back from — and returns the error unchanged. The mark lives on that implementer whoever wraps it, so an error one value is shared by several readers is marked for all of them once one has filed it: the container's creation guard relies on exactly that, handing every caller coalesced on one failed creation a wrapper over the same failure so the owner's record is not filed once per waiter. The sharing ends with the creation — a later resolution runs the provider again and carries a fresh, unmarked failure. */
 func MarkLogged(err error) error {
     if nil == err || true == isNilInterfaceValue(err) {
         return err

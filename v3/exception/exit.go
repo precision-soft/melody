@@ -36,8 +36,8 @@ type ExitError struct {
 }
 
 func (instance *ExitError) Error() string {
-    /* the zero value is constructible outside the constructor that refuses a nil error */
-    if nil == instance.err {
+    /* the zero value is constructible outside the constructor that refuses a nil error, and a typed-nil receiver is the link errors.As matches in a chain whose cause is FromError(nil) — the accessors answer for it, this one included */
+    if nil == instance || nil == instance.err {
         return "exit error carries no error value"
     }
 

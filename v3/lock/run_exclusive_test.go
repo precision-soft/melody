@@ -10,7 +10,9 @@ import (
 
     "github.com/precision-soft/melody/v3/clock"
     "github.com/precision-soft/melody/v3/container"
+    containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/internal/testhelper"
     lockcontract "github.com/precision-soft/melody/v3/lock/contract"
     "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -888,5 +890,127 @@ func TestRunExclusive_RenewalLeaseIsDatedFromTheRenewalIssueInstant(t *testing.T
 
     if 2 != locker.refreshCount.Load() {
         t.Fatalf("expected the failure behind a slow successful renewal to demote a lease dated from the renewal issue instant, got %d renewals", locker.refreshCount.Load())
+    }
+}
+
+type nilableExclusiveScope struct {
+    containercontract.Scope
+}
+
+type typedNilScopeExclusiveRuntime struct {
+    ctx       context.Context
+    container containercontract.Container
+}
+
+func (instance *typedNilScopeExclusiveRuntime) Context() context.Context { return instance.ctx }
+func (instance *typedNilScopeExclusiveRuntime) Scope() containercontract.Scope {
+    return (*nilableExclusiveScope)(nil)
+}
+func (instance *typedNilScopeExclusiveRuntime) Container() containercontract.Container {
+    return instance.container
+}
+
+/* runtime.New refuses a typed-nil scope, and the run re-wraps its runtime through it three times — once inside the deferred release, where the refusal was a second panic in the unwind of the first and the lock stayed held for its ttl; refused at the entry, nothing is held */
+func TestRunExclusive_RefusesATypedNilScopeBeforeAcquiring(t *testing.T) {
+    locker := NewInMemoryLocker(clock.NewSystemClock())
+    serviceContainer := container.NewContainer()
+
+    testhelper.AssertPanicsWithError(t, func() {
+        _, _ = RunExclusive(
+            &typedNilScopeExclusiveRuntime{ctx: context.Background(), container: serviceContainer},
+            locker,
+            "typed-nil-scope",
+            time.Minute,
+            func(runtimecontract.Runtime) error { return nil },
+        )
+    }, "run exclusive runtime scope is nil")
+
+    acquired, acquireErr := locker.CreateLock("typed-nil-scope", time.Minute).Acquire(testRuntimeWithContext(context.Background()))
+    if nil != acquireErr || false == acquired {
+        t.Fatalf("expected no lock to be held by the refused run, got acquired=%v err=%v", acquired, acquireErr)
+    }
+}
+
+/* refreshHoldingLock answers each Refresh slowly, the way a store on the wire does, and records whether a Release arrived while one was still in flight — the window a panicking callback used to open, the release going out while the renewal was on the wire */
+type refreshHoldingLock struct {
+    inner lockcontract.Lock
+
+    refreshInFlight             atomic.Int32
+    releaseWhileRefreshInFlight atomic.Bool
+    releases                    atomic.Int32
+}
+
+func (instance *refreshHoldingLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+    return instance.inner.Acquire(runtimeInstance)
+}
+
+func (instance *refreshHoldingLock) Release(runtimeInstance runtimecontract.Runtime) error {
+    if 0 < instance.refreshInFlight.Load() {
+        instance.releaseWhileRefreshInFlight.Store(true)
+    }
+
+    instance.releases.Add(1)
+
+    return instance.inner.Release(runtimeInstance)
+}
+
+func (instance *refreshHoldingLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl time.Duration) error {
+    instance.refreshInFlight.Add(1)
+    defer instance.refreshInFlight.Add(-1)
+
+    time.Sleep(50 * time.Millisecond)
+
+    return instance.inner.Refresh(runtimeInstance, ttl)
+}
+
+type refreshHoldingLocker struct {
+    inner lockcontract.Locker
+    last  *refreshHoldingLock
+}
+
+func (instance *refreshHoldingLocker) CreateLock(name string, ttl time.Duration) lockcontract.Lock {
+    instance.last = &refreshHoldingLock{inner: instance.inner.CreateLock(name, ttl)}
+
+    return instance.last
+}
+
+func TestRunExclusive_ACallbackPanicJoinsTheRefreshBeforeReleasing(t *testing.T) {
+    locker := &refreshHoldingLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}
+    runtimeInstance := testRuntimeWithContext(context.Background())
+
+    var recovered any
+    func() {
+        defer func() { recovered = recover() }()
+
+        /* the callback panics at the instant a renewal is on the wire, which is what makes the old order observable every time rather than by timing */
+        _, _ = RunExclusive(runtimeInstance, locker, "callback-panics", 4*time.Millisecond, func(runtimecontract.Runtime) error {
+            deadline := time.Now().Add(2 * time.Second)
+            for 0 == locker.last.refreshInFlight.Load() {
+                if time.Now().After(deadline) {
+                    t.Fatalf("no renewal went out while the callback ran")
+                }
+
+                time.Sleep(time.Millisecond)
+            }
+
+            panic("callback exploded")
+        })
+    }()
+
+    if "callback exploded" != recovered {
+        t.Fatalf("expected the callback's panic to propagate unchanged, got %v", recovered)
+    }
+
+    if true == locker.last.releaseWhileRefreshInFlight.Load() {
+        t.Fatalf("expected the release to wait for the refresh in flight")
+    }
+
+    if 1 != locker.last.releases.Load() {
+        t.Fatalf("expected exactly one release, got %d", locker.last.releases.Load())
+    }
+
+    acquired, acquireErr := locker.inner.CreateLock("callback-panics", time.Minute).Acquire(runtimeInstance)
+    if nil != acquireErr || false == acquired {
+        t.Fatalf("expected the lock to be released after the panic, got acquired=%v err=%v", acquired, acquireErr)
     }
 }

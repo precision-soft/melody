@@ -1765,3 +1765,207 @@ func TestNewDefaultRememberOption_ArmsACancelableFlight(t *testing.T) {
         t.Fatalf("expected the zero-value option to read the constructor's cancelable default")
     }
 }
+
+func deeplyNestedValue(depth int) any {
+    var value any = "leaf"
+
+    for level := 0; level < depth; level = level + 1 {
+        value = map[string]any{"nested": value}
+    }
+
+    return value
+}
+
+/* the round-trip that makes one shape is also where a value the serializer encodes but cannot decode is found out — the JSON serializer has no depth ceiling on the way in and one on the way out; stored first, such a value was read back as a miss on every later call, recomputed, rewritten and refused again, so the refusal has to come before the store on both paths */
+func TestRemember_AValueTheSerializerCannotReadBackIsNotStored(t *testing.T) {
+    for _, option := range []*RememberOption{
+        NewDefaultRememberOption(),
+        NewDefaultRememberOption().WithStampedeProtectionEnabled(false),
+    } {
+        backend := NewInMemoryBackend(0, time.Minute, clock.NewSystemClock())
+        manager := NewManager(backend, NewJsonSerializer())
+
+        calls := 0
+        callback := func(ctx context.Context) (any, error) {
+            calls = calls + 1
+
+            return deeplyNestedValue(20000), nil
+        }
+
+        _, rememberErr := Remember(manager, "remember:unreadable", time.Minute, callback, option)
+        if nil == rememberErr {
+            t.Fatalf("expected the value the serializer cannot read back to be refused (protection %v)", option.EnableStampedeProtection())
+        }
+
+        if _, exists, _ := backend.Get("remember:unreadable"); true == exists {
+            t.Fatalf("expected the refused value to stay out of the backend (protection %v)", option.EnableStampedeProtection())
+        }
+
+        if 1 != calls {
+            t.Fatalf("expected the callback to run once, ran %d times (protection %v)", calls, option.EnableStampedeProtection())
+        }
+
+        _ = backend.Close()
+    }
+}
+
+type forwardingNormalizerCache struct {
+    cachecontract.Cache
+    manager *Manager
+}
+
+func (instance *forwardingNormalizerCache) NormalizeStoredValue(value any) (any, error) {
+    return instance.manager.NormalizeStoredValue(value)
+}
+
+/* the normalizer door is asked of the Cache value Remember was handed, so a decorator over the manager reaches it only by implementing the contract's door itself; a decorator that does not carries the two shapes the door exists to make one, which is the documented cost */
+func TestRemember_ADecoratorThatForwardsTheNormalizerAnswersOneShape(t *testing.T) {
+    backend := NewInMemoryBackend(0, time.Minute, clock.NewSystemClock())
+    defer func() { _ = backend.Close() }()
+
+    manager := NewManager(backend, NewJsonSerializer())
+    decorated := &forwardingNormalizerCache{Cache: manager, manager: manager}
+
+    callback := func(ctx context.Context) (any, error) {
+        return 5, nil
+    }
+
+    missValue, missErr := Remember(decorated, "remember:decorated", time.Minute, callback, NewDefaultRememberOption())
+    if nil != missErr {
+        t.Fatalf("miss failed: %v", missErr)
+    }
+
+    hitValue, hitErr := Remember(decorated, "remember:decorated", time.Minute, callback, NewDefaultRememberOption())
+    if nil != hitErr {
+        t.Fatalf("hit failed: %v", hitErr)
+    }
+
+    if reflect.TypeOf(missValue) != reflect.TypeOf(hitValue) {
+        t.Fatalf("expected one shape through the decorator, got %v on the miss and %v on the hit", reflect.TypeOf(missValue), reflect.TypeOf(hitValue))
+    }
+
+    if float64(5) != missValue.(float64) {
+        t.Fatalf("expected the decorated miss to answer the stored shape, got %#v", missValue)
+    }
+}
+
+func TestRememberOption_WithContextLeavesTheSharedOptionUntouched(t *testing.T) {
+    shared := NewDefaultRememberOption().WithWaitTimeout(time.Second)
+
+    callerContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    derived := shared.WithContext(callerContext)
+
+    if derived == shared {
+        t.Fatalf("expected WithContext to answer a copy, got the receiver")
+    }
+
+    if callerContext != derived.Context() {
+        t.Fatalf("expected the derived option to carry the context it was given")
+    }
+
+    if time.Second != derived.WaitTimeout() {
+        t.Fatalf("expected the derived option to keep the shared configuration, got %v", derived.WaitTimeout())
+    }
+
+    if context.Background() != shared.Context() {
+        t.Fatalf("expected the shared option to stay without a context")
+    }
+}
+
+/* the uncoalesced path runs the callback under the caller's context, which is what makes the leak deterministic: a request that derived its option and was abandoned must not leave its cancellation in the shared option a later caller hands over as it is */
+func TestRemember_ARequestDerivingFromASharedOptionLeavesNoContextBehind(t *testing.T) {
+    backend := NewInMemoryBackend(0, time.Minute, clock.NewSystemClock())
+    defer func() { _ = backend.Close() }()
+
+    manager := NewManager(backend, NewJsonSerializer())
+    shared := NewDefaultRememberOption().WithStampedeProtectionEnabled(false)
+
+    abandonedContext, abandon := context.WithCancel(context.Background())
+    _ = shared.WithContext(abandonedContext)
+    abandon()
+
+    value, rememberErr := Remember(
+        manager,
+        "remember:shared-option",
+        time.Minute,
+        func(ctx context.Context) (any, error) {
+            if nil != ctx.Err() {
+                return nil, ctx.Err()
+            }
+
+            return "value", nil
+        },
+        shared,
+    )
+    if nil != rememberErr {
+        t.Fatalf("expected the shared option to carry no context of the abandoned request, got %v", rememberErr)
+    }
+
+    if "value" != value {
+        t.Fatalf("expected the value, got %#v", value)
+    }
+}
+
+func rememberWithABoundedWaitOnASlowCallback(t *testing.T, cancelable bool) (bool, int) {
+    t.Helper()
+
+    backend := NewInMemoryBackend(0, time.Minute, clock.NewSystemClock())
+    defer func() { _ = backend.Close() }()
+
+    manager := NewManager(backend, NewJsonSerializer())
+
+    var calls atomic.Int64
+    callback := func(ctx context.Context) (any, error) {
+        calls.Add(1)
+
+        select {
+        case <-ctx.Done():
+            return nil, ctx.Err()
+        case <-time.After(150 * time.Millisecond):
+            return "value", nil
+        }
+    }
+
+    for call := 0; call < 3; call = call + 1 {
+        option := NewDefaultRememberOption().WithWaitTimeout(30 * time.Millisecond).WithCancelable(cancelable)
+
+        if _, rememberErr := Remember(manager, "remember:bounded-wait", time.Minute, callback, option); nil == rememberErr {
+            t.Fatalf("expected call %d to time out on the slow callback", call+1)
+        }
+
+        time.Sleep(20 * time.Millisecond)
+    }
+
+    time.Sleep(300 * time.Millisecond)
+
+    _, exists, _ := backend.Get("remember:bounded-wait")
+
+    return exists, int(calls.Load())
+}
+
+/* pins the consequence of the shipped default rather than a repair: under the cancelable default the lone waiter's timeout cancels the flight before it can store, and every call leads a fresh flight to the same end — the key is never populated; the sibling below pins the pairing the documentation names */
+func TestRemember_AWaitTimeoutShorterThanTheCallbackUnderTheCancelableDefaultNeverStores(t *testing.T) {
+    stored, calls := rememberWithABoundedWaitOnASlowCallback(t, true)
+
+    if true == stored {
+        t.Fatalf("expected the cancelable default to store nothing when every wait times out first")
+    }
+
+    if 3 != calls {
+        t.Fatalf("expected a fresh flight per call, the callback ran %d times", calls)
+    }
+}
+
+func TestRemember_AWaitTimeoutShorterThanTheCallbackWithCancelableOffStoresForTheCallersAfter(t *testing.T) {
+    stored, calls := rememberWithABoundedWaitOnASlowCallback(t, false)
+
+    if false == stored {
+        t.Fatalf("expected the detached flight to store the value after the waiters left")
+    }
+
+    if 1 != calls {
+        t.Fatalf("expected the later calls to coalesce on the one flight, the callback ran %d times", calls)
+    }
+}

@@ -81,3 +81,18 @@ func TestRedactQueryValuesForDiagnostics_KeepsOrderAndMultiplicity(t *testing.T)
         t.Fatalf("expected the semicolon-joined tail redacted as the value it is, got %q", RedactQueryValuesForDiagnostics("a=1;b=2"))
     }
 }
+
+/* an empty segment carries nothing to redact and nothing to diagnose: rendered as the marker it read as a value withheld where nothing was sent */
+func TestRedactQueryValuesForDiagnostics_LeavesAnEmptySegmentEmpty(t *testing.T) {
+    if "a=xxxxx&" != RedactQueryValuesForDiagnostics("a=1&") {
+        t.Fatalf("expected the trailing empty segment to stay empty, got %q", RedactQueryValuesForDiagnostics("a=1&"))
+    }
+
+    if "a=xxxxx&&b=xxxxx" != RedactQueryValuesForDiagnostics("a=1&&b=2") {
+        t.Fatalf("expected the doubled separator to stay as written, got %q", RedactQueryValuesForDiagnostics("a=1&&b=2"))
+    }
+
+    if "xxxxx&" != RedactQueryValuesForDiagnostics("9f8a7b3c&") {
+        t.Fatalf("expected the bare token to become the marker and the empty segment to stay empty, got %q", RedactQueryValuesForDiagnostics("9f8a7b3c&"))
+    }
+}

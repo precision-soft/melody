@@ -244,4 +244,4 @@ func (instance *Manager) Close() error {
 }
 
 var _ cachecontract.Cache = (*Manager)(nil)
-var _ storedValueNormalizer = (*Manager)(nil)
+var _ cachecontract.StoredValueNormalizer = (*Manager)(nil)

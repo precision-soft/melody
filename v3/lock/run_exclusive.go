@@ -51,6 +51,8 @@ func RunExclusive(
         exception.Panic(exception.NewError("run exclusive callback is nil", nil, nil))
     }
 
+    refuseARuntimeThatCannotBeRewrapped(runtimeInstance, "run exclusive")
+
     lock := locker.CreateLock(name, ttl)
 
     /* the lease is dated from the instant the acquire is ISSUED, not from when it answers: the store starts the lease somewhere inside the call, and dating it from the later instant would claim time the lease does not have — the same judgement enterTerm applies on the leader gate. */
@@ -82,6 +84,18 @@ func RunExclusive(
     var refreshFailure error
     var waitGroup sync.WaitGroup
 
+    /* the join is one door run once: explicitly on the way out below, and from this defer when callback panics. Registered after releaseDetached, it runs BEFORE the release on an unwind, so a panicking callback no longer left the refresh goroutine mid-Refresh while Release went out on the same Lock — per-lock state (the owner token, a session handle) used from two goroutines at once. The panic itself is not recovered: it is the command's, and the cli layer re-raises it with its exit code. */
+    var joinOnce sync.Once
+    joinRefresh := func() {
+        joinOnce.Do(func() {
+            /* close before cancel so a refresh that fails *because* of the cancel is read as shutdown, not as a lost lease; cancel before Wait so a refresh already blocked on an unresponsive backend is interrupted rather than wedging this call until the connection times out — with the lock still held. */
+            close(refreshDone)
+            cancel()
+            waitGroup.Wait()
+        })
+    }
+    defer joinRefresh()
+
     waitGroup.Add(1)
     go func() {
         defer waitGroup.Done()
@@ -107,10 +121,7 @@ func RunExclusive(
 
     runErr := callback(childRuntime)
 
-    /* close before cancel so a refresh that fails *because* of the cancel is read as shutdown, not as a lost lease; cancel before Wait so a refresh already blocked on an unresponsive backend is interrupted rather than wedging this call until the connection times out — with the lock still held. */
-    close(refreshDone)
-    cancel()
-    waitGroup.Wait()
+    joinRefresh()
 
     if nil != refreshFailure {
         /* the callback's own error joins the cause chain rather than being flattened to a string: a genuinely independent callback failure keeps its identity for errors.Is/errors.As at the process boundary, while the usual case — the callback failing with the cancellation the lost lease caused — adds nothing to the join. */
@@ -235,6 +246,17 @@ func refreshOnce(
     refreshRuntime := runtime.New(refreshContext, runtimeInstance.Scope(), runtimeInstance.Container())
 
     return lock.Refresh(refreshRuntime, ttl)
+}
+
+/* refuseARuntimeThatCannotBeRewrapped refuses, before any lock is taken, a runtime whose scope or container is a typed nil. The callers re-wrap the runtime they were handed through runtime.New three times — the child handed to the work, the one under each renewal, and the detached one the release runs on — and runtime.New refuses a typed nil, as it should; but the release runs in a defer, so a refusal there was a second panic inside the unwind of the first, and the lock stayed held until its ttl lapsed. Refused here, the panic names the same thing and holds nothing. The resolution doors of the runtime package tolerate a typed-nil scope by falling back to the container, which is why such a runtime can reach this far. */
+func refuseARuntimeThatCannotBeRewrapped(runtimeInstance runtimecontract.Runtime, door string) {
+    if true == internal.IsNilInterface(runtimeInstance.Scope()) {
+        exception.Panic(exception.NewError(door+" runtime scope is nil", nil, nil))
+    }
+
+    if true == internal.IsNilInterface(runtimeInstance.Container()) {
+        exception.Panic(exception.NewError(door+" runtime container is nil", nil, nil))
+    }
 }
 
 /* releaseDetached releases the lock on a runtime detached from the caller's context: by release time that context may already be cancelled, and a release that silently fails because of it would keep the lock held until the ttl lapses. A release that fails anyway is logged: the lock then stays held for up to a full ttl, every peer's next tick skips, and without this record the operator has no way to tell that from a crash — the ttl is documented as crash-safety, so a stranded lock must at least name itself. */

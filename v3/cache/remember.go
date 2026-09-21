@@ -13,7 +13,9 @@ import (
     "github.com/precision-soft/melody/v3/internal"
 )
 
-/* NewDefaultRememberOption arms stampede protection with an unbounded wait and a cancelable flight. Cancelable is what keeps a hung callback from owning its key forever: when the last waiter leaves — by timeout, by its caller context, or by giving up — the flight's context is canceled, and the next caller of the key finds a canceled flight, replaces it, and leads a fresh computation. What the default does not bound is the wait itself: a waiter that brings neither a caller context nor a wait timeout parks for as long as the callback takes, so a callback that can hang still wants its own deadline inside, WithWaitTimeout on the waiters, or WithContext so an abandoned request takes its waiter out. */
+/* NewDefaultRememberOption arms stampede protection with an unbounded wait and a cancelable flight. Cancelable is what keeps a hung callback from owning its key forever: when the last waiter leaves — by timeout, by its caller context, or by giving up — the flight's context is canceled, and the next caller of the key finds a canceled flight, replaces it, and leads a fresh computation. What the default does not bound is the wait itself: a waiter that brings neither a caller context nor a wait timeout parks for as long as the callback takes, so a callback that can hang still wants its own deadline inside, WithWaitTimeout on the waiters, or WithContext so an abandoned request takes its waiter out.
+
+   The two settings compose one way a caller has to know: under this cancelable default, a wait timeout SHORTER than the callback cancels every flight before it can store — the lone waiter times out, the flight loses its last waiter, the callback that honours its context returns the cancellation, nothing is written, and the next call leads a fresh flight to the same end, so the key is never populated. A caller that wants a bounded wait AND the value eventually stored pairs WithWaitTimeout with WithCancelable(false), which lets the computation finish detached and store for the callers that come after, or gives the callback its own deadline instead of the waiters. */
 func NewDefaultRememberOption() *RememberOption {
     defaultWaitTimeout := time.Duration(-1)
 
@@ -60,6 +62,7 @@ func (instance *RememberOption) WaitTimeout() time.Duration {
     return *instance.waitTimeout
 }
 
+/* WithWaitTimeout bounds how long THIS caller waits for the flight; it does not bound the computation. Under the cancelable default a timeout shorter than the callback never stores the value — see NewDefaultRememberOption — so a bounded wait on a slow callback is paired with WithCancelable(false). */
 func (instance *RememberOption) WithWaitTimeout(waitTimeout time.Duration) *RememberOption {
     instance.normalizeZeroReceiver()
     instance.waitTimeout = &waitTimeout
@@ -87,10 +90,14 @@ func (instance *RememberOption) Context() context.Context {
     return instance.callerContext
 }
 
+/* WithContext answers a COPY of the option carrying the context, and leaves the receiver as it was — the one setter that does not write the receiver, because the context is per-call state where every other field is configuration: a service keeps one option, configured once, and derives a per-request option from it at every call. Written into the shared receiver, the context of one request governed the wait of every concurrent request on the same option, and two requests deriving at once raced on the field. A caller that discards the value WithContext answers keeps the option without a context, exactly as if WithContext had not been called; the chained spelling is unchanged. */
 func (instance *RememberOption) WithContext(callerContext context.Context) *RememberOption {
     instance.normalizeZeroReceiver()
-    instance.callerContext = callerContext
-    return instance
+
+    derived := *instance
+    derived.callerContext = callerContext
+
+    return &derived
 }
 
 /* Remember answers the cached value, computing it through the callback on a miss and storing it. The computed value is run through the backend's stored shape before it is returned, so the miss answers exactly what every later hit answers — a callback's int comes back a float64 and its struct a map, and this makes that true from the first call rather than only from the second. The cost is that the round-trip is uniform: with the default JSON serializer an integer beyond 2^53 comes back changed on the computing call as well, not only on the cached reads. Where a cached value carries an integer that large, carry a version inside it or key it so it never decodes through JSON. No major escapes this: every default serializer in the tree decodes through the same json.Unmarshal into any. */
@@ -276,15 +283,15 @@ func executeRememberInFlightLeader(
         return
     }
 
-    setErr := normalizeThirdPartyError(cacheInstance.Set(key, computedValue, ttl))
-    if nil != setErr {
-        call.Complete(nil, setErr)
-        return
-    }
-
     normalizedValue, normalizeErr := normalizeRememberedValue(cacheInstance, computedValue)
     if nil != normalizeErr {
         call.Complete(nil, normalizeErr)
+        return
+    }
+
+    setErr := normalizeThirdPartyError(cacheInstance.Set(key, computedValue, ttl))
+    if nil != setErr {
+        call.Complete(nil, setErr)
         return
     }
 
@@ -308,22 +315,24 @@ func rememberWithoutStampedeProtection(
         return nil, callbackErr
     }
 
+    normalizedValue, normalizeErr := normalizeRememberedValue(cacheInstance, value)
+    if nil != normalizeErr {
+        return nil, normalizeErr
+    }
+
     setErr := normalizeThirdPartyError(cacheInstance.Set(key, value, ttl))
     if nil != setErr {
         return nil, setErr
     }
 
-    return normalizeRememberedValue(cacheInstance, value)
+    return normalizedValue, nil
 }
 
-/* storedValueNormalizer is the optional door through which Remember learns what shape a stored value reads back as; the cache manager implements it with one local serializer round-trip. */
-type storedValueNormalizer interface {
-    NormalizeStoredValue(value any) (any, error)
-}
+/* normalizeRememberedValue makes the computing call answer the exact shape every cached call will answer: without it one key had two shapes — the callback's own value on the miss, the decoded generic form on every hit — so a type assertion worked on the cold path and failed on the warm one, from the second call on. A cache that does not expose its stored shape answers the callback's value unchanged.
 
-/* normalizeRememberedValue makes the computing call answer the exact shape every cached call will answer: without it one key had two shapes — the callback's own value on the miss, the decoded generic form on every hit — so a type assertion worked on the cold path and failed on the warm one, from the second call on. A cache that does not expose its stored shape answers the callback's value unchanged. */
+   It runs BEFORE the store, on both paths. The round-trip is also the only place where a value the serializer encodes but cannot decode is found out — the default JSON serializer has no depth ceiling on the way in and one on the way out — and a value like that, stored first, was written and then read back as a miss on every later call: recomputed, rewritten, refused again, a loop with one write per call that no ttl ends. Refused before the store, the key stays empty and the caller gets the refusal once per call and nothing else. */
 func normalizeRememberedValue(cacheInstance cachecontract.Cache, value any) (any, error) {
-    normalizer, isNormalizer := cacheInstance.(storedValueNormalizer)
+    normalizer, isNormalizer := cacheInstance.(cachecontract.StoredValueNormalizer)
     if false == isNormalizer {
         return value, nil
     }
