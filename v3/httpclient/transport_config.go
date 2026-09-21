@@ -1,6 +1,9 @@
 package httpclient
 
-import "time"
+import (
+    "math"
+    "time"
+)
 
 /* DefaultTransportConfig is the transport melody builds when no override names a field. Every field is populated, so it doubles as the statement of the defaults; overriding starts from a zero-valued TransportConfig, not from this. */
 func DefaultTransportConfig() *TransportConfig {
@@ -33,7 +36,7 @@ type TransportConfig struct {
 
     MaxIdleConns *int
 
-    /* MaxIdleConnsPerHost bounds the idle pool of a single host. net/http defaults it to two, which caps the whole pool for a client bound to one BaseUrl: every connection past the second is closed as soon as it goes idle, so a burst dials as many sockets as it has requests and leaves almost all of them in TIME_WAIT for the MSL, until the ephemeral port range runs out and every request fails to connect. It defaults to MaxIdleConns and follows an override of it. */
+    /* MaxIdleConnsPerHost bounds the idle pool of a single host. net/http defaults it to two, which caps the whole pool for a client bound to one BaseUrl: every connection past the second is closed as soon as it goes idle, so a burst dials as many sockets as it has requests and leaves almost all of them in TIME_WAIT for the MSL, until the ephemeral port range runs out and every request fails to connect. It defaults to MaxIdleConns and follows an override of it, in its meaning: an unbounded total (zero) makes the host unbounded too, spelled as the largest count because net/http reads a per-host zero as its default of two. */
     MaxIdleConnsPerHost *int
 
     IdleConnTimeout       *time.Duration
@@ -83,8 +86,11 @@ func resolveTransportConfig(override *TransportConfig) resolvedTransportConfig {
     if nil != override.MaxIdleConns {
         resolved.MaxIdleConns = *override.MaxIdleConns
 
-        /* the per-host pool follows the total unless the caller pins it, so raising MaxIdleConns alone is never silently capped at net/http's per-host default of two */
+        /* the per-host pool follows the total unless the caller pins it, so raising MaxIdleConns alone is never silently capped at net/http's per-host default of two; it follows the total's meaning rather than its number — zero is an unbounded total, and copied to the host it would read as net/http's default of two, the very cap this rule exists to avoid, so the host becomes unbounded in the only spelling net/http has for it */
         resolved.MaxIdleConnsPerHost = *override.MaxIdleConns
+        if 0 == *override.MaxIdleConns {
+            resolved.MaxIdleConnsPerHost = math.MaxInt
+        }
     }
 
     if nil != override.MaxIdleConnsPerHost {

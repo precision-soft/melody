@@ -75,6 +75,25 @@ func TestGenerate_MultiMethodRouteEmitsDistinctOperationsAndUniqueOperationIds(t
     }
 }
 
+/* Get is asked once per route and the operation built once per method, so the operations of one route are given each a tags slice of their own: a post-processor writing a tag into the GET operation used to rewrite the POST beside it. */
+func TestGenerate_TheOperationsOfOneRouteDoNotShareTheirTags(t *testing.T) {
+    registry := NewRegistry()
+    registry.Describe("thing.handle", Descriptor{Tags: []string{"a"}})
+
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "thing.handle", pattern: "/thing/", methods: []string{"GET", "POST"}},
+    }
+
+    document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, registry)
+    pathItem := document.Paths["/thing/"]
+
+    pathItem.Get.Tags[0] = "x"
+
+    if "a" != pathItem.Post.Tags[0] {
+        t.Fatalf("expected the POST operation to keep its own tags, got %v", pathItem.Post.Tags)
+    }
+}
+
 func TestGenerate_BuildsPathsParametersAndSchemas(t *testing.T) {
     registry := NewRegistry()
     registry.Describe("products.create", Descriptor{

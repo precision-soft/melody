@@ -33,8 +33,9 @@ type validationMemoKey struct {
     depth   int
 }
 
-/* memoizedValidationError is one error of a memoized walk, its field spelled RELATIVE to the path of the pointer that was walked, so the walk answers under any later path by prefixing that path. */
+/* memoizedValidationError is one error of a memoized walk. An error whose field lies under the walked path is kept as its field spelled RELATIVE to that path, so the walk answers under any later path by prefixing that path. An error a constraint answered under a field of its own — the door validateRule keeps open by returning such an error verbatim — is kept as the value it is and answered verbatim under every path: its field is the constraint's statement, not a spelling of the path, and re-spelling it glued the later path onto it. An error of a constraint's own TYPE is not memoized at all (see remember), since re-spelling it would replace that type with this package's. */
 type memoizedValidationError struct {
+    verbatim      validationcontract.ValidationError
     relativeField string
     message       string
     code          string
@@ -54,10 +55,20 @@ func newValidationWalk() *validationWalk {
     }
 }
 
-/* remember files the errors of a finished walk under the key, each field spelled relative to the path the walk ran under. */
+/* remember files the errors of a finished walk under the key, each field spelled relative to the path the walk ran under. A walk that produced an error of a constraint's own type is not filed: such an error can only be answered under a later path by being re-spelled into this package's type, which is not what the constraint answered, so that node is walked again per path as every node was before the memo — the cost returns only for a constraint that answers its own type on a shared pointer. */
 func (instance *validationWalk) remember(key validationMemoKey, path string, errors ValidationErrors) {
     memoized := make([]memoizedValidationError, 0, len(errors))
     for _, validationError := range errors {
+        if _, ownType := validationError.(*ValidationError); false == ownType {
+            return
+        }
+
+        if false == strings.HasPrefix(validationError.Field(), path) {
+            memoized = append(memoized, memoizedValidationError{verbatim: validationError})
+
+            continue
+        }
+
         memoized = append(memoized, memoizedValidationError{
             relativeField: strings.TrimPrefix(validationError.Field(), path),
             message:       validationError.Message(),
@@ -78,6 +89,12 @@ func (instance *validationWalk) recall(key validationMemoKey, path string) (Vali
 
     var errors ValidationErrors
     for _, memoizedError := range memoized {
+        if nil != memoizedError.verbatim {
+            errors = append(errors, memoizedError.verbatim)
+
+            continue
+        }
+
         errors = append(errors, NewValidationError(
             path+memoizedError.relativeField,
             memoizedError.message,

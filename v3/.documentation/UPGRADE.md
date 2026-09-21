@@ -1554,9 +1554,9 @@ The module supplies no default of its own on purpose: the only thing that reaps 
 
 ### Httpclient: header maps are canonicalized at every door, the getters hand out copies, and a nil option is refused
 
-**What changed.** `NewHttpClientConfig` and `RequestOptions.SetHeaders` refuse a map carrying two spellings that collapse onto one header; `HttpClient.SetHeader` and `RequestOptions.SetHeader` store the canonical spelling. `RequestOptions.Headers()` and `Query()` hand out copies. A nil `RequestOption` in a call's option list is refused with its index instead of being called.
+**What changed.** `NewHttpClientConfig` refuses a map carrying two spellings that collapse onto one header by panic, at the wiring; `RequestOptions.SetHeaders` refuses the same map on the request path by writing nothing and keeping the refusal, so the request fails with `request option refused` naming the index of the option. `HttpClient.SetHeader` and `RequestOptions.SetHeader` store the canonical spelling. `RequestOptions.Headers()` and `Query()` hand out copies. A nil `RequestOption` in a call's option list is refused with its index instead of being called.
 
-**Symptom.** A configuration map holding both `x-api-key` and `X-Api-Key` panics naming the collision. A header rotation through `SetHeader("x-api-key", ...)` on a client configured with `X-Api-Key` overwrites the entry it means to instead of leaving two. Code that wrote into the map returned by `Headers()` no longer reaches the option set.
+**Symptom.** A configuration map holding both `x-api-key` and `X-Api-Key` panics naming the collision; a request built with such a map through `WithHeaders` fails with `request option refused` instead of being sent. A header rotation through `SetHeader("x-api-key", ...)` on a client configured with `X-Api-Key` overwrites the entry it means to instead of leaving two. Code that wrote into the map returned by `Headers()` no longer reaches the option set.
 
 **Remedy.** Keep one spelling per header in each map. Code that mutated the getters' maps moves to `SetHeader`/`SetQuery`, the doors that write.
 

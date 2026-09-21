@@ -35,11 +35,20 @@ func (instance *Error) Unwrap() error {
     return instance.causeErr
 }
 
+/* the accessors answer the nil receiver as Error and Unwrap above do, and as every accessor of ExitError does: the typed nil FromError(nil) produces is a link errors.As matches, and a caller that read it through the interface reached these before any guard. */
 func (instance *Error) Message() string {
+    if nil == instance {
+        return ""
+    }
+
     return instance.message
 }
 
 func (instance *Error) Context() exceptioncontract.Context {
+    if nil == instance {
+        return nil
+    }
+
     instance.stateMutex.RLock()
     defer instance.stateMutex.RUnlock()
 
@@ -47,6 +56,10 @@ func (instance *Error) Context() exceptioncontract.Context {
 }
 
 func (instance *Error) SetContext(context exceptioncontract.Context) {
+    if nil == instance {
+        return
+    }
+
     instance.stateMutex.Lock()
     defer instance.stateMutex.Unlock()
 
@@ -54,6 +67,10 @@ func (instance *Error) SetContext(context exceptioncontract.Context) {
 }
 
 func (instance *Error) SetContextValue(key string, value any) {
+    if nil == instance {
+        return
+    }
+
     instance.stateMutex.Lock()
     defer instance.stateMutex.Unlock()
 
@@ -66,14 +83,26 @@ func (instance *Error) SetContextValue(key string, value any) {
 }
 
 func (instance *Error) CauseErr() error {
+    if nil == instance {
+        return nil
+    }
+
     return instance.causeErr
 }
 
 func (instance *Error) Level() loggingcontract.Level {
+    if nil == instance {
+        return loggingcontract.LevelError
+    }
+
     return instance.level
 }
 
 func (instance *Error) AlreadyLogged() bool {
+    if nil == instance {
+        return false
+    }
+
     instance.stateMutex.RLock()
     defer instance.stateMutex.RUnlock()
 
@@ -81,6 +110,10 @@ func (instance *Error) AlreadyLogged() bool {
 }
 
 func (instance *Error) MarkAsLogged() {
+    if nil == instance {
+        return
+    }
+
     instance.stateMutex.Lock()
     defer instance.stateMutex.Unlock()
 

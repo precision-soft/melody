@@ -15,6 +15,9 @@ type RequestOptions struct {
     timeout                      time.Duration
     authorization                httpclientcontract.AuthorizationOptions
     maxResponseBodyBytes         int
+
+    /* refusal is the collision SetHeaders could not answer: the contract gives that door no error to return, and the request path promises an error rather than a panic, so the first refusal waits here for applyRequestOptions to fail the request with, under the index of the option that raised it. */
+    refusal error
     explicitMaxResponseBodyBytes bool
 }
 
@@ -85,9 +88,14 @@ func (instance *RequestOptions) SetHeader(key string, value string) {
     instance.headers[textproto.CanonicalMIMEHeaderKey(key)] = value
 }
 
-/* SetHeaders refuses a map carrying two spellings that collapse onto one header, the way the client config constructor does: inside one map there is no sequential order to make the survivor deterministic. */
+/* SetHeaders refuses a map carrying two spellings that collapse onto one header, the way the client config constructor does: inside one map there is no sequential order to make the survivor deterministic. The constructor refuses by panic, at the wiring; this door runs on the request path, where a panic would bypass the caller's own handling of the failure, so a colliding map writes nothing and the refusal is kept for applyRequestOptions, which fails the request naming the option. */
 func (instance *RequestOptions) SetHeaders(headers map[string]string) {
-    for key, value := range canonicalHeaderMap(headers) {
+    canonical, err := canonicalizeHeaderMap(headers)
+    if nil != err && nil == instance.refusal {
+        instance.refusal = err
+    }
+
+    for key, value := range canonical {
         instance.headers[key] = value
     }
 }

@@ -475,7 +475,7 @@ func (instance *HttpClient) RequestStreamWithContext(
     ), nil
 }
 
-/* applyRequestOptions folds the caller's options onto a fresh option set. A nil option is refused rather than skipped: an option chosen by a condition whose other branch produced nothing is a wiring mistake, and calling it would be a nil function call on the request path, outside any recovery this package owns. */
+/* applyRequestOptions folds the caller's options onto a fresh option set. A nil option is refused rather than skipped: an option chosen by a condition whose other branch produced nothing is a wiring mistake, and calling it would be a nil function call on the request path, outside any recovery this package owns. A refusal an option could not answer itself — SetHeaders on a colliding map — is answered here, under the index of the option that raised it, for the same reason: the request path promises an error, and the option contract has no error to return. */
 func applyRequestOptions(options []httpclientcontract.RequestOption) (*RequestOptions, error) {
     requestConfig := NewRequestOptions()
 
@@ -491,12 +491,22 @@ func applyRequestOptions(options []httpclientcontract.RequestOption) (*RequestOp
         }
 
         applyOption(requestConfig)
+
+        if refusal := requestConfig.refusal; nil != refusal {
+            return nil, exception.NewError(
+                "request option refused",
+                exceptioncontract.Context{
+                    "index": index,
+                },
+                refusal,
+            )
+        }
     }
 
     return requestConfig, nil
 }
 
-/* newRequestFailedError reports a failed exchange without the url net/http embeds in its own error text. A *url.Error carries the whole request url — query string included — and the cause chain is rendered into the log record, so a token passed through WithQuery, or a password spelled in the userinfo, would be written out by the most ordinary failure there is: a refused connection. The inner error keeps the diagnosis; the sanitized url sits beside it in the context. */
+/* newRequestFailedError reports a failed exchange without the url net/http embeds in its own error text. A *url.Error carries the whole request url — query string included — and the cause chain is rendered into the log record, so a token passed through WithQuery, or a password spelled in the userinfo, would be written out by the most ordinary failure there is: a refused connection. The *url.Error stays in the chain, because Client.Do documents it as the type of every error it answers and errors.As on it is the form retry and breaker code is written in; it carries the sanitized url in place of the one it quoted, so Op, Timeout and the inner cause survive and the query values and the userinfo do not. The sanitized url sits beside it in the context as well. */
 func newRequestFailedError(method string, requestUrl *url.URL, err error) error {
     urlForDiagnostics := ""
     if nil != requestUrl {
@@ -505,7 +515,7 @@ func newRequestFailedError(method string, requestUrl *url.URL, err error) error 
 
     cause := err
     if urlErr, ok := err.(*url.Error); true == ok && nil != urlErr.Err {
-        cause = urlErr.Err
+        cause = &url.Error{Op: urlErr.Op, URL: sanitizeUrlForDiagnostics(urlErr.URL), Err: urlErr.Err}
     }
 
     return exception.NewError(
@@ -569,7 +579,7 @@ func (instance *HttpClient) buildRequest(
     return request, nil
 }
 
-/* applyAuthorization writes the credential the caller asked for. A bearer token wins over a basic credential when both are set — the two cannot share one Authorization header. Basic travels whenever it was asked for, empty halves included: an api key spelled as the password of an empty user is the ordinary shape of "-u :key", and dropping it silently sent the request unauthenticated with nothing to say so. */
+/* applyAuthorization writes the credential the caller asked for. A bearer token wins over a basic credential when both are set — the two cannot share one Authorization header. Basic travels whenever it was asked for, empty halves included: an api key spelled as the password of an empty user is the ordinary shape of "-u :key", and dropping it silently sent the request unauthenticated with nothing to say so. It runs after every header door, so a typed credential wins over an Authorization header written through the client's or the request's header map: the credential is the caller's statement about this request's identity, and WithBasicAuth("", "") sends Basic with two empty halves because that is what was asked for. */
 func applyAuthorization(request *nethttp.Request, authorization httpclientcontract.AuthorizationOptions) {
     if true == internal.IsNilInterface(authorization) {
         return

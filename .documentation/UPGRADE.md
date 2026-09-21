@@ -421,11 +421,11 @@ Every section below shipped in the `[v1.19.0]` block of [`CHANGELOG.md`](../CHAN
 
 ### Httpclient: two spellings of one header are refused
 
-**What changed.** Client-config and request-option header maps are canonicalized, and a map carrying two spellings that collapse onto one header — `x-api-key` beside `X-Api-Key` — is refused with a named panic at construction.
+**What changed.** Client-config and request-option header maps are canonicalized, and a map carrying two spellings that collapse onto one header — `x-api-key` beside `X-Api-Key` — is refused with a named panic at construction. `RequestOptions.Headers()` and `Query()` hand out copies. (A later patch refines the request-time half: a colliding map handed to `SetHeaders` — through `WithHeaders` — no longer panics on the request path; it writes nothing and the request fails with `request option refused`, naming the index of the option and the collision.)
 
-**Symptom.** A configuration that carried both spellings — and was silently sending a per-request coin flip of the two values until now — fails at the constructor naming the collision.
+**Symptom.** A configuration that carried both spellings — and was silently sending a per-request coin flip of the two values until now — fails at the constructor naming the collision. A request built with such a map fails instead of being sent. Code that wrote into the map returned by `Headers()` or `Query()` no longer reaches the option set.
 
-**Remedy.** Keep one spelling. Sequential `SetHeader` calls stay legal and last-write-wins on the canonical key.
+**Remedy.** Keep one spelling. Sequential `SetHeader` calls stay legal and last-write-wins on the canonical key. Code that mutated the getters' maps moves to `SetHeader`/`SetQuery`, the doors that write.
 
 ### Http: an out-of-range response status code answers 500
 

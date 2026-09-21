@@ -6,6 +6,9 @@ import (
     "strings"
     "sync"
     "testing"
+
+    exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
 func TestError_AlreadyLoggedFlag(t *testing.T) {
@@ -149,4 +152,21 @@ func TestError_ErrorOnANilReceiverAnswersInsteadOfDereferencing(t *testing.T) {
     if false == strings.Contains(joined.Error(), "other") {
         t.Fatalf("expected the join holding a typed nil to render, got %q", joined.Error())
     }
+}
+
+/* every accessor answers the nil receiver, as every accessor of ExitError does: a caller that read the typed nil FromError(nil) produces through the interface reached these before any guard. */
+func TestError_EveryAccessorAnswersTheNilReceiver(t *testing.T) {
+    var typedNil *Error
+
+    if "" != typedNil.Message() || nil != typedNil.Context() || nil != typedNil.CauseErr() || true == typedNil.AlreadyLogged() {
+        t.Fatalf("expected the nil receiver answered by every reader")
+    }
+
+    if loggingcontract.LevelError != typedNil.Level() {
+        t.Fatalf("expected the nil receiver to answer the error level, got %v", typedNil.Level())
+    }
+
+    typedNil.SetContext(exceptioncontract.Context{"key": "value"})
+    typedNil.SetContextValue("key", "value")
+    typedNil.MarkAsLogged()
 }

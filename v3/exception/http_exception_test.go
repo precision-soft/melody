@@ -7,6 +7,8 @@ import (
     "strings"
     "sync"
     "testing"
+
+    exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
 )
 
 func TestHttpException_ErrorIncludesCauseWhenPresent(t *testing.T) {
@@ -246,4 +248,17 @@ func TestHttpException_ErrorOnANilReceiverAnswersInsteadOfDereferencing(t *testi
     if false == strings.Contains(joined.Error(), "other") {
         t.Fatalf("expected the join holding a typed nil to render, got %q", joined.Error())
     }
+}
+
+/* every accessor answers the nil receiver, as every accessor of ExitError does. */
+func TestHttpException_EveryAccessorAnswersTheNilReceiver(t *testing.T) {
+    var typedNil *HttpException
+
+    if "" != typedNil.Message() || nil != typedNil.Context() || nil != typedNil.CauseErr() || true == typedNil.AlreadyLogged() || 0 != typedNil.StatusCode() {
+        t.Fatalf("expected the nil receiver answered by every reader")
+    }
+
+    typedNil.SetContext(exceptioncontract.Context{"key": "value"})
+    typedNil.SetContextValue("key", "value")
+    typedNil.MarkAsLogged()
 }

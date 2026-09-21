@@ -140,7 +140,7 @@ Use `Describe` directly for no-body or multi-response routes (add extra response
 Run it to emit the document:
 
 ```sh
-app melody:openapi:generate            # prints to stdout; a diagnostic (an info service missing) goes to the journal, not ahead of the json
+app melody:openapi:generate            # prints to stdout; a diagnostic (an info service missing) goes to the journal — to stderr when the journal is stdout — never ahead of the json
 app melody:openapi:generate --out openapi.json
 ```
 

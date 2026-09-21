@@ -115,14 +115,27 @@ func (instance *GenerateCommand) Run(
     return nil
 }
 
-/* journal answers the application's logger, resolved through the runtime so the scope's logger wins over the root's, and the emergency logger when the runtime carries none — a process that generates the document without wiring a logger still has a journal of last resort. It resolves for itself rather than through the framework's LoggerFromRuntime, which files an emergency record of its own and answers nil where this door wants a fallback. */
+/* journal answers the application's logger, resolved through the runtime so the scope's logger wins over the root's, and the emergency logger when the runtime carries none — a process that generates the document without wiring a logger still has a journal of last resort. It resolves for itself rather than through the framework's LoggerFromRuntime, which files an emergency record of its own and answers nil where this door wants a fallback. The application's journal is also the wrong channel when it IS stdout: an empty kernel.log_path makes the container log to stdout, the writer the document goes to, so a record there lands ahead of the json exactly as the warning line did; that configuration is read here, and the emergency journal — stderr — carries the warning for it. */
 func (instance *GenerateCommand) journal(runtimeInstance runtimecontract.Runtime) loggingcontract.Logger {
+    if true == journalSharesStdout(runtimeInstance) {
+        return logging.EmergencyLogger()
+    }
+
     logger, resolveErr := runtime.FromRuntime[loggingcontract.Logger](runtimeInstance, logging.ServiceLogger)
     if nil != resolveErr || nil == logger {
         return logging.EmergencyLogger()
     }
 
     return logger
+}
+
+/* journalSharesStdout reads the fact the container reads when it builds the logger: an empty log path means the journal writes to stdout. A runtime without the configuration answers false, so the application's logger is asked as before. */
+func journalSharesStdout(runtimeInstance runtimecontract.Runtime) bool {
+    if false == runtimeInstance.Container().Has(config.ServiceConfig) {
+        return false
+    }
+
+    return "" == config.ConfigMustFromContainer(runtimeInstance.Container()).Kernel().LogPath()
 }
 
 var _ clicontract.Command = (*GenerateCommand)(nil)

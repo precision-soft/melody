@@ -58,3 +58,23 @@ func TestHttpClient_SetHeaderRotatesTheCredentialUnderItsCanonicalSpelling(t *te
         t.Fatalf("expected one canonical entry holding the rotated-in credential, got %#v", client.headers)
     }
 }
+
+/* the error form is what the request-time door reads: on a collision nothing comes back to write, so a partial map can never reach the option set before the refusal. */
+func TestCanonicalizeHeaderMap_AnswersTheCollisionAsAnErrorAndNoMap(t *testing.T) {
+    canonical, err := canonicalizeHeaderMap(map[string]string{
+        "x-api-key": "old",
+        "X-Api-Key": "new",
+    })
+
+    if nil == err {
+        t.Fatal("expected the collision to be refused")
+    }
+
+    if false == strings.Contains(err.Error(), "collide") {
+        t.Fatalf("expected the refusal to name the collision, got %v", err)
+    }
+
+    if nil != canonical {
+        t.Fatalf("expected no map beside the refusal, got %#v", canonical)
+    }
+}

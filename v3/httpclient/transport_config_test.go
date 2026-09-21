@@ -1,6 +1,11 @@
 package httpclient
 
 import (
+    "math"
+    "net"
+    "net/http"
+    "net/http/httptest"
+    "sync"
     "testing"
     "time"
 )
@@ -146,12 +151,74 @@ func TestResolveTransportConfig_ZeroAndNegativeAreResolvedVerbatim(t *testing.T)
     }
 }
 
-/* a MaxIdleConns SET to zero must also carry the per-host pool with it: the follow rule reads "pinned or not", not "positive or not". */
-func TestResolveTransportConfig_AZeroTotalCarriesThePerHostPoolWithIt(t *testing.T) {
+/* a MaxIdleConns SET to zero must also carry the per-host pool with it: the follow rule reads "pinned or not", not "positive or not" — and it carries the total's MEANING, an unbounded pool, spelled as the largest count, because a per-host zero is net/http's default of two, the cap the follow rule exists to avoid. */
+func TestResolveTransportConfig_AZeroTotalCarriesThePerHostPoolWithItAsUnbounded(t *testing.T) {
     resolved := resolveTransportConfig(&TransportConfig{MaxIdleConns: TransportCount(0)})
 
-    if 0 != resolved.MaxIdleConns || 0 != resolved.MaxIdleConnsPerHost {
-        t.Fatalf("expected the zero total to carry the per-host pool, got %+v", resolved)
+    if 0 != resolved.MaxIdleConns || math.MaxInt != resolved.MaxIdleConnsPerHost {
+        t.Fatalf("expected the zero total to carry an unbounded per-host pool, got %+v", resolved)
+    }
+
+    pinned := resolveTransportConfig(&TransportConfig{MaxIdleConns: TransportCount(0), MaxIdleConnsPerHost: TransportCount(3)})
+    if 3 != pinned.MaxIdleConnsPerHost {
+        t.Fatalf("expected an explicit per-host pool to win over the unbounded total, got %d", pinned.MaxIdleConnsPerHost)
+    }
+}
+
+/* the same read on the wire: two waves of six concurrent requests against one host, the handler holding every request of a wave until all six have arrived so the wave dials six sockets; under a per-host pool of two the second wave dials four more (ten new connections, measured), under an unbounded pool it reuses all six. */
+func TestNewHttpClient_AnUnboundedTotalKeepsEveryIdleConnectionOfTheHost(t *testing.T) {
+    var mutex sync.Mutex
+    newConnections := 0
+    var arrived sync.WaitGroup
+    var release sync.WaitGroup
+
+    server := httptest.NewUnstartedServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        arrived.Done()
+        release.Wait()
+    }))
+    server.Config.ConnState = func(connection net.Conn, state http.ConnState) {
+        if http.StateNew == state {
+            mutex.Lock()
+            newConnections++
+            mutex.Unlock()
+        }
+    }
+    server.Start()
+    defer server.Close()
+
+    client := NewHttpClient(
+        NewHttpClientConfig("", 0, nil).WithTransport(&TransportConfig{MaxIdleConns: TransportCount(0)}),
+    )
+    defer client.Close()
+
+    wave := func() {
+        arrived.Add(6)
+        release.Add(1)
+
+        var finished sync.WaitGroup
+        for index := 0; index < 6; index++ {
+            finished.Add(1)
+            go func() {
+                defer finished.Done()
+                if _, err := client.Get(server.URL); nil != err {
+                    t.Errorf("unexpected error: %v", err)
+                }
+            }()
+        }
+
+        arrived.Wait()
+        release.Done()
+        finished.Wait()
+    }
+
+    wave()
+    time.Sleep(200 * time.Millisecond)
+    wave()
+
+    mutex.Lock()
+    defer mutex.Unlock()
+    if 6 != newConnections {
+        t.Fatalf("expected the second wave to reuse the six idle connections of the first, got %d new connections", newConnections)
     }
 }
 

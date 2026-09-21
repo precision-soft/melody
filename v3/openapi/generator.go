@@ -137,9 +137,9 @@ func buildOperation(
         operation.Summary = descriptor.Summary
         operation.Description = descriptor.Description
 
-        /* the document must not alias registry memory, and it does not: Get answers a copy of the descriptor, its slice detached from the registry's, so a caller post-processing the returned document writes into nothing but the document */
+        /* the document must not alias registry memory, and it does not: Get answers a copy of the descriptor, its slice detached from the registry's. Get is asked once per route and this runs once per method of it, so the operations of one route are given each a slice of their own — a post-processor writing a tag into the GET operation must not rewrite the POST beside it */
         if 0 < len(descriptor.Tags) {
-            operation.Tags = descriptor.Tags
+            operation.Tags = append([]string(nil), descriptor.Tags...)
         }
 
         if nil != descriptor.RequestType && true == methodAcceptsRequestBody(method) {

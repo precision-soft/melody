@@ -1834,7 +1834,7 @@ func TestRemember_AValueTheSerializerCannotEncodeIsRefusedNamingTheKey(t *testin
         _, rememberErr := Remember(manager, "remember:unencodable", time.Minute, func(ctx context.Context) (any, error) {
             return math.NaN(), nil
         }, option)
-        if nil == rememberErr || "cache value round-trip failed" != rememberErr.Error() {
+        if nil == rememberErr || "cache value serialization failed" != rememberErr.Error() {
             t.Fatalf("expected the unencodable value to be refused under the framework's message, got %v (protection %v)", rememberErr, option.EnableStampedeProtection())
         }
 

@@ -4,6 +4,7 @@ import (
     "bytes"
     "context"
     "encoding/json"
+    "io"
     nethttp "net/http"
     "os"
     "path/filepath"
@@ -314,3 +315,79 @@ func (instance *recordingOpenApiLogger) Error(message string, context loggingcon
 func (instance *recordingOpenApiLogger) Emergency(message string, context loggingcontract.Context) {}
 
 var _ loggingcontract.Logger = (*recordingOpenApiLogger)(nil)
+
+type commandStdoutJournalEnvironmentSource struct {
+}
+
+func (instance *commandStdoutJournalEnvironmentSource) Load() (map[string]string, error) {
+    return map[string]string{config.LogPathKey: ""}, nil
+}
+
+/* an empty MELODY_LOG_PATH makes the container log to stdout — the writer the document goes to in stdout mode — so the journal record would land ahead of the json exactly as the warning line used to; the warning goes to the emergency journal on stderr for that configuration, and the application's logger receives nothing. */
+func TestGenerateCommand_AStdoutJournalDoesNotCarryTheWarningAheadOfTheDocument(t *testing.T) {
+    projectDirectory := t.TempDir()
+
+    withoutInfo := newCommandFixtureRuntime(t, projectDirectory, true, false)
+
+    environment, environmentErr := config.NewEnvironment(&commandStdoutJournalEnvironmentSource{})
+    if nil != environmentErr {
+        t.Fatalf("new environment: %v", environmentErr)
+    }
+    configuration, configurationErr := config.NewConfiguration(environment, projectDirectory)
+    if nil != configurationErr {
+        t.Fatalf("new configuration: %v", configurationErr)
+    }
+    if "" != configuration.Kernel().LogPath() {
+        t.Fatalf("expected the fixture to configure a stdout journal, got %q", configuration.Kernel().LogPath())
+    }
+    if overrideErr := withoutInfo.Container().OverrideProtectedInstance(config.ServiceConfig, configuration); nil != overrideErr {
+        t.Fatalf("override configuration: %v", overrideErr)
+    }
+
+    journal := &recordingOpenApiLogger{}
+    withoutInfo.Container().MustRegister(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return journal, nil
+        },
+    )
+
+    readEnd, writeEnd, pipeErr := os.Pipe()
+    if nil != pipeErr {
+        t.Fatalf("pipe: %v", pipeErr)
+    }
+    previousStderr := os.Stderr
+    os.Stderr = writeEnd
+    logging.CloseEmergencyLogger()
+    defer func() {
+        os.Stderr = previousStderr
+        logging.CloseEmergencyLogger()
+    }()
+
+    output, runErr := runOpenApiGenerateCommand(t, NewGenerateCommandFromContainer(), withoutInfo)
+
+    logging.CloseEmergencyLogger()
+    os.Stderr = previousStderr
+    writeEnd.Close()
+    emergency, readErr := io.ReadAll(readEnd)
+    if nil != readErr {
+        t.Fatalf("read stderr: %v", readErr)
+    }
+
+    if nil != runErr {
+        t.Fatalf("run without info: %v", runErr)
+    }
+
+    var document map[string]any
+    if unmarshalErr := json.Unmarshal([]byte(output), &document); nil != unmarshalErr {
+        t.Fatalf("expected the writer to carry the document alone, got %v over:\n%s", unmarshalErr, output)
+    }
+
+    if 0 != len(journal.warnings) {
+        t.Fatalf("expected the stdout journal to receive nothing, got %v", journal.warnings)
+    }
+
+    if false == strings.Contains(string(emergency), "no openapi info service is registered") {
+        t.Fatalf("expected the warning on the emergency journal, got %q", string(emergency))
+    }
+}

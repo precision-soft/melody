@@ -41,11 +41,20 @@ func (instance *HttpException) Unwrap() error {
     return instance.causeErr
 }
 
+/* the accessors answer the nil receiver as Error and Unwrap above do, and as every accessor of ExitError does: the typed nil FromError(nil) produces is a link errors.As matches, and a caller that read it through the interface reached these before any guard. */
 func (instance *HttpException) Message() string {
+    if nil == instance {
+        return ""
+    }
+
     return instance.message
 }
 
 func (instance *HttpException) Context() exceptioncontract.Context {
+    if nil == instance {
+        return nil
+    }
+
     instance.stateMutex.RLock()
     defer instance.stateMutex.RUnlock()
 
@@ -53,6 +62,10 @@ func (instance *HttpException) Context() exceptioncontract.Context {
 }
 
 func (instance *HttpException) SetContext(context exceptioncontract.Context) {
+    if nil == instance {
+        return
+    }
+
     instance.stateMutex.Lock()
     defer instance.stateMutex.Unlock()
 
@@ -60,6 +73,10 @@ func (instance *HttpException) SetContext(context exceptioncontract.Context) {
 }
 
 func (instance *HttpException) SetContextValue(key string, value any) {
+    if nil == instance {
+        return
+    }
+
     instance.stateMutex.Lock()
     defer instance.stateMutex.Unlock()
 
@@ -72,14 +89,26 @@ func (instance *HttpException) SetContextValue(key string, value any) {
 }
 
 func (instance *HttpException) CauseErr() error {
+    if nil == instance {
+        return nil
+    }
+
     return instance.causeErr
 }
 
 func (instance *HttpException) StatusCode() int {
+    if nil == instance {
+        return 0
+    }
+
     return instance.statusCode
 }
 
 func (instance *HttpException) AlreadyLogged() bool {
+    if nil == instance {
+        return false
+    }
+
     instance.stateMutex.RLock()
     defer instance.stateMutex.RUnlock()
 
@@ -87,6 +116,10 @@ func (instance *HttpException) AlreadyLogged() bool {
 }
 
 func (instance *HttpException) MarkAsLogged() {
+    if nil == instance {
+        return
+    }
+
     instance.stateMutex.Lock()
     defer instance.stateMutex.Unlock()
 

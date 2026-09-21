@@ -16,6 +16,7 @@ import (
     "strings"
     "sync"
     "sync/atomic"
+    "syscall"
     "testing"
     "time"
 
@@ -2077,5 +2078,134 @@ func TestSanitizeUrlTextually_AnOpaqueReferenceLosesItsUserinfo(t *testing.T) {
         if false == strings.Contains(sanitized, redactedValue+":"+redactedValue+"@host") {
             t.Fatalf("%s: expected the userinfo replaced in place, got %q", currentCase.name, sanitized)
         }
+    }
+}
+
+/* the request path promises an error: a colliding header map handed through WithHeaders fails the request naming the option's index and the collision, where the constructor refuses the same map by panic at the wiring. */
+func TestHttpClient_ACollidingHeaderMapOptionIsRefusedAsAnError(t *testing.T) {
+    var served int32
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        atomic.AddInt32(&served, 1)
+    }))
+    defer server.Close()
+
+    client := NewHttpClient(NewHttpClientConfig("", 0, nil))
+    defer client.Close()
+
+    response, err := client.Get(
+        server.URL,
+        WithHeader("X-First", "first"),
+        WithHeaders(map[string]string{"x-api-key": "old", "X-Api-Key": "new"}),
+    )
+    if nil == err {
+        t.Fatal("expected the colliding map to fail the request")
+    }
+
+    if nil != response {
+        t.Fatalf("expected no response beside the refusal, got %v", response)
+    }
+
+    if "request option refused" != err.Error() {
+        t.Fatalf("expected the request to name the refused option, got %q", err.Error())
+    }
+
+    context := exception.LogContext(err)
+    if 1 != context["index"] {
+        t.Fatalf("expected the refusal to carry the index of the colliding option, got %v", context["index"])
+    }
+
+    if false == strings.Contains(fmt.Sprint(context["cause"]), "collide") {
+        t.Fatalf("expected the collision as the cause, got %v", context["cause"])
+    }
+
+    if 0 != atomic.LoadInt32(&served) {
+        t.Fatal("expected the refused request never to reach the server")
+    }
+}
+
+/* Client.Do documents a *url.Error as the type of every error it answers, and errors.As on it is the form retry and breaker code is written in; the one it quoted carried the whole url, so the link that stays in the chain carries the sanitized one — Op, Timeout and the inner cause survive, the userinfo and the query values do not. */
+func TestNewRequestFailedError_KeepsAUrlErrorWithTheSanitizedUrlInTheChain(t *testing.T) {
+    listener, err := net.Listen("tcp", "127.0.0.1:0")
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+    refusedAddress := listener.Addr().String()
+    listener.Close()
+
+    client := NewHttpClient(NewHttpClientConfig("", 0, nil))
+    defer client.Close()
+
+    _, err = client.Get("http://user:SECRET@" + refusedAddress + "/path?token=SECRET")
+    if nil == err {
+        t.Fatal("expected the refused connection to fail the request")
+    }
+
+    var urlErr *url.Error
+    if false == errors.As(err, &urlErr) {
+        t.Fatalf("expected a *url.Error in the chain, got %v", exception.LogContext(err))
+    }
+
+    if "Get" != urlErr.Op {
+        t.Fatalf("expected the operation kept, got %q", urlErr.Op)
+    }
+
+    if true == strings.Contains(urlErr.URL, "SECRET") || false == strings.Contains(urlErr.URL, "token=xxxxx") {
+        t.Fatalf("expected the sanitized url on the link, got %q", urlErr.URL)
+    }
+
+    if false == errors.Is(err, syscall.ECONNREFUSED) {
+        t.Fatalf("expected the inner cause to survive, got %v", err)
+    }
+
+    rendered := fmt.Sprint(exception.LogContext(err))
+    if true == strings.Contains(rendered, "SECRET") {
+        t.Fatalf("expected no secret in the rendered chain, got %s", rendered)
+    }
+
+    slow := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        time.Sleep(500 * time.Millisecond)
+    }))
+    defer slow.Close()
+
+    _, err = client.Get(slow.URL+"/path?token=SECRET", WithTimeout(50*time.Millisecond))
+    if nil == err {
+        t.Fatal("expected the timeout to fail the request")
+    }
+
+    if false == errors.As(err, &urlErr) || false == urlErr.Timeout() || false == errors.Is(err, context.DeadlineExceeded) {
+        t.Fatalf("expected a timing-out *url.Error in the chain, got %v", exception.LogContext(err))
+    }
+}
+
+/* a contract pin, green before this test existed: the typed credential is applied after every header door, so it wins over an Authorization header written through the client's or the request's map, and two empty halves travel because they were asked for. */
+func TestHttpClient_TheTypedCredentialIsAppliedLastAndWinsOverAnExplicitAuthorizationHeader(t *testing.T) {
+    var received string
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        received = request.Header.Get("Authorization")
+    }))
+    defer server.Close()
+
+    client := NewHttpClient(NewHttpClientConfig("", 0, map[string]string{"Authorization": "Bearer configured"}))
+    defer client.Close()
+
+    if _, err := client.Get(server.URL, WithHeader("Authorization", "Bearer explicit"), WithBasicAuth("", "")); nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+    if "Basic Og==" != received {
+        t.Fatalf("expected the empty basic credential to win over both header doors, got %q", received)
+    }
+
+    if _, err := client.Get(server.URL, WithHeader("Authorization", "Bearer explicit"), WithBearerToken("typed")); nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+    if "Bearer typed" != received {
+        t.Fatalf("expected the typed bearer to win over the explicit header, got %q", received)
+    }
+
+    if _, err := client.Get(server.URL, WithHeader("Authorization", "Bearer explicit")); nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+    if "Bearer explicit" != received {
+        t.Fatalf("expected the request header to win over the client header, got %q", received)
     }
 }

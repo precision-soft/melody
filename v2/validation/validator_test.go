@@ -2318,3 +2318,113 @@ func TestValidator_ASharedPointerReachedAtTwoDepthsIsWalkedAtEach(t *testing.T) 
         t.Fatalf("expected the deep path to be cut at the cap instead of answering the shallow walk, got %v", codesByPrefix)
     }
 }
+
+/* a constraint that answers an error under a field of its own — the door validateRule keeps open by returning such an error verbatim — is answered verbatim under every path that reaches the shared pointer, and a constraint that answers an error TYPE of its own keeps that type under every path: the memo used to re-spell both by gluing the later path onto the field and replacing the type with this package's. */
+type ownFieldConstraintError struct {
+    field string
+}
+
+func (instance *ownFieldConstraintError) Field() string          { return instance.field }
+func (instance *ownFieldConstraintError) Message() string        { return "own message" }
+func (instance *ownFieldConstraintError) Code() string           { return "own_code" }
+func (instance *ownFieldConstraintError) Context() map[string]any { return nil }
+func (instance *ownFieldConstraintError) Error() string          { return instance.field + ": own message" }
+
+type ownFieldConstraint struct{}
+
+func (instance *ownFieldConstraint) Validate(value any, field string) validationcontract.ValidationError {
+    return &ownFieldConstraintError{field: "custom"}
+}
+
+type ownTypeConstraint struct{}
+
+func (instance *ownTypeConstraint) Validate(value any, field string) validationcontract.ValidationError {
+    return &ownFieldConstraintError{field: field}
+}
+
+type ownFieldPackageTypeConstraint struct{}
+
+func (instance *ownFieldPackageTypeConstraint) Validate(value any, field string) validationcontract.ValidationError {
+    return NewValidationError("custom", "own message", "own_code", nil)
+}
+
+func TestValidator_AConstraintErrorWithItsOwnFieldIsAnsweredVerbatimUnderEveryPath(t *testing.T) {
+    type sharedAddress struct {
+        Zip string `validate:"ownField"`
+    }
+    type order struct {
+        Billing  *sharedAddress
+        Shipping *sharedAddress
+    }
+
+    validator := NewValidator()
+    validator.RegisterConstraint("ownField", &ownFieldConstraint{})
+
+    shared := &sharedAddress{}
+    errors := requireValidationErrors(t, validator.Validate(&order{Billing: shared, Shipping: shared}))
+
+    if 2 != len(errors) {
+        t.Fatalf("expected the shared pointer reported under both paths, got %v", errors)
+    }
+
+    for _, validationError := range errors {
+        if "custom" != validationError.Field() {
+            t.Fatalf("expected the constraint's own field kept verbatim, got %q", validationError.Field())
+        }
+
+        if _, ownType := validationError.(*ownFieldConstraintError); false == ownType {
+            t.Fatalf("expected the constraint's own error type kept under every path, got %T", validationError)
+        }
+    }
+}
+
+func TestValidator_AConstraintErrorOfItsOwnTypeKeepsItsTypeAndItsPathUnderEveryPath(t *testing.T) {
+    type sharedAddress struct {
+        Zip string `validate:"ownType"`
+    }
+    type order struct {
+        Billing  *sharedAddress
+        Shipping *sharedAddress
+    }
+
+    validator := NewValidator()
+    validator.RegisterConstraint("ownType", &ownTypeConstraint{})
+
+    shared := &sharedAddress{}
+    errors := requireValidationErrors(t, validator.Validate(&order{Billing: shared, Shipping: shared}))
+
+    if 2 != len(errors) {
+        t.Fatalf("expected the shared pointer reported under both paths, got %v", errors)
+    }
+
+    fields := []string{errors[0].Field(), errors[1].Field()}
+    if "Billing.Zip" != fields[0] || "Shipping.Zip" != fields[1] {
+        t.Fatalf("expected the constraint to spell each path itself, got %v", fields)
+    }
+
+    for _, validationError := range errors {
+        if _, ownType := validationError.(*ownFieldConstraintError); false == ownType {
+            t.Fatalf("expected the constraint's own error type kept under every path, got %T", validationError)
+        }
+    }
+}
+
+func TestValidator_APackageErrorUnderAFieldOfItsOwnIsAnsweredVerbatimUnderEveryPath(t *testing.T) {
+    type sharedAddress struct {
+        Zip string `validate:"ownFieldPackageType"`
+    }
+    type order struct {
+        Billing  *sharedAddress
+        Shipping *sharedAddress
+    }
+
+    validator := NewValidator()
+    validator.RegisterConstraint("ownFieldPackageType", &ownFieldPackageTypeConstraint{})
+
+    shared := &sharedAddress{}
+    errors := requireValidationErrors(t, validator.Validate(&order{Billing: shared, Shipping: shared}))
+
+    if 2 != len(errors) || "custom" != errors[0].Field() || "custom" != errors[1].Field() {
+        t.Fatalf("expected the constraint's own field kept verbatim under both paths, got %v", errors)
+    }
+}

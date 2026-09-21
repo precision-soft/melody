@@ -7,8 +7,10 @@ import (
 type RequestOption func(RequestOptions)
 
 type RequestOptions interface {
+    /* Headers answers a copy of the request headers: the setters are the one door that writes, so a write into the returned map reaches nothing. */
     Headers() map[string]string
 
+    /* Query answers a copy of the query parameters, under the same single-door rule as Headers. */
     Query() map[string]string
 
     Body() any
