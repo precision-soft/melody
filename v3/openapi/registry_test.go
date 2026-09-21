@@ -135,3 +135,30 @@ func TestRegistry_ALateDescribeNamesTheRouteInItsRefusal(t *testing.T) {
 
     registry.Describe("example.late", Descriptor{Summary: "late"})
 }
+
+type descriptorCopyBody struct{}
+
+/* Describe stored the caller's Tags slice and Responses map by reference and Get handed them back the same way, so a tag list reused across routes rewrote every earlier description and a reader of Get could write into the registry; both doors copy. The double hands over its own slice and map deliberately — nothing in the package copies on the way in. */
+func TestRegistry_DescribeAndGetKeepNoReferenceToTheCallersTagsAndResponses(t *testing.T) {
+    registry := NewRegistry()
+
+    tags := []string{"catalogue"}
+    responses := map[int]reflect.Type{200: TypeOf[descriptorCopyBody]()}
+    registry.Describe("products.list", Descriptor{Tags: tags, Responses: responses})
+
+    tags[0] = "rewritten"
+    responses[500] = TypeOf[descriptorCopyBody]()
+
+    stored, _ := registry.Get("products.list")
+    if "catalogue" != stored.Tags[0] || 1 != len(stored.Responses) {
+        t.Fatalf("expected the registry to keep its own copy of the description, got tags %v responses %v", stored.Tags, stored.Responses)
+    }
+
+    stored.Tags[0] = "rewritten"
+    stored.Responses[404] = TypeOf[descriptorCopyBody]()
+
+    again, _ := registry.Get("products.list")
+    if "catalogue" != again.Tags[0] || 1 != len(again.Responses) {
+        t.Fatalf("expected Get to answer a copy, got tags %v responses %v", again.Tags, again.Responses)
+    }
+}

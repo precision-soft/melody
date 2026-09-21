@@ -17,7 +17,12 @@ type Error struct {
     alreadyLogged bool
 }
 
+/* Error answers for a nil receiver as Unwrap below does, and for the same producer: FromError(nil) answers a typed nil, and errors.Join skips only a nil interface, so errors.Join(FromError(a), FromError(b)) with one of them nil calls Error on the typed nil when the join is rendered — fmt recovers that dereference into <nil>, the join does not. */
 func (instance *Error) Error() string {
+    if nil == instance {
+        return "error carries no value"
+    }
+
     return instance.message
 }
 

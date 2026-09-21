@@ -2221,3 +2221,100 @@ func TestValidator_BuildConstraintWithParamsRefusesATypedNilConstruction(t *test
         t.Fatalf("expected the typed-nil refusal cause, got %q", refusalCause)
     }
 }
+
+type sharedSubtreeNode struct {
+    Name  string             `json:"name" validate:"notBlank"`
+    Left  *sharedSubtreeNode `json:"left"`
+    Right *sharedSubtreeNode `json:"right"`
+}
+
+/* buildSharedSubtree builds levels nodes whose two pointer fields both reach the same next node, so every node is reachable through 2^depth paths; the node two levels below the root carries the empty name. */
+func buildSharedSubtree(levels int) *sharedSubtreeNode {
+    node := &sharedSubtreeNode{Name: "leaf"}
+    for level := 0; level < levels; level++ {
+        name := "node"
+        if levels-3 == level {
+            name = ""
+        }
+
+        node = &sharedSubtreeNode{Name: name, Left: node, Right: node}
+    }
+
+    return node
+}
+
+/* Every path to a shared subtree reports it, and the subtree is walked once per depth: the path-scoped cycle set alone walked it once per path, which on twenty levels of two pointers each cost 6.6 s and 2^20 walks (measured); with the memo the same value validates in under a millisecond. The bound is 500 ms — over ten thousand times the measured walk and a tenth of the old cost, so a walk that fell back to once per path fails on the clock. */
+func TestValidator_ASharedSubtreeIsWalkedOnceAndReportedUnderEveryPath(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    started := time.Now()
+    validationErrors := requireValidationErrors(t, validatorInstance.Validate(buildSharedSubtree(20)))
+    elapsed := time.Since(started)
+
+    if 500*time.Millisecond < elapsed {
+        t.Fatalf("expected the shared subtree to be walked once per depth, the walk took %s", elapsed)
+    }
+
+    fields := map[string]bool{}
+    for _, validationError := range validationErrors {
+        fields[validationError.Field()] = true
+    }
+
+    expected := []string{"left.left.name", "left.right.name", "right.left.name", "right.right.name"}
+    if len(expected) != len(validationErrors) {
+        t.Fatalf("expected the invalid node under its %d paths, got %d errors: %v", len(expected), len(validationErrors), fields)
+    }
+
+    for _, field := range expected {
+        if false == fields[field] {
+            t.Fatalf("expected an error under %q, got %v", field, fields)
+        }
+    }
+}
+
+type sharedDepthItem struct {
+    Name string `json:"name" validate:"notBlank"`
+}
+
+type sharedDepthHolder struct {
+    Inner *sharedDepthItem `json:"inner"`
+}
+
+type sharedDepthLink struct {
+    Next   *sharedDepthLink   `json:"next"`
+    Holder *sharedDepthHolder `json:"holder"`
+}
+
+type sharedDepthRoot struct {
+    Shallow *sharedDepthHolder `json:"shallow"`
+    Deep    *sharedDepthLink   `json:"deep"`
+}
+
+/* The memo is keyed on the depth a pointer is reached at: the same holder reached shallow is walked whole and reports its inner name, reached just under the cap it is cut and reports the nesting depth instead. A memo keyed on the pointer alone would answer the shallow walk for the deep path and report a constraint the cut never enforced. */
+func TestValidator_ASharedPointerReachedAtTwoDepthsIsWalkedAtEach(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    holder := &sharedDepthHolder{Inner: &sharedDepthItem{Name: ""}}
+
+    /* the holder pointer sits at depth 63 on the deep path: the root struct is depth 0, each link costs a pointer and a struct, and the inner pointer under it is then the first value past the cap */
+    deep := &sharedDepthLink{Holder: holder}
+    for link := 0; link < 30; link++ {
+        deep = &sharedDepthLink{Next: deep}
+    }
+
+    validationErrors := requireValidationErrors(t, validatorInstance.Validate(sharedDepthRoot{Shallow: holder, Deep: deep}))
+
+    codesByPrefix := map[string][]string{}
+    for _, validationError := range validationErrors {
+        prefix := strings.SplitN(validationError.Field(), ".", 2)[0]
+        codesByPrefix[prefix] = append(codesByPrefix[prefix], validationError.Code())
+    }
+
+    if 1 != len(codesByPrefix["shallow"]) || ConstraintNotBlankErrorIsBlank != codesByPrefix["shallow"][0] {
+        t.Fatalf("expected the shallow path to report the blank inner name, got %v", codesByPrefix)
+    }
+
+    if 1 != len(codesByPrefix["deep"]) || ErrorNestingDepthExceeded != codesByPrefix["deep"][0] {
+        t.Fatalf("expected the deep path to be cut at the cap instead of answering the shallow walk, got %v", codesByPrefix)
+    }
+}

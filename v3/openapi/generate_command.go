@@ -10,6 +10,9 @@ import (
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/internal"
     "github.com/precision-soft/melody/v3/http"
+    "github.com/precision-soft/melody/v3/logging"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
+    "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
@@ -54,15 +57,23 @@ func (instance *GenerateCommand) Run(
 ) error {
     router := http.RouterMustFromContainer(runtimeInstance.Container())
 
+    out := commandContext.String("out")
+
     info := instance.info
     registry := instance.registry
     if true == instance.resolveFromContainer {
         info = InfoFromResolver(runtimeInstance.Container())
         registry = RegistryMustFromResolver(runtimeInstance.Container())
 
-        /* the auto-registration gate reads the registry service alone, so a container carrying it without the info service reaches this command and the tolerant resolver answers an empty Info — a document whose required title and version are empty strings. The document is still written, since the info is declared optional metadata, but the run says what the success would otherwise conceal. */
+        /* the auto-registration gate reads the registry service alone, so a container carrying it without the info service reaches this command and the tolerant resolver answers an empty Info — a document whose required title and version are empty strings. The document is still written, since the info is declared optional metadata, but the run says what the success would otherwise conceal — on the writer when the document goes to a file, and in the journal when the writer IS the document: with --out empty the command has one writer and prints the document on it, so a line of warning ahead of the json made the documented stdout mode (melody:openapi:generate > openapi.json) write a file no parser reads. */
         if false == runtimeInstance.Container().Has(ServiceOpenApiInfo) {
-            fmt.Fprint(commandContext.Writer(), "no openapi info service is registered; the document's info block is empty\n")
+            warning := "no openapi info service is registered; the document's info block is empty"
+
+            if "" == out {
+                instance.journal(runtimeInstance).Warning(warning, loggingcontract.Context{"command": instance.Name()})
+            } else {
+                fmt.Fprint(commandContext.Writer(), warning+"\n")
+            }
         }
     }
 
@@ -79,7 +90,6 @@ func (instance *GenerateCommand) Run(
         )
     }
 
-    out := commandContext.String("out")
     if "" == out {
         fmt.Fprintln(commandContext.Writer(), string(payload))
         return nil
@@ -103,6 +113,16 @@ func (instance *GenerateCommand) Run(
     fmt.Fprintln(commandContext.Writer(), "wrote openapi document to", out)
 
     return nil
+}
+
+/* journal answers the application's logger, resolved through the runtime so the scope's logger wins over the root's, and the emergency logger when the runtime carries none — a process that generates the document without wiring a logger still has a journal of last resort. It resolves for itself rather than through the framework's LoggerFromRuntime, which files an emergency record of its own and answers nil where this door wants a fallback. */
+func (instance *GenerateCommand) journal(runtimeInstance runtimecontract.Runtime) loggingcontract.Logger {
+    logger, resolveErr := runtime.FromRuntime[loggingcontract.Logger](runtimeInstance, logging.ServiceLogger)
+    if nil != resolveErr || nil == logger {
+        return logging.EmergencyLogger()
+    }
+
+    return logger
 }
 
 var _ clicontract.Command = (*GenerateCommand)(nil)

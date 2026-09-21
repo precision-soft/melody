@@ -4,6 +4,7 @@ import (
     "errors"
     "fmt"
     nethttp "net/http"
+    "strings"
     "sync"
     "testing"
 )
@@ -226,5 +227,19 @@ func TestHttpException_UnwrapOnANilReceiverAnswersNil(t *testing.T) {
 
     if nil != AsHttpException(chain) {
         t.Fatalf("expected no http exception past a typed-nil link")
+    }
+}
+
+/* the guard Error.Error carries, on this type: a typed-nil *HttpException stored as a cause is rendered through Error before any caller's guard */
+func TestHttpException_ErrorOnANilReceiverAnswersInsteadOfDereferencing(t *testing.T) {
+    var typedNil *HttpException
+
+    if "http exception carries no value" != typedNil.Error() {
+        t.Fatalf("expected the nil receiver to answer the placeholder message, got %q", typedNil.Error())
+    }
+
+    joined := errors.Join(typedNil, errors.New("other"))
+    if false == strings.Contains(joined.Error(), "other") {
+        t.Fatalf("expected the join holding a typed nil to render, got %q", joined.Error())
     }
 }

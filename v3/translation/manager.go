@@ -6,19 +6,25 @@ import (
     translationcontract "github.com/precision-soft/melody/v3/translation/contract"
 )
 
+/* NewManager keeps every catalog of a locale, in the order given, and a lookup asks them in that order until one answers: a locale is assembled from several sources — the json loader builds one catalog per file it reads — so a second catalog of a locale is an ordinary wiring, and keying the locale on one catalog made the second silently replace the first, every message that lived only in the first answering its raw id. A catalog whose Locale is empty is refused as the nil one is: the locale chain never asks for the empty locale, so such a catalog could never be found. */
 func NewManager(
     defaultLocale string,
     fallbackLocales []string,
     catalogs ...translationcontract.Catalog,
 ) *Manager {
-    catalogsByLocale := make(map[string]translationcontract.Catalog)
+    catalogsByLocale := make(map[string][]translationcontract.Catalog)
     for _, catalog := range catalogs {
         /* refused, not skipped: a nil catalog is a wiring mistake, and dropping it silently builds a translator that answers raw message ids for a whole locale with nothing pointing at the hole — the same judgement every sibling constructor applies to a nil collaborator */
         if true == internal.IsNilInterface(catalog) {
             exception.Panic(exception.NewError("translation catalog is nil", nil, nil))
         }
 
-        catalogsByLocale[catalog.Locale()] = catalog
+        locale := catalog.Locale()
+        if "" == locale {
+            exception.Panic(exception.NewError("translation catalog carries no locale", nil, nil))
+        }
+
+        catalogsByLocale[locale] = append(catalogsByLocale[locale], catalog)
     }
 
     return &Manager{
@@ -31,7 +37,7 @@ func NewManager(
 type Manager struct {
     defaultLocale    string
     fallbackLocales  []string
-    catalogsByLocale map[string]translationcontract.Catalog
+    catalogsByLocale map[string][]translationcontract.Catalog
 }
 
 func (instance *Manager) Trans(
@@ -60,14 +66,11 @@ func (instance *Manager) lookup(messageId string, domain string, locale string) 
     }
 
     for _, candidate := range instance.localeChain(locale) {
-        catalog, exists := instance.catalogsByLocale[candidate]
-        if false == exists {
-            continue
-        }
-
-        message, found := catalog.Get(messageId, domain)
-        if true == found {
-            return message, candidate, true
+        for _, catalog := range instance.catalogsByLocale[candidate] {
+            message, found := catalog.Get(messageId, domain)
+            if true == found {
+                return message, candidate, true
+            }
         }
     }
 

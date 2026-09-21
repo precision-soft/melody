@@ -100,7 +100,7 @@ func RunExclusive(
     go func() {
         defer waitGroup.Done()
 
-        /* a panicking backend Refresh would otherwise unwind a bare goroutine and kill the process with the lock still held; recovered, it is the same demotion signal a returned error is */
+        /* a panicking backend Refresh would otherwise unwind a bare goroutine and kill the process with the lock still held; recovered, it is the same demotion signal a returned error is. It surfaces through the return path alone: a callback that then panics on the cancelled context propagates its own panic, and the refresh panic is neither returned nor journaled — the lock is still released once, and the callback's panic is what the operator reads. */
         defer func() {
             if recoveredValue := recover(); nil != recoveredValue {
                 refreshFailure = exception.NewError(

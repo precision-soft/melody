@@ -263,13 +263,23 @@ func acceptsGzip(acceptEncoding string) bool {
     gzipQuality := -1.0
     starQuality := -1.0
 
-    for _, rawEntry := range internal.SplitOutsideQuotes(acceptEncoding, ',') {
+    /* a header the member cap cut is read as unparsable — no compression — because the members past the cap can carry the refusal (gzip;q=0) that the members before it do not, and scoring half a list served gzip to a client that had refused it */
+    entries, cut := internal.SplitOutsideQuotes(acceptEncoding, ',')
+    if true == cut {
+        return false
+    }
+
+    for _, rawEntry := range entries {
         entry := strings.TrimSpace(rawEntry)
         if "" == entry {
             continue
         }
 
-        parts := internal.SplitOutsideQuotes(entry, ';')
+        parts, cut := internal.SplitOutsideQuotes(entry, ';')
+        if true == cut {
+            return false
+        }
+
         codingName := strings.ToLower(strings.TrimSpace(parts[0]))
         if "" == codingName {
             continue

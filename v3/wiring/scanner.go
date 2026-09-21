@@ -409,15 +409,42 @@ func parseDirectives(
 
         if remainder, isService := directiveRemainder(text, serviceDirective); true == isService {
             fields := strings.Fields(remainder)
-            if 0 < len(fields) {
-                directives.serviceNameIdentifier = fields[0]
+
+            /* a service directive with no constant named is a directive dropped, and a dropped directive fails open: the constructor registers by type alone, every name-based lookup of the service fails at boot, far from the comment that caused it, so the empty directive is refused where it was written */
+            if 0 == len(fields) {
+                return nil, exception.NewError(
+                    "a service directive names the exported constant of the service name",
+                    map[string]any{
+                        "constructor": functionDeclaration.Name.Name,
+                        "file":        currentPath,
+                        "line":        fileSet.Position(comment.Pos()).Line,
+                    },
+                    nil,
+                )
             }
+
+            directives.serviceNameIdentifier = fields[0]
 
             continue
         }
 
         if remainder, isBind := directiveRemainder(text, bindDirective); true == isBind {
-            for _, assignment := range strings.Fields(remainder) {
+            assignments := strings.Fields(remainder)
+
+            /* a bind directive with no assignment binds nothing, and the override written beside the constructor is then silently not the one in effect — the same failure the malformed assignment below is refused for */
+            if 0 == len(assignments) {
+                return nil, exception.NewError(
+                    "a bind directive carries at least one argument=parameter assignment",
+                    map[string]any{
+                        "constructor": functionDeclaration.Name.Name,
+                        "file":        currentPath,
+                        "line":        fileSet.Position(comment.Pos()).Line,
+                    },
+                    nil,
+                )
+            }
+
+            for _, assignment := range assignments {
                 separatorIndex := strings.Index(assignment, "=")
 
                 /* a bind spelled without the equals sign, or with an empty half, would otherwise fall back to a broader bind — or to none — and the override written right beside the constructor would silently not be the one in effect */

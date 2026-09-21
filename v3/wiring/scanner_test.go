@@ -8,6 +8,8 @@ import (
     "path/filepath"
     "strings"
     "testing"
+
+    "github.com/precision-soft/melody/v3/exception"
 )
 
 func scanFixture(t *testing.T) *ScanResult {
@@ -597,5 +599,40 @@ type Thing struct {
 
     if nil == constructorByName(scanResult, "NewThing") {
         t.Fatalf("expected the constructor behind the symlinked root to be scanned")
+    }
+}
+
+/* An empty directive is a directive dropped, and every directive fails open when it is dropped: an empty service directive registered the constructor by type alone, so each name-based lookup failed at boot, and an empty bind lost the override written beside the constructor. Both are refused where they were written, naming the constructor and the line. */
+func TestScan_RefusesAnEmptyServiceOrBindDirective(t *testing.T) {
+    for directive, refusal := range map[string]string{
+        "//melody:service": "a service directive names the exported constant of the service name",
+        "//melody:bind":    "a bind directive carries at least one argument=parameter assignment",
+    } {
+        projectDirectory := t.TempDir()
+
+        writeFixtureFile(t, projectDirectory, "domain/service.go", `package domain
+
+`+directive+`
+func NewRepository(dsn string) *Repository {
+    return &Repository{}
+}
+
+type Repository struct {
+}
+`)
+
+        _, scanErr := Scan(projectDirectory, NewBindSet().Package("github.com/acme/app/domain", "domain"), nil)
+        if nil == scanErr {
+            t.Fatalf("expected the empty directive %q to be refused", directive)
+        }
+
+        cause := errors.Unwrap(scanErr)
+        if nil == cause || false == strings.Contains(cause.Error(), refusal) {
+            t.Fatalf("unexpected error for %q: %v (cause %v)", directive, scanErr, cause)
+        }
+
+        if "NewRepository" != exception.LogContext(cause)["constructor"] {
+            t.Fatalf("expected the refusal to name the constructor, got %v", exception.LogContext(cause))
+        }
     }
 }

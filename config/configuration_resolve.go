@@ -217,8 +217,8 @@ func (instance *Configuration) scanTemplate(
     return builder.String(), nil
 }
 
-/* nameEnvironmentValueRefusal adds the environment key to a refusal raised while the environment VALUE was being scanned: that scan runs under the reading parameter's name, so a refusal carrying an offset named the reader and an offset into a string the reader's own template is not — APP_DSN reading %env(DB_PASSWORD)% over Pa%SSword1 was reported as parameter APP_DSN, offset 2, which in the dsn is a colon. The key is added only once, by the innermost read: an environment value that itself reads another environment key keeps the key whose value the offset indexes. */
-func nameEnvironmentValueRefusal(refusalErr error, environmentKey string) {
+/* nameEnvironmentValueRefusal adds the environment key to a refusal raised while the environment VALUE was being scanned: that scan runs under the reading parameter's name, so a refusal carrying an offset named the reader and an offset into a string the reader's own template is not — APP_DSN reading %env(DB_PASSWORD)% over Pa%SSword1 was reported as parameter APP_DSN, offset 2, which in the dsn is a colon. The key is added only once, by the innermost read: an environment value that itself reads another environment key keeps the key whose value the offset indexes. And only to a refusal the environment scan itself raised, the one that names the reading parameter: a %parameter% reference inside the environment value is scanned under the referenced parameter's own name, and its refusal's offset indexes that parameter's value, so naming the environment key on it pointed the operator at a string the offset does not index. */
+func nameEnvironmentValueRefusal(refusalErr error, environmentKey string, readingParameter string) {
     var refusal *exception.Error
     if false == errors.As(refusalErr, &refusal) || nil == refusal {
         return
@@ -226,6 +226,10 @@ func nameEnvironmentValueRefusal(refusalErr error, environmentKey string) {
 
     refusalContext := refusal.Context()
     if _, carriesOffset := refusalContext["offset"]; false == carriesOffset {
+        return
+    }
+
+    if readingParameter != refusalContext["parameter"] {
         return
     }
 
@@ -320,7 +324,7 @@ func (instance *Configuration) resolveEnvironmentPlaceholder(
         delete(resolvingEnvironmentKeys, environmentKey)
 
         if nil != envValueErr {
-            nameEnvironmentValueRefusal(envValueErr, environmentKey)
+            nameEnvironmentValueRefusal(envValueErr, environmentKey, currentKey)
 
             return "", 0, envValueErr
         }

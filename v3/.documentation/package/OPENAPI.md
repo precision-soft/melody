@@ -123,6 +123,8 @@ command := openapi.NewGenerateCommand(
 )
 ```
 
+`Describe` stores a copy of the descriptor's `Tags` and `Responses` and `Get` answers a copy, so a tag list built once and appended to between routes describes each route with the tags it had at that moment, and a reader of `Get` cannot write into the registry from the request path.
+
 For the common single-request / single-response route, [`DescribeTyped[Req, Resp]`](../../openapi/describe_typed.go) takes the types as parameters instead of a `Descriptor` literal:
 
 ```go
@@ -138,7 +140,7 @@ Use `Describe` directly for no-body or multi-response routes (add extra response
 Run it to emit the document:
 
 ```sh
-app melody:openapi:generate            # prints to stdout
+app melody:openapi:generate            # prints to stdout; a diagnostic (an info service missing) goes to the journal, not ahead of the json
 app melody:openapi:generate --out openapi.json
 ```
 

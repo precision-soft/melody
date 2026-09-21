@@ -2,6 +2,8 @@ package http
 
 import (
     nethttp "net/http"
+    "strconv"
+    "strings"
     "testing"
 
     "github.com/precision-soft/melody/v2/internal/testhelper"
@@ -200,5 +202,33 @@ func TestPrefersHtml_ReadsAJsonPreferenceWrittenWithExcessTrailingZeros(t *testi
     refusedWithZeros := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/", "text/html;q=0.9, application/json;q=0.0000")
     if false == PrefersHtml(refusedWithZeros) {
         t.Fatal("expected q=0.0000 to keep refusing json")
+    }
+}
+
+/* acceptListWithTailPast builds an Accept header of one head range, filler ranges and one tail range; with more members than the split cap the tail is what the cap cuts off. */
+func acceptListWithTailPast(head string, fillers int, tail string) string {
+    members := []string{head}
+    for index := 0; index < fillers; index++ {
+        members = append(members, "x/"+strconv.Itoa(index))
+    }
+
+    return strings.Join(append(members, tail), ", ")
+}
+
+/* A header the member cap cut is read as unparsable: the refusal past the cap (text/html;q=0) used to be lost with the tail, and the type wildcard before it answered html for a client that had refused it. The sister list one member short of the cap still honours the refusal. */
+func TestPrefersHtml_AHeaderCutAtTheCapIsReadAsUnparsable(t *testing.T) {
+    cut := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/", acceptListWithTailPast("text/*", 63, "text/html;q=0"))
+    if true == PrefersHtml(cut) {
+        t.Fatalf("expected a header cut at the member cap to answer false")
+    }
+
+    within := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/", acceptListWithTailPast("text/*", 62, "text/html;q=0"))
+    if true == PrefersHtml(within) {
+        t.Fatalf("expected the refusal within the cap to be honoured")
+    }
+
+    accepted := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/", acceptListWithTailPast("text/*", 62, "application/json;q=0"))
+    if false == PrefersHtml(accepted) {
+        t.Fatalf("expected a list within the cap to negotiate normally")
     }
 }

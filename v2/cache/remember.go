@@ -276,7 +276,7 @@ func executeRememberInFlightLeader(
         return
     }
 
-    normalizedValue, normalizeErr := normalizeRememberedValue(cacheInstance, computedValue)
+    normalizedValue, normalizeErr := normalizeRememberedValue(cacheInstance, key, computedValue)
     if nil != normalizeErr {
         call.Complete(nil, normalizeErr)
         return
@@ -308,7 +308,7 @@ func rememberWithoutStampedeProtection(
         return nil, callbackErr
     }
 
-    normalizedValue, normalizeErr := normalizeRememberedValue(cacheInstance, value)
+    normalizedValue, normalizeErr := normalizeRememberedValue(cacheInstance, key, value)
     if nil != normalizeErr {
         return nil, normalizeErr
     }
@@ -329,13 +329,23 @@ type storedValueNormalizer interface {
 /* normalizeRememberedValue makes the computing call answer the exact shape every cached call will answer: without it one key had two shapes — the callback's own value on the miss, the decoded generic form on every hit — so a type assertion worked on the cold path and failed on the warm one, from the second call on. A cache that does not expose its stored shape answers the callback's value unchanged.
 
    It runs BEFORE the store, on both paths. The round-trip is also the only place where a value the serializer encodes but cannot decode is found out — the default JSON serializer has no depth ceiling on the way in and one on the way out — and a value like that, stored first, was written and then read back as a miss on every later call: recomputed, rewritten, refused again, a loop with one write per call that no ttl ends. Refused before the store, the key stays empty and the caller gets the refusal once per call and nothing else. */
-func normalizeRememberedValue(cacheInstance cachecontract.Cache, value any) (any, error) {
+func normalizeRememberedValue(cacheInstance cachecontract.Cache, key string, value any) (any, error) {
     normalizer, isNormalizer := cacheInstance.(storedValueNormalizer)
     if false == isNormalizer {
         return value, nil
     }
 
-    return normalizer.NormalizeStoredValue(value)
+    normalized, normalizeErr := normalizer.NormalizeStoredValue(value)
+    if nil != normalizeErr {
+        /* the refusal names the key and the framework's message, as the store's own serialization refusal does: the round-trip now runs before the store, so a value the serializer cannot encode — a NaN, a func field — is refused here, and the bare serializer error named neither the key nor the operation */
+        return nil, exception.NewError(
+            "cache value round-trip failed",
+            map[string]any{"key": key},
+            normalizeErr,
+        )
+    }
+
+    return normalized, nil
 }
 
 /* rememberSingleFlightKey names the unit callers coalesce under: one cache instance, one key, one cancelability. The instance is told apart by its pointer, so only pointer-kind implementations coalesce — a value-kind Cache has no address to tell two instances apart, and one shared flight would hand a caller the value computed for somebody else's cache, so a value-kind instance gets no coalescing at all, which costs the stampede optimization and never the answer. Two managers over one backend are two units on purpose: the unit is what Remember was handed, not what stands behind it. */

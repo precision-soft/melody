@@ -19,7 +19,12 @@ type HttpException struct {
     alreadyLogged bool
 }
 
+/* Error keeps the guard Error.Error keeps, for the same reason: a typed-nil *HttpException joined or stored as a cause is rendered through this method before any caller's guard. */
 func (instance *HttpException) Error() string {
+    if nil == instance {
+        return "http exception carries no value"
+    }
+
     if nil != instance.causeErr {
         return fmt.Sprintf("%s: %v", instance.message, instance.causeErr)
     }

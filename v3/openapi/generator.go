@@ -137,9 +137,9 @@ func buildOperation(
         operation.Summary = descriptor.Summary
         operation.Description = descriptor.Description
 
-        /* the document must not alias registry memory: the descriptor arrives by value but its slice shares the registry's backing array, and a caller post-processing the returned document would write through into every later generation */
+        /* the document must not alias registry memory, and it does not: Get answers a copy of the descriptor, its slice detached from the registry's, so a caller post-processing the returned document writes into nothing but the document */
         if 0 < len(descriptor.Tags) {
-            operation.Tags = append(make([]string, 0, len(descriptor.Tags)), descriptor.Tags...)
+            operation.Tags = descriptor.Tags
         }
 
         if nil != descriptor.RequestType && true == methodAcceptsRequestBody(method) {

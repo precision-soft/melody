@@ -2,6 +2,7 @@ package serializer
 
 import (
     "errors"
+    "strconv"
     "strings"
     "testing"
 
@@ -508,5 +509,36 @@ func TestResolveByAcceptHeader_AJsonTieWithoutJsonStaysLexicallyFirst(t *testing
     }
     if serializercontract.Serializer(halSerializer) != resolved {
         t.Fatalf("expected a tie without json to keep the lexically first candidate")
+    }
+}
+
+/* acceptListWithTailPast builds an Accept header of one head range, filler ranges and one tail range; with more members than the split cap the tail is what the cap cuts off. */
+func acceptListWithTailPast(head string, fillers int, tail string) string {
+    members := []string{head}
+    for index := 0; index < fillers; index++ {
+        members = append(members, "x/"+strconv.Itoa(index))
+    }
+
+    return strings.Join(append(members, tail), ", ")
+}
+
+/* A header the member cap cut is read as unparsable and refused as not acceptable: the refusal past the cap (application/json;q=0) used to be lost with the tail, and the wildcard before it served json to a client that had refused it. The sister list one member short of the cap still honours the refusal and falls to the other type. */
+func TestResolveByAcceptHeader_AHeaderCutAtTheCapIsRefused(t *testing.T) {
+    manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
+        MimeApplicationJson: NewJsonSerializer(),
+        MimeTextPlain:       NewPlainTextSerializer(),
+    })
+    if nil != managerErr {
+        t.Fatalf("unexpected manager error: %v", managerErr)
+    }
+
+    _, resolveErr := manager.ResolveByAcceptHeader(acceptListWithTailPast("*/*;q=1", 63, "application/json;q=0"))
+    if false == errors.Is(resolveErr, ErrNotAcceptable) {
+        t.Fatalf("expected a header cut at the member cap to be refused, got %v", resolveErr)
+    }
+
+    within, resolveErr := manager.ResolveByAcceptHeader(acceptListWithTailPast("*/*;q=1", 62, "application/json;q=0"))
+    if nil != resolveErr || false == strings.HasPrefix(within.ContentType(), MimeTextPlain) {
+        t.Fatalf("expected the refusal within the cap to fall to the plain serializer, got %v / %v", within, resolveErr)
     }
 }

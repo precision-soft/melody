@@ -1423,3 +1423,28 @@ func TestStreamGzipCompressInto_ContainsAPanicFromTheResponseBodyReader(t *testi
         t.Fatal("expected the compression goroutine to finish")
     }
 }
+
+/* listWithTailPast builds a header of one head member, filler members and one tail member; with more members than the split cap the tail is what the cap cuts off. */
+func listWithTailPast(head string, fillers int, tail string) string {
+    members := []string{head}
+    for index := 0; index < fillers; index++ {
+        members = append(members, "x"+strconv.Itoa(index))
+    }
+
+    return strings.Join(append(members, tail), ", ")
+}
+
+/* A header the member cap cut is read as unparsable: the refusal past the cap (gzip;q=0) used to be lost with the tail, and the wildcard before it switched compression on for a client that had refused it. The sister list one member short of the cap still honours the refusal. */
+func TestAcceptsGzip_AHeaderCutAtTheCapIsReadAsUnparsable(t *testing.T) {
+    if true == acceptsGzip(listWithTailPast("*;q=1", 63, "gzip;q=0")) {
+        t.Fatalf("expected a header cut at the member cap to switch compression off")
+    }
+
+    if true == acceptsGzip(listWithTailPast("*;q=1", 62, "gzip;q=0")) {
+        t.Fatalf("expected the refusal within the cap to be honoured")
+    }
+
+    if false == acceptsGzip(listWithTailPast("*;q=1", 62, "gzip;q=1")) {
+        t.Fatalf("expected a list within the cap to negotiate normally")
+    }
+}

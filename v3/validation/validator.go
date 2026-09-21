@@ -20,10 +20,73 @@ import (
 /* maxNestedValidationDepth bounds the recursive descent into nested struct/slice/map/embedded values so a self-referential or deeply cyclic payload cannot overflow the stack; the visited-pointer set below short-circuits genuine reference cycles, and this depth cap is the belt-and-suspenders backstop for value cycles the pointer set cannot observe. Reaching the cap yields a validation error, never a silent pass: the tags below it were never enforced, so reporting the payload valid would let a caller nest past the cap to bypass validation outright. */
 const maxNestedValidationDepth = 64
 
-/* cyclicReference identifies a pointer on the CURRENT descent path, so a reference cycle — a self-referential node, a structure that reaches back to an ancestor — is validated once and then short-circuited instead of recursing forever. The set is path-scoped, an entry leaving it when its subtree returns, because only an ancestor still on the path can close a cycle: a whole-call set reads a shared non-cyclic pointer, the same value reachable through two sibling fields, as a cycle and skips every constraint under its second occurrence. */
+/* cyclicReference identifies a pointer on the CURRENT descent path, so a reference cycle — a self-referential node, a structure that reaches back to an ancestor — is validated once and then short-circuited instead of recursing forever. The set is path-scoped, an entry leaving it when its subtree returns, because only an ancestor still on the path can close a cycle: a whole-call set reads a shared non-cyclic pointer, the same value reachable through two sibling fields, as a cycle and skips every constraint under its second occurrence. Validating that shared pointer under every path is what the memo of validationWalk keeps affordable: the path-scoped set alone walked it once per path, and a value whose every node is reachable through two fields cost 2^N on N levels — measured at 6.6 s for twenty. */
 type cyclicReference struct {
     pointer uintptr
     typ     reflect.Type
+}
+
+/* validationMemoKey identifies one walk of a pointer: the pointer, its type and the depth it was reached at. The depth is part of the key because the depth cap answers differently at different depths — the same node reached at depth three is walked whole, reached at depth sixty it is cut — so a memo keyed on the pointer alone would answer the shallow walk for the deep path. */
+type validationMemoKey struct {
+    pointer uintptr
+    typ     reflect.Type
+    depth   int
+}
+
+/* memoizedValidationError is one error of a memoized walk, its field spelled RELATIVE to the path of the pointer that was walked, so the walk answers under any later path by prefixing that path. */
+type memoizedValidationError struct {
+    relativeField string
+    message       string
+    code          string
+    context       map[string]any
+}
+
+/* validationWalk is the state of one Validate call: the path-scoped set that closes reference cycles, and the whole-call memo that answers a pointer already walked at the same depth with the errors of its first walk, re-spelled under the new path. A shared, non-cyclic subtree is therefore walked once per depth and reported under every path that reaches it, which is what the path-scoped set promises and what walking it again per path could not afford. What the memo does not carry is written here: a walk cut short by an ancestor on the path memoizes only what it saw, so a node reached again through a cycle answers without the errors of that ancestor — which were reported under the ancestor's own path. On a payload decoded from json nothing is shared, and the memo is never read. */
+type validationWalk struct {
+    onPath map[cyclicReference]bool
+    memo   map[validationMemoKey][]memoizedValidationError
+}
+
+func newValidationWalk() *validationWalk {
+    return &validationWalk{
+        onPath: make(map[cyclicReference]bool),
+        memo:   make(map[validationMemoKey][]memoizedValidationError),
+    }
+}
+
+/* remember files the errors of a finished walk under the key, each field spelled relative to the path the walk ran under. */
+func (instance *validationWalk) remember(key validationMemoKey, path string, errors ValidationErrors) {
+    memoized := make([]memoizedValidationError, 0, len(errors))
+    for _, validationError := range errors {
+        memoized = append(memoized, memoizedValidationError{
+            relativeField: strings.TrimPrefix(validationError.Field(), path),
+            message:       validationError.Message(),
+            code:          validationError.Code(),
+            context:       validationError.Context(),
+        })
+    }
+
+    instance.memo[key] = memoized
+}
+
+/* recall answers a memoized walk under a new path, or reports that the key was never walked. */
+func (instance *validationWalk) recall(key validationMemoKey, path string) (ValidationErrors, bool) {
+    memoized, exists := instance.memo[key]
+    if false == exists {
+        return nil, false
+    }
+
+    var errors ValidationErrors
+    for _, memoizedError := range memoized {
+        errors = append(errors, NewValidationError(
+            path+memoizedError.relativeField,
+            memoizedError.message,
+            memoizedError.code,
+            memoizedError.context,
+        ))
+    }
+
+    return errors, true
 }
 
 func NewValidator() *Validator {
@@ -127,11 +190,11 @@ func (instance *Validator) validateInternal(data any) ValidationErrors {
         return nil
     }
 
-    return instance.validateReflected(reflect.ValueOf(data), "", 0, make(map[cyclicReference]bool))
+    return instance.validateReflected(reflect.ValueOf(data), "", 0, newValidationWalk())
 }
 
-/* validateReflected drives the recursive cascade: it unwraps pointers and interfaces, skipping nil and already-visited references, then dispatches structs, slices, arrays and maps to their per-kind walkers, so a validate tag declared on a nested field is enforced under a path that identifies that field. A scalar leaf falls through untouched — the tag on it belongs to the struct that owns it. */
-func (instance *Validator) validateReflected(value reflect.Value, path string, depth int, visited map[cyclicReference]bool) ValidationErrors {
+/* validateReflected drives the recursive cascade: it unwraps pointers and interfaces, skipping nil and already-visited references and answering a pointer already walked at this depth from the memo, then dispatches structs, slices, arrays and maps to their per-kind walkers, so a validate tag declared on a nested field is enforced under a path that identifies that field. A scalar leaf falls through untouched — the tag on it belongs to the struct that owns it. */
+func (instance *Validator) validateReflected(value reflect.Value, path string, depth int, walk *validationWalk) ValidationErrors {
     var errors ValidationErrors
 
     if false == value.IsValid() {
@@ -164,29 +227,38 @@ func (instance *Validator) validateReflected(value reflect.Value, path string, d
             return errors
         }
 
-        return instance.validateReflected(value.Elem(), path, depth+1, visited)
+        return instance.validateReflected(value.Elem(), path, depth+1, walk)
     case reflect.Ptr:
         if true == value.IsNil() {
             return errors
         }
 
         reference := cyclicReference{pointer: value.Pointer(), typ: value.Type()}
-        if true == visited[reference] {
+        if true == walk.onPath[reference] {
             return errors
         }
-        visited[reference] = true
 
-        errors = append(errors, instance.validateReflected(value.Elem(), path, depth+1, visited)...)
+        /* the memo is read before the walk and written after it, under the depth the pointer is reached at; a pointer on the path never reaches it, so a cycle is still closed by the set above */
+        memoKey := validationMemoKey{pointer: reference.pointer, typ: reference.typ, depth: depth}
+        if recalled, walked := walk.recall(memoKey, path); true == walked {
+            return append(errors, recalled...)
+        }
 
-        delete(visited, reference)
+        walk.onPath[reference] = true
 
-        return errors
+        walked := instance.validateReflected(value.Elem(), path, depth+1, walk)
+
+        delete(walk.onPath, reference)
+
+        walk.remember(memoKey, path, walked)
+
+        return append(errors, walked...)
     case reflect.Struct:
-        return instance.validateStruct(value, path, depth, visited)
+        return instance.validateStruct(value, path, depth, walk)
     case reflect.Slice, reflect.Array:
-        return instance.validateSequence(value, path, depth, visited)
+        return instance.validateSequence(value, path, depth, walk)
     case reflect.Map:
-        return instance.validateMap(value, path, depth, visited)
+        return instance.validateMap(value, path, depth, walk)
     default:
         return errors
     }
@@ -258,7 +330,7 @@ type visibleFieldCandidate struct {
 }
 
 /* validateStruct validates the fields of one json object: the struct's own fields plus everything its embeds promote, resolved with encoding/json's dominance rules — the shallowest field wins a name, an explicit json tag beats an untagged field at equal depth, and an ambiguity drops the name entirely. Only the winners are validated, because only the winners are populated from a payload: validating a shadowed promoted field would run its tag against a permanent zero value and reject every request, while the openapi mirror (openapi/schema.go collectStructFields, kept in lockstep with this walk) rightly documents the winner alone. */
-func (instance *Validator) validateStruct(value reflect.Value, path string, depth int, visited map[cyclicReference]bool) ValidationErrors {
+func (instance *Validator) validateStruct(value reflect.Value, path string, depth int, walk *validationWalk) ValidationErrors {
     var errors ValidationErrors
 
     if true == promotesValidationTimeCodec(value.Type()) {
@@ -365,7 +437,7 @@ func (instance *Validator) validateStruct(value reflect.Value, path string, dept
                 continue
             }
 
-            errors = append(errors, instance.validateVisibleField(winner, jsonName, path, depth, visited)...)
+            errors = append(errors, instance.validateVisibleField(winner, jsonName, path, depth, walk)...)
         }
 
         for _, nextItem := range nextLevel {
@@ -384,7 +456,7 @@ func (instance *Validator) validateVisibleField(
     jsonName string,
     path string,
     depth int,
-    visited map[cyclicReference]bool,
+    walk *validationWalk,
 ) ValidationErrors {
     var errors ValidationErrors
 
@@ -399,7 +471,7 @@ func (instance *Validator) validateVisibleField(
 
     errors = append(errors, instance.applyFieldRules(candidate.field, candidate.value, fieldPath)...)
 
-    return append(errors, instance.validateReflected(candidate.value, fieldPath, depth+1, visited)...)
+    return append(errors, instance.validateReflected(candidate.value, fieldPath, depth+1, walk)...)
 }
 
 func (instance *Validator) applyFieldRules(field reflect.StructField, value reflect.Value, fieldPath string) ValidationErrors {
@@ -664,7 +736,7 @@ func dereferencedValidationStructValue(value reflect.Value) reflect.Value {
     return value
 }
 
-func (instance *Validator) validateSequence(value reflect.Value, path string, depth int, visited map[cyclicReference]bool) ValidationErrors {
+func (instance *Validator) validateSequence(value reflect.Value, path string, depth int, walk *validationWalk) ValidationErrors {
     var errors ValidationErrors
 
     if reflect.Slice == value.Kind() {
@@ -681,13 +753,13 @@ func (instance *Validator) validateSequence(value reflect.Value, path string, de
     for i := 0; i < value.Len(); i++ {
         elementPath := fmt.Sprintf("%s[%d]", path, i)
 
-        errors = append(errors, instance.validateReflected(value.Index(i), elementPath, depth+1, visited)...)
+        errors = append(errors, instance.validateReflected(value.Index(i), elementPath, depth+1, walk)...)
     }
 
     return errors
 }
 
-func (instance *Validator) validateMap(value reflect.Value, path string, depth int, visited map[cyclicReference]bool) ValidationErrors {
+func (instance *Validator) validateMap(value reflect.Value, path string, depth int, walk *validationWalk) ValidationErrors {
     var errors ValidationErrors
 
     if true == value.IsNil() {
@@ -698,7 +770,7 @@ func (instance *Validator) validateMap(value reflect.Value, path string, depth i
     for true == iterator.Next() {
         elementPath := fmt.Sprintf("%s[%v]", path, iterator.Key().Interface())
 
-        errors = append(errors, instance.validateReflected(iterator.Value(), elementPath, depth+1, visited)...)
+        errors = append(errors, instance.validateReflected(iterator.Value(), elementPath, depth+1, walk)...)
     }
 
     return errors

@@ -152,7 +152,7 @@ func (instance *GenerateCommand) Run(
         outputPath = filepath.Join(projectDirectory, outputPath)
     }
 
-    /* a generated file inside a scanned directory is read back by the next scan — with a package clause the surrounding sources do not carry, so the package stops compiling and the tool can no longer regenerate its way out; the constructor's own contract says the output package must not be a scanned one, and this is where it is enforceable */
+    /* a generated file inside a scanned directory is read back by the next scan — with a package clause the surrounding sources do not carry, so the package stops compiling and the tool can no longer regenerate its way out; the constructor's own contract says the output package must not be a scanned one, and this is where it is enforceable. The containment is read on path components, the way the static file server reads its own: a directory named ..hidden inside the scanned one spells a relative path that starts with two dots without lying outside it, and a relative path the two paths cannot be related on (one absolute, one not) is refused rather than read as outside. Neither shape reaches here through the shipped callers — the project directory is always absolute and the scanner skips dot-directories — but the guard no longer depends on either fact. */
     for _, packageBinding := range instance.bindSet.Packages() {
         scannedDirectory := packageBinding.Directory()
         if false == filepath.IsAbs(scannedDirectory) {
@@ -160,7 +160,20 @@ func (instance *GenerateCommand) Run(
         }
 
         relativePath, relativeErr := filepath.Rel(scannedDirectory, outputPath)
-        if nil == relativeErr && false == strings.HasPrefix(relativePath, "..") {
+        if nil != relativeErr {
+            return exception.NewError(
+                "the output path cannot be related to a scanned package directory",
+                map[string]any{
+                    "out":        outputPath,
+                    "importPath": packageBinding.ImportPath(),
+                    "directory":  scannedDirectory,
+                },
+                relativeErr,
+            )
+        }
+
+        liesOutside := ".." == relativePath || true == strings.HasPrefix(relativePath, ".."+string(filepath.Separator))
+        if false == liesOutside {
             return exception.NewError(
                 "the output path lies inside a scanned package directory",
                 map[string]any{

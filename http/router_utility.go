@@ -637,7 +637,9 @@ func markResponsePrivateForSessionCookie(response httpcontract.Response) {
 
     for _, existing := range existingLines {
         /* a directive may carry a quoted field-name list — no-cache="X-One, Public, X-Two" — and a bare comma cuts through it: the fragment left holding a field name spelled like a directive was then dropped as if it were one, deleting a name out of the middle of somebody else's list. */
-        for _, token := range internal.SplitOutsideQuotes(existing, ',') {
+        /* the cut past the member cap is not read here: the value merged is the application's own Cache-Control, not a client's negotiation */
+        tokens, _ := internal.SplitOutsideQuotes(existing, ',')
+        for _, token := range tokens {
             trimmed := strings.TrimSpace(token)
             if "" == trimmed {
                 continue

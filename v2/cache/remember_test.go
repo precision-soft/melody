@@ -3,6 +3,7 @@ package cache
 import (
     "context"
     "errors"
+    "math"
     "reflect"
     "strings"
     "sync"
@@ -1818,5 +1819,33 @@ func TestRememberOption_ACopyOfTheStructCarriesItsOwnContext(t *testing.T) {
 
     if context.Background() != shared.Context() {
         t.Fatalf("expected the shared option to stay without a context")
+    }
+}
+
+/* the round-trip runs before the store, so a value the serializer cannot ENCODE is refused by the normalizer rather than by the store: the refusal keeps naming the key and the operation, as the store's own serialization refusal did, instead of answering the bare serializer error */
+func TestRemember_AValueTheSerializerCannotEncodeIsRefusedNamingTheKey(t *testing.T) {
+    for _, option := range []*RememberOption{
+        NewDefaultRememberOption(),
+        NewDefaultRememberOption().WithStampedeProtectionEnabled(false),
+    } {
+        backend := NewInMemoryBackend(0, time.Minute, clock.NewSystemClock())
+        manager := NewManager(backend, NewJsonSerializer())
+
+        _, rememberErr := Remember(manager, "remember:unencodable", time.Minute, func(ctx context.Context) (any, error) {
+            return math.NaN(), nil
+        }, option)
+        if nil == rememberErr || "cache value round-trip failed" != rememberErr.Error() {
+            t.Fatalf("expected the unencodable value to be refused under the framework's message, got %v (protection %v)", rememberErr, option.EnableStampedeProtection())
+        }
+
+        if "remember:unencodable" != exception.LogContext(rememberErr)["key"] {
+            t.Fatalf("expected the refusal to name the key, got %v (protection %v)", exception.LogContext(rememberErr), option.EnableStampedeProtection())
+        }
+
+        if _, exists, _ := backend.Get("remember:unencodable"); true == exists {
+            t.Fatalf("expected the refused value to stay out of the backend (protection %v)", option.EnableStampedeProtection())
+        }
+
+        _ = backend.Close()
     }
 }

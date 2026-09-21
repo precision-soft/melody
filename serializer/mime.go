@@ -30,8 +30,13 @@ type acceptedMime struct {
 }
 
 /* a member whose q parameter falls outside the RFC 7231 qvalue grammar is dropped whole rather than rounded to a guess: the previous leniency scored an unparseable q as full acceptance, clamped a negative one into a refusal and let NaN through as a weight that no comparison could select or refuse, so the same malformed header could open, close or silently poison the negotiation depending on the spelling */
-func parseAcceptHeader(acceptHeader string) []acceptedMime {
-    parts := internal.SplitOutsideQuotes(acceptHeader, ',')
+func parseAcceptHeader(acceptHeader string) ([]acceptedMime, bool) {
+    /* a header the member cap cut is reported as such, and the manager refuses it as not acceptable: the members past the cap can carry the refusal (application/json;q=0) that a wildcard before them does not, so scoring half a list served the type the client had refused, and serving the default instead could serve it too */
+    parts, cut := internal.SplitOutsideQuotes(acceptHeader, ',')
+    if true == cut {
+        return nil, true
+    }
+
     result := make([]acceptedMime, 0, len(parts))
 
     for _, part := range parts {
@@ -50,7 +55,11 @@ func parseAcceptHeader(acceptHeader string) []acceptedMime {
             parametersPart := strings.TrimSpace(part[parameterSeparatorIndex+1:])
 
             if "" != parametersPart {
-                parameters := internal.SplitOutsideQuotes(parametersPart, ';')
+                parameters, cut := internal.SplitOutsideQuotes(parametersPart, ';')
+                if true == cut {
+                    return nil, true
+                }
+
                 for _, parameter := range parameters {
                     parameter = strings.TrimSpace(parameter)
                     if "" == parameter {
@@ -106,7 +115,7 @@ func parseAcceptHeader(acceptHeader string) []acceptedMime {
         return result[i].qualityValue > result[j].qualityValue
     })
 
-    return result
+    return result, false
 }
 
 func isWildcardSubtype(mime string) bool {

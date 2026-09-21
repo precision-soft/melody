@@ -1081,3 +1081,34 @@ func TestResolveTemplate_ARefusalInsideAnEnvironmentValueNamesTheEnvironmentKey(
         t.Fatalf("expected the innermost environment key, the one whose value the offset indexes, got %v", contextOfError(t, nestedErr))
     }
 }
+
+/* a %parameter% reference inside an environment value is scanned under the referenced parameter's own name, and its refusal's offset indexes that parameter's value; the environment key used to be added to it too, pointing the operator at a string the offset does not index */
+func TestResolveTemplate_ARefusalInsideAParameterReferencedFromAnEnvironmentValueNamesNoEnvironmentKey(t *testing.T) {
+    configuration := &Configuration{
+        environment: &Environment{values: map[string]string{
+            "REFS_PARAM": "x-%app.inner%",
+        }},
+        parameters: ParameterMap{
+            "app.inner": NewParameter("APP_INNER", "Pa%SSword", nil, false),
+        },
+    }
+
+    _, resolveErr := configuration.resolveTemplate(
+        "%env(REFS_PARAM)%",
+        "app.reader",
+        make(map[string]bool),
+        make(map[string]bool),
+    )
+    if nil == resolveErr {
+        t.Fatalf("expected the unclosed reference inside the referenced parameter to be refused")
+    }
+
+    refusalContext := contextOfError(t, resolveErr)
+    if "app.inner" != refusalContext["parameter"] || 2 != refusalContext["offset"] {
+        t.Fatalf("expected the referenced parameter and the offset into its value, got %v", refusalContext)
+    }
+
+    if _, named := refusalContext["environmentKey"]; true == named {
+        t.Fatalf("expected no environment key on a refusal whose offset indexes a parameter's value, got %v", refusalContext)
+    }
+}

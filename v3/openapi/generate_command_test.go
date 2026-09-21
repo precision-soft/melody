@@ -17,6 +17,8 @@ import (
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/logging"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
@@ -235,12 +237,14 @@ func TestGenerateCommand_ReplacesAPreviousDocument(t *testing.T) {
 }
 
 /* the auto-registration gate reads the registry service alone, so a container without the info service reaches the command and the tolerant resolver answers an empty Info — required title and version as empty strings; the run still succeeds, but it says what the success would otherwise conceal. */
-func TestGenerateCommand_WarnsWhenTheInfoServiceIsAbsent(t *testing.T) {
+/* with --out the writer is free, so the missing info is named there beside the "wrote" line; without it the writer is the document, and the warning goes to the journal (the test below) */
+func TestGenerateCommand_WarnsOnTheWriterWhenTheInfoServiceIsAbsentAndTheDocumentGoesToAFile(t *testing.T) {
     projectDirectory := t.TempDir()
+    out := filepath.Join(projectDirectory, "openapi.json")
 
     withoutInfo := newCommandFixtureRuntime(t, projectDirectory, true, false)
 
-    output, runErr := runOpenApiGenerateCommand(t, NewGenerateCommandFromContainer(), withoutInfo)
+    output, runErr := runOpenApiGenerateCommand(t, NewGenerateCommandFromContainer(), withoutInfo, "--out", out)
     if nil != runErr {
         t.Fatalf("run without info: %v", runErr)
     }
@@ -251,7 +255,7 @@ func TestGenerateCommand_WarnsWhenTheInfoServiceIsAbsent(t *testing.T) {
 
     withInfo := newCommandFixtureRuntime(t, projectDirectory, true, true)
 
-    output, runErr = runOpenApiGenerateCommand(t, NewGenerateCommandFromContainer(), withInfo)
+    output, runErr = runOpenApiGenerateCommand(t, NewGenerateCommandFromContainer(), withInfo, "--out", out)
     if nil != runErr {
         t.Fatalf("run with info: %v", runErr)
     }
@@ -260,3 +264,53 @@ func TestGenerateCommand_WarnsWhenTheInfoServiceIsAbsent(t *testing.T) {
         t.Fatalf("expected no warning once the info service is registered, got:\n%s", output)
     }
 }
+
+/* The documented stdout mode prints the document on the command's one writer, so the warning used to be its first line and melody:openapi:generate > openapi.json wrote a file no parser reads; the document stays parsable and the warning is journaled through the logger the runtime resolves. */
+func TestGenerateCommand_TheStdoutDocumentStaysValidJsonWithoutTheInfoService(t *testing.T) {
+    projectDirectory := t.TempDir()
+
+    withoutInfo := newCommandFixtureRuntime(t, projectDirectory, true, false)
+
+    journal := &recordingOpenApiLogger{}
+    withoutInfo.Container().MustRegister(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return journal, nil
+        },
+    )
+
+    output, runErr := runOpenApiGenerateCommand(t, NewGenerateCommandFromContainer(), withoutInfo)
+    if nil != runErr {
+        t.Fatalf("run without info: %v", runErr)
+    }
+
+    var document map[string]any
+    if unmarshalErr := json.Unmarshal([]byte(output), &document); nil != unmarshalErr {
+        t.Fatalf("expected the writer to carry the document alone, got %v over:\n%s", unmarshalErr, output)
+    }
+
+    if 1 != len(journal.warnings) || false == strings.Contains(journal.warnings[0], "no openapi info service is registered") {
+        t.Fatalf("expected the missing info to be journaled once, got %v", journal.warnings)
+    }
+}
+
+type recordingOpenApiLogger struct {
+    warnings []string
+}
+
+func (instance *recordingOpenApiLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+}
+
+func (instance *recordingOpenApiLogger) Debug(message string, context loggingcontract.Context) {}
+
+func (instance *recordingOpenApiLogger) Info(message string, context loggingcontract.Context) {}
+
+func (instance *recordingOpenApiLogger) Warning(message string, context loggingcontract.Context) {
+    instance.warnings = append(instance.warnings, message)
+}
+
+func (instance *recordingOpenApiLogger) Error(message string, context loggingcontract.Context) {}
+
+func (instance *recordingOpenApiLogger) Emergency(message string, context loggingcontract.Context) {}
+
+var _ loggingcontract.Logger = (*recordingOpenApiLogger)(nil)

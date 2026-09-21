@@ -670,7 +670,7 @@ Where the list itself comes from is the application's business — a constant as
     * [`DefaultCompressionConfig`](../../http/middleware/compression.go)
     * [`CompressionMiddleware`](../../http/middleware/compression.go)
     * [`DefaultCompressionMiddleware`](../../http/middleware/compression.go)
-    * Honors `Accept-Encoding` q-values (RFC 7231), emits `Vary: Accept-Encoding`, and streams the gzip output through [`io.Pipe`](https://pkg.go.dev/io#Pipe) so response bodies never fully land in memory.
+    * Honors `Accept-Encoding` q-values (RFC 7231) — a header of more than sixty-four members is read as unparsable and the response is not compressed, since the members past the cap can carry the refusal the members before it do not, and a legitimate header never reaches the cap —, emits `Vary: Accept-Encoding`, and streams the gzip output through [`io.Pipe`](https://pkg.go.dev/io#Pipe) so response bodies never fully land in memory.
 
 * Rate limiting:
     * [`RateLimitMiddleware`](../../http/middleware/rate_limit.go)

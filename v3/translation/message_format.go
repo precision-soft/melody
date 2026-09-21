@@ -96,16 +96,26 @@ func evaluateArgument(inner []rune, parameters map[string]any, locale string, po
 func stringifyArgument(name string, parameters map[string]any) string {
     value, exists := parameters[name]
     if false == exists {
-        return "{" + name + "}"
+        return absentParameterPlaceholder(name)
     }
 
     return stringifyParameter(value)
 }
 
+/* absentParameterPlaceholder is the one spelling of an absent parameter, shared by the plain placeholder and the plural and select arguments: the plural of an absent count used to render its other branch with the number deleted (" items") and the select of an absent keyword its other branch, the very loss the plain placeholder keeps visible — and count is, by convention, the plural's argument. */
+func absentParameterPlaceholder(name string) string {
+    return "{" + name + "}"
+}
+
 func evaluateSelect(name string, style []rune, parameters map[string]any, locale string, pound string, inPlural bool, depth int) string {
+    value, exists := parameters[name]
+    if false == exists {
+        return absentParameterPlaceholder(name)
+    }
+
     selectors := parseSelectors(style)
 
-    keyword := stringifyParameter(parameters[name])
+    keyword := stringifyParameter(value)
     block, found := selectors[keyword]
     if false == found {
         block, found = selectors["other"]
@@ -119,9 +129,14 @@ func evaluateSelect(name string, style []rune, parameters map[string]any, locale
 }
 
 func evaluatePlural(name string, style []rune, parameters map[string]any, locale string, depth int) string {
+    value, exists := parameters[name]
+    if false == exists {
+        return absentParameterPlaceholder(name)
+    }
+
     selectors := parseSelectors(style)
 
-    number, hasNumber := toFloat(parameters[name])
+    number, hasNumber := toFloat(value)
     if false == hasNumber {
         if block, found := selectors["other"]; true == found {
             return interpolate(block, parameters, locale, "", true, depth+1)

@@ -1713,6 +1713,14 @@ func (instance *CustomHttpConfiguration) SessionTombstoneRetention() time.Durati
 
 **Remedy.** None. To keep one migration connection across several commands deliberately, call `MigrationDatabase` yourself and hold the handle; the registry's `Close` remains the net underneath.
 
+### Translation: the catalogs of one locale are asked in order
+
+**What changed.** [`NewManager`](../translation/manager.go) keeps every catalog of a locale, in the order given, and a lookup asks them in that order until one answers. It used to key the locale on one catalog, so a second catalog of the same locale replaced the first. A catalog whose `Locale()` is empty is refused at construction, as a nil catalog is: the locale chain never asks for the empty locale, so it could never be found.
+
+**Symptom.** An application that handed `NewManager` two catalogs of one locale — one built by the json loader and one by hand, say — gets the messages of both, the earlier catalog answering a message both hold; it used to get the later catalog alone, every message that lived only in the earlier one answering its raw id. An application that passed a catalog with an empty locale panics at construction where it used to boot with a catalog nothing could reach.
+
+**Remedy.** None for the common wiring. An application that relied on the later catalog overriding the earlier one passes the overriding catalog first.
+
 ## v3.0.0
 
 v3 is a separate import path, so an application moves onto it by rewriting its imports rather than by resolving a new version. The entry below is the one rewrite that does not compile afterwards: v1 and v2 keep the identifiers, v3 has never carried them.

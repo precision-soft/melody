@@ -190,12 +190,32 @@ func TestTrans_PathologicallyNestedPluralDoesNotOverflow(t *testing.T) {
     }
 }
 
-func TestTrans_PluralWithMissingArgumentFallsBackToOther(t *testing.T) {
+/* the other branch with an empty pound — " messages" — was the old answer, which deleted the count from the message with nothing pointing at the missing key; the absent argument stays visible as its placeholder, the way the plain placeholder does */
+func TestTrans_PluralWithMissingArgumentRendersTheVisiblePlaceholder(t *testing.T) {
     manager := newTestManager()
 
     result := manager.Trans("inbox", map[string]any{}, "messages", "en")
+    if "{count}" != result {
+        t.Fatalf("expected the absent count to stay visible, got: %q", result)
+    }
+}
+
+/* a parameter present with a nil value is the caller saying so explicitly: the plural keeps rendering its other branch with an empty pound, only the ABSENT key renders as the placeholder */
+func TestTrans_PluralWithAPresentNilArgumentFallsBackToOther(t *testing.T) {
+    manager := newTestManager()
+
+    result := manager.Trans("inbox", map[string]any{"count": nil}, "messages", "en")
     if " messages" != result {
         t.Fatalf("expected the other branch with an empty pound, got: %q", result)
+    }
+}
+
+func TestTrans_SelectWithMissingArgumentRendersTheVisiblePlaceholder(t *testing.T) {
+    manager := newTestManager()
+
+    result := manager.Trans("invite", map[string]any{}, "messages", "en")
+    if "{gender}" != result {
+        t.Fatalf("expected the absent keyword to stay visible, got: %q", result)
     }
 }
 
@@ -216,4 +236,36 @@ func TestNewManager_RefusesANilCatalog(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
         NewManager("en", nil, nil)
     }, "translation catalog is nil")
+}
+
+/* A second catalog of a locale used to replace the first, so every message that lived only in the first answered its raw id; the catalogs of a locale are asked in the order given, the first to answer winning. */
+func TestNewManager_TwoCatalogsOfOneLocaleAreAskedInOrder(t *testing.T) {
+    first := NewMapCatalog("en")
+    first.Add("messages", "greeting", "Hello")
+    first.Add("messages", "shared", "from the first")
+
+    second := NewMapCatalog("en")
+    second.Add("messages", "farewell", "Bye")
+    second.Add("messages", "shared", "from the second")
+
+    manager := NewManager("en", nil, first, second)
+
+    if "Hello" != manager.Trans("greeting", nil, "messages", "en") {
+        t.Fatalf("expected the first catalog to keep answering, got %q", manager.Trans("greeting", nil, "messages", "en"))
+    }
+
+    if "Bye" != manager.Trans("farewell", nil, "messages", "en") {
+        t.Fatalf("expected the second catalog to answer what the first does not hold, got %q", manager.Trans("farewell", nil, "messages", "en"))
+    }
+
+    if "from the first" != manager.Trans("shared", nil, "messages", "en") {
+        t.Fatalf("expected the first catalog to win a message both hold, got %q", manager.Trans("shared", nil, "messages", "en"))
+    }
+}
+
+/* the locale chain never asks for the empty locale, so a catalog whose Locale is empty could never be found: it is refused as the nil one is, instead of being stored under a key nothing reads */
+func TestNewManager_RefusesACatalogWithoutALocale(t *testing.T) {
+    testhelper.AssertPanicsWithError(t, func() {
+        NewManager("en", nil, NewMapCatalog(""))
+    }, "translation catalog carries no locale")
 }

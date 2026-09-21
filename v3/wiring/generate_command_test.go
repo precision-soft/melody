@@ -512,3 +512,42 @@ func TestGenerateCommand_ReportsAnUnusedExcludeOnTheWriter(t *testing.T) {
         t.Fatalf("expected the unused exclude named on the writer, got:\n%s", output)
     }
 }
+
+/* The containment guard read the relative path as text: a directory named ..hidden inside the scanned one started with two dots and passed as outside, and a project directory the output path could not be related to (a relative one against an absolute --out) failed the relation and passed as well. Both are refused now; the sibling directory next to the scanned one stays permitted. */
+func TestGenerateCommand_ReadsTheContainmentOnPathComponents(t *testing.T) {
+    hiddenProject := newCommandFixtureProject(t)
+    if mkdirErr := os.MkdirAll(filepath.Join(hiddenProject, "app", "..hidden"), 0o755); nil != mkdirErr {
+        t.Fatalf("mkdir: %v", mkdirErr)
+    }
+
+    _, runErr := runGenerateCommand(t, hiddenProject, appBindSet(), "--out", filepath.Join("app", "..hidden", "wiring_gen.go"))
+    if nil == runErr || false == strings.Contains(runErr.Error(), "the output path lies inside a scanned package directory") {
+        t.Fatalf("expected a dot-dot-named directory inside the scanned one to be refused, got %v", runErr)
+    }
+
+    relativeProject := newCommandFixtureProject(t)
+    workingDirectory, getwdErr := os.Getwd()
+    if nil != getwdErr {
+        t.Fatalf("getwd: %v", getwdErr)
+    }
+    if chdirErr := os.Chdir(filepath.Dir(relativeProject)); nil != chdirErr {
+        t.Fatalf("chdir: %v", chdirErr)
+    }
+    defer func() {
+        _ = os.Chdir(workingDirectory)
+    }()
+
+    _, runErr = runGenerateCommand(t, filepath.Base(relativeProject), appBindSet(), "--out", filepath.Join(relativeProject, "app", "wiring_gen.go"))
+    if nil == runErr || false == strings.Contains(runErr.Error(), "the output path cannot be related to a scanned package directory") {
+        t.Fatalf("expected an output path the scanned directory cannot be related to to be refused, got %v", runErr)
+    }
+
+    siblingProject := newCommandFixtureProject(t)
+    if mkdirErr := os.MkdirAll(filepath.Join(siblingProject, "appx"), 0o755); nil != mkdirErr {
+        t.Fatalf("mkdir: %v", mkdirErr)
+    }
+
+    if _, runErr = runGenerateCommand(t, siblingProject, appBindSet(), "--out", filepath.Join("appx", "wiring_gen.go")); nil != runErr {
+        t.Fatalf("expected the sibling directory to stay permitted, got %v", runErr)
+    }
+}

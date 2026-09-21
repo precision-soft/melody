@@ -3,6 +3,7 @@ package exception
 import (
     "errors"
     "fmt"
+    "strings"
     "sync"
     "testing"
 )
@@ -133,5 +134,19 @@ func TestError_UnwrapOnANilReceiverAnswersNil(t *testing.T) {
     var target *Error
     if false == errors.As(chain, &target) || "outer" != target.Message() {
         t.Fatalf("expected the walk to reach the outer error past the typed-nil link, got %v", target)
+    }
+}
+
+/* FromError(nil) answers a typed nil, and errors.Join skips only a nil INTERFACE, so a join holding it called Error on the nil receiver and panicked when rendered; Error answers for the receiver as Unwrap already did. */
+func TestError_ErrorOnANilReceiverAnswersInsteadOfDereferencing(t *testing.T) {
+    var typedNil *Error
+
+    if "error carries no value" != typedNil.Error() {
+        t.Fatalf("expected the nil receiver to answer the placeholder message, got %q", typedNil.Error())
+    }
+
+    joined := errors.Join(FromError(nil), errors.New("other"))
+    if false == strings.Contains(joined.Error(), "other") {
+        t.Fatalf("expected the join holding a typed nil to render, got %q", joined.Error())
     }
 }

@@ -3,6 +3,7 @@ package cache
 import (
     "context"
     "errors"
+    "math"
     "reflect"
     "strings"
     "sync"
@@ -1967,5 +1968,51 @@ func TestRemember_AWaitTimeoutShorterThanTheCallbackWithCancelableOffStoresForTh
 
     if 1 != calls {
         t.Fatalf("expected the later calls to coalesce on the one flight, the callback ran %d times", calls)
+    }
+}
+
+/* the zero value is the one shared option the package documents as constructible outside the constructor, and normalising it on the receiver wrote the shared option on every first derivation — the race WithContext exists to close, in a narrower shape; the copy is normalised instead */
+func TestRememberOption_WithContextLeavesAZeroValueSharedOptionUntouched(t *testing.T) {
+    shared := &RememberOption{}
+
+    callerContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    derived := shared.WithContext(callerContext)
+
+    if (RememberOption{}) != *shared {
+        t.Fatalf("expected the zero-value shared option to stay the zero value, got %+v", *shared)
+    }
+
+    if false == derived.EnableStampedeProtection() || callerContext != derived.Context() {
+        t.Fatalf("expected the derived option to carry the constructor defaults and the context, got protection %v", derived.EnableStampedeProtection())
+    }
+}
+
+/* the round-trip runs before the store, so a value the serializer cannot ENCODE is refused by the normalizer rather than by the store: the refusal keeps naming the key and the operation, as the store's own serialization refusal did, instead of answering the bare serializer error */
+func TestRemember_AValueTheSerializerCannotEncodeIsRefusedNamingTheKey(t *testing.T) {
+    for _, option := range []*RememberOption{
+        NewDefaultRememberOption(),
+        NewDefaultRememberOption().WithStampedeProtectionEnabled(false),
+    } {
+        backend := NewInMemoryBackend(0, time.Minute, clock.NewSystemClock())
+        manager := NewManager(backend, NewJsonSerializer())
+
+        _, rememberErr := Remember(manager, "remember:unencodable", time.Minute, func(ctx context.Context) (any, error) {
+            return math.NaN(), nil
+        }, option)
+        if nil == rememberErr || "cache value round-trip failed" != rememberErr.Error() {
+            t.Fatalf("expected the unencodable value to be refused under the framework's message, got %v (protection %v)", rememberErr, option.EnableStampedeProtection())
+        }
+
+        if "remember:unencodable" != exception.LogContext(rememberErr)["key"] {
+            t.Fatalf("expected the refusal to name the key, got %v (protection %v)", exception.LogContext(rememberErr), option.EnableStampedeProtection())
+        }
+
+        if _, exists, _ := backend.Get("remember:unencodable"); true == exists {
+            t.Fatalf("expected the refused value to stay out of the backend (protection %v)", option.EnableStampedeProtection())
+        }
+
+        _ = backend.Close()
     }
 }

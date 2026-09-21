@@ -35,8 +35,26 @@ type Registry struct {
 func (instance *Registry) Describe(routeName string, descriptor Descriptor) *Registry {
     instance.refuseDescriptionWhileServing(routeName)
 
-    instance.descriptorsByRoute[routeName] = descriptor
+    instance.descriptorsByRoute[routeName] = copyDescriptor(descriptor)
     return instance
+}
+
+/* copyDescriptor detaches the descriptor from the slice and the map the caller handed in, and from the ones the registry holds: Descriptor is a value, but its Tags and Responses are references, so the caller's later append or write reached the registry — a tag list built once and reused across routes described every route with the last route's tags — and a reader of Get could write into the registry from the request path with nothing synchronizing the two. The types are reflect.Type values and immutable. */
+func copyDescriptor(descriptor Descriptor) Descriptor {
+    copied := descriptor
+
+    if nil != descriptor.Tags {
+        copied.Tags = append(make([]string, 0, len(descriptor.Tags)), descriptor.Tags...)
+    }
+
+    if nil != descriptor.Responses {
+        copied.Responses = make(map[int]reflect.Type, len(descriptor.Responses))
+        for status, responseType := range descriptor.Responses {
+            copied.Responses[status] = responseType
+        }
+    }
+
+    return copied
 }
 
 /* MarkServing records that the wiring phase is over: the application calls it from Run, at the moment it tells the configuration the same thing, and from then on Describe is refused. A registry a test builds by hand and never marks keeps admitting descriptions, which is the honest state of a registry nobody serves from. */
@@ -60,7 +78,12 @@ func (instance *Registry) refuseDescriptionWhileServing(routeName string) {
     )
 }
 
+/* Get answers a copy of the descriptor, for the reason Describe stores one: the registry is read on the request path, and a slice or map handed out by reference is a write door into it. */
 func (instance *Registry) Get(routeName string) (Descriptor, bool) {
     descriptor, exists := instance.descriptorsByRoute[routeName]
-    return descriptor, exists
+    if false == exists {
+        return Descriptor{}, false
+    }
+
+    return copyDescriptor(descriptor), true
 }
