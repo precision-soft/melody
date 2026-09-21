@@ -27,7 +27,12 @@ func (instance *HttpException) Error() string {
     return instance.message
 }
 
+/* Unwrap keeps the guard Error.Unwrap keeps, for the same reason: errors.Is walks through this link on a nil receiver whenever a typed-nil *HttpException sits in a chain as another error's cause. */
 func (instance *HttpException) Unwrap() error {
+    if nil == instance {
+        return nil
+    }
+
     return instance.causeErr
 }
 
@@ -92,7 +97,7 @@ func IsHttpException(err error) bool {
 }
 
 func AsHttpException(err error) *HttpException {
-    /* the typed nil is refused with the plain one: errors.As walks the chain through Unwrap, and every Unwrap in this package reads a field off its receiver */
+    /* the typed nil is refused with the plain one before the walk: errors.As walks the chain through Unwrap, and the Unwrap doors of this package answer nil on a nil receiver, so a typed nil deeper in the chain ends the walk rather than the process */
     if nil == err || true == isNilInterfaceValue(err) {
         return nil
     }

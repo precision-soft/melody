@@ -79,7 +79,14 @@ func swapDefaultRunnerOption(option RunnerOption) (installed *RunnerOption, prev
     installed = &option
     commandRunnerOptions.installed[installed] = struct{}{}
 
-    return installed, processRunnerOption.Swap(installed)
+    previous = processRunnerOption.Swap(installed)
+
+    /* a later command that displaces a value no command of the group installed has displaced one the HOST put there while the group ran: that value is the host's newer posture, and it is what the last restore has to put back — the one saved when the group began is older. Without this the host's mid-run value survived only while it was still live at the last restore; displaced by a second command, it was lost to the older saved one. */
+    if _, installedByACommand := commandRunnerOptions.installed[previous]; false == installedByACommand {
+        commandRunnerOptions.host = previous
+    }
+
+    return installed, previous
 }
 
 /* restoreDefaultRunnerOption puts back what the command's swap displaced, in whichever order the commands finish: the last command to leave puts the host's own value back over whatever the commands installed in between; a command leaving while others still run puts back the value that was live before it only when its own is the live one, and otherwise leaves the later command's value where it is. A value the HOST installed while the commands ran is neither: the last restore finds it live, sees it was installed by no command, and leaves it — SetDefaultRunnerOption promises to install the host's posture, and putting the older one back over it broke that promise for a host that reconfigures its fallback while a command runs. A compare-and-swap on the last command's own value is not enough for that, because three commands leaving out of order can leave a value of the group live under nobody's name. Two commands with migrations that drop their context share the one fallback for as long as they overlap — the context is the channel that keeps them apart, and a migration that drops it has opted out of that. */

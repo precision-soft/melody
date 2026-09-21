@@ -547,13 +547,13 @@ debug.NewMiddlewareCommand(
 
 **Remedy.** None for the refusals — they surface failures that were being mis-answered. A handler that must serve degraded responses during a session-backend outage stops writing to the session on that path.
 
-### Http: repeated request parameters are typed, and reading one as a single string refuses loudly
+### Http: repeated request parameters are typed, and reading one as a single string answers its first value
 
-**What changed.** A request parameter that appeared once is stored in the bags as a string; a genuinely repeated key (`?tag=a&tag=b`) stays a `[]string`, and `bag.String`/`bag.StringOrDefault` on it panic toward `StringSlice`/`StringAt` instead of guessing. `Request.Input` answers the first value of a repeated key.
+**What changed.** A request parameter that appeared once is stored in the bags as a string; a genuinely repeated key (`?tag=a&tag=b`) stays a `[]string`, and `bag.String`/`bag.StringOrDefault`/`bag.HasNonEmptyString` on it answer its first value, as `Request.Input` and `url.Values.Get` do; the whole list is read with `StringSlice`/`StringAt`.
 
-**Symptom.** Handlers that read single-occurrence query or post parameters through `Input`, `bag.String` or `StringOrDefault` start seeing the real values — they used to receive the empty string for every present parameter. Code that read a repeated key through `bag.String` now panics with a message naming the parameter, where it used to receive `("", true)`.
+**Symptom.** Handlers that read single-occurrence query or post parameters through `Input`, `bag.String` or `StringOrDefault` start seeing the real values — they used to receive the empty string for every present parameter. Code that read a repeated key through `bag.String` receives its first value, where it used to receive `("", true)`.
 
-**Remedy.** Read repeated keys with `bag.StringSlice` or `bag.StringAt`; nothing else changes for well-typed readers.
+**Remedy.** Read repeated keys whole with `bag.StringSlice` or `bag.StringAt`; nothing else changes for well-typed readers.
 
 ### Http: the kernel contract gains `SetMethodPolicy`, and duplicate routes are refused at registration
 
@@ -669,7 +669,7 @@ debug.NewMiddlewareCommand(
 
 ### Bunorm mysql and pgsql: a refusal the server gave by name is never an outage
 
-**What changed.** The transient classifier of the [`mysql`](../../integrations/bunorm/mysql/v3/provider.go) and [`pgsql`](../../integrations/bunorm/pgsql/v3/provider.go) providers reads the identity a server refusal carries — the SQLSTATE on PostgreSQL, the error number on MySQL — before it scans the message for markers, and the caller's own context before it classifies at all. A refusal with an identity is transient only for the classes that mean the server cannot take the connection now (PostgreSQL `08`, `53`, `57`; MySQL 1040, 1053, 1203, 1226) and terminal for every other; a context the caller had already cancelled or let expire is the caller's stop, whichever class its refusal wears.
+**What changed.** The transient classifier of the [`mysql`](../../integrations/bunorm/mysql/v3/provider.go) and [`pgsql`](../../integrations/bunorm/pgsql/v3/provider.go) providers reads the identity a server refusal carries — the SQLSTATE on PostgreSQL, the error number on MySQL — before it scans the message for markers, and the caller's own context before it classifies at all. A refusal with an identity is transient only for the classes that mean the server cannot take the connection now (PostgreSQL `08`, `53`, `57`; MySQL 1040, 1053, 1159, 1203, 1226, and ProxySQL's 9001 and 9002 for the backend it fronts) and terminal for every other; a context the caller had already cancelled or let expire is the caller's stop, whichever class its refusal wears.
 
 **Symptom.** A database named `timeout` or a user named `eof` — any operand the server quotes into its message that happens to carry a transient marker — used to be retried for the whole budget, reported as "failed after max retry attempts", and, behind a read/write splitter, served from the primary in silence; such a refusal now fails on the first attempt under its own name. An outage whose message carried no marker — a `57P03` "cannot connect now", MySQL's 1203 — used to be terminal and is now retried. A caller's expired deadline used to be filed as an unreachable database on the retry-less door and, on the retrying one, cost one retry and two warnings; it is now one warning and no attempt.
 

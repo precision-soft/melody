@@ -3,6 +3,7 @@ package cli
 
 import (
     "context"
+    "testing"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/container"
@@ -10,10 +11,15 @@ import (
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-func newTestRuntime() *testRuntime {
+/* the scope is closed when the TEST ends, not when this constructor returns: a defer here handed every test a scope already closed at its first line, so each assertion about scope reporting and the action's teardown half passed vacuously — the two runtimes the package writes by hand omit that defer on purpose */
+func newTestRuntime(t *testing.T) *testRuntime {
+    t.Helper()
+
     serviceContainer := container.NewContainer()
     scope := serviceContainer.NewScope()
-    defer scope.Close()
+    t.Cleanup(func() {
+        _ = scope.Close()
+    })
 
     return &testRuntime{
         contextValue:   context.Background(),

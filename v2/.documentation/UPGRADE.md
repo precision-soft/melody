@@ -731,11 +731,11 @@ Every section below shipped in the `[v2.13.0]` block of [`CHANGELOG.md`](../CHAN
 
 **Remedy.** None; log-volume alerts keyed on error records may need the new entries accounted for.
 
-### Http/Bag: request values are delivered, and a repeated key read as one string is refused
+### Http/Bag: request values are delivered, and a repeated key read as one string answers its first value
 
-**What changed.** The request bags keep the single and the repeated key apart by type: a query or form key that appeared once is stored as the string it is, a genuinely repeated key (`?a=1&a=2`) stays a string slice. `Request.Input` and the lax accessors (`bag.String`, `bag.StringOrDefault`, `bag.HasNonEmptyString`) deliver the single value they used to silently lose — every value was stored as a slice and the lax accessor answered the empty string for it, so `Input("term")` on `?term=melody` returned `""` with nothing said. Reading a repeated key as one string now panics, naming the key and pointing to `bag.StringSlice`/`bag.StringAt` — never an empty-string guess, never the first element silently hiding the rest.
+**What changed.** The request bags keep the single and the repeated key apart by type: a query or form key that appeared once is stored as the string it is, a genuinely repeated key (`?a=1&a=2`) stays a string slice. `Request.Input` and the lax accessors (`bag.String`, `bag.StringOrDefault`, `bag.HasNonEmptyString`) deliver the single value they used to silently lose — every value was stored as a slice and the lax accessor answered the empty string for it, so `Input("term")` on `?term=melody` returned `""` with nothing said. Reading a repeated key as one string answers its first value, the way `url.Values.Get` does (the release refused it with a panic naming the key; the first patch after it answers the first value instead, because the panic reached every documented read through `bag.StringOrDefault` and `bag.HasNonEmptyString` and turned one duplicated query key into a 500 an unauthenticated client could raise). The whole list is read with `bag.StringSlice`/`bag.StringAt`.
 
-**Symptom.** Handlers reading `Input`/`StringOrDefault` start receiving the values clients always sent. A request that repeats a key read as a single string answers 500 through the kernel's recovery instead of an empty field.
+**Symptom.** Handlers reading `Input`/`StringOrDefault` start receiving the values clients always sent. A request that repeats a key read as a single string answers the first value instead of an empty field.
 
 **Remedy.** None for the ordinary handler — this is the behaviour everyone assumed. Code that genuinely reads multi-value keys uses `bag.StringSlice` (the `all()` analogue), or `bag.StringStrict` for an explicit error.
 

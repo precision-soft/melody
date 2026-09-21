@@ -30,7 +30,7 @@ Important rules:
 - Missing keys return `exists == false` for helpers that expose key presence (for example `String` and `StringStrict`).
 - For conversion helpers (`Int`, `Bool`, `Float64`, `Duration`), the boolean result represents whether a typed value was present/produced (for example, it is `false` when the stored value is `nil`).
 - When a key is present but the stored value cannot be converted, conversion helpers return an error (with the boolean typically `true`, meaning the key was present and conversion was attempted).
-- `String` is intentionally permissive: it returns `""` for non-string scalar stored types, but a `[]string` value panics naming the key — read it with `StringSlice`. Use `StringStrict` when you need validation and errors. `NewParameterBagFromValues` keeps the single and the repeated key apart by type — a key that appeared once is stored as the string it is, a genuinely repeated one stays a `[]string` — which is what lets `String` and `Request.Input` answer single request parameters.
+- `String` is intentionally permissive: it returns `""` for non-string scalar stored types, and a `[]string` value — a genuinely repeated request key — answers its first value, as `Request.Input` and `url.Values.Get` do; the whole list is read with `StringSlice` or `StringAt`. Use `StringStrict` when you need validation and errors. `NewParameterBagFromValues` keeps the single and the repeated key apart by type — a key that appeared once is stored as the string it is, a genuinely repeated one stays a `[]string` — which is what lets `String` and `Request.Input` answer single request parameters.
 
 ## Conversion semantics
 
@@ -115,7 +115,7 @@ func readRequestParameters(
 
 ## Footguns & caveats
 
-- `String` returns `""` for non-string scalar stored types — a `[]string` value panics naming the key, and is read with `StringSlice`; use `StringStrict` to detect type mismatches.
+- `String` returns `""` for non-string scalar stored types — a `[]string` value answers its first value and is read whole with `StringSlice`; use `StringStrict` to detect type mismatches.
 - `StringSlice` and `StringSliceStrict` accept both `[]string` and `string` (single value), returning a slice in both cases.
 - A key present with a `nil` value reports as **unset** from `String`, `StringSlice`, `Int`, `Bool`, `Float64` and `Duration`, so `Has` and those accessors disagree for that state: `Has` reports the key, the accessor reports absence. The strict variants (`StringStrict`, `StringSliceStrict`) report it as absent as well.
 - `ParameterBag.All()` returns a copy of the internal map, deep for the shapes the bag's own writers produce (`[]string`, `map[string]string`); other value types come back as stored.

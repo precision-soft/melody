@@ -134,6 +134,7 @@ func (instance *publishHalf) abandonWedgedWrite(stateMutex *sync.Mutex, read fun
         return wedgedWriteWhileClosing
     }
 
+    /* an owned connection that is already nil answers the caller-owned verdict below with nothing marked: no owner produces that state — the transport nils its connection only inside its close, after closing is raised, and the backplane never nils it — so the branch is unreachable rather than a decision */
     if true == state.ownsConnection && nil != state.connection {
         _ = state.connection.CloseDeadline(time.Now())
 

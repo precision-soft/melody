@@ -482,3 +482,30 @@ func TestRunQueriesWithOption_EscapesTheMigrationNameInsideThePrefixOfEveryPerQu
         }
     }
 }
+
+/* the host's mid-run value is displaced by a SECOND command before the last restore, so the live value at that restore is a command's and the older saved value would be put back — the swap that displaces a value no command installed is the one that sees the host's newer posture, and saves it */
+func TestRestoreDefaultRunnerOption_KeepsAValueTheHostInstalledEvenWhenALaterCommandDisplacedIt(t *testing.T) {
+    t.Cleanup(func() {
+        processRunnerOption.Store(nil)
+        commandRunnerOptions.depth = 0
+        commandRunnerOptions.host = nil
+        commandRunnerOptions.installed = nil
+    })
+
+    var host bytes.Buffer
+    var reconfigured bytes.Buffer
+    var first bytes.Buffer
+    var second bytes.Buffer
+
+    SetDefaultRunnerOption(RunnerOption{Writer: &host, NoColor: true})
+
+    firstInstalled, firstPrevious := swapDefaultRunnerOption(RunnerOption{Writer: &first, NoColor: true})
+    SetDefaultRunnerOption(RunnerOption{Writer: &reconfigured, NoColor: true})
+    secondInstalled, secondPrevious := swapDefaultRunnerOption(RunnerOption{Writer: &second, NoColor: true})
+    restoreDefaultRunnerOption(firstInstalled, firstPrevious)
+    restoreDefaultRunnerOption(secondInstalled, secondPrevious)
+
+    if &reconfigured != resolveDefaultRunnerOption().Writer {
+        t.Fatalf("expected the value the host installed mid-run kept over the older saved one, got %v", resolveDefaultRunnerOption().Writer)
+    }
+}

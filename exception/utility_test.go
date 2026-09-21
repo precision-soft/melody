@@ -1103,3 +1103,47 @@ func TestFromError_AProviderWhoseContextPanicsIsContained(t *testing.T) {
         t.Fatalf("expected the panic value to be kept in the context's place, got %#v", converted.Context())
     }
 }
+
+type panickingMessageError struct{}
+
+func (panickingMessageError) Error() string {
+    panic("Error() panics")
+}
+
+/* FromError runs inside the kernel's recovery defers; an Error() that panics there raised a second panic through the defer that was reporting the first, so the message is rendered the way LogContext renders it */
+func TestFromError_AnErrorWhoseMessagePanicsIsStillWrapped(t *testing.T) {
+    wrapped := FromError(panickingMessageError{})
+
+    if nil == wrapped || "error message panicked: Error() panics" != wrapped.Message() {
+        t.Fatalf("expected the recovered message, got %v", wrapped)
+    }
+
+    if !errors.Is(wrapped, wrapped.Unwrap()) || nil == wrapped.Unwrap() {
+        t.Fatalf("expected the panicking error kept as the cause")
+    }
+}
+
+func TestFromErrorWithLevel_AnErrorWhoseMessagePanicsIsStillWrapped(t *testing.T) {
+    wrapped := FromErrorWithLevel(panickingMessageError{}, loggingcontract.LevelWarning)
+
+    if nil == wrapped || "error message panicked: Error() panics" != wrapped.Message() {
+        t.Fatalf("expected the recovered message, got %v", wrapped)
+    }
+}
+
+func TestFromErrorWithLevelAndContext_AnErrorWhoseMessagePanicsIsStillWrapped(t *testing.T) {
+    wrapped := FromErrorWithLevelAndContext(panickingMessageError{}, loggingcontract.LevelWarning, exceptioncontract.Context{"key": "value"})
+
+    if nil == wrapped || "error message panicked: Error() panics" != wrapped.Message() || "value" != wrapped.Context()["key"] {
+        t.Fatalf("expected the recovered message with the context, got %v", wrapped)
+    }
+}
+
+/* Logged is what the kernel's recovery defers return; the mark on the result is what separates it from FromError alone */
+func TestLogged_AnErrorWhoseMessagePanicsIsMarkedAndReturned(t *testing.T) {
+    logged := Logged(panickingMessageError{})
+
+    if nil == logged || false == IsAlreadyLogged(logged) {
+        t.Fatalf("expected a marked error back, got %v", logged)
+    }
+}

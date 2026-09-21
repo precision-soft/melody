@@ -13,7 +13,7 @@ The `internal` package contains framework-internal helper utilities that are **n
 
 ### Deep copy ([`internal/copy.go`](../../internal/copy.go))
 
-`CopyAnyMap`/`CopyAnySlice` descend into maps and slices **only** — a pointer, or a struct or array holding one, is returned as-is, which is the documented boundary of what session data may safely carry. The traversal memoizes visited nodes, so a node reached through two edges is copied **once** and stays shared inside the copy, a cycle closes onto its own copy rather than onto the live original, and the cost is linear in distinct nodes (the depth-only form was exponential on shared substructure). A depth bound remains as a safety net for genuinely deep data.
+`CopyAnyMap`/`CopyAnySlice` descend into maps and slices **only** — a pointer, or a struct or array holding one, is returned as-is, which is the documented boundary of what session data may safely carry. The traversal memoizes visited nodes, so a node reached through two edges is copied **once** and stays shared inside the copy, a cycle closes onto its own copy rather than onto the live original, and the cost is linear in distinct nodes (the depth-only form was exponential on shared substructure). A depth bound remains as a safety net for genuinely deep data. The memo is keyed on the pointer, the length AND the static type: a defined type over `map[string]any` or `[]any` shares its header with the plain value it was converted from, so without the type the two spelled one key while being copied on different paths, and the typed fast path asserted the reflect path's copy — intermittently, on whichever key the map iteration reached second.
 
 ### Conversions ([`internal/parse.go`](../../internal/parse.go))
 

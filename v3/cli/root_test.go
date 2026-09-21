@@ -27,7 +27,7 @@ func TestNewRoot_SetsNameAndUsage(t *testing.T) {
 }
 
 func TestRoot_CommandNamesAnswersTheRegistrationOrder(t *testing.T) {
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newTestRuntime(t)
     rootCommand := NewRoot("app", "desc")
 
     for _, commandName := range []string{"second", "first"} {
@@ -72,7 +72,7 @@ func TestRoot_SetWriterReachesACommandRegisteredAfterIt(t *testing.T) {
 func runProbeCommandThroughRoot(t *testing.T, setWriterFirst bool) []byte {
     t.Helper()
 
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newTestRuntime(t)
     rootCommand := NewRoot("app", "desc")
     buffer := &bytes.Buffer{}
 
@@ -112,7 +112,7 @@ func TestNewRoot_ExitCodedErrorLeavesRunInsteadOfExitingInside(t *testing.T) {
     urfavecli.OsExiter = func(code int) { exitedWith = code }
     defer func() { urfavecli.OsExiter = originalExiter }()
 
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newTestRuntime(t)
     rootCommand := NewRoot("probe", "probe")
     rootCommand.SetWriter(&bytes.Buffer{})
     rootCommand.SetErrorWriter(&bytes.Buffer{})

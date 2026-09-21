@@ -206,18 +206,39 @@ func TestValue_PresentNilReportsUnsetAcrossAllAccessors(t *testing.T) {
     }
 }
 
-func TestString_PanicsOnAStringSlice(t *testing.T) {
+/* the request bags keep the single and the repeated key apart by type, and a repeated key answers its first value the way Input and url.Values.Get do; the documented reads through StringOrDefault and HasNonEmptyString used to inherit a panic here, raised by one duplicated query key. */
+func TestString_ReadsTheFirstValueOfARepeatedKey(t *testing.T) {
+    parameterBag := NewParameterBagFromValues(url.Values{"name": {"a", "b"}})
+
+    value, exists := String(parameterBag, "name")
+    if false == exists || "a" != value {
+        t.Fatalf("expected the first value of the repeated key, got exists=%v value=%q", exists, value)
+    }
+
+    if "a" != StringOrDefault(parameterBag, "name", "anonymous") {
+        t.Fatalf("expected StringOrDefault to deliver the first value, not the fallback")
+    }
+
+    if false == HasNonEmptyString(parameterBag, "name") {
+        t.Fatalf("expected HasNonEmptyString to see the first value")
+    }
+
+    if slice, exists := StringSlice(parameterBag, "name"); false == exists || 2 != len(slice) {
+        t.Fatalf("expected the whole list through StringSlice, got exists=%v slice=%v", exists, slice)
+    }
+}
+
+func TestString_ReportsAnEmptyListAsUnset(t *testing.T) {
     parameterBag := NewParameterBag()
-    parameterBag.Set("repeated", []string{"1", "2"})
+    parameterBag.Set("tags", []string{})
 
-    defer func() {
-        recoveredValue := recover()
-        if nil == recoveredValue {
-            t.Fatalf("expected the string slice to be refused with a panic")
-        }
-    }()
+    if value, exists := String(parameterBag, "tags"); true == exists || "" != value {
+        t.Fatalf("expected an empty list to read as unset, got exists=%v value=%q", exists, value)
+    }
 
-    _, _ = String(parameterBag, "repeated")
+    if "anonymous" != StringOrDefault(parameterBag, "tags", "anonymous") {
+        t.Fatalf("expected the fallback for an empty list")
+    }
 }
 
 func TestString_DeliversTheSingleOccurrence(t *testing.T) {

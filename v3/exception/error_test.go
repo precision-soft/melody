@@ -2,6 +2,7 @@ package exception
 
 import (
     "errors"
+    "fmt"
     "sync"
     "testing"
 )
@@ -116,5 +117,21 @@ func TestError_ConcurrentContextWriteAndRead_IsOrdered(t *testing.T) {
 
     if nil == sharedError.Context()["serviceName"] {
         t.Fatalf("expected the written key to survive")
+    }
+}
+
+/* errors.As and errors.Is call Unwrap on every link, so a typed-nil *Error stored as another error's cause is walked on a nil receiver — FromError(nil) is the natural producer of that link */
+func TestError_UnwrapOnANilReceiverAnswersNil(t *testing.T) {
+    var typedNil *Error
+
+    if nil != typedNil.Unwrap() {
+        t.Fatalf("expected a nil receiver to unwrap to nil")
+    }
+
+    chain := fmt.Errorf("ctx: %w", NewError("outer", nil, typedNil))
+
+    var target *Error
+    if false == errors.As(chain, &target) || "outer" != target.Message() {
+        t.Fatalf("expected the walk to reach the outer error past the typed-nil link, got %v", target)
     }
 }

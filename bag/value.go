@@ -4,8 +4,6 @@ import (
     "strings"
 
     bagcontract "github.com/precision-soft/melody/bag/contract"
-    "github.com/precision-soft/melody/exception"
-    exceptioncontract "github.com/precision-soft/melody/exception/contract"
     "github.com/precision-soft/melody/internal"
 )
 
@@ -25,17 +23,13 @@ func String(parameterBag bagcontract.ParameterBag, name string) (string, bool) {
         return stringValue, true
     }
 
-    /* a string slice read as one string is refused loudly, never guessed at: the request bags keep the single and the repeated key apart by type, so what lands here is a genuine array. The empty string would lose the value and one element would hide the rest; the slice is read with StringSlice or StringAt. */
-    if _, isSlice := value.([]string); true == isSlice {
-        exception.Panic(
-            exception.NewError(
-                "parameter holds a string slice and cannot be read as one string; read it with StringSlice or StringAt",
-                exceptioncontract.Context{
-                    "parameterName": name,
-                },
-                nil,
-            ),
-        )
+    /* the request bags keep the single and the repeated key apart by type, so a []string landing here is a genuinely repeated key. It answers its FIRST value, the way Input and url.Values.Get answer a repeated key: the shape of a request parameter is chosen by the client, and a refusal here turned every documented read through StringOrDefault or HasNonEmptyString into a panic — a 500 an unauthenticated client could raise with one duplicated query key. The whole list is read with StringSlice or StringAt; an empty list is a key with no value, reported unset like nil. */
+    if sliceValue, isSlice := value.([]string); true == isSlice {
+        if 0 == len(sliceValue) {
+            return "", false
+        }
+
+        return sliceValue[0], true
     }
 
     /* a present value that is neither a string nor a string slice — an int, a bool, a float — reports absent rather than present-but-empty: returning ("", true) defeated StringOrDefault, which substitutes the default only when the value is absent, so an int parameter read through it came back "" instead of the default. Absent is the honest answer for "there is no string here", and it restores the default-fallback contract the sibling accessors keep. */

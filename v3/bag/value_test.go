@@ -2,7 +2,6 @@ package bag
 
 import (
     "net/url"
-    "strings"
     "testing"
 )
 
@@ -208,24 +207,39 @@ func TestValue_PresentNilReportsUnsetAcrossAllAccessors(t *testing.T) {
     }
 }
 
-/* the request bags keep the single and the repeated key apart by type, so a []string landing under String is a genuine array: the empty string would lose the value and one element would hide the rest, which is why the read refuses loudly toward StringSlice/StringAt instead of guessing. */
-func TestString_RefusesASliceNamingTheParameter(t *testing.T) {
+/* the request bags keep the single and the repeated key apart by type, and a repeated key answers its first value the way Input and url.Values.Get do; the documented reads through StringOrDefault and HasNonEmptyString used to inherit a panic here, raised by one duplicated query key. */
+func TestString_ReadsTheFirstValueOfARepeatedKey(t *testing.T) {
+    parameterBag := NewParameterBagFromValues(url.Values{"name": {"a", "b"}})
+
+    value, exists := String(parameterBag, "name")
+    if false == exists || "a" != value {
+        t.Fatalf("expected the first value of the repeated key, got exists=%v value=%q", exists, value)
+    }
+
+    if "a" != StringOrDefault(parameterBag, "name", "anonymous") {
+        t.Fatalf("expected StringOrDefault to deliver the first value, not the fallback")
+    }
+
+    if false == HasNonEmptyString(parameterBag, "name") {
+        t.Fatalf("expected HasNonEmptyString to see the first value")
+    }
+
+    if slice, exists := StringSlice(parameterBag, "name"); false == exists || 2 != len(slice) {
+        t.Fatalf("expected the whole list through StringSlice, got exists=%v slice=%v", exists, slice)
+    }
+}
+
+func TestString_ReportsAnEmptyListAsUnset(t *testing.T) {
     parameterBag := NewParameterBag()
-    parameterBag.Set("tags", []string{"a", "b"})
+    parameterBag.Set("tags", []string{})
 
-    defer func() {
-        recoveredValue := recover()
-        if nil == recoveredValue {
-            t.Fatalf("expected reading a string slice as one string to panic")
-        }
+    if value, exists := String(parameterBag, "tags"); true == exists || "" != value {
+        t.Fatalf("expected an empty list to read as unset, got exists=%v value=%q", exists, value)
+    }
 
-        recoveredErr, isError := recoveredValue.(error)
-        if false == isError || false == strings.Contains(recoveredErr.Error(), "cannot be read as one string") {
-            t.Fatalf("expected the refusal to name the shape, got %v", recoveredValue)
-        }
-    }()
-
-    _, _ = String(parameterBag, "tags")
+    if "anonymous" != StringOrDefault(parameterBag, "tags", "anonymous") {
+        t.Fatalf("expected the fallback for an empty list")
+    }
 }
 
 /* a key that appeared once in url.Values is stored as the string it is, and only a genuinely repeated key stays a slice — the separation String and Input depend on. */

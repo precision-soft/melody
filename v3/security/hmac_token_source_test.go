@@ -952,3 +952,33 @@ func TestHmacTokenSource_AnEnvelopeIssuedInTheFutureIsRefused(t *testing.T) {
         t.Fatalf("unexpected refusal message: %q", timeErr.Error())
     }
 }
+
+/* the refusal fires only when the two queries differ byte for byte, and the journal used to render a reordered pair as two identical strings — the operator read "the queries differ" above two equal lines */
+func TestHmacTokenSource_QueryMismatchByReorderingRendersTwoDifferentQueries(t *testing.T) {
+    signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "wms-service", Secrets: hmacTestSecrets()})
+    headerValue, signErr := signer.Sign("GET", "/internal/ping?b=2&a=1", nil, nil)
+    if nil != signErr {
+        t.Fatalf("sign: %v", signErr)
+    }
+
+    source := hmacTestSource(NewMemoryNonceGuard())
+    runtimeInstance, logger := runtimeWithRecordingLogger()
+
+    token, resolveErr := source.Resolve(
+        runtimeInstance,
+        hmacRequest("GET", "/internal/ping?a=1&b=2", nil, signer.HeaderName(), headerValue),
+    )
+    if nil != resolveErr || true == token.IsAuthenticated() {
+        t.Fatalf("a reordered query must resolve anonymous without error: authenticated=%v err=%v", token.IsAuthenticated(), resolveErr)
+    }
+
+    infoRecords := logger.recordsAtLevel(loggingcontract.LevelInfo)
+    if 1 != len(infoRecords) {
+        t.Fatalf("expected the rejection to be filed once at Info, got %d records", len(infoRecords))
+    }
+
+    signed, request := infoRecords[0].context["signed"], infoRecords[0].context["request"]
+    if signed == request {
+        t.Fatalf("expected the signed and the request query to render differently, both rendered %v", signed)
+    }
+}

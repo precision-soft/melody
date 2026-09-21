@@ -33,7 +33,7 @@ func TestDispatchCommand_ParsesTheArgumentsAgainstTheCommandsOwnFlags(t *testing
     runErr := DispatchCommand(
         context.Background(),
         command,
-        newTestRuntime(),
+        newTestRuntime(t),
         []string{"probe", "--format=json", "alpha"},
         nil,
     )
@@ -61,7 +61,7 @@ func TestDispatchCommand_AnswersTheCommandsOwnError(t *testing.T) {
         },
     }
 
-    runErr := DispatchCommand(context.Background(), command, newTestRuntime(), []string{"probe"}, nil)
+    runErr := DispatchCommand(context.Background(), command, newTestRuntime(t), []string{"probe"}, nil)
 
     if false == errors.Is(runErr, expectedErr) {
         t.Fatalf("expected the command's own error, got %v", runErr)
@@ -89,7 +89,7 @@ func TestDispatchCommand_ReadsATypedNilCommandErrorAsSuccess(t *testing.T) {
         },
     }
 
-    runErr := DispatchCommand(context.Background(), command, newTestRuntime(), []string{"probe"}, nil)
+    runErr := DispatchCommand(context.Background(), command, newTestRuntime(t), []string{"probe"}, nil)
 
     if nil != runErr {
         t.Fatalf("expected a typed nil to read as success, got %v", runErr)
@@ -110,7 +110,7 @@ func TestDispatchCommand_WritesTheCommandsOutputToTheGivenWriter(t *testing.T) {
         },
     }
 
-    if runErr := DispatchCommand(context.Background(), command, newTestRuntime(), []string{"probe"}, buffer); nil != runErr {
+    if runErr := DispatchCommand(context.Background(), command, newTestRuntime(t), []string{"probe"}, buffer); nil != runErr {
         t.Fatalf("expected no error, got %v", runErr)
     }
 
@@ -168,7 +168,7 @@ func TestDispatchCommand_AddsNoBannerAndClosesNoScope(t *testing.T) {
 
 func TestDispatchCommand_PanicsOnANilCommand(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
-        _ = DispatchCommand(context.Background(), nil, newTestRuntime(), []string{"probe"}, nil)
+        _ = DispatchCommand(context.Background(), nil, newTestRuntime(t), []string{"probe"}, nil)
     }, "cli command may not be nil")
 }
 
@@ -177,7 +177,7 @@ func TestDispatchCommand_PanicsOnATypedNilCommand(t *testing.T) {
     var typedNilCommand *testCommand
 
     testhelper.AssertPanicsWithError(t, func() {
-        _ = DispatchCommand(context.Background(), typedNilCommand, newTestRuntime(), []string{"probe"}, nil)
+        _ = DispatchCommand(context.Background(), typedNilCommand, newTestRuntime(t), []string{"probe"}, nil)
     }, "cli command may not be nil")
 }
 
@@ -208,6 +208,6 @@ func TestDispatchCommand_PanicsOnEmptyArguments(t *testing.T) {
     }
 
     testhelper.AssertPanicsWithError(t, func() {
-        _ = DispatchCommand(context.Background(), command, newTestRuntime(), nil, nil)
+        _ = DispatchCommand(context.Background(), command, newTestRuntime(t), nil, nil)
     }, "cli dispatch arguments may not be empty")
 }

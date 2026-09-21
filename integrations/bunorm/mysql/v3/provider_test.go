@@ -1283,6 +1283,9 @@ func TestIsTransientError_AServerOutageWithAnIdentityIsTransient(t *testing.T) {
     outages := []error{
         serverRefusal(1040, "08004", "Too many connections"),
         serverRefusal(1053, "08S01", "Server shutdown in progress"),
+        serverRefusal(1159, "08S01", "Got timeout reading communication packets"),
+        serverRefusal(9001, "HY000", "Max connect timeout reached while reaching hostgroup 0 after 10000ms"),
+        serverRefusal(9002, "HY000", "The hostgroup 0 has no servers available"),
         serverRefusal(1203, "42000", "User melody already has more than 'max_user_connections' active connections"),
     }
 

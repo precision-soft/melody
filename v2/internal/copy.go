@@ -5,13 +5,17 @@ import "reflect"
 /* maxCopyDepth bounds the deep-copy recursion as a safety net for genuinely deep (non-shared) data: a value that legitimately nests past this bound is returned as-is from there on rather than overflowing the goroutine stack — a fatal error that no deferred recover() can catch and which takes down the whole process. Cycles and shared substructure no longer reach this bound at all: the visited map closes a cycle onto its own copy and reuses the copy of a node reached through a second edge, so the traversal is linear in the number of distinct nodes where the depth-only form was exponential — a 28-level value whose every node was reachable through two edges never finished copying, with the caller's lock held the whole time. */
 const maxCopyDepth = 10000
 
-/* visitedKey identifies a container node across the two edges that may reach it: maps are identified by their pointer alone, slices by their backing array pointer AND length, because two slices of one array with different lengths are two different nodes — memoizing on the pointer alone would hand the copy of one to a reader of the other. */
+/* visitedKey identifies a container node across the two edges that may reach it: maps are identified by their pointer, slices by their backing array pointer AND length, because two slices of one array with different lengths are two different nodes — memoizing on the pointer alone would hand the copy of one to a reader of the other. The static TYPE is part of the identity as well: a defined type over map[string]any or []any (a Meta, a claims map) shares its header with the plain value it was converted from, so the two spell the same pointer while being copied on different paths — the plain one on the typed fast path, the defined one through reflection — and the fast path's assertion on a memo the other path had written fell over, intermittently, on whichever key the map iteration reached second. */
 type visitedKey struct {
-    pointer uintptr
-    length  int
+    pointer   uintptr
+    length    int
+    valueType reflect.Type
 }
 
 const mapLength = -1
+
+var plainMapType = reflect.TypeOf(map[string]any(nil))
+var plainSliceType = reflect.TypeOf([]any(nil))
 
 func CopyStringMap[T any](input map[string]T) map[string]T {
     if nil == input {
@@ -45,7 +49,7 @@ func copyAnyMapAtDepth(source map[string]any, depth int, visited map[visitedKey]
         return map[string]any{}
     }
 
-    key := visitedKey{pointer: reflect.ValueOf(source).Pointer(), length: mapLength}
+    key := visitedKey{pointer: reflect.ValueOf(source).Pointer(), length: mapLength, valueType: plainMapType}
     if existing, seen := visited[key]; true == seen {
         return existing.(map[string]any)
     }
@@ -67,7 +71,7 @@ func copyAnySliceAtDepth(source []any, depth int, visited map[visitedKey]any) []
     }
 
     if 0 < len(source) {
-        key := visitedKey{pointer: reflect.ValueOf(source).Pointer(), length: len(source)}
+        key := visitedKey{pointer: reflect.ValueOf(source).Pointer(), length: len(source), valueType: plainSliceType}
         if existing, seen := visited[key]; true == seen {
             return existing.([]any)
         }
@@ -107,7 +111,7 @@ func copyAnyValueAtDepth(value any, depth int, visited map[visitedKey]any) any {
             return value
         }
 
-        key := visitedKey{pointer: reflectedValue.Pointer(), length: reflectedValue.Len()}
+        key := visitedKey{pointer: reflectedValue.Pointer(), length: reflectedValue.Len(), valueType: reflectedValue.Type()}
         if 0 < reflectedValue.Len() {
             if existing, seen := visited[key]; true == seen {
                 return existing
@@ -136,7 +140,7 @@ func copyAnyValueAtDepth(value any, depth int, visited map[visitedKey]any) any {
             return value
         }
 
-        key := visitedKey{pointer: reflectedValue.Pointer(), length: mapLength}
+        key := visitedKey{pointer: reflectedValue.Pointer(), length: mapLength, valueType: reflectedValue.Type()}
         if existing, seen := visited[key]; true == seen {
             return existing
         }

@@ -208,3 +208,23 @@ func TestAsHttpException_TypedNilIsRefusedInsteadOfDereferenced(t *testing.T) {
         t.Fatalf("expected a typed-nil *Error to answer no http exception")
     }
 }
+
+/* errors.Is walks through this link on a nil receiver whenever a typed-nil *HttpException sits in a chain as a cause; errors.As with the http target does not, because it finds the typed nil assignable before unwrapping it */
+func TestHttpException_UnwrapOnANilReceiverAnswersNil(t *testing.T) {
+    var typedNil *HttpException
+
+    if nil != typedNil.Unwrap() {
+        t.Fatalf("expected a nil receiver to unwrap to nil")
+    }
+
+    sentinel := errors.New("sentinel")
+    chain := fmt.Errorf("ctx: %w", NewError("outer", nil, typedNil))
+
+    if true == errors.Is(chain, sentinel) {
+        t.Fatalf("expected the walk to end at the typed-nil link without matching")
+    }
+
+    if nil != AsHttpException(chain) {
+        t.Fatalf("expected no http exception past a typed-nil link")
+    }
+}

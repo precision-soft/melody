@@ -20,7 +20,7 @@ import (
 )
 
 func TestRegister_PanicsOnNilRootCommand(t *testing.T) {
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newTestRuntime(t)
 
     command := &testCommand{
         nameValue:        "test",
@@ -37,7 +37,7 @@ func TestRegister_PanicsOnNilRootCommand(t *testing.T) {
 }
 
 func TestRegister_PanicsOnNilCommand(t *testing.T) {
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newTestRuntime(t)
 
     rootCommand := NewRoot("app", "desc")
 
@@ -64,7 +64,7 @@ func TestRegister_PanicsOnNilRuntime(t *testing.T) {
 }
 
 func TestRegister_PanicsOnEmptyCommandName(t *testing.T) {
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newTestRuntime(t)
     rootCommand := NewRoot("app", "desc")
 
     command := &testCommand{
@@ -82,7 +82,7 @@ func TestRegister_PanicsOnEmptyCommandName(t *testing.T) {
 }
 
 func TestRegister_AppendsCommandAndBindsFields(t *testing.T) {
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newTestRuntime(t)
 
     rootCommand := NewRoot("app", "desc")
 
@@ -127,7 +127,7 @@ func TestRegister_AppendsCommandAndBindsFields(t *testing.T) {
 }
 
 func TestRegister_PanicsOnDuplicateCommandName(t *testing.T) {
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newTestRuntime(t)
     rootCommand := NewRoot("app", "desc")
 
     commandA := &testCommand{
@@ -243,7 +243,7 @@ func TestAggregateCliErrors_AnswersThePlainAggregateWhenTheCommandCarriesNoExitC
 }
 
 func TestRegister_ActionCallsRunWithRuntimeInstance(t *testing.T) {
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newTestRuntime(t)
 
     rootCommand := NewRoot("app", "desc")
 
@@ -302,7 +302,7 @@ func runRegisteredCommand(
 ) string {
     t.Helper()
 
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newTestRuntime(t)
 
     rootCommand := NewRoot("app", "desc")
 
@@ -350,7 +350,7 @@ func runRegisteredStandardFlagsCommand(
 ) string {
     t.Helper()
 
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newTestRuntime(t)
 
     rootCommand := NewRoot("app", "desc")
 
@@ -510,7 +510,7 @@ func newEnvelopeErrorCommand() *testCommand {
 
 func TestRegister_ActionKeepsTheJsonDocumentAloneWhenTheEnvelopeCarriesAnError(t *testing.T) {
     written, runErr := runRegisteredCommandWithRuntime(
-        newTestRuntime(),
+        newTestRuntime(t),
         newEnvelopeErrorCommand(),
         []string{"--format=json"},
     )
@@ -593,7 +593,7 @@ func TestRegister_ActionLeavesTheContainerOpenWhenTheCommandSucceeds(t *testing.
 
 /* the finish banner reads commandErr, and a panic in the command leaves the linear path that assigns it: the unwinding used to run the banner defer over a nil commandErr and print [finished] [success] for a command that died. The panic is re-raised unchanged so the recover handler that owns the process boundary still sees it. */
 func TestRegister_ActionPrintsTheFailedBannerAndRepanicsWhenTheCommandPanics(t *testing.T) {
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newTestRuntime(t)
 
     rootCommand := NewRoot("app", "desc")
 
@@ -640,7 +640,7 @@ func TestRegister_ActionPrintsTheFailedBannerAndRepanicsWhenTheCommandPanics(t *
 
 /* the closes are deliberately left to the outer layers on the panic path: closing the container here would hand the recover handler that resolves the exit logger a closed container, downgrading the fatal record to the emergency fallback */
 func TestRegister_ActionLeavesTheContainerOpenOnThePanicPath(t *testing.T) {
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newTestRuntime(t)
 
     rootCommand := NewRoot("app", "desc")
 
@@ -685,7 +685,7 @@ func (instance *typedNilErrorCommandFailure) Error() string {
 
 /* a command that returns its error through a concrete typed pointer hands over a non-nil interface around a nil value: read as a failure it reached Error() on a nil receiver on the printing line and killed the request with a masked panic in place of the success it meant */
 func TestRegister_ActionReadsATypedNilCommandErrorAsSuccess(t *testing.T) {
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newTestRuntime(t)
 
     rootCommand := NewRoot("app", "desc")
 
@@ -727,7 +727,7 @@ func (instance *failingCloseService) Close() error {
 
 /* asking before closing mirrors the application teardown: a repeated Close answers the first teardown's memoized error, so a command that already closed the container itself — and folded the failure into its own result — would have that one failure presented again as a fresh shutdown incident */
 func TestRegister_ActionDoesNotReportTheCloseFailureOfAContainerTheCommandAlreadyClosed(t *testing.T) {
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newTestRuntime(t)
 
     container.MustRegister(
         runtimeInstance.Container(),
@@ -848,7 +848,7 @@ func TestAggregateCliErrors_ARealExitLinkKeepsItsCode(t *testing.T) {
 
 /* the no-color run is the clean proof, because the colored branch writes the framework's own ansi codes around the data: under --no-color every escape byte in the output can only have come from the data, and the flag's comment promises a redirected file free of them. The negative assertions are what the eye cannot check — a raw \r and a raw escape byte render invisibly. */
 func TestRegister_ActionEscapesTheCommandErrorInTheStatusLine(t *testing.T) {
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newTestRuntime(t)
 
     command := &testCommand{
         nameValue:        "hello",
@@ -880,7 +880,7 @@ func TestRegister_ActionEscapesTheCommandErrorInTheStatusLine(t *testing.T) {
 }
 
 func TestRegister_ActionEscapesTheCommandNameInTheStartedBanner(t *testing.T) {
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newTestRuntime(t)
 
     command := &testCommand{
         nameValue:        "hello\x1b[2J",
@@ -919,7 +919,7 @@ func TestRegister_ActionColoursTheFailedVerdictAfterEscapingTheBanner(t *testing
         },
     }
 
-    written, runErr := runRegisteredCommandWithRuntime(newTestRuntime(), command, nil)
+    written, runErr := runRegisteredCommandWithRuntime(newTestRuntime(t), command, nil)
     if nil == runErr {
         t.Fatal("expected the command's failure to be returned")
     }
@@ -948,7 +948,7 @@ func TestRegister_ActionPrintsThePlainFailedVerdictUnderNoColor(t *testing.T) {
         },
     }
 
-    written, _ := runRegisteredCommandWithRuntime(newTestRuntime(), command, []string{"--no-color"})
+    written, _ := runRegisteredCommandWithRuntime(newTestRuntime(t), command, []string{"--no-color"})
 
     if false == strings.Contains(written, "[boom] [finished] [failed] [") || true == strings.Contains(written, "\x1b[") {
         t.Fatalf("expected the plain failed verdict and no escape sequence, got %q", written)

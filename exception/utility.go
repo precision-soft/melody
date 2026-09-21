@@ -122,7 +122,8 @@ func FromError(err error) *Error {
         context = renderedContextOf(provider)
     }
 
-    return NewError(err.Error(), context, err)
+    /* the message is rendered under a recover, as LogContext renders it: these doors run inside the kernel's recovery defers, where a second panic — an Error() that dereferences what the first panic left nil — would unwind past the 500 and the kernel.exception dispatch that defer exists to produce */
+    return NewError(renderErrorText(err), context, err)
 }
 
 func FromErrorWithLevel(err error, level loggingcontract.Level) *Error {
@@ -137,7 +138,7 @@ func FromErrorWithLevel(err error, level loggingcontract.Level) *Error {
         context = renderedContextOf(provider)
     }
 
-    return newWithLevel(err.Error(), context, err, level)
+    return newWithLevel(renderErrorText(err), context, err, level)
 }
 
 func FromErrorWithLevelAndContext(err error, level loggingcontract.Level, context exceptioncontract.Context) *Error {
@@ -158,7 +159,7 @@ func FromErrorWithLevelAndContext(err error, level loggingcontract.Level, contex
         mergedContext[key] = value
     }
 
-    return newWithLevel(err.Error(), mergedContext, err, level)
+    return newWithLevel(renderErrorText(err), mergedContext, err, level)
 }
 
 /* renderedContextOf reads a provider's context under a recover, the way renderErrorText reads the message: LogContext runs inside recovery defers, and the From* constructors run on the same paths, so a foreign Context() that panics — typically on the very field that made the error worth raising — would otherwise raise a second panic past the recovery that is reporting the first. A panicking context costs the context and nothing else, with the panic value kept in its place. */
