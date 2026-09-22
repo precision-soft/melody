@@ -697,6 +697,7 @@ func (instance *container) closeInternal(closeContext context.Context) error {
     closedPointers := make(map[pointerIdentity]struct{})
     closedValues := make(map[any]struct{})
     failures := make(map[string]string)
+    failureDetails := make(map[string]exceptioncontract.Context)
 
     /* the books of the deadline: what every close cost, the closes that were running when the deadline passed, and the closes reached after it. They are what names the service that ate the budget, which the failure map cannot, since spending it is not a failure. */
     closeDurations := make(map[string]time.Duration)
@@ -767,6 +768,7 @@ func (instance *container) closeInternal(closeContext context.Context) error {
 
         if nil != closeErr {
             failures[candidate.nodeKey] = errorText(closeErr)
+            recordCloseFailureDetails(failureDetails, candidate.nodeKey, closeErr)
         }
     }
 
@@ -893,9 +895,9 @@ func (instance *container) closeInternal(closeContext context.Context) error {
     if nil == resultErr && 0 < len(failures) {
         resultErr = exception.NewError(
             "failed to close container services",
-            withDeadline(exceptioncontract.Context{
+            withDeadline(withCloseFailureDetails(exceptioncontract.Context{
                 "failures": failures,
-            }),
+            }, failureDetails)),
             nil,
         )
     }
@@ -1039,6 +1041,25 @@ func containedClose(close func() error) (closeErr error) {
     }()
 
     return close()
+}
+
+/* recordCloseFailureDetails keeps, beside the one line the failure map holds, the whole of what the close error carries — for a contained panic the recovered value, its type, the frames that ran and the cause chain — under the node's key: the map of failures is rendered as text per service, and text is where a context map and a cause chain collapse to their first line, which is not the whole of what the operator will ever learn. */
+func recordCloseFailureDetails(failureDetails map[string]exceptioncontract.Context, nodeKey string, closeErr error) {
+    details := exception.LogContext(closeErr)
+    if 0 == len(details) {
+        return
+    }
+
+    failureDetails[nodeKey] = details
+}
+
+/* withCloseFailureDetails adds the details map under "failureDetails" only when a close left any, so a teardown whose failures carry nothing beyond their line renders as before. */
+func withCloseFailureDetails(context exceptioncontract.Context, failureDetails map[string]exceptioncontract.Context) exceptioncontract.Context {
+    if 0 < len(failureDetails) {
+        context["failureDetails"] = failureDetails
+    }
+
+    return context
 }
 
 /* a user error whose Error() panics must not abort the teardown loop, so the recorded failure text is produced under a recover. */

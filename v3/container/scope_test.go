@@ -2192,6 +2192,40 @@ func TestScope_Close_ContainsAPanickingContextDoor(t *testing.T) {
     }
 }
 
+
+/* the scope's failure map has the same one-line shape as the container's, and the same details map beside it */
+func TestScope_Close_CarriesTheFailureDetailsOfAPanickingCloseBesideItsLine(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerScopedErr := serviceContainer.RegisterScoped(
+        "app.scoped.panics",
+        func(resolver containercontract.Resolver) (*panickingCloseWithCauseService, error) {
+            return &panickingCloseWithCauseService{cause: errors.New("the drain buffer was nil")}, nil
+        },
+    )
+    if nil != registerScopedErr {
+        t.Fatalf("unexpected scoped register error: %v", registerScopedErr)
+    }
+
+    scopeInstance := serviceContainer.NewScope()
+
+    if _, getErr := scopeInstance.Get("app.scoped.panics"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    closeErr := scopeInstance.Close()
+    if nil == closeErr {
+        t.Fatalf("expected the panicking close to be reported")
+    }
+
+    var typedError *exception.Error
+    if false == errors.As(closeErr, &typedError) {
+        t.Fatalf("expected a melody error, got %T", closeErr)
+    }
+
+    assertCloseFailureDetails(t, typedError.Context(), "scope:service:app.scoped.panics")
+}
+
 /* scopedContextDoorOnlyService is the scoped twin of the container test's fixture: the context-taking close door alone, no Close. */
 type scopedContextDoorOnlyService struct {
     closes      int

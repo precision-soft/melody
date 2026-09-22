@@ -36,7 +36,7 @@ func NewSerializerManager(serializersByMime map[string]serializercontract.Serial
         }
 
         /* a typed nil is refused alongside the untyped one: it passes the plain comparison, gets stored as a live serializer and dereferences its nil receiver on the first request the negotiation routes to it — the construction-time refusal exists precisely to keep that panic off the request path */
-        if nil == serializerInstance || true == internal.IsNilInterface(serializerInstance) {
+        if true == internal.IsNilInterface(serializerInstance) {
             return nil, exception.NewError(
                 "serializer instance is nil",
                 exceptioncontract.Context{

@@ -1435,6 +1435,72 @@ func TestContainer_Close_APanickingCloseCarriesItsCauseAndItsStack(t *testing.T)
     }
 }
 
+
+/* the failure map holds one line per service, and a line is where the recovered value, the frames that ran and the cause of a contained panic collapsed; the details map beside it carries them whole, under the same key, only when a close left any */
+func TestContainer_Close_CarriesTheFailureDetailsOfAPanickingCloseBesideItsLine(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "service.panics",
+        func(resolver containercontract.Resolver) (*panickingCloseWithCauseService, error) {
+            return &panickingCloseWithCauseService{cause: errors.New("the drain buffer was nil")}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get("service.panics"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    closeErr := serviceContainer.Close()
+    if nil == closeErr {
+        t.Fatalf("expected the panicking close to be reported")
+    }
+
+    var typedError *exception.Error
+    if false == errors.As(closeErr, &typedError) {
+        t.Fatalf("expected a melody error, got %T", closeErr)
+    }
+
+    assertCloseFailureDetails(t, typedError.Context(), "service:service.panics")
+}
+
+/* assertCloseFailureDetails reads the details a teardown error carries for one failed node: the line in the failure map, and beside it the recovered value and the frames of the contained panic. */
+func assertCloseFailureDetails(t *testing.T, context exceptioncontract.Context, nodeKey string) {
+    t.Helper()
+
+    failures, hasFailures := context["failures"].(map[string]string)
+    if false == hasFailures || "service close panicked" != failures[nodeKey] {
+        t.Fatalf("expected the failure line under %q, got %v", nodeKey, context["failures"])
+    }
+
+    failureDetails, hasDetails := context["failureDetails"].(map[string]exceptioncontract.Context)
+    if false == hasDetails {
+        t.Fatalf("expected the failure details beside the failure map, got %v", context["failureDetails"])
+    }
+
+    details := failureDetails[nodeKey]
+    if "the drain buffer was nil" != details["recoveredValue"] {
+        t.Fatalf("expected the recovered value under %q, got %v", nodeKey, details)
+    }
+
+    panicStack, hasStack := details["panicStack"].(string)
+    if false == hasStack || false == strings.Contains(panicStack, "panickingCloseWithCauseService") {
+        t.Fatalf("expected the frames that ran under %q, got %v", nodeKey, details["panicStack"])
+    }
+}
+
+/* a teardown whose failures carry nothing beyond their line renders as before: no details key */
+func TestContainer_Close_AFailureWithoutDetailsAddsNoDetailsMap(t *testing.T) {
+    context := withCloseFailureDetails(exceptioncontract.Context{"failures": map[string]string{"a": "refused"}}, map[string]exceptioncontract.Context{})
+
+    if _, hasDetails := context["failureDetails"]; true == hasDetails {
+        t.Fatalf("expected no details map for a teardown that left none, got %v", context)
+    }
+}
+
 /* a panic value that is not an error has no cause to give, and the record still carries what it can */
 func TestContainer_Close_APanickingCloseWithoutAnErrorValueStillRecordsTheStack(t *testing.T) {
     closeErr := closeServiceValue(&panickingCloseWithTextService{})

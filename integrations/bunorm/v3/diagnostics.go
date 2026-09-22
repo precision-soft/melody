@@ -42,7 +42,7 @@ func RouteDiagnostics(logger loggingcontract.Logger) {
 
 /* routeDiagnosticsTo is RouteDiagnostics answering the destination it left live — the one already installed for this logger, or the one it installed — so a registry can keep the destination it routed and hand exactly that one back at its Close, whether or not its logger can be compared. A logger whose dynamic type carries no identity — held by value with a slice, a map or a func inside — is routed afresh on every call, a writer per open for the same journal, which is the cost of not reading its content; nil, and a typed nil, route nothing and answer nil. */
 func routeDiagnosticsTo(logger loggingcontract.Logger) *diagnosticsTarget {
-    if nil == logger || true == isNilInterface(logger) {
+    if true == isNilInterface(logger) {
         return nil
     }
 

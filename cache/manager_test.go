@@ -261,6 +261,41 @@ func TestManager_Many_SkipsCorruptEntriesAndNamesThem(t *testing.T) {
     }
 }
 
+/* the items come as a map, so a refusal that stopped at the first entry the iteration reached named a different key on every call — measured 179/21 over two hundred calls on two refused keys; fifty rounds leave a re-instated "first refusal wins" a chance of about 0.9^50 to hide */
+func TestManager_SetMultipleNamesTheRefusedKeysDeterministically(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+
+    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    defer backend.Close()
+
+    manager := NewManager(backend, NewJsonSerializer())
+
+    for round := 0; round < 50; round++ {
+        setErr := manager.SetMultiple(map[string]any{"b.bad": make(chan int), "a.bad": make(chan int), "good": "kept"}, 0)
+        if nil == setErr {
+            t.Fatalf("expected a serialization error from SetMultiple")
+        }
+
+        var exceptionErr *exception.Error
+        if false == errors.As(setErr, &exceptionErr) {
+            t.Fatalf("expected an exception error, got: %v", setErr)
+        }
+
+        if "a.bad" != exceptionErr.Context()["key"] {
+            t.Fatalf("round %d: expected the first refused key in order, got: %v", round, exceptionErr.Context()["key"])
+        }
+
+        keys, isSlice := exceptionErr.Context()["keys"].([]string)
+        if false == isSlice || 2 != len(keys) || "a.bad" != keys[0] || "b.bad" != keys[1] {
+            t.Fatalf("round %d: expected every refused key in order, got: %v", round, exceptionErr.Context()["keys"])
+        }
+    }
+
+    if _, exists, _ := backend.Get("good"); true == exists {
+        t.Fatalf("expected a refused SetMultiple to write nothing")
+    }
+}
+
 func TestManager_Set_NamesTheKeyOnSerializationFailure(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 

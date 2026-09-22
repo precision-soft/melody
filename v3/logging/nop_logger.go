@@ -30,7 +30,7 @@ func (instance *nopLogger) Enabled(level loggingcontract.Level) bool {
 }
 
 func EnsureLogger(logger loggingcontract.Logger) loggingcontract.Logger {
-    if nil != logger && false == internal.IsNilInterface(logger) {
+    if false == internal.IsNilInterface(logger) {
         return logger
     }
 

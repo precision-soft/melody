@@ -400,7 +400,7 @@ func resolveRecoveredExit(
 
 /* writeExitCertificate writes the record that says the process is exiting and why, at emergency level, so it passes every threshold a deployment configures — the level exists for exactly this record: the system is about to be unusable. The error travels in the context rather than as the record's own subject, because the record's subject is the exit. */
 func writeExitCertificate(logger loggingcontract.Logger, err *exception.Error, exitCode int) {
-    if nil == logger || true == internal.IsNilInterface(logger) {
+    if true == internal.IsNilInterface(logger) {
         return
     }
 

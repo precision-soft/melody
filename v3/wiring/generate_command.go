@@ -128,11 +128,17 @@ func (instance *GenerateCommand) Run(
 
     /* the report goes on the writer when the source goes to a file, and into the journal when the writer IS the source: with --out empty the command has one writer and prints the source on it, so the report lines ahead of the package clause made the stdout mode print a file that does not compile — the same class the sibling openapi command closed for its warning */
     reportWriter := commandContext.Writer()
+    journalWriter := (*journalLineWriter)(nil)
     if "" == commandContext.String("out") {
-        reportWriter = &journalLineWriter{logger: instance.journal(runtimeInstance), command: instance.Name()}
+        journalWriter = &journalLineWriter{logger: instance.journal(runtimeInstance), command: instance.Name()}
+        reportWriter = journalWriter
     }
 
     instance.writeReport(reportWriter, commandContext, report)
+
+    if nil != journalWriter {
+        journalWriter.flush()
+    }
 
     /* every strict violation is carried in one refusal: the run is inspected through its exit and its error record, and an error naming only the first violation found would attribute the failure to a bind typo while the lost constructor coverage beside it never crosses the process boundary */
     if true == commandContext.Bool("strict") {
@@ -244,7 +250,7 @@ func (instance *GenerateCommand) Run(
 
 
 
-/* journalLineWriter carries the report into the journal, one record per line, at the level a report is read at: the report is not a failure, it is what the generation covered and what it did not, and in stdout mode the stream it used to go to is the generated source */
+/* journalLineWriter carries the report into the journal, one record per line, in stdout mode, where the stream the report used to go to is the generated source. The count of what was registered is information; every other line of the report names coverage the wiring lost — a skipped constructor, a bind or an exclude that matched nothing, a file the build constraints left out, bind targets that went unchecked — and is journaled as a warning, because the application's journal drops what lies below its threshold and a deployment that journals to a file usually reads at warning: journaled as information, the whole report vanished from such a journal, and the losses with it. */
 type journalLineWriter struct {
     logger  loggingcontract.Logger
     command string
@@ -262,13 +268,31 @@ func (instance *journalLineWriter) Write(payload []byte) (int, error) {
 
         line := instance.pending[:lineEnd]
         instance.pending = instance.pending[lineEnd+1:]
-
-        if "" != line {
-            instance.logger.Info(line, loggingcontract.Context{"command": instance.command})
-        }
+        instance.journalLine(line)
     }
 
     return len(payload), nil
+}
+
+/* flush journals a last line written without its line end, which the line loop above keeps pending: every line writeReport prints ends with one today, so this is the door for the next line written without it */
+func (instance *journalLineWriter) flush() {
+    line := instance.pending
+    instance.pending = ""
+    instance.journalLine(line)
+}
+
+func (instance *journalLineWriter) journalLine(line string) {
+    if "" == line {
+        return
+    }
+
+    if true == strings.HasPrefix(line, "registered ") {
+        instance.logger.Info(line, loggingcontract.Context{"command": instance.command})
+
+        return
+    }
+
+    instance.logger.Warning(line, loggingcontract.Context{"command": instance.command})
 }
 
 /* journal answers the application's logger, resolved through the runtime so the scope's logger wins over the root's, and the emergency logger when the runtime carries none. The two doors below are the ones the sibling openapi generate command carries, copied rather than shared: the only home a shared door could have is an exported one, and this major publishes no new symbol. The application's journal is the wrong channel when it IS stdout — an empty kernel.log_path makes the container log to stdout, the writer the source goes to — so that configuration is read here and the emergency journal, stderr, carries the report for it. */

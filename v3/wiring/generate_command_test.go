@@ -622,11 +622,16 @@ func TestGenerateCommand_ReadsTheContainmentOnPathComponents(t *testing.T) {
 type journalCapturingLogger struct {
     loggingcontract.Logger
 
-    lines []string
+    lines    []string
+    warnings []string
 }
 
 func (instance *journalCapturingLogger) Info(message string, context loggingcontract.Context) {
     instance.lines = append(instance.lines, message)
+}
+
+func (instance *journalCapturingLogger) Warning(message string, context loggingcontract.Context) {
+    instance.warnings = append(instance.warnings, message)
 }
 
 /* in stdout mode the writer IS the generated source, so the report cannot share it: printed ahead of the package clause, the stream redirected into a file was never a compilable Go file, banner or not. The report goes to the journal, one record per line, through the application's logger. */
@@ -669,8 +674,63 @@ func TestGenerateCommand_TheStdoutModeJournalsTheReportAndPrintsTheSourceAlone(t
         t.Fatalf("expected the report journaled line by line, got %v", journal.lines)
     }
 
-    if false == slices.ContainsFunc(journal.lines, func(line string) bool { return strings.HasPrefix(line, "excluded by build constraints") }) {
-        t.Fatalf("expected the excluded file named in the journal, got %v", journal.lines)
+    if false == slices.ContainsFunc(journal.warnings, func(line string) bool { return strings.HasPrefix(line, "excluded by build constraints") }) {
+        t.Fatalf("expected the excluded file named in the journal as a warning, got %v / %v", journal.lines, journal.warnings)
+    }
+}
+
+/* the lines that name lost coverage are warnings, so a journal read at the usual production threshold keeps them: journaled as information, the whole report vanished from an application logger at warning — the branch every deployment with a log path takes */
+func TestGenerateCommand_TheStdoutModeJournalsTheCoverageLossesAboveAWarningThreshold(t *testing.T) {
+    projectDirectory := newCommandFixtureProject(t)
+    command := NewGenerateCommand(appBindSet())
+    runtimeInstance := newCommandFixtureRuntime(t, projectDirectory)
+
+    journal := &bytes.Buffer{}
+    container.MustRegister[loggingcontract.Logger](
+        runtimeInstance.Container(),
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return logging.NewJsonLogger(journal, loggingcontract.LevelWarning), nil
+        },
+    )
+
+    runErr := melodycli.DispatchCommand(
+        context.Background(),
+        command,
+        runtimeInstance,
+        []string{command.Name(), "--report-excluded"},
+        &bytes.Buffer{},
+    )
+    if nil != runErr {
+        t.Fatalf("expected the generation to succeed, got %v", runErr)
+    }
+
+    if false == strings.Contains(journal.String(), "excluded by build constraints") {
+        t.Fatalf("expected the excluded file to survive a warning threshold, got %q", journal.String())
+    }
+
+    if true == strings.Contains(journal.String(), "registered 1 constructors") {
+        t.Fatalf("expected the count of what was registered to stay information below the threshold, got %q", journal.String())
+    }
+}
+
+/* a last line written without its line end is journaled at the flush, not kept pending for ever */
+func TestJournalLineWriter_FlushJournalsALastLineWithoutALineEnd(t *testing.T) {
+    journal := &journalCapturingLogger{Logger: logging.NewNopLogger()}
+    writer := &journalLineWriter{logger: journal, command: "melody:wiring:generate"}
+
+    if _, writeErr := writer.Write([]byte("registered 2 constructors\nbind x matched no constructor argument")); nil != writeErr {
+        t.Fatalf("unexpected write error: %v", writeErr)
+    }
+
+    if false == slices.Contains(journal.lines, "registered 2 constructors") || 0 != len(journal.warnings) {
+        t.Fatalf("expected the ended line journaled and the pending one held, got %v / %v", journal.lines, journal.warnings)
+    }
+
+    writer.flush()
+
+    if false == slices.Contains(journal.warnings, "bind x matched no constructor argument") {
+        t.Fatalf("expected the flush to journal the pending line as a warning, got %v", journal.warnings)
     }
 }
 

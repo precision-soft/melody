@@ -89,7 +89,7 @@ func swapDefaultRunnerOption(option RunnerOption) (installed *RunnerOption, prev
     return installed, previous
 }
 
-/* restoreDefaultRunnerOption puts back what the command's swap displaced, in whichever order the commands finish: the last command to leave puts the host's own value back over whatever the commands installed in between; a command leaving while others still run puts back the value that was live before it only when its own is the live one, and otherwise leaves the later command's value where it is. A value the HOST installed while the commands ran is neither: the last restore finds it live, sees it was installed by no command, and leaves it — SetDefaultRunnerOption promises to install the host's posture, and putting the older one back over it broke that promise for a host that reconfigures its fallback while a command runs. A compare-and-swap on the last command's own value is not enough for that, because three commands leaving out of order can leave a value of the group live under nobody's name. Two commands with migrations that drop their context share the one fallback for as long as they overlap — the context is the channel that keeps them apart, and a migration that drops it has opted out of that. */
+/* restoreDefaultRunnerOption puts back what the command's swap displaced, in whichever order the commands finish: the last command to leave puts the host's own value back over whatever the commands installed in between; a command leaving while others still run puts back the value that was live before it only when its own is the live one, and otherwise leaves the later command's value where it is. A value the HOST installed while the commands ran is neither: the last restore finds it live, sees it was installed by no command, and leaves it — SetDefaultRunnerOption promises to install the host's posture, and putting the older one back over it broke that promise for a host that reconfigures its fallback while a command runs. A compare-and-swap on the last command's own value is not enough for that, because three commands leaving out of order can leave a value of the group live under nobody's name. The put-back itself is a compare-and-swap on the value that was read: SetDefaultRunnerOption takes no lock of this bookkeeping, so a host value that lands between the read and the put-back would otherwise be overwritten by the older saved one — with the swap it stays, and the read value is left where the host put it. Two commands with migrations that drop their context share the one fallback for as long as they overlap — the context is the channel that keeps them apart, and a migration that drops it has opted out of that. */
 func restoreDefaultRunnerOption(installed *RunnerOption, previous *RunnerOption) {
     commandRunnerOptions.mutex.Lock()
     defer commandRunnerOptions.mutex.Unlock()
@@ -99,8 +99,9 @@ func restoreDefaultRunnerOption(installed *RunnerOption, previous *RunnerOption)
     if 0 >= commandRunnerOptions.depth {
         commandRunnerOptions.depth = 0
 
-        if _, installedByACommand := commandRunnerOptions.installed[processRunnerOption.Load()]; true == installedByACommand {
-            processRunnerOption.Store(commandRunnerOptions.host)
+        live := processRunnerOption.Load()
+        if _, installedByACommand := commandRunnerOptions.installed[live]; true == installedByACommand {
+            processRunnerOption.CompareAndSwap(live, commandRunnerOptions.host)
         }
 
         commandRunnerOptions.host = nil

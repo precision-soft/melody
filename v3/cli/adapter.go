@@ -124,6 +124,11 @@ func runDeclaredValidator(definition clicontract.FlagDefinition) (refusal error)
             return
         }
 
+        /* an exit error is re-raised unchanged, as every recovery boundary of the framework re-raises it: the exit code belongs to whoever owns the process boundary, and that boundary reads it by type assertion on the recovered value, where a refusal carrying it as a cause would be read as a plain failure */
+        if exitErr, isExit := recoveredValue.(*exception.ExitError); true == isExit {
+            panic(exitErr)
+        }
+
         refusal = exception.NewError(
             "the flag's own validator panicked on the declared default: "+fmt.Sprint(recoveredValue),
             nil,

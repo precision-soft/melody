@@ -36,7 +36,7 @@ func LoggerFromRuntime(runtimeInstance runtimecontract.Runtime) loggingcontract.
         return nil
     }
 
-    if nil == loggerInstance || true == internal.IsNilInterface(loggerInstance) {
+    if true == internal.IsNilInterface(loggerInstance) {
         EmergencyLogger().Emergency(
             "the logger resolved from runtime is nil",
             exceptioncontract.Context{

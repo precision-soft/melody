@@ -27,7 +27,7 @@ func isNilInterfaceValue(value any) bool {
 
 /* LogContext assembles the loggable context of an error: its message under "error", the context of the nearest ContextProvider in its chain, the cause chain walked from the error's own wrap link, and every extra map merged on top in order, later entries winning. */
 func LogContext(err error, extra ...exceptioncontract.Context) exceptioncontract.Context {
-    if nil == err || true == isNilInterfaceValue(err) {
+    if true == isNilInterfaceValue(err) {
         mergedContext := (exceptioncontract.Context)(nil)
 
         for _, extraContext := range extra {
@@ -106,7 +106,7 @@ func LogContext(err error, extra ...exceptioncontract.Context) exceptioncontract
 }
 
 func FromError(err error) *Error {
-    if nil == err || true == isNilInterfaceValue(err) {
+    if true == isNilInterfaceValue(err) {
         return nil
     }
 
@@ -127,7 +127,7 @@ func FromError(err error) *Error {
 }
 
 func FromErrorWithLevel(err error, level loggingcontract.Level) *Error {
-    if nil == err || true == isNilInterfaceValue(err) {
+    if true == isNilInterfaceValue(err) {
         return nil
     }
 
@@ -142,7 +142,7 @@ func FromErrorWithLevel(err error, level loggingcontract.Level) *Error {
 }
 
 func FromErrorWithLevelAndContext(err error, level loggingcontract.Level, context exceptioncontract.Context) *Error {
-    if nil == err || true == isNilInterfaceValue(err) {
+    if true == isNilInterfaceValue(err) {
         return nil
     }
 
@@ -194,7 +194,7 @@ func renderErrorText(err error) (text string) {
 
 /* MarkLogged marks the nearest AlreadyLogged implementer in the chain — the depth IsAlreadyLogged reads the mark back from — and returns the error unchanged. The mark lives on that implementer whoever wraps it, so an error one value is shared by several readers is marked for all of them once one has filed it: the container's creation guard relies on exactly that, handing every caller coalesced on one failed creation a wrapper over the same failure so the owner's record is not filed once per waiter. The sharing ends with the creation — a later resolution runs the provider again and carries a fresh, unmarked failure. */
 func MarkLogged(err error) error {
-    if nil == err || true == isNilInterfaceValue(err) {
+    if true == isNilInterfaceValue(err) {
         return err
     }
 
@@ -208,7 +208,7 @@ func MarkLogged(err error) error {
 
 /* Logged answers an error that reports itself already logged, and is what a writer returns after filing its record. An error whose chain carries an AlreadyLogged implementer is marked in place and handed back unchanged, so its identity — and every errors.Is and errors.As its readers perform on it — survives. An error whose chain carries none has nowhere for the mark to live: errors.New, fmt.Errorf and every runtime error make MarkLogged a silent no-op, and the next reader then files the same failure a second time. That error is wrapped in a marked melody error keeping it as its cause, so the mark the writer meant to leave is the mark the reader finds. The wrap cannot change how a status is resolved: it happens exactly when no HttpException is in the chain, which is exactly when the status was already going to be the generic one. */
 func Logged(err error) error {
-    if nil == err || true == isNilInterfaceValue(err) {
+    if true == isNilInterfaceValue(err) {
         return err
     }
 
@@ -223,7 +223,7 @@ func Logged(err error) error {
 
 /* IsAlreadyLogged reads the mark at the depth MarkLogged writes it. It is the single reader: reading the mark off a concrete *Error instead misses a marked HttpException and anything wrapping a marked error, which are then rendered a second time. */
 func IsAlreadyLogged(err error) bool {
-    if nil == err || true == isNilInterfaceValue(err) {
+    if true == isNilInterfaceValue(err) {
         return false
     }
 
@@ -268,7 +268,7 @@ const causeChainCapacityHint = 8
 func causesOf(err error) []error {
     if singleUnwrapper, isSingleUnwrapper := err.(interface{ Unwrap() error }); true == isSingleUnwrapper {
         causeErr := singleUnwrapper.Unwrap()
-        if nil == causeErr || true == isNilInterfaceValue(causeErr) {
+        if true == isNilInterfaceValue(causeErr) {
             return nil
         }
 
@@ -282,7 +282,7 @@ func causesOf(err error) []error {
 
     causeErrs := make([]error, 0, len(multiUnwrapper.Unwrap()))
     for _, causeErr := range multiUnwrapper.Unwrap() {
-        if nil == causeErr || true == isNilInterfaceValue(causeErr) {
+        if true == isNilInterfaceValue(causeErr) {
             continue
         }
 
@@ -297,7 +297,7 @@ func causesOf(err error) []error {
 }
 
 func BuildCauseChain(causeErr error, maxDepth int) []string {
-    if nil == causeErr || true == isNilInterfaceValue(causeErr) {
+    if true == isNilInterfaceValue(causeErr) {
         return nil
     }
 
@@ -324,7 +324,7 @@ func buildCauseChainFromRoots(roots []error, maxDepth int) []string {
         pending = pending[1:]
 
         /* a typed-nil link is the nil its producer meant and contributes nothing */
-        if nil == current || true == isNilInterfaceValue(current) {
+        if true == isNilInterfaceValue(current) {
             continue
         }
 
@@ -365,7 +365,7 @@ func buildCauseContextChainFromRoots(roots []error, maxDepth int) []map[string]a
         pending = pending[1:]
 
         /* a typed-nil link is the nil its producer meant and contributes nothing */
-        if nil == current || true == isNilInterfaceValue(current) {
+        if true == isNilInterfaceValue(current) {
             continue
         }
 

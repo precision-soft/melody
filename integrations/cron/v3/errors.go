@@ -53,7 +53,7 @@ func (instance *commandTimeoutFailure) Unwrap() error {
 
 /* commandTimeoutCause answers the cause a timeout error wraps: the sentinel alone when the command reported nothing, and the sentinel over the command's own failure when it did, so both stay reachable down one chain. */
 func commandTimeoutCause(runErr error) error {
-    if nil == runErr || true == isNilInterface(runErr) {
+    if true == isNilInterface(runErr) {
         return ErrCommandTimeout
     }
 

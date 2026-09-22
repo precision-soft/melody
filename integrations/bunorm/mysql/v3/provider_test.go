@@ -1371,3 +1371,19 @@ func TestOpenContext_ALiveServerRefusalSpelledAroundAMarkerIsNotFiledAsUnreachab
         }
     }
 }
+
+/* the nil guards of this package read a value through isNilInterface alone: it answers true for the nil interface itself, so no `nil ==` needs to stand beside it, and true for a typed nil, which `nil ==` cannot see */
+func TestIsNilInterface_AnswersTheNilInterfaceAndTheTypedNil(t *testing.T) {
+    if false == isNilInterface(nil) {
+        t.Fatalf("expected the nil interface to be read as nil")
+    }
+
+    var typedNil *testing.T
+    if false == isNilInterface(typedNil) {
+        t.Fatalf("expected a typed nil to be read as nil")
+    }
+
+    if true == isNilInterface(t) {
+        t.Fatalf("expected a live pointer to be read as present")
+    }
+}

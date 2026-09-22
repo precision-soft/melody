@@ -209,6 +209,29 @@ func TestFilterRouteManifestByZone_RefusesAZoneThatIsNotDeclared(t *testing.T) {
 }
 
 /* the empty zone is read the way the command reads its empty --zone flag: no gate, the whole manifest — not the routes whose own zone is empty, which is the third reading the door used to give it */
+/* the door reads the zone the way the command reads its flag, surrounding space included: the command trims, so a zone the command accepts was refused by the door under a sentence that says the two read alike */
+func TestFilterRouteManifestByZone_ReadsAZoneWithSurroundingSpaceAsTheCommandDoes(t *testing.T) {
+    manifest := BuildRouteManifest(manifestTestRouter().RouteDefinitions())
+
+    trimmed, trimmedErr := FilterRouteManifestByZone(manifest, " "+RouteZoneFrontend+" ")
+    if nil != trimmedErr {
+        t.Fatalf("expected the padded zone read as the declared one, got %v", trimmedErr)
+    }
+
+    exact, exactErr := FilterRouteManifestByZone(manifest, RouteZoneFrontend)
+    if nil != exactErr {
+        t.Fatalf("unexpected refusal: %v", exactErr)
+    }
+
+    if len(exact.Routes) != len(trimmed.Routes) || 0 == len(trimmed.Routes) {
+        t.Fatalf("expected the padded zone to answer the %d routes of the exact one, got %d", len(exact.Routes), len(trimmed.Routes))
+    }
+
+    if _, blankErr := FilterRouteManifestByZone(manifest, "   "); nil != blankErr {
+        t.Fatalf("expected a blank zone read as no gate, got %v", blankErr)
+    }
+}
+
 func TestFilterRouteManifestByZone_AnEmptyZoneAnswersTheWholeManifest(t *testing.T) {
     manifest := BuildRouteManifest(manifestTestRouter().RouteDefinitions())
 

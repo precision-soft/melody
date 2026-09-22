@@ -48,7 +48,7 @@ func SerializerMustFromRuntime(runtimeInstance runtimecontract.Runtime) serializ
 /* SerializerFromRuntime resolves the request serializer and answers nil when it cannot, with the failure logged through the soft logger resolver. The typed-nil branch is latent defense: the container refuses a provider-returned typed nil with an error today, so it is reachable only through a resolution path without that refusal — but a typed nil that slipped through would pass the plain comparison, look live to the result handler and dereference its nil receiver on the first Serialize of the request path. */
 func SerializerFromRuntime(runtimeInstance runtimecontract.Runtime) serializercontract.Serializer {
     serializerInstance, err := runtime.FromRuntime[serializercontract.Serializer](runtimeInstance, ServiceSerializer)
-    if nil == serializerInstance || true == internal.IsNilInterface(serializerInstance) || nil != err {
+    if true == internal.IsNilInterface(serializerInstance) || nil != err {
         if nil != err {
             logger := logging.LoggerFromRuntime(runtimeInstance)
             if nil != logger {

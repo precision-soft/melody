@@ -136,7 +136,7 @@ func IsHttpException(err error) bool {
 
 func AsHttpException(err error) *HttpException {
     /* the typed nil is refused with the plain one before the walk: errors.As walks the chain through Unwrap, and the Unwrap doors of this package answer nil on a nil receiver, so a typed nil deeper in the chain ends the walk rather than the process */
-    if nil == err || true == isNilInterfaceValue(err) {
+    if true == isNilInterfaceValue(err) {
         return nil
     }
 

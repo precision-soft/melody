@@ -3911,3 +3911,44 @@ func TestLockstepNumericBoundAgreesWithValidator(t *testing.T) {
         }
     }
 }
+
+/* the parse of a validate tag is memoized: the nine predicates of the mirror split the same tag again for every field of every document, and the document is generated per request — measured, about thirty allocations per tag per document before the memo. The memo hands out the one parse by identity, so a second reading of a tag allocates nothing and reads the very maps the first one built. */
+func TestParsedTagRules_AnswersOneParsePerTag(t *testing.T) {
+    tag := "notBlank,min=2,regex=^[a-z]+$"
+
+    first := parsedTagRules(tag)
+    second := parsedTagRules(tag)
+
+    if 3 != len(first) || "notBlank" != first[0].name || "2" != first[1].params["value"] || "^[a-z]+$" != first[2].params["value"] {
+        t.Fatalf("expected the three rules as splitRule reads them, got %+v", first)
+    }
+
+    if reflect.ValueOf(first[1].params).Pointer() != reflect.ValueOf(second[1].params).Pointer() {
+        t.Fatalf("expected the second reading to answer the memoized parse, got a fresh one")
+    }
+
+    allocations := testing.AllocsPerRun(20, func() {
+        if 3 != len(parsedTagRules(tag)) {
+            t.Fatalf("expected the memoized rules")
+        }
+    })
+
+    if 0 != allocations {
+        t.Fatalf("expected a memoized reading to allocate nothing, got %v allocations", allocations)
+    }
+}
+
+/* the mirror answers the same facets through the memo as through the parse it replaced: the tag matrix of this file is run through applyValidation twice on fresh schemas, and the two documents agree */
+func TestApplyValidation_AnswersTheSameFacetsOnTheMemoizedParse(t *testing.T) {
+    for _, tag := range []string{"notBlank,min=2", "email", "min=1", "greaterThan=0", "min=1,max=5", "min=2,max=8", "regex=^x$", "min", "min(5)", "notEmpty(foo)", "regex=", "min=-1", "-", ""} {
+        firstSchema := &Schema{Type: "string"}
+        firstRejects := applyValidation(firstSchema, tag, nil)
+
+        secondSchema := &Schema{Type: "string"}
+        secondRejects := applyValidation(secondSchema, tag, nil)
+
+        if firstRejects != secondRejects || false == reflect.DeepEqual(firstSchema, secondSchema) {
+            t.Fatalf("expected the same facets for %q on both readings, got %+v / %+v", tag, firstSchema, secondSchema)
+        }
+    }
+}

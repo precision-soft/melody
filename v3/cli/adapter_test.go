@@ -484,3 +484,30 @@ func TestNewEngineFlag_ADefaultWhoseValidatorPanicsIsRefusedByFlagName(t *testin
         },
     })
 }
+
+/* an exit error raised by the validator is re-raised as itself, the way every recovery boundary of the framework re-raises it: read as a refusal carrying it, the process boundary — which reads the exit by type assertion — would have exited as for a plain failure */
+func TestNewEngineFlag_AValidatorThatPanicsWithAnExitErrorReRaisesIt(t *testing.T) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected the exit error to be re-raised")
+        }
+
+        exitErr, isExit := recoveredValue.(*exception.ExitError)
+        if false == isExit {
+            t.Fatalf("expected the exit error itself, got %T: %v", recoveredValue, recoveredValue)
+        }
+
+        if 7 != exitErr.ExitCode() {
+            t.Fatalf("expected exit code 7, got %d", exitErr.ExitCode())
+        }
+    }()
+
+    newEngineFlag(&clicontract.IntFlag{
+        Name:  "limit",
+        Value: 3,
+        Validator: func(value int) error {
+            panic(exception.NewExitError(7, exception.NewError("the validator decided an exit", nil, nil)))
+        },
+    })
+}

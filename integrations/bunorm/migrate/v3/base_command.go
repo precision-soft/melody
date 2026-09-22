@@ -175,7 +175,7 @@ func (instance *baseCommand) managerLabel(commandContext clicontract.Context) st
 /* journal answers the application's logger, resolved through the runtime so the scope's logger wins over the root's, and the emergency logger when the runtime carries none — a process that runs migrations without wiring a logger still has a journal of last resort. It resolves for itself rather than through the framework's LoggerFromRuntime, which files an emergency record of its own and answers nil where this door wants a fallback. */
 func (instance *baseCommand) journal(runtimeInstance runtimecontract.Runtime) loggingcontract.Logger {
     logger, resolveErr := runtime.FromRuntime[loggingcontract.Logger](runtimeInstance, logging.ServiceLogger)
-    if nil != resolveErr || nil == logger || true == isNilInterface(logger) {
+    if nil != resolveErr || true == isNilInterface(logger) {
         return logging.EmergencyLogger()
     }
 

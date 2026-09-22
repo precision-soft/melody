@@ -21,6 +21,9 @@ func TestRuneDisplayWidth_AnswersTheCellsATerminalRenders(t *testing.T) {
         {name: "variation selector", value: '\ufe0f', expected: 0},
         {name: "trailing hangul jamo", value: '\u1160', expected: 0},
         {name: "narrow punctuation", value: '-', expected: 1},
+        {name: "control byte, escaped before it is measured", value: '\x01', expected: 1},
+        {name: "first rune past ascii, a c1 control", value: '\u0080', expected: 1},
+        {name: "soft hyphen, the first format character past ascii", value: '\u00ad', expected: 0},
     }
 
     for _, testCase := range cases {

@@ -60,7 +60,7 @@ func (instance *Provider) OpenContext(ctx context.Context, params bunorm.Connect
         ctx = context.Background()
     }
 
-    if nil == logger || true == isNilInterface(logger) {
+    if true == isNilInterface(logger) {
         logger = logging.EmergencyLogger()
     }
 

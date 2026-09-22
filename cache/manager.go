@@ -1,6 +1,7 @@
 package cache
 
 import (
+    "sort"
     "strconv"
     "strings"
     "time"
@@ -175,20 +176,34 @@ func (instance *Manager) Many(keys []string) (map[string]any, error) {
     return result, nil
 }
 
+/* SetMultiple serializes every entry before the backend sees any of them, so a refusal writes nothing. The refusal names the keys it refused under "keys", sorted, with "key" the first of them and the cause its own: the items come as a map, and a refusal that stopped at the first entry the iteration happened to reach named a different key on every call. */
 func (instance *Manager) SetMultiple(items map[string]any, ttl time.Duration) error {
     payloads := make(map[string][]byte, len(items))
+    var refusedKeys []string
+    var refusalByKey map[string]error
     for key, value := range items {
         payload, serializeErr := instance.serializer.Serialize(value)
         serializeErr = normalizeThirdPartyError(serializeErr)
         if nil != serializeErr {
-            return exception.NewError(
-                "cache value serialization failed",
-                exceptioncontract.Context{"key": key},
-                serializeErr,
-            )
+            if nil == refusalByKey {
+                refusalByKey = make(map[string]error)
+            }
+            refusedKeys = append(refusedKeys, key)
+            refusalByKey[key] = serializeErr
+            continue
         }
 
         payloads[key] = payload
+    }
+
+    if 0 < len(refusedKeys) {
+        sort.Strings(refusedKeys)
+
+        return exception.NewError(
+            "cache value serialization failed",
+            exceptioncontract.Context{"key": refusedKeys[0], "keys": refusedKeys},
+            refusalByKey[refusedKeys[0]],
+        )
     }
 
     return normalizeThirdPartyError(instance.backend.SetMultiple(payloads, ttl))

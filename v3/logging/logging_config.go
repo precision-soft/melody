@@ -41,7 +41,7 @@ func LoggingConfigurationFromModules(moduleConfigurations map[string]any) loggin
     }
 
     /* the typed nil is refused above the assertion, which would otherwise accept it: the boot then dies inside the logger provider, naming service.logger instead of the configuration that was registered wrong */
-    if nil == raw || true == internal.IsNilInterface(raw) {
+    if true == internal.IsNilInterface(raw) {
         actualType := "<nil>"
         if nil != raw {
             actualType = fmt.Sprintf("%T", raw)

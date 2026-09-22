@@ -689,6 +689,7 @@ func closeCreatedScopeInstances(
     closedPointers := make(map[pointerIdentity]struct{})
     closedValues := make(map[any]struct{})
     failures := make(map[string]string)
+    failureDetails := make(map[string]exceptioncontract.Context)
 
     if 0 < len(cycleNodeKeys) {
         failures["scope.dependencyCycle"] = "dependency cycle detected: " + strings.Join(cycleNodeKeys, ", ")
@@ -724,6 +725,7 @@ func closeCreatedScopeInstances(
         closeErr := closeServiceValueWithin(closeContext, closeable, contextCloseable)
         if nil != closeErr {
             failures[nodeKey] = errorText(closeErr)
+            recordCloseFailureDetails(failureDetails, nodeKey, closeErr)
         }
     }
 
@@ -742,9 +744,9 @@ func closeCreatedScopeInstances(
 
     return exception.NewError(
         "failed to close scope services",
-        exceptioncontract.Context{
+        withCloseFailureDetails(exceptioncontract.Context{
             "failures": failures,
-        },
+        }, failureDetails),
         nil,
     )
 }

@@ -6,6 +6,7 @@ import (
     "regexp"
     "strconv"
     "strings"
+    "sync"
     "time"
 )
 
@@ -669,8 +670,8 @@ func scalarSchemaRejectsAll(schema *Schema) bool {
 func zeroValueRejectsAbsentProperty(field reflect.StructField, schema *Schema) bool {
     isPointer := reflect.Ptr == field.Type.Kind()
 
-    for _, rule := range splitRules(field.Tag.Get("validate")) {
-        name, params := splitRule(rule)
+    for _, rule := range parsedTagRules(field.Tag.Get("validate")) {
+        name, params := rule.name, rule.params
 
         switch name {
         case "min":
@@ -730,8 +731,8 @@ func pointerBoundRequiresPresence(field reflect.StructField) bool {
         return false
     }
 
-    for _, rule := range splitRules(field.Tag.Get("validate")) {
-        name, _ := splitRule(rule)
+    for _, rule := range parsedTagRules(field.Tag.Get("validate")) {
+        name := rule.name
         if "greaterThan" == name || "lessThan" == name {
             return true
         }
@@ -926,8 +927,8 @@ func isRequired(field reflect.StructField, schema *Schema) bool {
     /* an omitted pointer or interface field dereferences to nothing, which notBlank rejects as "this field is required" */
     absenceIsNil := reflect.Ptr == field.Type.Kind() || reflect.Interface == field.Type.Kind()
 
-    for _, rule := range splitRules(field.Tag.Get("validate")) {
-        name, _ := splitRule(rule)
+    for _, rule := range parsedTagRules(field.Tag.Get("validate")) {
+        name := rule.name
 
         if "notEmpty" == name {
             /* notEmpty on a fixed-length array is vacuous: the validator measures len(), which for [N]T (N >= 1) is always N, so it never rejects the field, present or absent — a non-pointer fixed array is therefore not required. A *[N]T stays required, since the validator rejects the nil pointer. */
@@ -956,8 +957,8 @@ func fixedArrayNotEmptyIsUnsatisfiable(field reflect.StructField) bool {
         return false
     }
 
-    for _, rule := range splitRules(field.Tag.Get("validate")) {
-        name, _ := splitRule(rule)
+    for _, rule := range parsedTagRules(field.Tag.Get("validate")) {
+        name := rule.name
         if "notEmpty" == name {
             return true
         }
@@ -974,8 +975,8 @@ func fixedArrayNotEmptyIsVacuous(field reflect.StructField) bool {
         return false
     }
 
-    for _, rule := range splitRules(field.Tag.Get("validate")) {
-        name, _ := splitRule(rule)
+    for _, rule := range parsedTagRules(field.Tag.Get("validate")) {
+        name := rule.name
         if "notEmpty" == name {
             return true
         }
@@ -1066,8 +1067,8 @@ func applyValidation(schema *Schema, validateTag string, components map[string]*
         rejectsAll = true
     }
 
-    for _, rule := range splitRules(validateTag) {
-        name, params := splitRule(rule)
+    for _, rule := range parsedTagRules(validateTag) {
+        name, params := rule.name, rule.params
 
         switch name {
         case "email":
@@ -1557,8 +1558,8 @@ func tagHasInvalidSyntax(validateTag string) bool {
 
 /* reports whether a validate tag carries parameters on a constraint that cannot consume them: the validator fails such a rule closed (createConstraintWithParams returns invalid-rule before Constraint.Validate runs), so the field accepts no value of any kind — including a struct behind a $ref/allOf, which the in-switch guards below never see because applyValidation returns early for those schemas. */
 func tagHasParamsOnNonParameterizable(validateTag string) bool {
-    for _, rule := range splitRules(validateTag) {
-        name, params := splitRule(rule)
+    for _, rule := range parsedTagRules(validateTag) {
+        name, params := rule.name, rule.params
         if 0 == len(params) {
             continue
         }
@@ -1574,8 +1575,8 @@ func tagHasParamsOnNonParameterizable(validateTag string) bool {
 
 /* reports whether a validate tag carries parameters a PARAMETERIZABLE constraint cannot consume: min/max/greaterThan/lessThan read only the "value" key and regex only "pattern"/"value", so a non-empty parameter set lacking the recognized key makes WithParams fail the rule closed (createConstraintWithParams returns invalid-rule before Constraint.Validate runs), and the field accepts no value of any kind. Mirrors tagHasParamsOnNonParameterizable for the parameterizable constraints. A bare constraint with no parameters at all is a distinct refusal with its own guard, tagHasBareParameterizedConstraint. */
 func tagHasUnconsumedParameterizedParams(validateTag string) bool {
-    for _, rule := range splitRules(validateTag) {
-        name, params := splitRule(rule)
+    for _, rule := range parsedTagRules(validateTag) {
+        name, params := rule.name, rule.params
         if 0 == len(params) {
             continue
         }
@@ -1599,8 +1600,8 @@ func tagHasUnconsumedParameterizedParams(validateTag string) bool {
 
 /* reports whether a validate tag names a parameterized constraint (min/max/greaterThan/lessThan/regex) with no parameters at all: the registered instance is the template WithParams is called on, not a fallback, so the validator fails such a rule closed (createConstraintWithParams answers "constraint requires parameters" before Constraint.Validate runs) and the field accepts no value of any kind. The defaults the mirror used to advertise for these — minLength 1, maxLength 100, an exclusive zero bound, a match-everything pattern — were the pre-repair validator's silent configurations and no longer exist. */
 func tagHasBareParameterizedConstraint(validateTag string) bool {
-    for _, rule := range splitRules(validateTag) {
-        name, params := splitRule(rule)
+    for _, rule := range parsedTagRules(validateTag) {
+        name, params := rule.name, rule.params
         if 0 != len(params) {
             continue
         }
@@ -1616,8 +1617,8 @@ func tagHasBareParameterizedConstraint(validateTag string) bool {
 
 /* reports whether a regex rule names an EMPTY pattern: the empty pattern compiles to an expression matching every string, so the validator's WithParams refuses it at construction (constraint_regex.go) and the rule fails closed before any value is examined — the field accepts no value of any kind. A bare regex with no parameters is the bare-parameterized case, and a parameter set without the "pattern"/"value" key is the unconsumed-params case; both are answered by their own guards before this question is asked, so an empty answer from patternParam here can only mean an explicitly empty pattern. */
 func tagHasEmptyRegexPattern(validateTag string) bool {
-    for _, rule := range splitRules(validateTag) {
-        name, params := splitRule(rule)
+    for _, rule := range parsedTagRules(validateTag) {
+        name, params := rule.name, rule.params
         if "regex" != name || 0 == len(params) {
             continue
         }
@@ -1632,8 +1633,8 @@ func tagHasEmptyRegexPattern(validateTag string) bool {
 
 /* reports whether a validate tag carries a constraint the runtime validator rejects outright for the value a $ref/allOf schema stands for AND for its null, so the field is unconditionally unsatisfiable server-side. greaterThan/lessThan reject every non-numeric value through their "value must be numeric" default branch — and the nil pointer through their own nil-pointer branch — whatever the component turns out to be. notBlank judges a string, so it refuses the referenced value ("value must be a string", constraint_not_blank.go) and the nil pointer alike ("this field is required"), a struct and a named collection equally. notEmpty depends on the component: it measures the length of a string, array, slice or map and falls into constraint_not_empty.go's default branch for everything else, so it rejects a struct outright but accepts a named collection that carries entries — the referencedKind the caller resolved is what tells the two apart, and an empty one means the struct reading. The nil-SKIPPING refusals (min/max and the format constraints) belong to tagRefusesNonStringValue instead, because they leave a nullable field its null. */
 func tagRejectsReferencedValue(validateTag string, referencedKind string) bool {
-    for _, rule := range splitRules(validateTag) {
-        name, _ := splitRule(rule)
+    for _, rule := range parsedTagRules(validateTag) {
+        name := rule.name
         switch name {
         case "greaterThan", "lessThan", "notBlank":
             return true
@@ -1649,8 +1650,8 @@ func tagRejectsReferencedValue(validateTag string, referencedKind string) bool {
 
 /* reports whether a validate tag carries a string-only constraint whose Validate refuses every non-string value while passing a nil pointer: min/max ("value must be a string", constraint_min_length.go / constraint_max_length.go) and email/alpha/numeric/alphanumeric/regex (the same refusal in each constraint file). Against a referenced component — a struct or a named collection, neither of which is a string — or a promoted embed, every non-null value is therefore refused, and the null alone survives where the field is nullable. notBlank refuses the null as well and lives in tagRejectsReferencedValue. */
 func tagRefusesNonStringValue(validateTag string) bool {
-    for _, rule := range splitRules(validateTag) {
-        name, _ := splitRule(rule)
+    for _, rule := range parsedTagRules(validateTag) {
+        name := rule.name
         switch name {
         case "min", "max", "email", "alpha", "numeric", "alphanumeric", "regex":
             return true
@@ -1662,8 +1663,8 @@ func tagRefusesNonStringValue(validateTag string) bool {
 
 /* reports whether a validate tag carries a bare notEmpty, the constraint that floors the length of the collection a $ref stands for. A notEmpty carrying parameters never reaches this question: the validator fails such a rule closed and tagHasParamsOnNonParameterizable has already answered for it. */
 func tagRequiresNonEmptyValue(validateTag string) bool {
-    for _, rule := range splitRules(validateTag) {
-        name, _ := splitRule(rule)
+    for _, rule := range parsedTagRules(validateTag) {
+        name := rule.name
         if "notEmpty" == name {
             return true
         }
@@ -1674,8 +1675,8 @@ func tagRequiresNonEmptyValue(validateTag string) bool {
 
 /* reports whether a min/max/greaterThan/lessThan tag carries a bound the validator refuses at construction: parseIntStrict (strconv.Atoi) rejects anything that is not an integer in its entirety, and min/max additionally refuse a negative bound — a length is never negative (constraint_min_length.go / constraint_max_length.go), where the pre-repair validator silently clamped or inverted it. createConstraintWithParams then fails the rule and validateRule returns the error BEFORE the field value is examined, so the validator rejects every value of every kind — a nil pointer included — making the field unconditionally unsatisfiable (null too). A negative greaterThan/lessThan bound is a legitimate declaration and stays out; a bound the constraint merely enforces strictly (a too-large min) still lets Validate run and is handled by the per-kind branches, not here. */
 func tagRejectsAllViaNumericBound(validateTag string) bool {
-    for _, rule := range splitRules(validateTag) {
-        name, params := splitRule(rule)
+    for _, rule := range parsedTagRules(validateTag) {
+        name, params := rule.name, rule.params
         if "min" != name && "max" != name && "greaterThan" != name && "lessThan" != name {
             continue
         }
@@ -1704,6 +1705,32 @@ func patternParam(params map[string]string) string {
     }
 
     return params["value"]
+}
+
+/* parsedTagRule is one rule of a validate tag as splitRule reads it; the params map is shared by every reader of the memo and is never written after the parse. */
+type parsedTagRule struct {
+    name   string
+    params map[string]string
+}
+
+/* parsedTagRulesCache memoizes the parse of a validate tag: the schema mirror asks nine predicates of every tagged field and each one split the tag again — measured, about ten parses and thirty allocations per tag, once per field, on every document the spec handler generates, which is once per request. Tags are struct tags, compile-time constants, so the key space is the program's own set of distinct tags and cannot be grown by a request; the form is the validator's parsedValidationTagCache. */
+var parsedTagRulesCache sync.Map
+
+func parsedTagRules(validateTag string) []parsedTagRule {
+    if cached, exists := parsedTagRulesCache.Load(validateTag); true == exists {
+        return cached.([]parsedTagRule)
+    }
+
+    var rules []parsedTagRule
+    for _, rule := range splitRules(validateTag) {
+        name, params := splitRule(rule)
+        rules = append(rules, parsedTagRule{name: name, params: params})
+    }
+
+    /* LoadOrStore rather than Store so a concurrent first touch settles on ONE parse, the rules and their maps being shared by identity */
+    stored, _ := parsedTagRulesCache.LoadOrStore(validateTag, rules)
+
+    return stored.([]parsedTagRule)
 }
 
 func splitRules(validateTag string) []string {

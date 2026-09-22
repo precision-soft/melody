@@ -515,7 +515,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
             finalResponse = exceptionEvent.Response()
 
-            finalResponse = instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, finalResponse, sessionManager, sessionInstance, requestLogger, eventDispatcher)
+            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, sessionManager, sessionInstance, requestLogger, eventDispatcher)
         }()
 
         /* the session is loaded here, after the recovery defer is installed, and must not move back up with the rest of the request setup: both Manager.Session and Manager.NewSession turn a storage outage into a panic, and above the guard that panic escapes ServeHttp — net/http closes the connection with no response, the terminate listener never fires and the access-log line is lost */
@@ -545,7 +545,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
             finalResponse = renderErrorResponse(runtimeInstance, melodyRequest, nethttp.StatusBadRequest, "bad request", nil)
 
-            finalResponse = instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, finalResponse, sessionManager, sessionInstance, requestLogger, eventDispatcher)
+            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, sessionManager, sessionInstance, requestLogger, eventDispatcher)
 
             return
         }
@@ -574,7 +574,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
             finalResponse = renderErrorResponse(runtimeInstance, melodyRequest, statusCode, message, nil)
 
-            finalResponse = instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, finalResponse, sessionManager, sessionInstance, requestLogger, eventDispatcher)
+            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, sessionManager, sessionInstance, requestLogger, eventDispatcher)
 
             return
         }
@@ -604,7 +604,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         if nil != kernelRequestEvent.Response() {
             finalResponse = kernelRequestEvent.Response()
 
-            finalResponse = instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, finalResponse, sessionManager, sessionInstance, requestLogger, eventDispatcher)
+            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, sessionManager, sessionInstance, requestLogger, eventDispatcher)
 
             return
         }
@@ -741,7 +741,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         if nil != kernelControllerEvent.Response() {
             finalResponse = kernelControllerEvent.Response()
 
-            finalResponse = instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, finalResponse, sessionManager, sessionInstance, requestLogger, eventDispatcher)
+            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, sessionManager, sessionInstance, requestLogger, eventDispatcher)
 
             return
         }
@@ -801,7 +801,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         }
 
         finalResponse = response
-        finalResponse = instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, finalResponse, sessionManager, sessionInstance, requestLogger, eventDispatcher)
+        instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, sessionManager, sessionInstance, requestLogger, eventDispatcher)
     })
 }
 
@@ -835,30 +835,33 @@ func (instance *Kernel) invokeErrorHandlerSafely(
     return instance.errorHandler(runtimeInstance, writer, request, handlerErr)
 }
 
-/* dispatchResponseAndWrite is the one exit of every request path through ServeHttp: the response the path arrived at is published on kernel.response, the response the listeners answered with is written, and the body of the response they swapped out is closed so a file-backed body — FileResponse, ServeReader — is not leaked. Six paths used to carry this block as six copies, kept alike by hand. */
+/* dispatchResponseAndWrite is the one exit of every request path through ServeHttp: the response the path arrived at is published on kernel.response, the response the listeners answered with is written, and the body of the response they swapped out is closed so a file-backed body — FileResponse, ServeReader — is not leaked. Six paths used to carry this block as six copies, kept alike by hand.
+
+   The response is handed in by reference and written back at every step, because the caller's variable is what the recovery of ServeHttp reads when the write panics: written back only on return, a panic inside the write — a session storage whose Save panics, a Response of the application whose accessors do — left the caller naming the response the listeners had discarded, so the recovery closed that one a second time and the file-backed response they had swapped in never at all. */
 func (instance *Kernel) dispatchResponseAndWrite(
     runtimeInstance runtimecontract.Runtime,
     melodyRequest httpcontract.Request,
     writer nethttp.ResponseWriter,
-    finalResponse httpcontract.Response,
+    finalResponse *httpcontract.Response,
     sessionManager sessioncontract.Manager,
     sessionInstance sessioncontract.Session,
     requestLogger loggingcontract.Logger,
     eventDispatcher eventcontract.EventDispatcher,
-) httpcontract.Response {
-    kernelResponseEvent := NewKernelResponseEvent(melodyRequest, finalResponse)
+) {
+    kernelResponseEvent := NewKernelResponseEvent(melodyRequest, *finalResponse)
     _, eventKernelResponseErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelResponse, kernelResponseEvent)
     instance.logEventDispatchError(requestLogger, "kernel response error", eventKernelResponseErr)
 
-    if nil != finalResponse && finalResponse != kernelResponseEvent.Response() {
-        closeDiscardedResponseBody(finalResponse, requestLogger)
+    if nil != *finalResponse && *finalResponse != kernelResponseEvent.Response() {
+        closeDiscardedResponseBody(*finalResponse, requestLogger)
     }
 
-    return writeResponse(
+    *finalResponse = kernelResponseEvent.Response()
+    *finalResponse = writeResponse(
         runtimeInstance,
         melodyRequest,
         writer,
-        kernelResponseEvent.Response(),
+        *finalResponse,
         sessionManager,
         sessionInstance,
         instance.options.ForwardedHeadersPolicy,

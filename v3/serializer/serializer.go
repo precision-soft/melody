@@ -33,7 +33,7 @@ func (instance *JsonSerializer) Serialize(value any) ([]byte, error) {
 }
 
 func (instance *JsonSerializer) Deserialize(payload []byte, target any) error {
-    if nil == target || true == internal.IsNilInterface(target) {
+    if true == internal.IsNilInterface(target) {
         return exception.NewError("deserialize target is nil", nil, nil)
     }
 

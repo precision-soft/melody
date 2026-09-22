@@ -732,7 +732,7 @@ func argumentsOrEmpty(arguments []string) []string {
 
 /* errorTextOrEmpty keeps the document's error field a string on every row: absent on a run that succeeded means a field whose json type changes with the outcome, which is the shape the machine contracts of this family were taken off. */
 func errorTextOrEmpty(err error) string {
-    if nil == err || true == isNilInterface(err) {
+    if true == isNilInterface(err) {
         return ""
     }
 
@@ -1035,7 +1035,7 @@ func withSiblingFailure(base exceptioncontract.Context, prefix string, sibling e
         merged[key] = value
     }
 
-    if nil == sibling || true == isNilInterface(sibling) {
+    if true == isNilInterface(sibling) {
         return merged
     }
 
@@ -1053,7 +1053,7 @@ func withSiblingFailure(base exceptioncontract.Context, prefix string, sibling e
     merged[prefix+"Context"] = siblingContext
 
     causeChain := []string{}
-    for current := errors.Unwrap(sibling); nil != current && false == isNilInterface(current); current = errors.Unwrap(current) {
+    for current := errors.Unwrap(sibling); false == isNilInterface(current); current = errors.Unwrap(current) {
         causeChain = append(causeChain, current.Error())
 
         if 8 <= len(causeChain) {

@@ -71,8 +71,12 @@ func (instance *ParameterBag) Get(name string) (any, bool) {
     return copyStoredParameterValue(value), true
 }
 
+/* Has asks for presence alone and reads the map under the lock without the copy Get pays: routed through Get, a stored []string cost a copy of itself to answer a boolean. */
 func (instance *ParameterBag) Has(name string) bool {
-    _, exists := instance.Get(name)
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
+
+    _, exists := instance.parameters[name]
 
     return exists
 }

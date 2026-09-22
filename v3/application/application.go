@@ -392,7 +392,7 @@ func (instance *Application) resolveExitLogger() loggingcontract.Logger {
     }
 
     containerLogger, loggerErr := logging.LoggerFromContainer(instance.kernel.ServiceContainer())
-    if nil != loggerErr || nil == containerLogger || true == internal.IsNilInterface(containerLogger) {
+    if nil != loggerErr || true == internal.IsNilInterface(containerLogger) {
         /* the typed-nil clause is latent defense: the container refuses a provider-returned or overridden typed nil with an error today, but one that did slip through a future resolution path would pass the plain comparison and answer the Closed probe below with a nil receiver — a panic in the one handler that must not panic, in place of the emergency fallback this resolver exists to provide */
         return instance.exitFileLogger(logger)
     }
