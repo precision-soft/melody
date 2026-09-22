@@ -5,7 +5,7 @@ import (
 
     melodyhttp "github.com/precision-soft/melody/v3/http"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
-    melodysecurity "github.com/precision-soft/melody/v3/security"
+    examplesecurity "github.com/precision-soft/melody/v3/.example/security"
 )
 
 /* RouteManifestForRuntime projects the exposed named routes into the RouteManifest shape the frontend RouteGenerator (melody-routes.ts) consumes, injected into every page as window.melodyRoutes. It reuses the framework BuildRouteManifest so it applies the same RouteAttributeExpose opt-in filter as the melody:routes:manifest export command: an example must model shipping only deliberately-exposed route metadata to the browser rather than dumping every route's pattern, requirements and defaults — internal routes stay server-side.
@@ -38,25 +38,25 @@ func RouteManifestForRuntime(runtimeInstance runtimecontract.Runtime) (melodyhtt
 func RoutesJsonFromRuntime(runtimeInstance runtimecontract.Runtime) (string, error) {
     manifest, manifestErr := RouteManifestForRuntime(runtimeInstance)
     if nil != manifestErr {
-        return `{"routes":[]}`, manifestErr
+        return EmptyRoutesJson, manifestErr
     }
 
     payload, marshalErr := json.Marshal(manifest)
     if nil != marshalErr {
-        return `{"routes":[]}`, marshalErr
+        return EmptyRoutesJson, marshalErr
     }
 
     return string(payload), nil
 }
 
-func callerIsAuthenticated(runtimeInstance runtimecontract.Runtime) bool {
-    securityContext, found := melodysecurity.SecurityContextFromRuntime(runtimeInstance)
-    if false == found {
-        return false
-    }
+/* EmptyRoutesJson is the manifest a reader answers when it has none to give.
+The page renders it so its scripts still parse something, and the loss is
+journaled beside it rather than carried to the browser in silence. */
+const EmptyRoutesJson = `{"routes":[]}`
 
-    token := securityContext.Token()
-    if nil == token {
+func callerIsAuthenticated(runtimeInstance runtimecontract.Runtime) bool {
+    token, found := examplesecurity.TokenFromRuntime(runtimeInstance)
+    if false == found {
         return false
     }
 

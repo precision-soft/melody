@@ -83,7 +83,7 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
         if "" != normalizedPassword {
             /* bcrypt reads at most 72 bytes of the plaintext, so a longer password is refused as the caller's mistake instead of surfacing as a hashing failure */
             if security.PasswordMaximumBytes < len(normalizedPassword) {
-                return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "password must not exceed 72 bytes"), nil
+                return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, security.PasswordTooLongMessage), nil
             }
 
             passwordHash, hashErr := security.HashPassword(normalizedPassword)
@@ -134,13 +134,8 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
 }
 
 func Actor(runtimeInstance melodyruntimecontract.Runtime) (string, []string) {
-    securityContext, exists := melodysecurity.SecurityContextFromRuntime(runtimeInstance)
+    token, exists := security.TokenFromRuntime(runtimeInstance)
     if false == exists {
-        return "", []string{}
-    }
-
-    token := securityContext.Token()
-    if nil == token {
         return "", []string{}
     }
 

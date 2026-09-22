@@ -11,6 +11,7 @@ import (
     "strings"
     "sync"
     "time"
+    "unicode/utf8"
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
@@ -1047,14 +1048,21 @@ func containedClose(close func() error) (closeErr error) {
 /* closeFailureStackLimit bounds the frames one failed close contributes. A contained panic carries the whole debug.Stack of the goroutine that ran the close — about a kilobyte on an ordinary one, three on a deep one — and the teardown error is ONE record the application journals, so a shutdown that loses twenty services wrote sixty kilobytes of it in a single line. The top frames are the ones that name the close; what the cut drops is the runtime's own tail. */
 const closeFailureStackLimit = 2048
 
-/* boundedCloseFailureDetail cuts one detail to the limit above, naming the cut so the reader knows the tail is missing rather than absent. A detail that is not text, or not there, is answered unchanged. */
+/* boundedCloseFailureDetail cuts one detail to the limit above, naming the cut so the reader knows the tail is missing rather than absent. A detail that is not text, or not there, is answered unchanged.
+
+   The cut backs off to a rune boundary. The limit is counted in BYTES, and one of the two details it bounds is the recovered value — the panic value as the SERVICE wrote it, so arbitrary application text, where the frames beside it are ASCII. A cut taken at the byte alone split a multi-byte rune and put an invalid UTF-8 sequence into the one record the operator reads, which a json journal then re-writes as the replacement character. */
 func boundedCloseFailureDetail(value any) any {
     text, isText := value.(string)
     if false == isText || closeFailureStackLimit >= len(text) {
         return value
     }
 
-    return text[:closeFailureStackLimit] + fmt.Sprintf("\n\t… cut, %d of %d bytes kept", closeFailureStackLimit, len(text))
+    kept := closeFailureStackLimit
+    for 0 < kept && false == utf8.ValidString(text[:kept]) {
+        kept--
+    }
+
+    return text[:kept] + fmt.Sprintf("\n\t… cut, %d of %d bytes kept", kept, len(text))
 }
 
 /* recordCloseFailureDetails keeps, beside the one line the failure map holds, what the close error carries BEYOND that line — for a contained panic the recovered value, its type and the frames that ran — under the node's key: the map of failures is rendered as text per service, and text is where a context map and a cause chain collapse to their first line, which is not the whole of what the operator will ever learn.
@@ -1074,13 +1082,19 @@ func recordCloseFailureDetails(
         delete(details, "error")
     }
 
-    details["panicStack"] = boundedCloseFailureDetail(details["panicStack"])
-    details["recoveredValue"] = boundedCloseFailureDetail(details["recoveredValue"])
-
+    /* a key is bounded only where it IS: LogContext answers a NIL map for an error
+    that is nil or typed nil, and the guard that reaches here is nil != closeErr,
+    which a typed nil passes -- so writing the two keys unconditionally assigned
+    into a nil map and ended the teardown with "assignment to entry in nil map".
+    Under a teardown armed in waves that write runs on a goroutine with no recover
+    above it, so it took the process with it rather than one service's line. */
     for _, boundedKey := range []string{"panicStack", "recoveredValue"} {
-        if nil == details[boundedKey] {
-            delete(details, boundedKey)
+        existing, exists := details[boundedKey]
+        if false == exists {
+            continue
         }
+
+        details[boundedKey] = boundedCloseFailureDetail(existing)
     }
 
     if 0 == len(details) {

@@ -9,6 +9,7 @@ import (
     store2fa "github.com/precision-soft/melody/v3/.example/twofactor"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
+    examplesecurity "github.com/precision-soft/melody/v3/.example/security"
     melodysecurity "github.com/precision-soft/melody/v3/security"
     "github.com/precision-soft/melody/v3/security/totp"
 )
@@ -17,12 +18,12 @@ import (
 
    The two doors used to read a `user` query parameter, and the route was public. That pair let anyone bind a second factor they held to any identifier they liked and read back whether a code satisfied it, and — the insert being a plain one — left the named account unable to enroll ever after. Taken from the token, the enrollment door writes the caller's own row and the verification door reads it, so replacing an enrollment is the account's own doing. */
 func enrolledIdentifier(runtimeInstance melodyruntimecontract.Runtime) (string, bool) {
-    securityContext, exists := melodysecurity.SecurityContextFromRuntime(runtimeInstance)
+    token, exists := examplesecurity.TokenFromRuntime(runtimeInstance)
     if false == exists {
         return "", false
     }
 
-    identifier := securityContext.Token().UserIdentifier()
+    identifier := token.UserIdentifier()
     if "" == identifier {
         return "", false
     }

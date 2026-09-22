@@ -4,6 +4,7 @@ import (
     nethttp "net/http"
 
     "github.com/precision-soft/melody/v3/.example/presenter"
+    examplesecurity "github.com/precision-soft/melody/v3/.example/security"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v3/security"
@@ -22,12 +23,10 @@ type principalView struct {
 
 func MeHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        securityContext, exists := melodysecurity.SecurityContextFromRuntime(runtimeInstance)
+        token, exists := examplesecurity.TokenFromRuntime(runtimeInstance)
         if false == exists {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusUnauthorized, "unauthorized"), nil
         }
-
-        token := securityContext.Token()
 
         payload := mePayload{
             UserIdentifier: token.UserIdentifier(),

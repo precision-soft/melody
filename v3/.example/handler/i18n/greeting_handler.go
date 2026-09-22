@@ -5,6 +5,7 @@ import (
     "strconv"
 
     "github.com/precision-soft/melody/v3/.example/presenter"
+    melodybag "github.com/precision-soft/melody/v3/bag"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     melodytranslation "github.com/precision-soft/melody/v3/translation"
@@ -21,12 +22,12 @@ func GreetingHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         translator := melodytranslation.TranslatorMustFromContainer(runtimeInstance.Container())
 
-        locale := queryString(request, "locale")
+        locale := melodybag.StringOrDefault(request.Query(), "locale", "")
         if "" == locale {
             locale = "en"
         }
 
-        name := queryString(request, "name")
+        name := melodybag.StringOrDefault(request.Query(), "name", "")
         if "" == name {
             name = "world"
         }
@@ -41,27 +42,12 @@ func GreetingHandler() melodyhttpcontract.Handler {
     }
 }
 
-func queryString(request melodyhttpcontract.Request, name string) string {
-    value, exists := request.Query().Get(name)
-    if false == exists {
-        return ""
-    }
-
-    switch typed := value.(type) {
-    case string:
-        return typed
-    case []string:
-        if 0 == len(typed) {
-            return ""
-        }
-        return typed[0]
-    default:
-        return ""
-    }
-}
-
+/* queryInt reads the count through StringOrDefault rather than through bag.Int:
+bag.Int refuses a repeated key, which arrives as a []string and falls to its
+default branch, while StringOrDefault answers the first value the way the rest
+of the example reads a query parameter. */
 func queryInt(request melodyhttpcontract.Request, name string) int {
-    parsed, parseErr := strconv.Atoi(queryString(request, name))
+    parsed, parseErr := strconv.Atoi(melodybag.StringOrDefault(request.Query(), name, ""))
     if nil != parseErr {
         return 0
     }

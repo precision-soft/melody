@@ -552,7 +552,6 @@ func (instance *ManagerRegistry) Close() error {
     return instance.CloseWithContext(context.Background())
 }
 
-/* CloseWithContext is Close under a deadline its caller declares, which is the door the unbounded wait below was written to expect. The pools are torn down whatever the deadline says — a close travelling the wire is what the teardown is FOR — and what the deadline bounds is the wait for opens that were still in flight when the refusal was published: those end against the closed flag on their own, so a caller told the teardown is over while one is still in the air is told something true about this registry and false about the process. */
 /* namedCloser is one thing the teardown has to close and the name it is reported under. The pools and the migration databases were closed by two loops that differed in the label suffix and in nothing else — the same accumulators, the same nil skip, the same first-cause rule written twice, which is two places for the rule to drift apart. */
 type namedCloser struct {
     name  string
@@ -570,6 +569,7 @@ func sortedNamesOf[T any](entries map[string]T) []string {
     return names
 }
 
+/* CloseWithContext is Close under a deadline its caller declares, which is the door the unbounded wait below was written to expect. The pools are torn down whatever the deadline says — a close travelling the wire is what the teardown is FOR — and what the deadline bounds is the wait for opens that were still in flight when the refusal was published: those end against the closed flag on their own, so a caller told the teardown is over while one is still in the air is told something true about this registry and false about the process. */
 func (instance *ManagerRegistry) CloseWithContext(closeContext context.Context) error {
     /* the refusal is published under the lock and the pools are torn down outside it. A pool close travels the wire — COM_QUIT to a peer that may be partitioned, and the migration connection deliberately lifts its write deadlines — so a teardown held inside the critical section parks every caller on the registry lock for as long as the driver waits, including the ones the closed flag above exists to refuse at once. The maps are snapshotted, never emptied: the entry refusal reads the flag rather than the map, and a manager handed out before the snapshot keeps working through its own pool's close. */
     instance.lock.Lock()

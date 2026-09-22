@@ -5,6 +5,7 @@ import (
 
     "github.com/precision-soft/melody/v3/.example/message"
     "github.com/precision-soft/melody/v3/.example/presenter"
+    melodybag "github.com/precision-soft/melody/v3/bag"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
     melodymessagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -27,24 +28,15 @@ func PublishHandler(bus melodymessagebuscontract.Bus) melodyhttpcontract.Handler
     }
 }
 
+/* queryStringOr differs from StringOrDefault in one place, which is why it
+stays: a present but EMPTY value falls back here, where the door answers the
+empty string it was given. */
 func queryStringOr(request melodyhttpcontract.Request, name string, fallback string) string {
-    value, exists := request.Query().Get(name)
-    if false == exists {
+    value := melodybag.StringOrDefault(request.Query(), name, fallback)
+    if "" == value {
         return fallback
     }
 
-    switch typed := value.(type) {
-    case string:
-        if "" == typed {
-            return fallback
-        }
-        return typed
-    case []string:
-        if 0 == len(typed) || "" == typed[0] {
-            return fallback
-        }
-        return typed[0]
-    default:
-        return fallback
-    }
+    return value
 }
+

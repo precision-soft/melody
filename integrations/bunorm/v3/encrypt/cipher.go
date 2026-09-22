@@ -63,7 +63,9 @@ type aes256Cipher struct {
 
 /* keyMaterial is what a key yields once instead of once per call: the AEAD built over it, and the sub-key the deterministic nonce is taken under, which depends on the key alone. Measured on the development container, building the AEAD costs about six hundred nanoseconds and 1280 bytes — forty per cent of the time and eighty-seven per cent of the allocation of a single Decrypt — while the deterministic conversion path paid it twice and CiphertextCandidates pays it once per active key on every equality lookup.
 
-   The key bytes are kept beside it and compared on every read, because KeyProvider is a PUBLIC interface: an application's provider is free to answer different bytes under the same id, and a memo that trusted the id alone would seal and open under the retired key long after the provider had rotated it. Comparing a few dozen bytes against six hundred nanoseconds is what makes the memo safe rather than merely fast. */
+   The key bytes are kept beside it and compared on every read, because KeyProvider is a PUBLIC interface: an application's provider is free to answer different bytes under the same id, and a memo that trusted the id alone would seal and open under the retired key long after the provider had rotated it. Comparing a few dozen bytes against six hundred nanoseconds is what makes the memo safe rather than merely fast.
+
+   What the memo RETAINS is written here because nothing else says it: an entry per key id ever seen, each holding the raw key bytes, for the life of the cipher. Nothing evicts one, so a provider that rotates keeps every retired key resident — measured, two hundred rotations leave two hundred entries and the first key's bytes still in memory after the provider has dropped it. For the shipped StaticKeyProvider, whose keys live as long as the process anyway, that is no change; for a rotating provider it is a property to know about, and bounding it is a decision about the component rather than about this memo. */
 type keyMaterial struct {
     key      []byte
     gcm      cipher.AEAD

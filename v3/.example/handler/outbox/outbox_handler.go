@@ -7,6 +7,7 @@ import (
     outboxintegration "github.com/precision-soft/melody/integrations/outbox/v3"
     "github.com/precision-soft/melody/v3/.example/message"
     "github.com/precision-soft/melody/v3/.example/presenter"
+    melodybag "github.com/precision-soft/melody/v3/bag"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -16,12 +17,12 @@ import (
 /* EnqueueHandler writes a notice to the outbox inside a transaction — in real use the same transaction also carries the business change, so the message is published if and only if the business write commits. It does NOT publish; the relay does that later. The store arrives as a container.Lazy handle: the first request resolves the registered store (which ensures the outbox schema), later requests reuse the memoized instance. */
 func EnqueueHandler(database *bun.DB, store *melodycontainer.LazyService[*outboxintegration.Store]) melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        reference := queryString(request, "reference")
+        reference := melodybag.StringOrDefault(request.Query(), "reference", "")
         if "" == reference {
             reference = "unreferenced"
         }
 
-        text := queryString(request, "text")
+        text := melodybag.StringOrDefault(request.Query(), "text", "")
         if "" == text {
             text = "hello from the outbox"
         }
@@ -98,23 +99,3 @@ func StatusHandler(database *bun.DB, store *melodycontainer.LazyService[*outboxi
     }
 }
 
-/* queryString reads a query parameter as a string, handling the bag's []string storage. */
-func queryString(request melodyhttpcontract.Request, name string) string {
-    value, exists := request.Query().Get(name)
-    if false == exists {
-        return ""
-    }
-
-    switch typed := value.(type) {
-    case string:
-        return typed
-    case []string:
-        if 0 == len(typed) {
-            return ""
-        }
-
-        return typed[0]
-    default:
-        return ""
-    }
-}

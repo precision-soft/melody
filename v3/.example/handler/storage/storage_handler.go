@@ -7,6 +7,7 @@ import (
 
     melodyawss3 "github.com/precision-soft/melody/integrations/awss3/v3"
     "github.com/precision-soft/melody/v3/.example/presenter"
+    melodybag "github.com/precision-soft/melody/v3/bag"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     storagecontract "github.com/precision-soft/melody/v3/storage/contract"
@@ -15,7 +16,7 @@ import (
 /* PutHandler stores the request body under the given key in the object store (localstack S3 in dev), demonstrating the awss3 integration's Put over real HTTP. */
 func PutHandler(storage *melodyawss3.Storage) melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        key := queryString(request, "key")
+        key := melodybag.StringOrDefault(request.Query(), "key", "")
         if "" == key {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "key query parameter is required"), nil
         }
@@ -42,7 +43,7 @@ func PutHandler(storage *melodyawss3.Storage) melodyhttpcontract.Handler {
 /* GetHandler retrieves the object stored under the given key, demonstrating the awss3 integration's Get. */
 func GetHandler(storage *melodyawss3.Storage) melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        key := queryString(request, "key")
+        key := melodybag.StringOrDefault(request.Query(), "key", "")
         if "" == key {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "key query parameter is required"), nil
         }
@@ -62,23 +63,3 @@ func GetHandler(storage *melodyawss3.Storage) melodyhttpcontract.Handler {
     }
 }
 
-/* queryString reads a query parameter as a string, handling the bag's []string storage. */
-func queryString(request melodyhttpcontract.Request, name string) string {
-    value, exists := request.Query().Get(name)
-    if false == exists {
-        return ""
-    }
-
-    switch typed := value.(type) {
-    case string:
-        return typed
-    case []string:
-        if 0 == len(typed) {
-            return ""
-        }
-
-        return typed[0]
-    default:
-        return ""
-    }
-}

@@ -4,11 +4,17 @@ import (
     "errors"
     "fmt"
 
+    melodyexception "github.com/precision-soft/melody/v3/exception"
     "golang.org/x/crypto/bcrypt"
 )
 
 /* PasswordMaximumBytes is bcrypt's input ceiling, counted in bytes rather than characters: a password of 19 four-byte runes is over it while 72 ascii letters are exactly on it, so the doors that admit a password validate against this constant and answer a 400 instead of letting the hasher fail. */
 const PasswordMaximumBytes = 72
+
+/* PasswordTooLongMessage is the refusal both admitting doors answer for a password
+over the ceiling. It lives here, beside the number it quotes, because the two doors
+had a copy of the sentence each and nothing would have said so if one were reworded. */
+const PasswordTooLongMessage = "password must not exceed 72 bytes"
 
 /* HashPassword answers the bcrypt hash of the given plaintext password. Each call salts anew, so two hashes of the same password differ; equality is decided by PasswordMatches, never by comparing hashes. */
 func HashPassword(plaintextPassword string) (string, error) {
@@ -24,7 +30,7 @@ func HashPassword(plaintextPassword string) (string, error) {
 func MustHashPassword(plaintextPassword string) string {
     passwordHash, hashErr := HashPassword(plaintextPassword)
     if nil != hashErr {
-        panic(hashErr)
+        melodyexception.Panic(melodyexception.FromError(hashErr))
     }
 
     return passwordHash

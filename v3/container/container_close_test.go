@@ -7,6 +7,7 @@ import (
     "reflect"
     "sort"
     "strings"
+    "unicode/utf8"
     "sync"
     "sync/atomic"
     "testing"
@@ -4180,5 +4181,79 @@ func TestContainer_Close_ClosesAServiceThatCarriesOnlyCloseWithContextAndHandsIt
 
     if false == service.hadDeadline {
         t.Fatalf("expected the teardown's deadline to reach the service through its only door")
+    }
+}
+
+/* a service whose Close answers a TYPED nil: the interface is not nil, the pointer
+inside it is, which is what an application closer built on a *exception.Error it
+never assigned hands back. */
+type typedNilCloseErrorService struct{}
+
+func (instance *typedNilCloseErrorService) Close() error {
+    var refusal *exception.Error
+
+    return refusal
+}
+
+/* The teardown guard is nil != closeErr, which a typed nil passes, while LogContext
+answers a NIL map for it -- so the details of that failure are recorded into a map
+with no storage. Under a teardown armed in waves the write runs on a goroutine with
+no recover above it, so what it ends is the process, not the service's line; the
+serial path pinned here shares the one function with it. */
+func TestContainerClose_ATypedNilCloseErrorIsRecordedWithoutWritingIntoANilMap(t *testing.T) {
+    containerInstance := NewContainer()
+
+    registerErr := Register[*typedNilCloseErrorService](
+        containerInstance,
+        "service.typednil",
+        func(resolver containercontract.Resolver) (*typedNilCloseErrorService, error) {
+            return &typedNilCloseErrorService{}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("register: %v", registerErr)
+    }
+
+    if _, resolveErr := FromResolver[*typedNilCloseErrorService](containerInstance, "service.typednil"); nil != resolveErr {
+        t.Fatalf("resolve: %v", resolveErr)
+    }
+
+    closeErr := containerInstance.Close()
+
+    if nil == closeErr {
+        t.Fatal("expected the typed nil to be reported as a failed close")
+    }
+
+    failures, hasFailures := exception.LogContext(closeErr)["failures"].(map[string]string)
+    if false == hasFailures {
+        t.Fatalf("the teardown error carries no failure map: %v", exception.LogContext(closeErr))
+    }
+
+    if _, named := failures["service:service.typednil"]; false == named {
+        t.Fatalf("the failure map does not name the service: %v", failures)
+    }
+}
+
+/* The limit is counted in bytes and one of the two details it bounds is the panic
+value as the SERVICE wrote it, so arbitrary application text. A cut taken at the
+byte alone splits whatever rune straddles it; the probe puts a three-byte rune
+across the boundary deliberately. */
+func TestBoundedCloseFailureDetail_CutsOnARuneBoundary(t *testing.T) {
+    /* one filler byte short of the limit, then a three-byte rune straddling it */
+    detail := strings.Repeat("a", closeFailureStackLimit-1) + strings.Repeat("\u4e16", 64)
+
+    bounded, isText := boundedCloseFailureDetail(detail).(string)
+    if false == isText {
+        t.Fatalf("the detail came back as %T, wanted the cut text", boundedCloseFailureDetail(detail))
+    }
+
+    kept := strings.Split(bounded, "\n\t\u2026 cut,")[0]
+
+    if false == utf8.ValidString(kept) {
+        t.Fatalf("the cut left invalid utf8: %q", kept[len(kept)-8:])
+    }
+
+    if closeFailureStackLimit < len(kept) {
+        t.Fatalf("the cut kept %d bytes, over the limit of %d", len(kept), closeFailureStackLimit)
     }
 }

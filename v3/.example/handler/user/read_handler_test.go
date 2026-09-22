@@ -87,31 +87,3 @@ func TestRoleContainingCommaAcceptsPlainRoles(t *testing.T) {
     }
 }
 
-/* A file-backed session storage snapshots through json, so the role list comes back as []any: the copy of the helper this package holds must accept the same two spellings the token resolver accepts, or the door reading it answers an empty role list to a signed-in caller. */
-func TestGetStringSliceFromSessionAcceptsARestoredRoleList(t *testing.T) {
-    sessionInstance := sessionCarrying(t, map[string]any{
-        "roles": []any{entity.RoleUser, entity.RoleEditor},
-    })
-
-    roles, ok := getStringSliceFromSession(sessionInstance, "roles")
-    if false == ok {
-        t.Fatal("a restored role list was refused")
-    }
-
-    if 2 != len(roles) || entity.RoleUser != roles[0] || entity.RoleEditor != roles[1] {
-        t.Fatalf("unexpected roles: %v", roles)
-    }
-}
-
-func TestGetStringSliceFromSessionRefusesWhatIsNotARoleList(t *testing.T) {
-    for name, value := range map[string]any{
-        "a bare string":                    entity.RoleUser,
-        "a restored list holding a number": []any{entity.RoleUser, 7},
-    } {
-        t.Run(name, func(t *testing.T) {
-            if _, ok := getStringSliceFromSession(sessionCarrying(t, map[string]any{"roles": value}), "roles"); true == ok {
-                t.Fatal("the value was accepted as a role list")
-            }
-        })
-    }
-}

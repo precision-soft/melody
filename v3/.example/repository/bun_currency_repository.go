@@ -50,33 +50,16 @@ type bunCurrencyRepository struct {
     database *bun.DB
 }
 
-/* seedIfEmpty writes the opening nomenclature into an empty table; the table itself belongs to the migration set the constructor has already applied. The insert ignores duplicate keys because several example applications may reach an empty table at the same time, and losing that race is not a failure. */
 func (instance *bunCurrencyRepository) seedIfEmpty(ctx context.Context) error {
-    count, countErr := instance.database.
-        NewSelect().
-        Model((*currencyRow)(nil)).
-        Count(ctx)
-    if nil != countErr {
-        return countErr
-    }
+    return seedIfEmptyRows(ctx, instance.database, func() []*currencyRow {
+        seedList := seedCurrencyList()
+        rowList := make([]*currencyRow, 0, len(seedList))
+        for _, currency := range seedList {
+            rowList = append(rowList, newCurrencyRow(currency))
+        }
 
-    if 0 < count {
-        return nil
-    }
-
-    seedList := seedCurrencyList()
-    rowList := make([]*currencyRow, 0, len(seedList))
-    for _, currency := range seedList {
-        rowList = append(rowList, newCurrencyRow(currency))
-    }
-
-    _, insertErr := instance.database.
-        NewInsert().
-        Model(&rowList).
-        Ignore().
-        Exec(ctx)
-
-    return insertErr
+        return rowList
+    })
 }
 
 func (instance *bunCurrencyRepository) All(ctx context.Context) ([]*entity.Currency, error) {

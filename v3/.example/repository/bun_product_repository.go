@@ -77,33 +77,16 @@ func auditContext(ctx context.Context) context.Context {
     return melodyaudit.WithActor(ctx, actor)
 }
 
-/* seedIfEmpty writes the opening catalogue into an empty table; the table itself belongs to the migration set the constructor has already applied. The insert ignores duplicate keys because several example applications may reach an empty table at the same time, and losing that race is not a failure. */
 func (instance *bunProductRepository) seedIfEmpty(ctx context.Context) error {
-    count, countErr := instance.database.
-        NewSelect().
-        Model((*productRow)(nil)).
-        Count(ctx)
-    if nil != countErr {
-        return countErr
-    }
+    return seedIfEmptyRows(ctx, instance.database, func() []*productRow {
+        seedList := seedProductList(time.Now())
+        rowList := make([]*productRow, 0, len(seedList))
+        for _, product := range seedList {
+            rowList = append(rowList, newProductRow(product))
+        }
 
-    if 0 < count {
-        return nil
-    }
-
-    seedList := seedProductList(time.Now())
-    rowList := make([]*productRow, 0, len(seedList))
-    for _, product := range seedList {
-        rowList = append(rowList, newProductRow(product))
-    }
-
-    _, insertErr := instance.database.
-        NewInsert().
-        Model(&rowList).
-        Ignore().
-        Exec(ctx)
-
-    return insertErr
+        return rowList
+    })
 }
 
 func (instance *bunProductRepository) All(ctx context.Context) ([]*entity.Product, error) {

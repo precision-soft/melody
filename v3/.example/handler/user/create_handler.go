@@ -45,7 +45,7 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
 
         /* bcrypt reads at most 72 bytes of the plaintext, so a longer password is refused as the caller's mistake instead of surfacing as a hashing failure */
         if security.PasswordMaximumBytes < len(normalizedPassword) {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "password must not exceed 72 bytes"), nil
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, security.PasswordTooLongMessage), nil
         }
 
         if commaRole, hasCommaRole := roleContainingComma(dto.Roles); true == hasCommaRole {

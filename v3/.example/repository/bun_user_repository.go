@@ -62,33 +62,16 @@ type bunUserRepository struct {
     recorder *melodyaudit.Recorder
 }
 
-/* seedIfEmpty writes the opening directory into an empty table; the table itself belongs to the migration set the constructor has already applied. The insert ignores duplicate keys because several example applications may reach an empty table at the same time, and losing that race is not a failure. */
 func (instance *bunUserRepository) seedIfEmpty(ctx context.Context) error {
-    count, countErr := instance.database.
-        NewSelect().
-        Model((*userRow)(nil)).
-        Count(ctx)
-    if nil != countErr {
-        return countErr
-    }
+    return seedIfEmptyRows(ctx, instance.database, func() []*userRow {
+        seedList := seedUserList()
+        rowList := make([]*userRow, 0, len(seedList))
+        for _, user := range seedList {
+            rowList = append(rowList, newUserRow(user))
+        }
 
-    if 0 < count {
-        return nil
-    }
-
-    seedList := seedUserList()
-    rowList := make([]*userRow, 0, len(seedList))
-    for _, user := range seedList {
-        rowList = append(rowList, newUserRow(user))
-    }
-
-    _, insertErr := instance.database.
-        NewInsert().
-        Model(&rowList).
-        Ignore().
-        Exec(ctx)
-
-    return insertErr
+        return rowList
+    })
 }
 
 func (instance *bunUserRepository) All(ctx context.Context) ([]*entity.User, error) {

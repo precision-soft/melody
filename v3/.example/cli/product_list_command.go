@@ -8,6 +8,7 @@ import (
     "time"
     "unicode/utf8"
 
+    "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/service"
     melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -69,6 +70,19 @@ func (instance *ProductListCommand) Run(runtimeInstance melodyruntimecontract.Ru
         "UPDATED_AT",
     }
 
+    /* both nomenclatures are read ONCE and answered from a map, where the listing
+    used to ask FindById per product and per column: a page of N products cost 2N
+    lookups to render two columns whose whole vocabulary is two short tables. A
+    name that has gone missing between the two reads still renders as "-", which
+    is what the per-product lookup answered for it. */
+    categoryNameById := nameById(categoryService.List, func(category *entity.Category) (string, string) {
+        return category.Id, category.Name
+    })
+
+    currencyNameById := nameById(currencyService.List, func(currency *entity.Currency) (string, string) {
+        return currency.Id, currency.Name
+    })
+
     rows := make([][]string, 0, len(products))
 
     for _, product := range products {
@@ -76,26 +90,11 @@ func (instance *ProductListCommand) Run(runtimeInstance melodyruntimecontract.Ru
             continue
         }
 
-        categoryName := "-"
         categoryId := product.CategoryId
-        if "" != categoryId {
-            category, _, categoryErr := categoryService.FindById(categoryId)
-            if nil == categoryErr && nil != category {
-                categoryName = category.Name
-            }
-        }
+        categoryName := nameOrDash(categoryNameById, categoryId)
 
-        currencyId := ""
-        currencyName := "-"
-
-        currencyId = product.CurrencyId
-
-        if "" != currencyId {
-            currency, _, currencyErr := currencyService.FindById(currencyId)
-            if nil == currencyErr && nil != currency {
-                currencyName = currency.Name
-            }
-        }
+        currencyId := product.CurrencyId
+        currencyName := nameOrDash(currencyNameById, currencyId)
 
         rows = append(rows, []string{
             product.Id,
@@ -110,6 +109,46 @@ func (instance *ProductListCommand) Run(runtimeInstance melodyruntimecontract.Ru
 
     printTable(headers, rows)
     return nil
+}
+
+/* nameById reads a whole nomenclature once and keys its names by identifier. A
+read that fails answers an empty map, so every name renders as the dash the
+per-product lookup rendered when ITS read failed: the listing keeps the answer it
+gave before the two reads replaced the 2N. Whether a listing should instead refuse
+when a nomenclature is unreachable is a question about the command, not about this
+fold, and it is filed rather than decided here. */
+func nameById[Entity any](list func() ([]*Entity, error), identify func(*Entity) (string, string)) map[string]string {
+    entityList, listErr := list()
+    if nil != listErr {
+        return map[string]string{}
+    }
+
+    nameById := make(map[string]string, len(entityList))
+    for _, entityInstance := range entityList {
+        if nil == entityInstance {
+            continue
+        }
+
+        identifier, name := identify(entityInstance)
+        nameById[identifier] = name
+    }
+
+    return nameById
+}
+
+/* nameOrDash answers the dash the per-product lookup answered for an identifier
+it could not resolve, and for the empty identifier of a product filed under none. */
+func nameOrDash(nameById map[string]string, identifier string) string {
+    if "" == identifier {
+        return "-"
+    }
+
+    name, exists := nameById[identifier]
+    if false == exists {
+        return "-"
+    }
+
+    return name
 }
 
 /* printTable renders to standard output, which is where the commands that only ever print a table want it.

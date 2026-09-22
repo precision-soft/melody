@@ -6,11 +6,11 @@ import (
 
     "github.com/precision-soft/melody/v3/.example/persistence"
     "github.com/precision-soft/melody/v3/.example/repository"
+    examplesecurity "github.com/precision-soft/melody/v3/.example/security"
     melodyclockcontract "github.com/precision-soft/melody/v3/clock/contract"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
-    melodysecurity "github.com/precision-soft/melody/v3/security"
 )
 
 const (
@@ -65,13 +65,8 @@ func (instance *CatalogJournalService) Record(
 
 /* ActorFromRuntime names whoever is behind the change. A scheduled command and a console run carry no security context at all, and an unauthenticated request carries one with nothing in it; both are the system rather than a person, and the journal says so instead of leaving the column empty. */
 func ActorFromRuntime(runtimeInstance melodyruntimecontract.Runtime) string {
-    securityContext, found := melodysecurity.SecurityContextFromRuntime(runtimeInstance)
+    token, found := examplesecurity.TokenFromRuntime(runtimeInstance)
     if false == found {
-        return repository.CatalogJournalActorSystem
-    }
-
-    token := securityContext.Token()
-    if nil == token {
         return repository.CatalogJournalActorSystem
     }
 

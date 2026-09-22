@@ -55,7 +55,7 @@ func Html(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontr
     /* a page without its manifest still renders — the routes are what its scripts resolve, and a page that fails to load over a manifest is worse than one whose links fail — but the loss is journaled: rendered in silence, the empty manifest was the very artifact the manifest command refuses to write, carried to the browser with nothing saying why */
     routesJson, routesJsonErr := exampleurl.RoutesJsonFromRuntime(runtimeInstance)
     if nil != routesJsonErr {
-        routesJson = `{"routes":[]}`
+        routesJson = exampleurl.EmptyRoutesJson
         pageLoggerOf(runtimeInstance).Warning(
             "page rendered without its route manifest",
             melodyexception.LogContext(routesJsonErr, melodyloggingcontract.Context{"page": fileName}),
