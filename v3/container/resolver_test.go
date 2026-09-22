@@ -20,9 +20,14 @@ type resolverTestService struct {
 type resolverTestResolver struct {
     servicesByName map[string]any
     servicesByType map[reflect.Type]any
+    getErr         error
 }
 
 func (instance *resolverTestResolver) Get(serviceName string) (any, error) {
+    if nil != instance.getErr {
+        return nil, instance.getErr
+    }
+
     value, exists := instance.servicesByName[serviceName]
     if false == exists {
         return nil, errors.New("service missing")
@@ -108,8 +113,54 @@ func TestFromResolver_MissingService_ReturnsError(t *testing.T) {
         t.Fatalf("expected *exception.Error, got: %T", err)
     }
 
-    if "service not registered in resolver" != typedError.Message() {
+    if "service resolution failed in resolver" != typedError.Message() {
         t.Fatalf("unexpected error message: %s", typedError.Message())
+    }
+}
+
+/* the double's refusal is a foreign error, the shape a provider handing back its driver's error raw takes: it is kept as the cause under the title of the resolution, and the title does not call the service unregistered — the twin door by type dresses it the same way */
+func TestFromResolver_AForeignProviderErrorKeepsItsCauseUnderTheResolutionTitle(t *testing.T) {
+    cause := errors.New("dial tcp: connection refused")
+
+    byName := &resolverTestResolver{
+        servicesByName: map[string]any{},
+        servicesByType: map[reflect.Type]any{},
+        getErr:         cause,
+    }
+
+    _, nameErr := FromResolver[*resolverTestService](byName, "service.dialing")
+    assertResolutionTitleKeepsTheCause(t, nameErr, cause, "serviceName")
+
+    serviceContainer := NewContainer()
+    serviceContainer.MustRegister(
+        "service.dialing",
+        func(resolver containercontract.Resolver) (*resolverTestService, error) {
+            return nil, cause
+        },
+    )
+
+    _, typeErr := FromResolverByType[*resolverTestService](serviceContainer)
+    assertResolutionTitleKeepsTheCause(t, typeErr, cause, "serviceType")
+}
+
+func assertResolutionTitleKeepsTheCause(t *testing.T, err error, cause error, contextKey string) {
+    t.Helper()
+
+    typedError, ok := err.(*exception.Error)
+    if false == ok {
+        t.Fatalf("expected *exception.Error, got %T", err)
+    }
+
+    if "service resolution failed in resolver" != typedError.Message() {
+        t.Fatalf("expected the resolution title, got %q", typedError.Message())
+    }
+
+    if false == errors.Is(err, cause) {
+        t.Fatalf("expected the provider's own error to stay the cause")
+    }
+
+    if _, named := typedError.Context()[contextKey]; false == named {
+        t.Fatalf("expected the refusal to carry %s, got %+v", contextKey, typedError.Context())
     }
 }
 

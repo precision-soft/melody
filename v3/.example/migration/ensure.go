@@ -100,7 +100,7 @@ func ensureMigratedSet(ctx context.Context, database *bun.DB, migrationSet *migr
         migrate.WithMarkAppliedOnSuccess(true),
     )
 
-    /* every failure of the set is handed back as this application's exception naming the set and the step, with bun's error as the cause: a raw driver error travelling up through a by-type resolution is relabelled "service not registered in resolver" by the container, a headline that sends the operator to the wiring for a database that refused. errors.Is still reaches the cause. */
+    /* every failure of the set is handed back as this application's exception naming the set and the step, with bun's error as the cause: a raw driver error travelling up through a by-type resolution is wrapped by the container under its own title, "service resolution failed in resolver", a headline about the wiring for a database that refused. errors.Is still reaches the cause. */
     if initErr := migrator.Init(ctx); nil != initErr {
         return migrationStepFailure(setName, "initialising the bookkeeping", unlockCommand, initErr)
     }
@@ -118,8 +118,8 @@ func ensureMigratedSet(ctx context.Context, database *bun.DB, migrationSet *migr
         }
 
         /* through the same door as every other step: the wait ends bare when the context does — a SIGTERM
-           during a lock wait handed a naked context.Canceled up the by-type resolution, which relabelled it
-           "service not registered in resolver" — and the set's own refusal is left as it is */
+           during a lock wait handed a naked context.Canceled up the by-type resolution, which wrapped it under
+           "service resolution failed in resolver" — and the set's own refusal is left as it is */
         return migrationStepFailure(setName, "waiting for the migration lock", unlockCommand, lockErr)
     }
 

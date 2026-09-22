@@ -278,6 +278,7 @@ func (instance *EventDispatcher) RemoveSubscriber(registration eventcontract.Sub
     return removedCount
 }
 
+/* Dispatch runs the listeners of the event's name in priority order and stops at the first one that fails: the listeners behind it do not run, and the failure — or the refusal of a required listener it skipped — is returned beside the partially dispatched event. The consequence for the application's own subscribers is that their ORDER on one event is a property of what runs, not of style: a subscriber that releases a resource, registered after a best-effort subscriber at the same priority, inherits that subscriber's failure and never runs, so a release that must happen belongs in the store the entity lives in — a cascade, a transaction — or ahead of every subscriber that may fail. A dispatch that continues past a failure and answers the failures joined, or a per-listener policy, is a different contract and is left to the next major. */
 func (instance *EventDispatcher) Dispatch(runtimeInstance runtimecontract.Runtime, event eventcontract.Event) (eventcontract.Event, error) {
     return instance.dispatchSafely(
         runtimeInstance,

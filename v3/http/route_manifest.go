@@ -3,6 +3,7 @@ package http
 import (
     "sort"
 
+    "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
 )
 
@@ -69,8 +70,25 @@ func BuildRouteManifest(definitions []httpcontract.RouteDefinition) RouteManifes
     return RouteManifest{Routes: entries}
 }
 
-/* FilterRouteManifestByZone narrows a manifest to one zone. It is exported because the gate existed only inside the cli command: an application projecting the manifest in-process — into a page, into a bundle — had no way to apply it, so the zone travelled as a label on an artifact that carried every zone to every consumer, the anonymous ones included. */
-func FilterRouteManifestByZone(manifest RouteManifest, zone string) RouteManifest {
+/* FilterRouteManifestByZone narrows a manifest to one zone. It is exported because the gate existed only inside the cli command: an application projecting the manifest in-process — into a page, into a bundle — had no way to apply it, so the zone travelled as a label on an artifact that carried every zone to every consumer, the anonymous ones included.
+
+   The zone is read the way the command reads its --zone flag: an empty zone is no gate and answers the manifest whole, and a zone that is not one of the declared ones is refused by name. Accepted, a misspelled zone matched no entry and answered an empty manifest in silence — the very artifact the command refuses to write over the good one — so a page carried no route at all with nothing saying why. */
+func FilterRouteManifestByZone(manifest RouteManifest, zone string) (RouteManifest, error) {
+    if "" == zone {
+        return manifest, nil
+    }
+
+    if false == IsRouteZone(zone) {
+        return RouteManifest{}, exception.NewError(
+            "route zone is not one of the declared zones",
+            map[string]any{
+                "zone":          zone,
+                "declaredZones": RouteZones(),
+            },
+            nil,
+        )
+    }
+
     filtered := make([]RouteManifestEntry, 0, len(manifest.Routes))
 
     for _, entry := range manifest.Routes {
@@ -79,7 +97,7 @@ func FilterRouteManifestByZone(manifest RouteManifest, zone string) RouteManifes
         }
     }
 
-    return RouteManifest{Routes: filtered}
+    return RouteManifest{Routes: filtered}, nil
 }
 
 func routeIsExposed(definition httpcontract.RouteDefinition) bool {

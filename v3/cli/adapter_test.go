@@ -4,6 +4,7 @@ import (
     "bytes"
     "context"
     "errors"
+    "fmt"
     "go/parser"
     "go/token"
     "io"
@@ -13,6 +14,7 @@ import (
     "testing"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
+    "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/internal/testhelper"
     urfavecli "github.com/urfave/cli/v3"
 )
@@ -441,4 +443,44 @@ func runFlagProbeError(t *testing.T, flags []clicontract.Flag, arguments ...stri
     }
 
     return engineCommand.Run(context.Background(), append([]string{"probe"}, arguments...))
+}
+
+/* a validator that panics on its default is the developer's own bug, but raw it named neither the flag nor the kind: it is refused at registration as the other three wiring mistakes are, naming the flag and what exploded */
+func TestNewEngineFlag_ADefaultWhoseValidatorPanicsIsRefusedByFlagName(t *testing.T) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected the panicking validator to refuse the registration")
+        }
+
+        recoveredErr, isError := recoveredValue.(error)
+        if false == isError {
+            t.Fatalf("expected an error panic, got %#v", recoveredValue)
+        }
+
+        if false == strings.Contains(recoveredErr.Error(), "refused by the flag's own validator") {
+            t.Fatalf("expected the registration refusal, got %v", recoveredErr)
+        }
+
+        typedError, isTyped := recoveredErr.(*exception.Error)
+        if false == isTyped {
+            t.Fatalf("expected *exception.Error, got %T", recoveredErr)
+        }
+
+        if "limit" != typedError.Context()["flagName"] {
+            t.Fatalf("expected the flag named, got %+v", typedError.Context())
+        }
+
+        if false == strings.Contains(fmt.Sprint(typedError.Context()["refusal"]), "validator exploded") {
+            t.Fatalf("expected the panic value carried in the refusal, got %+v", typedError.Context())
+        }
+    }()
+
+    newEngineFlag(&clicontract.IntFlag{
+        Name:  "limit",
+        Value: 3,
+        Validator: func(value int) error {
+            panic("validator exploded")
+        },
+    })
 }

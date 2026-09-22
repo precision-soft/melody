@@ -21,7 +21,11 @@ func RoutesHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         urlGenerator := melodyhttp.UrlGeneratorMustFromContainer(runtimeInstance.Container())
 
-        manifest := exampleurl.RouteManifestForRuntime(runtimeInstance)
+        manifest, manifestErr := exampleurl.RouteManifestForRuntime(runtimeInstance)
+        if nil != manifestErr {
+            return nil, manifestErr
+        }
+
         payload := make([]routeListingResponse, 0, len(manifest.Routes))
 
         for _, entry := range manifest.Routes {

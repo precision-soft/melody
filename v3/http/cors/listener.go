@@ -72,6 +72,7 @@ func RegisterRequestListener(eventDispatcher eventcontract.EventDispatcher, serv
     )
 }
 
+/* RegisterResponseListener decorates the response the kernel is about to write, which is how the cross-origin headers reach the security refusals and the error pages the middleware chain never sees. It writes into the response and nothing else, so a handler that committed its own headers to the writer before returning — a Server-Sent Events stream, a long poll — is past its reach: the headers it sets on that response are discarded with the response. Such a handler needs the Middleware, which writes them to the writer before the handler runs; the listener is not a replacement for it on a streaming route. */
 func RegisterResponseListener(eventDispatcher eventcontract.EventDispatcher, service *Service) {
     if nil == service {
         service = DefaultService()

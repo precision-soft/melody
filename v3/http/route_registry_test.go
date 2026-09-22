@@ -10,12 +10,6 @@ import (
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-func routeRegistryTestHandler() httpcontract.Handler {
-    return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-        return TextResponse(200, "ok"), nil
-    }
-}
-
 /* registration was the single channel with no duplicate handling: two unnamed routes on one method and pattern were both stored and the later one could never be dispatched — the tie falls to the first registered — so the shadowing was invisible everywhere. */
 func TestRouteRegistry_RefusesAnExactDispatchDuplicate(t *testing.T) {
     router := NewRouter()

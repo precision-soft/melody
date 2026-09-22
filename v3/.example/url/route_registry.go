@@ -11,7 +11,7 @@ import (
 /* RouteManifestForRuntime projects the exposed named routes into the RouteManifest shape the frontend RouteGenerator (melody-routes.ts) consumes, injected into every page as window.melodyRoutes. It reuses the framework BuildRouteManifest so it applies the same RouteAttributeExpose opt-in filter as the melody:routes:manifest export command: an example must model shipping only deliberately-exposed route metadata to the browser rather than dumping every route's pattern, requirements and defaults — internal routes stay server-side.
 
    the ZONE gate is applied here too, and it is applied against the caller. The zone gate used to live only inside the cli command, so the in-process door carried every zone to every page — and the frontend zone is the admin surface (the product and user api routes, each behind RoleEditor/RoleAdmin), enumerated with its patterns and methods into the anonymous login page. The public zone is what an unauthenticated visitor needs (login, logout, health, the openapi document); the frontend zone joins it once the caller is authenticated. */
-func RouteManifestForRuntime(runtimeInstance runtimecontract.Runtime) melodyhttp.RouteManifest {
+func RouteManifestForRuntime(runtimeInstance runtimecontract.Runtime) (melodyhttp.RouteManifest, error) {
     routeRegistry := melodyhttp.RouteRegistryMustFromContainer(runtimeInstance.Container())
 
     zones := []string{melodyhttp.RouteZonePublic}
@@ -23,15 +23,25 @@ func RouteManifestForRuntime(runtimeInstance runtimecontract.Runtime) melodyhttp
 
     entries := make([]melodyhttp.RouteManifestEntry, 0, len(manifest.Routes))
     for _, zone := range zones {
-        entries = append(entries, melodyhttp.FilterRouteManifestByZone(manifest, zone).Routes...)
+        zoned, filterErr := melodyhttp.FilterRouteManifestByZone(manifest, zone)
+        if nil != filterErr {
+            return melodyhttp.RouteManifest{}, filterErr
+        }
+
+        entries = append(entries, zoned.Routes...)
     }
 
-    return melodyhttp.RouteManifest{Routes: entries}
+    return melodyhttp.RouteManifest{Routes: entries}, nil
 }
 
 /* RoutesJsonFromRuntime renders the same projection as the JSON document every page carries. */
 func RoutesJsonFromRuntime(runtimeInstance runtimecontract.Runtime) (string, error) {
-    payload, marshalErr := json.Marshal(RouteManifestForRuntime(runtimeInstance))
+    manifest, manifestErr := RouteManifestForRuntime(runtimeInstance)
+    if nil != manifestErr {
+        return `{"routes":[]}`, manifestErr
+    }
+
+    payload, marshalErr := json.Marshal(manifest)
     if nil != marshalErr {
         return `{"routes":[]}`, marshalErr
     }

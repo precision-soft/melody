@@ -1,18 +1,14 @@
 package middleware
 
 import (
-    "context"
-    "errors"
     nethttp "net/http"
 
     eventcontract "github.com/precision-soft/melody/v3/event/contract"
     "github.com/precision-soft/melody/v3/exception"
-    exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/internal"
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
-    "github.com/precision-soft/melody/v3/logging"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
@@ -54,32 +50,9 @@ func RegisterRateLimitRequestListener(
             }
 
             request := requestEvent.Request()
-            key := config.KeyExtractor()(request)
 
-            allowed := false
-            if runtimeLimiter, isRuntimeLimiter := config.Limiter().(httpcontract.RuntimeRateLimiter); true == isRuntimeLimiter {
-                var allowErr error
-                allowed, allowErr = runtimeLimiter.AllowWithRuntime(runtimeInstance, key)
-                if nil != allowErr && false == exception.IsAlreadyLogged(allowErr) {
-                    /* the returned allowed value already reflects the limiter's failure policy; the listener only reports the store failure. A failure that is the caller's own cancellation — the client disconnected while the limiter's round trip was in flight — is recorded at warning under its own name, because at error it read as a store outage and paged the operator for a client hanging up. This door meters every request, ahead of authentication, so it sees more of those disconnects than the middleware does. A limiter that filed its own record marks it, and then this is the second copy rather than the only one. */
-                    logger := logging.LoggerFromRuntime(runtimeInstance)
-                    if nil != logger {
-                        if true == errors.Is(allowErr, context.Canceled) {
-                            logger.Warning(
-                                "rate limiter call cancelled",
-                                exception.LogContext(allowErr, exceptioncontract.Context{"key": key}),
-                            )
-                        } else {
-                            logger.Error(
-                                "rate limiter store failure",
-                                exception.LogContext(allowErr, exceptioncontract.Context{"key": key}),
-                            )
-                        }
-                    }
-                }
-            } else {
-                allowed = config.Limiter().Allow(key)
-            }
+            /* this door meters every request, ahead of authentication, so it sees more of the client disconnects the shared door records at warning than the middleware does */
+            allowed := allowRequestUnderLimit(config, runtimeInstance, request)
 
             if true == allowed {
                 return nil

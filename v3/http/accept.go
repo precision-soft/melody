@@ -8,17 +8,8 @@ import (
 )
 
 func PrefersHtml(request httpcontract.Request) bool {
-    if true == internal.IsNilInterface(request) {
-        return false
-    }
-
-    httpRequest := request.HttpRequest()
-    if nil == httpRequest {
-        return false
-    }
-
-    /* every line of a repeated Accept field is joined before parsing, the way the error renderer joins them for the serialized branch: the header is list-typed, and reading only the first line let the two readers of one error response see two different views of the client's preference */
-    acceptHeader := strings.Join(httpRequest.Header.Values("Accept"), ",")
+    /* every line of a repeated Accept field is joined before parsing, through the same door the error renderer reads the header with for the serialized branch: the header is list-typed, and reading only the first line let the two readers of one error response see two different views of the client's preference — one spelling of the join, so the two readers cannot drift apart again */
+    acceptHeader := joinedAcceptHeader(request)
     if "" == acceptHeader {
         return false
     }

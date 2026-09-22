@@ -456,32 +456,7 @@ func RateLimitMiddleware(config *RateLimitConfig) httpcontract.Middleware {
 
     return func(next httpcontract.Handler) httpcontract.Handler {
         return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            key := config.KeyExtractor()(request)
-
-            allowed := false
-            if runtimeLimiter, isRuntimeLimiter := config.Limiter().(httpcontract.RuntimeRateLimiter); true == isRuntimeLimiter {
-                var allowErr error
-                allowed, allowErr = runtimeLimiter.AllowWithRuntime(runtimeInstance, key)
-                if nil != allowErr && false == exception.IsAlreadyLogged(allowErr) {
-                    /* the returned allowed value already reflects the limiter's failure policy; the middleware only reports the store failure. A failure that is the caller's own cancellation — the client disconnected while the limiter's round trip was in flight — is recorded at warning under its own name, because at error it read as a store outage and paged the operator for a client hanging up. A limiter that filed its own record marks it, and then this is the second copy rather than the only one. */
-                    logger := logging.LoggerFromRuntime(runtimeInstance)
-                    if nil != logger {
-                        if true == errors.Is(allowErr, context.Canceled) {
-                            logger.Warning(
-                                "rate limiter call cancelled",
-                                exception.LogContext(allowErr, exceptioncontract.Context{"key": key}),
-                            )
-                        } else {
-                            logger.Error(
-                                "rate limiter store failure",
-                                exception.LogContext(allowErr, exceptioncontract.Context{"key": key}),
-                            )
-                        }
-                    }
-                }
-            } else {
-                allowed = config.Limiter().Allow(key)
-            }
+            allowed := allowRequestUnderLimit(config, runtimeInstance, request)
 
             if false == allowed {
                 response, limitErr := config.OnLimitExceeded()(request)
@@ -598,4 +573,34 @@ func UserRateLimitWithResolver(
 
 func defaultOnLimitExceeded(request httpcontract.Request) (httpcontract.Response, error) {
     return nil, exception.TooManyRequests("Rate limit exceeded. Please try again later.")
+}
+
+/* allowRequestUnderLimit is the one metering step the middleware door and the listener door share: the key is extracted, the limiter is asked — through the runtime when it carries one — and a store failure is reported once. The two doors used to carry this block as two copies, which is how the record a store failure files would have come to differ between them. The returned allowed value already reflects the limiter's failure policy; only the store failure is reported here. A failure that is the caller's own cancellation — the client disconnected while the limiter's round trip was in flight — is recorded at warning under its own name, because at error it read as a store outage and paged the operator for a client hanging up. A limiter that filed its own record marks it, and then this would be the second copy rather than the only one. */
+func allowRequestUnderLimit(config *RateLimitConfig, runtimeInstance runtimecontract.Runtime, request httpcontract.Request) bool {
+    key := config.KeyExtractor()(request)
+
+    runtimeLimiter, isRuntimeLimiter := config.Limiter().(httpcontract.RuntimeRateLimiter)
+    if false == isRuntimeLimiter {
+        return config.Limiter().Allow(key)
+    }
+
+    allowed, allowErr := runtimeLimiter.AllowWithRuntime(runtimeInstance, key)
+    if nil != allowErr && false == exception.IsAlreadyLogged(allowErr) {
+        logger := logging.LoggerFromRuntime(runtimeInstance)
+        if nil != logger {
+            if true == errors.Is(allowErr, context.Canceled) {
+                logger.Warning(
+                    "rate limiter call cancelled",
+                    exception.LogContext(allowErr, exceptioncontract.Context{"key": key}),
+                )
+            } else {
+                logger.Error(
+                    "rate limiter store failure",
+                    exception.LogContext(allowErr, exceptioncontract.Context{"key": key}),
+                )
+            }
+        }
+    }
+
+    return allowed
 }

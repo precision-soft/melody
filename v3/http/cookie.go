@@ -8,6 +8,7 @@ import (
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
 )
 
+/* SetCookie adds the cookie to the response. It does not touch Cache-Control: a cookie is not, in general, a client's identity — a preference cookie on a public page is meant to be cached with it — so the decision that a response addresses one client is the caller's. The session path takes it for the session cookie, live or expiring, through its own door. */
 func SetCookie(response httpcontract.Response, cookie *nethttp.Cookie) {
     if "" == cookie.Name {
         exception.Panic(

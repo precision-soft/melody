@@ -6,23 +6,11 @@ import (
     "net/http/httptest"
     "strings"
     "testing"
-    "time"
 
-    "github.com/precision-soft/melody/v3/clock"
-    "github.com/precision-soft/melody/v3/config"
-    configcontract "github.com/precision-soft/melody/v3/config/contract"
-    "github.com/precision-soft/melody/v3/container"
-    containercontract "github.com/precision-soft/melody/v3/container/contract"
-    "github.com/precision-soft/melody/v3/event"
-    eventcontract "github.com/precision-soft/melody/v3/event/contract"
     "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/internal/testhelper"
-    "github.com/precision-soft/melody/v3/logging"
-    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
-    "github.com/precision-soft/melody/v3/session"
-    sessioncontract "github.com/precision-soft/melody/v3/session/contract"
 )
 
 type testEnvironmentSource struct {
@@ -36,83 +24,6 @@ func (instance *testEnvironmentSource) Load() (map[string]string, error) {
     }
 
     return copied, nil
-}
-
-func newHttpTestContainer() containercontract.Container {
-    return newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage())
-}
-
-func newHttpTestContainerWithSessionStorage(storage sessioncontract.Storage) containercontract.Container {
-    return newHttpTestContainerWithSessionStorageAndEnvironmentValues(storage, nil)
-}
-
-func newHttpTestContainerWithSessionManager(
-    sessionManager sessioncontract.Manager,
-) containercontract.Container {
-    return newHttpTestContainerWithSessionManagerAndEnvironmentValues(sessionManager, nil)
-}
-
-func newHttpTestContainerWithSessionStorageAndEnvironmentValues(
-    storage sessioncontract.Storage,
-    environmentValues map[string]string,
-) containercontract.Container {
-    return newHttpTestContainerWithSessionManagerAndEnvironmentValues(
-        session.NewManager(storage, 30*time.Minute),
-        environmentValues,
-    )
-}
-
-func newHttpTestContainerWithSessionManagerAndEnvironmentValues(
-    sessionManager sessioncontract.Manager,
-    environmentValues map[string]string,
-) containercontract.Container {
-    serviceContainer := container.NewContainer()
-
-    serviceContainer.MustRegister(
-        logging.ServiceLogger,
-        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
-            return logging.NewNopLogger(), nil
-        },
-    )
-
-    serviceContainer.MustRegister(
-        config.ServiceConfig,
-        func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
-            values := map[string]string{
-                config.EnvKey: config.EnvDevelopment,
-            }
-            for key, value := range environmentValues {
-                values[key] = value
-            }
-
-            environment, err := config.NewEnvironment(
-                &testEnvironmentSource{
-                    values: values,
-                },
-            )
-            if nil != err {
-                return nil, err
-            }
-
-            return config.NewConfiguration(environment, "/tmp/melody")
-        },
-    )
-
-    serviceContainer.MustRegister(
-        session.ServiceSessionManager,
-        func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
-            return sessionManager, nil
-        },
-    )
-
-    serviceContainer.MustRegister(
-        event.ServiceEventDispatcher,
-        func(resolver containercontract.Resolver) (eventcontract.EventDispatcher, error) {
-            return event.NewEventDispatcher(clock.NewSystemClock()), nil
-        },
-    )
-
-    return serviceContainer
 }
 
 func TestRouter_HandleAndServeHttp_HappyPath(t *testing.T) {

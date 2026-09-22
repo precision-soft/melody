@@ -2,6 +2,7 @@ package http
 
 import (
     "context"
+    "reflect"
     "sync"
     "sync/atomic"
 
@@ -69,7 +70,7 @@ func (instance *ServerSentEventHub) SetLogger(logger loggingcontract.Logger) {
     instance.logger = logger
 }
 
-/* Subscribe registers a subscriber for a topic. A non-positive buffer size is the caller's own zero value and takes the default; a negative one is refused, because it can only come from a computed or configured size that went wrong and reading it as "the default" tells the operator a policy is in force that is not.
+/* Subscribe registers a subscriber for a topic. A zero buffer size is the caller's own zero value and takes the default; a negative one is refused, because it can only come from a computed or configured size that went wrong and reading it as "the default" tells the operator a policy is in force that is not.
 
    On a hub that has been shut down the subscriber is handed back with its channel already closed and is not registered — the caller's range ends immediately. IsClosed answers the difference between that and an ordinary end of stream. */
 func (instance *ServerSentEventHub) Subscribe(topic string, bufferSize int) *ServerSentEventSubscriber {
@@ -173,7 +174,7 @@ func (instance *ServerSentEventHub) SetBackplane(backplane ServerSentEventBackpl
         )
     }
 
-    if nil != instance.backplane && instance.backplane != backplane {
+    if nil != instance.backplane && false == sameBackplane(instance.backplane, backplane) {
         exception.Panic(
             exception.NewError(
                 "server sent event hub already carries a backplane; clear it and close the previous one before installing another",
@@ -184,6 +185,15 @@ func (instance *ServerSentEventHub) SetBackplane(backplane ServerSentEventBackpl
     }
 
     instance.backplane = backplane
+}
+
+/* sameBackplane asks identity only of values that carry one. The contract is implemented outside this package, and == between two interface values holding the same dynamic type panics when that type is not comparable — a backplane carried by value with a slice or a map inside, installed a second time, used to end the call with the runtime's own panic in place of the refusal above. A value with no identity is never "the same", so re-installing it is refused; the pointer every shipped backplane is keeps its identity. */
+func sameBackplane(installed ServerSentEventBackplane, candidate ServerSentEventBackplane) bool {
+    if false == reflect.ValueOf(installed).Comparable() || false == reflect.ValueOf(candidate).Comparable() {
+        return false
+    }
+
+    return installed == candidate
 }
 
 func (instance *ServerSentEventHub) Broadcast(topic string, event ServerSentEvent) int {

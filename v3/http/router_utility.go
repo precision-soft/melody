@@ -365,18 +365,7 @@ func writeResponse(
                 logSessionPersistenceEvent(runtimeInstance, loggingcontract.LevelError, "failed to delete session", err, sessionInstance.Id(), request)
             }
 
-            cookie := &nethttp.Cookie{
-                Name:     session.SessionCookieName,
-                Value:    "",
-                Path:     resolveSessionCookiePath(sessionCookiePolicy),
-                Domain:   sessionCookiePolicy.Domain,
-                HttpOnly: true,
-                SameSite: resolveSessionCookieSameSite(sessionCookiePolicy),
-                Secure:   resolveSessionCookieSecure(request, forwardedHeadersPolicy, sessionCookiePolicy),
-                MaxAge:   -1,
-            }
-
-            SetCookie(response, cookie)
+            setSessionCookie(response, expiringSessionCookie(request, forwardedHeadersPolicy, sessionCookiePolicy))
         } else if true == sessionModified {
             /* a discarded response carries no Set-Cookie, so storing a session the client does not already hold would write a row nothing can ever reference: a first-time visitor on a streamed response (Server-Sent Events commit the headers before the handler runs) would leave one unreachable session behind per reconnect. A session the request already names is stored as before, since it needs no cookie to be reachable — and the clear path above still destroys a session whatever the response does with it. */
             if true == responseIsDiscarded && false == requestNamesSession(request, sessionInstance.Id()) {
@@ -407,19 +396,7 @@ func writeResponse(
 
                     logSessionPersistenceEvent(runtimeInstance, loggingcontract.LevelWarning, "session was deleted while the request was in flight", err, sessionInstance.Id(), request)
 
-                    SetCookie(
-                        response,
-                        &nethttp.Cookie{
-                            Name:     session.SessionCookieName,
-                            Value:    "",
-                            Path:     resolveSessionCookiePath(sessionCookiePolicy),
-                            Domain:   sessionCookiePolicy.Domain,
-                            HttpOnly: true,
-                            SameSite: resolveSessionCookieSameSite(sessionCookiePolicy),
-                            Secure:   resolveSessionCookieSecure(request, forwardedHeadersPolicy, sessionCookiePolicy),
-                            MaxAge:   -1,
-                        },
-                    )
+                    setSessionCookie(response, expiringSessionCookie(request, forwardedHeadersPolicy, sessionCookiePolicy))
                 } else if nil != err {
                     /* a storage outage on the save path answers 500 rather than the response the handler produced. The handler wrote to the session and returned success on the assumption the write would land — a login answering "welcome" with the identity never stored, or an attempt counter that never grows while the backend is down — and the client cannot tell the difference. The headers are not committed at this point (the branch above holds the case where they are), so the response can still be replaced; the cookie is suppressed either way, so the browser is never pointed at an id nothing persisted. */
                     sessionPersistFailed = true
@@ -430,19 +407,7 @@ func writeResponse(
 
                     response = EmptyResponse(nethttp.StatusInternalServerError)
                 } else {
-                    cookie := &nethttp.Cookie{
-                        Name:     session.SessionCookieName,
-                        Value:    sessionInstance.Id(),
-                        Path:     resolveSessionCookiePath(sessionCookiePolicy),
-                        Domain:   sessionCookiePolicy.Domain,
-                        HttpOnly: true,
-                        SameSite: resolveSessionCookieSameSite(sessionCookiePolicy),
-                        Secure:   resolveSessionCookieSecure(request, forwardedHeadersPolicy, sessionCookiePolicy),
-                    }
-
-                    SetCookie(response, cookie)
-                    /* the id the cookie now carries names this one client, so the response must not be stored by a shared cache and replayed to another: a listener that modified the session on a response some layer marked Cache-Control: public — a static asset among them — would otherwise leak this session id to the next client the cache serves */
-                    markResponsePrivateForSessionCookie(response)
+                    setSessionCookie(response, sessionCookie(request, forwardedHeadersPolicy, sessionCookiePolicy, sessionInstance.Id()))
                 }
             }
         }
@@ -575,6 +540,42 @@ func requestNamesSession(request httpcontract.Request, sessionId string) bool {
     }
 
     return sessionId == cookie.Value
+}
+
+/* sessionCookie is the one spelling of the session cookie, whichever of the three doors below writes it: three copies of the same nine fields were kept in step by hand, and a policy field added to one of them was a field the other two would have silently dropped. */
+func sessionCookie(
+    request httpcontract.Request,
+    forwardedHeadersPolicy httpcontract.ForwardedHeadersPolicy,
+    sessionCookiePolicy httpcontract.SessionCookiePolicy,
+    sessionId string,
+) *nethttp.Cookie {
+    return &nethttp.Cookie{
+        Name:     session.SessionCookieName,
+        Value:    sessionId,
+        Path:     resolveSessionCookiePath(sessionCookiePolicy),
+        Domain:   sessionCookiePolicy.Domain,
+        HttpOnly: true,
+        SameSite: resolveSessionCookieSameSite(sessionCookiePolicy),
+        Secure:   resolveSessionCookieSecure(request, forwardedHeadersPolicy, sessionCookiePolicy),
+    }
+}
+
+/* expiringSessionCookie is the session cookie that ends the client's session: the same attributes, an empty value and a negative max-age, so the browser drops the cookie under the same path and domain it was set with. */
+func expiringSessionCookie(
+    request httpcontract.Request,
+    forwardedHeadersPolicy httpcontract.ForwardedHeadersPolicy,
+    sessionCookiePolicy httpcontract.SessionCookiePolicy,
+) *nethttp.Cookie {
+    cookie := sessionCookie(request, forwardedHeadersPolicy, sessionCookiePolicy, "")
+    cookie.MaxAge = -1
+
+    return cookie
+}
+
+/* setSessionCookie writes the session cookie and keeps the response out of a shared cache, whether the cookie carries a live id or ends the session. A live id names this one client, so a response stored under its url by a shared cache and replayed to another would hand that client the first one's session — and an expiring cookie replayed the same way would log the next client out of a session it never asked to end. Either way the header addresses one client, so a response some layer marked Cache-Control: public — a static asset among them — is marked private the moment the session cookie lands on it. */
+func setSessionCookie(response httpcontract.Response, cookie *nethttp.Cookie) {
+    SetCookie(response, cookie)
+    markResponsePrivateForSessionCookie(response)
 }
 
 func resolveSessionCookiePath(sessionCookiePolicy httpcontract.SessionCookiePolicy) string {

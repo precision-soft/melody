@@ -2124,24 +2124,6 @@ func TestHttpClient_ACollidingHeaderMapOptionIsRefusedAsAnError(t *testing.T) {
 }
 
 /* Client.Do documents a *url.Error as the type of every error it answers, and errors.As on it is the form retry and breaker code is written in; the one it quoted carried the whole url, so the link that stays in the chain carries the sanitized one — Op, Timeout and the inner cause survive, the userinfo and the query values do not. */
-/* net/http never answers a *url.Error with a nil Err, and that was the one shape the rebuild skipped: the link was kept verbatim, url unsanitized, so the rendered chain carried the query value in the clear */
-func TestNewRequestFailedError_SanitizesAUrlErrorWithoutAnInnerCause(t *testing.T) {
-    requestUrl, _ := url.Parse("http://h/p?token=SECRET")
-
-    err := newRequestFailedError("GET", requestUrl, &url.Error{Op: "Get", URL: "http://h/p?token=SECRET"})
-
-    var urlErr *url.Error
-    if false == errors.As(err, &urlErr) {
-        t.Fatalf("expected a *url.Error in the chain, got %v", err)
-    }
-    if true == strings.Contains(urlErr.URL, "SECRET") || false == strings.Contains(urlErr.URL, "token=xxxxx") {
-        t.Fatalf("expected the sanitized url on the link, got %q", urlErr.URL)
-    }
-    if true == strings.Contains(fmt.Sprint(exception.LogContext(err)), "SECRET") {
-        t.Fatalf("expected no secret in the rendered chain, got %v", exception.LogContext(err))
-    }
-}
-
 func TestNewRequestFailedError_KeepsAUrlErrorWithTheSanitizedUrlInTheChain(t *testing.T) {
     listener, err := net.Listen("tcp", "127.0.0.1:0")
     if nil != err {
@@ -2192,6 +2174,24 @@ func TestNewRequestFailedError_KeepsAUrlErrorWithTheSanitizedUrlInTheChain(t *te
 
     if false == errors.As(err, &urlErr) || false == urlErr.Timeout() || false == errors.Is(err, context.DeadlineExceeded) {
         t.Fatalf("expected a timing-out *url.Error in the chain, got %v", exception.LogContext(err))
+    }
+}
+
+/* net/http never answers a *url.Error with a nil Err, and that was the one shape the rebuild skipped: the link was kept verbatim, url unsanitized, so the rendered chain carried the query value in the clear */
+func TestNewRequestFailedError_SanitizesAUrlErrorWithoutAnInnerCause(t *testing.T) {
+    requestUrl, _ := url.Parse("http://h/p?token=SECRET")
+
+    err := newRequestFailedError("GET", requestUrl, &url.Error{Op: "Get", URL: "http://h/p?token=SECRET"})
+
+    var urlErr *url.Error
+    if false == errors.As(err, &urlErr) {
+        t.Fatalf("expected a *url.Error in the chain, got %v", err)
+    }
+    if true == strings.Contains(urlErr.URL, "SECRET") || false == strings.Contains(urlErr.URL, "token=xxxxx") {
+        t.Fatalf("expected the sanitized url on the link, got %q", urlErr.URL)
+    }
+    if true == strings.Contains(fmt.Sprint(exception.LogContext(err)), "SECRET") {
+        t.Fatalf("expected no secret in the rendered chain, got %v", exception.LogContext(err))
     }
 }
 

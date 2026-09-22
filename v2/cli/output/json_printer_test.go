@@ -5,9 +5,11 @@ import (
     "encoding/json"
     "errors"
     "fmt"
+    "io"
     "reflect"
     "strings"
     "testing"
+    "time"
 )
 
 type failingOutputWriter struct{}
@@ -174,5 +176,20 @@ func TestJsonPrinter_SpellsTheC1BlockAsJsonEscapes(t *testing.T) {
         if false == isWarning || "wa\xc2\x85rn" != warning["message"] {
             t.Fatalf("%s: expected the warning decoded to the message given, got %#v", format, warnings[0])
         }
+    }
+}
+
+/* the class the table printer closed — a sink that accepts fewer bytes than it is handed, with no error — reaches the json door through the one write of the whole document, and a truncated document is what a machine consumer cannot parse */
+func TestJsonPrinter_ReportsAShortWriteAsAFailure(t *testing.T) {
+    envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
+
+    writer := &shortTableWriter{}
+
+    printErr := (&JsonPrinter{}).Print(writer, envelope, DefaultOption())
+    if nil == printErr {
+        t.Fatalf("expected the short write to be reported after %d truncated writes", writer.dropped)
+    }
+    if false == errors.Is(printErr, io.ErrShortWrite) {
+        t.Fatalf("expected io.ErrShortWrite, got %v", printErr)
     }
 }

@@ -515,30 +515,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
             finalResponse = exceptionEvent.Response()
 
-            kernelResponseEvent := NewKernelResponseEvent(melodyRequest, finalResponse)
-            _, eventKernelExceptionErr = eventDispatcher.DispatchName(
-                runtimeInstance,
-                kernelcontract.EventKernelResponse,
-                kernelResponseEvent,
-            )
-            instance.logEventDispatchError(requestLogger, "kernel response error", eventKernelExceptionErr)
-
-            /* the swapped-out response body is closed so a file-backed body (FileResponse/ServeReader) is not leaked */
-            if nil != finalResponse && finalResponse != kernelResponseEvent.Response() {
-                closeDiscardedResponseBody(finalResponse, requestLogger)
-            }
-
-            finalResponse = kernelResponseEvent.Response()
-            finalResponse = writeResponse(
-                runtimeInstance,
-                melodyRequest,
-                writer,
-                finalResponse,
-                sessionManager,
-                sessionInstance,
-                instance.options.ForwardedHeadersPolicy,
-                instance.options.SessionCookiePolicy,
-            )
+            finalResponse = instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, finalResponse, sessionManager, sessionInstance, requestLogger, eventDispatcher)
         }()
 
         /* the session is loaded here, after the recovery defer is installed, and must not move back up with the rest of the request setup: both Manager.Session and Manager.NewSession turn a storage outage into a panic, and above the guard that panic escapes ServeHttp — net/http closes the connection with no response, the terminate listener never fires and the access-log line is lost */
@@ -568,26 +545,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
             finalResponse = renderErrorResponse(runtimeInstance, melodyRequest, nethttp.StatusBadRequest, "bad request", nil)
 
-            kernelResponseEvent := NewKernelResponseEvent(melodyRequest, finalResponse)
-            _, eventKernelResponseErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelResponse, kernelResponseEvent)
-            instance.logEventDispatchError(requestLogger, "kernel response error", eventKernelResponseErr)
-
-            /* the swapped-out response body is closed so a file-backed body is not leaked */
-            if nil != finalResponse && finalResponse != kernelResponseEvent.Response() {
-                closeDiscardedResponseBody(finalResponse, requestLogger)
-            }
-
-            finalResponse = kernelResponseEvent.Response()
-            finalResponse = writeResponse(
-                runtimeInstance,
-                melodyRequest,
-                writer,
-                finalResponse,
-                sessionManager,
-                sessionInstance,
-                instance.options.ForwardedHeadersPolicy,
-                instance.options.SessionCookiePolicy,
-            )
+            finalResponse = instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, finalResponse, sessionManager, sessionInstance, requestLogger, eventDispatcher)
 
             return
         }
@@ -616,26 +574,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
             finalResponse = renderErrorResponse(runtimeInstance, melodyRequest, statusCode, message, nil)
 
-            kernelResponseEvent := NewKernelResponseEvent(melodyRequest, finalResponse)
-            _, eventKernelResponseErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelResponse, kernelResponseEvent)
-            instance.logEventDispatchError(requestLogger, "kernel response error", eventKernelResponseErr)
-
-            /* the swapped-out response body is closed so a file-backed body (FileResponse/ServeReader) is not leaked */
-            if nil != finalResponse && finalResponse != kernelResponseEvent.Response() {
-                closeDiscardedResponseBody(finalResponse, requestLogger)
-            }
-
-            finalResponse = kernelResponseEvent.Response()
-            finalResponse = writeResponse(
-                runtimeInstance,
-                melodyRequest,
-                writer,
-                finalResponse,
-                sessionManager,
-                sessionInstance,
-                instance.options.ForwardedHeadersPolicy,
-                instance.options.SessionCookiePolicy,
-            )
+            finalResponse = instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, finalResponse, sessionManager, sessionInstance, requestLogger, eventDispatcher)
 
             return
         }
@@ -665,26 +604,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         if nil != kernelRequestEvent.Response() {
             finalResponse = kernelRequestEvent.Response()
 
-            kernelResponseEvent := NewKernelResponseEvent(melodyRequest, finalResponse)
-            _, eventKernelResponseErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelResponse, kernelResponseEvent)
-            instance.logEventDispatchError(requestLogger, "kernel response error", eventKernelResponseErr)
-
-            /* the swapped-out response body is closed so a file-backed body (FileResponse/ServeReader) is not leaked */
-            if nil != finalResponse && finalResponse != kernelResponseEvent.Response() {
-                closeDiscardedResponseBody(finalResponse, requestLogger)
-            }
-
-            finalResponse = kernelResponseEvent.Response()
-            finalResponse = writeResponse(
-                runtimeInstance,
-                melodyRequest,
-                writer,
-                finalResponse,
-                sessionManager,
-                sessionInstance,
-                instance.options.ForwardedHeadersPolicy,
-                instance.options.SessionCookiePolicy,
-            )
+            finalResponse = instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, finalResponse, sessionManager, sessionInstance, requestLogger, eventDispatcher)
 
             return
         }
@@ -821,26 +741,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         if nil != kernelControllerEvent.Response() {
             finalResponse = kernelControllerEvent.Response()
 
-            kernelResponseEvent := NewKernelResponseEvent(melodyRequest, finalResponse)
-            _, eventKernelResponseErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelResponse, kernelResponseEvent)
-            instance.logEventDispatchError(requestLogger, "kernel response error", eventKernelResponseErr)
-
-            /* the swapped-out response body is closed so a file-backed body (FileResponse/ServeReader) is not leaked */
-            if nil != finalResponse && finalResponse != kernelResponseEvent.Response() {
-                closeDiscardedResponseBody(finalResponse, requestLogger)
-            }
-
-            finalResponse = kernelResponseEvent.Response()
-            finalResponse = writeResponse(
-                runtimeInstance,
-                melodyRequest,
-                writer,
-                finalResponse,
-                sessionManager,
-                sessionInstance,
-                instance.options.ForwardedHeadersPolicy,
-                instance.options.SessionCookiePolicy,
-            )
+            finalResponse = instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, finalResponse, sessionManager, sessionInstance, requestLogger, eventDispatcher)
 
             return
         }
@@ -900,30 +801,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         }
 
         finalResponse = response
-        kernelResponseEvent := NewKernelResponseEvent(melodyRequest, finalResponse)
-        _, eventKernelResponseErr := eventDispatcher.DispatchName(
-            runtimeInstance,
-            kernelcontract.EventKernelResponse,
-            kernelResponseEvent,
-        )
-        instance.logEventDispatchError(requestLogger, "kernel response error", eventKernelResponseErr)
-
-        /* the swapped-out response body is closed so a file-backed body (FileResponse/ServeReader) is not leaked */
-        if nil != finalResponse && finalResponse != kernelResponseEvent.Response() {
-            closeDiscardedResponseBody(finalResponse, requestLogger)
-        }
-
-        finalResponse = kernelResponseEvent.Response()
-        finalResponse = writeResponse(
-            runtimeInstance,
-            melodyRequest,
-            writer,
-            finalResponse,
-            sessionManager,
-            sessionInstance,
-            instance.options.ForwardedHeadersPolicy,
-            instance.options.SessionCookiePolicy,
-        )
+        finalResponse = instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, finalResponse, sessionManager, sessionInstance, requestLogger, eventDispatcher)
     })
 }
 
@@ -955,6 +833,37 @@ func (instance *Kernel) invokeErrorHandlerSafely(
     }()
 
     return instance.errorHandler(runtimeInstance, writer, request, handlerErr)
+}
+
+/* dispatchResponseAndWrite is the one exit of every request path through ServeHttp: the response the path arrived at is published on kernel.response, the response the listeners answered with is written, and the body of the response they swapped out is closed so a file-backed body — FileResponse, ServeReader — is not leaked. Six paths used to carry this block as six copies, kept alike by hand. */
+func (instance *Kernel) dispatchResponseAndWrite(
+    runtimeInstance runtimecontract.Runtime,
+    melodyRequest httpcontract.Request,
+    writer nethttp.ResponseWriter,
+    finalResponse httpcontract.Response,
+    sessionManager sessioncontract.Manager,
+    sessionInstance sessioncontract.Session,
+    requestLogger loggingcontract.Logger,
+    eventDispatcher eventcontract.EventDispatcher,
+) httpcontract.Response {
+    kernelResponseEvent := NewKernelResponseEvent(melodyRequest, finalResponse)
+    _, eventKernelResponseErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelResponse, kernelResponseEvent)
+    instance.logEventDispatchError(requestLogger, "kernel response error", eventKernelResponseErr)
+
+    if nil != finalResponse && finalResponse != kernelResponseEvent.Response() {
+        closeDiscardedResponseBody(finalResponse, requestLogger)
+    }
+
+    return writeResponse(
+        runtimeInstance,
+        melodyRequest,
+        writer,
+        kernelResponseEvent.Response(),
+        sessionManager,
+        sessionInstance,
+        instance.options.ForwardedHeadersPolicy,
+        instance.options.SessionCookiePolicy,
+    )
 }
 
 func (instance *Kernel) dispatchEventKernelException(

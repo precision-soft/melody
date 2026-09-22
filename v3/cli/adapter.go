@@ -2,6 +2,7 @@ package cli
 
 import (
     "context"
+    "fmt"
     "io"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
@@ -115,13 +116,31 @@ func engineFlagValidator[T any](definition clicontract.FlagDefinition) func(valu
     }
 }
 
+/* runDeclaredValidator runs the declared validator over the declared default and contains a validator that panics: the panic is the developer's own bug, but raw it names neither the flag nor the kind, where the three refusals beside it do — so it is answered as a refusal that says what exploded, and the registration then names the flag as for any refused default. */
+func runDeclaredValidator(definition clicontract.FlagDefinition) (refusal error) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            return
+        }
+
+        refusal = exception.NewError(
+            "the flag's own validator panicked on the declared default: "+fmt.Sprint(recoveredValue),
+            nil,
+            exception.PanicCause(recoveredValue),
+        )
+    }()
+
+    return definition.Validator(definition.Value)
+}
+
 /* refuseARefusedDefault runs the declared validator over the declared default, where the mistyped default beside it is refused: a default the flag's own validator refuses is the same wiring mistake, and left to the engine it would never be seen, because the engine validates only the values it parses. A definition that carries no default at all is not validated — the zero value it means is nobody's declaration — and a definition without a validator has nothing to refuse it with; the four shipped flag types always carry their default, the typed field, zero when it was left unset, so for them a validator that refuses the zero value is refused here too, since the command would run on that zero whenever the flag is left out. */
 func refuseARefusedDefault(definition clicontract.FlagDefinition) {
     if nil == definition.Value || nil == definition.Validator {
         return
     }
 
-    refusal := definition.Validator(definition.Value)
+    refusal := runDeclaredValidator(definition)
     if nil == refusal {
         return
     }

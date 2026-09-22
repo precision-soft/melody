@@ -111,7 +111,7 @@ e2e_require_dev_service
 # mismatch message prints both numbers, so the count to move to is in the failure itself. A run that took one of
 # the degraded early-exit branches (an unreachable supervised app, a cold-cache timeout) legitimately executes
 # fewer checks; it is already red from the check_fail that branch raised
-EXPECTED_CHECK_COUNT_INTEGER=162
+EXPECTED_CHECK_COUNT_INTEGER=163
 readonly EXPECTED_CHECK_COUNT_INTEGER
 
 # state the scope in the output, so a reader never has to infer which major these checks covered
@@ -1108,6 +1108,16 @@ if printf '%s' "${WIRING_OUTPUT_STRING}" | grep -q 'wiring_identical=1'; then
     check_pass "the regenerated wiring is identical to the committed generated/wiring_gen.go"
 else
     check_fail "the regenerated wiring drifted from the committed file (${WIRING_OUTPUT_STRING})"
+fi
+
+# the documented stdout mode is a redirection into a Go file: the stream has to begin with the generated source, not
+# with the report lines the command journals in that mode and not with the run banner — the first byte is the comment
+# slash of the "Code generated" header
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . melody:wiring:generate --package generated --function RegisterGeneratedServices 2>/dev/null | head -c 1 | od -An -c | tr -d ' '"
+if [[ "$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | tr -d '[:space:]')" == "/" ]]; then
+    check_pass "melody:wiring:generate on stdout begins with the generated source, not with the report"
+else
+    check_fail "melody:wiring:generate on stdout does not begin with the generated source (first byte: ${RUN_IN_DEV_OUTPUT_STRING})"
 fi
 
 check_section_end "WIRING GENERATE" "${TAG_VALIDATE}" "e2e"

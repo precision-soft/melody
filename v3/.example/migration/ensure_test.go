@@ -523,7 +523,7 @@ func TestMigrationStepFailureLeavesAnOwnExceptionUntouched(t *testing.T) {
 }
 
 /* a lock wait that ends because the process is going away hands back the set's own exception, not a bare
-   context.Canceled: a by-type resolution relabels any foreign error "service not registered in resolver",
+   context.Canceled: a by-type resolution wraps any foreign error under "service resolution failed in resolver",
    which is what the console printed for a SIGTERM during the wait. errors.Is still reaches the cancellation. */
 func TestEnsureMigratedNamesTheSetWhenTheLockWaitIsCancelled(t *testing.T) {
     database, recorder := newFakeBunDatabase()

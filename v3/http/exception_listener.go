@@ -60,7 +60,7 @@ func RegisterKernelExceptionListener(eventDispatcher eventcontract.EventDispatch
                         }
                     }
 
-                    /* the mark is read the way the kernel's writers already read it before they log: an error recorded upstream is not filed a second time under a second message. What only this listener knows — the request coordinates — is attached to the error itself instead of being rewritten as a duplicate record. */
+                    /* the mark is read the way the kernel's writers already read it before they log: an error recorded upstream is not filed a second time under a second message. What only this listener knows — the request coordinates — is attached to the error itself instead of being rewritten as a duplicate record. Every producer inside the kernel files its record before it dispatches, so through the kernel the branch below never runs; it is the journal of the dispatches made by hand — the rate-limit request listener hands the refusal of the application's limit handler to this event unmarked, and a listener of the application may do the same. */
                     if true == exception.IsAlreadyLogged(exceptionEvent.Err()) {
                         attachRequestContextToError(exceptionEvent.Err(), requestId, method, path)
                     } else {

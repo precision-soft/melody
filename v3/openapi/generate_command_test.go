@@ -204,6 +204,13 @@ func TestGenerateCommand_TheStdoutDocumentIsNotWrappedInTheBanner(t *testing.T) 
     if false == strings.Contains(written, "[melody:openapi:generate] [started]") {
         t.Fatalf("expected the banner back under --quiet=false, got %q", written[:min(len(written), 80)])
     }
+
+    /* the frame --quiet=false brings back is governed by the other standard flag too: a command declaring --quiet by hand and not --no-color offered a frame that could not be un-coloured */
+    written = runRegisteredOpenApiGenerateCommand(t, []string{"--quiet=false", "--no-color"})
+
+    if false == strings.Contains(written, "[melody:openapi:generate] [started]") || true == strings.Contains(written, "\x1b[") {
+        t.Fatalf("expected an uncoloured frame under --quiet=false --no-color, got %q", written[:min(len(written), 80)])
+    }
 }
 
 func runRegisteredOpenApiGenerateCommand(t *testing.T, arguments []string) string {
@@ -383,6 +390,61 @@ func TestGenerateCommand_AConfigurationThatDoesNotResolveDoesNotFailTheStdoutMod
         t.Fatalf("expected the application's logger asked as before, got %v", journal.warnings)
     }
 }
+
+/* the same tolerance one call further: a configuration that resolves but answers no kernel section — a substitute, a decorator, a double — used to dereference nil under the comment that promised the door never fails the command */
+func TestGenerateCommand_AConfigurationWithoutAKernelSectionDoesNotFailTheStdoutMode(t *testing.T) {
+    serviceContainer := container.NewContainer()
+    serviceContainer.MustRegister(
+        melodyhttp.ServiceRouter,
+        func(resolver containercontract.Resolver) (httpcontract.Router, error) {
+            return melodyhttp.NewRouter(), nil
+        },
+    )
+    container.MustRegister[configcontract.Configuration](
+        serviceContainer,
+        config.ServiceConfig,
+        func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
+            return kernelLessConfiguration{}, nil
+        },
+    )
+    container.MustRegister[*Registry](
+        serviceContainer,
+        ServiceOpenApiRegistry,
+        func(resolver containercontract.Resolver) (*Registry, error) {
+            return NewRegistry(), nil
+        },
+    )
+    withoutKernel := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    journal := &recordingOpenApiLogger{}
+    withoutKernel.Container().MustRegister(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return journal, nil
+        },
+    )
+
+    output, runErr := runOpenApiGenerateCommand(t, NewGenerateCommandFromContainer(), withoutKernel)
+    if nil != runErr {
+        t.Fatalf("run without a kernel section: %v", runErr)
+    }
+
+    var document map[string]any
+    if unmarshalErr := json.Unmarshal([]byte(output), &document); nil != unmarshalErr {
+        t.Fatalf("expected the writer to carry the document alone, got %v over:\n%s", unmarshalErr, output)
+    }
+
+    if 1 != len(journal.warnings) {
+        t.Fatalf("expected the application's logger asked as before, got %v", journal.warnings)
+    }
+}
+
+/* kernelLessConfiguration answers no kernel section; every other door is the zero value a configuration double may answer */
+type kernelLessConfiguration struct {
+    configcontract.Configuration
+}
+
+func (instance kernelLessConfiguration) Kernel() configcontract.KernelConfiguration { return nil }
 
 type recordingOpenApiLogger struct {
     warnings []string

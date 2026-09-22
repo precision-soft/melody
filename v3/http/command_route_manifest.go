@@ -66,8 +66,9 @@ func (instance *RouteManifestCommand) Run(
 
     manifest := BuildRouteManifest(router.RouteDefinitions())
 
-    if "" != zone {
-        manifest = FilterRouteManifestByZone(manifest, zone)
+    manifest, filterErr := FilterRouteManifestByZone(manifest, zone)
+    if nil != filterErr {
+        return filterErr
     }
 
     payload, marshalErr := json.MarshalIndent(manifest, "", "  ")

@@ -364,6 +364,29 @@ func TestServerSentEventHub_SetBackplaneRefusesToInstallOverALiveOne(t *testing.
     }
 }
 
+/* the contract is implemented outside this package, so a backplane carried by VALUE with a slice inside is a shape an application may hand over; == on two such values panics with the runtime's own message, and the refusal this door writes never ran */
+func TestServerSentEventHub_SetBackplaneRefusesANonComparableBackplaneByName(t *testing.T) {
+    hub := NewServerSentEventHub()
+
+    hub.SetBackplane(sliceBackplane{names: []string{"first"}})
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            hub.SetBackplane(sliceBackplane{names: []string{"second"}})
+        },
+        "already carries a backplane",
+    )
+}
+
+type sliceBackplane struct {
+    names []string
+}
+
+func (instance sliceBackplane) Publish(topic string, event ServerSentEvent) error { return nil }
+
+func (instance sliceBackplane) Close() error { return nil }
+
 func TestServerSentEventHub_ClearingTheBackplaneIsAllowedOnAShutDownHub(t *testing.T) {
     hub := NewServerSentEventHub()
     backplane := &closeRecordingBackplane{}

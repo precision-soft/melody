@@ -36,6 +36,7 @@ func (instance *Response) SetStatusCode(statusCode int) { instance.statusCode = 
 
 func (instance *Response) Headers() nethttp.Header { return instance.headers }
 
+/* SetHeaders stores a copy of the map, and stores nil when handed nil: Headers may therefore answer nil, and every writer of the response asks before it writes. The guard is not for this type alone — the contract is implemented by the application too, and a response of its own may answer nil for reasons of its own — so the writers keep it whatever this type does. */
 func (instance *Response) SetHeaders(headers nethttp.Header) {
     if nil == headers {
         instance.headers = nil
@@ -251,6 +252,7 @@ func ConfinedAttachmentResponse(statusCode int, rootDirectory string, name strin
     return response, nil
 }
 
+/* confineFileToRoot resolves a file name under a root directory and refuses everything that would leave it: an absolute name, a climb, a symlink resolving outside, and anything that is not a regular file. The static file server keeps its own containment in dirFileSystem.Open, on purpose rather than by oversight: that door admits directories, because its caller dispatches them itself, falls back to the raw base path when the root cannot be evaluated, and answers the fs errors its io/fs contract prescribes, where this one answers named refusals a handler renders. Two consumers, two contracts; a change to what "outside the root" means is made in both. */
 func confineFileToRoot(rootDirectory string, name string) (string, error) {
     if "" == strings.TrimSpace(rootDirectory) {
         return "", exception.NewError("the file root directory may not be empty", nil, nil)

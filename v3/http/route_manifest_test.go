@@ -5,6 +5,7 @@ import (
     "testing"
 
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/internal/testhelper"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
@@ -166,8 +167,57 @@ func TestBuildRouteManifest_CarriesEveryMatchDiscriminatorAGeneratedUrlMustSatis
 func TestFilterManifestByZone(t *testing.T) {
     manifest := BuildRouteManifest(manifestTestRouter().RouteDefinitions())
 
-    frontendOnly := FilterRouteManifestByZone(manifest, RouteZoneFrontend)
+    frontendOnly, filterErr := FilterRouteManifestByZone(manifest, RouteZoneFrontend)
+    if nil != filterErr {
+        t.Fatalf("unexpected refusal: %v", filterErr)
+    }
+
     if 1 != len(frontendOnly.Routes) || "user_show" != frontendOnly.Routes[0].Name {
         t.Fatalf("expected only the frontend route, got %+v", frontendOnly.Routes)
+    }
+}
+
+func TestFilterRouteManifestByZone_RefusesAZoneThatIsNotDeclared(t *testing.T) {
+    manifest := BuildRouteManifest(manifestTestRouter().RouteDefinitions())
+
+    filtered, filterErr := FilterRouteManifestByZone(manifest, "frontned")
+    if nil == filterErr {
+        t.Fatalf("expected the misspelled zone to be refused, got %d routes", len(filtered.Routes))
+    }
+
+    typedError, ok := filterErr.(*exception.Error)
+    if false == ok {
+        t.Fatalf("expected *exception.Error, got %T", filterErr)
+    }
+
+    if "route zone is not one of the declared zones" != typedError.Message() {
+        t.Fatalf("unexpected message: %s", typedError.Message())
+    }
+
+    if "frontned" != typedError.Context()["zone"] {
+        t.Fatalf("expected the refusal to name the zone, got %+v", typedError.Context())
+    }
+
+    declaredZones, isList := typedError.Context()["declaredZones"].([]string)
+    if false == isList || len(RouteZones()) != len(declaredZones) {
+        t.Fatalf("expected the refusal to list the declared zones, got %+v", typedError.Context()["declaredZones"])
+    }
+
+    if 0 != len(filtered.Routes) {
+        t.Fatalf("expected no manifest beside the refusal, got %+v", filtered.Routes)
+    }
+}
+
+/* the empty zone is read the way the command reads its empty --zone flag: no gate, the whole manifest — not the routes whose own zone is empty, which is the third reading the door used to give it */
+func TestFilterRouteManifestByZone_AnEmptyZoneAnswersTheWholeManifest(t *testing.T) {
+    manifest := BuildRouteManifest(manifestTestRouter().RouteDefinitions())
+
+    whole, filterErr := FilterRouteManifestByZone(manifest, "")
+    if nil != filterErr {
+        t.Fatalf("unexpected refusal: %v", filterErr)
+    }
+
+    if len(manifest.Routes) != len(whole.Routes) || 0 == len(whole.Routes) {
+        t.Fatalf("expected the whole manifest of %d routes, got %d", len(manifest.Routes), len(whole.Routes))
     }
 }

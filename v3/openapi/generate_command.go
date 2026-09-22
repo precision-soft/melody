@@ -57,6 +57,11 @@ func (instance *GenerateCommand) Flags() []clicontract.Flag {
             Usage: "suppress the run banner around the document (--quiet=false brings it back)",
             Value: true,
         },
+        &clicontract.BoolFlag{
+            Name:  output.FlagNameNoColor,
+            Usage: "disable ansi colors",
+            Value: false,
+        },
     }
 }
 
@@ -145,7 +150,13 @@ func journalSharesStdout(runtimeInstance runtimecontract.Runtime) bool {
         return false
     }
 
-    return "" == configuration.Kernel().LogPath()
+    /* the kernel section is read through the same tolerance: a substitute configuration answering no kernel section is a door this command does not fail on either */
+    kernelConfiguration := configuration.Kernel()
+    if true == internal.IsNilInterface(kernelConfiguration) {
+        return false
+    }
+
+    return "" == kernelConfiguration.LogPath()
 }
 
 var _ clicontract.Command = (*GenerateCommand)(nil)

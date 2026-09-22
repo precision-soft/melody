@@ -1206,6 +1206,60 @@ func TestWriteResponse_ADeletedSessionExpiresTheCookieAndKeepsTheResponse(t *tes
     }
 }
 
+/* an expiring session cookie addresses one client as much as a live one does: replayed out of a shared cache it logs the next client out, so the response that carries it is marked private at every door that writes it, not only at the save */
+func TestWriteResponse_AnExpiringSessionCookieMarksTheResponsePrivate(t *testing.T) {
+    arms := []struct {
+        name           string
+        sessionManager *stubSessionManager
+        sessionInstance *stubSession
+    }{
+        {
+            name:            "cleared",
+            sessionManager:  &stubSessionManager{},
+            sessionInstance: &stubSession{id: "session-123", isModified: false, isCleared: true},
+        },
+        {
+            name:            "deleted while the request was in flight",
+            sessionManager:  &stubSessionManager{saveErr: exception.NewError("session was deleted and cannot be saved again", nil, session.ErrSessionDeleted)},
+            sessionInstance: &stubSession{id: "session-123", isModified: true},
+        },
+    }
+
+    for _, arm := range arms {
+        netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
+        netRequest.RemoteAddr = "127.0.0.1:1234"
+
+        melodyRequest := NewRequest(netRequest, nil, nil, nil)
+
+        response := TextResponse(nethttp.StatusOK, "handler body")
+        response.Headers().Set("Cache-Control", "public, max-age=60")
+        writer := httptest.NewRecorder()
+
+        writeResponse(
+            nil,
+            melodyRequest,
+            writer,
+            response,
+            arm.sessionManager,
+            arm.sessionInstance,
+            httpcontract.ForwardedHeadersPolicy{},
+            httpcontract.SessionCookiePolicy{Path: "/"},
+        )
+
+        httpResponse := writer.Result()
+
+        cookies := httpResponse.Cookies()
+        if 1 != len(cookies) || "" != cookies[0].Value || 0 <= cookies[0].MaxAge {
+            t.Fatalf("%s: expected the expiring session cookie, got %+v", arm.name, cookies)
+        }
+
+        cacheControl := httpResponse.Header.Get("Cache-Control")
+        if true == strings.Contains(strings.ToLower(cacheControl), "public") || false == strings.Contains(strings.ToLower(cacheControl), "private") {
+            t.Fatalf("%s: expected the response carrying the expiring cookie to be marked private, got Cache-Control %q", arm.name, cacheControl)
+        }
+    }
+}
+
 /* A session ROTATED away while the request was running is refused the same write and answered differently: the identity did not end, it moved to a fresh id the rotating request is handing the client in its own Set-Cookie, so expiring the browser cookie here would race that header and log the user out immediately after the login that rotated the session. The write is still refused, the refusal is still logged, and the handler's own response is still served — only the clearing cookie is gone. */
 func TestWriteResponse_ARotatedAwaySessionKeepsTheCookieAndTheResponse(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)

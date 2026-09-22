@@ -871,7 +871,7 @@ func buildContainerServiceErrorLines(item containerServiceListItem, verbosityLev
     return lines
 }
 
-/* limitErrorLinesByVerbosity applies the verbosity ladder to the message and the context together, as one budget, and splices the cause lines whole between them: the cut marker stays on the last rendered line, so it still says that something below was left out, and it is never a cause */
+/* limitErrorLinesByVerbosity applies the verbosity ladder to the message and the context together, as one budget, and splices the cause lines whole between them: the cut marker stays on the last rendered line, so it still says that something below was left out — and when the message is cut or the context is cut whole, that last line is a cause line, which then carries the marker for the lines below it */
 func limitErrorLinesByVerbosity(messageLines []string, causeLines []string, contextLines []string, verbosityLevel int) []string {
     budgeted := make([]string, 0, len(messageLines)+len(contextLines))
     budgeted = append(budgeted, messageLines...)

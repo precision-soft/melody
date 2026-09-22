@@ -2,6 +2,7 @@ package http
 
 import (
     nethttp "net/http"
+    "net/http/httptest"
     "strconv"
     "strings"
     "testing"
@@ -244,5 +245,16 @@ func TestPrefersHtml_AHeaderCutAtTheCapIsReadAsUnparsable(t *testing.T) {
     accepted := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/", acceptListWithTailPast("text/*", 62, "application/json;q=0"))
     if false == PrefersHtml(accepted) {
         t.Fatalf("expected a list within the cap to negotiate normally")
+    }
+}
+
+/* the Accept field is list-typed and a client may send it on two lines; the html preference on the second line is the one a first-line reader never sees */
+func TestPrefersHtml_ReadsEveryAcceptLine(t *testing.T) {
+    netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
+    netRequest.Header.Add("Accept", "application/json;q=0.5")
+    netRequest.Header.Add("Accept", "text/html")
+
+    if false == PrefersHtml(testhelper.NewHttpTestRequestFromHttpRequest(netRequest)) {
+        t.Fatalf("expected the html preference on the second Accept line to be read")
     }
 }

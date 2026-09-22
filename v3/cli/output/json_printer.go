@@ -30,9 +30,16 @@ func (instance *JsonPrinter) Print(
     }
 
     /* the encoder escapes the C0 block and the two Unicode line separators and leaves the C1 block raw, so a document carrying U+009B repainted the terminal it was printed to; the document is rewritten whole before it reaches the writer — the escape decodes to the same rune, so a consumer reads the value the command gave — and written once, so a write failure is still the writer's and still reported */
-    _, writeErr := writer.Write(internal.EscapeJsonC1Block(document.Bytes()))
+    escaped := internal.EscapeJsonC1Block(document.Bytes())
+
+    written, writeErr := writer.Write(escaped)
     if nil != writeErr {
         return writeErr
+    }
+
+    /* a sink that accepted fewer bytes than the document without an error — the application's own writer, the cron runner's capture buffer — truncated the one document a machine consumer parses, under exit zero; the count is read the way the table printer's tracking writer reads it, and the shortfall is the printing failure it is */
+    if written < len(escaped) {
+        return io.ErrShortWrite
     }
 
     return nil

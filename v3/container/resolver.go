@@ -40,8 +40,9 @@ func FromResolver[T any](resolver containercontract.Resolver, serviceName string
             return zero, getErr
         }
 
+        /* a foreign error — a resolver implemented outside this package, a provider handing back its driver's error raw — is wrapped under a title that names the resolution and keeps it as the cause: the service may well be registered and its provider the one that failed, so the title does not say "not registered" for it. Whether the service exists is read from the cause. */
         return zero, exception.NewError(
-            "service not registered in resolver",
+            "service resolution failed in resolver",
             map[string]any{
                 "serviceName": serviceName,
             },
@@ -113,7 +114,7 @@ func FromResolverByType[T any](resolver containercontract.Resolver) (T, error) {
         var melodyErr *exception.Error
         isMelodyErr := errors.As(getByTypeErr, &melodyErr)
 
-        /* the failure is dressed the way the name-keyed twin dresses it: the original error travels out whole with the type written into its context in place, and a foreign error is wrapped naming the type — a rebuilt copy would shed the log level, the already-logged mark, the capture stack and every wrapper above it */
+        /* the failure is dressed the way the name-keyed twin dresses it: the original error travels out whole with the type written into its context in place, and a foreign error is wrapped under the title of the resolution, naming the type, with the error as its cause — a rebuilt copy would shed the log level, the already-logged mark, the capture stack and every wrapper above it, and a title of "not registered" would blame the registration for a provider that failed */
         if true == isMelodyErr && nil != melodyErr {
             melodyErr.SetContextValue("serviceType", canonicalTargetType.String())
 
@@ -121,7 +122,7 @@ func FromResolverByType[T any](resolver containercontract.Resolver) (T, error) {
         }
 
         return zero, exception.NewError(
-            "service not registered in resolver",
+            "service resolution failed in resolver",
             map[string]any{
                 "serviceType": canonicalTargetType.String(),
             },
