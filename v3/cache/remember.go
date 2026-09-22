@@ -83,7 +83,7 @@ func (instance *RememberOption) WithCancelable(isCancelable bool) *RememberOptio
 
    The three settings answer in this order: a canceled context ends the wait first, then the wait timeout, then the leader. A zero wait timeout means no waiting at all, so the context never gets to be consulted, and an unbounded wait — the shipped default — is exactly where a context matters most, since without one the waiter parks for as long as the callback takes however long ago its own request was abandoned. Where the callback is the one that should stop, hand its own deadline to the callback: the context it receives is the flight's, not this one. */
 func (instance *RememberOption) Context() context.Context {
-    if nil == instance.callerContext {
+    if true == internal.IsNilInterface(instance.callerContext) {
         return context.Background()
     }
 

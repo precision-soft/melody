@@ -4,6 +4,7 @@ import (
     "reflect"
 
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/internal"
     "github.com/precision-soft/melody/v3/logging"
     messagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -36,7 +37,7 @@ func (instance *Manager) Dispatch(
     chain := instance.buildChain(0)
 
     result, chainErr := chain(runtimeInstance, envelopeInstance)
-    if nil == chainErr && nil != result {
+    if nil == chainErr && false == internal.IsNilInterface(result) {
         instance.warnWhenUntouched(runtimeInstance, result)
     }
 
@@ -59,7 +60,7 @@ func (instance *Manager) warnWhenUntouched(
     }
 
     logger := logging.LoggerFromRuntime(runtimeInstance)
-    if nil == logger {
+    if true == internal.IsNilInterface(logger) {
         return
     }
 

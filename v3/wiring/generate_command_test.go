@@ -756,3 +756,36 @@ type kernelLessConfiguration struct {
 }
 
 func (instance kernelLessConfiguration) Kernel() configcontract.KernelConfiguration { return nil }
+
+/* the classifier reads what a line IS, not what it is not: the vendor trees the scan stepped over and the reach of a global bind are facts of a scan that worked — the reach line is emitted for every bind the generator RESOLVED, so an application with global binds raised one warning per bound argument on every clean generation, and a reader who learns that warnings here are routine stops reading the ones that name lost coverage. */
+func TestJournalLineWriter_AFactOfAScanThatWorkedStaysInformation(t *testing.T) {
+    journal := &bytes.Buffer{}
+    writer := &journalLineWriter{
+        logger:  logging.NewJsonLogger(journal, loggingcontract.LevelWarning),
+        command: "melody:wiring:generate",
+    }
+
+    for _, line := range []string{
+        "registered 12 constructors",
+        "skipped vendor directory: vendor/github.com/x",
+        "global bind logger reaches 2 constructors: NewBilling, NewInvoicing",
+        "skipped NewThing (thing.go:12): unexported",
+        "bind targets were not checked: the application declares no parameters",
+    } {
+        writer.journalLine(line)
+    }
+
+    kept := journal.String()
+
+    for _, fact := range []string{"registered 12 constructors", "skipped vendor directory", "global bind logger"} {
+        if true == strings.Contains(kept, fact) {
+            t.Fatalf("expected %q to stay information below a warning threshold, got %q", fact, kept)
+        }
+    }
+
+    for _, loss := range []string{"skipped NewThing", "bind targets were not checked"} {
+        if false == strings.Contains(kept, loss) {
+            t.Fatalf("expected %q to survive the warning threshold, got %q", loss, kept)
+        }
+    }
+}

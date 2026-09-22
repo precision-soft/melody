@@ -767,8 +767,9 @@ func (instance *container) closeInternal(closeContext context.Context) error {
         }
 
         if nil != closeErr {
-            failures[candidate.nodeKey] = errorText(closeErr)
-            recordCloseFailureDetails(failureDetails, candidate.nodeKey, closeErr)
+            failureLine := errorText(closeErr)
+            failures[candidate.nodeKey] = failureLine
+            recordCloseFailureDetails(failureDetails, candidate.nodeKey, closeErr, failureLine)
         }
     }
 
@@ -1043,9 +1044,31 @@ func containedClose(close func() error) (closeErr error) {
     return close()
 }
 
-/* recordCloseFailureDetails keeps, beside the one line the failure map holds, the whole of what the close error carries — for a contained panic the recovered value, its type, the frames that ran and the cause chain — under the node's key: the map of failures is rendered as text per service, and text is where a context map and a cause chain collapse to their first line, which is not the whole of what the operator will ever learn. */
-func recordCloseFailureDetails(failureDetails map[string]exceptioncontract.Context, nodeKey string, closeErr error) {
-    details := exception.LogContext(closeErr)
+/* closeFailureStackLimit bounds the frames one failed close contributes. A contained panic carries the whole debug.Stack of the goroutine that ran the close — about a kilobyte on an ordinary one, three on a deep one — and the teardown error is ONE record the application journals, so a shutdown that loses twenty services wrote sixty kilobytes of it in a single line. The top frames are the ones that name the close; what the cut drops is the runtime's own tail. */
+const closeFailureStackLimit = 2048
+
+/* recordCloseFailureDetails keeps, beside the one line the failure map holds, what the close error carries BEYOND that line — for a contained panic the recovered value, its type and the frames that ran — under the node's key: the map of failures is rendered as text per service, and text is where a context map and a cause chain collapse to their first line, which is not the whole of what the operator will ever learn.
+
+   Beyond the line is the whole of the condition: the context every melody error seeds is its own message, which is the failure line verbatim, so a close answering a plain error has nothing to add and records nothing — the entry would otherwise be a duplicate of the line it sits beside, on EVERY failed teardown. */
+func recordCloseFailureDetails(
+    failureDetails map[string]exceptioncontract.Context,
+    nodeKey string,
+    closeErr error,
+    failureLine string,
+) {
+    details := containedCloseFailureDetails(closeErr)
+
+    for key, value := range details {
+        text, isText := value.(string)
+        if true == isText && failureLine == text {
+            delete(details, key)
+        }
+    }
+
+    if stack, hasStack := details["panicStack"].(string); true == hasStack && closeFailureStackLimit < len(stack) {
+        details["panicStack"] = stack[:closeFailureStackLimit] + fmt.Sprintf("\n\t… cut, %d of %d bytes kept", closeFailureStackLimit, len(stack))
+    }
+
     if 0 == len(details) {
         return
     }
@@ -1053,7 +1076,23 @@ func recordCloseFailureDetails(failureDetails map[string]exceptioncontract.Conte
     failureDetails[nodeKey] = details
 }
 
-/* withCloseFailureDetails adds the details map under "failureDetails" only when a close left any, so a teardown whose failures carry nothing beyond their line renders as before. */
+/* containedCloseFailureDetails reads the close error's context under the same containment the failure line beside it already has. LogContext walks the error's own CHAIN — errors.As for a context provider, and the cause walk under it, both call the error's Unwrap — so an error whose Unwrap panics, which is the class errorText exists for one link deeper, would end the teardown loop from inside the one place that exists to survive a bad close; and under a teardown armed in waves that loop body runs on a goroutine with no recover above it, where no caller can contain it. */
+func containedCloseFailureDetails(closeErr error) (details exceptioncontract.Context) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            return
+        }
+
+        details = exceptioncontract.Context{
+            "detailsPanicked": fmt.Sprintf("reading the close error's context panicked: %v", recoveredValue),
+        }
+    }()
+
+    return exception.LogContext(closeErr)
+}
+
+/* withCloseFailureDetails adds the details map under "failureDetails" only when a close left something the failure line does not already say. */
 func withCloseFailureDetails(context exceptioncontract.Context, failureDetails map[string]exceptioncontract.Context) exceptioncontract.Context {
     if 0 < len(failureDetails) {
         context["failureDetails"] = failureDetails

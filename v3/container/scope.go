@@ -724,8 +724,9 @@ func closeCreatedScopeInstances(
 
         closeErr := closeServiceValueWithin(closeContext, closeable, contextCloseable)
         if nil != closeErr {
-            failures[nodeKey] = errorText(closeErr)
-            recordCloseFailureDetails(failureDetails, nodeKey, closeErr)
+            failureLine := errorText(closeErr)
+            failures[nodeKey] = failureLine
+            recordCloseFailureDetails(failureDetails, nodeKey, closeErr, failureLine)
         }
     }
 

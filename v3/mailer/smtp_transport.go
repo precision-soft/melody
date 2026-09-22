@@ -235,7 +235,7 @@ func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, 
 
     /* from here the message is accepted: reporting any later failure would invite a retry and a duplicate delivery, so the quit path only ever logs. A deadline that cannot be re-armed also means the quit cannot be bounded — skip it and let the deferred close drop the connection. */
     if deadlineErr := instance.resetSessionDeadline(connection); nil != deadlineErr {
-        if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
+        if logger := logging.LoggerFromRuntime(runtimeInstance); false == internal.IsNilInterface(logger) {
             logger.Warning(
                 "smtp session deadline reset failed after the message was accepted; skipping quit",
                 exception.LogContext(deadlineErr, map[string]any{"address": instance.address}),
@@ -246,7 +246,7 @@ func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, 
     }
 
     if quitErr := client.Quit(); nil != quitErr {
-        if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
+        if logger := logging.LoggerFromRuntime(runtimeInstance); false == internal.IsNilInterface(logger) {
             /* log-only is right (the message is accepted; returning would invite a duplicate delivery), but the record must carry the cause — a recurring quit failure with only the address beside it cannot be told apart from a timeout, a protocol error or a closed socket */
             logger.Warning(
                 "smtp quit failed after the message was accepted",

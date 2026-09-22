@@ -2,6 +2,7 @@ package contract
 
 import (
     "io"
+    "reflect"
 )
 
 /* StaticContext is a Context whose answers are given rather than parsed. It exists because a command's body is worth testing without a command line: before melody owned this contract a caller could build the engine's command struct itself and drive argv through it, and taking that away without offering a door would have made a command harder to test than it was. Hand it the values a run would have produced and call the command's Run directly.
@@ -51,11 +52,27 @@ func (instance *StaticContext) Arguments() []string {
 }
 
 func (instance *StaticContext) Writer() io.Writer {
-    if nil == instance.WriterValue {
+    if true == isNilWriter(instance.WriterValue) {
         return io.Discard
     }
 
     return instance.WriterValue
+}
+
+/* isNilWriter reads the shape internal.IsNilInterface reads, spelled here because no contract package of this major imports a concrete melody package and internal carries exception with it. The shape matters at this door in particular: a caller assembling a StaticContext from a field of their own hands WriterValue a nil *os.File or a nil *bytes.Buffer, which is an io.Writer that is not nil, so the comparison against nil answers false and the contract's promise — a context built without a writer answers io.Discard — is kept for the true nil alone while the typed nil is handed back to panic on its first write. */
+func isNilWriter(writer io.Writer) bool {
+    if nil == writer {
+        return true
+    }
+
+    reflectedWriter := reflect.ValueOf(writer)
+
+    switch reflectedWriter.Kind() {
+    case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+        return true == reflectedWriter.IsNil()
+    default:
+        return false
+    }
 }
 
 /* copyStringValues keeps the contract the parsed context keeps: what a command is handed is its own, so a command that sorts or truncates it does not rewrite the values every later reader sees */

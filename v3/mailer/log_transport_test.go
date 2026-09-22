@@ -1,7 +1,12 @@
 package mailer
 
 import (
+    "context"
     "testing"
+
+    "github.com/precision-soft/melody/v3/container"
+    "github.com/precision-soft/melody/v3/logging"
+    "github.com/precision-soft/melody/v3/runtime"
 
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     mailercontract "github.com/precision-soft/melody/v3/mailer/contract"
@@ -172,5 +177,49 @@ func TestLogTransportIsNoOpWithoutLogger(t *testing.T) {
     })
     if nil != sendErr {
         t.Fatalf("Send must be a safe no-op when no logger is available, got: %v", sendErr)
+    }
+}
+
+/* the GoDoc of Send says the constructor's logger is PREFERRED and that a nil one falls through to the runtime's, and the constructor's logger is the caller's own value: an application wiring NewLogTransport from a field it resolved into and left nil hands a *capturingLogger that is nil — an interface that is not. The first guard answered false, the runtime was never asked, and the message a request-scoped logger was there to record was dropped; with no runtime logger either it went further and dereferenced at Info, where the document promises a safe no-op.
+
+   The runtime logger is what pins the FIRST guard on its own: the second one reads the same variable, so a probe that only asks whether the send survived is answered by either of them. */
+func TestLogTransport_ATypedNilConstructorLoggerFallsThroughToTheRuntimes(t *testing.T) {
+    var absentLogger *capturingLogger
+
+    runtimeLogger := &capturingLogger{}
+    serviceContainer := container.NewContainer()
+    scope := serviceContainer.NewScope()
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, runtimeLogger)
+    runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
+
+    sendErr := NewLogTransport(absentLogger).Send(runtimeInstance, mailercontract.Message{
+        From:    mailercontract.Address{Email: "shop@example.com"},
+        To:      []mailercontract.Address{{Email: "ada@example.com"}},
+        Subject: "Welcome",
+        Text:    "hello there",
+    })
+
+    if nil != sendErr {
+        t.Fatalf("expected the send to answer no error, got %v", sendErr)
+    }
+
+    if 1 != len(runtimeLogger.entries) {
+        t.Fatalf("expected the runtime's logger to record the message, got %d entries", len(runtimeLogger.entries))
+    }
+}
+
+/* the same typed nil with no runtime logger either: the second guard is the one that keeps the promise, and what it answers is the no-op. */
+func TestLogTransport_ATypedNilLoggerKeepsTheSendASafeNoOp(t *testing.T) {
+    var absentLogger *capturingLogger
+
+    sendErr := NewLogTransport(absentLogger).Send(testRuntime(), mailercontract.Message{
+        From:    mailercontract.Address{Email: "shop@example.com"},
+        To:      []mailercontract.Address{{Email: "ada@example.com"}},
+        Subject: "Welcome",
+        Text:    "hello there",
+    })
+
+    if nil != sendErr {
+        t.Fatalf("expected the send to stay a safe no-op, got %v", sendErr)
     }
 }

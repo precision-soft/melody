@@ -610,3 +610,36 @@ func (instance *cacheTestCountingSerializer) Deserialize(payload []byte) (any, e
 
     return instance.inner.Deserialize(payload)
 }
+
+/* the reasons are as many as the refused keys, and one of them can be the error's: a batch refused for several reasons reported one cause under a list of keys, leaving the operator to say which key it belonged to. The empty key is the one the sorted list names first whenever the batch carries it, which is a key the backend contract calls malformed — so "key" alone is not the whole answer. */
+func TestManager_SetMultipleCarriesTheReasonOfEveryRefusedKey(t *testing.T) {
+    backend := NewInMemoryBackend(10, time.Hour, &cacheTestClock{now: time.Unix(10, 0)})
+    defer backend.Close()
+
+    manager := NewManager(backend, NewJsonSerializer())
+
+    setErr := manager.SetMultiple(map[string]any{
+        "":     make(chan int),
+        "mmm":  func() {},
+        "fine": "value",
+    }, time.Minute)
+
+    if nil == setErr {
+        t.Fatalf("expected the unserializable entries to be refused")
+    }
+
+    context := exception.LogContext(setErr)
+
+    causes, hasCauses := context["causes"].(map[string]string)
+    if false == hasCauses || 2 != len(causes) {
+        t.Fatalf("expected a reason per refused key, got %v", context["causes"])
+    }
+
+    if "" == causes[""] || "" == causes["mmm"] {
+        t.Fatalf("expected both refused keys to carry their own reason, got %v", causes)
+    }
+
+    if causes[""] == causes["mmm"] {
+        t.Fatalf("expected the two reasons to be the ones their own keys raised, got %v", causes)
+    }
+}

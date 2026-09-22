@@ -2154,3 +2154,8 @@ func TestContainerCommand_TheSingleDoorOnATwinNameAnswersScopedWithoutTheContain
         t.Fatalf("expected no teardown block beside a scoped registration, got %q", rendered)
     }
 }
+
+/* sanitizeErrorContextValue is the tests' own entry into the tracked walk: production always enters it with the cycle set and the depth the caller is at, so the wrapper had no production caller and lived beside the code it exercised. */
+func sanitizeErrorContextValue(value any) any {
+    return sanitizeErrorContextValueTracked(value, map[errorContextVisitKey]struct{}{}, 0, false)
+}

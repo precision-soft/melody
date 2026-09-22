@@ -182,3 +182,14 @@ func TestRequestOptions_SetHeadersWritesNothingOnACollisionAndKeepsTheFirstRefus
         t.Fatalf("expected the first refusal to stay, got %v", options.refusal)
     }
 }
+
+func TestRequestOptions_SetHeaderStoresTheCanonicalKeyDeterministically(t *testing.T) {
+    options := NewRequestOptions()
+    options.SetHeader("x-api-key", "first")
+    options.SetHeader("X-Api-Key", "second")
+
+    headers := options.Headers()
+    if 1 != len(headers) || "second" != headers["X-Api-Key"] {
+        t.Fatalf("expected the sequential last write on one canonical key, got %#v", headers)
+    }
+}

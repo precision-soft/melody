@@ -127,7 +127,7 @@ func (instance *Configuration) Parameters() ParameterMap {
 /* projectDirectoryParameterValue reads the project-directory default for diagnostics without requiring a resolved configuration. */
 func (instance *Configuration) projectDirectoryParameterValue() string {
     parameter := instance.Get(KernelProjectDir)
-    if nil == parameter {
+    if true == internal.IsNilInterface(parameter) {
         return ""
     }
 
@@ -149,7 +149,7 @@ func (instance *Configuration) Get(name string) configcontract.Parameter {
 
 func (instance *Configuration) MustGet(name string) configcontract.Parameter {
     parameter := instance.Get(name)
-    if nil == parameter {
+    if true == internal.IsNilInterface(parameter) {
         exception.Panic(
             exception.NewError(
                 "parameter does not exist",

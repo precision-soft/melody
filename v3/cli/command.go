@@ -24,13 +24,13 @@ func Register(root *Root, command clicontract.Command, runtimeInstance runtimeco
         )
     }
 
-    if nil == command {
+    if true == internal.IsNilInterface(command) {
         exception.Panic(
             exception.NewError("cli command may not be nil", nil, nil),
         )
     }
 
-    if nil == runtimeInstance {
+    if true == internal.IsNilInterface(runtimeInstance) {
         exception.Panic(
             exception.NewError("runtime instance may not be nil in cli register", nil, nil),
         )

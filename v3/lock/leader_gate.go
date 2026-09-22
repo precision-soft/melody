@@ -288,7 +288,7 @@ func (instance *LeaderGate) runHookShielded(runtimeInstance runtimecontract.Runt
 
 func (instance *LeaderGate) gateLogger(runtimeInstance runtimecontract.Runtime) loggingcontract.Logger {
     logger := logging.LoggerFromRuntime(runtimeInstance)
-    if nil == logger {
+    if true == internal.IsNilInterface(logger) {
         logger = logging.EmergencyLogger()
     }
 

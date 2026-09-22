@@ -22,6 +22,7 @@ import (
 
     "github.com/precision-soft/melody/v3/exception"
     httpclientcontract "github.com/precision-soft/melody/v3/httpclient/contract"
+    "github.com/precision-soft/melody/v3/internal"
 )
 
 func TestHttpClientBuildsUrlAndAddsQuery(t *testing.T) {
@@ -1533,7 +1534,7 @@ func TestSanitizeUrlTextually_CutsTheQueryWholeWhateverFollowsIt(t *testing.T) {
         t.Fatalf("the query value survived the textual fallback: %q", sanitized)
     }
 
-    if false == strings.HasSuffix(sanitized, "?"+redactedValue) {
+    if false == strings.HasSuffix(sanitized, "?"+internal.RedactedQueryValue) {
         t.Fatalf("expected the whole query to be replaced by one redaction, got %q", sanitized)
     }
 
@@ -1550,7 +1551,7 @@ func TestSanitizeUrlTextually_AStringWithoutAnAuthorityIsReturnedUnchanged(t *te
         t.Fatalf("expected a string with no authority to be returned unchanged, got %q", sanitized)
     }
 
-    if true == strings.Contains(sanitized, redactedValue) {
+    if true == strings.Contains(sanitized, internal.RedactedQueryValue) {
         t.Fatalf("expected no redaction to be spliced into a path with no authority, got %q", sanitized)
     }
 }
@@ -1563,7 +1564,7 @@ func TestSanitizeUrlTextually_AnAuthorityWithoutUserinfoIsReturnedUnchanged(t *t
         t.Fatalf("expected an authority with no userinfo to be returned unchanged, got %q", sanitized)
     }
 
-    if true == strings.Contains(sanitized, redactedValue) {
+    if true == strings.Contains(sanitized, internal.RedactedQueryValue) {
         t.Fatalf("expected no redaction to be spliced into an authority that carried no credential, got %q", sanitized)
     }
 }
@@ -1576,7 +1577,7 @@ func TestSanitizeUrlTextually_AnAuthorityEndingTheStringStillLosesItsUserinfo(t 
         t.Fatalf("the userinfo password survived: %q", sanitized)
     }
 
-    if false == strings.Contains(sanitized, redactedValue+":"+redactedValue+"@host") {
+    if false == strings.Contains(sanitized, internal.RedactedQueryValue+":"+internal.RedactedQueryValue+"@host") {
         t.Fatalf("expected the userinfo to be replaced in place, got %q", sanitized)
     }
 }
@@ -1972,14 +1973,24 @@ func TestSanitizeUrlParseError_AnErrorThatIsNotAUrlErrorKeepsItsOwnText(t *testi
     }
 }
 
-/* the unsupported-body report names the type it was handed, and a nil reaching it would have no type to name — the branch answers "nil" rather than dereferencing. A nil body is filtered one step earlier so nothing can reach it, which is why it is pinned directly. */
-func TestTypeNameOf_ANilValueIsNamedRatherThanDereferenced(t *testing.T) {
-    if "nil" != typeNameOf(nil) {
-        t.Fatalf("unexpected name for a nil value: %q", typeNameOf(nil))
+/* the unsupported-body report names the type it was handed: the naming itself belongs to the shared helper, which pins the nil, the named type and the typed nil in its own package, and what nothing pinned until now is that this refusal carries the name at all. */
+func TestBuildRequestBodyReader_TheRefusalNamesTheTypeItWasHanded(t *testing.T) {
+    options := NewRequestOptions()
+    options.SetBody(struct{ Field int }{Field: 3})
+
+    reader, err := buildRequestBodyReader(options)
+
+    if nil != reader || nil == err {
+        t.Fatalf("expected the unsupported body to be refused, got reader=%v err=%v", reader, err)
     }
 
-    if "int" != typeNameOf(3) {
-        t.Fatalf("unexpected name for an int: %q", typeNameOf(3))
+    if "unsupported body type" != err.Error() {
+        t.Fatalf("unexpected refusal: %q", err.Error())
+    }
+
+    context := exception.LogContext(err)
+    if "struct { Field int }" != context["type"] {
+        t.Fatalf("expected the refusal to name the type it was handed, got %v", context["type"])
     }
 }
 
@@ -2111,7 +2122,7 @@ func TestSanitizeUrlTextually_ASchemeRelativeAuthorityLosesItsUserinfo(t *testin
             t.Fatalf("%s: the credential survived the textual fallback: %q", currentCase.name, sanitized)
         }
 
-        if false == strings.HasPrefix(sanitized, "//"+redactedValue+":"+redactedValue+"@") {
+        if false == strings.HasPrefix(sanitized, "//"+internal.RedactedQueryValue+":"+internal.RedactedQueryValue+"@") {
             t.Fatalf("%s: expected the userinfo replaced in place, got %q", currentCase.name, sanitized)
         }
     }
@@ -2152,6 +2163,21 @@ func TestSanitizeUrlForDiagnostics_AnOpaqueUrlLosesItsUserinfo(t *testing.T) {
     }
 }
 
+/* the query is redacted through the shared door, which redacts pair by pair IN PLACE: the form that went through url.Values re-encoded the query, so it sorted the names and COLLAPSED a repeated one — the three ways two queries can differ without differing in their pairs (order, duplication, multiplicity) all rendered alike, in the one diagnostic whose reason for existing is to show a caller which url failed. A name that does not unescape redacts the query whole, because an unparseable name cannot have its secret half told apart from its diagnosable half; the form that dropped the pair lost the name too. */
+func TestSanitizeUrlForDiagnostics_KeepsTheQueryOrderAndTheRepetitionAndRedactsAnUnparsableNameWhole(t *testing.T) {
+    if "https://h/p?b=xxxxx&a=xxxxx&a=xxxxx" != sanitizeUrlForDiagnostics("https://h/p?b=2&a=1&a=3") {
+        t.Fatalf("expected the pairs redacted in place, got %q", sanitizeUrlForDiagnostics("https://h/p?b=2&a=1&a=3"))
+    }
+
+    if "https://h/p?xxxxx" != sanitizeUrlForDiagnostics("https://h/p?%zz=1&ok=2") {
+        t.Fatalf("expected an unparsable name to redact the query whole, got %q", sanitizeUrlForDiagnostics("https://h/p?%zz=1&ok=2"))
+    }
+
+    if "https://h/p?xxxxx" != sanitizeUrlForDiagnostics("https://h/p?9f8a7b3c") {
+        t.Fatalf("expected a bare capability token to become the marker whole, got %q", sanitizeUrlForDiagnostics("https://h/p?9f8a7b3c"))
+    }
+}
+
 /* a scheme-relative url net/url accepts is redacted by the parsed branch and must stay that way: it is the one spelling of this shape that was never a leak, and a repair reaching for the textual side could only make it worse. */
 func TestSanitizeUrlForDiagnostics_AParsableSchemeRelativeUrlKeepsItsRedaction(t *testing.T) {
     sanitized := sanitizeUrlForDiagnostics("//user:SECRET@host/path")
@@ -2160,7 +2186,7 @@ func TestSanitizeUrlForDiagnostics_AParsableSchemeRelativeUrlKeepsItsRedaction(t
         t.Fatalf("the credential survived: %q", sanitized)
     }
 
-    if "//"+redactedValue+":"+redactedValue+"@host/path" != sanitized {
+    if "//"+internal.RedactedQueryValue+":"+internal.RedactedQueryValue+"@host/path" != sanitized {
         t.Fatalf("expected the parsed branch to redact in place, got %q", sanitized)
     }
 }
@@ -2207,7 +2233,7 @@ func TestSanitizeUrlTextually_AnOpaqueReferenceLosesItsUserinfo(t *testing.T) {
             t.Fatalf("%s: the credential survived the textual fallback: %q", currentCase.name, sanitized)
         }
 
-        if false == strings.Contains(sanitized, redactedValue+":"+redactedValue+"@host") {
+        if false == strings.Contains(sanitized, internal.RedactedQueryValue+":"+internal.RedactedQueryValue+"@host") {
             t.Fatalf("%s: expected the userinfo replaced in place, got %q", currentCase.name, sanitized)
         }
     }
@@ -2426,5 +2452,16 @@ func TestHttpClient_TheTypedCredentialIsAppliedLastAndWinsOverAnExplicitAuthoriz
     }
     if "Bearer explicit" != received {
         t.Fatalf("expected the request header to win over the client header, got %q", received)
+    }
+}
+
+/* The client's own setter is the other door into a header map that is applied with Set: a rotation spelled differently from the configured key used to leave both entries live, and which credential travelled was decided by map iteration order. */
+func TestHttpClient_SetHeaderRotatesTheCredentialUnderItsCanonicalSpelling(t *testing.T) {
+    client := NewHttpClient(NewHttpClientConfig("", 0, map[string]string{"X-Api-Key": "rotated-out"}))
+
+    client.SetHeader("x-api-key", "rotated-in")
+
+    if 1 != len(client.headers) || "rotated-in" != client.headers["X-Api-Key"] {
+        t.Fatalf("expected one canonical entry holding the rotated-in credential, got %#v", client.headers)
     }
 }

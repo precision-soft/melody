@@ -1147,3 +1147,37 @@ func TestLogged_AnErrorWhoseMessagePanicsIsMarkedAndReturned(t *testing.T) {
         t.Fatalf("expected a marked error back, got %v", logged)
     }
 }
+
+/* the two chains are read side by side — an operator reading causeChain[N] wants its context at causeContextChain[N] — and until now nothing asserted the alignment itself: the two walks were hand-copied loops that agreed, so an edit to one could part them silently. They take one walk now, and this pin is what says the alignment is the contract and not a coincidence: a join whose branches are a typed nil, a link that carries context and a link that carries none exercises every way the two could drift. */
+func TestBuildCauseContextChain_StaysIndexAlignedWithBuildCauseChainAcrossAJoin(t *testing.T) {
+    var typedNil *Error
+    withContext := NewError("carries context", map[string]any{"key": "value"}, nil)
+    plain := errors.New("carries none")
+    top := NewError("top", map[string]any{"top": 1}, errors.Join(typedNil, withContext, plain))
+
+    textChain := BuildCauseChain(top, 8)
+    contextChain := BuildCauseContextChain(top, 8)
+
+    if len(textChain) != len(contextChain) {
+        t.Fatalf("expected the two chains to have one entry per link, got %d and %d", len(textChain), len(contextChain))
+    }
+
+    if 4 != len(textChain) {
+        t.Fatalf("expected the typed nil to contribute nothing and the other three links to be walked, got %#v", textChain)
+    }
+
+    contextIndex := -1
+    for index, text := range textChain {
+        if "carries context" == text {
+            contextIndex = index
+        }
+    }
+
+    if -1 == contextIndex {
+        t.Fatalf("the probe no longer walks the link that carries context: %#v", textChain)
+    }
+
+    if "value" != contextChain[contextIndex]["key"] {
+        t.Fatalf("expected the context of link %d beside its text, got %#v", contextIndex, contextChain)
+    }
+}

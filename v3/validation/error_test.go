@@ -107,3 +107,19 @@ func TestValidationErrors_RenderTheirMembersInAStableOrder(t *testing.T) {
         t.Fatalf("expected the rendering to be sorted, got %q", forward.Error())
     }
 }
+
+/* ValidationErrors is a public collection of an interface, so an entry a caller appended from a field of their own — a nil *ValidationError — is an entry that is not nil: the skip answered false and Code() was called on the nil receiver, which is a panic inside a method whose whole job is to report whether anything is wrong. */
+func TestValidationErrors_ATypedNilEntryIsSkippedRatherThanDereferenced(t *testing.T) {
+    var absentError *ValidationError
+
+    errors := ValidationErrors{absentError}
+
+    if true == errors.HasRuleWiringError() {
+        t.Fatalf("expected a typed-nil entry to blame nothing")
+    }
+
+    projected := errors.WithoutRuleWiringContext()
+    if 1 != len(projected) {
+        t.Fatalf("expected the entry to keep its position, got %d", len(projected))
+    }
+}

@@ -254,7 +254,7 @@ func (instance *MiddlewareCommand) populateBuiltChain(
                 buildErr.Error(),
                 map[string]any{
                     /* the chain is built from the failure itself with the head dropped, rather than from a bare errors.Unwrap: a joined failure answers Unwrap with nothing, and the report lost every cause exactly when there was more than one to show */
-                    "causeChain": causeChainBelowHead(buildErr),
+                    "causeChain": resolveErrorCauseChain(buildErr),
                 },
             ),
         )
@@ -361,16 +361,6 @@ func middlewareFunctionName(middleware httpcontract.Middleware) string {
     }
 
     return function.Name()
-}
-
-/* causeChainBelowHead walks the causes below the failure's own message through both unwrap shapes: a bare errors.Unwrap answers nothing for a joined failure, whose causes live behind the []error shape. */
-func causeChainBelowHead(err error) []string {
-    chain := exception.BuildCauseChain(err, 9)
-    if 1 >= len(chain) {
-        return nil
-    }
-
-    return chain[1:]
 }
 
 var _ clicontract.Command = (*MiddlewareCommand)(nil)

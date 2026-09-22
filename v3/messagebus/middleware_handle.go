@@ -4,6 +4,7 @@ import (
     "reflect"
 
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/internal"
     "github.com/precision-soft/melody/v3/logging"
     messagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -72,7 +73,7 @@ func noHandler(
         )
     }
 
-    if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
+    if logger := logging.LoggerFromRuntime(runtimeInstance); false == internal.IsNilInterface(logger) {
         logger.Warning(
             "no handler is registered for the message; it passes through unhandled",
             map[string]any{"type": messageType},

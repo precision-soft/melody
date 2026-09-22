@@ -3,6 +3,7 @@ package httpclient
 import (
     "io"
     "net/http"
+    "os"
     "net/http/httptest"
     "strings"
     "sync"
@@ -102,5 +103,25 @@ func TestStreamResponse_HeadersCarryWhatTheServerSent(t *testing.T) {
 
     if "text/event-stream" != streamResponse.Headers().Get("Content-Type") {
         t.Fatalf("expected the stream headers to carry the server's own, got %v", streamResponse.Headers())
+    }
+}
+
+/* the body is the caller's own value through the public constructor, and a nil *http.Response.Body — the shape a caller forwards from a response it built itself — is an io.ReadCloser that is not nil: Body() answered it, and the ordinary consumer the GoDoc names, io.Copy(destination, response.Body()), dereferenced it. The promise is a reader that FAILS on the first read, which is what closedStreamBody is. */
+func TestStreamResponse_ATypedNilBodyAnswersTheFailingReaderRatherThanItself(t *testing.T) {
+    var absentBody *os.File
+
+    response := NewStreamResponse(200, nil, absentBody)
+
+    body := response.Body()
+    if _, isClosed := body.(closedStreamBody); false == isClosed {
+        t.Fatalf("expected the closed-stream reader, got %#v", body)
+    }
+
+    if _, err := io.Copy(io.Discard, body); nil == err {
+        t.Fatalf("expected the first read to fail rather than dereference")
+    }
+
+    if err := response.Close(); nil != err {
+        t.Fatalf("expected closing a stream with no body to answer nil, got %v", err)
     }
 }

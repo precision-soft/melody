@@ -851,10 +851,6 @@ type errorContextVisitKey struct {
     length  uintptr
 }
 
-func sanitizeErrorContextValue(value any) any {
-    return sanitizeErrorContextValueTracked(value, map[errorContextVisitKey]struct{}{}, 0, false)
-}
-
 /* the context handed in at the top of resolveErrorContextJson is the caller's own map, redacted before it reaches json.Marshal so the fallbacks cannot print what the redaction exists to strip. That ordering puts this walk ahead of encoding/json's cycle detector, so the walk carries its own: a context holding itself — `context["self"] = context`, which any producer can build — would otherwise recurse until the stack is gone, and a stack overflow is a fatal error that no recover in the command layer turns into a reported failure. */
 /* the plain shapes the tracked walk descends into; a defined type sharing their underlying type is converted to them below, which keeps the backing pointer and so the cycle keying */
 var plainContextMapType = reflect.TypeOf(map[string]any(nil))

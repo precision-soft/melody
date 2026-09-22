@@ -4,9 +4,11 @@ import (
     "context"
     "fmt"
     "io"
+    "slices"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/internal"
     urfavecli "github.com/urfave/cli/v3"
 )
 
@@ -14,7 +16,7 @@ import (
 
 /* newEngineFlag builds the engine's flag from what a melody flag says about itself. A kind the engine has no parser for is refused where the command is registered, naming the flag and the kind: a flag that cannot be built is a wiring mistake, and the alternative to a panic is a command whose flag silently does not exist. */
 func newEngineFlag(flag clicontract.Flag) urfavecli.Flag {
-    if nil == flag {
+    if true == internal.IsNilInterface(flag) {
         exception.Panic(
             exception.NewError("cli flag may not be nil", nil, nil),
         )
@@ -179,7 +181,7 @@ var _ clicontract.Context = (*engineContext)(nil)
 func newEngineContext(command *urfavecli.Command) *engineContext {
     var writer io.Writer = io.Discard
 
-    if nil != command && nil != command.Writer {
+    if nil != command && false == internal.IsNilInterface(command.Writer) {
         writer = command.Writer
     }
 
@@ -204,7 +206,7 @@ func (instance *engineContext) Int(flagName string) int {
 func (instance *engineContext) StringSlice(flagName string) []string {
     values := instance.command.StringSlice(flagName)
 
-    return copyStringSlice(values)
+    return slices.Clone(values)
 }
 
 func (instance *engineContext) IsSet(flagName string) bool {
@@ -212,21 +214,10 @@ func (instance *engineContext) IsSet(flagName string) bool {
 }
 
 func (instance *engineContext) Arguments() []string {
-    return copyStringSlice(instance.command.Args().Slice())
+    return slices.Clone(instance.command.Args().Slice())
 }
 
 func (instance *engineContext) Writer() io.Writer {
     return instance.writer
 }
 
-/* copyStringSlice hands back the caller's own backing array. Both readers above answer a slice the engine keeps holding, and a command that sorts or truncates what it was given would otherwise rewrite the parsed command line under every later reader of the same flag. */
-func copyStringSlice(values []string) []string {
-    if nil == values {
-        return nil
-    }
-
-    copied := make([]string, len(values))
-    copy(copied, values)
-
-    return copied
-}

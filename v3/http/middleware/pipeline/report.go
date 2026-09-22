@@ -1,5 +1,9 @@
 package pipeline
 
+import (
+    "slices"
+)
+
 type InactiveMiddleware struct {
     name   string
     reason string
@@ -24,9 +28,9 @@ func NewMiddlewareBuildReport(
     return &MiddlewareBuildReport{
         requestedGroup:   requestedGroup,
         kernelEnv:        kernelEnv,
-        selectedNames:    copyStringSlice(selectedNames),
+        selectedNames:    slices.Clone(selectedNames),
         inactive:         copyInactiveMiddlewareSlice(inactive),
-        missingReference: copyStringSlice(missingReference),
+        missingReference: slices.Clone(missingReference),
         cycleDetected:    cycleDetected,
     }
 }
@@ -49,11 +53,11 @@ func (instance *MiddlewareBuildReport) KernelEnv() string {
 }
 
 func (instance *MiddlewareBuildReport) SelectedNames() []string {
-    return copyStringSlice(instance.selectedNames)
+    return slices.Clone(instance.selectedNames)
 }
 
 func (instance *MiddlewareBuildReport) SetSelectedNames(selectedNames []string) {
-    instance.selectedNames = copyStringSlice(selectedNames)
+    instance.selectedNames = slices.Clone(selectedNames)
 }
 
 func (instance *MiddlewareBuildReport) Inactive() []*InactiveMiddleware {
@@ -66,11 +70,11 @@ func (instance *MiddlewareBuildReport) SetInactive(inactive []*InactiveMiddlewar
 }
 
 func (instance *MiddlewareBuildReport) MissingReference() []string {
-    return copyStringSlice(instance.missingReference)
+    return slices.Clone(instance.missingReference)
 }
 
 func (instance *MiddlewareBuildReport) SetMissingReference(missingReference []string) {
-    instance.missingReference = copyStringSlice(missingReference)
+    instance.missingReference = slices.Clone(missingReference)
 }
 
 func (instance *MiddlewareBuildReport) CycleDetected() bool {
@@ -81,13 +85,6 @@ func (instance *MiddlewareBuildReport) SetCycleDetected(cycleDetected bool) {
     instance.cycleDetected = cycleDetected
 }
 
-func copyStringSlice(values []string) []string {
-    if nil == values {
-        return nil
-    }
-
-    return append([]string{}, values...)
-}
 
 func copyInactiveMiddlewareSlice(values []*InactiveMiddleware) []*InactiveMiddleware {
     if nil == values {

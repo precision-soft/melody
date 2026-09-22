@@ -4,6 +4,7 @@ import (
     "path/filepath"
 
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/internal"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
@@ -71,7 +72,7 @@ func (instance *Configuration) setDefaultParameter(
         }
 
         existingParameter := instance.Get(name)
-        if nil != existingParameter {
+        if false == internal.IsNilInterface(existingParameter) {
             exception.Panic(
                 exception.NewError(
                     "duplicate parameter name when setting defaults",

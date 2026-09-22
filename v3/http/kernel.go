@@ -503,10 +503,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 )
             }
 
-            /* the response built before the panic may own an open file (FileResponse/ServeReader) and is about to lose its only reference, so it is closed unless the exception handler chose to keep it */
-            if nil != panickedResponse && panickedResponse != exceptionEvent.Response() {
-                closeDiscardedResponseBody(panickedResponse, requestLogger)
-            }
+            /* the response built before the panic may own an open file (FileResponse/ServeReader) and is about to lose its only reference, so it is closed unless something downstream keeps it. It is handed to the write step rather than closed here: that step publishes kernel.response once more for the error response, and a listener that answers with the response it swapped in the first time — one holding it in a per-request field, one memoising its own decoration — would otherwise be handed back a body this line had already closed, and the write would read it after its close. The step closes it only once it knows what is being written. */
 
             /* an outer middleware that panicked after its next() returned unwound the stack before finalResponse was assigned, so the response the chain produced is held only by the recording shim; it is closed here. On the panic paths where finalResponse was already assigned the discard above owns the close — closing the recorded response there too would close a body a wrapping middleware may share with the response being served. */
             if nil == panickedResponse && nil != chainResponse && chainResponse != exceptionEvent.Response() {
@@ -515,7 +512,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
             finalResponse = exceptionEvent.Response()
 
-            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, sessionManager, sessionInstance, requestLogger, eventDispatcher)
+            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, panickedResponse, sessionManager, sessionInstance, requestLogger, eventDispatcher)
         }()
 
         /* the session is loaded here, after the recovery defer is installed, and must not move back up with the rest of the request setup: both Manager.Session and Manager.NewSession turn a storage outage into a panic, and above the guard that panic escapes ServeHttp — net/http closes the connection with no response, the terminate listener never fires and the access-log line is lost */
@@ -545,7 +542,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
             finalResponse = renderErrorResponse(runtimeInstance, melodyRequest, nethttp.StatusBadRequest, "bad request", nil)
 
-            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, sessionManager, sessionInstance, requestLogger, eventDispatcher)
+            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, sessionInstance, requestLogger, eventDispatcher)
 
             return
         }
@@ -574,7 +571,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
             finalResponse = renderErrorResponse(runtimeInstance, melodyRequest, statusCode, message, nil)
 
-            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, sessionManager, sessionInstance, requestLogger, eventDispatcher)
+            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, sessionInstance, requestLogger, eventDispatcher)
 
             return
         }
@@ -604,7 +601,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         if nil != kernelRequestEvent.Response() {
             finalResponse = kernelRequestEvent.Response()
 
-            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, sessionManager, sessionInstance, requestLogger, eventDispatcher)
+            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, sessionInstance, requestLogger, eventDispatcher)
 
             return
         }
@@ -741,7 +738,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         if nil != kernelControllerEvent.Response() {
             finalResponse = kernelControllerEvent.Response()
 
-            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, sessionManager, sessionInstance, requestLogger, eventDispatcher)
+            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, sessionInstance, requestLogger, eventDispatcher)
 
             return
         }
@@ -801,7 +798,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         }
 
         finalResponse = response
-        instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, sessionManager, sessionInstance, requestLogger, eventDispatcher)
+        instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, sessionInstance, requestLogger, eventDispatcher)
     })
 }
 
@@ -838,11 +835,13 @@ func (instance *Kernel) invokeErrorHandlerSafely(
 /* dispatchResponseAndWrite is the one exit of every request path through ServeHttp: the response the path arrived at is published on kernel.response, the response the listeners answered with is written, and the body of the response they swapped out is closed so a file-backed body — FileResponse, ServeReader — is not leaked. Six paths used to carry this block as six copies, kept alike by hand.
 
    The response is handed in by reference and written back at every step, because the caller's variable is what the recovery of ServeHttp reads when the write panics: written back only on return, a panic inside the write — a session storage whose Save panics, a Response of the application whose accessors do — left the caller naming the response the listeners had discarded, so the recovery closed that one a second time and the file-backed response they had swapped in never at all. */
+/* discardCandidate is a response an earlier step is about to lose the reference to and which must be closed unless this step ends up writing it — the response the recovery took the panic over, which the listeners of the re-published event may hand back. Closed after the publish, never before it: closed ahead, a listener answering with that same response would be written after its body was closed. */
 func (instance *Kernel) dispatchResponseAndWrite(
     runtimeInstance runtimecontract.Runtime,
     melodyRequest httpcontract.Request,
     writer nethttp.ResponseWriter,
     finalResponse *httpcontract.Response,
+    discardCandidate httpcontract.Response,
     sessionManager sessioncontract.Manager,
     sessionInstance sessioncontract.Session,
     requestLogger loggingcontract.Logger,
@@ -852,11 +851,17 @@ func (instance *Kernel) dispatchResponseAndWrite(
     _, eventKernelResponseErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelResponse, kernelResponseEvent)
     instance.logEventDispatchError(requestLogger, "kernel response error", eventKernelResponseErr)
 
-    if nil != *finalResponse && *finalResponse != kernelResponseEvent.Response() {
+    publishedResponse := kernelResponseEvent.Response()
+
+    if nil != *finalResponse && *finalResponse != publishedResponse {
         closeDiscardedResponseBody(*finalResponse, requestLogger)
     }
 
-    *finalResponse = kernelResponseEvent.Response()
+    if nil != discardCandidate && discardCandidate != publishedResponse && discardCandidate != *finalResponse {
+        closeDiscardedResponseBody(discardCandidate, requestLogger)
+    }
+
+    *finalResponse = publishedResponse
     *finalResponse = writeResponse(
         runtimeInstance,
         melodyRequest,

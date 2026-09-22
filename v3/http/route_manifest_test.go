@@ -227,8 +227,25 @@ func TestFilterRouteManifestByZone_ReadsAZoneWithSurroundingSpaceAsTheCommandDoe
         t.Fatalf("expected the padded zone to answer the %d routes of the exact one, got %d", len(exact.Routes), len(trimmed.Routes))
     }
 
-    if _, blankErr := FilterRouteManifestByZone(manifest, "   "); nil != blankErr {
-        t.Fatalf("expected a blank zone read as no gate, got %v", blankErr)
+}
+
+/* a zone made only of space is a zone nobody declared, not the absence of one: the trim ran before the emptiness test, so a configuration value that rendered to spaces collapsed to the empty zone and answered the manifest WHOLE — every zone, to a consumer that had asked for one. The written reason for the trim is that the door reads a zone the way the command reads its flag; a caller asking for no gate passes no zone. */
+func TestFilterRouteManifestByZone_AZoneMadeOnlyOfSpaceIsRefusedRatherThanReadAsNoGate(t *testing.T) {
+    manifest := BuildRouteManifest(manifestTestRouter().RouteDefinitions())
+
+    filtered, filterErr := FilterRouteManifestByZone(manifest, "   ")
+
+    if nil == filterErr {
+        t.Fatalf("expected a blank zone to be refused, got %d routes", len(filtered.Routes))
+    }
+
+    if 0 != len(filtered.Routes) {
+        t.Fatalf("expected no routes beside the refusal, got %d", len(filtered.Routes))
+    }
+
+    whole, wholeErr := FilterRouteManifestByZone(manifest, "")
+    if nil != wholeErr || 0 == len(whole.Routes) {
+        t.Fatalf("expected the empty zone to stay the one spelling of no gate, got %d routes and %v", len(whole.Routes), wholeErr)
     }
 }
 

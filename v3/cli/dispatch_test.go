@@ -211,3 +211,32 @@ func TestDispatchCommand_PanicsOnEmptyArguments(t *testing.T) {
         _ = DispatchCommand(context.Background(), command, newTestRuntime(t), nil, nil)
     }, "cli dispatch arguments may not be empty")
 }
+
+/* the document promises that a nil writer discards, and the writer is the caller's own value: a cron runner handing the field of a capture it has not opened, a caller forwarding a *bytes.Buffer it left nil, gives an io.Writer that is not nil. The comparison against nil answered false and the engine was handed that writer.
+
+   The probe writes through the ENGINE, not through the command: what the command is handed goes through the engine context's own guard, so a refused flag — which the engine writes about on the writer this door gave it, before any command runs — is the one effect this guard produces alone. */
+func TestDispatchCommand_ATypedNilWriterDiscardsRatherThanPanicking(t *testing.T) {
+    var absentBuffer *bytes.Buffer
+
+    command := &testCommand{
+        nameValue:        "probe",
+        descriptionValue: "probe",
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+            t.Fatalf("the probe no longer refuses at the parser: the command ran")
+
+            return nil
+        },
+    }
+
+    runErr := DispatchCommand(
+        context.Background(),
+        command,
+        newTestRuntime(t),
+        []string{"probe", "--no-such-flag"},
+        absentBuffer,
+    )
+
+    if nil == runErr {
+        t.Fatalf("expected the refused flag to be answered as an error")
+    }
+}

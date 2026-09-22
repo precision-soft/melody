@@ -13,6 +13,7 @@ import (
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
+    "github.com/precision-soft/melody/v3/internal"
     "github.com/precision-soft/melody/v3/logging"
     messagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
     "github.com/precision-soft/melody/v3/runtime"
@@ -344,7 +345,7 @@ func (instance *consumeSession) consume(
 
     instance.logError(runtimeInstance, "message handling exhausted retries", dispatchErr)
 
-    if nil != instance.retryPolicy.FailureTransport {
+    if false == internal.IsNilInterface(instance.retryPolicy.FailureTransport) {
         if sendErr := instance.retryPolicy.FailureTransport.Send(runtimeInstance, envelopeInstance); nil != sendErr {
             instance.logError(runtimeInstance, "could not route the exhausted message to the failure transport", sendErr)
 
@@ -376,7 +377,7 @@ func (instance *consumeSession) consume(
         return
     }
 
-    if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
+    if logger := logging.LoggerFromRuntime(runtimeInstance); false == internal.IsNilInterface(logger) {
         logger.Warning(
             "no failure transport configured; the exhausted message is discarded unless the transport dead-letters it",
             nil,
@@ -396,7 +397,7 @@ func (instance *consumeSession) messageRuntime(
     noopClose := func() {}
 
     serviceContainer := runtimeInstance.Container()
-    if nil == serviceContainer {
+    if true == internal.IsNilInterface(serviceContainer) {
         return runtimeInstance, noopClose
     }
 
@@ -406,7 +407,7 @@ func (instance *consumeSession) messageRuntime(
 
     closeScope := func() {
         scopeCloseErr := messageScope.Close()
-        if nil != scopeCloseErr && nil != baseLogger {
+        if nil != scopeCloseErr && false == internal.IsNilInterface(baseLogger) {
             baseLogger.Error(
                 "failed to close message scope",
                 exception.LogContext(scopeCloseErr),
@@ -414,7 +415,7 @@ func (instance *consumeSession) messageRuntime(
         }
     }
 
-    if nil != baseLogger {
+    if false == internal.IsNilInterface(baseLogger) {
         messageId, hasMessageId := MessageId(envelopeInstance)
         if false == hasMessageId || "" == messageId {
             messageId = "-"
@@ -508,7 +509,7 @@ func (instance *consumeSession) logError(
     err error,
 ) {
     logger := logging.LoggerFromRuntime(runtimeInstance)
-    if nil == logger {
+    if true == internal.IsNilInterface(logger) {
         /* these records include the only trace of a recovered panic outside the handler — a runtime that resolves no logger must not make them evaporate */
         logger = logging.EmergencyLogger()
     }

@@ -8,6 +8,7 @@ import (
 
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
+    "github.com/precision-soft/melody/v3/internal"
     validationcontract "github.com/precision-soft/melody/v3/validation/contract"
 )
 
@@ -143,7 +144,7 @@ func IsRuleWiringErrorCode(code string) bool {
 /* HasRuleWiringError reports whether any member of the collection blames the declaration rather than the value. */
 func (instance ValidationErrors) HasRuleWiringError() bool {
     for _, validationError := range instance {
-        if nil == validationError {
+        if true == internal.IsNilInterface(validationError) {
             continue
         }
 
@@ -160,7 +161,7 @@ func (instance ValidationErrors) WithoutRuleWiringContext() ValidationErrors {
     projected := make(ValidationErrors, 0, len(instance))
 
     for _, validationError := range instance {
-        if nil == validationError || false == IsRuleWiringErrorCode(validationError.Code()) {
+        if true == internal.IsNilInterface(validationError) || false == IsRuleWiringErrorCode(validationError.Code()) {
             projected = append(projected, validationError)
 
             continue

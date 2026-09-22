@@ -176,7 +176,9 @@ func (instance *Manager) Many(keys []string) (map[string]any, error) {
     return result, nil
 }
 
-/* SetMultiple serializes every entry before the backend sees any of them, so a refusal writes nothing. The refusal names the keys it refused under "keys", sorted, with "key" the first of them and the cause its own: the items come as a map, and a refusal that stopped at the first entry the iteration happened to reach named a different key on every call. */
+/* SetMultiple serializes every entry before the backend sees any of them, so a refusal writes nothing. The refusal names the keys it refused under "keys", sorted, with "key" the first of them and the cause its own: the items come as a map, and a refusal that stopped at the first entry the iteration happened to reach named a different key on every call. Every entry is serialized even after the first refusal, which is what makes the list of refused keys the whole list rather than a prefix of the iteration order; a batch whose first entry is unserializable therefore pays the serializer for the rest of it.
+
+   Each refused key's own reason travels beside it under "causes": one cause can be the error's, and a batch refused for several reasons would otherwise report one of them under a list of keys, leaving the operator to guess which key it belonged to — and the first sorted key is the empty one whenever the batch carries it, a key the backend contract declares malformed. */
 func (instance *Manager) SetMultiple(items map[string]any, ttl time.Duration) error {
     payloads := make(map[string][]byte, len(items))
     var refusedKeys []string
@@ -199,9 +201,14 @@ func (instance *Manager) SetMultiple(items map[string]any, ttl time.Duration) er
     if 0 < len(refusedKeys) {
         sort.Strings(refusedKeys)
 
+        causes := make(map[string]string, len(refusedKeys))
+        for _, refusedKey := range refusedKeys {
+            causes[refusedKey] = refusalByKey[refusedKey].Error()
+        }
+
         return exception.NewError(
             "cache value serialization failed",
-            exceptioncontract.Context{"key": refusedKeys[0], "keys": refusedKeys},
+            exceptioncontract.Context{"key": refusedKeys[0], "keys": refusedKeys, "causes": causes},
             refusalByKey[refusedKeys[0]],
         )
     }

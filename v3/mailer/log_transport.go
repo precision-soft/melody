@@ -1,6 +1,7 @@
 package mailer
 
 import (
+    "github.com/precision-soft/melody/v3/internal"
     "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     mailercontract "github.com/precision-soft/melody/v3/mailer/contract"
@@ -20,12 +21,12 @@ type LogTransport struct {
 /* the logger supplied at construction is preferred; when it is nil the request-scoped logger is resolved quietly from the runtime (a missing logger service is swallowed rather than emitting an emergency log on every send), and when neither is available the send is a safe no-op */
 func (instance *LogTransport) Send(runtimeInstance runtimecontract.Runtime, message mailercontract.Message) error {
     logger := instance.logger
-    if nil == logger {
+    if true == internal.IsNilInterface(logger) {
         resolved, _ := runtime.FromRuntime[loggingcontract.Logger](runtimeInstance, logging.ServiceLogger)
         logger = resolved
     }
 
-    if nil == logger {
+    if true == internal.IsNilInterface(logger) {
         return nil
     }
 

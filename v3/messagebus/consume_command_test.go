@@ -787,3 +787,37 @@ func TestRun_OverlappingRunsShareNoMutableState(t *testing.T) {
 
     wait.Wait()
 }
+
+/* RetryPolicy is a public struct an application fills in, and FailureTransport is a field it sets from a transport it resolved: a *InMemoryTransport left nil is a Transport that is not nil. The comparison against nil answered false, Send was called on the nil receiver, and the panic that followed was caught by the session's own recovery and filed as a handling failure — so the exhausted message was neither routed nor nacked, which is the one outcome the retry pipeline has no name for. Absent means absent, whichever nil it is spelled with. */
+func TestConsume_ATypedNilFailureTransportIsReadAsAbsent(t *testing.T) {
+    var absentTransport *InMemoryTransport
+
+    runtimeInstance, logger := newTestRuntimeWithRecordingLogger()
+
+    source := NewInMemoryTransport(8)
+    if sendErr := source.Send(runtimeInstance, NewEnvelope(consumeTestMessage{Value: 9})); nil != sendErr {
+        t.Fatalf("unexpected send error: %v", sendErr)
+    }
+
+    locator := NewHandlerLocator()
+    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage) error {
+        return exception.NewError("handler always fails", nil, nil)
+    })
+
+    bus := NewManager("default", NewHandleMessageMiddleware(locator))
+    command := NewConsumeCommandWithRetry(bus, nil, RetryPolicy{MaxRetries: 2, FailureTransport: absentTransport})
+
+    if consumeErr := command.newConsumeSession(runtimeInstance).consumeFrom(runtimeInstance, source, 3, 1); nil != consumeErr {
+        t.Fatalf("unexpected consume error: %v", consumeErr)
+    }
+
+    /* the message is dropped either way — the session recovers the dereference and files it as a handling failure — so the drop separates nothing. What separates is the record the operator reads: the wiring mistake, or a panic that never happened in any handler. */
+    if 0 == len(logger.messages) {
+        t.Fatalf("expected the exhausted message to be journaled")
+    }
+
+    lastRecord := logger.messages[len(logger.messages)-1]
+    if "no failure transport configured; the exhausted message is discarded unless the transport dead-letters it" != lastRecord {
+        t.Fatalf("expected the absent transport to be journaled as absent, got %q", lastRecord)
+    }
+}

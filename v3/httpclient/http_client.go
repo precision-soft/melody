@@ -9,7 +9,6 @@ import (
     "net"
     nethttp "net/http"
     "net/url"
-    "reflect"
     "strings"
     "sync"
     "time"
@@ -197,7 +196,7 @@ func sanitizeUrlForDiagnostics(urlString string) string {
     }
 
     if nil != parsed.User {
-        parsed.User = url.UserPassword(redactedValue, redactedValue)
+        parsed.User = url.UserPassword(internal.RedactedQueryValue, internal.RedactedQueryValue)
     }
 
     if "" != parsed.Opaque {
@@ -206,12 +205,7 @@ func sanitizeUrlForDiagnostics(urlString string) string {
     }
 
     if "" != parsed.RawQuery {
-        queryValues := parsed.Query()
-        for key := range queryValues {
-            queryValues.Set(key, redactedValue)
-        }
-
-        parsed.RawQuery = queryValues.Encode()
+        parsed.RawQuery = internal.RedactQueryValuesForDiagnostics(parsed.RawQuery)
     }
 
     parsed.Fragment = ""
@@ -220,14 +214,12 @@ func sanitizeUrlForDiagnostics(urlString string) string {
     return parsed.String()
 }
 
-const redactedValue = "xxxxx"
-
 /* sanitizeUrlTextually removes the userinfo and the whole query from a url net/url refused to parse. The userinfo is cut wherever the reference can carry one, not only after a scheme separator: net/url refuses on a bad port, a control character, a broken percent escape or an unclosed bracket, and a reference spelled "//user:secret@host:notaport/path" reaches this function with a credential and no "://" in it at all. */
 func sanitizeUrlTextually(urlString string) string {
     sanitized := urlString
 
     if queryStart := strings.Index(sanitized, "?"); 0 <= queryStart {
-        sanitized = sanitized[:queryStart] + "?" + redactedValue
+        sanitized = sanitized[:queryStart] + "?" + internal.RedactedQueryValue
     }
 
     authorityStart, hasAuthority := authorityStartIndex(sanitized)
@@ -296,7 +288,7 @@ func redactAuthorityUserinfo(value string, authorityStart int) string {
     }
 
     return value[:authorityStart] +
-        redactedValue + ":" + redactedValue +
+        internal.RedactedQueryValue + ":" + internal.RedactedQueryValue +
         value[authorityStart+userinfoEnd:]
 }
 
@@ -421,7 +413,7 @@ func (instance *HttpClient) RequestStreamWithContext(
     urlString string,
     options ...httpclientcontract.RequestOption,
 ) (httpclientcontract.StreamResponse, error) {
-    if nil == contextInstance {
+    if true == internal.IsNilInterface(contextInstance) {
         return nil, exception.NewError("request context is nil", nil, nil)
     }
 
@@ -629,20 +621,10 @@ func buildRequestBodyReader(requestConfig *RequestOptions) (io.Reader, error) {
     return nil, exception.NewError(
         "unsupported body type",
         exceptioncontract.Context{
-            "type": typeNameOf(body),
+            "type": internal.StringifyType(body),
         },
         nil,
     )
-}
-
-/* typeNameOf names the type a value carries, so a body the client cannot encode says which type it was handed. */
-func typeNameOf(value any) string {
-    reflectedType := reflect.TypeOf(value)
-    if nil == reflectedType {
-        return "nil"
-    }
-
-    return reflectedType.String()
 }
 
 /* SetBaseUrl refuses a base whose path lacks its trailing slash, the rule the constructor states: RFC 3986 resolution merges a relative target over the last segment of the base path, so the missing slash silently cuts the segment the caller meant to keep. */

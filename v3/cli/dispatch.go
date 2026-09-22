@@ -29,7 +29,7 @@ func DispatchCommand(
         )
     }
 
-    if nil == runtimeInstance {
+    if true == internal.IsNilInterface(runtimeInstance) {
         exception.Panic(
             exception.NewError("runtime instance may not be nil in cli dispatch", nil, nil),
         )
@@ -47,7 +47,7 @@ func DispatchCommand(
         )
     }
 
-    if nil == writer {
+    if true == internal.IsNilInterface(writer) {
         writer = io.Discard
     }
 

@@ -281,15 +281,24 @@ func (instance *journalLineWriter) flush() {
     instance.journalLine(line)
 }
 
+/* informationReportPrefixes are the report lines that state a fact of a scan that WORKED rather than coverage it lost: the two counts; the vendor trees the scan stepped over, which are opt-in and cannot hold a service, so stepping over one loses nothing; and the reach of a global bind, which the generator emits for every bind it RESOLVED — one line per bound argument, on every clean generation. Everything else names something the wiring did not cover, which is what a journal read at the usual production threshold must keep, so the line is classified by what it IS and not by what it is not: read the other way round, an application with two global binds raised a warning apiece for a generation with nothing wrong in it, and a reader who learns that warnings here are routine stops reading the ones that are not. */
+var informationReportPrefixes = []string{
+    "registered ",
+    "skipped vendor directory: ",
+    "global bind ",
+}
+
 func (instance *journalLineWriter) journalLine(line string) {
     if "" == line {
         return
     }
 
-    if true == strings.HasPrefix(line, "registered ") {
-        instance.logger.Info(line, loggingcontract.Context{"command": instance.command})
+    for _, prefix := range informationReportPrefixes {
+        if true == strings.HasPrefix(line, prefix) {
+            instance.logger.Info(line, loggingcontract.Context{"command": instance.command})
 
-        return
+            return
+        }
     }
 
     instance.logger.Warning(line, loggingcontract.Context{"command": instance.command})
@@ -387,12 +396,21 @@ func (instance *GenerateCommand) writeReport(
 
         fmt.Fprintf(
             reportWriter,
-            "global bind %s reaches %d constructors: %s\n",
+            "global bind %s reaches %d %s: %s\n",
             argumentName,
             len(constructors),
+            pluralConstructors(len(constructors)),
             strings.Join(constructors, ", "),
         )
     }
+}
+
+func pluralConstructors(count int) string {
+    if 1 == count {
+        return "constructor"
+    }
+
+    return "constructors"
 }
 
 /* splitBuildTags parses the comma-separated tag list. A build context carries plain tag identifiers, not constraint expressions: a negation or a space-separated pair reaches it as a tag no file can ever declare, so the scan would silently behave as if nothing had been passed — the tagged files stay excluded, their services stay missing from the generated wiring, and strict still reports success. Reject the malformed entry here instead, where the mistake is still traceable to what was typed. */

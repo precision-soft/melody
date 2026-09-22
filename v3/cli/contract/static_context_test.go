@@ -91,3 +91,18 @@ func TestStaticContext_AnswersACopyOfWhatItHolds(t *testing.T) {
         t.Fatalf("expected the values to survive the caller's write, got %v", commandContext.StringSlice("role"))
     }
 }
+
+/* the contract promises that a context built without a writer answers io.Discard, and the shape a caller hands this holder is a field of their own: a nil *bytes.Buffer is an io.Writer that is not nil, so the comparison against nil answered false and the holder handed back a writer whose first Write dereferences — the one value of this field that breaks the promise. */
+func TestStaticContext_ATypedNilWriterIsReadAsAbsent(t *testing.T) {
+    var absentBuffer *bytes.Buffer
+
+    context := &StaticContext{WriterValue: absentBuffer}
+
+    if io.Discard != context.Writer() {
+        t.Fatalf("expected a typed-nil writer to be read as absent, got %#v", context.Writer())
+    }
+
+    if _, err := context.Writer().Write([]byte("written")); nil != err {
+        t.Fatalf("expected the discarding writer to accept the write, got %v", err)
+    }
+}

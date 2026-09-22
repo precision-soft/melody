@@ -37,28 +37,6 @@ func TestCanonicalHeaderMap_RefusesTwoSpellingsOfOneHeader(t *testing.T) {
     })
 }
 
-func TestRequestOptions_SetHeaderStoresTheCanonicalKeyDeterministically(t *testing.T) {
-    options := NewRequestOptions()
-    options.SetHeader("x-api-key", "first")
-    options.SetHeader("X-Api-Key", "second")
-
-    headers := options.Headers()
-    if 1 != len(headers) || "second" != headers["X-Api-Key"] {
-        t.Fatalf("expected the sequential last write on one canonical key, got %#v", headers)
-    }
-}
-
-/* The client's own setter is the other door into a header map that is applied with Set: a rotation spelled differently from the configured key used to leave both entries live, and which credential travelled was decided by map iteration order. */
-func TestHttpClient_SetHeaderRotatesTheCredentialUnderItsCanonicalSpelling(t *testing.T) {
-    client := NewHttpClient(NewHttpClientConfig("", 0, map[string]string{"X-Api-Key": "rotated-out"}))
-
-    client.SetHeader("x-api-key", "rotated-in")
-
-    if 1 != len(client.headers) || "rotated-in" != client.headers["X-Api-Key"] {
-        t.Fatalf("expected one canonical entry holding the rotated-in credential, got %#v", client.headers)
-    }
-}
-
 /* the error form is what the request-time door reads: on a collision nothing comes back to write, so a partial map can never reach the option set before the refusal. */
 func TestCanonicalizeHeaderMap_AnswersTheCollisionAsAnErrorAndNoMap(t *testing.T) {
     canonical, err := canonicalizeHeaderMap(map[string]string{

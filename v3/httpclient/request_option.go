@@ -1,7 +1,7 @@
 package httpclient
 
 import (
-    "net/textproto"
+    "maps"
     "time"
 
     httpclientcontract "github.com/precision-soft/melody/v3/httpclient/contract"
@@ -31,25 +31,12 @@ func NewRequestOptions() *RequestOptions {
 
 /* Headers hands out a copy: the live map invited writes that bypass the canonicalization SetHeader exists to enforce, and a non-canonical spelling planted through the getter next to the canonical one made the request-time winner a map-iteration choice — in what is often a credential header, the exact nondeterminism the setters refuse. The setters remain the one door that writes. */
 func (instance *RequestOptions) Headers() map[string]string {
-    return copyStringMap(instance.headers)
+    return maps.Clone(instance.headers)
 }
 
 /* Query hands out a copy under the same single-door rule as Headers. */
 func (instance *RequestOptions) Query() map[string]string {
-    return copyStringMap(instance.query)
-}
-
-func copyStringMap(values map[string]string) map[string]string {
-    if nil == values {
-        return nil
-    }
-
-    copied := make(map[string]string, len(values))
-    for key, value := range values {
-        copied[key] = value
-    }
-
-    return copied
+    return maps.Clone(instance.query)
 }
 
 func (instance *RequestOptions) Body() any {
@@ -78,7 +65,7 @@ func (instance *RequestOptions) SetMaxResponseBodyBytes(maxResponseBodyBytes int
 
 /* SetHeader stores the key canonicalized, so two spellings of one header land on one entry deterministically — the last sequential write wins — instead of surviving as two map entries whose request-time winner map iteration chose. */
 func (instance *RequestOptions) SetHeader(key string, value string) {
-    instance.headers[textproto.CanonicalMIMEHeaderKey(key)] = value
+    instance.headers[canonicalHeaderKey(key)] = value
 }
 
 /* SetHeaders refuses a map carrying two spellings that collapse onto one header, the way the client config constructor does: inside one map there is no sequential order to make the survivor deterministic. The constructor refuses by panic, at the wiring; this door runs on the request path, where a panic would bypass the caller's own handling of the failure, so a colliding map writes nothing and the refusal is kept for applyRequestOptions, which fails the request naming the option. */

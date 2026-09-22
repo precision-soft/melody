@@ -1492,14 +1492,143 @@ func assertCloseFailureDetails(t *testing.T, context exceptioncontract.Context, 
     }
 }
 
-/* a teardown whose failures carry nothing beyond their line renders as before: no details key */
-func TestContainer_Close_AFailureWithoutDetailsAddsNoDetailsMap(t *testing.T) {
-    context := withCloseFailureDetails(exceptioncontract.Context{"failures": map[string]string{"a": "refused"}}, map[string]exceptioncontract.Context{})
+/* a teardown whose failures carry nothing beyond their line renders as before: no details key. Driven through a real close, because every melody error seeds its context with its own message — so a plain refusal used to record an entry holding the failure line a second time, under the same node key, on EVERY failed teardown, and the white-box form of this control could not see it. */
+func TestContainer_Close_AFailureThatSaysNothingBeyondItsLineAddsNoDetailsMap(t *testing.T) {
+    serviceContainer := NewContainer()
 
-    if _, hasDetails := context["failureDetails"]; true == hasDetails {
-        t.Fatalf("expected no details map for a teardown that left none, got %v", context)
+    registerErr := serviceContainer.Register(
+        "service.refuses",
+        func(resolver containercontract.Resolver) (*failingCloseService, error) {
+            return &failingCloseService{}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get("service.refuses"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    closeErr := serviceContainer.Close()
+
+    var typedError *exception.Error
+    if false == errors.As(closeErr, &typedError) {
+        t.Fatalf("expected a melody error, got %T", closeErr)
+    }
+
+    failures, hasFailures := typedError.Context()["failures"].(map[string]string)
+    if false == hasFailures || "refusing to close" != failures["service:service.refuses"] {
+        t.Fatalf("expected the failure line, got %v", typedError.Context()["failures"])
+    }
+
+    if _, hasDetails := typedError.Context()["failureDetails"]; true == hasDetails {
+        t.Fatalf("expected no details map beside a line that already says everything, got %v", typedError.Context()["failureDetails"])
     }
 }
+
+/* the frames of one contained panic are bounded: the teardown error is ONE record the application journals, and an unbounded stack per failed node made a shutdown that loses twenty services write sixty kilobytes of it in a single line. The cut names itself and keeps the top frames, which are the ones that name the close. */
+func TestContainer_Close_TheFramesOfAPanickingCloseAreBounded(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "service.panics",
+        func(resolver containercontract.Resolver) (*deeplyPanickingCloseService, error) {
+            return &deeplyPanickingCloseService{depth: 60}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get("service.panics"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    var typedError *exception.Error
+    if false == errors.As(serviceContainer.Close(), &typedError) {
+        t.Fatalf("expected a melody error")
+    }
+
+    failureDetails, _ := typedError.Context()["failureDetails"].(map[string]exceptioncontract.Context)
+    panicStack, hasStack := failureDetails["service:service.panics"]["panicStack"].(string)
+    if false == hasStack {
+        t.Fatalf("expected the frames that ran, got %v", failureDetails)
+    }
+
+    if false == strings.Contains(panicStack, "bytes kept") {
+        t.Fatalf("expected a stack this deep to be cut and to say so, got %d bytes", len(panicStack))
+    }
+
+    if closeFailureStackLimit+128 < len(panicStack) {
+        t.Fatalf("expected the cut to bound the frames near the limit, got %d bytes", len(panicStack))
+    }
+}
+
+/* the details are read under the same containment the failure line beside them has: LogContext walks the error's own chain through Unwrap, which is the class errorText exists for one link deeper, and an error whose Unwrap panics used to end the teardown loop from inside the one place built to survive a bad close — under a teardown armed in waves, on a goroutine no caller can recover. */
+func TestContainer_Close_ACloseErrorWhoseUnwrapPanicsDoesNotEndTheTeardown(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "service.unwrapPanics",
+        func(resolver containercontract.Resolver) (*panickingUnwrapCloseService, error) {
+            return &panickingUnwrapCloseService{}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get("service.unwrapPanics"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    var typedError *exception.Error
+    if false == errors.As(serviceContainer.Close(), &typedError) {
+        t.Fatalf("expected the failed close to be reported rather than ending the process")
+    }
+
+    failures, _ := typedError.Context()["failures"].(map[string]string)
+    if "the drain refused" != failures["service:service.unwrapPanics"] {
+        t.Fatalf("expected the failure line to survive, got %v", typedError.Context()["failures"])
+    }
+
+    failureDetails, _ := typedError.Context()["failureDetails"].(map[string]exceptioncontract.Context)
+    detailsPanicked, hasMarker := failureDetails["service:service.unwrapPanics"]["detailsPanicked"].(string)
+    if false == hasMarker || false == strings.Contains(detailsPanicked, "unwrap of a half-built error") {
+        t.Fatalf("expected the contained reading to say why it left nothing, got %v", failureDetails)
+    }
+}
+
+type deeplyPanickingCloseService struct {
+    depth int
+}
+
+func (instance *deeplyPanickingCloseService) Close() error {
+    instance.panicAtDepth(instance.depth)
+
+    return nil
+}
+
+func (instance *deeplyPanickingCloseService) panicAtDepth(remaining int) {
+    if 0 >= remaining {
+        panic(errors.New("the drain buffer was nil"))
+    }
+
+    instance.panicAtDepth(remaining - 1)
+}
+
+type panickingUnwrapCloseService struct{}
+
+func (instance *panickingUnwrapCloseService) Close() error {
+    return panickingUnwrapError{}
+}
+
+type panickingUnwrapError struct{}
+
+func (instance panickingUnwrapError) Error() string { return "the drain refused" }
+
+func (instance panickingUnwrapError) Unwrap() error { panic("unwrap of a half-built error") }
 
 /* a panic value that is not an error has no cause to give, and the record still carries what it can */
 func TestContainer_Close_APanickingCloseWithoutAnErrorValueStillRecordsTheStack(t *testing.T) {

@@ -27,7 +27,7 @@ func SerializerManagerFromRuntime(runtimeInstance runtimecontract.Runtime) *Seri
         if nil != err {
             /* the failure is reported through the soft logger resolver: the Must variant panics when the logger itself cannot be resolved, and a runtime broken enough to lose the serializer manager is the runtime most likely to lose the logger with it — the reporting branch of a return-nil-on-failure resolver must not be the line that panics */
             logger := logging.LoggerFromRuntime(runtimeInstance)
-            if nil != logger {
+            if false == internal.IsNilInterface(logger) {
                 logger.Error(
                     "failed to resolve the serializer manager",
                     exception.LogContext(err),
@@ -51,7 +51,7 @@ func SerializerFromRuntime(runtimeInstance runtimecontract.Runtime) serializerco
     if true == internal.IsNilInterface(serializerInstance) || nil != err {
         if nil != err {
             logger := logging.LoggerFromRuntime(runtimeInstance)
-            if nil != logger {
+            if false == internal.IsNilInterface(logger) {
                 logger.Error(
                     "failed to resolve the serializer",
                     exception.LogContext(err),

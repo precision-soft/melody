@@ -272,7 +272,7 @@ func releaseDetached(runtimeInstance runtimecontract.Runtime, lock lockcontract.
     }
 
     logger := logging.LoggerFromRuntime(runtimeInstance)
-    if nil == logger {
+    if true == internal.IsNilInterface(logger) {
         logger = logging.EmergencyLogger()
     }
 

@@ -7,6 +7,7 @@ import (
 
     "github.com/precision-soft/melody/v3/exception"
     httpclientcontract "github.com/precision-soft/melody/v3/httpclient/contract"
+    "github.com/precision-soft/melody/v3/internal"
 )
 
 func NewStreamResponse(statusCode int, headers nethttp.Header, body io.ReadCloser) *StreamResponse {
@@ -37,7 +38,7 @@ func (instance *StreamResponse) Body() io.ReadCloser {
     instance.bodyMutex.Lock()
     defer instance.bodyMutex.Unlock()
 
-    if nil == instance.body {
+    if true == internal.IsNilInterface(instance.body) {
         return closedStreamBody{}
     }
 
@@ -50,7 +51,7 @@ func (instance *StreamResponse) Close() error {
     instance.body = nil
     instance.bodyMutex.Unlock()
 
-    if nil == body {
+    if true == internal.IsNilInterface(body) {
         return nil
     }
 

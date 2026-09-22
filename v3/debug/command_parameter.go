@@ -87,7 +87,7 @@ func (instance *ParameterCommand) Run(
 
     for _, name := range keys {
         parameter := applicationConfiguration.Get(name)
-        if nil == parameter {
+        if true == internal.IsNilInterface(parameter) {
             continue
         }
 
@@ -110,7 +110,7 @@ func (instance *ParameterCommand) Run(
 
     for _, key := range keys {
         parameter := applicationConfiguration.Get(key)
-        if nil == parameter {
+        if true == internal.IsNilInterface(parameter) {
             continue
         }
 

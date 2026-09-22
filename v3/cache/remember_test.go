@@ -2016,3 +2016,30 @@ func TestRemember_AValueTheSerializerCannotEncodeIsRefusedNamingTheKey(t *testin
         _ = backend.Close()
     }
 }
+
+/* zzTypedNilContext dereferences its receiver in every method, which is what an application's own context wrapper does: without that a typed nil would answer happily and the guard it breaks could not be seen (§the double must be handed the failure the guard prevents). */
+type zzTypedNilContext struct {
+    parent context.Context
+}
+
+func (instance *zzTypedNilContext) Deadline() (time.Time, bool)  { return instance.parent.Deadline() }
+func (instance *zzTypedNilContext) Done() <-chan struct{}        { return instance.parent.Done() }
+func (instance *zzTypedNilContext) Err() error                   { return instance.parent.Err() }
+func (instance *zzTypedNilContext) Value(key any) any            { return instance.parent.Value(key) }
+
+/* the GoDoc of Context promises context.Background when none was given, and the value is the caller's own: an application deriving an option from a request context it wraps in a type of its own, left nil, hands a context.Context that is not nil. The comparison against nil answered false, the typed nil was handed back as the option's context, and the wait that reads Done() on it dereferenced — on the cache path of a request. */
+func TestRememberOption_ATypedNilCallerContextAnswersBackground(t *testing.T) {
+    var absentContext *zzTypedNilContext
+
+    option := (&RememberOption{}).WithContext(absentContext)
+
+    if context.Background() != option.Context() {
+        t.Fatalf("expected the background context for a typed-nil caller context, got %#v", option.Context())
+    }
+
+    select {
+    case <-option.Context().Done():
+        t.Fatalf("expected the background context never to be done")
+    default:
+    }
+}

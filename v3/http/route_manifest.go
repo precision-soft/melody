@@ -73,12 +73,15 @@ func BuildRouteManifest(definitions []httpcontract.RouteDefinition) RouteManifes
 
 /* FilterRouteManifestByZone narrows a manifest to one zone. It is exported because the gate existed only inside the cli command: an application projecting the manifest in-process — into a page, into a bundle — had no way to apply it, so the zone travelled as a label on an artifact that carried every zone to every consumer, the anonymous ones included.
 
-   The zone is read the way the command reads its --zone flag, surrounding space trimmed: an empty zone is no gate and answers the manifest whole, and a zone that is not one of the declared ones is refused by name. Accepted, a misspelled zone matched no entry and answered an empty manifest in silence — the very artifact the command refuses to write over the good one — so a page carried no route at all with nothing saying why. */
+   The zone is read the way the command reads its --zone flag, surrounding space trimmed: an empty zone is no gate and answers the manifest whole, and a zone that is not one of the declared ones is refused by name. Accepted, a misspelled zone matched no entry and answered an empty manifest in silence — the very artifact the command refuses to write over the good one — so a page carried no route at all with nothing saying why.
+
+   Emptiness is asked of the zone AS GIVEN, before the trim: a caller asking for no gate passes no zone, while a zone that arrives as whitespace — a configuration value, a template that rendered to spaces — is a zone nobody declared, and reading it as no gate would answer every zone to a consumer that asked for one. Refused by name, like any other zone that is not declared. */
 func FilterRouteManifestByZone(manifest RouteManifest, zone string) (RouteManifest, error) {
-    zone = strings.TrimSpace(zone)
     if "" == zone {
         return manifest, nil
     }
+
+    zone = strings.TrimSpace(zone)
 
     if false == IsRouteZone(zone) {
         return RouteManifest{}, exception.NewError(

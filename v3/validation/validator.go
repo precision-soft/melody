@@ -537,7 +537,7 @@ func (instance *Validator) applyFieldRules(field reflect.StructField, value refl
 
     for _, rule := range rules {
         validationError := instance.validateRule(value.Interface(), fieldPath, rule)
-        if nil != validationError {
+        if false == internal.IsNilInterface(validationError) {
             errors = append(errors, validationError)
         }
     }

@@ -5,6 +5,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/internal"
     "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     messagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
@@ -149,7 +150,7 @@ func (instance *InMemoryTransport) requeueAfter(
     select {
     case <-timer.C:
         if requeueErr := instance.requeue(envelopeInstance); nil != requeueErr {
-            if nil != logger {
+            if false == internal.IsNilInterface(logger) {
                 logger.Error("in-memory transport dropped a delayed requeue", exception.LogContext(requeueErr))
             }
         }
@@ -159,7 +160,7 @@ func (instance *InMemoryTransport) requeueAfter(
 
 /* resolveLogger prefers the runtime's logger — present in every framework-assembled scope — and falls back to the one configured through WithLogger. */
 func (instance *InMemoryTransport) resolveLogger(runtimeInstance runtimecontract.Runtime) loggingcontract.Logger {
-    if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
+    if logger := logging.LoggerFromRuntime(runtimeInstance); false == internal.IsNilInterface(logger) {
         return logger
     }
 

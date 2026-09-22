@@ -1713,7 +1713,7 @@ type parsedTagRule struct {
     params map[string]string
 }
 
-/* parsedTagRulesCache memoizes the parse of a validate tag: the schema mirror asks nine predicates of every tagged field and each one split the tag again — measured, about ten parses and thirty allocations per tag, once per field, on every document the spec handler generates, which is once per request. Tags are struct tags, compile-time constants, so the key space is the program's own set of distinct tags and cannot be grown by a request; the form is the validator's parsedValidationTagCache. */
+/* parsedTagRulesCache memoizes the parse of a validate tag: the schema mirror asks nine predicates of every tagged field and each one split the tag again — measured, about ten parses and thirty allocations per tag, once per field, on every document the spec handler generates, which is once per request. Tags are struct tags, so for a program whose types are declared in source the key space is its own set of distinct tags and no request can grow it; the form is the validator's parsedValidationTagCache. The bound is the program's, not the package's: nothing here evicts, and a type built at run time with reflect.StructOf carries a tag the memo retains whole for the life of the process, so a program that makes types per request must not build their validate tags per request either. tagHasInvalidSyntax reads the raw rules rather than this memo, being a question about the TEXT the parse has already resolved, so one split per reading survives it. */
 var parsedTagRulesCache sync.Map
 
 func parsedTagRules(validateTag string) []parsedTagRule {

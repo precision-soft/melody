@@ -13,6 +13,7 @@ import (
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
+    exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
 )
 
 type scopeTestService struct {
@@ -2267,5 +2268,37 @@ func TestScope_Close_ClosesAServiceThatCarriesOnlyCloseWithContextAndHandsItTheD
 
     if false == service.hadDeadline {
         t.Fatalf("expected the scope's deadline to reach the service through its only door")
+    }
+}
+
+/* the sister of the container's site: the scope reads the close error's context through the same contained door, so an error whose Unwrap panics is recorded rather than ending the scope's teardown — and a request scope closes on the request path, where a panic reaches the kernel's recovery as a five hundred. */
+func TestScope_Close_ACloseErrorWhoseUnwrapPanicsDoesNotEndTheTeardown(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerScopedErr := serviceContainer.RegisterScoped(
+        "app.scoped.unwrapPanics",
+        func(resolver containercontract.Resolver) (*panickingUnwrapCloseService, error) {
+            return &panickingUnwrapCloseService{}, nil
+        },
+    )
+    if nil != registerScopedErr {
+        t.Fatalf("unexpected scoped register error: %v", registerScopedErr)
+    }
+
+    scopeInstance := serviceContainer.NewScope()
+
+    if _, getErr := scopeInstance.Get("app.scoped.unwrapPanics"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    var typedError *exception.Error
+    if false == errors.As(scopeInstance.Close(), &typedError) {
+        t.Fatalf("expected the failed close to be reported rather than ending the teardown")
+    }
+
+    failureDetails, _ := typedError.Context()["failureDetails"].(map[string]exceptioncontract.Context)
+    detailsPanicked, hasMarker := failureDetails["scope:service:app.scoped.unwrapPanics"]["detailsPanicked"].(string)
+    if false == hasMarker || false == strings.Contains(detailsPanicked, "unwrap of a half-built error") {
+        t.Fatalf("expected the contained reading to say why it left nothing, got %v", failureDetails)
     }
 }

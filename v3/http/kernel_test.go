@@ -1095,6 +1095,85 @@ func TestKernel_PanicRecoveryClosesTheResponseAListenerSwappedInNotTheDiscardedO
     }
 }
 
+/* the sister of the pin above, on the listener the pin above steps round: one that answers with the response it already swapped in — a listener holding it in a per-request field, one memoising its own decoration — is handed that response back on the recovery's re-publish of the same event. Closing the panicked response BEFORE that publish closed the very body the write then read, on the response actually served; the close waits until the publish has said what is being written. */
+func TestKernel_PanicRecoveryDoesNotCloseAResponseTheRepublishHandsBack(t *testing.T) {
+    original := &closeRecordingReadCloser{}
+    swapped := &closeRecordingReadCloser{}
+    storage := &panicOnceSessionStorage{}
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/file-then-swap-always",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            sessionValue, exists := request.Attributes().Get(RequestAttributeSession)
+            if false == exists {
+                t.Fatal("expected the request to carry a session")
+            }
+
+            sessionInstance, ok := sessionValue.(sessioncontract.Session)
+            if false == ok {
+                t.Fatal("expected the session attribute to be a session")
+            }
+
+            sessionInstance.Set("key", "value")
+
+            return &Response{
+                statusCode: nethttp.StatusOK,
+                headers:    make(nethttp.Header),
+                bodyReader: original,
+            }, nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainerWithSessionStorage(storage)
+
+    swappedResponse := &Response{
+        statusCode: nethttp.StatusAccepted,
+        headers:    make(nethttp.Header),
+        bodyReader: swapped,
+    }
+
+    publishes := 0
+    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher.AddListener(
+        kernelcontract.EventKernelResponse,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            responseEvent, ok := eventValue.Payload().(*KernelResponseEvent)
+            if false == ok {
+                return nil
+            }
+
+            publishes++
+            responseEvent.SetResponse(swappedResponse)
+
+            return nil
+        },
+        0,
+    )
+
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/file-then-swap-always", nil))
+
+    if false == storage.panicked.Load() {
+        t.Fatal("the session backend never panicked; the test does not exercise the recovery path")
+    }
+
+    if 2 != publishes {
+        t.Fatalf("the probe no longer exercises the re-publish: %d publishes", publishes)
+    }
+
+    if 1 != original.closeCount {
+        t.Fatalf("expected the discarded original body to be closed exactly once, got %d", original.closeCount)
+    }
+
+    /* once, by the write that served it. Closed ahead of the re-publish it was closed twice — and the first of those closes came BEFORE the write read it. */
+    if 1 != swapped.closeCount {
+        t.Fatalf("expected the body the re-publish handed back to be closed once, by the write that served it, got %d", swapped.closeCount)
+    }
+}
+
 /* net/http documents this sentinel as "abort the connection and suppress the log"; converting it into an error answered an aborted upload with a 500 and an error line, and a reverse proxy panics with it on every client disconnect mid-stream */
 func TestKernel_AbortHandlerPanicClosesTheConnectionWithoutAResponse(t *testing.T) {
     router := NewRouter()

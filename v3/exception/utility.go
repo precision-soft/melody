@@ -308,18 +308,12 @@ func BuildCauseChain(causeErr error, maxDepth int) []string {
     return buildCauseChainFromRoots([]error{causeErr}, maxDepth)
 }
 
-func buildCauseChainFromRoots(roots []error, maxDepth int) []string {
-    capacity := maxDepth
-    if capacity > causeChainCapacityHint {
-        capacity = causeChainCapacityHint
-    }
-
-    chain := make([]string, 0, capacity)
-
-    /* the walk is breadth-first over both unwrap shapes, so a chain of single wraps produces exactly the sequence it always did while a join contributes its branches side by side instead of ending the chain at its own link. maxDepth bounds the number of LINKS rendered, not the depth of the tree, which is what keeps a wide join from costing more than a deep chain. */
+/* walkCauseChain is the one walk both chains take, so they stay index-aligned by construction rather than by two hand-copied loops an edit could part. It is breadth-first over both unwrap shapes, so a chain of single wraps produces exactly the sequence it always did while a join contributes its branches side by side instead of ending the chain at its own link. maxDepth bounds the number of LINKS visited, not the depth of the tree, which is what keeps a wide join from costing more than a deep chain. */
+func walkCauseChain(roots []error, maxDepth int, visit func(link error)) {
     pending := append([]error{}, roots...)
+    visited := 0
 
-    for 0 < len(pending) && len(chain) < maxDepth {
+    for 0 < len(pending) && visited < maxDepth {
         current := pending[0]
         pending = pending[1:]
 
@@ -328,10 +322,27 @@ func buildCauseChainFromRoots(roots []error, maxDepth int) []string {
             continue
         }
 
-        chain = append(chain, renderErrorText(current))
+        visit(current)
+        visited++
 
         pending = append(pending, causesOf(current)...)
     }
+}
+
+func causeChainCapacity(maxDepth int) int {
+    if maxDepth > causeChainCapacityHint {
+        return causeChainCapacityHint
+    }
+
+    return maxDepth
+}
+
+func buildCauseChainFromRoots(roots []error, maxDepth int) []string {
+    chain := make([]string, 0, causeChainCapacity(maxDepth))
+
+    walkCauseChain(roots, maxDepth, func(link error) {
+        chain = append(chain, renderErrorText(link))
+    })
 
     return chain
 }
@@ -349,42 +360,29 @@ func BuildCauseContextChain(causeErr error, maxDepth int) []map[string]any {
 }
 
 func buildCauseContextChainFromRoots(roots []error, maxDepth int) []map[string]any {
-    capacity := maxDepth
-    if capacity > causeChainCapacityHint {
-        capacity = causeChainCapacityHint
-    }
-
-    chain := make([]map[string]any, 0, capacity)
+    chain := make([]map[string]any, 0, causeChainCapacity(maxDepth))
     hasAnyContext := false
 
-    /* the same breadth-first walk BuildCauseChain performs, so the two chains stay index-aligned: an operator reading causeChain[2] finds its context at causeContextChain[2] whether the failure below was one wrap or a join of several */
-    pending := append([]error{}, roots...)
-
-    for 0 < len(pending) && len(chain) < maxDepth {
-        current := pending[0]
-        pending = pending[1:]
-
-        /* a typed-nil link is the nil its producer meant and contributes nothing */
-        if true == isNilInterfaceValue(current) {
-            continue
-        }
-
+    /* the same walk BuildCauseChain takes, so the two chains stay index-aligned: an operator reading causeChain[2] finds its context at causeContextChain[2] whether the failure below was one wrap or a join of several */
+    walkCauseChain(roots, maxDepth, func(link error) {
         /* the immediate node is asserted rather than searched with errors.As: a deep search emits the nearest provider's context once per intervening wrapper, while the cursor advances one link at a time */
-        causeProvider, isProvider := current.(exceptioncontract.ContextProvider)
-        if true == isProvider {
-            causeContext := renderedContextOf(causeProvider)
-            if nil != causeContext && 0 < len(causeContext) {
-                chain = append(chain, causeContext)
-                hasAnyContext = true
-            } else {
-                chain = append(chain, nil)
-            }
-        } else {
+        causeProvider, isProvider := link.(exceptioncontract.ContextProvider)
+        if false == isProvider {
             chain = append(chain, nil)
+
+            return
         }
 
-        pending = append(pending, causesOf(current)...)
-    }
+        causeContext := renderedContextOf(causeProvider)
+        if nil == causeContext || 0 == len(causeContext) {
+            chain = append(chain, nil)
+
+            return
+        }
+
+        chain = append(chain, causeContext)
+        hasAnyContext = true
+    })
 
     if false == hasAnyContext {
         return nil
