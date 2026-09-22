@@ -1527,6 +1527,113 @@ func TestContainer_Close_AFailureThatSaysNothingBeyondItsLineAddsNoDetailsMap(t 
     }
 }
 
+/* the drop of the duplicate entry is ONE key — the one LogContext seeds with the error's own message —
+   and only when it holds the failure line verbatim. Swept by VALUE across the whole key space, it took a
+   producer's own keys with it whenever their value happened to be that message, which is exactly the
+   shape a refusal written for an operator has: the line, and the same line filed under the name of the
+   thing to do about it. */
+func TestContainer_Close_TheDuplicateDropTakesOnlyTheSeededMessage(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "service.refuses",
+        func(resolver containercontract.Resolver) (*operatorFailingCloseService, error) {
+            return &operatorFailingCloseService{}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get("service.refuses"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    var typedError *exception.Error
+    if false == errors.As(serviceContainer.Close(), &typedError) {
+        t.Fatalf("expected a melody error")
+    }
+
+    failureDetails, hasDetails := typedError.Context()["failureDetails"].(map[string]exceptioncontract.Context)
+    if false == hasDetails {
+        t.Fatalf("expected the failure details beside the failure map, got %v", typedError.Context()["failureDetails"])
+    }
+
+    details := failureDetails["service:service.refuses"]
+
+    if _, seeded := details["error"]; true == seeded {
+        t.Fatalf("expected the seeded message to be dropped as the duplicate of the line, got %v", details)
+    }
+
+    if "the pool is still draining" != details["operator"] {
+        t.Fatalf("expected the producer's own key to survive the drop, got %v", details)
+    }
+
+    if "db-1" != details["host"] {
+        t.Fatalf("expected the producer's other key to survive, got %v", details)
+    }
+}
+
+type operatorFailingCloseService struct{}
+
+func (instance *operatorFailingCloseService) Close() error {
+    return exception.NewError(
+        "the pool is still draining",
+        exceptioncontract.Context{"host": "db-1", "operator": "the pool is still draining"},
+        nil,
+    )
+}
+
+/* the recovered value is bounded for the reason the frames are: it is the panic value as the SERVICE
+   wrote it, so twenty services panicking with five kilobytes apiece put a hundred into the one record
+   the stack limit exists to keep out of it. */
+func TestContainer_Close_TheRecoveredValueOfAPanickingCloseIsBounded(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "service.panics",
+        func(resolver containercontract.Resolver) (*hugePanicCloseService, error) {
+            return &hugePanicCloseService{}, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get("service.panics"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    var typedError *exception.Error
+    if false == errors.As(serviceContainer.Close(), &typedError) {
+        t.Fatalf("expected a melody error")
+    }
+
+    failureDetails, hasDetails := typedError.Context()["failureDetails"].(map[string]exceptioncontract.Context)
+    if false == hasDetails {
+        t.Fatalf("expected the failure details, got %v", typedError.Context()["failureDetails"])
+    }
+
+    recoveredValue, isText := failureDetails["service:service.panics"]["recoveredValue"].(string)
+    if false == isText {
+        t.Fatalf("expected the recovered value to be recorded as text, got %v", failureDetails["service:service.panics"])
+    }
+
+    if 5000 <= len(recoveredValue) {
+        t.Fatalf("expected the recovered value to be cut, it is %d bytes", len(recoveredValue))
+    }
+
+    if false == strings.Contains(recoveredValue, "bytes kept") {
+        t.Fatalf("expected the cut to name itself, got %q", recoveredValue[:64])
+    }
+}
+
+type hugePanicCloseService struct{}
+
+func (instance *hugePanicCloseService) Close() error {
+    panic(strings.Repeat("H", 5000))
+}
+
 /* the frames of one contained panic are bounded: the teardown error is ONE record the application journals, and an unbounded stack per failed node made a shutdown that loses twenty services write sixty kilobytes of it in a single line. The cut names itself and keeps the top frames, which are the ones that name the close. */
 func TestContainer_Close_TheFramesOfAPanickingCloseAreBounded(t *testing.T) {
     serviceContainer := NewContainer()

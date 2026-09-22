@@ -36,16 +36,7 @@ func (instance EncryptedDeterministicString) MarshalJSON() ([]byte, error) {
 
 /* UnmarshalJSON refuses the redaction placeholder MarshalJSON writes and decodes any other string, for the reason on EncryptedString.UnmarshalJSON. */
 func (instance *EncryptedDeterministicString) UnmarshalJSON(data []byte) error {
-    decoded, present, decodeErr := decodeEncryptedJson(data, fmt.Sprintf("%T", *instance))
-    if nil != decodeErr {
-        return decodeErr
-    }
-
-    if true == present {
-        *instance = EncryptedDeterministicString(decoded)
-    }
-
-    return nil
+    return unmarshalEncryptedJson(instance, data)
 }
 
 func (instance EncryptedDeterministicString) Value() (driver.Value, error) {

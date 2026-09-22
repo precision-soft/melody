@@ -73,21 +73,22 @@ func BuildRouteManifest(definitions []httpcontract.RouteDefinition) RouteManifes
 
 /* FilterRouteManifestByZone narrows a manifest to one zone. It is exported because the gate existed only inside the cli command: an application projecting the manifest in-process — into a page, into a bundle — had no way to apply it, so the zone travelled as a label on an artifact that carried every zone to every consumer, the anonymous ones included.
 
-   The zone is read the way the command reads its --zone flag, surrounding space trimmed: an empty zone is no gate and answers the manifest whole, and a zone that is not one of the declared ones is refused by name. Accepted, a misspelled zone matched no entry and answered an empty manifest in silence — the very artifact the command refuses to write over the good one — so a page carried no route at all with nothing saying why.
+   The zone is read here for every caller, the command included, which hands its --zone flag over as typed: an empty zone is no gate and answers the manifest whole, a zone that is not one of the declared ones is refused by name, and a declared one surrounded by space is that zone. The command used to trim before calling, so the two disagreed about a zone that is nothing but space — refused here, read there as no gate. Accepted, a misspelled zone matched no entry and answered an empty manifest in silence — the very artifact the command refuses to write over the good one — so a page carried no route at all with nothing saying why.
 
-   Emptiness is asked of the zone AS GIVEN, before the trim: a caller asking for no gate passes no zone, while a zone that arrives as whitespace — a configuration value, a template that rendered to spaces — is a zone nobody declared, and reading it as no gate would answer every zone to a consumer that asked for one. Refused by name, like any other zone that is not declared. */
+   Emptiness is asked of the zone AS GIVEN, before the trim: a caller asking for no gate passes no zone, while a zone that arrives as whitespace — a configuration value, a template that rendered to spaces — is a zone nobody declared, and reading it as no gate would answer every zone to a consumer that asked for one. Refused by name, like any other zone that is not declared — and the name in the refusal is the zone AS GIVEN, since the trimmed spelling of a zone made of spaces is the empty one, which the sentence above says is no gate at all. */
 func FilterRouteManifestByZone(manifest RouteManifest, zone string) (RouteManifest, error) {
     if "" == zone {
         return manifest, nil
     }
 
+    givenZone := zone
     zone = strings.TrimSpace(zone)
 
     if false == IsRouteZone(zone) {
         return RouteManifest{}, exception.NewError(
             "route zone is not one of the declared zones",
             map[string]any{
-                "zone":          zone,
+                "zone":          givenZone,
                 "declaredZones": RouteZones(),
             },
             nil,

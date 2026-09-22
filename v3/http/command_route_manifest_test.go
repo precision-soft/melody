@@ -170,6 +170,39 @@ func TestRouteManifestCommand_RefusesAZoneThatIsNotDeclared(t *testing.T) {
     }
 }
 
+/* the command and the exported door are one reader of the zone. The command used to trim its flag before
+   calling, so for a zone that is nothing but space the two answered differently — the door refused it, the
+   command, having trimmed it to empty, read it as no gate and wrote the manifest WHOLE over the previous
+   one. That is the class the door's own paragraph exists to close, reopened one caller up. */
+func TestRouteManifestCommand_ReadsAZoneMadeOnlyOfSpaceTheWayTheDoorDoes(t *testing.T) {
+    projectDirectory := t.TempDir()
+    runtimeInstance := newManifestCommandRuntime(t, projectDirectory)
+
+    outputPath := filepath.Join(projectDirectory, "routes.json")
+    if writeErr := os.WriteFile(outputPath, []byte(`{"routes":[{"name":"kept"}]}`), 0o644); nil != writeErr {
+        t.Fatalf("seed: %v", writeErr)
+    }
+
+    _, runErr := runRouteManifestCommand(t, runtimeInstance, "--zone", "   ", "--out", "routes.json")
+    if nil == runErr {
+        t.Fatalf("expected a zone made only of space to be refused, the way the door refuses it")
+    }
+
+    survived, readErr := os.ReadFile(outputPath)
+    if nil != readErr {
+        t.Fatalf("read back: %v", readErr)
+    }
+
+    if false == strings.Contains(string(survived), "kept") {
+        t.Fatalf("the previous manifest was replaced: %q", string(survived))
+    }
+
+    /* the declared zone surrounded by space stays the zone it names, which is what the trim is for */
+    if _, spacedErr := runRouteManifestCommand(t, runtimeInstance, "--zone", " public ", "--out", "routes.json"); nil != spacedErr {
+        t.Fatalf("expected a declared zone surrounded by space to be that zone, got: %v", spacedErr)
+    }
+}
+
 func TestRouteManifestCommand_PrintsTheManifestToTheCommandWriterWhenOutIsEmpty(t *testing.T) {
     runtimeInstance := newManifestCommandRuntime(t, t.TempDir())
 

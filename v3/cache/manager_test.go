@@ -296,6 +296,72 @@ func TestManager_SetMultipleNamesTheRefusedKeysDeterministically(t *testing.T) {
     }
 }
 
+/* Serializer is a PUBLIC contract, so the refusal SetMultiple reads to build its per-key reasons is the
+   application's error. Reading its text bare turned a failure this door ANSWERS into a panic nothing on
+   the request path contains — the sibling Set, which hands the same error to NewError without reading it,
+   answered an error for the same input on every major. The text is read the way the repository reads every
+   foreign error's text, under a recover, and the marker takes the place of the reason. */
+func TestManager_SetMultipleAnswersARefusalWhenTheSerializersErrorTextPanics(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+
+    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    defer backend.Close()
+
+    manager := NewManager(backend, &panickingTextSerializer{})
+
+    var recoveredValue any
+    var setErr error
+
+    func() {
+        defer func() {
+            recoveredValue = recover()
+        }()
+
+        setErr = manager.SetMultiple(map[string]any{"a.bad": "first", "b.bad": "second"}, 0)
+    }()
+
+    if nil != recoveredValue {
+        t.Fatalf("expected a refusal; the door panicked with the serializer's own error text: %v", recoveredValue)
+    }
+
+    if nil == setErr {
+        t.Fatalf("expected a serialization error from SetMultiple")
+    }
+
+    var exceptionErr *exception.Error
+    if false == errors.As(setErr, &exceptionErr) {
+        t.Fatalf("expected an exception error, got: %v", setErr)
+    }
+
+    causeByKey, isMap := exceptionErr.Context()["causeByKey"].(map[string]string)
+    if false == isMap || 2 != len(causeByKey) {
+        t.Fatalf("expected a reason for each refused key, got: %v", exceptionErr.Context()["causeByKey"])
+    }
+
+    for _, refusedKey := range []string{"a.bad", "b.bad"} {
+        if "serialization error message panicked: the serializer's error text panicked" != causeByKey[refusedKey] {
+            t.Fatalf("expected %s to carry the panic in place of its reason, got: %q", refusedKey, causeByKey[refusedKey])
+        }
+    }
+}
+
+/* an error of the application's whose Error() panics — typically on the very field that made the
+   serialization fail — is the value this whole class is about; it is not producible through any shipped
+   serializer, so the double is what makes the guard observable */
+type panickingTextError struct{}
+
+func (instance *panickingTextError) Error() string {
+    panic("the serializer's error text panicked")
+}
+
+type panickingTextSerializer struct {
+    cachecontract.Serializer
+}
+
+func (instance *panickingTextSerializer) Serialize(value any) ([]byte, error) {
+    return nil, &panickingTextError{}
+}
+
 func TestManager_Set_NamesTheKeyOnSerializationFailure(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -669,16 +735,16 @@ func TestManager_SetMultipleCarriesTheReasonOfEveryRefusedKey(t *testing.T) {
 
     context := exception.LogContext(setErr)
 
-    causes, hasCauses := context["causes"].(map[string]string)
-    if false == hasCauses || 2 != len(causes) {
-        t.Fatalf("expected a reason per refused key, got %v", context["causes"])
+    causeByKey, hasCauses := context["causeByKey"].(map[string]string)
+    if false == hasCauses || 2 != len(causeByKey) {
+        t.Fatalf("expected a reason per refused key, got %v", context["causeByKey"])
     }
 
-    if "" == causes[""] || "" == causes["mmm"] {
-        t.Fatalf("expected both refused keys to carry their own reason, got %v", causes)
+    if "" == causeByKey[""] || "" == causeByKey["mmm"] {
+        t.Fatalf("expected both refused keys to carry their own reason, got %v", causeByKey)
     }
 
-    if causes[""] == causes["mmm"] {
-        t.Fatalf("expected the two reasons to be the ones their own keys raised, got %v", causes)
+    if causeByKey[""] == causeByKey["mmm"] {
+        t.Fatalf("expected the two reasons to be the ones their own keys raised, got %v", causeByKey)
     }
 }

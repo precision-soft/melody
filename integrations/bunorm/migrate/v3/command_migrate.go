@@ -2,7 +2,6 @@ package migrate
 
 import (
     "fmt"
-    "time"
 
     "strconv"
 
@@ -41,31 +40,26 @@ func (instance *MigrateCommand) Flags() []clicontract.Flag {
     )
 }
 
-func (instance *MigrateCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) (runErr error) {
-    option := instance.base.optionFromCommand(commandContext)
-    outputInstance := newCommandOutput(commandContext.Writer(), commandContext.Arguments(), option)
+func (instance *MigrateCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+    return instance.base.run(instance.Name(), runtimeInstance, commandContext, instance.runMigrate)
+}
 
-    startedAt := time.Now()
-    defer func() {
-        runErr = outputInstance.finishRun(instance.Name(), startedAt, runErr, recover())
-    }()
-
+func (instance *MigrateCommand) runMigrate(
+    runtimeInstance runtimecontract.Runtime,
+    commandContext clicontract.Context,
+    outputInstance *commandOutput,
+) (runErr error) {
     /* the per-query lines print through the command output's writer, so a write the report lost there is remembered by finish too */
-    runnerOption := runnerOptionForCommand(outputInstance.writer, option)
+    runnerOption := runnerOptionForCommand(outputInstance.writer, outputInstance.option)
     ctx := withRunnerOption(runtimeInstance.Context(), runnerOption)
     /* the parsed posture reaches the migrations through the context the migrator hands them, so this run's writer and colour choice belong to this run alone; the process-wide fallback is installed only for the length of the run, for a migration that drops the context it was handed, and put back on the way out */
     defer restoreDefaultRunnerOption(swapDefaultRunnerOption(runnerOption))
 
-    db, managerName, releaseDatabase, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext, outputInstance)
-    if nil != dbErr {
-        return dbErr
+    db, managerName, migrator, releaseDatabase, resolveErr := instance.base.resolveMigrator(runtimeInstance, commandContext, outputInstance)
+    if nil != resolveErr {
+        return resolveErr
     }
     defer releaseDatabase()
-
-    migrator, migratorErr := instance.base.newMigrator(db)
-    if nil != migratorErr {
-        return migratorErr
-    }
 
     /* take the bun migration lock so two replicas running the migrate command during a rolling deploy cannot both compute the same pending set and double-apply a migration. */
     if lockErr := migrator.Lock(ctx); nil != lockErr {
@@ -88,15 +82,8 @@ func (instance *MigrateCommand) Run(runtimeInstance runtimecontract.Runtime, com
         }
     }()
 
-    if true == outputInstance.wantsDetail() {
-        identity, identityErr := fetchDatabaseIdentity(ctx, db)
-        if nil != identityErr {
-            return identityErr
-        }
-        if nil != identity {
-            outputInstance.printDatabaseBlock(identity)
-            outputInstance.newline()
-        }
+    if identityErr := instance.base.printDatabaseIdentity(ctx, db, outputInstance); nil != identityErr {
+        return identityErr
     }
 
     group, migrateErr := migrator.Migrate(ctx)

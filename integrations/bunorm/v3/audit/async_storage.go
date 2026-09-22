@@ -368,16 +368,11 @@ func (instance *AsyncStorage) saveItem(item asyncEntry) (failed bool) {
             return
         }
 
-        recoveredErr, isErr := recovered.(error)
-        if false == isErr {
-            recoveredErr = nil
-        }
-
         failed = true
         instance.deadLetter(item.table, item.entry, exception.NewError(
             "audit storage panicked while saving the entry",
             map[string]any{"panic": recovered},
-            recoveredErr,
+            exception.PanicCause(recovered),
         ))
     }()
 

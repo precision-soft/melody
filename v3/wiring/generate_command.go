@@ -255,6 +255,9 @@ type journalLineWriter struct {
     logger  loggingcontract.Logger
     command string
     pending string
+
+    /* globalBindReach collects the reach lines instead of journaling them one by one; flush turns them into the single record described above */
+    globalBindReach []string
 }
 
 func (instance *journalLineWriter) Write(payload []byte) (int, error) {
@@ -279,17 +282,47 @@ func (instance *journalLineWriter) flush() {
     line := instance.pending
     instance.pending = ""
     instance.journalLine(line)
+
+    if 0 == len(instance.globalBindReach) {
+        return
+    }
+
+    reaches := instance.globalBindReach
+    instance.globalBindReach = nil
+
+    instance.logger.Warning(
+        fmt.Sprintf("%d global %s reach constructors by argument name alone", len(reaches), pluralBinds(len(reaches))),
+        loggingcontract.Context{"command": instance.command, "globalBindReach": reaches},
+    )
 }
 
-/* informationReportPrefixes are the report lines that state a fact of a scan that WORKED rather than coverage it lost: the two counts; the vendor trees the scan stepped over, which are opt-in and cannot hold a service, so stepping over one loses nothing; and the reach of a global bind, which the generator emits for every bind it RESOLVED — one line per bound argument, on every clean generation. Everything else names something the wiring did not cover, which is what a journal read at the usual production threshold must keep, so the line is classified by what it IS and not by what it is not: read the other way round, an application with two global binds raised a warning apiece for a generation with nothing wrong in it, and a reader who learns that warnings here are routine stops reading the ones that are not. */
+func pluralBinds(count int) string {
+    if 1 == count {
+        return "bind"
+    }
+
+    return "binds"
+}
+
+/* informationReportPrefixes are the report lines that state a fact of a scan that WORKED rather than coverage it lost: the two counts, and the vendor trees the scan stepped over, which are opt-in and cannot hold a service, so stepping over one loses nothing. Everything else names something the wiring did not cover, which is what a journal read at the usual production threshold must keep.
+
+   The reach of a global bind is not in this list, and the reason is the one this package's own test writes over the reach report: a global bind SILENTLY reaches every constructor declaring an argument of that name, and the line is the only place an operator learns that one word bound forty of them. Below the threshold it reaches nobody. What made it look like noise is that the generator emits one line per bound argument on every clean generation — so the repetition is what is cut, not the warning: the lines are collected and journaled as ONE record whose message carries the count and whose context carries them all. A clean generation raises one warning, whatever the number of binds, and it is the warning that says how wide they reach. */
+/* globalBindReportPrefix is the one line the journal aggregates rather than repeats; the text is the generator's, written once here and once where the line is built */
+const globalBindReportPrefix = "global bind "
+
 var informationReportPrefixes = []string{
     "registered ",
     "skipped vendor directory: ",
-    "global bind ",
 }
 
 func (instance *journalLineWriter) journalLine(line string) {
     if "" == line {
+        return
+    }
+
+    if true == strings.HasPrefix(line, globalBindReportPrefix) {
+        instance.globalBindReach = append(instance.globalBindReach, strings.TrimPrefix(line, globalBindReportPrefix))
+
         return
     }
 

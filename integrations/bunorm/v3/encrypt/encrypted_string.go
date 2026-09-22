@@ -5,6 +5,7 @@ import (
     "encoding/json"
     "fmt"
     "log/slog"
+    "reflect"
 
     "github.com/precision-soft/melody/v3/exception"
 )
@@ -44,16 +45,7 @@ func (instance EncryptedString) MarshalJSON() ([]byte, error) {
 
 /* UnmarshalJSON is the read side of the redaction: a document MarshalJSON produced carries the placeholder where the plaintext was, and decoding it back into the column used to store the placeholder as the value, so the next Value() sealed "<redacted>" in place of the secret with no error anywhere on the way. The placeholder is refused by name; any other string is the plaintext the application typed, and a json null leaves the value untouched. */
 func (instance *EncryptedString) UnmarshalJSON(data []byte) error {
-    decoded, present, decodeErr := decodeEncryptedJson(data, fmt.Sprintf("%T", *instance))
-    if nil != decodeErr {
-        return decodeErr
-    }
-
-    if true == present {
-        *instance = EncryptedString(decoded)
-    }
-
-    return nil
+    return unmarshalEncryptedJson(instance, data)
 }
 
 func (instance EncryptedString) Value() (driver.Value, error) {
@@ -111,21 +103,42 @@ func scanRaw(source any) (string, bool, error) {
     }
 }
 
+/* unmarshalEncryptedJson is the whole of the four column types' UnmarshalJSON. The four differed in one identifier — the conversion back to the receiver's own type — and in nothing else, and every one of them is a string underneath, so the type parameter carries that one difference and the twelve lines that surrounded it are written once.
+
+   The receiver is handed to the decoder rather than its type name, so the name is taken in the refusal branches alone; see columnTypeOf. */
+func unmarshalEncryptedJson[T ~string](instance *T, data []byte) error {
+    decoded, present, decodeErr := decodeEncryptedJson(data, instance)
+    if nil != decodeErr {
+        return decodeErr
+    }
+
+    if true == present {
+        *instance = T(decoded)
+    }
+
+    return nil
+}
+
+/* columnTypeOf names the column type of a pointer receiver, for a refusal to carry. It is asked in the refusal branches alone: taken on the way in, as fmt.Sprintf("%T", *instance), it boxed the value and formatted it on EVERY decode — including the four cases out of five that answer no error at all, which is every decode a document actually performs — and measured at two of the four allocations of one. The receiver is already a pointer, so handing it over allocates nothing, and Elem() puts back the spelling %T gave: the type, not a pointer to it, which is what the three refusal pins read. */
+func columnTypeOf(column any) string {
+    return reflect.TypeOf(column).Elem().String()
+}
+
 /* decodeEncryptedJson is the shared read side of the four column types' MarshalJSON. It answers the decoded plaintext and whether one was present: a json null is the no-op encoding/json asks of every Unmarshaler, so nothing is present and nothing is an error. The redaction placeholder is refused rather than stored, because a value equal to it can only have come from a document this package redacted — an application that round-trips such a document would otherwise seal the placeholder over its own secret in silence. The refusal names the column type so the wiring that decoded the document is the one reported. */
-func decodeEncryptedJson(data []byte, columnType string) (string, bool, error) {
+func decodeEncryptedJson(data []byte, column any) (string, bool, error) {
     if "null" == string(data) {
         return "", false, nil
     }
 
     var decoded string
     if unmarshalErr := json.Unmarshal(data, &decoded); nil != unmarshalErr {
-        return "", false, exception.NewError("encrypted column json value is not a string", map[string]any{"type": columnType}, unmarshalErr)
+        return "", false, exception.NewError("encrypted column json value is not a string", map[string]any{"type": columnTypeOf(column)}, unmarshalErr)
     }
 
     if redactedPlaceholder == decoded {
         return "", false, exception.NewError(
             "a redacted encrypted value cannot be decoded back into an encrypted column; MarshalJSON removed the plaintext",
-            map[string]any{"type": columnType},
+            map[string]any{"type": columnTypeOf(column)},
             nil,
         )
     }

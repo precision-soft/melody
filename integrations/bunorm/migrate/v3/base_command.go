@@ -57,6 +57,82 @@ type baseCommand struct {
     options    Options
 }
 
+/* migrationRun is the work of one command of this set, run inside the frame below. */
+type migrationRun func(
+    runtimeInstance runtimecontract.Runtime,
+    commandContext clicontract.Context,
+    outputInstance *commandOutput,
+) error
+
+/* run is the one entry door of every command of this set. The parsed posture, the output the run prints through, the timer and — the part that matters — the RECOVERY were copied into each of the six Run methods seven lines at a time, which is six places for one of them to be written without a recover and turn a panicking migration into the death of the process rather than the failure of a command. Written once, it cannot be omitted.
+
+   db:create used to install its lost-report journal BEFORE the recovery was armed, so a journal that could not be resolved took the process with it; inside the frame that panic is the command's failure like any other. */
+func (instance *baseCommand) run(
+    name string,
+    runtimeInstance runtimecontract.Runtime,
+    commandContext clicontract.Context,
+    body migrationRun,
+) (runErr error) {
+    outputInstance := newCommandOutput(
+        commandContext.Writer(),
+        commandContext.Arguments(),
+        instance.optionFromCommand(commandContext),
+    )
+
+    startedAt := time.Now()
+    defer func() {
+        runErr = outputInstance.finishRun(name, startedAt, runErr, recover())
+    }()
+
+    return body(runtimeInstance, commandContext, outputInstance)
+}
+
+/* resolveMigrator answers the database this command acts on, the manager it belongs to, the migrator over it, and the release the caller must defer. Five of the six commands opened with the same eleven lines, whose one subtlety is that a migrator which cannot be built must still release the database it was to be built over — spelled out five times, that is five places for the release to be forgotten. */
+func (instance *baseCommand) resolveMigrator(
+    runtimeInstance runtimecontract.Runtime,
+    commandContext clicontract.Context,
+    outputInstance *commandOutput,
+) (*bun.DB, string, *migrate.Migrator, func(), error) {
+    db, managerName, releaseDatabase, dbErr := instance.resolveDatabase(runtimeInstance, commandContext, outputInstance)
+    if nil != dbErr {
+        return nil, "", nil, nil, dbErr
+    }
+
+    migrator, migratorErr := instance.newMigrator(db)
+    if nil != migratorErr {
+        releaseDatabase()
+
+        return nil, "", nil, nil, migratorErr
+    }
+
+    return db, managerName, migrator, releaseDatabase, nil
+}
+
+/* printDatabaseIdentity prints the database block the detailed postures carry, for the five commands that carry it. The context stays the caller's: the two commands that install a runner option hand the derived one, the other three hand the runtime's, and that difference is the whole of what the five sites had left to say. */
+func (instance *baseCommand) printDatabaseIdentity(
+    ctx context.Context,
+    db *bun.DB,
+    outputInstance *commandOutput,
+) error {
+    if false == outputInstance.wantsDetail() {
+        return nil
+    }
+
+    identity, identityErr := fetchDatabaseIdentity(ctx, db)
+    if nil != identityErr {
+        return identityErr
+    }
+
+    if nil == identity {
+        return nil
+    }
+
+    outputInstance.printDatabaseBlock(identity)
+    outputInstance.newline()
+
+    return nil
+}
+
 func (instance *baseCommand) managerFlag() clicontract.Flag {
     usage := "manager name (defaults to registry default)"
     if "" != instance.options.ManagerName {

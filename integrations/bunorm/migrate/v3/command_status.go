@@ -1,7 +1,6 @@
 package migrate
 
 import (
-    "time"
 
     "strconv"
 
@@ -34,35 +33,23 @@ func (instance *StatusCommand) Flags() []clicontract.Flag {
     )
 }
 
-func (instance *StatusCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) (runErr error) {
-    option := instance.base.optionFromCommand(commandContext)
-    outputInstance := newCommandOutput(commandContext.Writer(), commandContext.Arguments(), option)
+func (instance *StatusCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+    return instance.base.run(instance.Name(), runtimeInstance, commandContext, instance.runStatus)
+}
 
-    startedAt := time.Now()
-    defer func() {
-        runErr = outputInstance.finishRun(instance.Name(), startedAt, runErr, recover())
-    }()
-
-    db, managerName, releaseDatabase, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext, outputInstance)
-    if nil != dbErr {
-        return dbErr
+func (instance *StatusCommand) runStatus(
+    runtimeInstance runtimecontract.Runtime,
+    commandContext clicontract.Context,
+    outputInstance *commandOutput,
+) (runErr error) {
+    db, managerName, migrator, releaseDatabase, resolveErr := instance.base.resolveMigrator(runtimeInstance, commandContext, outputInstance)
+    if nil != resolveErr {
+        return resolveErr
     }
     defer releaseDatabase()
 
-    migrator, migratorErr := instance.base.newMigrator(db)
-    if nil != migratorErr {
-        return migratorErr
-    }
-
-    if true == outputInstance.wantsDetail() {
-        identity, identityErr := fetchDatabaseIdentity(runtimeInstance.Context(), db)
-        if nil != identityErr {
-            return identityErr
-        }
-        if nil != identity {
-            outputInstance.printDatabaseBlock(identity)
-            outputInstance.newline()
-        }
+    if identityErr := instance.base.printDatabaseIdentity(runtimeInstance.Context(), db, outputInstance); nil != identityErr {
+        return identityErr
     }
 
     items, statusErr := migrator.MigrationsWithStatus(runtimeInstance.Context())

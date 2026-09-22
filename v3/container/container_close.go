@@ -1047,9 +1047,21 @@ func containedClose(close func() error) (closeErr error) {
 /* closeFailureStackLimit bounds the frames one failed close contributes. A contained panic carries the whole debug.Stack of the goroutine that ran the close — about a kilobyte on an ordinary one, three on a deep one — and the teardown error is ONE record the application journals, so a shutdown that loses twenty services wrote sixty kilobytes of it in a single line. The top frames are the ones that name the close; what the cut drops is the runtime's own tail. */
 const closeFailureStackLimit = 2048
 
+/* boundedCloseFailureDetail cuts one detail to the limit above, naming the cut so the reader knows the tail is missing rather than absent. A detail that is not text, or not there, is answered unchanged. */
+func boundedCloseFailureDetail(value any) any {
+    text, isText := value.(string)
+    if false == isText || closeFailureStackLimit >= len(text) {
+        return value
+    }
+
+    return text[:closeFailureStackLimit] + fmt.Sprintf("\n\t… cut, %d of %d bytes kept", closeFailureStackLimit, len(text))
+}
+
 /* recordCloseFailureDetails keeps, beside the one line the failure map holds, what the close error carries BEYOND that line — for a contained panic the recovered value, its type and the frames that ran — under the node's key: the map of failures is rendered as text per service, and text is where a context map and a cause chain collapse to their first line, which is not the whole of what the operator will ever learn.
 
-   Beyond the line is the whole of the condition: the context every melody error seeds is its own message, which is the failure line verbatim, so a close answering a plain error has nothing to add and records nothing — the entry would otherwise be a duplicate of the line it sits beside, on EVERY failed teardown. */
+   Beyond the line is the whole of the condition: the context every melody error seeds is its own message, which is the failure line verbatim, so a close answering a plain error has nothing to add and records nothing — the entry would otherwise be a duplicate of the line it sits beside, on EVERY failed teardown. That is ONE key, the one LogContext seeds, and only when it holds the line verbatim: swept by VALUE across the whole key space instead, the drop took a producer's own keys with it whenever their value happened to be the message — a refusal carrying operator: <message> lost it — and took the cause of any transparent wrapper, of which fmt.Errorf("%w", err) is the standard library's.
+
+   The recovered value is bounded beside the frames, for the reason the frames are: it is the panic value as the SERVICE wrote it, so twenty services panicking with five kilobytes apiece put a hundred in the one record the stack limit exists to keep out of it. */
 func recordCloseFailureDetails(
     failureDetails map[string]exceptioncontract.Context,
     nodeKey string,
@@ -1058,15 +1070,17 @@ func recordCloseFailureDetails(
 ) {
     details := containedCloseFailureDetails(closeErr)
 
-    for key, value := range details {
-        text, isText := value.(string)
-        if true == isText && failureLine == text {
-            delete(details, key)
-        }
+    if seededMessage, isText := details["error"].(string); true == isText && failureLine == seededMessage {
+        delete(details, "error")
     }
 
-    if stack, hasStack := details["panicStack"].(string); true == hasStack && closeFailureStackLimit < len(stack) {
-        details["panicStack"] = stack[:closeFailureStackLimit] + fmt.Sprintf("\n\t… cut, %d of %d bytes kept", closeFailureStackLimit, len(stack))
+    details["panicStack"] = boundedCloseFailureDetail(details["panicStack"])
+    details["recoveredValue"] = boundedCloseFailureDetail(details["recoveredValue"])
+
+    for _, boundedKey := range []string{"panicStack", "recoveredValue"} {
+        if nil == details[boundedKey] {
+            delete(details, boundedKey)
+        }
     }
 
     if 0 == len(details) {

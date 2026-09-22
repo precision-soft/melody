@@ -81,32 +81,9 @@ func (instance *mysqlLock) Acquire(runtimeInstance runtimecontract.Runtime) (boo
     defer instance.mutex.Unlock()
 
     if nil != instance.connection {
-        /* verify on a fresh, bounded context, exactly as Refresh does, so the caller's already-canceled request context is never read as a lost lock */
-        verifyCtx, cancelVerify := context.WithTimeout(context.Background(), instance.releaseTimeout)
-
-        var held sql.NullBool
-        verifyErr := instance.connection.QueryRowContext(
-            verifyCtx,
-            "SELECT IS_USED_LOCK(?) = CONNECTION_ID()",
-            instance.lockName,
-        ).Scan(&held)
-        cancelVerify()
-
-        if nil == verifyErr && true == held.Valid && true == held.Bool {
+        /* the cause is Refresh's to report; here a lock that is no longer held simply falls through to be taken afresh below */
+        if stillHeld, _ := instance.verifyPinnedLock(); true == stillHeld {
             return true, nil
-        }
-
-        if nil != verifyErr {
-            /* the same distinction Refresh draws: a verify that could not be answered is not a verify that answered "lost". Releasing on it gave the lock away and then reported (false, nil) — the caller was told it never held a lock it was holding a moment earlier, while a competitor walked into the section beside it. */
-            if true == instance.pinnedConnectionAlive() {
-                return true, nil
-            }
-
-            instance.discardPinnedConnection()
-        } else {
-            /* the verify answered, and its answer is that this session no longer holds the lock: the session let it go, so there is nothing to release — only the pin to drop before taking it afresh below */
-            instance.connection.Close()
-            instance.connection = nil
         }
     }
 
@@ -172,14 +149,19 @@ func releaseOrphanedLock(connection *sql.Conn, name string, releaseTimeout time.
 /* returns the connection to the pool with Close when RELEASE_LOCK succeeded; when it could not be issued (releaseErr) the lock may still be held, so the driver connection is marked bad (driver.ErrBadConn) — database/sql then closes the physical session instead of pooling it, which releases the GET_LOCK server-side and guarantees a still-held lock never rides a pooled connection back into reuse. Mirrors the pgsql advisory-lock locker. */
 func discardOrCloseConnection(connection *sql.Conn, releaseErr error) error {
     if nil != releaseErr {
-        _ = connection.Raw(func(_ any) error {
-            return driver.ErrBadConn
-        })
+        discardConnection(connection)
 
         return nil
     }
 
     return connection.Close()
+}
+
+/* discardConnection marks the driver connection bad so database/sql closes it instead of returning it to the pool. Ending the MySQL session releases every named lock the connection still holds, which is what makes a still-locked connection safe to abandon rather than reuse. Mirrors the pgsql advisory-lock locker, where the same primitive is written once and called by both doors that need it. */
+func discardConnection(connection *sql.Conn) {
+    _ = connection.Raw(func(_ any) error {
+        return driver.ErrBadConn
+    })
 }
 
 func (instance *mysqlLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl time.Duration) error {
@@ -190,42 +172,58 @@ func (instance *mysqlLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl 
         return exception.NewError("mysql lock is no longer held", map[string]any{"name": instance.name, "lockName": instance.lockName}, nil)
     }
 
-    /* probe on a fresh, bounded context so a transient cause (a canceled or expired request context) is never mistaken for a lost lock and does not actively release a still-held lock — a MySQL GET_LOCK is held for as long as the pinned session lives, so there is no lease to renew and nothing to lose on a transient error, mirroring the pgsql advisory-lock locker */
-    probeCtx, cancel := context.WithTimeout(context.Background(), instance.releaseTimeout)
-    defer cancel()
-
-    var held sql.NullBool
-    queryErr := instance.connection.QueryRowContext(
-        probeCtx,
-        "SELECT IS_USED_LOCK(?) = CONNECTION_ID()",
-        instance.lockName,
-    ).Scan(&held)
-    if nil != queryErr {
-        /* a probe that answered NOTHING has not answered "lost": a server stall past the probe budget, a killed query, a blip on the wire all fail it while the session — and the GET_LOCK the session holds — are untouched. Releasing here handed away a lock this process still held, and the caller reads a failed refresh as "another instance may hold it now" and stops the callback, so the two of them together put a second holder inside an exclusive section this one had never left. Liveness is the question that decides, and it is the only question the pgsql advisory-lock locker ever asks: a session that still answers still holds its lock, and only a session that is gone has lost it — having already released it server-side, which is why the dead branch ends the connection instead of unlocking on it. */
-        if true == instance.pinnedConnectionAlive() {
-            return nil
-        }
-
-        instance.discardPinnedConnection()
-
+    stillHeld, lostCause := instance.verifyPinnedLock()
+    if false == stillHeld {
         return exception.NewError(
             "mysql lock is no longer held",
             map[string]any{"name": instance.name, "lockName": instance.lockName},
-            queryErr,
-        )
-    }
-
-    if false == held.Valid || false == held.Bool {
-        instance.connection.Close()
-        instance.connection = nil
-        return exception.NewError(
-            "mysql lock is no longer held",
-            map[string]any{"name": instance.name, "lockName": instance.lockName},
-            nil,
+            lostCause,
         )
     }
 
     return nil
+}
+
+/* verifyPinnedLock asks the pinned session whether it still holds the named lock, and leaves the pin in the state that answer implies. Acquire and Refresh both asked it, spelled twice, with the three outcomes and their two different repairs written out in each; they differ only in what they do with the answer, so only that is left at the call sites.
+
+   The probe runs on a fresh, bounded context so a transient cause — a canceled or expired request context — is never mistaken for a lost lock and does not actively release a still-held one: a MySQL GET_LOCK is held for exactly as long as the pinned session lives, so there is no lease to renew and nothing to lose on a transient error, mirroring the pgsql advisory-lock locker.
+
+   The three outcomes:
+
+     - the probe answers "held": the lock is held, the pin stands;
+     - the probe answers NOTHING: that is not an answer of "lost". A server stall past the probe budget, a killed query, a blip on the wire all fail it while the session — and the GET_LOCK the session holds — are untouched. Releasing here handed away a lock this process still held, and the caller reads a failed refresh as "another instance may hold it now" and stops the callback, so the two together put a second holder inside an exclusive section this one had never left. Liveness is the question that decides, and it is the only question the pgsql advisory-lock locker ever asks: a session that still answers still holds its lock, and only a session that is gone has lost it — having already released it server-side, which is why that branch ENDS the connection instead of unlocking on it;
+     - the probe answers "not held": the session let the lock go, so there is nothing to release. The connection is healthy, so it goes back to the pool and only the pin is dropped.
+
+   The cause is answered beside the verdict because Refresh names it and Acquire does not. */
+func (instance *mysqlLock) verifyPinnedLock() (bool, error) {
+    probeCtx, cancel := context.WithTimeout(context.Background(), instance.releaseTimeout)
+    defer cancel()
+
+    var held sql.NullBool
+    probeErr := instance.connection.QueryRowContext(
+        probeCtx,
+        "SELECT IS_USED_LOCK(?) = CONNECTION_ID()",
+        instance.lockName,
+    ).Scan(&held)
+
+    if nil != probeErr {
+        if true == instance.pinnedConnectionAlive() {
+            return true, nil
+        }
+
+        instance.discardPinnedConnection()
+
+        return false, probeErr
+    }
+
+    if true == held.Valid && true == held.Bool {
+        return true, nil
+    }
+
+    instance.connection.Close()
+    instance.connection = nil
+
+    return false, nil
 }
 
 /* pinnedConnectionAlive reports whether the pinned session is still up, and therefore whether it still holds the GET_LOCK: MySQL keeps a named lock for exactly as long as the session that took it. It pings on a fresh, bounded context so a canceled or expired request context cannot make a live lock look lost, and it is deliberately not the same query as the refresh probe — the probe asks what the lock's state is, this asks whether there is still a session to hold one. */
@@ -238,9 +236,7 @@ func (instance *mysqlLock) pinnedConnectionAlive() bool {
 
 /* discardPinnedConnection ends the pinned session without attempting an unlock and clears the pin. It is for the case where that session is already gone: its named locks were released server-side when it died, so there is nothing left to release, and issuing RELEASE_LOCK on the replacement connection database/sql would hand out would release a lock this process does not hold. Mirrors the pgsql advisory-lock locker. */
 func (instance *mysqlLock) discardPinnedConnection() {
-    _ = instance.connection.Raw(func(_ any) error {
-        return driver.ErrBadConn
-    })
+    discardConnection(instance.connection)
 
     instance.connection = nil
 }

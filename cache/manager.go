@@ -1,6 +1,7 @@
 package cache
 
 import (
+    "fmt"
     "sort"
     "strconv"
     "strings"
@@ -176,9 +177,23 @@ func (instance *Manager) Many(keys []string) (map[string]any, error) {
     return result, nil
 }
 
+/* serializationErrorText produces the loggable text of a serializer's refusal under a recover. Serializer is a PUBLIC contract, so the error here is the application's, and reading its Error() to build the per-key reasons turned a refusal this door answers as an error into a panic that nothing on the request path contains. Everywhere else in the repository a foreign error's text is read this way — exception.renderErrorText for the log context, the container teardown's own errorText for a failed close — and the marker takes the same shape, so the reason a key was refused survives as the panic that replaced it. */
+func serializationErrorText(err error) (text string) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            return
+        }
+
+        text = fmt.Sprintf("serialization error message panicked: %v", recoveredValue)
+    }()
+
+    return err.Error()
+}
+
 /* SetMultiple serializes every entry before the backend sees any of them, so a refusal writes nothing. The refusal names the keys it refused under "keys", sorted, with "key" the first of them and the cause its own: the items come as a map, and a refusal that stopped at the first entry the iteration happened to reach named a different key on every call. Every entry is serialized even after the first refusal, which is what makes the list of refused keys the whole list rather than a prefix of the iteration order; a batch whose first entry is unserializable therefore pays the serializer for the rest of it.
 
-   Each refused key's own reason travels beside it under "causes": one cause can be the error's, and a batch refused for several reasons would otherwise report one of them under a list of keys, leaving the operator to guess which key it belonged to — and the first sorted key is the empty one whenever the batch carries it, a key the backend contract declares malformed. */
+   Each refused key's own reason travels beside it under "causeByKey": one cause can be the error's, and a batch refused for several reasons would otherwise report one of them under a list of keys, leaving the operator to guess which key it belonged to — and the first sorted key is the empty one whenever the batch carries it, a key the backend contract declares malformed. The name is not "causes", by a letter: LogContext already seeds "cause", "causeChain" and "causeContextChain" into the same record, and in that grammar the plural of a cause is the chain of it, not a map keyed by something else entirely. */
 func (instance *Manager) SetMultiple(items map[string]any, ttl time.Duration) error {
     payloads := make(map[string][]byte, len(items))
     var refusedKeys []string
@@ -201,14 +216,14 @@ func (instance *Manager) SetMultiple(items map[string]any, ttl time.Duration) er
     if 0 < len(refusedKeys) {
         sort.Strings(refusedKeys)
 
-        causes := make(map[string]string, len(refusedKeys))
+        causeByKey := make(map[string]string, len(refusedKeys))
         for _, refusedKey := range refusedKeys {
-            causes[refusedKey] = refusalByKey[refusedKey].Error()
+            causeByKey[refusedKey] = serializationErrorText(refusalByKey[refusedKey])
         }
 
         return exception.NewError(
             "cache value serialization failed",
-            exceptioncontract.Context{"key": refusedKeys[0], "keys": refusedKeys, "causes": causes},
+            exceptioncontract.Context{"key": refusedKeys[0], "keys": refusedKeys, "causeByKey": causeByKey},
             refusalByKey[refusedKeys[0]],
         )
     }

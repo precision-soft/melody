@@ -3,7 +3,10 @@ package encrypt
 import (
     "encoding/base64"
     "strings"
+    "sync"
     "testing"
+
+    "github.com/precision-soft/melody/v3/exception"
 )
 
 func TestCipher_EncryptDecryptRoundTrip(t *testing.T) {
@@ -623,5 +626,262 @@ func TestCipher_EncryptPassesThroughADeterministicSeal(t *testing.T) {
 
     if deterministic != stored {
         t.Fatalf("expected the random door to pass a deterministic seal through unchanged")
+    }
+}
+
+/* rotatingKeyProvider answers different bytes under the SAME key id on demand — the shape a custom
+   KeyProvider of an application has, and the one StaticKeyProvider cannot take. It is the only value in
+   the corpus that can separate a key memo keyed on the id alone from one that re-reads the bytes. */
+type rotatingKeyProvider struct {
+    mutex sync.Mutex
+    key   []byte
+}
+
+func (instance *rotatingKeyProvider) CurrentKeyId() string {
+    return "v1"
+}
+
+func (instance *rotatingKeyProvider) ActiveKeyIds() []string {
+    return []string{"v1"}
+}
+
+func (instance *rotatingKeyProvider) Key(keyId string) ([]byte, error) {
+    if "v1" != keyId {
+        return nil, exception.NewError("unknown key id", map[string]any{"keyId": keyId}, nil)
+    }
+
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return instance.key, nil
+}
+
+func (instance *rotatingKeyProvider) rotate(key []byte) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.key = key
+}
+
+func TestCipher_SealsUnderTheRotatedKeyWhenTheProviderChangesTheBytesUnderOneId(t *testing.T) {
+    provider := &rotatingKeyProvider{key: newKey(1)}
+    cipherInstance := NewCipher(provider)
+
+    if _, warmErr := cipherInstance.Encrypt("secret"); nil != warmErr {
+        t.Fatalf("warm-up encrypt: %v", warmErr)
+    }
+
+    provider.rotate(newKey(2))
+
+    sealedAfterRotation, encryptErr := cipherInstance.Encrypt("secret")
+    if nil != encryptErr {
+        t.Fatalf("encrypt after rotation: %v", encryptErr)
+    }
+
+    rotatedReader := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(2)}))
+
+    decrypted, decryptErr := rotatedReader.Decrypt(sealedAfterRotation)
+    if nil != decryptErr {
+        t.Fatalf("expected the seal to be written under the rotated key, it does not open under it: %v", decryptErr)
+    }
+
+    if "secret" != decrypted {
+        t.Fatalf("round-trip mismatch under the rotated key: %q", decrypted)
+    }
+
+    retiredReader := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)}))
+    if _, retiredErr := retiredReader.Decrypt(sealedAfterRotation); nil == retiredErr {
+        t.Fatalf("expected the seal not to open under the key the provider retired")
+    }
+}
+
+func TestCipher_OpensUnderTheRotatedKeyWhenTheProviderChangesTheBytesUnderOneId(t *testing.T) {
+    sealedUnderTheRotatedKey, encryptErr := NewCipher(
+        NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(2)}),
+    ).Encrypt("secret")
+    if nil != encryptErr {
+        t.Fatalf("encrypt: %v", encryptErr)
+    }
+
+    provider := &rotatingKeyProvider{key: newKey(1)}
+    cipherInstance := NewCipher(provider)
+
+    if _, warmErr := cipherInstance.Encrypt("warm the memo"); nil != warmErr {
+        t.Fatalf("warm-up encrypt: %v", warmErr)
+    }
+
+    provider.rotate(newKey(2))
+
+    decrypted, decryptErr := cipherInstance.Decrypt(sealedUnderTheRotatedKey)
+    if nil != decryptErr {
+        t.Fatalf("expected the rotated key to be read, the memo answered the retired one: %v", decryptErr)
+    }
+
+    if "secret" != decrypted {
+        t.Fatalf("round-trip mismatch under the rotated key: %q", decrypted)
+    }
+}
+
+/* the key material is memoised on the cipher, which every column type of a process shares, so the memo
+   is read and written from the goroutines of concurrent requests. A guard against a race is proved under
+   -race, repeatedly, not by a mutant (§5.11) — and a sequential suite would leave it green by construction. */
+func TestCipher_ConcurrentSealsAndOpensShareTheKeyMaterial(t *testing.T) {
+    cipherInstance := NewCipher(NewStaticKeyProvider("v2", map[string][]byte{
+        "v1": newKey(1),
+        "v2": newKey(2),
+        "v3": newKey(3),
+    }))
+
+    const workers = 8
+
+    start := make(chan struct{})
+    failures := make(chan error, workers)
+
+    var group sync.WaitGroup
+    for worker := 0; worker < workers; worker++ {
+        group.Add(1)
+
+        go func(worker int) {
+            defer group.Done()
+
+            <-start
+
+            for round := 0; round < 25; round++ {
+                sealed, sealErr := cipherInstance.EncryptWithKeyId("secret", []string{"v1", "v2", "v3"}[worker%3])
+                if nil != sealErr {
+                    failures <- sealErr
+
+                    return
+                }
+
+                if _, candidatesErr := cipherInstance.CiphertextCandidates("secret"); nil != candidatesErr {
+                    failures <- candidatesErr
+
+                    return
+                }
+
+                opened, openErr := cipherInstance.Decrypt(sealed)
+                if nil != openErr {
+                    failures <- openErr
+
+                    return
+                }
+
+                if "secret" != opened {
+                    failures <- exception.NewError("round-trip mismatch", map[string]any{"value": opened}, nil)
+
+                    return
+                }
+            }
+        }(worker)
+    }
+
+    close(start)
+    group.Wait()
+    close(failures)
+
+    for failure := range failures {
+        t.Fatalf("concurrent round-trip: %v", failure)
+    }
+}
+
+func BenchmarkCipher_Decrypt(b *testing.B) {
+    cipherInstance := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)}))
+
+    encoded, encryptErr := cipherInstance.Encrypt("a value of the size a column holds")
+    if nil != encryptErr {
+        b.Fatalf("encrypt: %v", encryptErr)
+    }
+
+    b.ReportAllocs()
+    b.ResetTimer()
+
+    for iteration := 0; iteration < b.N; iteration++ {
+        if _, decryptErr := cipherInstance.Decrypt(encoded); nil != decryptErr {
+            b.Fatalf("decrypt: %v", decryptErr)
+        }
+    }
+}
+
+func BenchmarkCipher_EncryptDeterministic(b *testing.B) {
+    cipherInstance := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)}))
+
+    b.ReportAllocs()
+    b.ResetTimer()
+
+    for iteration := 0; iteration < b.N; iteration++ {
+        if _, encryptErr := cipherInstance.EncryptDeterministic("a value of the size a column holds"); nil != encryptErr {
+            b.Fatalf("encrypt: %v", encryptErr)
+        }
+    }
+}
+
+func BenchmarkCipher_EncryptDeterministicConvertsARandomNonceSeal(b *testing.B) {
+    cipherInstance := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)}))
+
+    randomNonceSeal, encryptErr := cipherInstance.Encrypt("a value of the size a column holds")
+    if nil != encryptErr {
+        b.Fatalf("encrypt: %v", encryptErr)
+    }
+
+    b.ReportAllocs()
+    b.ResetTimer()
+
+    for iteration := 0; iteration < b.N; iteration++ {
+        if _, convertErr := cipherInstance.EncryptDeterministic(randomNonceSeal); nil != convertErr {
+            b.Fatalf("convert: %v", convertErr)
+        }
+    }
+}
+
+func BenchmarkCipher_CiphertextCandidates(b *testing.B) {
+    cipherInstance := NewCipher(NewStaticKeyProvider("v3", map[string][]byte{
+        "v1": newKey(1),
+        "v2": newKey(2),
+        "v3": newKey(3),
+    }))
+
+    b.ReportAllocs()
+    b.ResetTimer()
+
+    for iteration := 0; iteration < b.N; iteration++ {
+        if _, candidatesErr := cipherInstance.CiphertextCandidates("a value of the size a column holds"); nil != candidatesErr {
+            b.Fatalf("candidates: %v", candidatesErr)
+        }
+    }
+}
+
+func BenchmarkGcmForKey(b *testing.B) {
+    key := newKey(1)
+
+    b.ReportAllocs()
+    b.ResetTimer()
+
+    for iteration := 0; iteration < b.N; iteration++ {
+        if _, gcmErr := gcmForKey(key, "v1"); nil != gcmErr {
+            b.Fatalf("gcm: %v", gcmErr)
+        }
+    }
+}
+
+func BenchmarkNonceSubKey(b *testing.B) {
+    key := newKey(1)
+
+    b.ReportAllocs()
+    b.ResetTimer()
+
+    for iteration := 0; iteration < b.N; iteration++ {
+        nonceSubKey(key)
+    }
+}
+
+func BenchmarkDeterministicNonceFrom(b *testing.B) {
+    nonceKey := nonceSubKey(newKey(1))
+
+    b.ReportAllocs()
+    b.ResetTimer()
+
+    for iteration := 0; iteration < b.N; iteration++ {
+        deterministicNonceFrom(nonceKey, "a value of the size a column holds", minNonceSize)
     }
 }

@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- encrypt: the AES-GCM value and the sub-key the deterministic nonce is taken under are built once per key instead of once per call. Measured on the development container, building the AEAD cost about six hundred nanoseconds and 1280 bytes — forty per cent of the time and eighty-seven per cent of the allocation of a single `Decrypt`, the path every `Scan` of an encrypted column takes; the deterministic conversion path paid it twice, and `CiphertextCandidates` pays it once per active key on every equality lookup of a deterministic column. `Decrypt` went from 1446–1711 ns and 1472 B to 594–675 ns and 192 B, `EncryptDeterministic` from 3531–4493 ns and 2852 B to 1859–2587 ns and 1009 B, and the three-key `CiphertextCandidates` from 10339–17300 ns and 9087 B to 4379–8486 ns and 3557 B. `KeyProvider` is a public interface, so the key bytes are kept beside the material and compared on every read: an application's provider answering different bytes under the same key id is honoured at the next call, where a memo trusting the id alone would have sealed and opened under the retired key long after the rotation
+
 ## [v1.1.0] - 2026-08-18 - Context-Aware Opens, Diagnostics Routing and a Teardown-Safe Registry
 
 ### Added

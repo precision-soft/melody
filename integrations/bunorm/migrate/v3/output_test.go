@@ -714,9 +714,26 @@ func TestCommandOutput_FinishRunLeavesTheOrdinaryPathsUnchanged(t *testing.T) {
 
 /* recover() answers only when it is called directly by the deferred function itself, so the door
    takes the recovered value as a parameter. A command that read it one frame deeper would see nil
-   and believe every run ended well — which is the defect, spelled differently. This pins that every
-   command in the family passes recover() at its own defer rather than delegating the call. */
-func TestMigrateCommands_EveryCommandPassesItsOwnRecoverToTheSharedDoor(t *testing.T) {
+   and believe every run ended well — which is the defect, spelled differently.
+
+   The six commands used to spell that defer each for itself, and this pinned the spelling in each of
+   the six files. There is one frame now, and the property it has to keep is the same one: the frame
+   defers, calls recover() DIRECTLY in its own deferred function, and hands the value to the door.
+   What is left to pin is therefore the wiring, and it is pinned in both directions — the frame makes
+   the call, and no command renders its own document beside it — which is strictly more than the six
+   greps said: they could not have seen a seventh command added without a frame at all.
+
+   The door's own behaviour on a panic is pinned separately, a few tests above, on finishRun itself. */
+func TestMigrateCommands_EveryCommandRunsInsideTheFrameThatPassesItsOwnRecover(t *testing.T) {
+    frame, frameReadErr := os.ReadFile("base_command.go")
+    if nil != frameReadErr {
+        t.Fatalf("read base_command.go: %v", frameReadErr)
+    }
+
+    if false == strings.Contains(string(frame), "finishRun(name, startedAt, runErr, recover())") {
+        t.Fatalf("the shared frame does not call recover() at its own defer; a run that died would be rendered as one that ended well")
+    }
+
     commandFiles := []string{
         "command_migrate.go",
         "command_rollback.go",
@@ -732,9 +749,16 @@ func TestMigrateCommands_EveryCommandPassesItsOwnRecoverToTheSharedDoor(t *testi
             t.Fatalf("read %s: %v", commandFile, readErr)
         }
 
-        if false == strings.Contains(string(source), "finishRun(instance.Name(), startedAt, runErr, recover())") {
+        if false == strings.Contains(string(source), "return instance.base.run(instance.Name(), runtimeInstance, commandContext, instance.run") {
             t.Fatalf(
-                "%s does not defer to the shared door with its own recover(); a command that renders its document any other way can report success for a run that died",
+                "%s does not run inside the shared frame; a command that renders its document any other way can report success for a run that died",
+                commandFile,
+            )
+        }
+
+        if true == strings.Contains(string(source), "finishRun(") {
+            t.Fatalf(
+                "%s renders its own document beside the frame; the recovered value is the frame's to read, and a second reader of it sees nil",
                 commandFile,
             )
         }

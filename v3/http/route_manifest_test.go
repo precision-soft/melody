@@ -1,6 +1,7 @@
 package http
 
 import (
+    "errors"
     nethttp "net/http"
     "testing"
 
@@ -246,6 +247,18 @@ func TestFilterRouteManifestByZone_AZoneMadeOnlyOfSpaceIsRefusedRatherThanReadAs
     whole, wholeErr := FilterRouteManifestByZone(manifest, "")
     if nil != wholeErr || 0 == len(whole.Routes) {
         t.Fatalf("expected the empty zone to stay the one spelling of no gate, got %d routes and %v", len(whole.Routes), wholeErr)
+    }
+
+    /* the refusal names the zone AS GIVEN: trimmed first, a zone made of space is reported as the empty
+       one, which the sentence above this door says is no gate at all — the diagnostic contradicting
+       itself in the same record */
+    var refusal *exception.Error
+    if false == errors.As(filterErr, &refusal) {
+        t.Fatalf("expected a melody error, got %T", filterErr)
+    }
+
+    if "   " != refusal.Context()["zone"] {
+        t.Fatalf("expected the refusal to name the zone as given, got %q", refusal.Context()["zone"])
     }
 }
 

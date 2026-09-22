@@ -505,7 +505,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
             /* the response built before the panic may own an open file (FileResponse/ServeReader) and is about to lose its only reference, so it is closed unless something downstream keeps it. It is handed to the write step rather than closed here: that step publishes kernel.response once more for the error response, and a listener that answers with the response it swapped in the first time — one holding it in a per-request field, one memoising its own decoration — would otherwise be handed back a body this line had already closed, and the write would read it after its close. The step closes it only once it knows what is being written. */
 
-            /* an outer middleware that panicked after its next() returned unwound the stack before finalResponse was assigned, so the response the chain produced is held only by the recording shim; it is closed here. On the panic paths where finalResponse was already assigned the discard above owns the close — closing the recorded response there too would close a body a wrapping middleware may share with the response being served. */
+            /* an outer middleware that panicked after its next() returned unwound the stack before finalResponse was assigned, so the response the chain produced is held only by the recording shim; it is closed here. On the panic paths where finalResponse was already assigned the write step owns the close of the panicked response — closing the recorded response here too would close a body a wrapping middleware may share with the response being served. */
             if nil == panickedResponse && nil != chainResponse && chainResponse != exceptionEvent.Response() {
                 closeDiscardedResponseBody(chainResponse, requestLogger)
             }
@@ -848,6 +848,16 @@ func (instance *Kernel) dispatchResponseAndWrite(
     eventDispatcher eventcontract.EventDispatcher,
 ) {
     kernelResponseEvent := NewKernelResponseEvent(melodyRequest, *finalResponse)
+
+    /* the publish below can leave without returning: the dispatcher contains a listener's panic per listener and answers it as an error, with ONE exception — an exit error, which it re-raises by contract so it reaches the edge of the process. Nothing after this point runs then, and nothing is written, so the response built before the panic would lose its only reference with its file still open. The defer closes it on exactly that path; the ordinary path clears the candidate once it has decided what to do with it, and then the defer has nothing left to close. */
+    defer func() {
+        if nil == discardCandidate {
+            return
+        }
+
+        closeDiscardedResponseBody(discardCandidate, requestLogger)
+    }()
+
     _, eventKernelResponseErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelResponse, kernelResponseEvent)
     instance.logEventDispatchError(requestLogger, "kernel response error", eventKernelResponseErr)
 
@@ -860,6 +870,7 @@ func (instance *Kernel) dispatchResponseAndWrite(
     if nil != discardCandidate && discardCandidate != publishedResponse && discardCandidate != *finalResponse {
         closeDiscardedResponseBody(discardCandidate, requestLogger)
     }
+    discardCandidate = nil
 
     *finalResponse = publishedResponse
     *finalResponse = writeResponse(

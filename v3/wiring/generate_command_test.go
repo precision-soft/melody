@@ -757,7 +757,7 @@ type kernelLessConfiguration struct {
 
 func (instance kernelLessConfiguration) Kernel() configcontract.KernelConfiguration { return nil }
 
-/* the classifier reads what a line IS, not what it is not: the vendor trees the scan stepped over and the reach of a global bind are facts of a scan that worked — the reach line is emitted for every bind the generator RESOLVED, so an application with global binds raised one warning per bound argument on every clean generation, and a reader who learns that warnings here are routine stops reading the ones that name lost coverage. */
+/* the classifier reads what a line IS, not what it is not: the counts and the vendor trees the scan stepped over are facts of a scan that worked, while every line naming lost coverage survives the threshold a deployment reads at. The reach of a global bind is neither — it is a warning the operator needs and one the generator emits per bound argument, so it is aggregated rather than demoted; that half is pinned below. */
 func TestJournalLineWriter_AFactOfAScanThatWorkedStaysInformation(t *testing.T) {
     journal := &bytes.Buffer{}
     writer := &journalLineWriter{
@@ -768,16 +768,16 @@ func TestJournalLineWriter_AFactOfAScanThatWorkedStaysInformation(t *testing.T) 
     for _, line := range []string{
         "registered 12 constructors",
         "skipped vendor directory: vendor/github.com/x",
-        "global bind logger reaches 2 constructors: NewBilling, NewInvoicing",
         "skipped NewThing (thing.go:12): unexported",
         "bind targets were not checked: the application declares no parameters",
     } {
         writer.journalLine(line)
     }
+    writer.flush()
 
     kept := journal.String()
 
-    for _, fact := range []string{"registered 12 constructors", "skipped vendor directory", "global bind logger"} {
+    for _, fact := range []string{"registered 12 constructors", "skipped vendor directory"} {
         if true == strings.Contains(kept, fact) {
             t.Fatalf("expected %q to stay information below a warning threshold, got %q", fact, kept)
         }
@@ -786,6 +786,55 @@ func TestJournalLineWriter_AFactOfAScanThatWorkedStaysInformation(t *testing.T) 
     for _, loss := range []string{"skipped NewThing", "bind targets were not checked"} {
         if false == strings.Contains(kept, loss) {
             t.Fatalf("expected %q to survive the warning threshold, got %q", loss, kept)
+        }
+    }
+
+    /* a generation with no global bind must not raise the aggregate warning at all */
+    if true == strings.Contains(kept, "reach constructors by argument name") {
+        t.Fatalf("expected no reach warning where no bind reached anything, got %q", kept)
+    }
+}
+
+/* a global bind silently reaches every constructor declaring an argument of that name, which is what the
+   reach report exists to expose — so it has to survive the threshold a deployment journals at. What made
+   it read as noise is that the generator emits one line per bound argument, on every clean generation, so
+   what is cut is the REPETITION and not the warning: however many binds reach however many constructors,
+   the journal carries ONE record, its message naming how many binds and its context carrying every line.
+   Pinned in both directions — one record, and no line of it lost. */
+func TestJournalLineWriter_TheReachOfEveryGlobalBindIsOneWarningNotOnePerBind(t *testing.T) {
+    journal := &bytes.Buffer{}
+    writer := &journalLineWriter{
+        logger:  logging.NewJsonLogger(journal, loggingcontract.LevelWarning),
+        command: "melody:wiring:generate",
+    }
+
+    for _, line := range []string{
+        "global bind logger reaches 2 constructors: NewBilling, NewInvoicing",
+        "global bind clock reaches 1 constructor: NewScheduler",
+        "global bind stageEnv reaches 3 constructors: NewA, NewB, NewC",
+    } {
+        writer.journalLine(line)
+    }
+
+    if 0 != strings.Count(journal.String(), "globalBindReach") {
+        t.Fatalf("expected the reach lines to be held until the report ends, got %q", journal.String())
+    }
+
+    writer.flush()
+
+    kept := journal.String()
+
+    if 1 != strings.Count(kept, "reach constructors by argument name alone") {
+        t.Fatalf("expected exactly one aggregate record for three binds, got %q", kept)
+    }
+
+    if false == strings.Contains(kept, "3 global binds reach constructors by argument name alone") {
+        t.Fatalf("expected the message to name how many binds reached, got %q", kept)
+    }
+
+    for _, reach := range []string{"logger reaches 2 constructors", "clock reaches 1 constructor", "stageEnv reaches 3 constructors"} {
+        if false == strings.Contains(kept, reach) {
+            t.Fatalf("expected %q to survive inside the one record, got %q", reach, kept)
         }
     }
 }

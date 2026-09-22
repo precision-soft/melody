@@ -1021,6 +1021,91 @@ func TestKernel_PanicRecoveryClosesTheDiscardedFileBackedResponse(t *testing.T) 
 }
 
 
+/* the dispatcher contains a listener's panic per listener and answers it as an error, with ONE exception:
+   an exit error, which it re-raises by contract so it reaches the edge of the process. On the recovery
+   path that publish is where the response built BEFORE the panic is decided, so a listener leaving by
+   that one route took the decision with it — nothing was written, nothing below it ran, and the
+   file-backed response lost its only reference with the descriptor still open. One leak per request that
+   reaches it. The close is the frame's now, not the step's, so the route the listener leaves by cannot
+   change it. */
+func TestKernel_PanicRecoveryClosesTheDiscardedResponseWhenAListenerLeavesByExit(t *testing.T) {
+    original := &closeRecordingReadCloser{}
+    storage := &panicOnceSessionStorage{}
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/file-then-exit",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            sessionValue, exists := request.Attributes().Get(RequestAttributeSession)
+            if false == exists {
+                t.Fatal("expected the request to carry a session")
+            }
+
+            sessionInstance, ok := sessionValue.(sessioncontract.Session)
+            if false == ok {
+                t.Fatal("expected the session attribute to be a session")
+            }
+
+            /* dirty the session so writeResponse persists it — and panics doing so, ahead of the body write */
+            sessionInstance.Set("key", "value")
+
+            return &Response{
+                statusCode: nethttp.StatusOK,
+                headers:    make(nethttp.Header),
+                bodyReader: original,
+            }, nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainerWithSessionStorage(storage)
+
+    /* the first publish is the ordinary one, before the write; the exit has to fall on the SECOND, which
+       is the recovery's re-publish — the one that decides what happens to the response the panic left behind */
+    publishes := 0
+    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher.AddListener(
+        kernelcontract.EventKernelResponse,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            publishes++
+            if 2 > publishes {
+                return nil
+            }
+
+            exception.Exit(exception.NewExitError(7, exception.NewError("the listener is leaving", nil, nil)))
+
+            return nil
+        },
+        0,
+    )
+
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    recorder := httptest.NewRecorder()
+    handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/file-then-exit", nil))
+
+    if false == storage.panicked.Load() {
+        t.Fatal("the session backend never panicked; the test does not exercise the recovery path")
+    }
+
+    if 2 != publishes {
+        t.Fatalf("expected the recovery to re-publish, so the exit falls on that publish, got %d", publishes)
+    }
+
+    /* the exit does not reach the edge: the kernel's LAST guard — registered under the scope close, for a
+       panic raised inside the main guard after it has already recovered once — takes it and files its own
+       degraded record, which is why the recorder still carries a body. What the exit does take with it is
+       everything after the publish inside the write step, which is where the discarded response was
+       decided; the count below is the whole of what this pin is about. */
+    if 0 == recorder.Body.Len() {
+        t.Fatal("expected the kernel's last guard to have answered; the request produced no response at all")
+    }
+
+    if 1 != original.closeCount {
+        t.Fatalf("expected the discarded file-backed body to be closed exactly once, got %d: one descriptor leaks per request", original.closeCount)
+    }
+}
+
 /* the response a kernel.response listener swaps in is the one ServeHttp names while the write runs: a session backend that panics inside the write — ahead of the body write's own deferred Close — unwinds into the recovery with the swapped-in file-backed response holding its descriptor, and the recovery closes what ServeHttp names. Named by value, returned only when the write returned, the recovery closed the discarded original a second time and the swapped-in one never. */
 func TestKernel_PanicRecoveryClosesTheResponseAListenerSwappedInNotTheDiscardedOneTwice(t *testing.T) {
     original := &closeRecordingReadCloser{}

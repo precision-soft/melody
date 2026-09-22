@@ -553,6 +553,23 @@ func (instance *ManagerRegistry) Close() error {
 }
 
 /* CloseWithContext is Close under a deadline its caller declares, which is the door the unbounded wait below was written to expect. The pools are torn down whatever the deadline says — a close travelling the wire is what the teardown is FOR — and what the deadline bounds is the wait for opens that were still in flight when the refusal was published: those end against the closed flag on their own, so a caller told the teardown is over while one is still in the air is told something true about this registry and false about the process. */
+/* namedCloser is one thing the teardown has to close and the name it is reported under. The pools and the migration databases were closed by two loops that differed in the label suffix and in nothing else — the same accumulators, the same nil skip, the same first-cause rule written twice, which is two places for the rule to drift apart. */
+type namedCloser struct {
+    name  string
+    close func() error
+}
+
+/* sortedNamesOf answers the keys of a registry map in the order the teardown reports them. It is the half of the walk that does not depend on what the map holds. */
+func sortedNamesOf[T any](entries map[string]T) []string {
+    names := make([]string, 0, len(entries))
+    for name := range entries {
+        names = append(names, name)
+    }
+    sort.Strings(names)
+
+    return names
+}
+
 func (instance *ManagerRegistry) CloseWithContext(closeContext context.Context) error {
     /* the refusal is published under the lock and the pools are torn down outside it. A pool close travels the wire — COM_QUIT to a peer that may be partitioned, and the migration connection deliberately lifts its write deadlines — so a teardown held inside the critical section parks every caller on the registry lock for as long as the driver waits, including the ones the closed flag above exists to refuse at once. The maps are snapshotted, never emptied: the entry refusal reads the flag rather than the map, and a manager handed out before the snapshot keeps working through its own pool's close. */
     instance.lock.Lock()
@@ -562,27 +579,21 @@ func (instance *ManagerRegistry) CloseWithContext(closeContext context.Context) 
     /* an open still in flight is ended here, with the refusal: it has no consumer left — a database it opens after this is ended against the closed flag — and left to itself it went on retrying under the registry's own context, each attempt routing bun's diagnostics back onto the logger the teardown below hands back and the container then closes. Cancelled, the retry loop returns at its next sleep or dial, which is also what makes the wait below short on the plain constructor, where nothing else could cut it. */
     instance.openCancel()
 
-    /* both maps are walked in sorted name order so the carried cause and the failed-name list are the same for the same failing teardown on every run: a map walk let two identical failures report different causes and different orders, and the rueidis batch reporting sorts for the same reason */
-    managerNames := make([]string, 0, len(instance.managers))
-    for name := range instance.managers {
-        managerNames = append(managerNames, name)
-    }
-    sort.Strings(managerNames)
+    /* both maps are walked in sorted name order so the carried cause and the failed-name list are the same for the same failing teardown on every run: a map walk let two identical failures report different causes and different orders, and the rueidis batch reporting sorts for the same reason.
 
-    managers := make([]*Manager, 0, len(managerNames))
-    for _, name := range managerNames {
-        managers = append(managers, instance.managers[name])
+       They are photographed into ONE list, in that order — pools, then migration databases — because the loop that closes them had nothing to say about which map an entry came from beyond the label it carries. The nil skip stays HERE, where each value still has its own concrete type: a nil pool carried into a list of closers would be a typed nil, non-nil as an interface, and the skip would have to be re-invented against it. */
+    closers := make([]namedCloser, 0, len(instance.managers)+len(instance.migrationDatabases))
+
+    for _, name := range sortedNamesOf(instance.managers) {
+        if manager := instance.managers[name]; nil != manager {
+            closers = append(closers, namedCloser{name: name, close: manager.Close})
+        }
     }
 
-    migrationNames := make([]string, 0, len(instance.migrationDatabases))
-    for name := range instance.migrationDatabases {
-        migrationNames = append(migrationNames, name)
-    }
-    sort.Strings(migrationNames)
-
-    migrationDatabases := make([]*bun.DB, 0, len(migrationNames))
-    for _, name := range migrationNames {
-        migrationDatabases = append(migrationDatabases, instance.migrationDatabases[name])
+    for _, name := range sortedNamesOf(instance.migrationDatabases) {
+        if migrationDatabase := instance.migrationDatabases[name]; nil != migrationDatabase {
+            closers = append(closers, namedCloser{name: name + " (migration)", close: migrationDatabase.Close})
+        }
     }
 
     /* the opens still in flight are photographed alongside the pools, so the teardown can WAIT for them below. Close used to return while a dial was still in the air: the open publishes afterwards, reads the closed flag and ends its own database — nothing leaks — but the caller was told the teardown was over while it was not, and a process exiting on that answer left the dial outstanding, its server-side session to be reaped by a timeout rather than ended. The registry cancels the opens' context itself when the refusal is published, so what is waited for here is the retry loop noticing that — a dial already in the driver's hands ends when the driver honours the cancellation, which the providers of this repository do. */
@@ -601,33 +612,16 @@ func (instance *ManagerRegistry) CloseWithContext(closeContext context.Context) 
     var closeErr error
     failedNames := make([]string, 0)
 
-    for index, name := range managerNames {
-        manager := managers[index]
-        if nil == manager {
+    for _, closer := range closers {
+        closeFailure := closer.close()
+        if nil == closeFailure {
             continue
         }
 
-        managerCloseErr := manager.Close()
-        if nil != managerCloseErr {
-            failedNames = append(failedNames, name)
-        }
-        if nil == closeErr && nil != managerCloseErr {
-            closeErr = managerCloseErr
-        }
-    }
+        failedNames = append(failedNames, closer.name)
 
-    for index, name := range migrationNames {
-        migrationDatabase := migrationDatabases[index]
-        if nil == migrationDatabase {
-            continue
-        }
-
-        migrationDatabaseCloseErr := migrationDatabase.Close()
-        if nil != migrationDatabaseCloseErr {
-            failedNames = append(failedNames, name+" (migration)")
-        }
-        if nil == closeErr && nil != migrationDatabaseCloseErr {
-            closeErr = migrationDatabaseCloseErr
+        if nil == closeErr {
+            closeErr = closeFailure
         }
     }
 

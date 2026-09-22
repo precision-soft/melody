@@ -2,7 +2,6 @@ package migrate
 
 import (
     "strconv"
-    "time"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/cli/output"
@@ -35,31 +34,26 @@ func (instance *RollbackCommand) Flags() []clicontract.Flag {
     )
 }
 
-func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) (runErr error) {
-    option := instance.base.optionFromCommand(commandContext)
-    outputInstance := newCommandOutput(commandContext.Writer(), commandContext.Arguments(), option)
+func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+    return instance.base.run(instance.Name(), runtimeInstance, commandContext, instance.runRollback)
+}
 
-    startedAt := time.Now()
-    defer func() {
-        runErr = outputInstance.finishRun(instance.Name(), startedAt, runErr, recover())
-    }()
-
+func (instance *RollbackCommand) runRollback(
+    runtimeInstance runtimecontract.Runtime,
+    commandContext clicontract.Context,
+    outputInstance *commandOutput,
+) (runErr error) {
     /* the per-query lines print through the command output's writer, so a write the report lost there is remembered by finish too */
-    runnerOption := runnerOptionForCommand(outputInstance.writer, option)
+    runnerOption := runnerOptionForCommand(outputInstance.writer, outputInstance.option)
     ctx := withRunnerOption(runtimeInstance.Context(), runnerOption)
     /* the parsed posture reaches the migrations through the context the migrator hands them, so this run's writer and colour choice belong to this run alone; the process-wide fallback is installed only for the length of the run, for a migration that drops the context it was handed, and put back on the way out */
     defer restoreDefaultRunnerOption(swapDefaultRunnerOption(runnerOption))
 
-    db, managerName, releaseDatabase, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext, outputInstance)
-    if nil != dbErr {
-        return dbErr
+    db, managerName, migrator, releaseDatabase, resolveErr := instance.base.resolveMigrator(runtimeInstance, commandContext, outputInstance)
+    if nil != resolveErr {
+        return resolveErr
     }
     defer releaseDatabase()
-
-    migrator, migratorErr := instance.base.newMigrator(db)
-    if nil != migratorErr {
-        return migratorErr
-    }
 
     /* take the bun migration lock so two replicas rolling back concurrently cannot both act on the same applied group. */
     if lockErr := migrator.Lock(ctx); nil != lockErr {
@@ -82,15 +76,8 @@ func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, co
         }
     }()
 
-    if true == outputInstance.wantsDetail() {
-        identity, identityErr := fetchDatabaseIdentity(ctx, db)
-        if nil != identityErr {
-            return identityErr
-        }
-        if nil != identity {
-            outputInstance.printDatabaseBlock(identity)
-            outputInstance.newline()
-        }
+    if identityErr := instance.base.printDatabaseIdentity(ctx, db, outputInstance); nil != identityErr {
+        return identityErr
     }
 
     group, rollbackErr := migrator.Rollback(ctx)

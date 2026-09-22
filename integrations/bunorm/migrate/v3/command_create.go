@@ -4,7 +4,6 @@ import (
     "errors"
     "fmt"
     "regexp"
-    "time"
 
     "github.com/precision-soft/melody/integrations/bunorm/v3"
     "github.com/precision-soft/melody/v3/exception"
@@ -37,17 +36,17 @@ func (instance *CreateCommand) Flags() []clicontract.Flag {
     return output.MergeFlags(output.StandardFlags(), []clicontract.Flag{instance.base.managerFlag()})
 }
 
-func (instance *CreateCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) (runErr error) {
-    option := instance.base.optionFromCommand(commandContext)
-    outputInstance := newCommandOutput(commandContext.Writer(), commandContext.Arguments(), option)
+func (instance *CreateCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+    return instance.base.run(instance.Name(), runtimeInstance, commandContext, instance.runCreate)
+}
 
+func (instance *CreateCommand) runCreate(
+    runtimeInstance runtimecontract.Runtime,
+    commandContext clicontract.Context,
+    outputInstance *commandOutput,
+) (runErr error) {
     /* the result of this command is the file it writes, not the report: a report the writer lost is recorded in the journal rather than failing a run whose file is already in place — the re-run an exit of one invites creates a second migration beside the first */
     outputInstance.reportLostWritesTo(instance.base.journal(runtimeInstance))
-
-    startedAt := time.Now()
-    defer func() {
-        runErr = outputInstance.finishRun(instance.Name(), startedAt, runErr, recover())
-    }()
 
     migrationName := ""
     arguments := commandContext.Arguments()

@@ -283,3 +283,17 @@ func TestEncryptedString_FormatRedactsNumericVerbs(t *testing.T) {
         }
     }
 }
+
+func BenchmarkEncryptedString_UnmarshalJSON(b *testing.B) {
+    payload := []byte(`"a value of the size a column holds"`)
+
+    b.ReportAllocs()
+    b.ResetTimer()
+
+    for iteration := 0; iteration < b.N; iteration++ {
+        var decoded EncryptedString
+        if unmarshalErr := decoded.UnmarshalJSON(payload); nil != unmarshalErr {
+            b.Fatalf("unmarshal: %v", unmarshalErr)
+        }
+    }
+}

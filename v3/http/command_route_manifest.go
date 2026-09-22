@@ -4,7 +4,6 @@ import (
     "encoding/json"
     "fmt"
     "path/filepath"
-    "strings"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/cli/output"
@@ -49,18 +48,14 @@ func (instance *RouteManifestCommand) Run(
     runtimeInstance runtimecontract.Runtime,
     commandContext clicontract.Context,
 ) error {
-    zone := strings.TrimSpace(commandContext.String("zone"))
-    if "" != zone && false == IsRouteZone(zone) {
-        /* an unrecognised zone matched no entry, so the command wrote an empty manifest over the good one and reported success; the frontend then failed to resolve every route it asked for, at runtime, with the build green */
-        return exception.NewError(
-            "route zone is not one of the declared zones",
-            map[string]any{
-                "zone":          zone,
-                "declaredZones": RouteZones(),
-            },
-            nil,
-        )
-    }
+    /* the flag is handed over AS TYPED: the gate is the door's, and it reads the zone the way it reads
+       every other caller's — the command trimming first made the two disagree about a zone that is
+       nothing but space, which the door refuses and the command, having trimmed it to empty, read as no
+       gate and answered the manifest whole. One reader, one meaning. The refusal still lands before
+       anything is written, which is the whole of what the copy here bought: an unrecognised zone matched
+       no entry, so the command wrote an empty manifest over the good one and reported success, and the
+       frontend then failed to resolve every route it asked for, at runtime, with the build green. */
+    zone := commandContext.String("zone")
 
     router := RouterMustFromContainer(runtimeInstance.Container())
 
