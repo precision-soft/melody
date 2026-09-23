@@ -10,9 +10,9 @@ import (
     melodyexception "github.com/precision-soft/melody/v3/exception"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
+    examplejournal "github.com/precision-soft/melody/v3/.example/journal"
     melodylogging "github.com/precision-soft/melody/v3/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
-    melodyruntime "github.com/precision-soft/melody/v3/runtime"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
@@ -36,16 +36,6 @@ func Load(fileName string) (string, error) {
     return string(content), nil
 }
 
-/* pageLoggerOf resolves the journal through the runtime, so the scope's logger — the one carrying the request identifier — wins over the root's, and falls back to the emergency logger for a process without one; LoggerFromRuntime files an emergency record and answers nil in that case, and the fallback is this door's decision. */
-func pageLoggerOf(runtimeInstance melodyruntimecontract.Runtime) melodyloggingcontract.Logger {
-    logger, resolveErr := melodyruntime.FromRuntime[melodyloggingcontract.Logger](runtimeInstance, melodylogging.ServiceLogger)
-    if nil != resolveErr || nil == logger {
-        return melodylogging.EmergencyLogger()
-    }
-
-    return logger
-}
-
 func Html(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, statusCode int, fileName string) melodyhttpcontract.Response {
     htmlString, err := Load(fileName)
     if nil != err {
@@ -56,7 +46,7 @@ func Html(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontr
     routesJson, routesJsonErr := exampleurl.RoutesJsonFromRuntime(runtimeInstance)
     if nil != routesJsonErr {
         routesJson = exampleurl.EmptyRoutesJson
-        pageLoggerOf(runtimeInstance).Warning(
+        examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Warning(
             "page rendered without its route manifest",
             melodyexception.LogContext(routesJsonErr, melodyloggingcontract.Context{"page": fileName}),
         )

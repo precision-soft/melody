@@ -30,6 +30,7 @@ func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.
         cli.NewTotpCodeCommand(),
         cli.NewMailSendCommand(instance.mailer),
         cli.NewDatabaseResetCommand(),
+        cli.NewCacheClearCommand(),
         /* the grant command holds the user service through a container.Lazy handle built here, at command-registration time: the handle defers the resolution to the command's first run, so this boot-phase composition never races the container. */
         cli.NewGrantRoleCommand(
             melodycontainer.Lazy[*service.UserService](kernelInstance.ServiceContainer(), service.ServiceUserService),

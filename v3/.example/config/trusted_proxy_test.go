@@ -2,15 +2,22 @@ package config
 
 import (
     "bytes"
+    "context"
     "errors"
+    nethttp "net/http"
+    "net/http/httptest"
     "strings"
     "sync"
     "sync/atomic"
     "testing"
     "time"
 
+    melodycontainer "github.com/precision-soft/melody/v3/container"
+    melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
+    melodyhttp "github.com/precision-soft/melody/v3/http"
     melodylogging "github.com/precision-soft/melody/v3/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
+    melodyruntime "github.com/precision-soft/melody/v3/runtime"
 )
 
 func moduleWithTrustedProxyList(t *testing.T, value string) *Module {
@@ -317,5 +324,84 @@ func TestTrustedProxyResolver_LooksUpOnceAMinuteAndNeverInABurst(t *testing.T) {
 
     if 1 != slow.Load() {
         t.Fatalf("twenty concurrent requests over a stale list ran %d lookups, wanted one", slow.Load())
+    }
+}
+
+/* both budgets ask the resolver about the SAME request — the request budget ahead of authentication, the
+   write throttle once a handler is reached — and a re-resolution landing between the two asks charged the one
+   request to its forwarded client at one budget and to the balancer at the other. The first answer a request
+   was given is the answer it keeps; the next request reads the list as it now is. */
+func TestTrustedProxyResolver_AnswersOneRequestTheSameAcrossARefresh(t *testing.T) {
+    table := map[string][]string{"load-balancer": {balancerAddress}}
+    lookupTable(t, table)
+
+    now := time.Date(2026, time.September, 13, 9, 0, 0, 0, time.UTC)
+    resolver := resolverOver(t, "load-balancer", func() time.Time { return now })
+
+    request := requestForwardedBy(t, balancerAddress, "203.0.113.7")
+    if key := resolver.Resolve(request); "203.0.113.7" != key {
+        t.Fatalf("expected the balancer to be trusted at the first ask, got %q", key)
+    }
+
+    table["load-balancer"] = []string{"172.18.0.13"}
+    now = now.Add(trustedProxyRefreshInterval)
+
+    if key := resolver.Resolve(request); "203.0.113.7" != key {
+        t.Errorf("the second ask of the same request answered %q across a refresh, wanted the first answer", key)
+    }
+
+    if key := resolver.Resolve(requestForwardedBy(t, balancerAddress, "203.0.113.7")); balancerAddress != key {
+        t.Errorf("a new request after the refresh answered %q, wanted the list as it now is to charge the peer", key)
+    }
+}
+
+/* an entry that names nothing is reported to the REQUEST's logger when the request has one — the emergency
+   journal is standard error, which a process with a configured journal does not read once a minute — and a
+   lookup that answered no address without an error does not carry an "error" of nil */
+func TestTrustedProxyResolver_ReportsAnEntryThatNamesNothingToTheRequestsLogger(t *testing.T) {
+    emergency := &bytes.Buffer{}
+    previous := trustedProxyWarningLogger
+    trustedProxyWarningLogger = func() melodyloggingcontract.Logger {
+        return melodylogging.NewJsonLogger(emergency, melodyloggingcontract.LevelDebug)
+    }
+    t.Cleanup(func() {
+        trustedProxyWarningLogger = previous
+    })
+
+    lookupTable(t, map[string][]string{"load-balancer": {}})
+
+    journal := &bytes.Buffer{}
+    containerInstance := melodycontainer.NewContainer()
+    t.Cleanup(func() { _ = containerInstance.Close() })
+    melodycontainer.MustRegister(
+        containerInstance,
+        melodylogging.ServiceLogger,
+        func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
+            return melodylogging.NewJsonLogger(journal, melodyloggingcontract.LevelDebug), nil
+        },
+    )
+
+    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/products/", nil)
+    httpRequest.RemoteAddr = balancerAddress + ":41234"
+    request := melodyhttp.NewRequest(
+        httpRequest,
+        nil,
+        melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance),
+        melodyhttp.NewRequestContext("budget-test", time.Now()),
+    )
+
+    resolver := resolverOver(t, "load-balancer", time.Now)
+    _ = resolver.Resolve(request)
+
+    if false == strings.Contains(journal.String(), "trusted proxy entry names no address") {
+        t.Errorf("the request's logger did not receive the report: %q", journal.String())
+    }
+
+    if "" != emergency.String() {
+        t.Errorf("the report went to the emergency journal as well: %q", emergency.String())
+    }
+
+    if true == strings.Contains(journal.String(), `"error":null`) {
+        t.Errorf("a lookup that answered no address carried an error of nil: %q", journal.String())
     }
 }

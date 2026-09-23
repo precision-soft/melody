@@ -12,7 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
-- documentation: the per-key memo of the cipher states what it RETAINS — one entry per key id ever seen, each holding the raw key bytes, for the life of the cipher, with nothing evicting one. Measured, two hundred rotations leave two hundred entries and the first key's bytes resident after the provider has dropped them; for the shipped `StaticKeyProvider`, whose keys live as long as the process, that is no change, and for a rotating provider it is a property to know about.
+- documentation: the per-key memo of the cipher states what it RETAINS — one entry per key id ever seen, each holding the raw key bytes, for the life of the cipher, with nothing evicting one. Measured, two hundred rotations under two hundred key ids leave two hundred entries and the first key's bytes resident after the provider has dropped them, while a rotation that keeps the id replaces its entry and two hundred of those leave one; for the shipped `StaticKeyProvider`, whose keys live as long as the process, that is no change, and for a rotating provider it is a property to know about.
 
 ## [v1.1.0] - 2026-08-18 - Context-Aware Opens, Diagnostics Routing and a Teardown-Safe Registry
 

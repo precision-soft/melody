@@ -1050,7 +1050,9 @@ const closeFailureStackLimit = 2048
 
 /* boundedCloseFailureDetail cuts one detail to the limit above, naming the cut so the reader knows the tail is missing rather than absent. A detail that is not text, or not there, is answered unchanged.
 
-   The cut backs off to a rune boundary. The limit is counted in BYTES, and one of the two details it bounds is the recovered value — the panic value as the SERVICE wrote it, so arbitrary application text, where the frames beside it are ASCII. A cut taken at the byte alone split a multi-byte rune and put an invalid UTF-8 sequence into the one record the operator reads, which a json journal then re-writes as the replacement character. */
+   The cut backs off to a rune boundary. The limit is counted in BYTES, and one of the two details it bounds is the recovered value — the panic value as the SERVICE wrote it, so arbitrary application text, where the frames beside it are ASCII. A cut taken at the byte alone split a multi-byte rune and put an invalid UTF-8 sequence into the one record the operator reads, which a json journal then re-writes as the replacement character.
+
+   The back-off looks for the start of the rune the limit lands in, so it walks at most utf8.UTFMax-1 bytes. A byte that is not valid UTF-8 elsewhere in the text is the service's own and is kept as written: asked whether the whole kept prefix is valid instead, the back-off walked down to the first such byte, kept nothing of a value that led with one, and paid a validation of the prefix per step on the way. */
 func boundedCloseFailureDetail(value any) any {
     text, isText := value.(string)
     if false == isText || closeFailureStackLimit >= len(text) {
@@ -1058,7 +1060,7 @@ func boundedCloseFailureDetail(value any) any {
     }
 
     kept := closeFailureStackLimit
-    for 0 < kept && false == utf8.ValidString(text[:kept]) {
+    for closeFailureStackLimit-(utf8.UTFMax-1) < kept && false == utf8.RuneStart(text[kept]) {
         kept--
     }
 

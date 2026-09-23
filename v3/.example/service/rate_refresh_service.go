@@ -1,7 +1,9 @@
 package service
 
 import (
+    "context"
     "errors"
+    "sort"
     "strconv"
     "strings"
     "time"
@@ -46,8 +48,9 @@ const (
 
 /* rateDocumentClockSkew is how far into the future a provider's asOf may lie before the document is refused:
    five minutes is more than any pair of synchronised clocks drift and less than any interval the schedule
-   runs at, so an instant beyond it is a provider whose clock is wrong or a document written by hand, and a
-   reading stamped in the future would make every later, correct reading look stale beside it. */
+   runs at, so an instant beyond it is a provider whose clock is wrong or a document written by hand. A reading
+   inside it is stored at this clock's instant rather than its own, so it cannot make the next honest reading
+   look stale beside it either. */
 const rateDocumentClockSkew = 5 * time.Minute
 
 //melody:service ServiceRateRefreshService
@@ -138,7 +141,7 @@ func (instance *RateRefreshService) Refresh(runtimeInstance melodyruntimecontrac
         return RateRefreshOutcome{Configured: true}, resolveErr
     }
 
-    document, attempts, readErr := readRateDocument(client)
+    document, attempts, readErr := readRateDocument(runtimeInstance.Context(), client)
     if nil != readErr {
         return RateRefreshOutcome{Configured: true, Attempts: attempts}, readErr
     }
@@ -148,6 +151,15 @@ func (instance *RateRefreshService) Refresh(runtimeInstance melodyruntimecontrac
     quoteList, documentErr := instance.usableQuoteListOf(document)
     if nil != documentErr {
         return outcome, documentErr
+    }
+
+    /* a reading admitted inside the clock skew is stored at this clock's instant, not at the provider's: the
+       stored instant is what the next reading is judged against, so a document stamped 4m59s ahead made every
+       honest reading of the following five minutes look older than it and kept each one out as stale. The
+       provider's own instant is still what the outcome reports. */
+    quoteAsOf := document.AsOf
+    if now := instance.clock.Now(); true == quoteAsOf.After(now) {
+        quoteAsOf = now
     }
 
     currencies, listErr := instance.currencyService.List()
@@ -170,7 +182,7 @@ func (instance *RateRefreshService) Refresh(runtimeInstance melodyruntimecontrac
             continue
         }
 
-        _, updateOutcome, updateErr := instance.currencyService.UpdateRate(runtimeInstance, currency.Id, rate, document.AsOf)
+        _, updateOutcome, updateErr := instance.currencyService.UpdateRate(runtimeInstance, currency.Id, rate, quoteAsOf)
         if nil != updateErr {
             /* a refused QUOTE is counted and named, and the sweep goes on: the currencies after it are
                written on this run instead of waiting for a provider that may keep quoting that one badly.
@@ -296,16 +308,26 @@ func (instance *RateRefreshService) usableQuoteListOf(document rateDocument) (ma
     }
 
     quoteList := make(map[string]float64, len(document.Rates))
+    spellingByFolded := make(map[string]string, len(document.Rates))
     for code, rate := range document.Rates {
         folded := foldCurrencyCode(code)
-        if _, seen := quoteList[folded]; true == seen {
+        if seenSpelling, seen := spellingByFolded[folded]; true == seen {
+            /* the two spellings are sorted so the refusal reads the same on every run, whatever order the
+               document's map is walked in; they travel in the message for the reason the base does above */
+            spellingList := []string{seenSpelling, code}
+            sort.Strings(spellingList)
+
             return nil, exception.NewError(
-                "the rate document quotes one currency under two spellings",
-                exceptioncontract.Context{"code": folded},
+                "the rate document quotes one currency under two spellings ("+consoleSpellingOf(spellingList[0])+" and "+consoleSpellingOf(spellingList[1])+")",
+                exceptioncontract.Context{
+                    "code":         folded,
+                    "spellingList": spellingList,
+                },
                 nil,
             )
         }
 
+        spellingByFolded[folded] = code
         quoteList[folded] = rate
     }
 
@@ -316,13 +338,27 @@ func (instance *RateRefreshService) usableQuoteListOf(document rateDocument) (ma
    deliberately narrow: a call that never produced an answer, and an answer in the 5xx class, because those
    are the two a provider can recover from between one attempt and the next. A 4xx is NOT retried — the
    request is what is wrong, so repeating it repeats the mistake and spends the provider's budget doing it —
-   and neither is a body that fails to decode, which a working provider does not send twice. */
-func readRateDocument(client *httpclient.HttpClient) (rateDocument, int, error) {
+   and neither is a body that fails to decode, which a working provider does not send twice.
+
+   The wait between two attempts is where the run's context is heard. A plain sleep there slept through a
+   cancellation and sent the next attempt anyway, so a SIGTERM landing on a refused reading held the process
+   for two more backoffs and two more exchanges; the reading now stops at the first wait that finds the run
+   cancelled, and hands the cancellation back as its cause. One exchange in flight is still bounded by the
+   client's own timeout, since the client's doors take no context. */
+func readRateDocument(ctx context.Context, client *httpclient.HttpClient) (rateDocument, int, error) {
     var lastErr error
 
     for attempt := 1; attempt <= rateRefreshAttemptCount; attempt++ {
         if 1 < attempt {
-            time.Sleep(rateRefreshRetryBackoff)
+            if waitErr := waitForRetry(ctx); nil != waitErr {
+                return rateDocument{}, attempt - 1, exception.NewError(
+                    "the rate reading was stopped by the cancellation of its run",
+                    exceptioncontract.Context{
+                        "attempts": attempt - 1,
+                    },
+                    waitErr,
+                )
+            }
         }
 
         response, requestErr := client.Get(ratesLatestTarget)
@@ -377,6 +413,20 @@ func readRateDocument(client *httpclient.HttpClient) (rateDocument, int, error) 
         },
         lastErr,
     )
+}
+
+/* waitForRetry waits the backoff between two attempts, or answers the context's error the moment the run is
+   cancelled; a timer rather than time.After, so a cancelled wait releases it at once. */
+func waitForRetry(ctx context.Context) error {
+    timer := time.NewTimer(rateRefreshRetryBackoff)
+    defer timer.Stop()
+
+    select {
+    case <-ctx.Done():
+        return ctx.Err()
+    case <-timer.C:
+        return nil
+    }
 }
 
 func MustGetRateRefreshService(resolver melodycontainercontract.Resolver) *RateRefreshService {

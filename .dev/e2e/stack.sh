@@ -46,6 +46,8 @@
 #   - V3 DATABASE RESET  example:db:reset refuses without --force, and with it drops the schema, applies it
 #                        again, empties the audit trail the module's table keeps and reseeds all four
 #                        nomenclatures — the one state this application has, restored from the database side
+#   - V3 CACHE CLEAR     example:cache:clear empties the shared cache namespace on its own, the databases
+#                        untouched, with the entry a listing cached read out of redis before and after
 #   - V3 TWO-FACTOR RELEASE  the schema the reset just applied ties an enrollment to its account with a
 #                        cascading foreign key, read out of information_schema — the half of the release
 #                        that holds when no listener runs
@@ -111,7 +113,7 @@ e2e_require_dev_service
 # mismatch message prints both numbers, so the count to move to is in the failure itself. A run that took one of
 # the degraded early-exit branches (an unreachable supervised app, a cold-cache timeout) legitimately executes
 # fewer checks; it is already red from the check_fail that branch raised
-EXPECTED_CHECK_COUNT_INTEGER=163
+EXPECTED_CHECK_COUNT_INTEGER=165
 readonly EXPECTED_CHECK_COUNT_INTEGER
 
 # state the scope in the output, so a reader never has to infer which major these checks covered
@@ -1626,6 +1628,39 @@ else
 fi
 
 check_section_end "V3 DATABASE RESET" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
+# V3 CACHE CLEAR — the cache emptied by a door of its own, without the reset's two databases
+# ---------------------------------------------------------------------------------------------------
+
+check_section_start "V3 CACHE CLEAR" "${TAG_VALIDATE}" "e2e"
+
+# the count is read out of redis over RESP by the dev container's nc, so the check does not trust the line the
+# command prints about itself. The pattern ends on the product list's own key and matches it under EVERY layout
+# token, so an entry an older build left orphaned is counted before and after alike: what the check owns is that
+# the entry THIS build cached is gone, which is "after is smaller than before", not a number
+V3_CACHE_PRODUCT_LIST_COUNT_COMMAND_STRING='P="melody-example-v3:cache:*example-product-list"; printf "*2\r\n\$4\r\nKEYS\r\n\$${#P}\r\n${P}\r\n" | nc -w 2 redis 6379 | head -1 | tr -d "\r*"'
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . product:list >/dev/null 2>&1; ${V3_CACHE_PRODUCT_LIST_COUNT_COMMAND_STRING}"
+V3_CACHE_COUNT_BEFORE_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "set -o pipefail; go run . example:cache:clear 2>&1 | sed 's/\x1b\[[0-9;]*m//g'"
+if [[ 0 -eq ${RUN_IN_DEV_STATUS_INTEGER} ]] && printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'cache cleared: the shared cache'; then
+    check_pass "v3 example:cache:clear exits zero and says it cleared the shared cache"
+else
+    check_fail "v3 example:cache:clear did not report a cleared shared cache (status ${RUN_IN_DEV_STATUS_INTEGER}: ${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+fi
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "${V3_CACHE_PRODUCT_LIST_COUNT_COMMAND_STRING}"
+V3_CACHE_COUNT_AFTER_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+if [[ "${V3_CACHE_COUNT_BEFORE_STRING}" =~ ^[0-9]+$ ]] && [[ "${V3_CACHE_COUNT_AFTER_STRING}" =~ ^[0-9]+$ ]] \
+    && [[ 0 -lt ${V3_CACHE_COUNT_BEFORE_STRING} ]] && [[ ${V3_CACHE_COUNT_AFTER_STRING} -lt ${V3_CACHE_COUNT_BEFORE_STRING} ]]; then
+    check_pass "v3 example:cache:clear removed the product list a listing had cached (read out of redis: ${V3_CACHE_COUNT_BEFORE_STRING} -> ${V3_CACHE_COUNT_AFTER_STRING})"
+else
+    check_fail "v3 example:cache:clear left the cached product list standing (read out of redis: ${V3_CACHE_COUNT_BEFORE_STRING:-<no answer>} -> ${V3_CACHE_COUNT_AFTER_STRING:-<no answer>})"
+fi
+
+check_section_end "V3 CACHE CLEAR" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
 # V3 TWO-FACTOR RELEASE — the enrollment table the reset just recreated cascades its rows with the account

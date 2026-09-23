@@ -18,6 +18,7 @@ import (
     melodyeventcontract "github.com/precision-soft/melody/v3/event/contract"
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/httpclient"
+    melodyruntime "github.com/precision-soft/melody/v3/runtime"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
@@ -69,7 +70,7 @@ func TestReadRateDocument_ReadsTheDocumentInOneExchangeWhenTheProviderAnswers(t 
         _, _ = writer.Write([]byte(rateDocumentBody))
     })
 
-    document, attempts, err := readRateDocument(provider.client(t))
+    document, attempts, err := readRateDocument(context.Background(), provider.client(t))
     if nil != err {
         t.Fatalf("reading the document failed: %v", err)
     }
@@ -102,7 +103,7 @@ func TestReadRateDocument_SpendsEveryAttemptOnAProviderThatKeepsRefusing(t *test
         writer.WriteHeader(http.StatusServiceUnavailable)
     })
 
-    _, attempts, err := readRateDocument(provider.client(t))
+    _, attempts, err := readRateDocument(context.Background(), provider.client(t))
     if nil == err {
         t.Fatal("a provider that answered 503 to every attempt was read successfully")
     }
@@ -135,7 +136,7 @@ func TestReadRateDocument_TakesTheReadingFromAProviderThatRecoversOnTheSecondAtt
         _, _ = writer.Write([]byte(rateDocumentBody))
     })
 
-    document, attempts, err := readRateDocument(provider.client(t))
+    document, attempts, err := readRateDocument(context.Background(), provider.client(t))
     if nil != err {
         t.Fatalf("a provider that recovered was not read: %v", err)
     }
@@ -157,7 +158,7 @@ func TestReadRateDocument_DoesNotRepeatARequestTheProviderRefusedAsWrong(t *test
         writer.WriteHeader(http.StatusNotFound)
     })
 
-    _, attempts, err := readRateDocument(provider.client(t))
+    _, attempts, err := readRateDocument(context.Background(), provider.client(t))
     if nil == err {
         t.Fatal("a 404 was read as a rate document")
     }
@@ -178,7 +179,7 @@ func TestReadRateDocument_DoesNotRepeatAnAnswerThatIsNotARateDocument(t *testing
         _, _ = writer.Write([]byte("not json at all"))
     })
 
-    _, attempts, err := readRateDocument(provider.client(t))
+    _, attempts, err := readRateDocument(context.Background(), provider.client(t))
     if nil == err {
         t.Fatal("a body that is not json was read as a rate document")
     }
@@ -218,9 +219,21 @@ func TestRateRefreshServiceRefresh_DoesNothingWithNoProviderConfigured(t *testin
 func rateRefreshUnderTest(t *testing.T, body string) (*RateRefreshService, *CurrencyService, melodyruntimecontract.Runtime, *updateCountingCurrencyRepository) {
     t.Helper()
 
+    return rateRefreshAnsweringInTurn(t, body)
+}
+
+/* rateRefreshAnsweringInTurn is rateRefreshUnderTest over a provider that answers the bodies given one per
+   request, in order, and the last one from then on: what a refresh does is sometimes decided by the reading
+   a PREVIOUS run stored. */
+func rateRefreshAnsweringInTurn(t *testing.T, bodyList ...string) (*RateRefreshService, *CurrencyService, melodyruntimecontract.Runtime, *updateCountingCurrencyRepository) {
+    t.Helper()
+
+    var served atomic.Int64
     provider := newCountingRateProvider(t, func(writer http.ResponseWriter, request *http.Request) {
+        index := min(int(served.Add(1))-1, len(bodyList)-1)
+
         writer.Header().Set("Content-Type", "application/json")
-        _, _ = writer.Write([]byte(body))
+        _, _ = writer.Write([]byte(bodyList[index]))
     })
 
     currencyService, _, runtimeInstance := currencyServiceUnderTest(t)
@@ -330,6 +343,31 @@ func TestRateRefreshServiceRefresh_AdmitsADocumentInsideTheClockSkew(t *testing.
     }
 }
 
+/* a reading admitted inside the skew is stored at the clock's instant rather than at the provider's: stored
+   at 09:04:59 against a clock at 09:00, every honest reading of the next five minutes was older than it and
+   kept out as stale, so one provider running ahead pinned the catalogue against the ones that were not */
+func TestRateRefreshServiceRefresh_AReadingInsideTheSkewDoesNotPinTheCatalogue(t *testing.T) {
+    refresh, currencyService, runtimeInstance, _ := rateRefreshAnsweringInTurn(
+        t,
+        `{"base":"EUR","asOf":"2026-09-08T09:04:59Z","rates":{"USD":1.2}}`,
+        `{"base":"EUR","asOf":"2026-09-08T09:00:00Z","rates":{"USD":1.3}}`,
+    )
+
+    if _, err := refresh.Refresh(runtimeInstance); nil != err {
+        t.Fatalf("the reading ahead of the clock was refused: %v", err)
+    }
+
+    outcome, err := refresh.Refresh(runtimeInstance)
+    if nil != err {
+        t.Fatalf("the honest reading failed: %v", err)
+    }
+
+    usd, _, _ := currencyService.FindById("cur-usd")
+    if 1 != outcome.Updated || 1.3 != usd.Rate {
+        t.Errorf("the honest reading reported %+v and left cur-usd at %v, wanted it written at 1.3", outcome, usd.Rate)
+    }
+}
+
 /* a document older than the reading the catalogue holds is a replay; the newer reading is kept and the
    run says so under its own heading, not under "updated" or "skipped" */
 func TestRateRefreshServiceRefresh_CountsAReplayedDocumentAsStale(t *testing.T) {
@@ -379,6 +417,21 @@ func TestRateRefreshServiceRefresh_RefusesADocumentThatQuotesOneCurrencyTwice(t 
 
     if 0 != recordingRepository.updates.Load() {
         t.Errorf("an ambiguous document wrote %d rows", recordingRepository.updates.Load())
+    }
+}
+
+/* the refusal names both spellings the provider used, in the message the cli engine echoes: the folded
+   name alone says which currency is ambiguous but not what the document wrote */
+func TestRateRefreshServiceRefresh_NamesBothSpellingsOfACurrencyQuotedTwice(t *testing.T) {
+    refresh, _, runtimeInstance, _ := rateRefreshUnderTest(t, `{"base":"EUR","asOf":"2026-09-08T09:00:00Z","rates":{"usd":1.2,"USD":1.3}}`)
+
+    _, err := refresh.Refresh(runtimeInstance)
+    if nil == err {
+        t.Fatal("a document quoting USD under two spellings was accepted")
+    }
+
+    if false == strings.Contains(err.Error(), `"USD"`) || false == strings.Contains(err.Error(), `"usd"`) {
+        t.Errorf("the refusal does not name both spellings: %v", err)
     }
 }
 
@@ -511,9 +564,10 @@ func (instance *microsecondCurrencyRepository) UpdateQuote(ctx context.Context, 
 /* a provider stamping time.Now() serialises nine decimals, and the column holds six: the second run of the
    same document has to read as unchanged against the row the first run wrote, not as a full-row update the
    driver reports as no row — which the sweep counted as the currency having vanished, and which skipped the
-   cache drop the unchanged branch exists for */
+   cache drop the unchanged branch exists for. The document is stamped a second BEFORE the frozen clock: one
+   ahead of it is stored at the clock's instant, which has no sub-microsecond digits to truncate. */
 func TestRateRefreshServiceRefresh_JudgesTheInstantAtTheResolutionTheColumnHolds(t *testing.T) {
-    refresh, currencyService, runtimeInstance, _ := rateRefreshUnderTest(t, `{"base":"EUR","asOf":"2026-09-08T09:00:00.123456789Z","rates":{"EUR":1,"USD":1.0842,"RON":4.9761}}`)
+    refresh, currencyService, runtimeInstance, _ := rateRefreshUnderTest(t, `{"base":"EUR","asOf":"2026-09-08T08:59:59.123456789Z","rates":{"EUR":1,"USD":1.0842,"RON":4.9761}}`)
     currencyService.currencyRepository = &microsecondCurrencyRepository{CurrencyRepository: currencyService.currencyRepository}
 
     if outcome, err := refresh.Refresh(runtimeInstance); nil != err || 3 != outcome.Updated {
@@ -530,7 +584,7 @@ func TestRateRefreshServiceRefresh_JudgesTheInstantAtTheResolutionTheColumnHolds
     }
 
     usd, _, _ := currencyService.FindById("cur-usd")
-    if false == usd.RateAsOf.Equal(time.Date(2026, time.September, 8, 9, 0, 0, 123456000, time.UTC)) {
+    if false == usd.RateAsOf.Equal(time.Date(2026, time.September, 8, 8, 59, 59, 123456000, time.UTC)) {
         t.Fatalf("the stored instant is %v, wanted the document's truncated to the microsecond", usd.RateAsOf)
     }
 }
@@ -644,5 +698,39 @@ func TestRateRefreshServiceRefresh_NamesTheCacheDropThatFailedOverAnUnchangedQuo
 
     if 1 != outcome.Unchanged || 0 != outcome.Updated || updatesAfterFirst != recordingRepository.updates.Load() {
         t.Fatalf("the sweep reported %+v after %d writes, wanted one unchanged, none written, and the sweep stopped", outcome, recordingRepository.updates.Load()-updatesAfterFirst)
+    }
+}
+
+/* a refresh whose run is cancelled between two attempts stops there: the wait between attempts slept through
+   the cancellation and the next attempt went out anyway, so a SIGTERM landing on a refused reading waited up
+   to two backoffs and two more exchanges before the process could leave */
+func TestRateRefreshServiceRefresh_StopsRetryingOnceTheRunIsCancelled(t *testing.T) {
+    runContext, cancelRun := context.WithCancel(context.Background())
+    defer cancelRun()
+
+    provider := newCountingRateProvider(t, func(writer http.ResponseWriter, request *http.Request) {
+        cancelRun()
+        writer.WriteHeader(http.StatusServiceUnavailable)
+    })
+
+    currencyService, _, baseRuntime := currencyServiceUnderTest(t)
+    client := provider.client(t)
+    melodycontainer.MustRegister(
+        baseRuntime.Container().(melodycontainercontract.Registrar),
+        ServiceRatesHttpClient,
+        func(resolver melodycontainercontract.Resolver) (*httpclient.HttpClient, error) {
+            return client, nil
+        },
+    )
+
+    refresh := NewRateRefreshService(currencyService, &frozenClock{instant: currencyQuoteInstant.Add(24 * time.Hour)}, provider.server.URL+"/v1/", "eur")
+
+    _, err := refresh.Refresh(melodyruntime.New(runContext, baseRuntime.Scope(), baseRuntime.Container()))
+    if false == errors.Is(err, context.Canceled) {
+        t.Errorf("a cancelled refresh answered %v, wanted the cancellation", err)
+    }
+
+    if int64(1) != provider.requests.Load() {
+        t.Errorf("a refresh cancelled after its first attempt gave the provider %d exchanges, wanted one", provider.requests.Load())
     }
 }

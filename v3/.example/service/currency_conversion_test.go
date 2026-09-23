@@ -1,11 +1,13 @@
 package service
 
 import (
+    "encoding/json"
     "math"
     "testing"
     "time"
 
     "github.com/precision-soft/melody/v3/.example/entity"
+    melodyexception "github.com/precision-soft/melody/v3/exception"
 )
 
 /* the three rates the provider quotes, spelled here as the literals they are. The expected conversions below
@@ -160,5 +162,46 @@ func TestConvertAmount_RefusesAConvertedAmountThatOnlyTheRoundingOverflows(t *te
 
     if converted, err := ConvertAmount(amount, from, to); nil == err {
         t.Fatalf("a conversion whose rounding overflows answered %v with no error", converted)
+    }
+}
+
+/* the refusal of a converted amount that is not finite can carry an amount that is not finite either, and its
+   context still encodes: the json journal would otherwise render the whole context as one text */
+func TestConvertAmount_ARefusalOfANonFiniteAmountEncodes(t *testing.T) {
+    one := conversionCurrency("cur-one", "ONE", 1)
+
+    _, err := ConvertAmount(math.Inf(1), one, one)
+    if nil == err {
+        t.Fatal("an infinite amount was converted")
+    }
+
+    logContext := melodyexception.LogContext(err)
+    if _, marshalErr := json.Marshal(logContext); nil != marshalErr {
+        t.Fatalf("the refusal's context does not encode: %v", marshalErr)
+    }
+
+    if "+Inf" != logContext["amount"] {
+        t.Errorf("the amount travels as %#v, wanted \"+Inf\"", logContext["amount"])
+    }
+}
+
+/* a code is three ASCII letters, so the fold upper-cases ASCII alone: the standard library's ToUpper maps
+   U+017F LATIN SMALL LETTER LONG S onto S and a provider's "uſd" named the catalogue's USD. A code carrying a
+   control byte keeps it and so matches nothing the catalogue holds. */
+func TestFoldCurrencyCode_FoldsAsciiAlone(t *testing.T) {
+    for code, expected := range map[string]string{
+        " usd ":   "USD",
+        "Usd":     "USD",
+        "u\u017fd": "U\u017fD",
+        "u\x00sd": "U\x00SD",
+    } {
+        if folded := foldCurrencyCode(code); expected != folded {
+            t.Errorf("foldCurrencyCode(%q) = %q, wanted %q", code, folded, expected)
+        }
+    }
+
+    currencies := []*entity.Currency{conversionCurrency("cur-usd", "USD", 1.1)}
+    if found, matched := FindCurrencyByCode(currencies, "u\u017fd"); true == matched {
+        t.Errorf("a code spelled with a long s matched %s", found.Code)
     }
 }

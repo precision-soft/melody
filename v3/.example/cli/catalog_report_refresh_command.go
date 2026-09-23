@@ -129,6 +129,13 @@ func (instance *CatalogReportRefreshCommand) Run(runtimeInstance melodyruntimeco
        returned, so the operator reads that the archive holds the reading the sink did not receive */
     fprintTable(writer, headers, rows)
 
+    /* ARCHIVED false with no failure is the archive already holding a reading taken at this instant — two runs
+       inside one second — which is not a failure and exits zero; the table alone read as an archive that had
+       not recorded the reading, so the console says which of the two it was */
+    if nil == archiveFailure && false == archived {
+        fmt.Fprintln(writer, "the archive already holds a reading taken at this instant; nothing new was recorded")
+    }
+
     if nil != exportErr {
         if true == archived {
             fmt.Fprintln(writer, "the archive holds this reading; the sink did not receive it")

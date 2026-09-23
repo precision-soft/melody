@@ -24,7 +24,12 @@ func affectedAtLeastOneRow(result sql.Result) bool {
 /* seedIfEmptyRows is the body the four seeded repositories had a copy of each.
 What differs between them stays at the caller: which rows to build, and from
 which seed list. The table is read through the row type itself, so a caller
-cannot count one table and insert into another. */
+cannot count one table and insert into another.
+
+The table belongs to the migration set the constructor has already applied; this
+only fills it. The insert ignores duplicate keys because several example
+applications may reach an empty table at the same time, and losing that race is
+not a failure. */
 func seedIfEmptyRows[Row any](ctx context.Context, database *bun.DB, buildRows func() []*Row) error {
     count, countErr := database.
         NewSelect().

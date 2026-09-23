@@ -22,8 +22,6 @@ import (
     melodyruntime "github.com/precision-soft/melody/v3/runtime"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v3/security"
-    melodysession "github.com/precision-soft/melody/v3/session"
-    melodysessioncontract "github.com/precision-soft/melody/v3/session/contract"
 )
 
 /* The shared test material of the package lives here, and only here: this is the one test file the layout rule exempts from having a source of its own. */
@@ -423,18 +421,6 @@ func readAll(response melodyhttpcontract.Response) (string, error) {
     }
 
     return buffer.String(), nil
-}
-
-/* sessionCarrying hands back a real session holding the values named. A real one is used rather than a double: the helpers under test read through the typed getters, and a double would let the test agree with itself about what a session stores. */
-func sessionCarrying(t *testing.T, values map[string]any) melodysessioncontract.Session {
-    t.Helper()
-
-    sessionInstance := melodysession.NewManager(melodysession.NewInMemoryStorage(), time.Hour).NewSession()
-    for key, value := range values {
-        sessionInstance.Set(key, value)
-    }
-
-    return sessionInstance
 }
 
 func administrator(id string) *entity.User {

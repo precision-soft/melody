@@ -4,6 +4,8 @@ import (
     "context"
     "errors"
     "fmt"
+    "math"
+    "strconv"
     "time"
 
     "github.com/precision-soft/melody/v3/.example/entity"
@@ -77,12 +79,24 @@ func refuseUnusableRate(currencyId string, rate float64) error {
         ErrUnusableRate.Error(),
         exceptioncontract.Context{
             "currencyId": currencyId,
-            "rate":       rate,
+            "rate":       contextNumber(rate),
             "minimum":    minUsableRate,
             "maximum":    maxUsableRate,
         },
         ErrUnusableRate,
     )
+}
+
+/* contextNumber is a float as an error context can carry it. encoding/json refuses NaN and both infinities,
+   and a json journal handed one falls back to a single text rendering of the WHOLE context — every other
+   key of the record loses its structure, in exactly the record that describes a number that was not one.
+   A finite value is left a number; one that is not travels as its text, "NaN", "+Inf" or "-Inf". */
+func contextNumber(value float64) any {
+    if true == math.IsNaN(value) || true == math.IsInf(value, 0) {
+        return strconv.FormatFloat(value, 'g', -1, 64)
+    }
+
+    return value
 }
 
 /* quoteInstantOf is the resolution a quote's instant is held at: the column is DATETIME(6), so the row
@@ -284,12 +298,11 @@ func rateUpdateOutcomeName(outcome RateUpdateOutcome) string {
    A quote older than the instant the catalogue holds is not written: the provider's document is a reading
    taken at rateAsOf, and a reading older than the one already stored is a replay or a stale cache in
    front of the provider, never a newer price. A quote equal to the stored one, at the same instant, is
-   not written either, and the cache entries of the currency are dropped without an event: the write would
-   change nothing and the event would journal a change that did not happen, while the drop is what heals a
-   cache that kept the previous rate after the invalidation of an earlier tick failed. The instant is judged
-   at the microsecond the column holds, so "the same instant" means what the row can say. The drop costs
-   one delete of the list entry per unchanged currency, one delete too many for a sweep — a cost accepted
-   over a door that would have to know it is being swept. */
+   not written either, and the cache entries of the currency that do not serve that quote are dropped without
+   an event: the write would change nothing and the event would journal a change that did not happen, while
+   the drop is what heals a cache that kept the previous rate after the invalidation of an earlier tick
+   failed. The instant is judged at the microsecond the column holds, so "the same instant" means what the
+   row can say. An entry that already serves the quote is kept — see healCachedCurrency. */
 func (instance *CurrencyService) UpdateRate(
     runtimeInstance melodyruntimecontract.Runtime,
     currencyId string,
@@ -317,7 +330,7 @@ func (instance *CurrencyService) UpdateRate(
     }
 
     if rate == currency.Rate && true == rateAsOf.Equal(currency.RateAsOf) {
-        if dropErr := instance.dropCachedCurrency(currencyId); nil != dropErr {
+        if dropErr := instance.healCachedCurrency(currency); nil != dropErr {
             return nil, RateUpdateUnchanged, dropErr
         }
 
@@ -347,7 +360,7 @@ func (instance *CurrencyService) UpdateRate(
             return current, RateUpdateStale, nil
         }
 
-        if dropErr := instance.dropCachedCurrency(currencyId); nil != dropErr {
+        if dropErr := instance.healCachedCurrency(current); nil != dropErr {
             return nil, RateUpdateUnchanged, dropErr
         }
 
@@ -371,15 +384,57 @@ func (instance *CurrencyService) UpdateRate(
     return &modified, RateUpdateWritten, nil
 }
 
-/* dropCachedCurrency drops the two entries a currency is served from, the same two the updated listener
-   drops — by the keys, without the event, for the unchanged quote whose only job is to make sure the cache
-   agrees with a row that did not move. */
-func (instance *CurrencyService) dropCachedCurrency(currencyId string) error {
-    if byIdErr := instance.cache.Delete(CacheKeyCurrencyById(currencyId)); nil != byIdErr {
-        return byIdErr
+/* healCachedCurrency makes the two entries a currency is served from — the same two the updated listener
+   drops — agree with a row that did not move, by the keys and without the event. Each entry is READ first and
+   dropped only when it does not serve the row's quote: an entry holding another rate or another instant, an
+   absence cached for a row that exists, a list that lacks the currency, or a payload the cache cannot hand
+   back. Dropped unconditionally, as it used to be, a catalogue that had not moved cost the server four reads
+   from the database and four writes into the cache on every tick, twenty-four times a day, to heal a cache
+   that was almost never wrong; the two reads here are what the heal costs now. An entry that is absent is left
+   absent, since the next reader fills it from the row. */
+func (instance *CurrencyService) healCachedCurrency(currency *entity.Currency) error {
+    byIdKey := CacheKeyCurrencyById(currency.Id)
+
+    cached, exists, getErr := instance.cache.Get(byIdKey)
+    if nil != getErr || (true == exists && false == cachedCurrencyServesQuote(cached, currency)) {
+        if byIdErr := instance.cache.Delete(byIdKey); nil != byIdErr {
+            return byIdErr
+        }
     }
 
-    return instance.cache.Delete(CacheKeyCurrencyList)
+    cachedList, listExists, listErr := instance.cache.Get(CacheKeyCurrencyList)
+    if nil != listErr || (true == listExists && false == cachedListServesQuote(cachedList, currency)) {
+        return instance.cache.Delete(CacheKeyCurrencyList)
+    }
+
+    return nil
+}
+
+/* cachedCurrencyServesQuote answers whether a cached entry is the row's currency at the row's quote: the rate,
+   and the instant at the resolution the row holds. */
+func cachedCurrencyServesQuote(cached any, currency *entity.Currency) bool {
+    typed, isCurrency := cached.(*entity.Currency)
+    if false == isCurrency || nil == typed {
+        return false
+    }
+
+    return currency.Rate == typed.Rate && true == currency.RateAsOf.Equal(typed.RateAsOf)
+}
+
+/* cachedListServesQuote answers whether a cached list carries the currency at the row's quote. */
+func cachedListServesQuote(cached any, currency *entity.Currency) bool {
+    typed, isList := cached.([]*entity.Currency)
+    if false == isList {
+        return false
+    }
+
+    for _, listed := range typed {
+        if nil != listed && currency.Id == listed.Id {
+            return true == cachedCurrencyServesQuote(listed, currency)
+        }
+    }
+
+    return false
 }
 
 func (instance *CurrencyService) DeleteById(

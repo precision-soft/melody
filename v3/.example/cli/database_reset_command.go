@@ -10,8 +10,6 @@ import (
     "github.com/precision-soft/melody/v3/.example/migration"
     "github.com/precision-soft/melody/v3/.example/persistence"
     "github.com/precision-soft/melody/v3/.example/repository"
-    melodycache "github.com/precision-soft/melody/v3/cache"
-    melodycachecontract "github.com/precision-soft/melody/v3/cache/contract"
     melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     "github.com/precision-soft/melody/v3/exception"
@@ -120,7 +118,7 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
            are the catalogue's, and an archive that refuses between the reseed and a clear placed after it left
            the catalogue reseeded with every stale entry standing — the very account the reset removed still
            authenticating from the cache, the class the clear exists to close */
-        if clearErr := clearCache(runtimeInstance, writer); nil != clearErr {
+        if clearErr := clearCache(runtimeInstance, writer, "database reset"); nil != clearErr {
             /* the exit names what the failed clear left undone: the archive after it was not touched, and the
                catalogue before it was */
             if true == archiveStorage.IsPersistent() {
@@ -143,29 +141,10 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
     /* an environment that wired the archive alone has no catalogue to reseed and nothing of its own in the cache;
        the cache is cleared all the same, so a reset leaves the same state whichever halves are wired */
     if false == storage.IsPersistent() {
-        if clearErr := clearCache(runtimeInstance, writer); nil != clearErr {
+        if clearErr := clearCache(runtimeInstance, writer, "database reset"); nil != clearErr {
             return clearErr
         }
     }
-
-    return nil
-}
-
-/* clearCache empties the cache and says so. On the redis backend the clear is a SCAN of the whole keyspace filtered on this application's prefix, under the backend's one-second command budget — measured at 0 ms over the development keyspace, and declared here because a keyspace shared with much else could take the reset's exit code after both databases were reset. The state a fresh volume holds includes an EMPTY cache: the entities are cached under keys with no expiry and are cleared by name, by the listeners that watch the write events — and a reset writes through no door that dispatches one, so without this an account the reset removed kept authenticating on the login door with its old digest, from a cache nothing could clear afterwards. On the shared cache this reaches the running server; on the in-process fallback it reaches this process alone, which the line says. A clear that fails takes the exit code, and the only door that clears the cache again is this reset — a cache:clear command of its own is filed for the harvest. */
-func clearCache(runtimeInstance melodyruntimecontract.Runtime, writer io.Writer) error {
-    cacheInstance, cacheErr := melodycontainer.FromResolver[melodycachecontract.Cache](
-        runtimeInstance.Container(),
-        melodycache.ServiceCache,
-    )
-    if nil != cacheErr {
-        return cacheErr
-    }
-
-    if clearErr := cacheInstance.Clear(); nil != clearErr {
-        return exception.NewError("database reset: clearing the cache did not complete", nil, clearErr)
-    }
-
-    fmt.Fprintln(writer, "cache cleared: "+cacheClearedScope(runtimeInstance))
 
     return nil
 }

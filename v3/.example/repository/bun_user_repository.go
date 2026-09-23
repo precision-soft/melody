@@ -365,28 +365,46 @@ func asUsernameAlreadyExists(writeErr error) error {
 /* errorChainNamesKey answers whether any link of the chain — the error, its cause, the cause's cause, and
    every branch of a joined error — is the driver's duplicate refusal FOR the index named: the key is read
    out of the message's own "for key '<table>.<index>'" clause, not searched for anywhere in the text, so a
-   duplicate on another key whose VALUE happened to spell the index's name stays the diagnosis it is. */
+   duplicate on another key whose VALUE happened to spell the index's name stays the diagnosis it is.
+
+   The walk visits at most errorChainLinkLimit links, counted across every branch. It reads whatever error a
+   write returned, and a chain that closes on itself — through Unwrap, or through a join whose branch is the
+   join — recursed until the goroutine stack was gone: a fatal error, not a panic, so no recover on the
+   request path turned it into a response. A budget across branches rather than a depth per path, because a
+   join that repeats itself doubles the paths at every level while its depth grows by one. */
 func errorChainNamesKey(err error, indexName string) bool {
-    if nil == err {
-        return false
-    }
+    remainingLinks := errorChainLinkLimit
 
-    if true == duplicateRefusalNamesKey(err.Error(), indexName) {
-        return true
-    }
+    var walk func(link error) bool
+    walk = func(link error) bool {
+        if nil == link || 0 == remainingLinks {
+            return false
+        }
+        remainingLinks--
 
-    if joined, isJoined := err.(interface{ Unwrap() []error }); true == isJoined {
-        for _, branch := range joined.Unwrap() {
-            if true == errorChainNamesKey(branch, indexName) {
-                return true
-            }
+        if true == duplicateRefusalNamesKey(link.Error(), indexName) {
+            return true
         }
 
-        return false
+        if joined, isJoined := link.(interface{ Unwrap() []error }); true == isJoined {
+            for _, branch := range joined.Unwrap() {
+                if true == walk(branch) {
+                    return true
+                }
+            }
+
+            return false
+        }
+
+        return walk(errors.Unwrap(link))
     }
 
-    return errorChainNamesKey(errors.Unwrap(err), indexName)
+    return walk(err)
 }
+
+/* errorChainLinkLimit is far past any chain a write produces — the audit tracker's exception over the driver's
+   refusal is two links, a joined teardown a handful — and small enough that a cyclic one ends at once. */
+const errorChainLinkLimit = 64
 
 /* duplicateRefusalNamesKey reads the key clause of a MySQL duplicate refusal — "for key '<table>.<index>'" — and
    answers whether the key it names is the index given, bare or qualified by its table. The clause is the LAST

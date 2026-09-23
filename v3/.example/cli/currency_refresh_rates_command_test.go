@@ -11,6 +11,7 @@ import (
     "time"
 
     examplecache "github.com/precision-soft/melody/v3/.example/cache"
+    "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/persistence"
     "github.com/precision-soft/melody/v3/.example/repository"
     "github.com/precision-soft/melody/v3/.example/service"
@@ -150,9 +151,17 @@ func (instance *refusingRateCache) Delete(key string) error {
 
 /* a document the catalogue already holds writes nothing, and the sweep stops on the cache drop the unchanged
    branch performs: the line names the drop, not a write that never happened, and the table counts the quote
-   UNCHANGED before the failure takes the exit code */
+   UNCHANGED before the failure takes the exit code. The drop is attempted only for an entry that does not
+   serve the row's quote, so every currency is planted holding a rate the catalogue does not */
 func TestCurrencyRefreshRatesCommandNamesTheCacheDropThatFailedOverAnUnchangedQuote(t *testing.T) {
     runtimeInstance := rateRefreshCommandRuntime(t, `{"base":"EUR","asOf":"2026-01-01T00:00:00Z","rates":{"EUR":1,"USD":1.1,"RON":5.05}}`, nil, func(cache melodycachecontract.Cache) melodycachecontract.Cache {
+        for _, currencyId := range []string{"cur-eur", "cur-usd", "cur-ron"} {
+            stale := entity.NewCurrency(currencyId, "", "", 9.9, time.Date(2025, time.January, 1, 0, 0, 0, 0, time.UTC))
+            if setErr := cache.Set(service.CacheKeyCurrencyById(currencyId), stale, time.Hour); nil != setErr {
+                t.Fatalf("planting the stale entry of %s failed: %v", currencyId, setErr)
+            }
+        }
+
         return &refusingRateCache{Cache: cache}
     })
 

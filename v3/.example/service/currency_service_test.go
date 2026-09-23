@@ -2,6 +2,7 @@ package service
 
 import (
     "context"
+    "encoding/json"
     "math"
     "sync/atomic"
     "testing"
@@ -12,6 +13,7 @@ import (
     "github.com/precision-soft/melody/v3/.example/persistence"
     "github.com/precision-soft/melody/v3/.example/repository"
     melodycontainer "github.com/precision-soft/melody/v3/container"
+    melodyexception "github.com/precision-soft/melody/v3/exception"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
     melodylogging "github.com/precision-soft/melody/v3/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
@@ -159,8 +161,8 @@ func TestCurrencyServiceUpdateRate_KeepsTheNewerReadingOverAStaleQuote(t *testin
 
 /* the quote the catalogue already holds, at the instant it already holds it, is not written again and
    dispatches nothing — on mysql the full-row UPDATE it used to issue affected zero rows, which the door read
-   as the currency having vanished — but the two cache entries of the currency ARE dropped, so a cache that
-   kept the previous rate after a failed invalidation is healed by the tick that finds nothing to write */
+   as the currency having vanished — but a cache that kept the PREVIOUS rate after a failed invalidation has
+   its two entries of the currency dropped, so it is healed by the tick that finds nothing to write */
 func TestCurrencyServiceUpdateRate_AnswersUnchangedWithoutWritingAndDropsTheCachedCurrency(t *testing.T) {
     currencyService, dispatcher, runtimeInstance := currencyServiceUnderTest(t)
 
@@ -169,10 +171,15 @@ func TestCurrencyServiceUpdateRate_AnswersUnchangedWithoutWritingAndDropsTheCach
         t.Fatalf("the first update failed: %v", err)
     }
 
-    /* the first write dispatched once; the listener is not wired here, so the memo is planted by the read
-       below and must be dropped by the second call, not by an event */
-    if _, _, err := currencyService.FindById("cur-usd"); nil != err {
-        t.Fatalf("reading the currency back failed: %v", err)
+    /* the first write dispatched once and the listener is not wired here, so the invalidation it stands for
+       never ran: both entries are planted holding the quote from BEFORE that write, which is the state the
+       heal exists for, and must be dropped by the second call, not by an event */
+    stale := entity.NewCurrency("cur-usd", "USD", "US Dollar", 1.08, currencyQuoteInstant)
+    if setErr := currencyService.cache.Set(CacheKeyCurrencyById("cur-usd"), stale, time.Hour); nil != setErr {
+        t.Fatalf("planting the stale by-id entry failed: %v", setErr)
+    }
+    if setErr := currencyService.cache.Set(CacheKeyCurrencyList, []*entity.Currency{stale}, time.Hour); nil != setErr {
+        t.Fatalf("planting the stale list failed: %v", setErr)
     }
 
     recordingRepository := &updateCountingCurrencyRepository{CurrencyRepository: currencyService.currencyRepository}
@@ -207,6 +214,37 @@ func TestCurrencyServiceUpdateRate_AnswersUnchangedWithoutWritingAndDropsTheCach
     dropped = dropped[len(dropped)-2:]
     if CacheKeyCurrencyById("cur-usd") != dropped[0] || CacheKeyCurrencyList != dropped[1] {
         t.Errorf("an unchanged quote dropped %v, wanted the by-id entry of cur-usd and the list", dropped)
+    }
+}
+
+/* a cache that already serves the quote the row holds is left as it is: dropping it on every unchanged tick
+   made the server read the currency and the list back from the database and write them into the cache again,
+   four reads and four writes per tick for a catalogue that had not moved, twenty-four times a day */
+func TestCurrencyServiceUpdateRate_KeepsACacheThatAlreadyServesTheQuote(t *testing.T) {
+    currencyService, _, runtimeInstance := currencyServiceUnderTest(t)
+
+    quotedAt := currencyQuoteInstant.Add(time.Hour)
+    if _, _, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", 1.0842, quotedAt); nil != err {
+        t.Fatalf("the first update failed: %v", err)
+    }
+
+    /* the listener is not wired here, so the reads below plant both entries holding the row as it now is */
+    if _, _, err := currencyService.FindById("cur-usd"); nil != err {
+        t.Fatalf("reading the currency back failed: %v", err)
+    }
+    if _, err := currencyService.List(); nil != err {
+        t.Fatalf("reading the list back failed: %v", err)
+    }
+
+    cacheInstance := currencyService.cache.(*ttlRecordingCache)
+    deletesBefore := cacheInstance.deleteCount()
+
+    if _, outcome, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", 1.0842, quotedAt); nil != err || RateUpdateUnchanged != outcome {
+        t.Fatalf("the unchanged update answered %d, %v; wanted RateUpdateUnchanged", outcome, err)
+    }
+
+    if dropped := cacheInstance.deleteCount() - deletesBefore; 0 != dropped {
+        t.Errorf("an unchanged quote over a cache that serves it dropped %d entries, wanted none: %v", dropped, cacheInstance.deletedKeyList())
     }
 }
 
@@ -314,5 +352,30 @@ func TestCurrencyServiceUpdateRate_RefusesAnOlderDocumentThatReadTheRowBeforeANe
 
     if 1 != len(dispatcher.names()) {
         t.Fatalf("the refused older document dispatched an event: %v", dispatcher.names())
+    }
+}
+
+/* the refusal of a rate that is not a finite number carries that rate in its context, and encoding/json
+   refuses NaN and both infinities: the json journal then fell back to one text rendering of the WHOLE
+   context, so the currency and the bounds beside the rate lost their structure in exactly the record that
+   described the refusal. A non-finite rate travels as its text. */
+func TestRefuseUnusableRate_CarriesANonFiniteRateAsText(t *testing.T) {
+    for rate, spelled := range map[float64]string{math.Inf(1): "+Inf", math.Inf(-1): "-Inf"} {
+        assertRefusalContextEncodes(t, refuseUnusableRate("cur-usd", rate), spelled)
+    }
+
+    assertRefusalContextEncodes(t, refuseUnusableRate("cur-usd", math.NaN()), "NaN")
+}
+
+func assertRefusalContextEncodes(t *testing.T, refusal error, spelled string) {
+    t.Helper()
+
+    logContext := melodyexception.LogContext(refusal)
+    if _, marshalErr := json.Marshal(logContext); nil != marshalErr {
+        t.Fatalf("the refusal's context does not encode: %v", marshalErr)
+    }
+
+    if spelled != logContext["rate"] {
+        t.Errorf("the refused rate travels as %#v, wanted %q", logContext["rate"], spelled)
     }
 }

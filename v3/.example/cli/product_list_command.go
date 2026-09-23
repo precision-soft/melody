@@ -11,6 +11,10 @@ import (
     "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/service"
     melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
+    melodyexception "github.com/precision-soft/melody/v3/exception"
+    examplejournal "github.com/precision-soft/melody/v3/.example/journal"
+    melodylogging "github.com/precision-soft/melody/v3/logging"
+    melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
@@ -75,13 +79,15 @@ func (instance *ProductListCommand) Run(runtimeInstance melodyruntimecontract.Ru
     lookups to render two columns whose whole vocabulary is two short tables. A
     name that has gone missing between the two reads still renders as "-", which
     is what the per-product lookup answered for it. */
-    categoryNameById := nameById(categoryService.List, func(category *entity.Category) (string, string) {
+    categoryNameById, categoryListErr := nameById(categoryService.List, func(category *entity.Category) (string, string) {
         return category.Id, category.Name
     })
+    journalLostNomenclature(runtimeInstance, "category", categoryListErr)
 
-    currencyNameById := nameById(currencyService.List, func(currency *entity.Currency) (string, string) {
+    currencyNameById, currencyListErr := nameById(currencyService.List, func(currency *entity.Currency) (string, string) {
         return currency.Id, currency.Name
     })
+    journalLostNomenclature(runtimeInstance, "currency", currencyListErr)
 
     rows := make([][]string, 0, len(products))
 
@@ -112,15 +118,13 @@ func (instance *ProductListCommand) Run(runtimeInstance melodyruntimecontract.Ru
 }
 
 /* nameById reads a whole nomenclature once and keys its names by identifier. A
-read that fails answers an empty map, so every name renders as the dash the
-per-product lookup rendered when ITS read failed: the listing keeps the answer it
-gave before the two reads replaced the 2N. Whether a listing should instead refuse
-when a nomenclature is unreachable is a question about the command, not about this
-fold, and it is filed rather than decided here. */
-func nameById[Entity any](list func() ([]*Entity, error), identify func(*Entity) (string, string)) map[string]string {
+read that fails answers an empty map beside its error, so every name renders as
+the dash the per-product lookup rendered when ITS read failed: the listing keeps
+rendering, and the caller journals the loss. */
+func nameById[Entity any](list func() ([]*Entity, error), identify func(*Entity) (string, string)) (map[string]string, error) {
     entityList, listErr := list()
     if nil != listErr {
-        return map[string]string{}
+        return map[string]string{}, listErr
     }
 
     nameById := make(map[string]string, len(entityList))
@@ -133,7 +137,22 @@ func nameById[Entity any](list func() ([]*Entity, error), identify func(*Entity)
         nameById[identifier] = name
     }
 
-    return nameById
+    return nameById, nil
+}
+
+/* journalLostNomenclature records a nomenclature the listing could not read. The
+listing does not refuse over it — the products are what was asked for, and a column
+of dashes is still a listing — but a column of dashes printed in silence reads as
+products filed under nothing, so the loss goes to the journal with its cause. */
+func journalLostNomenclature(runtimeInstance melodyruntimecontract.Runtime, nomenclature string, listErr error) {
+    if nil == listErr {
+        return
+    }
+
+    examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Warning(
+        "product listing rendered a nomenclature it could not read as dashes",
+        melodyexception.LogContext(listErr, melodyloggingcontract.Context{"nomenclature": nomenclature}),
+    )
 }
 
 /* nameOrDash answers the dash the per-product lookup answered for an identifier

@@ -578,3 +578,72 @@ type frozenServerSentEventClock struct {
 func (instance *frozenServerSentEventClock) Now() time.Time {
     return instance.instant
 }
+
+/* discardingFlushWriter is a stream the frames leave through and nothing is kept of: the allocations a frame
+   costs are then the writer's own, with no buffer growing underneath to smear them. It cannot be unwrapped to a
+   connection and takes no deadline, which is the writer a budget can do nothing for. */
+type discardingFlushWriter struct {
+    header nethttp.Header
+}
+
+func (instance *discardingFlushWriter) Header() nethttp.Header {
+    if nil == instance.header {
+        instance.header = nethttp.Header{}
+    }
+
+    return instance.header
+}
+
+func (instance *discardingFlushWriter) Write(payload []byte) (int, error) {
+    return len(payload), nil
+}
+
+func (instance *discardingFlushWriter) WriteHeader(statusCode int) {}
+
+func (instance *discardingFlushWriter) Flush() {}
+
+/* a frame costs the text it writes and nothing else: the sanitizer built a new strings.Replacer on every call, and
+   measured on this writer a one-byte keepalive paid six allocations for it and an event frame thirty-one, one
+   replacer per field read. What stays is the frame's own: for a comment its text and the byte conversion a writer
+   without WriteString costs, for an event the builder's growth, the split lines and the same conversion. */
+func TestServerSentEventWriter_AFrameAllocatesOnlyItsText(t *testing.T) {
+    writer, writerErr := NewServerSentEventWriter(&discardingFlushWriter{})
+    if nil != writerErr {
+        t.Fatalf("building the writer failed: %v", writerErr)
+    }
+
+    if allocations := testing.AllocsPerRun(100, func() { _ = writer.Comment("k") }); 2 < allocations {
+        t.Errorf("a comment frame allocated %v times, wanted its text and its byte conversion alone", allocations)
+    }
+
+    event := ServerSentEvent{Id: "7", Event: "tick", Data: "a\r\nb"}
+    if allocations := testing.AllocsPerRun(100, func() { _ = writer.Send(event) }); 9 < allocations {
+        t.Errorf("an event frame allocated %v times, wanted the frame's own nine at most", allocations)
+    }
+}
+
+/* a writer that answered once that it cannot take a deadline is not asked again: every frame used to build a
+   ResponseController and walk it to the ErrNotSupported net/http allocates for such a writer, two allocations a
+   frame for a budget that could never apply */
+func TestServerSentEventWriter_StopsAskingAWriterThatCannotTakeADeadline(t *testing.T) {
+    writer, writerErr := NewServerSentEventWriter(&discardingFlushWriter{})
+    if nil != writerErr {
+        t.Fatalf("building the writer failed: %v", writerErr)
+    }
+    writer = writer.WithWriteBudget(time.Second)
+
+    unbudgeted, unbudgetedErr := NewServerSentEventWriter(&discardingFlushWriter{})
+    if nil != unbudgetedErr {
+        t.Fatalf("building the writer without a budget failed: %v", unbudgetedErr)
+    }
+
+    if firstErr := writer.Comment("first"); nil != firstErr {
+        t.Fatalf("the first frame failed: %v", firstErr)
+    }
+
+    withBudget := testing.AllocsPerRun(100, func() { _ = writer.Comment("k") })
+    withoutBudget := testing.AllocsPerRun(100, func() { _ = unbudgeted.Comment("k") })
+    if withoutBudget != withBudget {
+        t.Errorf("a frame under a budget the writer cannot take allocated %v times against %v without one, wanted the budget to cost nothing", withBudget, withoutBudget)
+    }
+}

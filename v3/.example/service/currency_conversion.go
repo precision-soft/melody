@@ -54,9 +54,9 @@ func ConvertAmount(amount float64, from *entity.Currency, to *entity.Currency) (
             "a currency without a positive rate cannot take part in a conversion",
             exceptioncontract.Context{
                 "fromCurrencyId": from.Id,
-                "fromRate":       from.Rate,
+                "fromRate":       contextNumber(from.Rate),
                 "toCurrencyId":   to.Id,
-                "toRate":         to.Rate,
+                "toRate":         contextNumber(to.Rate),
             },
             nil,
         )
@@ -79,11 +79,11 @@ func ConvertAmount(amount float64, from *entity.Currency, to *entity.Currency) (
         return 0, exception.NewError(
             "the converted amount is not a finite number",
             exceptioncontract.Context{
-                "amount":         amount,
+                "amount":         contextNumber(amount),
                 "fromCurrencyId": from.Id,
-                "fromRate":       from.Rate,
+                "fromRate":       contextNumber(from.Rate),
                 "toCurrencyId":   to.Id,
-                "toRate":         to.Rate,
+                "toRate":         contextNumber(to.Rate),
             },
             nil,
         )
@@ -92,9 +92,17 @@ func ConvertAmount(amount float64, from *entity.Currency, to *entity.Currency) (
     return rounded, nil
 }
 
-/* foldCurrencyCode is the one spelling of what makes two codes the same name. Trim then upper-case, through
-   the standard library rather than a hand-rolled loop: an ISO 4217 code is three ASCII letters, so there is
-   no case-folding subtlety to get right and nothing to reimplement. */
+/* foldCurrencyCode is the one spelling of what makes two codes the same name: trimmed, and upper-cased in
+   ASCII alone. An ISO 4217 code is three ASCII letters, and the standard library's ToUpper is a Unicode case
+   mapping — it takes U+017F LATIN SMALL LETTER LONG S to S, so a provider's "uſd" folded onto the catalogue's
+   USD and was written as its rate. Anything outside ASCII, a control byte included, is left as it came, which
+   is enough: such a code matches no code the catalogue holds. */
 func foldCurrencyCode(code string) string {
-    return strings.ToUpper(strings.TrimSpace(code))
+    return strings.Map(func(character rune) rune {
+        if 'a' <= character && 'z' >= character {
+            return character - ('a' - 'A')
+        }
+
+        return character
+    }, strings.TrimSpace(code))
 }

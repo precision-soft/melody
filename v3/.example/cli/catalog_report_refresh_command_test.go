@@ -11,6 +11,7 @@ import (
     "testing"
     "time"
 
+    examplecache "github.com/precision-soft/melody/v3/.example/cache"
     "github.com/precision-soft/melody/v3/.example/persistence"
     "github.com/precision-soft/melody/v3/.example/reporting"
     "github.com/precision-soft/melody/v3/.example/repository"
@@ -208,8 +209,10 @@ func newRefreshFixture(t *testing.T, option refreshFixtureOption) *refreshFixtur
     archive := &sequenceArchive{sequence: sequence}
     clockInstance := melodyclock.NewFrozenClock(time.Date(2026, time.September, 13, 9, 0, 0, 0, time.UTC))
 
+    /* the serializer the composition root registers: under the json one a cached list came back as []any, so
+       a second run over the same cache failed on the product list before it reached the archive */
     backend := melodycache.NewInMemoryBackend(0, 0, clockInstance)
-    cacheInstance := &sequenceCache{Cache: melodycache.NewManagerOwningBackend(backend, melodycache.NewJsonSerializer()), sequence: sequence}
+    cacheInstance := &sequenceCache{Cache: melodycache.NewManagerOwningBackend(backend, examplecache.NewGobSerializer()), sequence: sequence}
 
     storage := persistence.NewCatalogStorage(nil)
     productRepository, productErr := repository.NewProductRepository(storage)
@@ -319,6 +322,30 @@ func TestCatalogReportRefreshCommandDrivesLockRefreshArchiveExportInThatOrder(t 
 
     if false == strings.Contains(output, "true") || false == strings.Contains(output, "ARCHIVED") {
         t.Fatalf("expected the table to report the export and the archive, got %q", output)
+    }
+}
+
+/* a reading the archive already holds at that instant is not a failure, and the run exits zero — but the table
+   alone answered ARCHIVED false with nothing beside it, which reads as an archive that did not record the
+   reading; the console says why nothing was written */
+func TestCatalogReportRefreshCommandSaysWhyAReadingAlreadyRecordedIsNotArchivedAgain(t *testing.T) {
+    fixture := newRefreshFixture(t, refreshFixtureOption{})
+
+    if _, runErr := runRefresh(t, fixture); nil != runErr {
+        t.Fatalf("expected the first refresh to succeed, got %v", runErr)
+    }
+
+    output, runErr := runRefresh(t, fixture)
+    if nil != runErr {
+        t.Fatalf("expected a reading already recorded to exit zero, got %v", runErr)
+    }
+
+    if 1 != fixture.archive.appended() {
+        t.Fatalf("expected the second run to write nothing, the archive holds %d rows", fixture.archive.appended())
+    }
+
+    if false == strings.Contains(output, "the archive already holds a reading taken at this instant; nothing new was recorded") {
+        t.Fatalf("expected the operator to be told why the reading was not archived, got %q", output)
     }
 }
 

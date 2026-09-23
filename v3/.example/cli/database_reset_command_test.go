@@ -13,13 +13,6 @@ import (
 
     "github.com/precision-soft/melody/v3/.example/migration"
     "github.com/precision-soft/melody/v3/.example/persistence"
-    melodycache "github.com/precision-soft/melody/v3/cache"
-    melodycachecontract "github.com/precision-soft/melody/v3/cache/contract"
-    melodyclock "github.com/precision-soft/melody/v3/clock"
-    melodycontainer "github.com/precision-soft/melody/v3/container"
-    melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
-    melodylogging "github.com/precision-soft/melody/v3/logging"
-    melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     melodyruntime "github.com/precision-soft/melody/v3/runtime"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     bun "github.com/uptrace/bun"
@@ -143,102 +136,12 @@ func (instance *recordingResetRows) Next(destination []driver.Value) error {
     return nil
 }
 
-/* clearCountingCache is the cache the reset clears: it counts the clears and keeps the order they came in relative to the recorded statements, so the pin can say the clear came AFTER the reseed rather than merely that it happened. */
-type clearCountingCache struct {
-    melodycachecontract.Cache
-
-    mutex      sync.Mutex
-    clearCount int
-    onClear    func()
-    refusal    error
-}
-
-func (instance *clearCountingCache) Clear() error {
-    instance.mutex.Lock()
-    instance.clearCount = instance.clearCount + 1
-    onClear := instance.onClear
-    refusal := instance.refusal
-    instance.mutex.Unlock()
-
-    if nil != onClear {
-        onClear()
-    }
-
-    if nil != refusal {
-        return refusal
-    }
-
-    return instance.Cache.Clear()
-}
-
-func (instance *clearCountingCache) clears() int {
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    return instance.clearCount
-}
-
 func newResetRuntime(t *testing.T, storage *persistence.CatalogStorage) melodyruntimecontract.Runtime {
     t.Helper()
 
     runtimeInstance, _ := newResetRuntimeWithArchive(t, storage, persistence.NewArchiveStorage(nil))
 
     return runtimeInstance
-}
-
-func newResetRuntimeWithArchive(
-    t *testing.T,
-    storage *persistence.CatalogStorage,
-    archiveStorage *persistence.ArchiveStorage,
-) (melodyruntimecontract.Runtime, *clearCountingCache) {
-    t.Helper()
-
-    serviceContainer := melodycontainer.NewContainer()
-
-    melodycontainer.MustRegister(
-        serviceContainer,
-        persistence.ServiceArchiveStorage,
-        func(resolver melodycontainercontract.Resolver) (*persistence.ArchiveStorage, error) {
-            return archiveStorage, nil
-        },
-    )
-
-    melodycontainer.MustRegister(
-        serviceContainer,
-        melodylogging.ServiceLogger,
-        func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
-            return melodylogging.NewNopLogger(), nil
-        },
-    )
-
-    melodycontainer.MustRegister(
-        serviceContainer,
-        persistence.ServiceCatalogStorage,
-        func(resolver melodycontainercontract.Resolver) (*persistence.CatalogStorage, error) {
-            return storage, nil
-        },
-    )
-
-    backend := melodycache.NewInMemoryBackend(0, 0, melodyclock.NewSystemClock())
-    cacheInstance := &clearCountingCache{Cache: melodycache.NewManagerOwningBackend(backend, melodycache.NewJsonSerializer())}
-
-    melodycontainer.MustRegister(
-        serviceContainer,
-        melodycache.ServiceCacheBackend,
-        func(resolver melodycontainercontract.Resolver) (melodycachecontract.Backend, error) {
-            return backend, nil
-        },
-    )
-
-    melodycontainer.MustRegister(
-        serviceContainer,
-        melodycache.ServiceCache,
-        func(resolver melodycontainercontract.Resolver) (melodycachecontract.Cache, error) {
-            return cacheInstance, nil
-        },
-    )
-
-    return melodyruntime.New(context.Background(), serviceContainer.NewScope(), serviceContainer), cacheInstance
 }
 
 func newUndialedResetStorage() *persistence.CatalogStorage {

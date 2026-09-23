@@ -4257,3 +4257,33 @@ func TestBoundedCloseFailureDetail_CutsOnARuneBoundary(t *testing.T) {
         t.Fatalf("the cut kept %d bytes, over the limit of %d", len(kept), closeFailureStackLimit)
     }
 }
+
+/* The back-off looks for the start of the rune the limit lands in, which is at
+most three bytes back. A byte that is not valid UTF-8 ELSEWHERE in the text is the
+service's own and is not the cut's to repair: asked of the whole prefix instead,
+the back-off walked down to that byte and kept nothing of a value that led with
+one. */
+func TestBoundedCloseFailureDetail_KeepsTheLimitPastAnInvalidByte(t *testing.T) {
+    for _, invalidAt := range []int{0, 100, closeFailureStackLimit - 8} {
+        detail := strings.Repeat("a", invalidAt) + "\xff" + strings.Repeat("a", 2*closeFailureStackLimit)
+
+        bounded, isText := boundedCloseFailureDetail(detail).(string)
+        if false == isText {
+            t.Fatalf("the detail came back as %T, wanted the cut text", boundedCloseFailureDetail(detail))
+        }
+
+        kept := strings.Split(bounded, "\n\t\u2026 cut,")[0]
+
+        if closeFailureStackLimit != len(kept) {
+            t.Fatalf("an invalid byte at %d cut the detail to %d bytes, wanted the limit of %d", invalidAt, len(kept), closeFailureStackLimit)
+        }
+    }
+
+    /* a run of stray continuation bytes across the limit starts no rune anywhere in it: the walk stops at its
+       bound of three bytes rather than following the run down */
+    detail := strings.Repeat("a", closeFailureStackLimit-8) + strings.Repeat("\x80", 20) + strings.Repeat("a", closeFailureStackLimit)
+    bounded, _ := boundedCloseFailureDetail(detail).(string)
+    if kept := strings.Split(bounded, "\n\t\u2026 cut,")[0]; closeFailureStackLimit-(utf8.UTFMax-1) != len(kept) {
+        t.Fatalf("a run of continuation bytes across the limit cut the detail to %d bytes, wanted the three-byte bound at %d", len(kept), closeFailureStackLimit-(utf8.UTFMax-1))
+    }
+}

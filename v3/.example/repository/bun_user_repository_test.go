@@ -145,3 +145,53 @@ func TestAsUsernameAlreadyExists_LeavesEveryOtherFailureAlone(t *testing.T) {
         t.Fatalf("expected a write that did not fail to stay unreported")
     }
 }
+
+/* selfWrappingError is a chain that closes on itself through Unwrap, and selfJoiningError one that closes on
+   itself through BOTH branches of a join: neither is a shape the driver produces, but the walk reads whatever
+   error a write returned, and a cycle there recursed until the goroutine stack was gone — a fatal error no
+   recover turns into a response. */
+type selfWrappingError struct {
+    message string
+}
+
+func (instance *selfWrappingError) Error() string {
+    return instance.message
+}
+
+func (instance *selfWrappingError) Unwrap() error {
+    return instance
+}
+
+type selfJoiningError struct {
+    message string
+}
+
+func (instance *selfJoiningError) Error() string {
+    return instance.message
+}
+
+func (instance *selfJoiningError) Unwrap() []error {
+    return []error{instance, instance}
+}
+
+func TestAsUsernameAlreadyExists_EndsOnAChainThatClosesOnItself(t *testing.T) {
+    for _, writeErr := range []error{
+        &selfWrappingError{message: "connection reset"},
+        &selfJoiningError{message: "connection reset"},
+    } {
+        if translated := asUsernameAlreadyExists(writeErr); writeErr != translated {
+            t.Errorf("a cyclic %T came back as %v, wanted it unchanged", writeErr, translated)
+        }
+    }
+
+    /* the bound is on the walk, not on the diagnosis: a refusal three links down is still read */
+    driverRefusal := fmt.Errorf(
+        "Error 1062 (23000): Duplicate entry 'zzprobe' for key 'melody_example_v3_user.%s'",
+        migration.UserUsernameIndexName,
+    )
+    deep := exception.NewError("audited insert failed", nil, fmt.Errorf("tracked: %w", errors.Join(errors.New("other"), driverRefusal)))
+
+    if translated := asUsernameAlreadyExists(deep); false == errors.Is(translated, ErrUsernameAlreadyExists) {
+        t.Errorf("a refusal three links down came back as %v", translated)
+    }
+}

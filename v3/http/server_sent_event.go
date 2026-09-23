@@ -1,6 +1,7 @@
 package http
 
 import (
+    "errors"
     "io"
     nethttp "net/http"
     "strconv"
@@ -92,6 +93,9 @@ type ServerSentEventWriter struct {
     broken      bool
     writeBudget time.Duration
     clock       serverSentEventClock
+    /* deadlineUnsupported records that the writer answered ErrNotSupported to a deadline, so the next frames do not
+       ask again: the answer is a property of the writer, which does not change under a stream */
+    deadlineUnsupported bool
 }
 
 /* serverSentEventClock is the instant a frame's deadline is counted from; an interface rather than a func value so the writer stays comparable, the way it was before the budget existed — a func field would have made a value that was comparable stop being one, an incompatible change of the published surface. */
@@ -150,7 +154,7 @@ func (instance *ServerSentEventWriter) Send(event ServerSentEvent) error {
     }
 
     if "" != event.Data {
-        normalizedData := strings.NewReplacer("\r\n", "\n", "\r", "\n").Replace(event.Data)
+        normalizedData := serverSentEventLineEndingReplacer.Replace(event.Data)
         for _, line := range strings.Split(normalizedData, "\n") {
             builder.WriteString("data: ")
             builder.WriteString(line)
@@ -229,9 +233,11 @@ func (instance *ServerSentEventWriter) writeFrame(frame string) error {
     return nil
 }
 
-/* rearmWriteDeadlineLocked moves the connection's write deadline to now plus the budget before a frame is written; without a budget, or on a writer the controller cannot reach the connection through, it does nothing and the frame goes out under the deadline the server armed. */
+/* rearmWriteDeadlineLocked moves the connection's write deadline to now plus the budget before a frame is written; without a budget, or on a writer the controller cannot reach the connection through, it does nothing and the frame goes out under the deadline the server armed.
+
+   A writer that answered ErrNotSupported once is not asked again. Measured on the development container, the question cost two allocations a frame on such a writer — net/http builds the refusal as it walks the writer — for a budget that could never apply to it; on a writer that reaches the connection it costs none, the controller staying on the stack, which is why it is still built per frame rather than kept. */
 func (instance *ServerSentEventWriter) rearmWriteDeadlineLocked() {
-    if 0 >= instance.writeBudget {
+    if 0 >= instance.writeBudget || true == instance.deadlineUnsupported {
         return
     }
 
@@ -240,7 +246,10 @@ func (instance *ServerSentEventWriter) rearmWriteDeadlineLocked() {
         clock = instance.clock
     }
 
-    _ = nethttp.NewResponseController(instance.writer).SetWriteDeadline(clock.Now().Add(instance.writeBudget))
+    deadlineErr := nethttp.NewResponseController(instance.writer).SetWriteDeadline(clock.Now().Add(instance.writeBudget))
+    if true == errors.Is(deadlineErr, nethttp.ErrNotSupported) {
+        instance.deadlineUnsupported = true
+    }
 }
 
 /* the two terminators of the grammar, named so each site says which one it ends with. A comment deliberately ends the FRAME and not merely the line: the blank line is what makes a comment-only keepalive observable to a client that reads frame by frame, which is the whole point of the preamble a stream flushes at subscription time — without it a client cannot tell a live stream from a hung one. The hazard a single newline would avoid, a keepalive landing between the fields of a half-built event and dispatching it, cannot arise here: Send composes every frame whole and writes it under the lock, so nothing is ever buffered when a comment runs. */
@@ -249,12 +258,21 @@ const (
     serverSentEventFrameTerminator = "\n\n"
 )
 
+/* the replacers are built once: a strings.Replacer is safe for concurrent use and costs its tables to build, and
+   built per call it was the whole cost of a frame — measured on the development container, a one-byte keepalive
+   paid five allocations and 6.7 kilobytes for it, and an event frame thirty-one allocations, one replacer per
+   field read. */
+var (
+    serverSentEventControlByteReplacer = strings.NewReplacer("\r", "", "\n", "", "\x00", "")
+    serverSentEventLineEndingReplacer  = strings.NewReplacer("\r\n", "\n", "\r", "\n")
+)
+
 func sanitizeServerSentEventField(value string) string {
-    return strings.NewReplacer("\r", "", "\n", "", "\x00", "").Replace(value)
+    return serverSentEventControlByteReplacer.Replace(value)
 }
 
 func sanitizeServerSentEventId(value string) string {
-    return strings.NewReplacer("\r", "", "\n", "", "\x00", "").Replace(value)
+    return serverSentEventControlByteReplacer.Replace(value)
 }
 
 /* Comment writes one comment frame, ended by the blank line that terminates a frame: a comment-only keepalive is observable to a client reading frame by frame only through that blank line, and the half-built-event hazard a bare newline would avoid cannot arise here, since Send composes every frame whole and writes it under the lock. */
