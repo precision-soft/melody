@@ -24,6 +24,9 @@ type CurrencyRepository interface {
 
     Create(ctx context.Context, currency *entity.Currency) error
 
+    /* Update writes the currency's code and name onto its row, and answers whether a row was there to write.
+       The quote is not written here: a rename reads the row before it writes, and written whole it put back the
+       quote it had read over one the refresh wrote in between; the quote has its own conditional door, UpdateQuote. */
     Update(ctx context.Context, currency *entity.Currency) (bool, error)
 
     /* UpdateQuote writes a quote onto the row ONLY if the row does not hold a newer reading, in one statement,

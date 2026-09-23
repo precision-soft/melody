@@ -25,7 +25,7 @@ func upArchiveSchema(ctx context.Context, database *bun.DB) error {
         }
     }
 
-    return nil
+    return recordSchemaFingerprint(ctx, database, recordArchiveSchemaFingerprintSql, archiveMigrationSetName, archiveSchemaFingerprint)
 }
 
 /* downArchiveSchema reverses upArchiveSchema. */
@@ -50,6 +50,7 @@ const createCatalogReadingTableSql = "CREATE TABLE IF NOT EXISTS " + CatalogRead
 
 var archiveUpStatementList = []string{
     createCatalogReadingTableSql,
+    createArchiveSchemaFingerprintTableSql,
 }
 
 /* archiveTableNameList names the tables this migration owns, in the order it drops them. The drop
@@ -57,6 +58,7 @@ var archiveUpStatementList = []string{
    down that forgot it, and the reset command names the same list to the operator rather than a second
    copy of it. */
 var archiveTableNameList = []string{
+    ArchiveSchemaFingerprintTableName,
     CatalogReadingTableName,
 }
 

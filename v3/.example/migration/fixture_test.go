@@ -177,6 +177,11 @@ func (instance *fakeConnection) QueryContext(ctx context.Context, query string, 
         return &fakeRows{columns: []string{"column_name"}, rows: rows}, nil
     }
 
+    /* asked for the fingerprint a set recorded, the double answers the one this code records: the present schema */
+    if fingerprint, isFingerprintSelect := presentFingerprintAsked(query); true == isFingerprintSelect {
+        return &fakeRows{columns: []string{"fingerprint"}, rows: [][]driver.Value{{fingerprint}}}, nil
+    }
+
     /* a COUNT select always answers a row on a real server, so a double that answers none turns a step
        that asks the catalogue a question into "sql: no rows in result set". The steps that ask one are
        the tolerant ones — they check whether the object they are about to add is already there — and a
@@ -203,6 +208,19 @@ func presentColumnNameListAsked(query string) ([]string, bool) {
     }
 
     return nil, true
+}
+
+/* presentFingerprintAsked answers, for a read of the fingerprint a set recorded, the fingerprint this code records for the set the read names. */
+func presentFingerprintAsked(query string) (string, bool) {
+    if true == strings.HasPrefix(query, "SELECT fingerprint FROM "+ArchiveSchemaFingerprintTableName+" ") {
+        return archiveSchemaFingerprint, true
+    }
+
+    if true == strings.HasPrefix(query, "SELECT fingerprint FROM "+SchemaFingerprintTableName+" ") {
+        return catalogueSchemaFingerprint, true
+    }
+
+    return "", false
 }
 
 type fakeResult struct{}

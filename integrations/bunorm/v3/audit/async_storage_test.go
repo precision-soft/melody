@@ -13,6 +13,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v3/exception"
+    melodylogging "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
@@ -1468,6 +1469,51 @@ func TestAsyncStorage_WorkerSurvivesAPanicWhoseUnwrapPanics(t *testing.T) {
     if "a delegate failure whose Unwrap panics" != context["cause"] {
         t.Fatalf("expected the panic value as the cause, got %#v", context["cause"])
     }
+}
+
+/* messagePanickingSaveError is a delegate failure whose own Error() raises, the shape a panic carries when the nil field that made it panic-worthy is the one its message reads */
+type messagePanickingSaveError struct{}
+
+func (messagePanickingSaveError) Error() string {
+    panic("Error() panics")
+}
+
+/* the recovery puts the panic value into the dead-letter's context as it came, and a json journal renders it: its Error() raised inside the defer that had spent its recover, on the worker's own goroutine, and ended the process. Behind a real json logger the record is written and the worker goes on to the next entry. */
+func TestAsyncStorage_WorkerSurvivesAPanicWhoseMessagePanicsBehindAJsonJournal(t *testing.T) {
+    journal := &strings.Builder{}
+    delegate := &panicOnceStorage{panicValue: messagePanickingSaveError{}}
+    storage := NewAsyncStorage(delegate, 4).WithLogger(melodylogging.NewJsonLogger(&lockedJournal{builder: journal}, loggingcontract.LevelInfo))
+
+    for _, entity := range []string{"first", "second"} {
+        if saveErr := storage.Save(context.Background(), "melody_audit", Entry{Entity: entity}); nil != saveErr {
+            t.Fatalf("save %s: %v", entity, saveErr)
+        }
+    }
+
+    if closeErr := storage.Close(); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    if saved := delegate.savedEntities(); 1 != len(saved) || "second" != saved[0] {
+        t.Fatalf("expected the worker to survive and store the second entry, got %v", saved)
+    }
+
+    if record := journal.String(); false == strings.Contains(record, "error message panicked") || false == strings.Contains(record, `"entity":"first"`) {
+        t.Fatalf("expected one dead-letter naming the entry and the panicking message, got %q", record)
+    }
+}
+
+/* lockedJournal serializes the writes of the logger under test into a builder the test reads after Close */
+type lockedJournal struct {
+    mutex   sync.Mutex
+    builder *strings.Builder
+}
+
+func (instance *lockedJournal) Write(payload []byte) (int, error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return instance.builder.Write(payload)
 }
 
 /* the same error RETURNED by the delegate is dead-lettered under its own message: the reader that files it no longer panics, so the failure is not re-filed by the recovery as a panic of the storage */

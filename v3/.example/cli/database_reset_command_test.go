@@ -6,6 +6,7 @@ import (
     "database/sql"
     "database/sql/driver"
     "errors"
+    "fmt"
     "io"
     "strings"
     "sync"
@@ -13,6 +14,8 @@ import (
 
     "github.com/precision-soft/melody/v3/.example/migration"
     "github.com/precision-soft/melody/v3/.example/persistence"
+    melodyaudit "github.com/precision-soft/melody/integrations/bunorm/v3/audit"
+    "github.com/precision-soft/melody/v3/exception"
     melodyruntime "github.com/precision-soft/melody/v3/runtime"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     bun "github.com/uptrace/bun"
@@ -203,13 +206,72 @@ func TestDatabaseResetCommandWithoutForceNamesWhatItWouldDropAndTouchesNothing(t
 
 /* the sister of the test above: over the same handle, --force reaches the database and fails on the dial.
    Without it, a fixture that could never fail would let the guard be deleted and leave both green. */
+/* the refusal is the drop step's, on the catalogue, and says where: an error from anywhere else — a --force that touched nothing and fabricated a failure — does not satisfy it */
 func TestDatabaseResetCommandWithForceReachesTheDatabase(t *testing.T) {
     runErr := NewDatabaseResetCommand().Run(
-        newResetRuntime(t, newUndialedResetStorage()),
+        newResetRuntime(t, persistence.NewCatalogStorageAt(newUndialedResetStorage().Database(), "mysql:3306/melody_example_v3")),
         newBoolFlagContext(databaseResetFlagForce, true, nil),
     )
     if nil == runErr {
         t.Fatalf("expected --force to reach the undialed database and fail")
+    }
+
+    if false == strings.Contains(runErr.Error(), "database reset: dropping and recreating the schema did not complete on the catalogue database at mysql:3306/melody_example_v3") {
+        t.Fatalf("expected the failure to be the drop step's on the catalogue, got %v", runErr)
+    }
+
+    if false == strings.Contains(fmt.Sprintf("%v", exception.LogContext(runErr)), "this handle is never dialed") {
+        t.Fatalf("expected the drop step to have failed on the dial itself, got %v", exception.LogContext(runErr))
+    }
+}
+
+/* the catalogue is brought whole in one order: the schema dropped and recreated, then BOTH tables of the audit trail emptied, then the nomenclature reseeded. A trail emptied before the drop, or not at all, leaves the history of the rows the reset removed; a seed before the drop is dropped with the schema. */
+func TestDatabaseResetCommandWithForceDropsThenEmptiesTheTrailThenReseeds(t *testing.T) {
+    storage, recorder := newRecordingResetStorage("mysql:3306/melody_example_v3")
+    runtimeInstance, _ := newResetRuntimeWithArchive(t, storage, persistence.NewArchiveStorage(nil))
+
+    if runErr := NewDatabaseResetCommand().Run(runtimeInstance, newBoolFlagContext(databaseResetFlagForce, true, &bytes.Buffer{})); nil != runErr {
+        t.Fatalf("expected the reset over the recording handle to complete, got %v", runErr)
+    }
+
+    statements := recorder.recorded()
+    indexOf := func(matches func(statement string) bool) int {
+        for index, statement := range statements {
+            if true == matches(statement) {
+                return index
+            }
+        }
+
+        return -1
+    }
+
+    lastDrop := -1
+    for index, statement := range statements {
+        if true == strings.HasPrefix(strings.ToUpper(statement), "DROP TABLE") {
+            lastDrop = index
+        }
+    }
+
+    auditDelete := indexOf(func(statement string) bool {
+        return "DELETE FROM `"+persistence.AuditTable+"`" == statement
+    })
+    transactionDelete := indexOf(func(statement string) bool {
+        return "DELETE FROM `"+melodyaudit.DefaultTransactionTable+"`" == statement
+    })
+    firstSeed := indexOf(func(statement string) bool {
+        return true == strings.HasPrefix(strings.ToUpper(statement), "INSERT") && true == strings.Contains(statement, "melody_example_v3_user")
+    })
+
+    if -1 == lastDrop || -1 == auditDelete || -1 == transactionDelete || -1 == firstSeed {
+        t.Fatalf("expected a drop, both trail deletes and a seed, got drop %d, audit %d, transaction %d, seed %d in %q", lastDrop, auditDelete, transactionDelete, firstSeed, statements)
+    }
+
+    if false == (lastDrop < auditDelete && lastDrop < transactionDelete) {
+        t.Fatalf("expected the trail to be emptied after the schema was dropped, got drop %d, audit %d, transaction %d", lastDrop, auditDelete, transactionDelete)
+    }
+
+    if false == (auditDelete < firstSeed && transactionDelete < firstSeed) {
+        t.Fatalf("expected the nomenclature to be reseeded after the trail was emptied, got audit %d, transaction %d, seed %d", auditDelete, transactionDelete, firstSeed)
     }
 }
 

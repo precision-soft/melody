@@ -4,6 +4,7 @@ import (
     "context"
     "encoding/json"
     "math"
+    "reflect"
     "sync/atomic"
     "testing"
     "time"
@@ -425,5 +426,43 @@ func assertRefusalContextEncodes(t *testing.T, refusal error, spelled string) {
 
     if spelled != logContext["rate"] {
         t.Errorf("the refused rate travels as %#v, wanted %q", logContext["rate"], spelled)
+    }
+}
+
+/* the heal stands in for every invalidation that may have failed before it, so an entry is the row only when EVERY
+   field is: each field of the entity is changed in turn, and the entry carrying the change must not read as the
+   row. A field of a kind this pin does not know how to change fails it, so a field added to the entity is added to
+   the comparison by the same change that teaches the pin to change it */
+func TestCachedCurrencyIsRow_ComparesEveryFieldOfTheEntity(t *testing.T) {
+    quotedAt := currencyQuoteInstant.Add(time.Hour)
+    row := entity.NewQuotedCurrency("cur-usd", "USD", "US Dollar", entity.NewRateQuote(1.0842, quotedAt, quotedAt.Add(time.Minute)))
+
+    if false == cachedCurrencyIsRow(row, row) || false == cachedListCarriesRow([]*entity.Currency{row}, row) {
+        t.Fatal("the row itself did not read as the row")
+    }
+
+    rowType := reflect.TypeOf(*row)
+    for fieldIndex := 0; fieldIndex < rowType.NumField(); fieldIndex++ {
+        changed := *row
+        field := reflect.ValueOf(&changed).Elem().Field(fieldIndex)
+
+        switch value := field.Interface().(type) {
+        case string:
+            field.SetString(value + "-changed")
+        case float64:
+            field.SetFloat(value + 1)
+        case time.Time:
+            field.Set(reflect.ValueOf(value.Add(time.Second)))
+        default:
+            t.Fatalf("the entity carries %s of type %s, which this pin does not know how to change: teach it, and have the heal compare it", rowType.Field(fieldIndex).Name, field.Type())
+        }
+
+        if true == cachedCurrencyIsRow(&changed, row) {
+            t.Errorf("an entry whose %s differs from the row read as the row", rowType.Field(fieldIndex).Name)
+        }
+
+        if true == cachedListCarriesRow([]*entity.Currency{&changed}, row) {
+            t.Errorf("a list whose entry's %s differs from the row read as carrying the row", rowType.Field(fieldIndex).Name)
+        }
     }
 }

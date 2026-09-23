@@ -7,6 +7,7 @@ import (
     "io"
     "net/http"
     "net/http/httptest"
+    "reflect"
     "sync/atomic"
     "testing"
     "time"
@@ -185,5 +186,42 @@ func TestCatalogReportExporterExport_RefusesASinkThatRedirectsInsteadOfReceiving
 
     if int64(1) != sinkPosts.Load() || int64(0) != pageGets.Load() {
         t.Errorf("the sink was posted %d times and the page read %d times, wanted one post and no read", sinkPosts.Load(), pageGets.Load())
+    }
+}
+
+/* the sink that is DOWN is the common failure, not one that answers 503: the transport's refusal is the export's
+   failure, and a quiet false there reported a report nobody received as one there was nothing to send */
+func TestCatalogReportExporterExport_FailsWhenTheSinkCannotBeReached(t *testing.T) {
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {}))
+    endpoint := server.URL + "/v1/report-sink"
+    server.Close()
+
+    exported, err := NewCatalogReportExporter(endpoint).Export(exportRuntime(t), exportReading())
+    if nil == err || true == exported {
+        t.Fatalf("expected an unreachable sink to fail the export, got exported=%v err=%v", exported, err)
+    }
+}
+
+/* the body is a contract with an external party, so its field names are read off the wire, not through the struct
+   that writes them */
+func TestCatalogReportExporterExport_SendsTheFieldsUnderTheirContractNames(t *testing.T) {
+    sink := newRecordingSink(t, http.StatusOK)
+
+    if _, err := NewCatalogReportExporter(sink.server.URL+"/v1/report-sink").Export(exportRuntime(t), exportReading()); nil != err {
+        t.Fatalf("the export failed: %v", err)
+    }
+
+    var received map[string]any
+    if unmarshalErr := json.Unmarshal([]byte(sink.body.Load().(string)), &received); nil != unmarshalErr {
+        t.Fatalf("the sink was sent a body that is not json: %v", unmarshalErr)
+    }
+
+    wanted := map[string]any{
+        "recordedAt": "2026-09-07T10:47:37Z",
+        "headline":   "Melody Example Catalog: 25 entries",
+        "payload":    "products=5 journal=3",
+    }
+    if false == reflect.DeepEqual(wanted, received) {
+        t.Fatalf("expected the sink to receive %v, got %v", wanted, received)
     }
 }

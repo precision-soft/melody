@@ -1347,3 +1347,50 @@ func TestJsonLogger_SpellsTheC1BlockAsJsonEscapes(t *testing.T) {
         t.Fatalf("expected the context decoded to the value given, got %#v", payload["context"])
     }
 }
+
+/* panickingJsonMarshaler is a context value whose own encoding raises */
+type panickingJsonMarshaler struct{}
+
+func (instance panickingJsonMarshaler) MarshalJSON() ([]byte, error) {
+    panic("the value's encoding dereferences a nil field")
+}
+
+/* a record is written from the recovery defers that report a failure, where the context carries whatever the panic carried: an error whose own Error() raised a second panic past the recovery, and on a worker's goroutine with nothing above it that ended the process. The message is rendered under a recover, the rest of the record kept. */
+func TestJsonLogger_ContainsAContextErrorWhoseErrorPanics(t *testing.T) {
+    logger, buffer := testNewJsonLogger()
+
+    logger.Error("the worker recovered a panic", map[string]any{"panic": &panickingMessageError{}, "worker": "audit"})
+
+    record := buffer.String()
+    if false == strings.Contains(record, "error message panicked") || false == strings.Contains(record, `"worker":"audit"`) {
+        t.Fatalf("expected the record written with the panicking message named and the rest kept, got %q", record)
+    }
+}
+
+/* the encoder hands back as a panic anything a value's MarshalJSON raises that is not its own error: the record falls back to the text rendering it keeps for a context the encoder refuses, and names why */
+func TestJsonLogger_ContainsAContextValueWhoseEncodingPanics(t *testing.T) {
+    logger, buffer := testNewJsonLogger()
+
+    logger.Error("the worker recovered a panic", map[string]any{"value": panickingJsonMarshaler{}, "worker": "audit"})
+
+    record := buffer.String()
+    if false == strings.Contains(record, "encoding the context panicked") || false == strings.Contains(record, "worker:audit") {
+        t.Fatalf("expected the record written with the encoding's panic named and the context kept as text, got %q", record)
+    }
+}
+
+/* the floor renders an error as its message too, and under the same recover: an error whose Error() panics nested as
+   deep as the walk descends is where a second panic would still escape */
+func TestJsonLogger_ContainsAContextErrorWhoseErrorPanicsAtTheDepthFloor(t *testing.T) {
+    nested := any(map[string]any{"cause": &panickingMessageError{}})
+    for level := 0; level < normalizeJsonContextMaxDepth-1; level++ {
+        nested = map[string]any{"level": nested}
+    }
+
+    logger, buffer := testNewJsonLogger()
+    logger.Error("message", loggingcontract.Context{"root": nested})
+
+    if false == strings.Contains(buffer.String(), `"cause":"error message panicked`) {
+        t.Fatalf("expected the error at the floor rendered as panicked, got a record of %d bytes", buffer.Len())
+    }
+}

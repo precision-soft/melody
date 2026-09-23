@@ -51,7 +51,7 @@ const (
    for an answer that carried no readable date: five minutes is more than any pair of synchronised clocks drift
    and less than any interval the schedule runs at, so an instant beyond it is a provider whose clock is wrong or
    a document written by hand. An answer that carries its date is judged on the provider's own clock instead —
-   see usableQuoteListOf — where no skew has to be guessed at. */
+   see usableQuoteListOf — and the same five minutes bound how far that clock may be from this one. */
 const rateDocumentClockSkew = 5 * time.Minute
 
 //melody:service ServiceRateRefreshService
@@ -305,6 +305,24 @@ func (instance *RateRefreshService) usableQuoteListOf(document rateDocument, pro
 
     if true == document.AsOf.IsZero() {
         return nil, exception.NewError("the rate document carries no instant the reading was taken at", nil, nil)
+    }
+
+    /* the provider's clock is trusted within the skew a dateless answer is judged under, in either direction:
+       beyond it, a provider whose clock runs late cannot be told from a replay of an old answer that kept its
+       Date and dropped its Age, whose stamp the offset would lift over the newer reading it replays; a clock that
+       far off is refused by name until it is corrected, rather than moving a reading an hour onto this clock */
+    if true == providerClock.exceeds(rateDocumentClockSkew) {
+        return nil, exception.NewError(
+            "the rate provider's clock is "+providerClock.Offset.String()+" off this one, beyond the "+rateDocumentClockSkew.String()+" skew a reading is admitted under; the answer may be a replay of an old one",
+            exceptioncontract.Context{
+                "offset":      providerClock.Offset.String(),
+                "uncertainty": providerClock.Uncertainty.String(),
+                "skew":        rateDocumentClockSkew.String(),
+                "date":        providerClock.Date,
+                "age":         providerClock.Age,
+            },
+            nil,
+        )
     }
 
     /* a reading cannot have been taken after the provider answered with it, and both instants are on the

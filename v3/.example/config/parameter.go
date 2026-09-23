@@ -51,18 +51,38 @@ func (instance *Module) RegisterParameters(registrar melodyapplicationcontract.P
 
     /* the two outbound urls are where the process points, which an operator reads in debug:parameters, so they are not redacted as a rule; written with a userinfo — the shape the amqp dsn is marked for, and one the client sends as a credential — the url IS a credential, and the mark covers it together with the parameter whose template reads it. The value is read raw here, before resolution: a .env key is a literal, and the userinfo is in the literal or nowhere. */
     for _, environmentKey := range []string{environmentKeyRatesBaseUrl, environmentKeyReportExportEndpoint} {
-        if true == urlCarriesUserinfo(instance.environmentValue(environmentKey)) {
-            registrar.MarkParameterSecret(environmentKey)
-        }
+        instance.markEnvironmentSecret(registrar, environmentKey, urlCarriesUserinfo)
     }
 
     /* the credentials melody registers automatically from .env are marked here, so debug:parameters redacts them along with anything whose template reads them. AMQP_DSN is on the list because it carries its credentials INLINE: the amqp credentials sit whole in this one key and no marked source exists to propagate from.
 
        No parameter of this application assembles a template out of the integration keys — MYSQL_*, PGSQL_* — and none may: those keys are the switches the readme says to REMOVE to boot the fallbacks, and a template that read one without a default made the boot fail the moment its line was gone, over a value nothing consumed. The mysql provider assembles its own connection from the keys it reads directly. */
-    registrar.MarkParameterSecret("MYSQL_PASSWORD")
-    registrar.MarkParameterSecret(environmentKeyPgsqlPassword)
-    registrar.MarkParameterSecret("S3_SECRET_KEY")
-    registrar.MarkParameterSecret(environmentKeyAmqpDsn)
+    for _, environmentKey := range []string{environmentKeyMysqlPassword, environmentKeyPgsqlPassword, environmentKeyS3SecretKey, environmentKeyAmqpDsn} {
+        instance.markEnvironmentSecret(registrar, environmentKey, nil)
+    }
+}
+
+/* markEnvironmentSecret marks a key of the environment secret when the environment defines it — a line present,
+   even blank, is a parameter melody registered from it — and, when carriesSecret is given, only when its value
+   does. A key the environment does not define is not marked: the integration blocks are the switches the readme
+   says to REMOVE to boot the fallbacks, and a mark that matched no parameter warned "a secret marking matched no
+   parameter" at every boot of the very deployment the readme calls ordinary, a mysql-only checkout without the
+   PGSQL block. */
+func (instance *Module) markEnvironmentSecret(
+    registrar melodyapplicationcontract.ParameterRegistrar,
+    environmentKey string,
+    carriesSecret func(value string) bool,
+) {
+    parameter := instance.configuration.Get(environmentKey)
+    if nil == parameter {
+        return
+    }
+
+    if nil != carriesSecret && false == carriesSecret(parameter.String()) {
+        return
+    }
+
+    registrar.MarkParameterSecret(environmentKey)
 }
 
 var _ melodyapplicationcontract.ParameterModule = (*Module)(nil)

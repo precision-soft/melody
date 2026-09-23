@@ -170,16 +170,22 @@ func (instance *bunCurrencyRepository) Update(ctx context.Context, currency *ent
         return false, nil
     }
 
-    result, updateErr := instance.database.
-        NewUpdate().
-        Model(newCurrencyRow(currency)).
-        WherePK().
-        Exec(ctx)
+    result, updateErr := instance.renameQuery(currency).Exec(ctx)
     if nil != updateErr {
         return false, updateErr
     }
 
     return affectedAtLeastOneRow(result), nil
+}
+
+/* renameQuery writes the code and the name alone: the quote the caller read with the row may be older than the
+   one on it by now, and only the conditional write of UpdateQuote judges that. */
+func (instance *bunCurrencyRepository) renameQuery(currency *entity.Currency) *bun.UpdateQuery {
+    return instance.database.
+        NewUpdate().
+        Model(newCurrencyRow(currency)).
+        Column("code", "name").
+        WherePK()
 }
 
 func (instance *bunCurrencyRepository) UpdateQuote(ctx context.Context, id string, quote entity.RateQuote) (bool, error) {

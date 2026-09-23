@@ -12,6 +12,7 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/subscriber"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
@@ -20,6 +21,7 @@ import (
     melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     melodyruntime "github.com/precision-soft/melody/v3/runtime"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
+    melodysecurity "github.com/precision-soft/melody/v3/security"
 )
 
 /* recordingResponseWriter answers the two questions the kernel asks a writer before it decides whether a
@@ -122,6 +124,67 @@ func streamRequestOnContainer(t *testing.T, target string, cancelled bool, withH
     )
 
     return request, runtimeInstance
+}
+
+/* streamRequestAs is streamRequest for a caller the firewall authenticated with the roles given — the only caller
+   production lets reach this handler, the stream route being ROLE_USER */
+func streamRequestAs(t *testing.T, target string, roles []string) (*melodyhttp.Request, melodyruntimecontract.Runtime) {
+    t.Helper()
+
+    request, runtimeInstance := streamRequest(t, target, true)
+
+    firewall := melodysecurity.NewCompiledFirewall(
+        "main",
+        melodysecurity.NewPathPrefixMatcher("/"),
+        "prefix /",
+        nil, nil, nil, nil, nil, nil, nil,
+        "", "",
+        nil, nil,
+        melodysecurity.SourceNone,
+        melodysecurity.SourceNone,
+        melodysecurity.SourceNone,
+        melodysecurity.SourceNone,
+        melodysecurity.SourceNone,
+    )
+
+    melodysecurity.SecurityContextSetOnRuntime(
+        runtimeInstance,
+        melodysecurity.NewSecurityContext(firewall, melodysecurity.NewAuthenticatedToken("reader", roles)),
+    )
+
+    return request, runtimeInstance
+}
+
+/* the caller production brings here holds ROLE_USER: the catalogue topic carries the writes made behind ROLE_EDITOR,
+   and a reader holding the route's role and not the topic's is refused while the response is still writable. The
+   request is already cancelled, so a gate that let it through would answer an opened stream, not hang */
+func TestStreamHandler_RefusesTheCatalogueTopicToAReaderWithoutTheEditorRole(t *testing.T) {
+    request, runtimeInstance := streamRequestAs(t, "/events/stream/", []string{entity.RoleUser})
+    writer := &recordingResponseWriter{}
+
+    response, handlerErr := StreamHandler()(runtimeInstance, writer, request)
+    if nil != handlerErr || nil == response || nethttp.StatusForbidden != response.StatusCode() {
+        t.Fatalf("expected a ROLE_USER reader refused with 403, got %v, %v", response, handlerErr)
+    }
+
+    if true == writer.HeadersWritten() || true == writer.flushed {
+        t.Fatalf("expected the refusal to leave the response uncommitted, got status %d", writer.CommittedStatusCode())
+    }
+}
+
+/* the sister: the editor reads the topic its own writes are broadcast onto */
+func TestStreamHandler_OpensTheCatalogueTopicForAnEditor(t *testing.T) {
+    request, runtimeInstance := streamRequestAs(t, "/events/stream/", []string{entity.RoleUser, entity.RoleEditor})
+    writer := &recordingResponseWriter{}
+
+    response, handlerErr := StreamHandler()(runtimeInstance, writer, request)
+    if nil != handlerErr || nil != response {
+        t.Fatalf("expected the editor's stream to end on the cancelled request context, got %v, %v", response, handlerErr)
+    }
+
+    if false == writer.HeadersWritten() || nethttp.StatusOK != writer.CommittedStatusCode() {
+        t.Fatalf("expected the editor's stream committed with 200, got %d", writer.CommittedStatusCode())
+    }
 }
 
 /* the refusal has to be decided while the response is still writable. NewServerSentEventWriter commits it —

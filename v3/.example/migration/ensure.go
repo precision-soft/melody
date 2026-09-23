@@ -50,12 +50,12 @@ type refusedMigrationAttempt struct {
 
    A success is recorded for good. A refusal that spent the retry window waiting for another process is recorded for as long as that window, so the resolutions arriving inside it are answered with it instead of each waiting again; every other failure is recorded not at all and is retried at the next resolution. The mutex serializes the callers of one process, and the bun migration lock serializes processes sharing the database — several instances of this example race here whenever a volume starts empty. */
 func EnsureMigrated(ctx context.Context, database *bun.DB) error {
-    return ensureMigratedSet(ctx, database, Migrations, catalogMigrationSetName, migrationUnlockCommand, expectedSchemaOf(schemaUpStatementList))
+    return ensureMigratedSet(ctx, database, Migrations, catalogMigrationSetName, migrationUnlockCommand, expectedSchemaOf(schemaUpStatementList), SchemaFingerprintTableName, catalogueSchemaFingerprint)
 }
 
 /* EnsureArchiveMigrated applies the ArchiveMigrations set to the archive database, through the same funnel EnsureMigrated runs — only the set and the unlock remedy differ, because the archive's lock lives in the archive's own database and is cleared by db:archive:unlock, not db:unlock. */
 func EnsureArchiveMigrated(ctx context.Context, database *bun.DB) error {
-    return ensureMigratedSet(ctx, database, ArchiveMigrations, archiveMigrationSetName, archiveMigrationUnlockCommand, expectedSchemaOf(archiveUpStatementList))
+    return ensureMigratedSet(ctx, database, ArchiveMigrations, archiveMigrationSetName, archiveMigrationUnlockCommand, expectedSchemaOf(archiveUpStatementList), ArchiveSchemaFingerprintTableName, archiveSchemaFingerprint)
 }
 
 /* the two sets by the name a failure reports them under: a refusal of the second database has to say which database refused, because the console line an operator reads names neither the host nor the role */
@@ -64,7 +64,7 @@ const (
     archiveMigrationSetName = "archive"
 )
 
-func ensureMigratedSet(ctx context.Context, database *bun.DB, migrationSet *migrate.Migrations, setName string, unlockCommand string, expectedSchema []expectedTable) error {
+func ensureMigratedSet(ctx context.Context, database *bun.DB, migrationSet *migrate.Migrations, setName string, unlockCommand string, expectedSchema []expectedTable, fingerprintTableName string, expectedFingerprint string) error {
     if nil == database {
         return exception.NewError("migration: bun database is nil", nil, nil)
     }
@@ -134,6 +134,13 @@ func ensureMigratedSet(ctx context.Context, database *bun.DB, migrationSet *migr
        remembered, so the resolution after the reset goes on */
     if driftErr := refuseSchemaDrift(ctx, database, setName, expectedSchema); nil != driftErr {
         return driftErr
+    }
+
+    /* the columns say which of them a volume lacks, and nothing of their types, collations, keys or constraints:
+       the fingerprint the set recorded when it built the volume is what says the volume was built from these
+       statements */
+    if fingerprintErr := refuseSchemaFingerprint(ctx, database, setName, fingerprintTableName, expectedFingerprint); nil != fingerprintErr {
+        return fingerprintErr
     }
 
     migratedDatabaseList[memoizationKey] = struct{}{}

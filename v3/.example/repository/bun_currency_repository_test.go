@@ -42,3 +42,15 @@ func TestUpdateQuoteQuery_WritesOverTheRowOnlyUnderTheContract(t *testing.T) {
         }
     }
 }
+
+/* a rename reads the row before it writes; written whole, it put back the quote it had read over one the refresh
+   wrote in between. The statement sets the code and the name and nothing else */
+func TestRenameQuery_WritesTheCodeAndTheNameAlone(t *testing.T) {
+    repositoryInstance := &bunCurrencyRepository{database: newRenderingDatabase()}
+
+    rendered := repositoryInstance.renameQuery(entity.NewCurrency("cur-usd", "USD", "Dollar", 1.1, time.Date(2026, time.September, 7, 9, 0, 0, 0, time.UTC))).String()
+
+    if "UPDATE `melody_example_v3_currency` SET `code` = 'USD', `name` = 'Dollar' WHERE (`id` = 'cur-usd')" != rendered {
+        t.Fatalf("expected the rename to set the code and the name alone, got:\n%s", rendered)
+    }
+}

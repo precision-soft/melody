@@ -148,3 +148,33 @@ func TestInMemoryCurrencyRepositoryUpdateQuoteJudgesTheReadingOnThisClockAndByIt
         t.Fatalf("the row holds %v, wanted the re-quote 1.25 of the reading stamped %s", stored, stamped)
     }
 }
+
+/* a rename reads the row, and a refresh writes a newer quote before the rename writes: the rename changes the code
+   and the name and leaves the quote the refresh wrote */
+func TestInMemoryCurrencyRepositoryUpdateKeepsAQuoteWrittenAfterTheRenameRead(t *testing.T) {
+    ctx := context.Background()
+    repositoryInstance := newInMemoryCurrencyRepository()
+    readAt := time.Date(2026, time.September, 8, 9, 0, 0, 0, time.UTC)
+
+    if createErr := repositoryInstance.Create(ctx, entity.NewCurrency("cur-x", "XXX", "Old", 1.1, readAt)); nil != createErr {
+        t.Fatalf("create: %v", createErr)
+    }
+
+    read, _, _ := repositoryInstance.FindById(ctx, "cur-x")
+    renamed := *read
+    renamed.Name = "New"
+
+    later := readAt.Add(time.Hour)
+    if written, quoteErr := repositoryInstance.UpdateQuote(ctx, "cur-x", entity.NewRateQuote(1.2, later, later)); nil != quoteErr || false == written {
+        t.Fatalf("the refresh's write answered %v, %v", written, quoteErr)
+    }
+
+    if updated, updateErr := repositoryInstance.Update(ctx, &renamed); nil != updateErr || false == updated {
+        t.Fatalf("the rename answered %v, %v", updated, updateErr)
+    }
+
+    final, _, _ := repositoryInstance.FindById(ctx, "cur-x")
+    if "New" != final.Name || 1.2 != final.Rate || false == final.RateAsOf.Equal(later) || false == final.ProviderRateAsOf.Equal(later) {
+        t.Fatalf("expected the new name over the refresh's quote, got %s at %v, %s", final.Name, final.Rate, final.RateAsOf)
+    }
+}

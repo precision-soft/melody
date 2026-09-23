@@ -199,6 +199,7 @@ func TestRequestReportTrailSummaryNamesItsOwnRequest(t *testing.T) {
 /* readingCache keeps the values it is given, as they are: the reading is a string either way, and a double that round-tripped through a serializer would answer the same string for a reason that has nothing to do with what these probes ask. */
 type readingCache struct {
     values map[string]any
+    ttls   map[string]time.Duration
 }
 
 func (instance *readingCache) Get(key string) (any, bool, error) {
@@ -209,6 +210,11 @@ func (instance *readingCache) Get(key string) (any, bool, error) {
 
 func (instance *readingCache) Set(key string, value any, ttl time.Duration) error {
     instance.values[key] = value
+
+    if nil == instance.ttls {
+        instance.ttls = map[string]time.Duration{}
+    }
+    instance.ttls[key] = ttl
 
     return nil
 }
@@ -619,6 +625,10 @@ func TestArchiveCarriesTheCountsTheReadingStatesRatherThanASecondObservation(t *
     if 3 != archive.appended[0].ProductCount || 7 != archive.appended[0].JournalCount {
         t.Fatalf("expected the row to carry the payload's counts 3/7, got %d/%d", archive.appended[0].ProductCount, archive.appended[0].JournalCount)
     }
+
+    if "catalog" != archive.appended[0].Headline {
+        t.Fatalf("expected the row to carry the reading's headline, got %q", archive.appended[0].Headline)
+    }
 }
 
 /* a payload without counts is a reading this service did not write, and a row with counts nobody measured would be a second observation by another name */
@@ -656,5 +666,41 @@ func TestArchiveResolvesTheRepositoryAtTheCallAndNotAtConstruction(t *testing.T)
 
     if _, readErr := reportService.RecentReadings(newArchiveRuntime(nil), 1); nil == readErr {
         t.Fatalf("expected the history door to fail over a container without the repository")
+    }
+}
+
+/* a stamp that is there and does not parse is no more an instant than an absent one: served, the reading claimed
+   FromCache with a zero instant, the one thing a caller reads to know how old the answer is */
+func TestCatalogReadingTakesAFreshReadingWhenTheCachedInstantDoesNotParse(t *testing.T) {
+    servedAt := time.Date(2026, time.September, 6, 11, 0, 0, 0, time.UTC)
+    clockInstance := melodyclock.NewFrozenClock(servedAt)
+    cacheInstance := &readingCache{values: map[string]any{catalogReadingCacheKey: "products=1 journal=2 recorded_at=garbage"}}
+
+    reportService := newReportServiceUnderTest(t, clockInstance, cacheInstance)
+
+    reading, readingErr := reportService.Reading(context.Background())
+    if nil != readingErr {
+        t.Fatalf("reading: %v", readingErr)
+    }
+
+    if true == reading.FromCache || false == reading.RecordedAt.Equal(servedAt) {
+        t.Fatalf("expected a fresh reading at %s, got FromCache=%v at %s", servedAt.Format(time.RFC3339), reading.FromCache, reading.RecordedAt.Format(time.RFC3339))
+    }
+}
+
+/* the cached reading expires with the refresh interval: kept longer, a reading older than the schedule that
+   replaces it was served as the current one */
+func TestCatalogRefreshCachesTheReadingForTheRefreshInterval(t *testing.T) {
+    clockInstance := melodyclock.NewFrozenClock(time.Date(2026, time.September, 6, 10, 0, 0, 0, time.UTC))
+    cacheInstance := &readingCache{values: map[string]any{}}
+
+    reportService := newReportServiceUnderTest(t, clockInstance, cacheInstance)
+
+    if _, refreshErr := reportService.Refresh(context.Background()); nil != refreshErr {
+        t.Fatalf("refresh: %v", refreshErr)
+    }
+
+    if ttl, cached := cacheInstance.ttls[catalogReadingCacheKey]; false == cached || time.Minute != ttl {
+        t.Fatalf("expected the reading cached for the one-minute interval, got %s (cached %v)", ttl, cached)
     }
 }

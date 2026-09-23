@@ -41,8 +41,8 @@ func expectedSchemaOf(statementList []string) []expectedTable {
 
 /* expectedTableOf reads one CREATE TABLE statement: the table named after the keywords, and every item of the
    parenthesised body that opens with a column name rather than with a constraint keyword. Items are split on the
-   commas at depth one, so a type's own parentheses — VARCHAR(255), DATETIME(6), a key's column list — stay inside
-   their item. */
+   commas at depth one and outside a quoted literal, so a type's own parentheses — VARCHAR(255), DATETIME(6), a
+   key's column list — and a comma or a parenthesis inside a COMMENT or a DEFAULT stay inside their item. */
 func expectedTableOf(statement string) (expectedTable, bool) {
     const createPrefix = "CREATE TABLE IF NOT EXISTS "
 
@@ -77,9 +77,20 @@ func splitAtDepthOne(body string) []string {
 
     depth := 0
     itemStart := 0
+    quote := rune(0)
 
     for index, character := range body {
+        if 0 != quote {
+            if character == quote {
+                quote = 0
+            }
+
+            continue
+        }
+
         switch character {
+        case '\'', '"', '`':
+            quote = character
         case '(':
             depth++
         case ')':

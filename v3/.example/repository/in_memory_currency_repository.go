@@ -94,7 +94,11 @@ func (instance *inMemoryCurrencyRepository) Update(ctx context.Context, currency
             continue
         }
 
-        instance.currencies[index] = currency
+        renamed := *existing
+        renamed.Code = currency.Code
+        renamed.Name = currency.Name
+        instance.currencies[index] = &renamed
+
         return true, nil
     }
 

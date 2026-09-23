@@ -40,8 +40,10 @@ func TestUpSchemaCreatesEveryTableTolerantlyThenTheConstraint(t *testing.T) {
         "CREATE TABLE IF NOT EXISTS `melody_example_v3_user`",
         "CREATE TABLE IF NOT EXISTS `melody_example_v3_catalog_journal`",
         "CREATE TABLE IF NOT EXISTS `melody_example_v3_two_factor`",
+        "CREATE TABLE IF NOT EXISTS `melody_example_v3_schema_fingerprint`",
         "information_schema.STATISTICS",
         "ADD UNIQUE KEY",
+        "INSERT IGNORE INTO `melody_example_v3_schema_fingerprint` (`set_name`, `fingerprint`) VALUES ('catalogue', '" + catalogueSchemaFingerprint + "')",
     })
 }
 
@@ -79,6 +81,7 @@ func TestDownSchemaDropsTheConstraintFirstAndTheTablesInReverse(t *testing.T) {
     assertQueryOrder(t, recorder.recordedQueries(), []string{
         "information_schema.STATISTICS",
         "DROP INDEX",
+        "DROP TABLE IF EXISTS `melody_example_v3_schema_fingerprint`",
         "DROP TABLE IF EXISTS `melody_example_v3_two_factor`",
         "DROP TABLE IF EXISTS `melody_example_v3_catalog_journal`",
         "DROP TABLE IF EXISTS `melody_example_v3_user`",

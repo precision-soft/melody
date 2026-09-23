@@ -102,7 +102,7 @@ func (instance *jsonLogger) Log(level loggingcontract.Level, message string, con
 
     /* the normalization and the encoding of the caller's own context both stay outside the lock. Both run application code — a MarshalJSON, a String, an Error of the caller's own — which is unbounded work this logger does not own and which may itself log through this very logger: under the lock, such a value deadlocked the whole journal on its own record, and every other writer queued behind the slowest caller's encoder. */
     normalizedContext := normalizeJsonContext(context)
-    encodedContext, contextMarshalErr := json.Marshal(normalizedContext)
+    encodedContext, contextMarshalErr := marshalJsonContextContained(normalizedContext)
 
     renderedContext := ""
     if nil != contextMarshalErr {
@@ -369,7 +369,7 @@ func normalizeJsonValue(value any, remainingDepth int, seen map[jsonContextVisit
         /* the floor bounds the DESCENT, not the scalar conversion: an error sitting at the floor still renders as its message, because handed to the encoder raw it marshals as the empty object — losing exactly the failure the record nested this deep to carry */
         if err, ok := value.(error); true == ok && false == internal.IsNilInterface(err) {
             if _, isMarshaler := value.(json.Marshaler); false == isMarshaler {
-                return err.Error()
+                return recoveredErrorMessage(err)
             }
         }
 
@@ -391,7 +391,7 @@ func normalizeJsonValue(value any, remainingDepth int, seen map[jsonContextVisit
             return value
         }
 
-        return err.Error()
+        return recoveredErrorMessage(err)
     }
 
     switch typedValue := value.(type) {
@@ -432,4 +432,19 @@ func normalizeJsonValue(value any, remainingDepth int, seen map[jsonContextVisit
     }
 
     return value
+}
+
+/* marshalJsonContextContained encodes the normalized context under a recover: the encoder calls the MarshalJSON and MarshalText of the caller's own values and hands back as a panic anything they raise that is not its own error, and a record is written from the recovery defers that report a failure — a second panic there went past the recovery reporting the first, and on a worker's goroutine with nothing above it that ended the process. A value whose encoding panicked answers an error naming the panic, and the record falls back to the text rendering it keeps for a context the encoder refuses. */
+func marshalJsonContextContained(normalizedContext any) (encoded []byte, marshalErr error) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            return
+        }
+
+        encoded = nil
+        marshalErr = fmt.Errorf("encoding the context panicked: %v", recoveredValue)
+    }()
+
+    return json.Marshal(normalizedContext)
 }

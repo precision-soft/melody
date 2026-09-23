@@ -62,6 +62,7 @@ func TestRegisterParameters_LeavesAnOutboundUrlWithoutAUserinfoReadable(t *testi
     moduleWithEnvironment(t, map[string]string{
         environmentKeyRatesBaseUrl:         "http://rates.melody.localhost.precision-soft.com/v1/",
         environmentKeyReportExportEndpoint: "http://rates.melody.localhost.precision-soft.com/v1/report-sink",
+        "MYSQL_PASSWORD":                   "melody",
     }).RegisterParameters(registrar)
 
     for _, key := range []string{environmentKeyRatesBaseUrl, environmentKeyReportExportEndpoint} {
@@ -109,5 +110,37 @@ func TestRegisterParameters_DefaultsTheRatesBaseToTheSeeds(t *testing.T) {
 
     if "%env(default:"+parameterRatesDefaultBaseCurrency+":RATES_BASE_CURRENCY)%" != fmt.Sprint(registrar.registered[parameterRatesBaseCurrency]) {
         t.Fatalf("the base parameter reads %q, wanted the env key with the seed's default", fmt.Sprint(registrar.registered[parameterRatesBaseCurrency]))
+    }
+}
+
+/* a credential key the environment does not define is not marked: the integration blocks are removed to boot the
+   fallbacks, and a mark that matched no parameter warned at every boot of a mysql-only checkout. A key present —
+   blank included, which melody still registers as a parameter — is marked */
+func TestRegisterParameters_MarksACredentialOnlyWhereTheEnvironmentDefinesIt(t *testing.T) {
+    mysqlOnly := newRecordingParameterRegistrar()
+    moduleWithEnvironment(t, map[string]string{"MYSQL_PASSWORD": "melody"}).RegisterParameters(mysqlOnly)
+
+    if false == mysqlOnly.isMarked("MYSQL_PASSWORD") {
+        t.Fatalf("expected the defined credential marked, marked: %v", mysqlOnly.marked)
+    }
+
+    for _, absentKey := range []string{environmentKeyPgsqlPassword, "S3_SECRET_KEY", environmentKeyAmqpDsn} {
+        if true == mysqlOnly.isMarked(absentKey) {
+            t.Errorf("expected %s left unmarked where the environment does not define it, marked: %v", absentKey, mysqlOnly.marked)
+        }
+    }
+
+    everyBlock := newRecordingParameterRegistrar()
+    moduleWithEnvironment(t, map[string]string{
+        "MYSQL_PASSWORD":            "melody",
+        environmentKeyPgsqlPassword: "",
+        "S3_SECRET_KEY":             "secret",
+        environmentKeyAmqpDsn:       "amqp://guest:guest@rabbitmq:5672/",
+    }).RegisterParameters(everyBlock)
+
+    for _, definedKey := range []string{"MYSQL_PASSWORD", environmentKeyPgsqlPassword, "S3_SECRET_KEY", environmentKeyAmqpDsn} {
+        if false == everyBlock.isMarked(definedKey) {
+            t.Errorf("expected %s marked where the environment defines it, marked: %v", definedKey, everyBlock.marked)
+        }
     }
 }

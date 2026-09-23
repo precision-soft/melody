@@ -25,7 +25,11 @@ func upSchema(ctx context.Context, database *bun.DB) error {
         }
     }
 
-    return addUserUsernameIndex(ctx, database)
+    if indexErr := addUserUsernameIndex(ctx, database); nil != indexErr {
+        return indexErr
+    }
+
+    return recordSchemaFingerprint(ctx, database, recordSchemaFingerprintSql, catalogMigrationSetName, catalogueSchemaFingerprint)
 }
 
 /* downSchema reverses upSchema: the constraint goes first, because the table it stands on is one of the ones the drops below take away, and the tables go in the reverse order of their creation. */
@@ -125,6 +129,7 @@ var schemaUpStatementList = []string{
     createUserTableSql,
     createCatalogJournalTableSql,
     createTwoFactorTableSql,
+    createSchemaFingerprintTableSql,
 }
 
 /* schemaTableNameList names the tables this migration owns, in the order it drops them — the reverse of
@@ -132,6 +137,7 @@ var schemaUpStatementList = []string{
    cannot be left standing by a down that forgot it, and the reset command names the same list to the
    operator rather than a second copy of it. */
 var schemaTableNameList = []string{
+    SchemaFingerprintTableName,
     "melody_example_v3_two_factor",
     "melody_example_v3_catalog_journal",
     "melody_example_v3_user",

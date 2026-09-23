@@ -519,6 +519,94 @@ func TestRateRefreshServiceRefresh_AnAnswerWithoutADateIsJudgedUnderTheSkew(t *t
     }
 }
 
+/* a verbatim replay of an hour-old answer that kept its Date and dropped its Age reads as a provider whose clock
+   runs an hour late; moved by that hour, its old stamp landed at the moment it was replayed and was written over
+   the newer reading. The clock is trusted within the skew, and an answer that far off is refused by name */
+func TestRateRefreshServiceRefresh_RefusesAReplayThatKeptItsDateAndDroppedItsAge(t *testing.T) {
+    refresh, currencyService, runtimeInstance, _ := rateRefreshAnswering(
+        t,
+        providerAnswer{body: `{"base":"EUR","asOf":"2026-09-08T08:10:00Z","rates":{"USD":1.2}}`},
+        providerAnswer{body: `{"base":"EUR","asOf":"2026-09-08T07:59:00Z","rates":{"USD":1.3}}`, clockAhead: -time.Hour},
+    )
+
+    if _, err := refresh.Refresh(runtimeInstance); nil != err {
+        t.Fatalf("the first reading failed: %v", err)
+    }
+
+    outcome, err := refresh.Refresh(runtimeInstance)
+    if nil == err || false == strings.Contains(err.Error(), "the rate provider's clock is ") || false == strings.Contains(err.Error(), "beyond the 5m0s skew") {
+        t.Fatalf("the replay reported %+v, %v; wanted it refused naming the clock", outcome, err)
+    }
+
+    refusalContext := exception.LogContext(err)
+    if "" == refusalContext["date"] || nil == refusalContext["offset"] {
+        t.Errorf("the refusal did not name the Date and the offset it read: %v", refusalContext)
+    }
+
+    usd, _, _ := currencyService.FindById("cur-usd")
+    if 1.2 != usd.Rate {
+        t.Errorf("the replay moved cur-usd to %v, wanted 1.2 kept", usd.Rate)
+    }
+}
+
+/* the bound holds in both directions and is judged against the measurement: a clock six minutes ahead is refused,
+   one four minutes behind is an ordinary provider */
+func TestRateRefreshServiceRefresh_BoundsTheProviderClockInBothDirections(t *testing.T) {
+    ahead, _, aheadRuntime, aheadRepository := rateRefreshAnswering(t, providerAnswer{
+        body:       `{"base":"EUR","asOf":"2026-09-08T09:05:00Z","rates":{"USD":1.2}}`,
+        clockAhead: 6 * time.Minute,
+    })
+
+    if _, err := ahead.Refresh(aheadRuntime); nil == err || 0 != aheadRepository.updates.Load() {
+        t.Fatalf("a provider six minutes ahead was admitted: %v, %d writes", err, aheadRepository.updates.Load())
+    }
+
+    behind, currencyService, behindRuntime, _ := rateRefreshAnswering(t, providerAnswer{
+        body:       `{"base":"EUR","asOf":"2026-09-08T08:55:00Z","rates":{"USD":1.2}}`,
+        clockAhead: -4 * time.Minute,
+    })
+
+    outcome, err := behind.Refresh(behindRuntime)
+    if nil != err || 1 != outcome.Updated {
+        t.Fatalf("a provider four minutes behind reported %+v, %v; wanted it written", outcome, err)
+    }
+
+    usd, _, _ := currencyService.FindById("cur-usd")
+    if drift := usd.RateAsOf.Sub(time.Date(2026, time.September, 8, 8, 59, 0, 0, time.UTC)); drift < -time.Second || drift > time.Second {
+        t.Errorf("the reading was stored at %s on this clock, wanted four minutes after its stamp", usd.RateAsOf)
+    }
+}
+
+/* an answer without a date that is stamped ahead of this clock is taken at the moment it arrived: stored ahead,
+   it made the honest reading of the next run older than it, and kept it out as stale */
+func TestRateRefreshServiceRefresh_ADatelessReadingAheadDoesNotPinTheCatalogue(t *testing.T) {
+    refresh, currencyService, runtimeInstance, _ := rateRefreshAnswering(
+        t,
+        providerAnswer{body: `{"base":"EUR","asOf":"2026-09-08T09:04:00Z","rates":{"USD":1.2}}`, omitDate: true},
+        providerAnswer{body: `{"base":"EUR","asOf":"2026-09-08T09:00:00Z","rates":{"USD":1.3}}`, omitDate: true},
+    )
+
+    if _, err := refresh.Refresh(runtimeInstance); nil != err {
+        t.Fatalf("the first reading failed: %v", err)
+    }
+
+    /* read from the repository, not through the service: the fixture wires no listener that would drop the entry a read through the cache plants */
+    held, _, _ := currencyService.currencyRepository.FindById(context.Background(), "cur-usd")
+    if false == held.ProviderRateAsOf.Equal(time.Date(2026, time.September, 8, 9, 4, 0, 0, time.UTC)) || false == held.RateAsOf.Equal(time.Date(2026, time.September, 8, 9, 0, 0, 0, time.UTC)) {
+        t.Errorf("the reading was stored at %s on this clock and %s as stamped, wanted the arrival and the stamp as it came", held.RateAsOf, held.ProviderRateAsOf)
+    }
+
+    outcome, err := refresh.Refresh(runtimeInstance)
+    if nil != err {
+        t.Fatalf("the honest reading failed: %v", err)
+    }
+
+    usd, _, _ := currencyService.FindById("cur-usd")
+    if 1 != outcome.Updated || 1.3 != usd.Rate {
+        t.Errorf("the honest reading reported %+v and left cur-usd at %v, wanted it written at 1.3", outcome, usd.Rate)
+    }
+}
+
 /* a document older than the reading the catalogue holds is a replay; the newer reading is kept and the
    run says so under its own heading, not under "updated" or "skipped" */
 func TestRateRefreshServiceRefresh_CountsAReplayedDocumentAsStale(t *testing.T) {

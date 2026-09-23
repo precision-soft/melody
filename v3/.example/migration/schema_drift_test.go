@@ -12,8 +12,8 @@ import (
    taken for a column, and no table for the statement that only adds the username key */
 func TestExpectedSchemaOf_ReadsTheColumnsTheSetCreates(t *testing.T) {
     catalogue := expectedSchemaOf(schemaUpStatementList)
-    if 6 != len(catalogue) {
-        t.Fatalf("expected the six tables of the catalogue, got %d: %v", len(catalogue), catalogue)
+    if 7 != len(catalogue) {
+        t.Fatalf("expected the six tables of the catalogue and its fingerprint table, got %d: %v", len(catalogue), catalogue)
     }
 
     columnListByTable := map[string][]string{}
@@ -25,6 +25,7 @@ func TestExpectedSchemaOf_ReadsTheColumnsTheSetCreates(t *testing.T) {
         "melody_example_v3_currency":   {"id", "code", "name", "rate", "rate_as_of", "provider_rate_as_of"},
         "melody_example_v3_two_factor": {"user_identifier", "secret", "recovery_codes", "created_at"},
         "melody_example_v3_category":   {"id", "name"},
+        SchemaFingerprintTableName:     {"set_name", "fingerprint"},
     }
     for tableName, columnNameList := range wanted {
         if false == reflect.DeepEqual(columnNameList, columnListByTable[tableName]) {
@@ -33,8 +34,8 @@ func TestExpectedSchemaOf_ReadsTheColumnsTheSetCreates(t *testing.T) {
     }
 
     archive := expectedSchemaOf(archiveUpStatementList)
-    if 1 != len(archive) || false == reflect.DeepEqual([]string{"taken_at", "headline", "payload", "product_count", "journal_count"}, archive[0].columnNameList) {
-        t.Fatalf("expected the archive's one table with its five columns, got %v", archive)
+    if 2 != len(archive) || false == reflect.DeepEqual([]string{"taken_at", "headline", "payload", "product_count", "journal_count"}, archive[0].columnNameList) || ArchiveSchemaFingerprintTableName != archive[1].name || false == reflect.DeepEqual([]string{"set_name", "fingerprint"}, archive[1].columnNameList) {
+        t.Fatalf("expected the archive's table with its five columns and its fingerprint table, got %v", archive)
     }
 }
 
@@ -112,5 +113,15 @@ func TestEnsureArchiveMigratedRefusesAnArchiveInAnotherShape(t *testing.T) {
     ensureErr := EnsureArchiveMigrated(context.Background(), database)
     if nil == ensureErr || false == strings.Contains(ensureErr.Error(), "the archive set finds the volume in another shape") || false == strings.Contains(ensureErr.Error(), "lacks journal_count") {
         t.Fatalf("expected the archive's drift named, got %v", ensureErr)
+    }
+}
+
+/* a comma or a parenthesis inside a quoted literal — a COMMENT, a DEFAULT — belongs to its item: split there, it
+   invented a column the volume could never hold and refused every volume */
+func TestExpectedSchemaOf_KeepsAQuotedCommaInsideItsItem(t *testing.T) {
+    table, isCreate := expectedTableOf("CREATE TABLE IF NOT EXISTS `probe` (`a` INT COMMENT 'one, (two', `b` VARCHAR(8) DEFAULT \"x,y\", PRIMARY KEY (`a`))")
+
+    if false == isCreate || false == reflect.DeepEqual([]string{"a", "b"}, table.columnNameList) {
+        t.Fatalf("expected the columns a and b, got %v", table.columnNameList)
     }
 }
