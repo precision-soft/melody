@@ -46,13 +46,16 @@
 #   - V3 DATABASE RESET  example:db:reset refuses without --force, and with it drops the schema, applies it
 #                        again, empties the audit trail the module's table keeps and reseeds all four
 #                        nomenclatures — the one state this application has, restored from the database side
+#   - V3 SCHEMA DRIFT    a column dropped out of band makes product:list refuse the volume by table and column,
+#                        naming example:db:reset --force, and the command runs again after the reset
 #   - V3 CACHE CLEAR     example:cache:clear empties the shared cache namespace on its own, the databases
 #                        untouched, with the entry a listing cached read out of redis before and after
 #   - V3 TWO-FACTOR RELEASE  the schema the reset just applied ties an enrollment to its account with a
 #                        cascading foreign key, read out of information_schema — the half of the release
 #                        that holds when no listener runs
-#   - V3 EXCHANGE RATES  the seeded quote, the refresh that replaces it with the provider's, the quote read
-#                        back out of band, the report export, and the two configurations that gate the door:
+#   - V3 EXCHANGE RATES  the seeded quote, the refresh that replaces it with the provider's, the quote and the
+#                        provider's own stamp read back out of band, the provider's clock measured at no offset,
+#                        the report export, and the two configurations that gate the door:
 #                        a provider that refuses exits non-zero and moves nothing, an absent one is a no-op
 #   - V3 READING ARCHIVE the example's SECOND database, on postgres: its own command family pinned to its own
 #                        manager, the reading a refresh appends read back out of band, the archived instant
@@ -113,7 +116,7 @@ e2e_require_dev_service
 # mismatch message prints both numbers, so the count to move to is in the failure itself. A run that took one of
 # the degraded early-exit branches (an unreachable supervised app, a cold-cache timeout) legitimately executes
 # fewer checks; it is already red from the check_fail that branch raised
-EXPECTED_CHECK_COUNT_INTEGER=165
+EXPECTED_CHECK_COUNT_INTEGER=169
 readonly EXPECTED_CHECK_COUNT_INTEGER
 
 # state the scope in the output, so a reader never has to infer which major these checks covered
@@ -1630,6 +1633,39 @@ fi
 check_section_end "V3 DATABASE RESET" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
+# V3 SCHEMA DRIFT — a volume in another shape than the code is refused by name, not answered with a 500
+# ---------------------------------------------------------------------------------------------------
+
+check_section_start "V3 SCHEMA DRIFT" "${TAG_VALIDATE}" "e2e"
+
+# The example's schema is ONE migration recorded as applied by name, and its tables are created IF NOT EXISTS,
+# so a volume provisioned before a column was added passes the set untouched. Measured before this section was
+# written: the currency column added in the same change made the live harness read a product as a 500, the
+# journal saying "Unknown column". The section puts the live volume in that shape on purpose — the column
+# dropped out of band — and requires a command that reaches the catalogue to refuse it by name, then resets and
+# requires the same command to run.
+e2e_mysql_scalar "melody_example_v3" "ALTER TABLE melody_example_v3_currency DROP COLUMN provider_rate_as_of" >/dev/null
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "set -o pipefail; go run . product:list 2>&1 | sed 's/\x1b\[[0-9;]*m//g'"
+if [[ 0 -ne ${RUN_IN_DEV_STATUS_INTEGER} ]] \
+    && printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'melody_example_v3_currency lacks provider_rate_as_of' \
+    && printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'run example:db:reset --force'; then
+    check_pass "v3 product:list over a volume lacking a column refuses it by table and column and names the reset"
+else
+    check_fail "v3 product:list over a volume lacking provider_rate_as_of answered status ${RUN_IN_DEV_STATUS_INTEGER}: ${RUN_IN_DEV_OUTPUT_STRING:-<empty>}"
+fi
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:db:reset --force >/dev/null 2>&1"
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "set -o pipefail; go run . product:list 2>&1 | sed 's/\x1b\[[0-9;]*m//g'"
+if [[ 0 -eq ${RUN_IN_DEV_STATUS_INTEGER} ]]; then
+    check_pass "v3 product:list runs again once example:db:reset --force brought the volume to the present schema"
+else
+    check_fail "v3 product:list after the reset answered status ${RUN_IN_DEV_STATUS_INTEGER}: ${RUN_IN_DEV_OUTPUT_STRING:-<empty>}"
+fi
+
+check_section_end "V3 SCHEMA DRIFT" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
 # V3 CACHE CLEAR — the cache emptied by a door of its own, without the reset's two databases
 # ---------------------------------------------------------------------------------------------------
 
@@ -1725,10 +1761,26 @@ else
     check_fail "cur-usd is quoted ${V3_REFRESHED_QUOTE_STRING:-<no answer>}, wanted the provider's 1.0842@2026-09-07T09:00:00Z"
 fi
 
+# the reading is stored in both reference frames: the provider's stamp as it came, beside the same instant moved
+# onto this application's clock. The stub answers from the balancer, whose clock is this host's, so the offset is
+# measured as none and the two instants are one — the table says so in its last column.
+V3_PROVIDER_STAMP_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT DATE_FORMAT(provider_rate_as_of, '%Y-%m-%dT%H:%i:%sZ') FROM melody_example_v3_currency WHERE id = 'cur-usd'")"
+if [[ "2026-09-07T09:00:00Z" = "${V3_PROVIDER_STAMP_STRING}" ]]; then
+    check_pass "the provider's own stamp landed beside the quote (cur-usd provider_rate_as_of ${V3_PROVIDER_STAMP_STRING}, read out of band)"
+else
+    check_fail "cur-usd carries the provider stamp ${V3_PROVIDER_STAMP_STRING:-<no answer>}, wanted 2026-09-07T09:00:00Z as the document wrote it"
+fi
+
+if printf '%s' "${V3_REFRESH_OUTPUT_STRING}" | grep -qE '\|[[:space:]]*\+0s[[:space:]]*\|?[[:space:]]*$'; then
+    check_pass "example:currency:refresh-rates measured the provider's clock from its answer and found no offset"
+else
+    check_fail "the refresh reported ${V3_REFRESH_OUTPUT_STRING:-<empty>}, wanted a measured provider clock at +0s"
+fi
+
 # the same document a second time is a provider between two moves: nothing is written and the run says
 # so under its own heading, where the previous form issued a full-row UPDATE per currency and, on mysql,
 # read its zero affected rows as three currencies deleted inside the run (SKIPPED 3). Columns: AS_OF,
-# ATTEMPTS, UPDATED, SKIPPED, UNCHANGED, STALE, REFUSED
+# ATTEMPTS, UPDATED, SKIPPED, UNCHANGED, STALE, REFUSED, PROVIDER_CLOCK
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:currency:refresh-rates 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
 V3_SECOND_REFRESH_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 if printf '%s' "${V3_SECOND_REFRESH_OUTPUT_STRING}" | grep -qE '2026-09-07T09:00:00Z[[:space:]]*\|[[:space:]]*1[[:space:]]*\|[[:space:]]*0[[:space:]]*\|[[:space:]]*0[[:space:]]*\|[[:space:]]*3[[:space:]]*\|[[:space:]]*0[[:space:]]*\|[[:space:]]*0'; then

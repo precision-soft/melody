@@ -1673,7 +1673,7 @@ func TestContainer_Close_TheFramesOfAPanickingCloseAreBounded(t *testing.T) {
     }
 }
 
-/* the details are read under the same containment the failure line beside them has: LogContext walks the error's own chain through Unwrap, which is the class errorText exists for one link deeper, and an error whose Unwrap panics used to end the teardown loop from inside the one place built to survive a bad close — under a teardown armed in waves, on a goroutine no caller can recover. */
+/* the details are read under the same containment the failure line beside them has: LogContext walks the error's own chain through Unwrap, which is the class errorText exists for one link deeper, and an error whose Unwrap panics used to end the teardown loop from inside the one place built to survive a bad close — under a teardown armed in waves, on a goroutine no caller can recover. LogContext now walks under a recover of its own and writes the cut into the chain, so the details carry the reason where the teardown's own containment used to leave only its marker; that containment stays, for a reading no door of the exception package contains. */
 func TestContainer_Close_ACloseErrorWhoseUnwrapPanicsDoesNotEndTheTeardown(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1702,9 +1702,8 @@ func TestContainer_Close_ACloseErrorWhoseUnwrapPanicsDoesNotEndTheTeardown(t *te
     }
 
     failureDetails, _ := typedError.Context()["failureDetails"].(map[string]exceptioncontract.Context)
-    detailsPanicked, hasMarker := failureDetails["service:service.unwrapPanics"]["detailsPanicked"].(string)
-    if false == hasMarker || false == strings.Contains(detailsPanicked, "unwrap of a half-built error") {
-        t.Fatalf("expected the contained reading to say why it left nothing, got %v", failureDetails)
+    if cause := failureDetails["service:service.unwrapPanics"]["cause"]; "the links below could not be read, their Unwrap panicked: unwrap of a half-built error" != cause {
+        t.Fatalf("expected the details to say where the chain was cut and why, got %v", failureDetails)
     }
 }
 

@@ -1094,12 +1094,12 @@ func TestLogOnRecoverAndExitAfter_WritesTheCertificateForAnAlreadyLoggedError(t 
     }
 }
 
-/* the resolve step runs under its own shield, honouring the comment beside the other steps: a recovered value whose methods panic used to unwind into main and the process died with the Go runtime's exit code 2 — no record, no certificate, no teardown. The shield answers a generic record under the caller's own code. The probe panics in Unwrap, which the already-logged probe calls: an Error() that panics is rendered by the resolve itself now and never reaches the shield */
-func TestResolveRecoveredExitShielded_AnswersTheCallersCodeWhenTheValueItselfPanics(t *testing.T) {
+/* a recovered value whose methods panic used to unwind into main and the process died with the Go runtime's exit code 2 — no record, no certificate, no teardown; the resolve step runs under its own shield for that. The probe panics in Unwrap, which the already-logged probe calls, and the exception package now searches the chain and reads the mark under a recover of its own: the value is no longer unresolvable, so it reaches the record under its OWN message rather than the shield's generic one, with the caller's code, and still logged. The shield stays as the defense of a value that no reader of this package would contain; no value reaches it through the public doors any more */
+func TestResolveRecoveredExitShielded_ResolvesAValueWhoseUnwrapPanicsUnderItsOwnMessage(t *testing.T) {
     err, resolvedExitCode, needsLogging := resolveRecoveredExitShielded(&panickingResolveError{}, 3)
 
     if nil == err {
-        t.Fatal("expected a generic record for the unresolvable value")
+        t.Fatal("expected a record for the value")
     }
 
     if 3 != resolvedExitCode {
@@ -1107,11 +1107,15 @@ func TestResolveRecoveredExitShielded_AnswersTheCallersCodeWhenTheValueItselfPan
     }
 
     if false == needsLogging {
-        t.Fatal("expected the generic record to be logged")
+        t.Fatal("expected the record to be logged")
     }
 
-    if false == strings.Contains(err.Error(), "could not be resolved") {
-        t.Fatalf("expected the record to name the failure, got %q", err.Error())
+    if "a value whose Unwrap panics" != err.Error() {
+        t.Fatalf("expected the record to carry the value's own message, got %q", err.Error())
+    }
+
+    if _, isProbe := err.CauseErr().(*panickingResolveError); false == isProbe {
+        t.Fatalf("expected the value itself as the cause, got %T", err.CauseErr())
     }
 }
 

@@ -1133,3 +1133,50 @@ func TestAwaitHttpServerEnd_DrainsOpenScopesEvenWhenTheShutdownOverran(t *testin
         t.Fatalf("expected the drain to have run and reported the open scopes, got %q", endErr.Error())
     }
 }
+
+type shutdownHookRecordLogger struct {
+    loggingcontract.Logger
+
+    messages []string
+}
+
+func (instance *shutdownHookRecordLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+    instance.messages = append(instance.messages, message)
+}
+
+type shutdownHookMessagePanickingError struct{}
+
+func (shutdownHookMessagePanickingError) Error() string {
+    panic("Error() panics")
+}
+
+type shutdownHookUnwrapPanickingError struct{}
+
+func (shutdownHookUnwrapPanickingError) Error() string {
+    return "a hook failure whose Unwrap panics"
+}
+
+func (shutdownHookUnwrapPanickingError) Unwrap() error {
+    panic("Unwrap() panics")
+}
+
+/* a shutdown hook runs on a goroutine net/http starts and never joins, so the recovery of a hook is the last boundary it has: an error the hook panicked with whose Error or Unwrap panicked raised a second panic there, while the server was still draining, and ended the process. The hook's panic is now filed under the message that could be rendered */
+func TestWrapHttpShutdownHook_FilesAPanicWhoseErrorOrUnwrapPanics(t *testing.T) {
+    for name, testCase := range map[string]struct {
+        panicValue error
+        message    string
+    }{
+        "error":  {panicValue: shutdownHookMessagePanickingError{}, message: "error message panicked: Error() panics"},
+        "unwrap": {panicValue: shutdownHookUnwrapPanickingError{}, message: "a hook failure whose Unwrap panics"},
+    } {
+        logger := &shutdownHookRecordLogger{Logger: logging.NewNopLogger()}
+
+        var hooksDone sync.WaitGroup
+        wrapHttpShutdownHook(func() { panic(testCase.panicValue) }, &hooksDone, logger)()
+        hooksDone.Wait()
+
+        if 1 != len(logger.messages) || testCase.message != logger.messages[0] {
+            t.Fatalf("%s: expected one record %q, got %v", name, testCase.message, logger.messages)
+        }
+    }
+}

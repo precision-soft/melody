@@ -361,6 +361,15 @@ func TestJournalServerSideCut_WarnsOnTheDeadlineAloneWhoeverHoldsTheContext(t *t
     }
 }
 
+/* a runtime without a logger answered nil through LoggerFromRuntime, and the warning of a server cut was written
+   onto it; it now goes to the fallback journal */
+func TestJournalServerSideCut_ARuntimeWithoutALoggerDoesNotPanic(t *testing.T) {
+    containerInstance := melodycontainer.NewContainer()
+    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+
+    journalServerSideCut(runtimeInstance, "visitor", "event", &net.OpError{Op: "write", Err: &timeoutError{}})
+}
+
 /* timeoutError is what a deadline reports through net.OpError */
 type timeoutError struct{}
 

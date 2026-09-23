@@ -16,11 +16,12 @@ import (
 type currencyRow struct {
     bun.BaseModel `bun:"table:melody_example_v3_currency,alias:currency"`
 
-    Id       string    `bun:"id,pk"`
-    Code     string    `bun:"code,notnull"`
-    Name     string    `bun:"name,notnull"`
-    Rate     float64   `bun:"rate,notnull"`
-    RateAsOf time.Time `bun:"rate_as_of,notnull"`
+    Id               string    `bun:"id,pk"`
+    Code             string    `bun:"code,notnull"`
+    Name             string    `bun:"name,notnull"`
+    Rate             float64   `bun:"rate,notnull"`
+    RateAsOf         time.Time `bun:"rate_as_of,notnull"`
+    ProviderRateAsOf time.Time `bun:"provider_rate_as_of,notnull"`
 }
 
 /* newCurrencyRow is the one place an entity becomes a row, and the instant is moved to UTC here: the mysql
@@ -30,16 +31,17 @@ type currencyRow struct {
    there — an instant compares equal across locations — and the two agree once the row carries UTC. */
 func newCurrencyRow(currency *entity.Currency) *currencyRow {
     return &currencyRow{
-        Id:       currency.Id,
-        Code:     currency.Code,
-        Name:     currency.Name,
-        Rate:     currency.Rate,
-        RateAsOf: currency.RateAsOf.UTC(),
+        Id:               currency.Id,
+        Code:             currency.Code,
+        Name:             currency.Name,
+        Rate:             currency.Rate,
+        RateAsOf:         currency.RateAsOf.UTC(),
+        ProviderRateAsOf: currency.ProviderRateAsOf.UTC(),
     }
 }
 
 func (instance *currencyRow) toEntity() *entity.Currency {
-    return entity.NewCurrency(instance.Id, instance.Code, instance.Name, instance.Rate, instance.RateAsOf)
+    return entity.NewQuotedCurrency(instance.Id, instance.Code, instance.Name, entity.NewRateQuote(instance.Rate, instance.RateAsOf, instance.ProviderRateAsOf))
 }
 
 func newBunCurrencyRepository(database *bun.DB) *bunCurrencyRepository {
@@ -180,27 +182,38 @@ func (instance *bunCurrencyRepository) Update(ctx context.Context, currency *ent
     return affectedAtLeastOneRow(result), nil
 }
 
-func (instance *bunCurrencyRepository) UpdateQuote(ctx context.Context, id string, rate float64, rateAsOf time.Time) (bool, error) {
+func (instance *bunCurrencyRepository) UpdateQuote(ctx context.Context, id string, quote entity.RateQuote) (bool, error) {
     normalizedId := strings.TrimSpace(id)
     if "" == normalizedId {
         return false, fmt.Errorf("id is required")
     }
 
-    /* the instant is written and compared in UTC, the spelling the row holds; the condition is what makes two
-       concurrent documents land in instant order whichever process writes last */
-    result, updateErr := instance.database.
-        NewUpdate().
-        Model((*currencyRow)(nil)).
-        Set("rate = ?", rate).
-        Set("rate_as_of = ?", rateAsOf.UTC()).
-        Where("id = ?", normalizedId).
-        Where("rate_as_of <= ?", rateAsOf.UTC()).
-        Exec(ctx)
+    result, updateErr := instance.updateQuoteQuery(normalizedId, quote).Exec(ctx)
     if nil != updateErr {
         return false, updateErr
     }
 
     return affectedAtLeastOneRow(result), nil
+}
+
+/* updateQuoteQuery is the conditional write of UpdateQuote, the repository contract in one statement. The instants
+   are written and compared in UTC, the spelling the row holds, and the condition is what makes two concurrent
+   documents land in reading order whichever process writes last: the row is written when it does not hold a
+   newer reading on this clock, or when it names the same reading the provider re-quotes, and never when it
+   already holds the quote. */
+func (instance *bunCurrencyRepository) updateQuoteQuery(id string, quote entity.RateQuote) *bun.UpdateQuery {
+    asOf := quote.AsOf.UTC()
+    providerAsOf := quote.ProviderAsOf.UTC()
+
+    return instance.database.
+        NewUpdate().
+        Model((*currencyRow)(nil)).
+        Set("rate = ?", quote.Rate).
+        Set("rate_as_of = ?", asOf).
+        Set("provider_rate_as_of = ?", providerAsOf).
+        Where("id = ?", id).
+        Where("(rate_as_of <= ? OR provider_rate_as_of = ?)", asOf, providerAsOf).
+        Where("NOT (rate = ? AND provider_rate_as_of = ?)", quote.Rate, providerAsOf)
 }
 
 func (instance *bunCurrencyRepository) DeleteById(ctx context.Context, id string) (bool, error) {

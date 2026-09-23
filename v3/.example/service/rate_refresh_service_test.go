@@ -13,6 +13,7 @@ import (
 
     "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/repository"
+    melodyclock "github.com/precision-soft/melody/v3/clock"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
     melodyeventcontract "github.com/precision-soft/melody/v3/event/contract"
@@ -70,7 +71,7 @@ func TestReadRateDocument_ReadsTheDocumentInOneExchangeWhenTheProviderAnswers(t 
         _, _ = writer.Write([]byte(rateDocumentBody))
     })
 
-    document, attempts, err := readRateDocument(context.Background(), provider.client(t))
+    reading, attempts, err := readRateDocument(context.Background(), provider.client(t), melodyclock.NewSystemClock())
     if nil != err {
         t.Fatalf("reading the document failed: %v", err)
     }
@@ -83,16 +84,16 @@ func TestReadRateDocument_ReadsTheDocumentInOneExchangeWhenTheProviderAnswers(t 
         t.Errorf("the provider was given %d exchanges, wanted one", provider.requests.Load())
     }
 
-    if "EUR" != document.Base {
-        t.Errorf("the document names base %q, wanted EUR", document.Base)
+    if "EUR" != reading.document.Base {
+        t.Errorf("the document names base %q, wanted EUR", reading.document.Base)
     }
 
-    if 1.0842 != document.Rates["USD"] {
-        t.Errorf("the document quotes USD at %v, wanted 1.0842", document.Rates["USD"])
+    if 1.0842 != reading.document.Rates["USD"] {
+        t.Errorf("the document quotes USD at %v, wanted 1.0842", reading.document.Rates["USD"])
     }
 
-    if time.Date(2026, time.September, 7, 9, 0, 0, 0, time.UTC) != document.AsOf.UTC() {
-        t.Errorf("the document is stamped %s, wanted the provider's instant", document.AsOf.UTC())
+    if time.Date(2026, time.September, 7, 9, 0, 0, 0, time.UTC) != reading.document.AsOf.UTC() {
+        t.Errorf("the document is stamped %s, wanted the provider's instant", reading.document.AsOf.UTC())
     }
 }
 
@@ -103,7 +104,7 @@ func TestReadRateDocument_SpendsEveryAttemptOnAProviderThatKeepsRefusing(t *test
         writer.WriteHeader(http.StatusServiceUnavailable)
     })
 
-    _, attempts, err := readRateDocument(context.Background(), provider.client(t))
+    _, attempts, err := readRateDocument(context.Background(), provider.client(t), melodyclock.NewSystemClock())
     if nil == err {
         t.Fatal("a provider that answered 503 to every attempt was read successfully")
     }
@@ -136,7 +137,7 @@ func TestReadRateDocument_TakesTheReadingFromAProviderThatRecoversOnTheSecondAtt
         _, _ = writer.Write([]byte(rateDocumentBody))
     })
 
-    document, attempts, err := readRateDocument(context.Background(), provider.client(t))
+    reading, attempts, err := readRateDocument(context.Background(), provider.client(t), melodyclock.NewSystemClock())
     if nil != err {
         t.Fatalf("a provider that recovered was not read: %v", err)
     }
@@ -145,8 +146,8 @@ func TestReadRateDocument_TakesTheReadingFromAProviderThatRecoversOnTheSecondAtt
         t.Errorf("the reading took %d attempts, wanted two", attempts)
     }
 
-    if 1.0842 != document.Rates["USD"] {
-        t.Errorf("the document quotes USD at %v, wanted 1.0842", document.Rates["USD"])
+    if 1.0842 != reading.document.Rates["USD"] {
+        t.Errorf("the document quotes USD at %v, wanted 1.0842", reading.document.Rates["USD"])
     }
 }
 
@@ -158,7 +159,7 @@ func TestReadRateDocument_DoesNotRepeatARequestTheProviderRefusedAsWrong(t *test
         writer.WriteHeader(http.StatusNotFound)
     })
 
-    _, attempts, err := readRateDocument(context.Background(), provider.client(t))
+    _, attempts, err := readRateDocument(context.Background(), provider.client(t), melodyclock.NewSystemClock())
     if nil == err {
         t.Fatal("a 404 was read as a rate document")
     }
@@ -179,7 +180,7 @@ func TestReadRateDocument_DoesNotRepeatAnAnswerThatIsNotARateDocument(t *testing
         _, _ = writer.Write([]byte("not json at all"))
     })
 
-    _, attempts, err := readRateDocument(context.Background(), provider.client(t))
+    _, attempts, err := readRateDocument(context.Background(), provider.client(t), melodyclock.NewSystemClock())
     if nil == err {
         t.Fatal("a body that is not json was read as a rate document")
     }
@@ -224,16 +225,50 @@ func rateRefreshUnderTest(t *testing.T, body string) (*RateRefreshService, *Curr
 
 /* rateRefreshAnsweringInTurn is rateRefreshUnderTest over a provider that answers the bodies given one per
    request, in order, and the last one from then on: what a refresh does is sometimes decided by the reading
-   a PREVIOUS run stored. */
+   a PREVIOUS run stored. The provider's clock agrees with the refresh's on every answer. */
 func rateRefreshAnsweringInTurn(t *testing.T, bodyList ...string) (*RateRefreshService, *CurrencyService, melodyruntimecontract.Runtime, *updateCountingCurrencyRepository) {
     t.Helper()
 
+    answerList := make([]providerAnswer, 0, len(bodyList))
+    for _, body := range bodyList {
+        answerList = append(answerList, providerAnswer{body: body})
+    }
+
+    return rateRefreshAnswering(t, answerList...)
+}
+
+/* providerAnswer is one answer of the stub provider: its body, and the provider's clock when it answered —
+   clockAhead of the refresh's clock, written into the Date header the way a server writes its own, with the
+   Age a cache in front of it adds when age is set, and no Date at all when omitDate is set. */
+type providerAnswer struct {
+    body       string
+    clockAhead time.Duration
+    age        string
+    omitDate   bool
+}
+
+/* rateRefreshAnswering is rateRefreshAnsweringInTurn with the provider's clock stated per answer. */
+func rateRefreshAnswering(t *testing.T, answerList ...providerAnswer) (*RateRefreshService, *CurrencyService, melodyruntimecontract.Runtime, *updateCountingCurrencyRepository) {
+    t.Helper()
+
+    clockInstance := &frozenClock{instant: currencyQuoteInstant.Add(24 * time.Hour)}
+
     var served atomic.Int64
     provider := newCountingRateProvider(t, func(writer http.ResponseWriter, request *http.Request) {
-        index := min(int(served.Add(1))-1, len(bodyList)-1)
+        answer := answerList[min(int(served.Add(1))-1, len(answerList)-1)]
+
+        if true == answer.omitDate {
+            writer.Header()["Date"] = nil
+        } else {
+            writer.Header().Set("Date", clockInstance.Now().Add(answer.clockAhead).UTC().Format(http.TimeFormat))
+        }
+
+        if "" != answer.age {
+            writer.Header().Set("Age", answer.age)
+        }
 
         writer.Header().Set("Content-Type", "application/json")
-        _, _ = writer.Write([]byte(bodyList[index]))
+        _, _ = writer.Write([]byte(answer.body))
     })
 
     currencyService, _, runtimeInstance := currencyServiceUnderTest(t)
@@ -248,8 +283,6 @@ func rateRefreshAnsweringInTurn(t *testing.T, bodyList ...string) (*RateRefreshS
             return client, nil
         },
     )
-
-    clockInstance := &frozenClock{instant: currencyQuoteInstant.Add(24 * time.Hour)}
 
     return NewRateRefreshService(currencyService, clockInstance, provider.server.URL+"/v1/", "eur"), currencyService, runtimeInstance, recordingRepository
 }
@@ -316,11 +349,14 @@ func TestRateRefreshServiceRefresh_RefusesADocumentWithoutAnInstant(t *testing.T
     }
 }
 
+/* a reading cannot have been taken after the provider answered with it: both instants are on the provider's
+   clock, so the refusal needs no guess at how far that clock is from this one, and a stamp one minute past the
+   answer is refused where the skew used to admit five */
 func TestRateRefreshServiceRefresh_RefusesADocumentStampedInTheFuture(t *testing.T) {
-    refresh, _, runtimeInstance, recordingRepository := rateRefreshUnderTest(t, `{"base":"EUR","asOf":"2026-09-08T10:06:00Z","rates":{"USD":1.2}}`)
+    refresh, _, runtimeInstance, recordingRepository := rateRefreshUnderTest(t, `{"base":"EUR","asOf":"2026-09-08T09:01:00Z","rates":{"USD":1.2}}`)
 
     if _, err := refresh.Refresh(runtimeInstance); nil == err {
-        t.Fatal("a document stamped six minutes past the clock was accepted")
+        t.Fatal("a document stamped a minute after the provider answered was accepted")
     }
 
     if 0 != recordingRepository.updates.Load() {
@@ -328,43 +364,158 @@ func TestRateRefreshServiceRefresh_RefusesADocumentStampedInTheFuture(t *testing
     }
 }
 
-/* five minutes of clock skew are admitted: a provider a few seconds ahead of this clock is an ordinary
-   provider */
-func TestRateRefreshServiceRefresh_AdmitsADocumentInsideTheClockSkew(t *testing.T) {
-    refresh, _, runtimeInstance, _ := rateRefreshUnderTest(t, `{"base":"EUR","asOf":"2026-09-08T09:04:00Z","rates":{"USD":1.2}}`)
+/* a provider whose clock runs ahead of this one is an ordinary provider: its answer says so, the Date it writes
+   being ahead by as much as its stamps are, and the reading is stored with its stamp as it came and its instant
+   moved onto this clock */
+func TestRateRefreshServiceRefresh_AdmitsAProviderWhoseClockRunsAhead(t *testing.T) {
+    refresh, currencyService, runtimeInstance, _ := rateRefreshAnswering(t, providerAnswer{
+        body:       `{"base":"EUR","asOf":"2026-09-08T09:04:00Z","rates":{"USD":1.2}}`,
+        clockAhead: 4 * time.Minute,
+    })
 
     outcome, err := refresh.Refresh(runtimeInstance)
     if nil != err {
-        t.Fatalf("a document four minutes ahead of the clock was refused: %v", err)
+        t.Fatalf("a provider four minutes ahead of this clock was refused: %v", err)
     }
 
-    if 1 != outcome.Updated {
-        t.Errorf("the refresh reported %+v, wanted one update", outcome)
+    if 1 != outcome.Updated || false == outcome.ProviderClockMeasured || outcome.ProviderClockOffset < 4*time.Minute || outcome.ProviderClockOffset > 4*time.Minute+time.Second {
+        t.Fatalf("the refresh reported %+v, wanted one update over a clock measured four minutes ahead", outcome)
+    }
+
+    usd, _, _ := currencyService.FindById("cur-usd")
+    stamped := time.Date(2026, time.September, 8, 9, 4, 0, 0, time.UTC)
+    if false == usd.ProviderRateAsOf.Equal(stamped) {
+        t.Errorf("the provider's stamp was stored as %s, wanted %s as it came", usd.ProviderRateAsOf, stamped)
+    }
+
+    onThisClock := stamped.Add(-4 * time.Minute)
+    if drift := usd.RateAsOf.Sub(onThisClock); drift < -time.Second || drift > time.Second {
+        t.Errorf("the reading was stored at %s on this clock, wanted %s to within the second the date is read to", usd.RateAsOf, onThisClock)
     }
 }
 
-/* a reading admitted inside the skew is stored at the clock's instant rather than at the provider's: stored
-   at 09:04:59 against a clock at 09:00, every honest reading of the next five minutes was older than it and
-   kept out as stale, so one provider running ahead pinned the catalogue against the ones that were not */
-func TestRateRefreshServiceRefresh_AReadingInsideTheSkewDoesNotPinTheCatalogue(t *testing.T) {
-    refresh, currencyService, runtimeInstance, _ := rateRefreshAnsweringInTurn(
+/* the provider's clock ran five minutes ahead and was then set back: judged stamp against stamp, the reading
+   stamped before the correction was newer than every honest reading of the five minutes after it, and each was
+   kept out as stale. On this clock the two land in the order they were taken */
+func TestRateRefreshServiceRefresh_AProviderClockSetBackDoesNotPinTheCatalogue(t *testing.T) {
+    refresh, currencyService, runtimeInstance, _ := rateRefreshAnswering(
         t,
-        `{"base":"EUR","asOf":"2026-09-08T09:04:59Z","rates":{"USD":1.2}}`,
-        `{"base":"EUR","asOf":"2026-09-08T09:00:00Z","rates":{"USD":1.3}}`,
+        providerAnswer{body: `{"base":"EUR","asOf":"2026-09-08T09:04:59Z","rates":{"USD":1.2}}`, clockAhead: 5 * time.Minute},
+        providerAnswer{body: `{"base":"EUR","asOf":"2026-09-08T09:00:00Z","rates":{"USD":1.3}}`},
     )
 
     if _, err := refresh.Refresh(runtimeInstance); nil != err {
-        t.Fatalf("the reading ahead of the clock was refused: %v", err)
+        t.Fatalf("the reading of the clock running ahead was refused: %v", err)
     }
 
     outcome, err := refresh.Refresh(runtimeInstance)
     if nil != err {
-        t.Fatalf("the honest reading failed: %v", err)
+        t.Fatalf("the reading after the correction failed: %v", err)
     }
 
     usd, _, _ := currencyService.FindById("cur-usd")
     if 1 != outcome.Updated || 1.3 != usd.Rate {
-        t.Errorf("the honest reading reported %+v and left cur-usd at %v, wanted it written at 1.3", outcome, usd.Rate)
+        t.Errorf("the reading after the correction reported %+v and left cur-usd at %v, wanted it written at 1.3", outcome, usd.Rate)
+    }
+}
+
+/* a replay keeps its old stamp under a clock that answers now, so on this clock it is older than the reading it
+   replays, whatever the provider's clock is off by: stored at the clock's own instant, as the clamp used to store a
+   reading ahead of it, a replay of the minutes before was written over the newer reading */
+func TestRateRefreshServiceRefresh_KeepsOutAReplayFromAProviderWhoseClockRunsAhead(t *testing.T) {
+    refresh, currencyService, runtimeInstance, _ := rateRefreshAnswering(
+        t,
+        providerAnswer{body: `{"base":"EUR","asOf":"2026-09-08T09:04:00Z","rates":{"USD":1.2}}`, clockAhead: 4 * time.Minute},
+        providerAnswer{body: `{"base":"EUR","asOf":"2026-09-08T09:02:00Z","rates":{"USD":1.3}}`, clockAhead: 4*time.Minute + 30*time.Second},
+    )
+
+    if _, err := refresh.Refresh(runtimeInstance); nil != err {
+        t.Fatalf("the first reading failed: %v", err)
+    }
+
+    outcome, err := refresh.Refresh(runtimeInstance)
+    if nil != err {
+        t.Fatalf("the replay failed instead of being kept out: %v", err)
+    }
+
+    usd, _, _ := currencyService.FindById("cur-usd")
+    if 1 != outcome.Stale || 0 != outcome.Updated || 1.2 != usd.Rate {
+        t.Errorf("the replay reported %+v and left cur-usd at %v, wanted it stale and 1.2 kept", outcome, usd.Rate)
+    }
+}
+
+/* the same document read on two runs is the same reading, named by the provider's stamp: the instant this
+   clock gives it is measured again on each arrival — here the second answer's date falls one second later, the
+   resolution the date is read to — and stored at the clock's instant, as the clamp used to store it, it was never
+   the reading already held: every run wrote it again, dispatched, and dropped the cache */
+func TestRateRefreshServiceRefresh_TheSameDocumentFromAClockAheadIsUnchangedOnTheNextRun(t *testing.T) {
+    refresh, _, runtimeInstance, recordingRepository := rateRefreshAnswering(
+        t,
+        providerAnswer{body: `{"base":"EUR","asOf":"2026-09-08T09:00:30Z","rates":{"USD":1.2}}`, clockAhead: 30 * time.Second},
+        providerAnswer{body: `{"base":"EUR","asOf":"2026-09-08T09:00:30Z","rates":{"USD":1.2}}`, clockAhead: 31 * time.Second},
+    )
+
+    if _, err := refresh.Refresh(runtimeInstance); nil != err {
+        t.Fatalf("the first run failed: %v", err)
+    }
+
+    updatesBefore := recordingRepository.updates.Load()
+
+    outcome, err := refresh.Refresh(runtimeInstance)
+    if nil != err {
+        t.Fatalf("the second run failed: %v", err)
+    }
+
+    if 1 != outcome.Unchanged || 0 != outcome.Updated || updatesBefore != recordingRepository.updates.Load() {
+        t.Errorf("the second run reported %+v with %d writes, wanted the reading unchanged and nothing written", outcome, recordingRepository.updates.Load()-updatesBefore)
+    }
+}
+
+/* a cache in front of the provider keeps the origin's Date on an answer it hands out again and says how long
+   it kept it in Age: read without the Age, an hour-old document from a cache was a provider whose clock runs an
+   hour late, and its old stamp, moved forward by that hour, was written over the newer reading */
+func TestRateRefreshServiceRefresh_ReadsTheAgeOfACachedAnswer(t *testing.T) {
+    refresh, currencyService, runtimeInstance, _ := rateRefreshAnswering(
+        t,
+        providerAnswer{body: `{"base":"EUR","asOf":"2026-09-08T08:59:00Z","rates":{"USD":1.2}}`},
+        providerAnswer{body: `{"base":"EUR","asOf":"2026-09-08T08:00:00Z","rates":{"USD":1.3}}`, clockAhead: -time.Hour, age: "3600"},
+    )
+
+    if _, err := refresh.Refresh(runtimeInstance); nil != err {
+        t.Fatalf("the first reading failed: %v", err)
+    }
+
+    outcome, err := refresh.Refresh(runtimeInstance)
+    if nil != err {
+        t.Fatalf("the cached answer failed: %v", err)
+    }
+
+    usd, _, _ := currencyService.FindById("cur-usd")
+    if 1 != outcome.Stale || 1.2 != usd.Rate || 0 != outcome.ProviderClockOffset {
+        t.Errorf("the cached answer reported %+v and left cur-usd at %v, wanted it stale over a clock that agrees", outcome, usd.Rate)
+    }
+}
+
+/* an answer without a date says nothing of the provider's clock: its stamps are taken as they came, the run
+   says the clock went unmeasured, and a stamp ahead of this clock is judged under the skew */
+func TestRateRefreshServiceRefresh_AnAnswerWithoutADateIsJudgedUnderTheSkew(t *testing.T) {
+    admitted, _, admittedRuntime, _ := rateRefreshAnswering(t, providerAnswer{
+        body:     `{"base":"EUR","asOf":"2026-09-08T09:04:00Z","rates":{"USD":1.2}}`,
+        omitDate: true,
+    })
+
+    outcome, err := admitted.Refresh(admittedRuntime)
+    if nil != err || 1 != outcome.Updated || true == outcome.ProviderClockMeasured || 0 != outcome.ProviderClockOffset {
+        t.Fatalf("a dateless answer four minutes ahead reported %+v, %v; wanted it written over an unmeasured clock", outcome, err)
+    }
+
+    refused, _, refusedRuntime, recordingRepository := rateRefreshAnswering(t, providerAnswer{
+        body:     `{"base":"EUR","asOf":"2026-09-08T09:06:00Z","rates":{"USD":1.2}}`,
+        omitDate: true,
+    })
+
+    if _, err := refused.Refresh(refusedRuntime); nil == err || 0 != recordingRepository.updates.Load() {
+        t.Fatalf("a dateless answer six minutes ahead was not refused: %v, %d writes", err, recordingRepository.updates.Load())
     }
 }
 
@@ -432,6 +583,35 @@ func TestRateRefreshServiceRefresh_NamesBothSpellingsOfACurrencyQuotedTwice(t *t
 
     if false == strings.Contains(err.Error(), `"USD"`) || false == strings.Contains(err.Error(), `"usd"`) {
         t.Errorf("the refusal does not name both spellings: %v", err)
+    }
+}
+
+/* every spelling of a currency quoted more than twice is named, and the refusal reads the same on every run:
+   judged while the document's map was walked, three spellings read three different ways over as many runs */
+func TestRateRefreshServiceRefresh_NamesEverySpellingOfACurrencyTheSameOnEveryRun(t *testing.T) {
+    messageSet := map[string]bool{}
+
+    for run := 0; run < 50; run++ {
+        refresh, _, runtimeInstance, _ := rateRefreshUnderTest(t, `{"base":"EUR","asOf":"2026-09-08T09:00:00Z","rates":{"usd":1.2,"USD":1.3,"Usd":1.4}}`)
+
+        _, err := refresh.Refresh(runtimeInstance)
+        if nil == err {
+            t.Fatal("a document quoting USD under three spellings was accepted")
+        }
+
+        messageSet[err.Error()] = true
+    }
+
+    if 1 != len(messageSet) {
+        t.Fatalf("the refusal read %d different ways over fifty runs: %v", len(messageSet), messageSet)
+    }
+
+    for message := range messageSet {
+        for _, spelling := range []string{`"USD"`, `"Usd"`, `"usd"`} {
+            if false == strings.Contains(message, spelling) {
+                t.Errorf("the refusal does not name %s: %s", spelling, message)
+            }
+        }
     }
 }
 
@@ -557,8 +737,8 @@ func (instance *microsecondCurrencyRepository) Update(ctx context.Context, curre
     return instance.CurrencyRepository.Update(ctx, &stored)
 }
 
-func (instance *microsecondCurrencyRepository) UpdateQuote(ctx context.Context, id string, rate float64, rateAsOf time.Time) (bool, error) {
-    return instance.CurrencyRepository.UpdateQuote(ctx, id, rate, rateAsOf.Truncate(time.Microsecond))
+func (instance *microsecondCurrencyRepository) UpdateQuote(ctx context.Context, id string, quote entity.RateQuote) (bool, error) {
+    return instance.CurrencyRepository.UpdateQuote(ctx, id, entity.NewRateQuote(quote.Rate, quote.AsOf.Truncate(time.Microsecond), quote.ProviderAsOf.Truncate(time.Microsecond)))
 }
 
 /* a provider stamping time.Now() serialises nine decimals, and the column holds six: the second run of the

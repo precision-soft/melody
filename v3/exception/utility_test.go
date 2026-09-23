@@ -1181,3 +1181,151 @@ func TestBuildCauseContextChain_StaysIndexAlignedWithBuildCauseChainAcrossAJoin(
         t.Fatalf("expected the context of link %d beside its text, got %#v", contextIndex, contextChain)
     }
 }
+
+type panickingUnwrapError struct{}
+
+func (panickingUnwrapError) Error() string {
+    return "a link whose Unwrap panics"
+}
+
+func (panickingUnwrapError) Unwrap() error {
+    panic("Unwrap() panics")
+}
+
+type panickingJoinUnwrapError struct{}
+
+func (panickingJoinUnwrapError) Error() string {
+    return "a join whose Unwrap panics"
+}
+
+func (panickingJoinUnwrapError) Unwrap() []error {
+    panic("Unwrap() []error panics")
+}
+
+type panickingAsError struct{}
+
+func (panickingAsError) Error() string {
+    return "a link whose As panics"
+}
+
+func (panickingAsError) As(any) bool {
+    panic("As() panics")
+}
+
+type panickingMarkError struct{}
+
+func (panickingMarkError) Error() string {
+    return "a link whose mark panics"
+}
+
+func (panickingMarkError) AlreadyLogged() bool {
+    panic("AlreadyLogged() panics")
+}
+
+func (panickingMarkError) MarkAsLogged() {
+    panic("MarkAsLogged() panics")
+}
+
+/* LogContext runs in the recovery defers that file a failure — the async audit worker's among them, on a bare goroutine — and an Unwrap that panicked raised a second panic there, past the recover already spent, which ended the process. The walk now stops at that link with the reason written into the chain, and the message is kept */
+func TestLogContext_AnErrorWhoseUnwrapPanicsKeepsItsMessageAndNamesTheCut(t *testing.T) {
+    context := LogContext(panickingUnwrapError{})
+
+    if "a link whose Unwrap panics" != context["error"] {
+        t.Fatalf("expected the message kept, got %#v", context["error"])
+    }
+
+    if "the links below could not be read, their Unwrap panicked: Unwrap() panics" != context["cause"] {
+        t.Fatalf("expected the cut named as the cause, got %#v", context["cause"])
+    }
+}
+
+func TestLogContext_AJoinWhoseUnwrapPanicsKeepsItsMessageAndNamesTheCut(t *testing.T) {
+    context := LogContext(panickingJoinUnwrapError{})
+
+    if "a join whose Unwrap panics" != context["error"] {
+        t.Fatalf("expected the message kept, got %#v", context["error"])
+    }
+
+    if "the links below could not be read, their Unwrap panicked: Unwrap() []error panics" != context["cause"] {
+        t.Fatalf("expected the cut named as the cause, got %#v", context["cause"])
+    }
+}
+
+/* the search for a context provider calls the As of every link, so an As that panics took LogContext down before the walk began */
+func TestLogContext_AnErrorWhoseAsPanicsKeepsItsMessage(t *testing.T) {
+    context := LogContext(panickingAsError{}, exceptioncontract.Context{"table": "audit"})
+
+    if "a link whose As panics" != context["error"] || "audit" != context["table"] {
+        t.Fatalf("expected the message and the extra context kept, got %#v", context)
+    }
+}
+
+/* the link that panics sits BELOW a wrap here, which is where a recovery boundary puts it: exception.NewError(..., PanicCause(recovered)) */
+func TestLogContext_AWrapOverALinkWhoseUnwrapPanicsKeepsTheChainAboveTheCut(t *testing.T) {
+    wrapped := NewError("audit storage panicked while saving the entry", nil, panickingUnwrapError{})
+
+    context := LogContext(wrapped)
+
+    causeChain, isChain := context["causeChain"].([]string)
+    if false == isChain || 2 != len(causeChain) {
+        t.Fatalf("expected the link and the cut in the chain, got %#v", context["causeChain"])
+    }
+
+    if "a link whose Unwrap panics" != causeChain[0] || false == strings.HasPrefix(causeChain[1], "the links below could not be read") {
+        t.Fatalf("expected the link then the cut, got %#v", causeChain)
+    }
+}
+
+func TestBuildCauseChain_StopsAtALinkWhoseUnwrapPanics(t *testing.T) {
+    chain := BuildCauseChain(panickingUnwrapError{}, 8)
+
+    if 2 != len(chain) || "a link whose Unwrap panics" != chain[0] || false == strings.HasSuffix(chain[1], "Unwrap() panics") {
+        t.Fatalf("expected the link then the cut, got %#v", chain)
+    }
+}
+
+func TestFromError_AnErrorWhoseAsPanicsIsStillWrapped(t *testing.T) {
+    for name, convert := range map[string]func(error) *Error{
+        "FromError": FromError,
+        "FromErrorWithLevel": func(err error) *Error {
+            return FromErrorWithLevel(err, loggingcontract.LevelWarning)
+        },
+        "FromErrorWithLevelAndContext": func(err error) *Error {
+            return FromErrorWithLevelAndContext(err, loggingcontract.LevelWarning, exceptioncontract.Context{"key": "value"})
+        },
+    } {
+        converted := convert(panickingAsError{})
+
+        if nil == converted || "a link whose As panics" != converted.Message() {
+            t.Fatalf("%s: expected the error wrapped under its message, got %v", name, converted)
+        }
+    }
+}
+
+/* a mark that cannot be left or read costs a second record of the failure, never the record itself */
+func TestMarkLogged_AMarkThatPanicsLeavesTheErrorAsItWas(t *testing.T) {
+    foreignErr := panickingMarkError{}
+
+    if returned := MarkLogged(foreignErr); returned != error(foreignErr) {
+        t.Fatalf("expected the error handed back unchanged, got %v", returned)
+    }
+
+    if true == IsAlreadyLogged(foreignErr) {
+        t.Fatalf("expected a mark that panics to read as not logged")
+    }
+}
+
+func TestIsAlreadyLogged_AChainWhoseSearchPanicsReadsAsNotLogged(t *testing.T) {
+    if true == IsAlreadyLogged(panickingAsError{}) || true == IsAlreadyLogged(panickingUnwrapError{}) {
+        t.Fatalf("expected a chain that cannot be searched to read as not logged")
+    }
+}
+
+/* Logged wraps what it could not mark in a marked melody error, so the reader after it still finds the mark */
+func TestLogged_AnErrorWhoseMarkPanicsIsWrappedMarked(t *testing.T) {
+    logged := Logged(panickingMarkError{})
+
+    if nil == logged || false == IsAlreadyLogged(logged) {
+        t.Fatalf("expected a marked error back, got %v", logged)
+    }
+}

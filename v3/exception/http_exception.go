@@ -1,7 +1,6 @@
 package exception
 
 import (
-    "errors"
     "fmt"
     nethttp "net/http"
     "sync"
@@ -141,7 +140,7 @@ func AsHttpException(err error) *HttpException {
     }
 
     var httpExceptionInstance *HttpException
-    if true == errors.As(err, &httpExceptionInstance) && nil != httpExceptionInstance {
+    if true == chainHolds(err, &httpExceptionInstance) && nil != httpExceptionInstance {
         return httpExceptionInstance
     }
 

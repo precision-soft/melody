@@ -1,7 +1,6 @@
 package logging
 
 import (
-    "errors"
     "fmt"
     "log"
     "strings"
@@ -32,11 +31,9 @@ func LogError(logger loggingcontract.Logger, err error) {
         return
     }
 
-    var alreadyLoggedValue exceptioncontract.AlreadyLogged
-    if true == errors.As(err, &alreadyLoggedValue) && false == internal.IsNilInterface(alreadyLoggedValue) {
-        if true == alreadyLoggedValue.AlreadyLogged() {
-            return
-        }
+    /* the mark is read through the exception package's own reader, which searches the chain and asks the mark under a recover: LogError is called from recovery defers, where a foreign Unwrap, As or AlreadyLogged that panicked raised a second panic past the recovery filing the first */
+    if true == exception.IsAlreadyLogged(err) {
+        return
     }
 
     exceptionValue, isTopException := err.(*exception.Error)

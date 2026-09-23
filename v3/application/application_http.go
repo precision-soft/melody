@@ -349,7 +349,12 @@ func httpShutdownHookError(recoveredValue any) *exception.Error {
         return value
 
     case error:
-        return exception.NewError(value.Error(), nil, value)
+        /* built through FromError, which renders the message under a recover: this runs in the recovery of a hook on its own goroutine, where an Error() that panicked was a second panic nothing above it caught */
+        if converted := exception.FromError(value); nil != converted {
+            return converted
+        }
+
+        return exception.NewError("http shutdown hook panicked with a nil error", nil, nil)
 
     default:
         return exception.NewError(

@@ -49,6 +49,7 @@ func (instance *recordingStorage) count() int {
 type capturingLogger struct {
     mutex    sync.Mutex
     messages []string
+    contexts []loggingcontract.Context
 }
 
 func (instance *capturingLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
@@ -65,6 +66,7 @@ func (instance *capturingLogger) Error(message string, context loggingcontract.C
     defer instance.mutex.Unlock()
 
     instance.messages = append(instance.messages, message)
+    instance.contexts = append(instance.contexts, context)
 }
 
 func (instance *capturingLogger) Emergency(message string, context loggingcontract.Context) {}
@@ -1378,5 +1380,121 @@ func TestAsyncStorage_TheCloseReadsTheCountersInOneSnapshotWhileTheWorkerSettles
 
     if closeErr := storage.Close(); nil != closeErr {
         t.Fatalf("second close: %v", closeErr)
+    }
+}
+
+type unwrapPanickingSaveError struct{}
+
+func (unwrapPanickingSaveError) Error() string {
+    return "a delegate failure whose Unwrap panics"
+}
+
+func (unwrapPanickingSaveError) Unwrap() error {
+    panic("Unwrap() panics")
+}
+
+/* panicOnceStorage fails its first save with the value it is given — raised as a panic, or returned — and stores every save after it */
+type panicOnceStorage struct {
+    mutex      sync.Mutex
+    calls      int
+    panicValue any
+    returnErr  error
+    saved      []Entry
+}
+
+func (instance *panicOnceStorage) Save(ctx context.Context, table string, entries ...Entry) error {
+    instance.mutex.Lock()
+    instance.calls++
+    call := instance.calls
+    instance.mutex.Unlock()
+
+    if 1 == call {
+        if nil != instance.panicValue {
+            panic(instance.panicValue)
+        }
+
+        return instance.returnErr
+    }
+
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.saved = append(instance.saved, entries...)
+
+    return nil
+}
+
+func (instance *panicOnceStorage) savedEntities() []string {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    entities := make([]string, 0, len(instance.saved))
+    for _, entry := range instance.saved {
+        entities = append(entities, entry.Entity)
+    }
+
+    return entities
+}
+
+/* the worker recovers a panicking delegate and dead-letters it, and the dead-letter reads the panic's chain: a panic value whose Unwrap panicked raised a second panic inside the defer whose recover was already spent, on the worker's bare goroutine, and the process ended — the audit trail, the one component whose failure the design demotes to a dead-letter, took the application down. The worker now files the entry and stores the next one */
+func TestAsyncStorage_WorkerSurvivesAPanicWhoseUnwrapPanics(t *testing.T) {
+    delegate := &panicOnceStorage{panicValue: unwrapPanickingSaveError{}}
+    logger := &capturingLogger{}
+    storage := NewAsyncStorage(delegate, 4).WithLogger(logger)
+
+    for _, entity := range []string{"first", "second"} {
+        if saveErr := storage.Save(context.Background(), "melody_audit", Entry{Entity: entity}); nil != saveErr {
+            t.Fatalf("save %s: %v", entity, saveErr)
+        }
+    }
+
+    if closeErr := storage.Close(); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    if saved := delegate.savedEntities(); 1 != len(saved) || "second" != saved[0] {
+        t.Fatalf("expected the worker to survive and store the second entry, got %v", saved)
+    }
+
+    if 1 != storage.Failed() || 1 != logger.count() {
+        t.Fatalf("expected one failed entry dead-lettered once, got %d failed and %d records", storage.Failed(), logger.count())
+    }
+
+    context := logger.contexts[0]
+    if "melody_audit" != context["table"] || "first" != context["entity"] {
+        t.Fatalf("expected the dead-letter to name the entry, got %#v", context)
+    }
+
+    if "a delegate failure whose Unwrap panics" != context["cause"] {
+        t.Fatalf("expected the panic value as the cause, got %#v", context["cause"])
+    }
+}
+
+/* the same error RETURNED by the delegate is dead-lettered under its own message: the reader that files it no longer panics, so the failure is not re-filed by the recovery as a panic of the storage */
+func TestAsyncStorage_DeadLettersAReturnedErrorWhoseUnwrapPanicsUnderItsOwnMessage(t *testing.T) {
+    delegate := &panicOnceStorage{returnErr: unwrapPanickingSaveError{}}
+    logger := &capturingLogger{}
+    storage := NewAsyncStorage(delegate, 4).WithLogger(logger)
+
+    for _, entity := range []string{"first", "second"} {
+        if saveErr := storage.Save(context.Background(), "melody_audit", Entry{Entity: entity}); nil != saveErr {
+            t.Fatalf("save %s: %v", entity, saveErr)
+        }
+    }
+
+    if closeErr := storage.Close(); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    if saved := delegate.savedEntities(); 1 != len(saved) || "second" != saved[0] {
+        t.Fatalf("expected the second entry stored, got %v", saved)
+    }
+
+    if 1 != logger.count() {
+        t.Fatalf("expected the failure dead-lettered once, got %d records", logger.count())
+    }
+
+    if "a delegate failure whose Unwrap panics" != logger.contexts[0]["error"] {
+        t.Fatalf("expected the delegate's own failure in the record, got %#v", logger.contexts[0]["error"])
     }
 }

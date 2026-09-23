@@ -239,15 +239,28 @@ of it was proven by compilation.
   the seed's base): a conversion cancels the base by dividing one rate by another, which is arithmetic only
   while every rate shares it. The refresh therefore judges the provider's document whole before it writes a
   quote, and refuses it — nothing written, exit non-zero, both bases named — when it is quoted against another
-  base, carries no `asOf`, is stamped more than five minutes into the future, or quotes one currency under
-  two spellings. Codes are matched folded, so a provider writing `usd` quotes the seed's `USD`; two spellings
+  base, carries no `asOf`, is stamped after the provider answered with it, or quotes one currency under
+  several spellings, every spelling named. Codes are matched folded, so a provider writing `usd` quotes the seed's `USD`; two spellings
   means two keys that fold onto one code — a key repeated letter for letter is collapsed by the JSON decoder
   before the refresh sees it, the last value winning, which is the decoder's rule and not the refresh's. A
   base that is configured EMPTY (`RATES_BASE_CURRENCY=` present in `.env`, where an absent key falls back to
   `EUR`) refuses every document. The instant is held at the microsecond the column holds.
+- A reading carries its instant in two reference frames. `asOf` is stamped on the PROVIDER's clock, and the
+  catalogue orders readings on THIS one: a provider whose clock ran ahead and was then set back would otherwise
+  have every honest reading after the correction judged older than the one stamped before it. The answer's
+  `Date` — plus the `Age` a cache in front of the provider adds — is the provider's clock at the moment it
+  answered, so the refresh measures the offset between the two clocks on every answer, to within the second the
+  date is read to and half the round trip, and stores the reading twice: `provider_rate_as_of`, the stamp as it
+  came, which names the reading, and `rate_as_of`, the same instant moved onto this clock, on which every order
+  is judged. A clock set back moves the stamp and the answer together, so the reading after it is newer here; a
+  replay keeps an old stamp under an answer given now, so it is older here. The last column of the table,
+  `PROVIDER_CLOCK`, prints the offset measured (`+0s` for a provider that agrees with this clock to within what
+  one answer can tell), or `unmeasured` for an answer without a date — its stamps are then taken as they came,
+  and one more than five minutes ahead of this clock is refused.
 - What the refresh did is printed under one heading per currency: `UPDATED` (written), `SKIPPED` (not quoted
-  by the provider, or deleted inside the run), `UNCHANGED` (the quote the catalogue already held, at the
-  instant it already held it — nothing written, no event, the currency's cache entries dropped), `STALE`
+  by the provider, or deleted inside the run), `UNCHANGED` (the reading the catalogue already held — the
+  same provider stamp at the same rate, however this clock measured it on arrival — nothing written, no event, the
+  currency's cache entries dropped where they are not the row), `STALE`
   (older than the reading stored — a replay, kept out) and `REFUSED` (a quote the write door would not take:
   zero, negative, infinite or outside `[1e-6, 1e9]`). One refused quote does not stop the sweep: the currencies
   after it are written on the same run, and the exit code names the currencies refused. A backend failure does stop
@@ -283,7 +296,7 @@ balancer at `rates.melody.localhost.precision-soft.com`, which also serves the f
 
 ### The migration set
 
-The schema is owned by one migration set in [`migration/`](./migration/) — a single MySQL DDL migration holding the six tables this example owns and the one constraint it declares: the four catalogue tables, the journal, the two-factor enrollment table neither frozen major carries, and the unique key on the folded spelling of a username, which is what holds a name against two callers that pass the repository's read-then-write check at the same moment. The set is one migration because this application has no history — an example has one state, the present one, so its schema is the statement of that state rather than the record of how it got there, and a database left in an older shape is answered by `example:db:reset` rather than by a step that repairs its past. This is the catalogue's set, on the catalogue's connection; the reading archive has a set and a command family of its own, described below. Two doors run the set, so neither can drift from the other:
+The schema is owned by one migration set in [`migration/`](./migration/) — a single MySQL DDL migration holding the six tables this example owns and the one constraint it declares: the four catalogue tables, the journal, the two-factor enrollment table neither frozen major carries, and the unique key on the folded spelling of a username, which is what holds a name against two callers that pass the repository's read-then-write check at the same moment. The set is one migration because this application has no history — an example has one state, the present one, so its schema is the statement of that state rather than the record of how it got there, and a database left in an older shape is answered by `example:db:reset` rather than by a step that repairs its past. Until it is, it is refused by name: the set is recorded as applied by name and its tables are created `IF NOT EXISTS`, so it passes such a volume untouched, and the first resolution compares every table the set's own statements create with the table the volume holds — a missing column or one no statement declares refuses the volume with the table, the columns and `run example:db:reset --force`, where the first request reading the column used to answer 500. This is the catalogue's set, on the catalogue's connection; the reading archive has a set and a command family of its own, described below. Two doors run the set, so neither can drift from the other:
 
 - the **composition root and the repository constructors** call `migration.EnsureMigrated`. `buildTwoFactor` calls it at boot — this example dials eagerly, so the schema is in place before the first request rather than at the first resolution the way v1 and v2 do it — and each repository constructor calls it again before seeding, which is what keeps a freshly recreated volume usable with no operator step. It is also why every `CREATE TABLE` carries `IF NOT EXISTS`: several processes of the example may apply the set at the same time, serialized by bun's migration lock with a bounded retry that names `db:unlock` when it gives up;
 - the **`db:*` command family** (`db:init`, `db:migrate`, `db:rollback`, `db:status`, `db:unlock`, `db:create`) runs the same set from the operator's side. It comes from the [`integrations/bunorm/migrate`](../../integrations/bunorm/migrate/v3/) module facade registered in [`config/configure.go`](./config/configure.go), pinned to the example's own manager registry service.

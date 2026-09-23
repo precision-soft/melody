@@ -105,8 +105,12 @@ func (instance *trustedProxyResolver) Resolve(request melodyhttpcontract.Request
     }
 
     /* reported to the emergency journal from a process that has a configured one, an entry that named nothing
-       reached standard error once a minute, where an operator reading the application's journal never looks */
-    clientIp := instance.current(examplejournal.LoggerOr(request.RuntimeInstance(), trustedProxyWarningLogger()))(request)
+       reached standard error once a minute, where an operator reading the application's journal never looks;
+       the logger is resolved by the one request that re-resolves the list, not asked of every request that
+       only reads it — resolving it on each cost five allocations and the emergency logger's lock per request */
+    clientIp := instance.current(func() melodyloggingcontract.Logger {
+        return examplejournal.LoggerOr(request.RuntimeInstance(), trustedProxyWarningLogger())
+    })(request)
 
     if nil != attributes {
         attributes.Set(trustedProxyClientIpAttribute, clientIp)
@@ -116,7 +120,7 @@ func (instance *trustedProxyResolver) Resolve(request melodyhttpcontract.Request
 }
 
 /* current hands back the resolver over the list last resolved, resolving it when there is none and again when the interval has passed. Both resolutions run OUTSIDE the lock, on the one request that found nothing or found the list stale, and land under the lock when they are done: every other request keeps the list last resolved — and, before there is one, a list that trusts NOTHING, so a request served while the first lookup is in flight is charged to its peer, which fails closed. The first form resolved the first list under the lock, and a lookup that hung held every concurrent request of the process for as long as it hung, on the listener that runs ahead of authentication for every request. */
-func (instance *trustedProxyResolver) current(logger melodyloggingcontract.Logger) melodyhttpmiddleware.ClientIpResolver {
+func (instance *trustedProxyResolver) current(loggerOf func() melodyloggingcontract.Logger) melodyhttpmiddleware.ClientIpResolver {
     instance.mutex.Lock()
 
     resolver := instance.resolver
@@ -129,7 +133,7 @@ func (instance *trustedProxyResolver) current(logger melodyloggingcontract.Logge
     instance.mutex.Unlock()
 
     if true == resolveHere {
-        resolved := forwardedClientIpResolver(instance.resolvedList(logger))
+        resolved := forwardedClientIpResolver(instance.resolvedList(loggerOf()))
 
         instance.mutex.Lock()
         instance.resolver = resolved

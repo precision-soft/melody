@@ -61,7 +61,7 @@ func TestCurrencyServiceUpdateRate_WritesTheQuoteAndTellsTheListeners(t *testing
 
     quotedAt := time.Date(2026, time.September, 7, 9, 30, 0, 0, time.UTC)
 
-    updated, outcome, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", 1.0842, quotedAt)
+    updated, outcome, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", entity.NewRateQuote(1.0842, quotedAt, quotedAt))
     if nil != err {
         t.Fatalf("the update failed: %v", err)
     }
@@ -103,7 +103,7 @@ func TestCurrencyServiceUpdateRate_RefusesAQuoteThatIsNotAUsablePrice(t *testing
 
         before, _, _ := currencyService.FindById("cur-usd")
 
-        _, _, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", rate, currencyQuoteInstant)
+        _, _, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", entity.NewRateQuote(rate, currencyQuoteInstant, currencyQuoteInstant))
         if nil == err {
             t.Fatalf("a rate of %v was accepted", rate)
         }
@@ -122,7 +122,7 @@ func TestCurrencyServiceUpdateRate_RefusesAQuoteThatIsNotAUsablePrice(t *testing
 func TestCurrencyServiceUpdateRate_AnswersNotFoundForACurrencyTheCatalogueDoesNotCarry(t *testing.T) {
     currencyService, _, runtimeInstance := currencyServiceUnderTest(t)
 
-    _, outcome, err := currencyService.UpdateRate(runtimeInstance, "cur-nope", 1.0842, currencyQuoteInstant)
+    _, outcome, err := currencyService.UpdateRate(runtimeInstance, "cur-nope", entity.NewRateQuote(1.0842, currencyQuoteInstant, currencyQuoteInstant))
     if nil != err {
         t.Fatalf("updating a missing currency failed instead of reporting it missing: %v", err)
     }
@@ -140,7 +140,7 @@ func TestCurrencyServiceUpdateRate_KeepsTheNewerReadingOverAStaleQuote(t *testin
     before, _, _ := currencyService.FindById("cur-usd")
     olderInstant := before.RateAsOf.Add(-time.Hour)
 
-    _, outcome, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", 9.99, olderInstant)
+    _, outcome, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", entity.NewRateQuote(9.99, olderInstant, olderInstant))
     if nil != err {
         t.Fatalf("a stale quote failed instead of being kept out: %v", err)
     }
@@ -167,7 +167,7 @@ func TestCurrencyServiceUpdateRate_AnswersUnchangedWithoutWritingAndDropsTheCach
     currencyService, dispatcher, runtimeInstance := currencyServiceUnderTest(t)
 
     quotedAt := currencyQuoteInstant.Add(time.Hour)
-    if _, _, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", 1.0842, quotedAt); nil != err {
+    if _, _, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", entity.NewRateQuote(1.0842, quotedAt, quotedAt)); nil != err {
         t.Fatalf("the first update failed: %v", err)
     }
 
@@ -188,7 +188,7 @@ func TestCurrencyServiceUpdateRate_AnswersUnchangedWithoutWritingAndDropsTheCach
     cacheInstance := currencyService.cache.(*ttlRecordingCache)
     deletesBefore := cacheInstance.deleteCount()
 
-    _, outcome, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", 1.0842, quotedAt)
+    _, outcome, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", entity.NewRateQuote(1.0842, quotedAt, quotedAt))
     if nil != err {
         t.Fatalf("the unchanged update failed: %v", err)
     }
@@ -224,7 +224,7 @@ func TestCurrencyServiceUpdateRate_KeepsACacheThatAlreadyServesTheQuote(t *testi
     currencyService, _, runtimeInstance := currencyServiceUnderTest(t)
 
     quotedAt := currencyQuoteInstant.Add(time.Hour)
-    if _, _, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", 1.0842, quotedAt); nil != err {
+    if _, _, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", entity.NewRateQuote(1.0842, quotedAt, quotedAt)); nil != err {
         t.Fatalf("the first update failed: %v", err)
     }
 
@@ -239,12 +239,60 @@ func TestCurrencyServiceUpdateRate_KeepsACacheThatAlreadyServesTheQuote(t *testi
     cacheInstance := currencyService.cache.(*ttlRecordingCache)
     deletesBefore := cacheInstance.deleteCount()
 
-    if _, outcome, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", 1.0842, quotedAt); nil != err || RateUpdateUnchanged != outcome {
+    if _, outcome, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", entity.NewRateQuote(1.0842, quotedAt, quotedAt)); nil != err || RateUpdateUnchanged != outcome {
         t.Fatalf("the unchanged update answered %d, %v; wanted RateUpdateUnchanged", outcome, err)
     }
 
     if dropped := cacheInstance.deleteCount() - deletesBefore; 0 != dropped {
         t.Errorf("an unchanged quote over a cache that serves it dropped %d entries, wanted none: %v", dropped, cacheInstance.deletedKeyList())
+    }
+}
+
+/* the heal stands in for every invalidation that may have failed before it, the rename's included: an entry at
+   the row's quote under a name the row no longer carries was kept by a heal that compared the quote alone, and
+   served as it was, the entries of a currency carrying no expiry */
+func TestCurrencyServiceUpdateRate_DropsACachedEntryAtTheQuoteThatIsNotTheRow(t *testing.T) {
+    currencyService, _, runtimeInstance := currencyServiceUnderTest(t)
+
+    quotedAt := currencyQuoteInstant.Add(time.Hour)
+    if _, _, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", entity.NewRateQuote(1.0842, quotedAt, quotedAt)); nil != err {
+        t.Fatalf("the first update failed: %v", err)
+    }
+
+    renamed := entity.NewCurrency("cur-usd", "USD", "Old Dollar Name", 1.0842, quotedAt)
+    if setErr := currencyService.cache.Set(CacheKeyCurrencyById("cur-usd"), renamed, time.Hour); nil != setErr {
+        t.Fatalf("planting the by-id entry failed: %v", setErr)
+    }
+    if setErr := currencyService.cache.Set(CacheKeyCurrencyList, []*entity.Currency{renamed}, time.Hour); nil != setErr {
+        t.Fatalf("planting the list failed: %v", setErr)
+    }
+
+    if _, outcome, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", entity.NewRateQuote(1.0842, quotedAt, quotedAt)); nil != err || RateUpdateUnchanged != outcome {
+        t.Fatalf("the unchanged update answered %d, %v; wanted RateUpdateUnchanged", outcome, err)
+    }
+
+    served, _, _ := currencyService.FindById("cur-usd")
+    if "US Dollar" != served.Name {
+        t.Errorf("the heal kept an entry naming %q at the row's quote, wanted the row's %q", served.Name, "US Dollar")
+    }
+}
+
+/* the provider may re-quote the reading the catalogue holds at another rate; its instant on this clock is measured
+   again on the arrival, to the second the provider's date is read to, and may land a little before the first
+   arrival's — the re-quote is the same reading and is written, not kept out as older */
+func TestCurrencyServiceUpdateRate_WritesAReQuoteOfTheHeldReadingMeasuredALittleEarlier(t *testing.T) {
+    currencyService, _, runtimeInstance := currencyServiceUnderTest(t)
+
+    stamped := currencyQuoteInstant.Add(time.Hour)
+    onThisClock := stamped.Add(-4 * time.Minute)
+
+    if _, _, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", entity.NewRateQuote(1.2, onThisClock, stamped)); nil != err {
+        t.Fatalf("the reading failed: %v", err)
+    }
+
+    updated, outcome, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", entity.NewRateQuote(1.25, onThisClock.Add(-700*time.Millisecond), stamped))
+    if nil != err || RateUpdateWritten != outcome || 1.25 != updated.Rate {
+        t.Fatalf("the re-quote answered %d, %v, %v; wanted it written at 1.25", outcome, updated, err)
     }
 }
 
@@ -294,10 +342,10 @@ func (instance *updateCountingCurrencyRepository) Update(ctx context.Context, cu
     return instance.CurrencyRepository.Update(ctx, currency)
 }
 
-func (instance *updateCountingCurrencyRepository) UpdateQuote(ctx context.Context, id string, rate float64, rateAsOf time.Time) (bool, error) {
+func (instance *updateCountingCurrencyRepository) UpdateQuote(ctx context.Context, id string, quote entity.RateQuote) (bool, error) {
     instance.updates.Add(1)
 
-    return instance.CurrencyRepository.UpdateQuote(ctx, id, rate, rateAsOf)
+    return instance.CurrencyRepository.UpdateQuote(ctx, id, quote)
 }
 
 /* staleReadCurrencyRepository serves one FindById from a snapshot taken earlier — the row as a concurrent
@@ -334,13 +382,13 @@ func TestCurrencyServiceUpdateRate_RefusesAnOlderDocumentThatReadTheRowBeforeANe
 
     /* the newer document lands first, through the real read */
     stale.snapshot = nil
-    if _, outcome, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", 1.2, newer); nil != err || RateUpdateWritten != outcome {
+    if _, outcome, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", entity.NewRateQuote(1.2, newer, newer)); nil != err || RateUpdateWritten != outcome {
         t.Fatalf("the newer document was not written: %d, %v", outcome, err)
     }
 
     /* the older document judges itself against the row as it read it BEFORE the newer write */
     stale.snapshot = before
-    _, outcome, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", 1.1, older)
+    _, outcome, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", entity.NewRateQuote(1.1, older, older))
     if nil != err || RateUpdateStale != outcome {
         t.Fatalf("the older document answered %d, %v; wanted stale", outcome, err)
     }

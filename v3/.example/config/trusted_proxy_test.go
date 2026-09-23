@@ -405,3 +405,31 @@ func TestTrustedProxyResolver_ReportsAnEntryThatNamesNothingToTheRequestsLogger(
         t.Errorf("a lookup that answered no address carried an error of nil: %q", journal.String())
     }
 }
+
+/* the logger is resolved by the request that re-resolves the list and by no other: asked of every request, it cost
+   each one five allocations and the emergency logger's lock for a record only a re-resolution can write */
+func TestTrustedProxyResolver_ResolvesTheLoggerOnlyWhenTheListIsResolved(t *testing.T) {
+    previous := trustedProxyWarningLogger
+    var asked int
+    trustedProxyWarningLogger = func() melodyloggingcontract.Logger {
+        asked++
+
+        return previous()
+    }
+    t.Cleanup(func() {
+        trustedProxyWarningLogger = previous
+    })
+
+    lookupTable(t, map[string][]string{"load-balancer": {balancerAddress}})
+
+    now := time.Date(2026, time.September, 13, 9, 0, 0, 0, time.UTC)
+    resolver := resolverOver(t, "load-balancer", func() time.Time { return now })
+
+    for index := 0; index < 10; index++ {
+        resolver.Resolve(requestForwardedBy(t, balancerAddress, "203.0.113.7"))
+    }
+
+    if 1 != asked {
+        t.Fatalf("expected the logger asked once, by the request that resolved the list, got %d", asked)
+    }
+}

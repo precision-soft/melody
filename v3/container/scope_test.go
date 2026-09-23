@@ -2271,7 +2271,7 @@ func TestScope_Close_ClosesAServiceThatCarriesOnlyCloseWithContextAndHandsItTheD
     }
 }
 
-/* the sister of the container's site: the scope reads the close error's context through the same contained door, so an error whose Unwrap panics is recorded rather than ending the scope's teardown — and a request scope closes on the request path, where a panic reaches the kernel's recovery as a five hundred. */
+/* the sister of the container's site: the scope reads the close error's context through the same contained door, so an error whose Unwrap panics is recorded rather than ending the scope's teardown — and a request scope closes on the request path, where a panic reaches the kernel's recovery as a five hundred. The cut and its reason are written into the chain by LogContext itself. */
 func TestScope_Close_ACloseErrorWhoseUnwrapPanicsDoesNotEndTheTeardown(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -2297,8 +2297,7 @@ func TestScope_Close_ACloseErrorWhoseUnwrapPanicsDoesNotEndTheTeardown(t *testin
     }
 
     failureDetails, _ := typedError.Context()["failureDetails"].(map[string]exceptioncontract.Context)
-    detailsPanicked, hasMarker := failureDetails["scope:service:app.scoped.unwrapPanics"]["detailsPanicked"].(string)
-    if false == hasMarker || false == strings.Contains(detailsPanicked, "unwrap of a half-built error") {
-        t.Fatalf("expected the contained reading to say why it left nothing, got %v", failureDetails)
+    if cause := failureDetails["scope:service:app.scoped.unwrapPanics"]["cause"]; "the links below could not be read, their Unwrap panicked: unwrap of a half-built error" != cause {
+        t.Fatalf("expected the details to say where the chain was cut and why, got %v", failureDetails)
     }
 }

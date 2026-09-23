@@ -165,6 +165,18 @@ func (instance *fakeConnection) QueryContext(ctx context.Context, query string, 
         }
     }
 
+    /* the double holds the PRESENT schema: asked which columns a table carries, it answers the ones the set's
+       own statements create, which is what a volume the set has just brought here holds. A test of a volume in
+       another shape answers through the query hook */
+    if columnNameList, isColumnSelect := presentColumnNameListAsked(query); true == isColumnSelect {
+        rows := make([][]driver.Value, 0, len(columnNameList))
+        for _, columnName := range columnNameList {
+            rows = append(rows, []driver.Value{columnName})
+        }
+
+        return &fakeRows{columns: []string{"column_name"}, rows: rows}, nil
+    }
+
     /* a COUNT select always answers a row on a real server, so a double that answers none turns a step
        that asks the catalogue a question into "sql: no rows in result set". The steps that ask one are
        the tolerant ones — they check whether the object they are about to add is already there — and a
@@ -175,6 +187,22 @@ func (instance *fakeConnection) QueryContext(ctx context.Context, query string, 
     }
 
     return &fakeRows{columns: []string{}, rows: nil}, nil
+}
+
+/* presentColumnNameListAsked answers, for a read of the information schema, the columns the sets create for the
+   table the read names. */
+func presentColumnNameListAsked(query string) ([]string, bool) {
+    if false == strings.Contains(query, "information_schema.columns") {
+        return nil, false
+    }
+
+    for _, table := range append(expectedSchemaOf(schemaUpStatementList), expectedSchemaOf(archiveUpStatementList)...) {
+        if true == strings.Contains(query, "'"+table.name+"'") {
+            return table.columnNameList, true
+        }
+    }
+
+    return nil, true
 }
 
 type fakeResult struct{}

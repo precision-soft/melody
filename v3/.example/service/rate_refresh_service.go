@@ -8,6 +8,7 @@ import (
     "strings"
     "time"
 
+    "github.com/precision-soft/melody/v3/.example/entity"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodyclockcontract "github.com/precision-soft/melody/v3/clock/contract"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
@@ -46,11 +47,11 @@ const (
     rateRefreshRetryBackoff = 200 * time.Millisecond
 )
 
-/* rateDocumentClockSkew is how far into the future a provider's asOf may lie before the document is refused:
-   five minutes is more than any pair of synchronised clocks drift and less than any interval the schedule
-   runs at, so an instant beyond it is a provider whose clock is wrong or a document written by hand. A reading
-   inside it is stored at this clock's instant rather than its own, so it cannot make the next honest reading
-   look stale beside it either. */
+/* rateDocumentClockSkew is how far ahead of this clock a provider's asOf may lie before the document is refused,
+   for an answer that carried no readable date: five minutes is more than any pair of synchronised clocks drift
+   and less than any interval the schedule runs at, so an instant beyond it is a provider whose clock is wrong or
+   a document written by hand. An answer that carries its date is judged on the provider's own clock instead —
+   see usableQuoteListOf — where no skew has to be guessed at. */
 const rateDocumentClockSkew = 5 * time.Minute
 
 //melody:service ServiceRateRefreshService
@@ -112,11 +113,18 @@ type RateRefreshOutcome struct {
     Skipped    int
     Refused    int
     AsOf       time.Time
+    /* ProviderClockMeasured and ProviderClockOffset say how the provider's stamps were moved onto this clock:
+       an offset of zero on a measured clock is a provider whose clock agrees with this one to within what one
+       answer can tell, while an unmeasured clock is an answer that carried no readable date — see
+       providerClockReading. */
+    ProviderClockMeasured bool
+    ProviderClockOffset   time.Duration
 }
 
 /* rateDocument is the provider's answer. The rates are quoted against Base, one unit of Base costing that
-   many units of the currency, and AsOf is when the provider took the reading — which is what this
-   application stores, so a reader can tell the age of a quote rather than the age of the last refresh run.
+   many units of the currency, and AsOf is when the provider took the reading, on the provider's clock — which
+   is what this application stores, beside the same instant moved onto its own clock, so a reader can tell the
+   age of a quote rather than the age of the last refresh run.
    Both halves are load-bearing, and both are judged before a quote is written: the base must be the
    catalogue's, and the instant must be present and not in the future. */
 type rateDocument struct {
@@ -141,26 +149,30 @@ func (instance *RateRefreshService) Refresh(runtimeInstance melodyruntimecontrac
         return RateRefreshOutcome{Configured: true}, resolveErr
     }
 
-    document, attempts, readErr := readRateDocument(runtimeInstance.Context(), client)
+    reading, attempts, readErr := readRateDocument(runtimeInstance.Context(), client, instance.clock)
     if nil != readErr {
         return RateRefreshOutcome{Configured: true, Attempts: attempts}, readErr
     }
 
-    outcome := RateRefreshOutcome{Configured: true, Attempts: attempts, AsOf: document.AsOf}
+    document := reading.document
+    outcome := RateRefreshOutcome{
+        Configured:            true,
+        Attempts:              attempts,
+        AsOf:                  document.AsOf,
+        ProviderClockMeasured: reading.providerClock.Measured,
+        ProviderClockOffset:   reading.providerClock.Offset,
+    }
 
-    quoteList, documentErr := instance.usableQuoteListOf(document)
+    quoteList, documentErr := instance.usableQuoteListOf(document, reading.providerClock)
     if nil != documentErr {
         return outcome, documentErr
     }
 
-    /* a reading admitted inside the clock skew is stored at this clock's instant, not at the provider's: the
-       stored instant is what the next reading is judged against, so a document stamped 4m59s ahead made every
-       honest reading of the following five minutes look older than it and kept each one out as stale. The
-       provider's own instant is still what the outcome reports. */
-    quoteAsOf := document.AsOf
-    if now := instance.clock.Now(); true == quoteAsOf.After(now) {
-        quoteAsOf = now
-    }
+    /* the reading is written with its instant in both frames: the provider's stamp as it came, which names the
+       reading, and the same instant moved onto this clock, on which its order against the stored reading is
+       judged — so a provider whose clock was set back between two readings has the later one written, while a
+       replay, whose stamp is old under a clock that answers now, is still older here */
+    quoteAsOf := reading.providerClock.onThisClock(document.AsOf)
 
     currencies, listErr := instance.currencyService.List()
     if nil != listErr {
@@ -182,7 +194,7 @@ func (instance *RateRefreshService) Refresh(runtimeInstance melodyruntimecontrac
             continue
         }
 
-        _, updateOutcome, updateErr := instance.currencyService.UpdateRate(runtimeInstance, currency.Id, rate, quoteAsOf)
+        _, updateOutcome, updateErr := instance.currencyService.UpdateRate(runtimeInstance, currency.Id, entity.NewRateQuote(rate, quoteAsOf, document.AsOf))
         if nil != updateErr {
             /* a refused QUOTE is counted and named, and the sweep goes on: the currencies after it are
                written on this run instead of waiting for a provider that may keep quoting that one badly.
@@ -255,7 +267,7 @@ func (instance *RateRefreshService) Refresh(runtimeInstance melodyruntimecontrac
    table can hold; an instant absent or beyond the clock skew, since the instant is what every reader judges
    the age of a quote by; and two codes that fold onto one name, since the document then says two things
    about one currency and nothing chooses between them. */
-func (instance *RateRefreshService) usableQuoteListOf(document rateDocument) (map[string]float64, error) {
+func (instance *RateRefreshService) usableQuoteListOf(document rateDocument, providerClock providerClockReading) (map[string]float64, error) {
     /* a catalogue base that is empty is refused before the document is compared against it: the parameter
        falls onto its default only when the key is absent, so RATES_BASE_CURRENCY= in a deployment template
        reached here as "", and a document naming no base folded onto it and was written whole */
@@ -295,7 +307,14 @@ func (instance *RateRefreshService) usableQuoteListOf(document rateDocument) (ma
         return nil, exception.NewError("the rate document carries no instant the reading was taken at", nil, nil)
     }
 
+    /* a reading cannot have been taken after the provider answered with it, and both instants are on the
+       provider's clock, so the judgement needs no guess at how far that clock is from this one; only an answer
+       without a date is judged against this clock, under the skew */
     latestAcceptable := instance.clock.Now().Add(rateDocumentClockSkew)
+    if true == providerClock.Measured {
+        latestAcceptable = providerClock.AnsweredAt
+    }
+
     if true == document.AsOf.After(latestAcceptable) {
         return nil, exception.NewError(
             "the rate document is stamped in the future",
@@ -308,30 +327,55 @@ func (instance *RateRefreshService) usableQuoteListOf(document rateDocument) (ma
     }
 
     quoteList := make(map[string]float64, len(document.Rates))
-    spellingByFolded := make(map[string]string, len(document.Rates))
+    /* every spelling is gathered before any is judged, so the refusal of a code quoted under several spellings
+       names ALL of them, sorted, and names the first such code in folded order when several are: judged while the
+       document's map was walked, it named the first two spellings the walk happened to meet, and three spellings
+       of one code read three different ways over as many runs. They travel in the message for the reason the base
+       does above, and every colliding code travels in the context */
+    spellingListByFolded := make(map[string][]string, len(document.Rates))
     for code, rate := range document.Rates {
         folded := foldCurrencyCode(code)
-        if seenSpelling, seen := spellingByFolded[folded]; true == seen {
-            /* the two spellings are sorted so the refusal reads the same on every run, whatever order the
-               document's map is walked in; they travel in the message for the reason the base does above */
-            spellingList := []string{seenSpelling, code}
-            sort.Strings(spellingList)
-
-            return nil, exception.NewError(
-                "the rate document quotes one currency under two spellings ("+consoleSpellingOf(spellingList[0])+" and "+consoleSpellingOf(spellingList[1])+")",
-                exceptioncontract.Context{
-                    "code":         folded,
-                    "spellingList": spellingList,
-                },
-                nil,
-            )
-        }
-
-        spellingByFolded[folded] = code
+        spellingListByFolded[folded] = append(spellingListByFolded[folded], code)
         quoteList[folded] = rate
     }
 
+    var collidingCodeList []string
+    for folded, spellingList := range spellingListByFolded {
+        if 1 < len(spellingList) {
+            sort.Strings(spellingList)
+            collidingCodeList = append(collidingCodeList, folded)
+        }
+    }
+
+    if 0 < len(collidingCodeList) {
+        sort.Strings(collidingCodeList)
+
+        firstCode := collidingCodeList[0]
+        spellingList := spellingListByFolded[firstCode]
+
+        renderedSpellingList := make([]string, 0, len(spellingList))
+        for _, spelling := range spellingList {
+            renderedSpellingList = append(renderedSpellingList, consoleSpellingOf(spelling))
+        }
+
+        return nil, exception.NewError(
+            "the rate document quotes one currency under "+strconv.Itoa(len(spellingList))+" spellings ("+strings.Join(renderedSpellingList, ", ")+")",
+            exceptioncontract.Context{
+                "code":              firstCode,
+                "spellingList":      spellingList,
+                "collidingCodeList": collidingCodeList,
+            },
+            nil,
+        )
+    }
+
     return quoteList, nil
+}
+
+/* rateReading is one answer of the provider: its document, and its clock read against this one. */
+type rateReading struct {
+    document      rateDocument
+    providerClock providerClockReading
 }
 
 /* readRateDocument spends up to rateRefreshAttemptCount exchanges on one reading. What is retried is
@@ -345,13 +389,13 @@ func (instance *RateRefreshService) usableQuoteListOf(document rateDocument) (ma
    for two more backoffs and two more exchanges; the reading now stops at the first wait that finds the run
    cancelled, and hands the cancellation back as its cause. One exchange in flight is still bounded by the
    client's own timeout, since the client's doors take no context. */
-func readRateDocument(ctx context.Context, client *httpclient.HttpClient) (rateDocument, int, error) {
+func readRateDocument(ctx context.Context, client *httpclient.HttpClient, clockInstance melodyclockcontract.Clock) (rateReading, int, error) {
     var lastErr error
 
     for attempt := 1; attempt <= rateRefreshAttemptCount; attempt++ {
         if 1 < attempt {
             if waitErr := waitForRetry(ctx); nil != waitErr {
-                return rateDocument{}, attempt - 1, exception.NewError(
+                return rateReading{}, attempt - 1, exception.NewError(
                     "the rate reading was stopped by the cancellation of its run",
                     exceptioncontract.Context{
                         "attempts": attempt - 1,
@@ -361,7 +405,9 @@ func readRateDocument(ctx context.Context, client *httpclient.HttpClient) (rateD
             }
         }
 
+        sentAt := clockInstance.Now()
         response, requestErr := client.Get(ratesLatestTarget)
+        receivedAt := clockInstance.Now()
         if nil != requestErr {
             lastErr = requestErr
 
@@ -382,7 +428,7 @@ func readRateDocument(ctx context.Context, client *httpclient.HttpClient) (rateD
         }
 
         if false == response.IsSuccess() {
-            return rateDocument{}, attempt, exception.NewError(
+            return rateReading{}, attempt, exception.NewError(
                 "the rate provider answered a status the reading cannot be taken from",
                 exceptioncontract.Context{
                     "status":  response.StatusCode(),
@@ -394,7 +440,7 @@ func readRateDocument(ctx context.Context, client *httpclient.HttpClient) (rateD
 
         var document rateDocument
         if decodeErr := response.Json(&document); nil != decodeErr {
-            return rateDocument{}, attempt, exception.NewError(
+            return rateReading{}, attempt, exception.NewError(
                 "the rate provider answered a body that is not a rate document",
                 exceptioncontract.Context{
                     "status": response.StatusCode(),
@@ -403,10 +449,13 @@ func readRateDocument(ctx context.Context, client *httpclient.HttpClient) (rateD
             )
         }
 
-        return document, attempt, nil
+        return rateReading{
+            document:      document,
+            providerClock: readProviderClock(response.Headers(), sentAt, receivedAt),
+        }, attempt, nil
     }
 
-    return rateDocument{}, rateRefreshAttemptCount, exception.NewError(
+    return rateReading{}, rateRefreshAttemptCount, exception.NewError(
         "the rate provider could not be read",
         exceptioncontract.Context{
             "attempts": rateRefreshAttemptCount,

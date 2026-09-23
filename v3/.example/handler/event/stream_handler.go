@@ -6,6 +6,7 @@ import (
     nethttp "net/http"
     "time"
 
+    examplejournal "github.com/precision-soft/melody/v3/.example/journal"
     "github.com/precision-soft/melody/v3/.example/presenter"
     "github.com/precision-soft/melody/v3/.example/subscriber"
     melodyexception "github.com/precision-soft/melody/v3/exception"
@@ -134,7 +135,10 @@ func journalServerSideCut(runtimeInstance melodyruntimecontract.Runtime, topic s
         return
     }
 
-    melodylogging.LoggerFromRuntime(runtimeInstance).Warning(
+    /* the journal is resolved through the application's one door with a fallback: LoggerFromRuntime files an
+       emergency record and answers nil for a runtime without a logger, and the warning was then written onto
+       the nil, a panic on the one line that says a frame was lost */
+    examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Warning(
         "event stream cut by the server with a frame in flight",
         melodyexception.LogContext(writeErr, melodyexceptioncontract.Context{"topic": topic, "frame": frame}),
     )

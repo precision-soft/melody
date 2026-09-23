@@ -977,6 +977,48 @@ func TestDispatchOnMessage_PreservesThePanickedErrorsCauseChain(t *testing.T) {
     }
 }
 
+type unwrapPanickingCallbackError struct{}
+
+func (unwrapPanickingCallbackError) Error() string {
+    return "a callback failure whose Unwrap panics"
+}
+
+func (unwrapPanickingCallbackError) Unwrap() error {
+    panic("Unwrap() panics")
+}
+
+/* the read goroutine has no recovery above dispatchOnMessage, and the record of the callback's panic reads the panic's chain: a panic value whose Unwrap panicked raised a second panic past the recover already spent and ended the process on one client's message */
+func TestDispatchOnMessage_SurvivesAPanicWhoseUnwrapPanics(t *testing.T) {
+    logger := &capturingLogger{}
+
+    serviceContainer := container.NewContainer()
+    if registerErr := serviceContainer.Register(logging.ServiceLogger, func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+        return logger, nil
+    }); nil != registerErr {
+        t.Fatalf("register: %v", registerErr)
+    }
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    options := Options{
+        OnMessage: func(_ runtimecontract.Runtime, _ coderwebsocket.MessageType, _ []byte) {
+            panic(unwrapPanickingCallbackError{})
+        },
+    }
+
+    if false == dispatchOnMessage(runtimeInstance, options, coderwebsocket.MessageText, []byte("payload")) {
+        t.Fatal("expected the panic to be recovered and reported")
+    }
+
+    if 0 == len(logger.contexts) {
+        t.Fatal("expected the panic to be logged")
+    }
+
+    rendered := fmt.Sprintf("%v", logger.contexts[len(logger.contexts)-1])
+    if false == strings.Contains(rendered, "a callback failure whose Unwrap panics") {
+        t.Fatalf("expected the panic value in the record, got %q", rendered)
+    }
+}
+
 func TestStreamHandler_ANegativeReadLimitDisablesTheDefaultCap(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub()
     defer hub.Shutdown()

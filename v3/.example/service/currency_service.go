@@ -295,26 +295,26 @@ func rateUpdateOutcomeName(outcome RateUpdateOutcome) string {
    The rate is judged by refuseUnusableRate, the spelling Create reads too, and the refusal names the
    currency so a caller sweeping a whole document can say which quote was bad and go on to the next.
 
-   A quote older than the instant the catalogue holds is not written: the provider's document is a reading
-   taken at rateAsOf, and a reading older than the one already stored is a replay or a stale cache in
-   front of the provider, never a newer price. A quote equal to the stored one, at the same instant, is
-   not written either, and the cache entries of the currency that do not serve that quote are dropped without
-   an event: the write would change nothing and the event would journal a change that did not happen, while
-   the drop is what heals a cache that kept the previous rate after the invalidation of an earlier tick
-   failed. The instant is judged at the microsecond the column holds, so "the same instant" means what the
-   row can say. An entry that already serves the quote is kept — see healCachedCurrency. */
+   The quote carries its instant in both reference frames — see entity.RateQuote. The reading the catalogue
+   already holds — the same provider stamp at the same rate — is not written again, however this clock measured
+   its arrival, and the cache entries of the currency that do not serve the row are dropped without an event:
+   the write would change nothing and the event would journal a change that did not happen, while the drop is
+   what heals a cache that kept a previous state after the invalidation of an earlier write failed. A reading
+   older than the one stored, on THIS clock, is not written: a replay, or a stale cache in front of the
+   provider, is older here even when the provider's clock was set back between the two, and never a newer
+   price. The instants are judged at the microsecond the columns hold, so "the same instant" means what the
+   row can say. An entry that already serves the row is kept — see healCachedCurrency. */
 func (instance *CurrencyService) UpdateRate(
     runtimeInstance melodyruntimecontract.Runtime,
     currencyId string,
-    rate float64,
-    rateAsOf time.Time,
+    quote entity.RateQuote,
 ) (*entity.Currency, RateUpdateOutcome, error) {
-    if rateErr := refuseUnusableRate(currencyId, rate); nil != rateErr {
+    if rateErr := refuseUnusableRate(currencyId, quote.Rate); nil != rateErr {
         return nil, RateUpdateAbsent, rateErr
     }
 
     ctx := runtimeInstance.Context()
-    rateAsOf = quoteInstantOf(rateAsOf)
+    quote = entity.NewRateQuote(quote.Rate, quoteInstantOf(quote.AsOf), quoteInstantOf(quote.ProviderAsOf))
 
     currency, found, findErr := instance.currencyRepository.FindById(ctx, currencyId)
     if nil != findErr {
@@ -325,11 +325,7 @@ func (instance *CurrencyService) UpdateRate(
         return nil, RateUpdateAbsent, nil
     }
 
-    if true == rateAsOf.Before(currency.RateAsOf) {
-        return currency, RateUpdateStale, nil
-    }
-
-    if rate == currency.Rate && true == rateAsOf.Equal(currency.RateAsOf) {
+    if true == quote.NamesTheSameReadingAs(currency.Quote()) {
         if dropErr := instance.healCachedCurrency(currency); nil != dropErr {
             return nil, RateUpdateUnchanged, dropErr
         }
@@ -337,11 +333,16 @@ func (instance *CurrencyService) UpdateRate(
         return currency, RateUpdateUnchanged, nil
     }
 
-    /* the write is CONDITIONAL on the row's instant, in one statement: the read above judged a row as it was,
+    if true == isOlderReading(quote, currency.Quote()) {
+        return currency, RateUpdateStale, nil
+    }
+
+    /* the write is CONDITIONAL on the row's reading, in one statement: the read above judged a row as it was,
        and two processes on one schedule — the refresh takes no lock — each judged their document newer than
        that row and wrote whole, so the older document landed last. The repository writes only over a row
-       that is not newer; a refusal is read back to tell a row that moved from one that vanished. */
-    written, updateErr := instance.currencyRepository.UpdateQuote(ctx, currencyId, rate, rateAsOf)
+       that does not hold a newer reading; a refusal is read back to tell a row that moved from one that
+       vanished. */
+    written, updateErr := instance.currencyRepository.UpdateQuote(ctx, currencyId, quote)
     if nil != updateErr {
         return nil, RateUpdateAbsent, updateErr
     }
@@ -356,7 +357,7 @@ func (instance *CurrencyService) UpdateRate(
             return nil, RateUpdateAbsent, nil
         }
 
-        if true == current.RateAsOf.After(rateAsOf) {
+        if false == quote.NamesTheSameReadingAs(current.Quote()) && true == isOlderReading(quote, current.Quote()) {
             return current, RateUpdateStale, nil
         }
 
@@ -368,8 +369,9 @@ func (instance *CurrencyService) UpdateRate(
     }
 
     modified := *currency
-    modified.Rate = rate
-    modified.RateAsOf = rateAsOf
+    modified.Rate = quote.Rate
+    modified.RateAsOf = quote.AsOf
+    modified.ProviderRateAsOf = quote.ProviderAsOf
 
     updatedEvent := event.NewCurrencyUpdatedEvent(&modified)
     _, dispatchErr := instance.eventDispatcher.DispatchName(
@@ -384,45 +386,64 @@ func (instance *CurrencyService) UpdateRate(
     return &modified, RateUpdateWritten, nil
 }
 
+/* isOlderReading answers whether a quote is a reading older than the one held, judged on this application's
+   clock. A quote carrying the held reading's own stamp is never older: it is the provider re-quoting that
+   reading, and the instant this clock gave it moves with every measurement of the offset. */
+func isOlderReading(quote entity.RateQuote, held entity.RateQuote) bool {
+    if true == quote.ProviderAsOf.Equal(held.ProviderAsOf) {
+        return false
+    }
+
+    return true == quote.AsOf.Before(held.AsOf)
+}
+
 /* healCachedCurrency makes the two entries a currency is served from — the same two the updated listener
    drops — agree with a row that did not move, by the keys and without the event. Each entry is READ first and
-   dropped only when it does not serve the row's quote: an entry holding another rate or another instant, an
-   absence cached for a row that exists, a list that lacks the currency, or a payload the cache cannot hand
-   back. Dropped unconditionally, as it used to be, a catalogue that had not moved cost the server four reads
-   from the database and four writes into the cache on every tick, twenty-four times a day, to heal a cache
-   that was almost never wrong; the two reads here are what the heal costs now. An entry that is absent is left
-   absent, since the next reader fills it from the row. */
+   dropped only when it is not the row: an entry holding another rate, another instant, another code or name,
+   an absence cached for a row that exists, a list that lacks the currency, or a payload the cache cannot hand
+   back. The whole row is compared, not the quote alone, because the heal stands in for EVERY invalidation that
+   may have failed before it — the rename's included, whose listener drops the same two keys — and an entry
+   no key expires is otherwise served as it is until the next write. Dropped unconditionally, as it used to be,
+   a catalogue that had not moved cost the server four reads from the database and four writes into the cache
+   on every tick, twenty-four times a day, to heal a cache that was almost never wrong; the two reads here are
+   what the heal costs now. An entry that is absent is left absent, since the next reader fills it from the
+   row. */
 func (instance *CurrencyService) healCachedCurrency(currency *entity.Currency) error {
     byIdKey := CacheKeyCurrencyById(currency.Id)
 
     cached, exists, getErr := instance.cache.Get(byIdKey)
-    if nil != getErr || (true == exists && false == cachedCurrencyServesQuote(cached, currency)) {
+    if nil != getErr || (true == exists && false == cachedCurrencyIsRow(cached, currency)) {
         if byIdErr := instance.cache.Delete(byIdKey); nil != byIdErr {
             return byIdErr
         }
     }
 
     cachedList, listExists, listErr := instance.cache.Get(CacheKeyCurrencyList)
-    if nil != listErr || (true == listExists && false == cachedListServesQuote(cachedList, currency)) {
+    if nil != listErr || (true == listExists && false == cachedListCarriesRow(cachedList, currency)) {
         return instance.cache.Delete(CacheKeyCurrencyList)
     }
 
     return nil
 }
 
-/* cachedCurrencyServesQuote answers whether a cached entry is the row's currency at the row's quote: the rate,
-   and the instant at the resolution the row holds. */
-func cachedCurrencyServesQuote(cached any, currency *entity.Currency) bool {
+/* cachedCurrencyIsRow answers whether a cached entry is the row, field for field, the instants at the
+   resolution the row holds. */
+func cachedCurrencyIsRow(cached any, currency *entity.Currency) bool {
     typed, isCurrency := cached.(*entity.Currency)
     if false == isCurrency || nil == typed {
         return false
     }
 
-    return currency.Rate == typed.Rate && true == currency.RateAsOf.Equal(typed.RateAsOf)
+    return currency.Id == typed.Id &&
+        currency.Code == typed.Code &&
+        currency.Name == typed.Name &&
+        currency.Rate == typed.Rate &&
+        true == currency.RateAsOf.Equal(typed.RateAsOf) &&
+        true == currency.ProviderRateAsOf.Equal(typed.ProviderRateAsOf)
 }
 
-/* cachedListServesQuote answers whether a cached list carries the currency at the row's quote. */
-func cachedListServesQuote(cached any, currency *entity.Currency) bool {
+/* cachedListCarriesRow answers whether a cached list carries the currency as the row holds it. */
+func cachedListCarriesRow(cached any, currency *entity.Currency) bool {
     typed, isList := cached.([]*entity.Currency)
     if false == isList {
         return false
@@ -430,7 +451,7 @@ func cachedListServesQuote(cached any, currency *entity.Currency) bool {
 
     for _, listed := range typed {
         if nil != listed && currency.Id == listed.Id {
-            return true == cachedCurrencyServesQuote(listed, currency)
+            return true == cachedCurrencyIsRow(listed, currency)
         }
     }
 

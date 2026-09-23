@@ -5,7 +5,6 @@ import (
     "fmt"
     "strings"
     "sync"
-    "time"
 
     "github.com/precision-soft/melody/v3/.example/entity"
 )
@@ -102,7 +101,7 @@ func (instance *inMemoryCurrencyRepository) Update(ctx context.Context, currency
     return false, nil
 }
 
-func (instance *inMemoryCurrencyRepository) UpdateQuote(ctx context.Context, id string, rate float64, rateAsOf time.Time) (bool, error) {
+func (instance *inMemoryCurrencyRepository) UpdateQuote(ctx context.Context, id string, quote entity.RateQuote) (bool, error) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -117,17 +116,19 @@ func (instance *inMemoryCurrencyRepository) UpdateQuote(ctx context.Context, id 
         }
 
         /* the judgement and the write are one step under the lock, the way the database's conditional statement is one */
-        if true == existing.RateAsOf.After(rateAsOf) {
+        held := existing.Quote()
+        if true == quote.NamesTheSameReadingAs(held) {
             return false, nil
         }
 
-        if rate == existing.Rate && true == existing.RateAsOf.Equal(rateAsOf) {
+        if false == quote.ProviderAsOf.Equal(held.ProviderAsOf) && true == held.AsOf.After(quote.AsOf) {
             return false, nil
         }
 
         quoted := *existing
-        quoted.Rate = rate
-        quoted.RateAsOf = rateAsOf
+        quoted.Rate = quote.Rate
+        quoted.RateAsOf = quote.AsOf
+        quoted.ProviderRateAsOf = quote.ProviderAsOf
         instance.currencies[index] = &quoted
 
         return true, nil

@@ -1,6 +1,7 @@
 package repository
 
 import (
+    "strings"
     "testing"
     "time"
 
@@ -21,5 +22,23 @@ func TestNewCurrencyRow_CarriesTheInstantInUtc(t *testing.T) {
 
     if false == row.RateAsOf.Equal(quotedAt) || 9 != row.RateAsOf.Hour() {
         t.Errorf("the row carries %s, wanted the same instant as 09:00:00Z", row.RateAsOf)
+    }
+}
+
+/* the write judges the row as the repository contract says, in the one statement: not over a newer reading on
+   this clock unless it names the same reading, and never over the reading it already holds */
+func TestUpdateQuoteQuery_WritesOverTheRowOnlyUnderTheContract(t *testing.T) {
+    repositoryInstance := &bunCurrencyRepository{database: newRenderingDatabase()}
+
+    stamped := time.Date(2026, time.September, 8, 9, 4, 0, 0, time.UTC)
+    rendered := repositoryInstance.updateQuoteQuery("cur-usd", entity.NewRateQuote(1.2, stamped.Add(-4*time.Minute), stamped)).String()
+
+    for _, wanted := range []string{
+        "SET rate = 1.2, rate_as_of = '2026-09-08 09:00:00+00:00', provider_rate_as_of = '2026-09-08 09:04:00+00:00' ",
+        "WHERE (id = 'cur-usd') AND ((rate_as_of <= '2026-09-08 09:00:00+00:00' OR provider_rate_as_of = '2026-09-08 09:04:00+00:00')) AND (NOT (rate = 1.2 AND provider_rate_as_of = '2026-09-08 09:04:00+00:00'))",
+    } {
+        if false == strings.Contains(rendered, wanted) {
+            t.Errorf("the statement lacks %q:\n%s", wanted, rendered)
+        }
     }
 }

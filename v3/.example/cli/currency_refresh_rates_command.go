@@ -57,7 +57,8 @@ func (instance *CurrencyRefreshRatesCommand) Run(runtimeInstance melodyruntimeco
     /* the columns keep the order the live band reads them in — instant, attempts, updated, skipped — and the
        three headings that were folded into "skipped" or lost in a refusal follow them: a provider between
        two moves answers UNCHANGED, a replayed document STALE, and a quote the catalogue would not take
-       REFUSED, with the run's exit code naming the currencies it refused */
+       REFUSED, with the run's exit code naming the currencies it refused; the provider's clock closes the row,
+       the offset its stamps were moved by onto this clock or "unmeasured" for an answer that carried no date */
     headers := []string{
         "AS_OF",
         "ATTEMPTS",
@@ -66,6 +67,7 @@ func (instance *CurrencyRefreshRatesCommand) Run(runtimeInstance melodyruntimeco
         "UNCHANGED",
         "STALE",
         "REFUSED",
+        "PROVIDER_CLOCK",
     }
 
     rows := [][]string{
@@ -77,6 +79,7 @@ func (instance *CurrencyRefreshRatesCommand) Run(runtimeInstance melodyruntimeco
             fmt.Sprintf("%d", outcome.Unchanged),
             fmt.Sprintf("%d", outcome.Stale),
             fmt.Sprintf("%d", outcome.Refused),
+            providerClockColumn(outcome),
         },
     }
 
@@ -90,6 +93,20 @@ func (instance *CurrencyRefreshRatesCommand) Run(runtimeInstance melodyruntimeco
     }
 
     return refreshErr
+}
+
+/* providerClockColumn renders how the provider's stamps were moved onto this clock: the offset, signed, with
+   "+0s" for a clock that agrees with this one, and "unmeasured" when the answer carried no date. */
+func providerClockColumn(outcome service.RateRefreshOutcome) string {
+    if false == outcome.ProviderClockMeasured {
+        return "unmeasured"
+    }
+
+    if 0 <= outcome.ProviderClockOffset {
+        return "+" + outcome.ProviderClockOffset.String()
+    }
+
+    return outcome.ProviderClockOffset.String()
 }
 
 var _ melodyclicontract.Command = (*CurrencyRefreshRatesCommand)(nil)
