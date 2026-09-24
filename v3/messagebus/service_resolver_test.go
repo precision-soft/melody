@@ -333,6 +333,22 @@ func TestTransportsCloser_APanickingCloseDoesNotStrandTheOthers(t *testing.T) {
     }
 }
 
+func TestTransportsCloser_APanickingCloseCarriesTheStackOfThePanic(t *testing.T) {
+    closer := &TransportsCloser{transports: map[string]messagebuscontract.Transport{
+        "a-panicking": &closePanickingTransport{},
+    }}
+
+    closeErr := closer.closeOne(context.Background(), "a-panicking")
+    if nil == closeErr {
+        t.Fatalf("expected the panicking close to surface as a failure")
+    }
+
+    panicStack, isString := exception.LogContext(closeErr)["panicStack"].(string)
+    if false == isString || false == strings.Contains(panicStack, "closePanickingTransport") {
+        t.Fatalf("expected the stack of the panic, through the transport's own Close, got %q", panicStack)
+    }
+}
+
 /* a nil entry is refused at boot, named, rather than dereferenced by the consume command at run time */
 func TestRegisterTransports_RefusesANilOrTypedNilEntryByName(t *testing.T) {
     for name, transport := range map[string]messagebuscontract.Transport{

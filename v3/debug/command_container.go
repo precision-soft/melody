@@ -842,6 +842,9 @@ const errorContextCycleMarker = "<cycle>"
 /* errorContextDepthMarker stands in for a subtree the walk refused to descend into. It reads differently from the cycle marker because the two say different things to whoever is looking at the rendered context: a cycle is a structure that closes on itself, this is a structure that simply goes deeper than anything worth printing. */
 const errorContextDepthMarker = "<depth limit>"
 
+/* errorContextMarshalFailureMarker stands in for a value that renders itself and whose rendering failed: what it holds is exactly what its own method exists to decide about, so none of it is shown */
+const errorContextMarshalFailureMarker = "<marshal failed>"
+
 /* maximumErrorContextDepth bounds the descent. The cycle guard above answers the context that holds itself; it says nothing about one that is merely very deep, and nothing else did either — a deep enough acyclic context walked until the goroutine stack was gone. That failure is `fatal error: stack overflow`, which no recover reaches, so the command layer cannot report it and the process dies rendering a debug page. Measured with the stack capped at 16 MiB it took some five hundred thousand levels, which the production cap of one gigabyte scales up rather than removes.
 
    The bound is far above anything a real error context reaches: these are producer-supplied maps describing a failure, and a hand-built one nests a handful of levels. It matches the bound internal/copy.go puts on the same shape of walk for the same reason. */
@@ -918,7 +921,7 @@ func sanitizeErrorContextValueTracked(value any, seen map[errorContextVisitKey]s
     return value
 }
 
-/* renderedThroughItsOwnJson renders a map or slice value that marshals itself through its own method and decodes the result into the plain shapes the walk reads, numbers kept as written; a value that marshals nothing of its own, or whose method fails or panics, is answered as not rendered and walked as it is */
+/* renderedThroughItsOwnJson renders a map or slice value that marshals itself through its own method and decodes the result into the plain shapes the walk reads, numbers kept as written; a value that marshals nothing of its own is answered as not rendered and walked as it is. A value whose method fails or panics is rendered as the failure marker: walked as it is, it would be converted to its plain shape, which strips the very method that masks it, and a masking value would print in the clear exactly when its own rendering failed. */
 func renderedThroughItsOwnJson(value any) (rendered any, isRendered bool) {
     /* only the shapes the walk would otherwise convert: any other value that marshals itself — an error that renders structurally — is already handed to the encoder as it is, and in the text table it keeps the rendering it has */
     if kind := reflect.ValueOf(value).Kind(); reflect.Map != kind && reflect.Slice != kind {
@@ -933,20 +936,20 @@ func renderedThroughItsOwnJson(value any) (rendered any, isRendered bool) {
 
     defer func() {
         if nil != recover() {
-            rendered = nil
-            isRendered = false
+            rendered = errorContextMarshalFailureMarker
+            isRendered = true
         }
     }()
 
     encoded, marshalErr := json.Marshal(value)
     if nil != marshalErr {
-        return nil, false
+        return errorContextMarshalFailureMarker, true
     }
 
     decoder := json.NewDecoder(bytes.NewReader(encoded))
     decoder.UseNumber()
     if decodeErr := decoder.Decode(&rendered); nil != decodeErr {
-        return nil, false
+        return errorContextMarshalFailureMarker, true
     }
 
     return rendered, true

@@ -4,6 +4,7 @@ import (
     "context"
     "errors"
     "fmt"
+    "runtime/debug"
     "sort"
 
     "github.com/precision-soft/melody/v3/container"
@@ -116,7 +117,7 @@ func isNilTransport(transport messagebuscontract.Transport) bool {
     return true == internal.IsNilInterface(transport)
 }
 
-/* closeOne contains a panicking transport Close as a returned failure, so the teardown of the transports that sort after it still happens. The container's own teardown makes the same decision one level up for the same reason — but its boundary is around the CLOSER, so a panic inside this loop is recorded once and the rest of the map is silently skipped. The recovered value travels as the cause, not as a stringified context slot, so an error-shaped panic keeps its own context and cause chain in the record. */
+/* closeOne contains a panicking transport Close as a returned failure, so the teardown of the transports that sort after it still happens. The container's own teardown makes the same decision one level up for the same reason — but its boundary is around the CLOSER, so a panic inside this loop is recorded once and the rest of the map is silently skipped. The recovered value travels as the cause, not as a stringified context slot, so an error-shaped panic keeps its own context and cause chain in the record, and the stack is captured inside the recover, the only place the frames that ran still exist — the container's own containment keeps it for the same reason. */
 func (instance *TransportsCloser) closeOne(closeContext context.Context, name string) (closeErr error) {
     defer func() {
         recoveredValue := recover()
@@ -126,7 +127,11 @@ func (instance *TransportsCloser) closeOne(closeContext context.Context, name st
 
         closeErr = exception.NewError(
             "messagebus transport close panicked",
-            map[string]any{"transport": name, "recoveredType": fmt.Sprintf("%T", recoveredValue)},
+            map[string]any{
+                "transport":     name,
+                "recoveredType": fmt.Sprintf("%T", recoveredValue),
+                "panicStack":    string(debug.Stack()),
+            },
             exception.PanicCause(recoveredValue),
         )
     }()

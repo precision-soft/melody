@@ -887,6 +887,11 @@ func TestAggregateCliErrors_ARealExitLinkKeepsItsCode(t *testing.T) {
     if 4 != exitError.ExitCode() {
         t.Fatalf("expected the command's exit code to survive the aggregation, got %d", exitError.ExitCode())
     }
+
+    /* the aggregate carries the command's own exit error as a cause, so errors.As finds an exit error either way: the one found must be the wrapper around the aggregate, or the shutdown failures never reach the record the exit writes */
+    if false == strings.Contains(exitError.Error(), "cli command failed with shutdown errors") {
+        t.Fatalf("expected the exit error to carry the shutdown failures, got %q", exitError.Error())
+    }
 }
 
 /* the no-color run is the clean proof, because the colored branch writes the framework's own ansi codes around the data: under --no-color every escape byte in the output can only have come from the data, and the flag's comment promises a redirected file free of them. The negative assertions are what the eye cannot check — a raw \r and a raw escape byte render invisibly. */
@@ -980,6 +985,28 @@ func TestRegister_ActionColoursTheFailedVerdictAfterEscapingTheBanner(t *testing
     }
 }
 
+/* the error line is the one line of the banner on a red background, and the finish lines around it stay green */
+func TestRegister_ActionPrintsTheErrorLineOnTheRedBackground(t *testing.T) {
+    command := &testCommand{
+        nameValue:        "boom",
+        descriptionValue: "boom command",
+        flagsValue:       output.DebugFlags(),
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+            return errors.New("boom")
+        },
+    }
+
+    written, _ := runRegisteredCommandWithRuntime(newTestRuntime(t), command, nil)
+
+    if false == strings.Contains(written, AnsiBackgroundRed+AnsiEraseLine+"\r"+AnsiWhite+"[error] boom"+AnsiReset) {
+        t.Fatalf("expected the error line on the red background, got %q", written)
+    }
+
+    if 1 != strings.Count(written, AnsiBackgroundRed) {
+        t.Fatalf("expected the red background on the error line alone, got %q", written)
+    }
+}
+
 /* the no-color banner never coloured the verdict and always printed it right; the split keeps that line byte for byte */
 func TestRegister_ActionPrintsThePlainFailedVerdictUnderNoColor(t *testing.T) {
     command := &testCommand{
@@ -1029,6 +1056,17 @@ func TestNewEngineFlags_RefusesTwoFlagsSharingAnAlias(t *testing.T) {
         &clicontract.StringFlag{Name: "alpha", Aliases: []string{"a"}},
         &clicontract.BoolFlag{Name: "beta", Aliases: []string{"a"}},
     }, "cli flag spelling declared twice", "a")
+}
+
+/* the engine mounts its own help flag on every command, so a spelling of it declared by the command is parsed in its place and -h runs the command instead of printing the usage */
+func TestNewEngineFlags_RefusesASpellingOfTheEnginesHelpFlag(t *testing.T) {
+    requireSpellingRefusal(t, []clicontract.Flag{
+        &clicontract.StringFlag{Name: "host", Aliases: []string{"h"}},
+    }, "cli flag spelling declared twice", "h")
+
+    requireSpellingRefusal(t, []clicontract.Flag{
+        &clicontract.BoolFlag{Name: "help"},
+    }, "cli flag spelling declared twice", "help")
 }
 
 func TestNewEngineFlags_RefusesAnEmptyAlias(t *testing.T) {

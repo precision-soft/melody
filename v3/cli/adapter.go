@@ -139,7 +139,7 @@ func runDeclaredValidator(definition clicontract.FlagDefinition) (refusal error)
         }
 
         /* an exit error is re-raised unchanged, as every recovery boundary of the framework re-raises it: the exit code belongs to whoever owns the process boundary, and that boundary reads it by type assertion on the recovered value, where a refusal carrying it as a cause would be read as a plain failure */
-        if exitErr, isExit := recoveredValue.(*exception.ExitError); true == isExit {
+        if exitErr, isExit := internal.RecoveredExitError(recoveredValue); true == isExit {
             panic(exitErr)
         }
 
@@ -189,11 +189,17 @@ type engineContext struct {
 
 var _ clicontract.Context = (*engineContext)(nil)
 
-/* newEngineContext resolves the output stream once, at the door: the engine leaves it nil on a command that was never given one, and every caller downstream would otherwise repeat the same guard on its first written line. */
+/* newEngineContext resolves the output stream once, at the door: the engine leaves it nil on a command that was never given one, and every caller downstream would otherwise repeat the same guard on its first written line. A nil command is refused here, because every reader of the context goes through it and a context built over none would panic at its first read instead. */
 func newEngineContext(command *urfavecli.Command) *engineContext {
+    if nil == command {
+        exception.Panic(
+            exception.NewError("cli engine context may not be built over a nil command", nil, nil),
+        )
+    }
+
     var writer io.Writer = io.Discard
 
-    if nil != command && false == internal.IsNilInterface(command.Writer) {
+    if false == internal.IsNilInterface(command.Writer) {
         writer = command.Writer
     }
 

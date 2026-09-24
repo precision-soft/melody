@@ -1415,3 +1415,33 @@ func TestSanitizeErrorContextValue_RendersADefinedMapThroughItsOwnMarshalerThenW
         t.Fatalf("expected the map rendered through its own MarshalJSON with the noise key dropped, got %s", encoded)
     }
 }
+
+type failingMaskingErrorContextMap map[string]any
+
+func (instance failingMaskingErrorContextMap) MarshalJSON() ([]byte, error) {
+    return nil, errors.New("the masking method could not render")
+}
+
+type panickingMaskingErrorContextMap map[string]any
+
+func (instance panickingMaskingErrorContextMap) MarshalJSON() ([]byte, error) {
+    panic("the masking method panicked")
+}
+
+func TestSanitizeErrorContextValue_RendersAMapWhoseOwnMarshalerFailsAsTheMarkerNotInTheClear(t *testing.T) {
+    for name, value := range map[string]any{
+        "failing":   failingMaskingErrorContextMap{"secret": "hunter2"},
+        "panicking": panickingMaskingErrorContextMap{"secret": "hunter2"},
+    } {
+        sanitized := sanitizeErrorContextValue(map[string]any{"value": value})
+
+        encoded, marshalErr := json.Marshal(sanitized)
+        if nil != marshalErr {
+            t.Fatalf("%s: the sanitized context must stay marshalable: %v", name, marshalErr)
+        }
+
+        if true == strings.Contains(string(encoded), "hunter2") || false == strings.Contains(string(encoded), "marshal failed") {
+            t.Fatalf("%s: expected the failure marker in place of the value, got %s", name, encoded)
+        }
+    }
+}

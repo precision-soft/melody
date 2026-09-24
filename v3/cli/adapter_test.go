@@ -386,6 +386,12 @@ func TestNewEngineContext_AnswersADiscardingWriterForACommandWithoutOne(t *testi
     }
 }
 
+func TestNewEngineContext_PanicsOnANilCommand(t *testing.T) {
+    testhelper.AssertPanicsWithError(t, func() {
+        newEngineContext(nil)
+    }, "cli engine context may not be built over a nil command")
+}
+
 func TestNewEngineContext_AnswersTheCommandsOwnWriter(t *testing.T) {
     buffer := &bytes.Buffer{}
     commandContext := newEngineContext(&urfavecli.Command{Name: "probe", Writer: buffer})

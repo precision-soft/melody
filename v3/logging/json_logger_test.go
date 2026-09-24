@@ -671,6 +671,24 @@ func TestNewJsonLoggerWithLabels_CopiesTheLabels(t *testing.T) {
     }
 }
 
+/* the configured labels are encoded at construction, so the copy is observed through a level the caller labels only afterwards: the logger reads the map for it on every record, and it must be the map it was built with */
+func TestNewJsonLoggerWithLabels_ALabelTheCallerAddsLaterIsNotRead(t *testing.T) {
+    labels := loggingcontract.LevelLabels{
+        loggingcontract.LevelError: loggingcontract.LevelLabelFromString("custom-error"),
+    }
+
+    buffer := &bytes.Buffer{}
+    logger := NewJsonLoggerWithLabels(buffer, loggingcontract.LevelInfo, labels)
+
+    labels[loggingcontract.Level("audit")] = loggingcontract.LevelLabelFromString("added-later")
+
+    logger.Log(loggingcontract.Level("audit"), "record", nil)
+
+    if true == strings.Contains(buffer.String(), "added-later") || false == strings.Contains(buffer.String(), `"level":"audit"`) {
+        t.Fatalf("expected the raw level as the label, not one added to the caller's map, got %s", buffer.String())
+    }
+}
+
 type marshalingProbeError struct {
     detail string
 }
@@ -1613,5 +1631,56 @@ func TestNormalizeJsonValue_AMarshalerAtTheDepthFloorPassesAsItIs(t *testing.T) 
 
     if _, kept := normalized.(maskingContextMap); false == kept {
         t.Fatalf("expected the marshaler handed on at the floor, got %#v", normalized)
+    }
+}
+
+func BenchmarkJsonLogger_Log(b *testing.B) {
+    caseList := []struct {
+        name    string
+        context loggingcontract.Context
+    }{
+        {
+            name:    "empty",
+            context: nil,
+        },
+        {
+            name: "scalar",
+            context: loggingcontract.Context{
+                "service": "service.catalog",
+                "attempt": 3,
+                "enabled": true,
+                "elapsed": 1.5,
+            },
+        },
+        {
+            name: "nested",
+            context: loggingcontract.Context{
+                "service": "service.catalog",
+                "cause":   errors.New("connection refused"),
+                "chain": []any{
+                    map[string]any{"message": "first", "context": map[string]any{"host": "db", "port": 3306}},
+                    map[string]any{"message": "second", "context": map[string]any{"host": "cache", "port": 6379}},
+                },
+            },
+        },
+        {
+            name: "marshaler",
+            context: loggingcontract.Context{
+                "payload": maskingContextMap{"secret": "value"},
+            },
+        },
+    }
+
+    for _, benchmarkCase := range caseList {
+        b.Run(benchmarkCase.name, func(b *testing.B) {
+            logger := NewJsonLogger(io.Discard, loggingcontract.LevelInfo)
+
+            b.ReportAllocs()
+            b.ResetTimer()
+
+            for index := 0; index < b.N; index++ {
+                logger.Info("record", benchmarkCase.context)
+            }
+        })
     }
 }

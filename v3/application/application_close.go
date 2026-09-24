@@ -28,16 +28,23 @@ func (instance *Application) close(closeContext context.Context) error {
         return nil
     }
 
-    doneChannel := instance.closeDoneChannel()
+    performed := false
+    var performErr error
 
-    if false == instance.closePerformerClaimed.CompareAndSwap(false, true) {
-        <-doneChannel
+    instance.closePerformerOnce.Do(func() {
+        performed = true
+        performErr = instance.performClose(closeContext)
+    })
 
+    if false == performed {
         return nil
     }
 
-    defer close(doneChannel)
+    return performErr
+}
 
+/* performClose is the teardown the claim's winner runs */
+func (instance *Application) performClose(closeContext context.Context) error {
     emergencyLogger := logging.EmergencyLogger()
 
     serviceContainer := instance.kernel.ServiceContainer()
@@ -74,15 +81,6 @@ func (instance *Application) close(closeContext context.Context) error {
     logging.CloseEmergencyLogger()
 
     return nil
-}
-
-/* closeDoneChannel builds the performer-done channel on first use: the Application is constructed by literal in half its own suite, so an eagerly constructed channel would be nil exactly there. */
-func (instance *Application) closeDoneChannel() chan struct{} {
-    instance.closeDoneOnce.Do(func() {
-        instance.closeDone = make(chan struct{})
-    })
-
-    return instance.closeDone
 }
 
 /* closeServiceContainerWithin prefers the container's context-taking teardown when it has one, exactly the way this file already discovers IsClosed on the same value: the contract declares Close alone, so a method added to it would be a method every application carrying its own Container implementation would have to grow, and the door is reached by asking the value instead. A container that carries only Close is closed with it, and the budget then bounds the shield around this step rather than the closes inside it — which is the state every container was in before the door existed. */

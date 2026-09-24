@@ -383,8 +383,7 @@ func (instance *EventDispatcher) dispatchSafely(runtimeInstance runtimecontract.
         }
 
         /* an exit carries its code on the wrapper, and wrapping it in an ordinary error here would turn a deliberate exit code into the generic one the process boundary falls back to; logging.LogOnRecover passes it through for the same reason */
-        exitValue, isExit := recoveredValue.(*exception.ExitError)
-        if true == isExit && nil != exitValue {
+        if exitValue, isExit := internal.RecoveredExitError(recoveredValue); true == isExit {
             exception.Exit(exitValue)
         }
 
@@ -615,8 +614,7 @@ func (instance *EventDispatcher) callListenerSafely(
         }
 
         /* the exit code lives on the wrapper, and folding it into a listener error would leave a deliberate exit as an ordinary request failure with the code gone */
-        exitValue, isExit := recoveredValue.(*exception.ExitError)
-        if true == isExit && nil != exitValue {
+        if exitValue, isExit := internal.RecoveredExitError(recoveredValue); true == isExit {
             exception.Exit(exitValue)
         }
 

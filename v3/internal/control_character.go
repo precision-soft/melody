@@ -90,7 +90,7 @@ func isEscapedControlRune(currentRune rune, keepNewline bool) bool {
         return false == keepNewline
     }
 
-    if (0x20 > currentRune && 0 <= currentRune) || 0x7f == currentRune {
+    if 0x20 > currentRune || 0x7f == currentRune {
         return true
     }
 

@@ -2,7 +2,6 @@ package cli
 
 import (
     "context"
-    "errors"
     "fmt"
     "io"
     "sort"
@@ -78,199 +77,176 @@ func Register(root *Root, command clicontract.Command, runtimeInstance runtimeco
             Writer:    root.writer,
             ErrWriter: root.errorWriter,
             Action: func(ctx context.Context, actionCommand *urfavecli.Command) error {
-                commandContext := newEngineContext(actionCommand)
-
-                writer := commandContext.Writer()
-
-                /* in json mode the command writes one machine-readable document to this same stream, so the banner would make it unparseable from the first byte; nothing is lost because output.Meta already carries the command, arguments, start time and duration. The final status is the exit code, not the document: the scope and container are closed after the document was written, so a shutdown failure discovered there can no longer enter it. */
-                resolvedOption := output.NormalizeOption(
-                    output.ParseOptionFromCommand(commandContext),
-                )
-
-                if true == output.IsJsonFormat(resolvedOption.Format) {
-                    writer = io.Discard
-                }
-
-                startedAt := time.Now()
-                const logFiller = "======================================"
-
-                /* the flag promises the absence of ansi sequences, and the banner is written to the same stream the command's own output goes to: a --no-color run redirected into a file must not carry escape codes around an output that honoured the flag */
-                noColor := resolvedOption.NoColor
-
-                /* the banner is decoration, and quiet is the documented governor of decoration: StandardFlags defaults it to true so a scripted invocation stays clean without asking, DebugFlags to false so an introspection command keeps its frame, and a command that declares neither reads false and keeps the banner it always had. The banner ignored the flag entirely, so the one output the contract promises quiet suppresses was the one it never touched — melody:routes:manifest piped into jq carried the frame into the document. */
-                quiet := resolvedOption.Quiet
-
-                printGreenFullLine := func(writer io.Writer) {
-                    if true == noColor {
-                        return
-                    }
-
-                    _, _ = fmt.Fprintf(
-                        writer,
-                        "%s%s%s\n",
-                        AnsiBackgroundGreen,
-                        AnsiEraseLine,
-                        AnsiReset,
-                    )
-                }
-
-                printGreenStatusLine := func(writer io.Writer, text string) {
-                    /* the text embeds the command's own error, which routinely echoes downstream and client-derived values: escaped here, an embedded carriage return or escape sequence cannot repaint the status line as another verdict, and the no-color branch keeps the promise above — no escape codes reach a redirected file through the data either */
-                    text = internal.EscapeControlCharacters(text)
-
-                    if true == noColor {
-                        _, _ = fmt.Fprintf(writer, "%s\n", text)
-
-                        return
-                    }
-
-                    _, _ = fmt.Fprintf(
-                        writer,
-                        "%s%s\r%s%s%s\n",
-                        AnsiBackgroundGreen,
-                        AnsiEraseLine,
-                        AnsiWhite,
-                        text,
-                        AnsiReset,
-                    )
-                }
-
-                /* printGreenVerdictLine is the finish form of printGreenStatusLine: the text on either side of the verdict is escaped as data, and the verdict is coloured AFTER that. Coloured before, the banner's own escape sequence went through the escaping together with the data, and every failed run with colour on — the default — printed \x1b[31m as literal text around [failed], while the no-color run, which never coloured the verdict, printed it right. A sanitiser handed an already formatted line cannot tell the author's bytes from the client's, so the presentation is added last. */
-                printGreenVerdictLine := func(writer io.Writer, textBeforeVerdict string, verdict string, failed bool, textAfterVerdict string) {
-                    escapedBefore := internal.EscapeControlCharacters(textBeforeVerdict)
-                    escapedAfter := internal.EscapeControlCharacters(textAfterVerdict)
-
-                    if true == noColor {
-                        _, _ = fmt.Fprintf(writer, "%s%s%s\n", escapedBefore, verdict, escapedAfter)
-
-                        return
-                    }
-
-                    colouredVerdict := verdict
-                    if true == failed {
-                        colouredVerdict = AnsiRed + verdict + AnsiWhite
-                    }
-
-                    _, _ = fmt.Fprintf(
-                        writer,
-                        "%s%s\r%s%s%s%s%s\n",
-                        AnsiBackgroundGreen,
-                        AnsiEraseLine,
-                        AnsiWhite,
-                        escapedBefore,
-                        colouredVerdict,
-                        escapedAfter,
-                        AnsiReset,
-                    )
-                }
-
-                printRedStatusLine := func(writer io.Writer, text string) {
-                    text = internal.EscapeControlCharacters(text)
-
-                    if true == noColor {
-                        _, _ = fmt.Fprintf(writer, "%s\n", text)
-
-                        return
-                    }
-
-                    _, _ = fmt.Fprintf(
-                        writer,
-                        "%s%s\r%s%s%s\n",
-                        AnsiBackgroundRed,
-                        AnsiEraseLine,
-                        AnsiWhite,
-                        text,
-                        AnsiReset,
-                    )
-                }
-
-                if false == quiet {
-                    printGreenFullLine(writer)
-
-                    printGreenStatusLine(
-                        writer,
-                        fmt.Sprintf(
-                            "%s [%s] [started] [%s] %s",
-                            logFiller,
-                            normalizedCommandName,
-                            startedAt.Format(time.DateTime),
-                            logFiller,
-                        ),
-                    )
-
-                    printGreenFullLine(writer)
-                }
-
-                var commandErr error
-
-                defer func() {
-                    if true == quiet {
-                        return
-                    }
-
-                    finishedAt := time.Now()
-                    duration := finishedAt.Sub(startedAt)
-
-                    durationSecondsString := fmt.Sprintf("%.3fs", duration.Seconds())
-
-                    printGreenFullLine(writer)
-
-                    verdict := "[success]"
-                    failed := nil != commandErr
-                    if true == failed {
-                        verdict = "[failed]"
-                    }
-
-                    printGreenVerdictLine(
-                        writer,
-                        fmt.Sprintf("%s [%s] [finished] ", logFiller, normalizedCommandName),
-                        verdict,
-                        failed,
-                        fmt.Sprintf(" [%s] [duration=%s] %s", finishedAt.Format(time.DateTime), durationSecondsString, logFiller),
-                    )
-
-                    printGreenFullLine(writer)
-                }()
-
-                /* the finish banner reads commandErr, and a panic in the command leaves the linear path that assigns it: without this the unwinding ran the banner defer over a nil commandErr and printed [finished] [success] for a command that died. The panic itself is re-raised unchanged — an *exception.ExitError keeps its exit code — and the closes are deliberately NOT performed here on this path: the scope is closed by the caller's defer, and the container — on every path — by the recover handler that owns the exit, after it resolved the logger; closing the container here would hand that handler a closed logger and downgrade the fatal record to the emergency fallback. */
-                defer func() {
-                    recoveredValue := recover()
-                    if nil == recoveredValue {
-                        return
-                    }
-
-                    commandErr = exception.NewError(
-                        "cli command panicked",
-                        map[string]any{
-                            "commandName": normalizedCommandName,
-                        },
-                        nil,
-                    )
-
-                    panic(recoveredValue)
-                }()
-
-                /* a command that returns its error through a concrete typed pointer hands over a non-nil interface around a nil value: read as a failure it reaches Error() on a nil receiver on the printing line below. The same normalization guards the scope's Close result, which crosses the substitutable runtime contract. */
-                runErr := normalizeCliError(copied.Run(runtimeInstance, commandContext))
-
-                closeErrorByName := map[string]error{}
-
-                /* the container is deliberately not closed here, on either outcome — the reading the panic path above already had is the linear path's too: the recover handler that owns the process exit resolves the final record's logger through the container and closes it between the record and os.Exit, so a close here would downgrade a failed command's final record to the stderr fallback. The scope stays this action's to close, and its failure this action's to report. */
-                scopeCloseErr := normalizeCliError(runtimeInstance.Scope().Close())
-                if nil != scopeCloseErr {
-                    closeErrorByName["scope"] = scopeCloseErr
-                }
-
-                aggregatedErr := aggregateCliErrors(runErr, closeErrorByName)
-                if nil != aggregatedErr {
-                    commandErr = aggregatedErr
-                    printRedStatusLine(writer, fmt.Sprintf("[error] %s", aggregatedErr.Error()))
-                    return aggregatedErr
-                }
-
-                return nil
+                return runCommandAction(newEngineContext(actionCommand), copied, runtimeInstance, normalizedCommandName)
             },
         },
+    )
+}
+
+/* runCommandAction is the action of every registered command: the banner framing it, the command itself, and the close of the scope it ran in, the three failures folded into the one error the tree answers. */
+func runCommandAction(
+    commandContext *engineContext,
+    command clicontract.Command,
+    runtimeInstance runtimecontract.Runtime,
+    commandName string,
+) error {
+    writer := commandContext.Writer()
+
+    /* in json mode the command writes one machine-readable document to this same stream, so the banner would make it unparseable from the first byte; nothing is lost because output.Meta already carries the command, arguments, start time and duration. The final status is the exit code, not the document: the scope and container are closed after the document was written, so a shutdown failure discovered there can no longer enter it. */
+    resolvedOption := output.NormalizeOption(
+        output.ParseOptionFromCommand(commandContext),
+    )
+
+    if true == output.IsJsonFormat(resolvedOption.Format) {
+        writer = io.Discard
+    }
+
+    startedAt := time.Now()
+    const logFiller = "======================================"
+
+    /* the banner is decoration, and quiet is the documented governor of decoration: StandardFlags defaults it to true so a scripted invocation stays clean without asking, DebugFlags to false so an introspection command keeps its frame, and a command that declares neither reads false and keeps the banner it always had. The banner ignored the flag entirely, so the one output the contract promises quiet suppresses was the one it never touched — melody:routes:manifest piped into jq carried the frame into the document. */
+    quiet := resolvedOption.Quiet
+
+    banner := commandBanner{writer: writer, noColor: resolvedOption.NoColor}
+
+    if false == quiet {
+        banner.printFullLine()
+
+        banner.printStatusLine(
+            AnsiBackgroundGreen,
+            fmt.Sprintf(
+                "%s [%s] [started] [%s] %s",
+                logFiller,
+                commandName,
+                startedAt.Format(time.DateTime),
+                logFiller,
+            ),
+        )
+
+        banner.printFullLine()
+    }
+
+    var commandErr error
+
+    defer func() {
+        if true == quiet {
+            return
+        }
+
+        finishedAt := time.Now()
+        duration := finishedAt.Sub(startedAt)
+
+        durationSecondsString := fmt.Sprintf("%.3fs", duration.Seconds())
+
+        banner.printFullLine()
+
+        verdict := "[success]"
+        failed := nil != commandErr
+        if true == failed {
+            verdict = "[failed]"
+        }
+
+        banner.printLine(
+            AnsiBackgroundGreen,
+            fmt.Sprintf("%s [%s] [finished] ", logFiller, commandName),
+            verdict,
+            failed,
+            fmt.Sprintf(" [%s] [duration=%s] %s", finishedAt.Format(time.DateTime), durationSecondsString, logFiller),
+        )
+
+        banner.printFullLine()
+    }()
+
+    /* the finish banner reads commandErr, and a panic in the command leaves the linear path that assigns it: without this the unwinding ran the banner defer over a nil commandErr and printed [finished] [success] for a command that died. The panic itself is re-raised unchanged — an *exception.ExitError keeps its exit code — and the closes are deliberately NOT performed here on this path: the scope is closed by the caller's defer, and the container — on every path — by the recover handler that owns the exit, after it resolved the logger; closing the container here would hand that handler a closed logger and downgrade the fatal record to the emergency fallback. */
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            return
+        }
+
+        commandErr = exception.NewError(
+            "cli command panicked",
+            map[string]any{
+                "commandName": commandName,
+            },
+            nil,
+        )
+
+        panic(recoveredValue)
+    }()
+
+    /* a command that returns its error through a concrete typed pointer hands over a non-nil interface around a nil value: read as a failure it reaches Error() on a nil receiver on the printing line below. The same normalization guards the scope's Close result, which crosses the substitutable runtime contract. */
+    runErr := normalizeCliError(command.Run(runtimeInstance, commandContext))
+
+    closeErrorByName := map[string]error{}
+
+    /* the container is deliberately not closed here, on either outcome — the reading the panic path above already had is the linear path's too: the recover handler that owns the process exit resolves the final record's logger through the container and closes it between the record and os.Exit, so a close here would downgrade a failed command's final record to the stderr fallback. The scope stays this action's to close, and its failure this action's to report. */
+    scopeCloseErr := normalizeCliError(runtimeInstance.Scope().Close())
+    if nil != scopeCloseErr {
+        closeErrorByName["scope"] = scopeCloseErr
+    }
+
+    aggregatedErr := aggregateCliErrors(runErr, closeErrorByName)
+    if nil != aggregatedErr {
+        commandErr = aggregatedErr
+        banner.printStatusLine(AnsiBackgroundRed, fmt.Sprintf("[error] %s", aggregatedErr.Error()))
+        return aggregatedErr
+    }
+
+    return nil
+}
+
+/* commandBanner prints the frame a registered command runs inside, on the stream the command's own output goes to. The flag promises the absence of ansi sequences, so a --no-color run redirected into a file carries no escape codes around an output that honoured it. */
+type commandBanner struct {
+    writer  io.Writer
+    noColor bool
+}
+
+func (instance commandBanner) printFullLine() {
+    if true == instance.noColor {
+        return
+    }
+
+    _, _ = fmt.Fprintf(
+        instance.writer,
+        "%s%s%s\n",
+        AnsiBackgroundGreen,
+        AnsiEraseLine,
+        AnsiReset,
+    )
+}
+
+/* printStatusLine is the line with no verdict in it */
+func (instance commandBanner) printStatusLine(background string, text string) {
+    instance.printLine(background, text, "", false, "")
+}
+
+/* printLine escapes the text on either side of the verdict as data and colours the verdict AFTER that. The text embeds the command's own error, which routinely echoes downstream and client-derived values: escaped, an embedded carriage return or escape sequence cannot repaint the line as another verdict. Coloured before the escaping, the banner's own escape sequence went through it together with the data, and every failed run with colour on — the default — printed \x1b[31m as literal text around [failed], while the no-color run, which never coloured the verdict, printed it right. A sanitiser handed an already formatted line cannot tell the author's bytes from the client's, so the presentation is added last. */
+func (instance commandBanner) printLine(background string, textBeforeVerdict string, verdict string, failed bool, textAfterVerdict string) {
+    escapedBefore := internal.EscapeControlCharacters(textBeforeVerdict)
+    escapedAfter := internal.EscapeControlCharacters(textAfterVerdict)
+
+    if true == instance.noColor {
+        _, _ = fmt.Fprintf(instance.writer, "%s%s%s\n", escapedBefore, verdict, escapedAfter)
+
+        return
+    }
+
+    colouredVerdict := verdict
+    if true == failed {
+        colouredVerdict = AnsiRed + verdict + AnsiWhite
+    }
+
+    _, _ = fmt.Fprintf(
+        instance.writer,
+        "%s%s\r%s%s%s%s%s\n",
+        background,
+        AnsiEraseLine,
+        AnsiWhite,
+        escapedBefore,
+        colouredVerdict,
+        escapedAfter,
+        AnsiReset,
     )
 }
 
@@ -281,7 +257,12 @@ func newEngineFlags(flags []clicontract.Flag) []urfavecli.Flag {
     }
 
     engineFlags := make([]urfavecli.Flag, 0, len(flags))
+
+    /* the engine mounts its own help flag on every command, and a command's flag declaring one of its spellings is parsed in its place: -h stopped printing the usage and ran the command, in silence */
     declaredBy := map[string]string{}
+    for _, spelling := range urfavecli.HelpFlag.Names() {
+        declaredBy[spelling] = urfavecli.HelpFlag.Names()[0]
+    }
 
     for _, flag := range flags {
         engineFlag := newEngineFlag(flag)
@@ -383,8 +364,7 @@ func aggregateCliErrors(runErr error, closeErrorByName map[string]error) error {
     )
 
     /* the exit code is resolved with errors.As, which matches the outermost ExitError in the chain: returning the aggregate unwrapped would hand the caller the command's own exit error instead, and the shutdown failures — carried only here — would never reach the log. A typed-nil link matches too and answers code 0, which NewExitError refuses with a panic, so the match is honoured only for a wrapper that carries one and the aggregate is returned plainly otherwise. */
-    var exitError *exception.ExitError
-    if true == errors.As(runErr, &exitError) && nil != exitError {
+    if exitError, isExit := internal.ExitErrorInChain(runErr); true == isExit {
         return exception.NewExitError(exitError.ExitCode(), aggregatedErr)
     }
 

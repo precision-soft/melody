@@ -39,13 +39,19 @@ func NewJsonLoggerWithClock(
         )
     }
 
-    logger := NewJsonLoggerWithLabels(output, minLevel, labels)
-    logger.(*jsonLogger).clock = clockInstance
-
-    return logger
+    return newJsonLogger(output, minLevel, labels, clockInstance)
 }
 
 func NewJsonLoggerWithLabels(output io.Writer, minLevel loggingcontract.Level, labels loggingcontract.LevelLabels) loggingcontract.Logger {
+    return newJsonLogger(output, minLevel, labels, nil)
+}
+
+func newJsonLogger(
+    output io.Writer,
+    minLevel loggingcontract.Level,
+    labels loggingcontract.LevelLabels,
+    clockInstance clockcontract.Clock,
+) *jsonLogger {
     if true == internal.IsNilInterface(output) {
         exception.Panic(
             exception.NewError("json logger output is not provided", nil, nil),
@@ -65,16 +71,40 @@ func NewJsonLoggerWithLabels(output io.Writer, minLevel loggingcontract.Level, l
     }
 
     /* the labels are copied because the caller keeps its reference: the map is read lock-free on every Log call, and a caller mutating the map it still holds against those reads is a fatal concurrent map access no recover reaches — the copy makes the reads safe the way the immutable output and minLevel fields already are */
-    copiedLabels := make(loggingcontract.LevelLabels, len(labels))
-    for level, label := range labels {
-        copiedLabels[level] = label
-    }
+    copiedLabels := copyLevelLabels(labels)
 
     return &jsonLogger{
-        output:      output,
-        minLevel:    minLevel,
-        levelLabels: copiedLabels,
+        output:             output,
+        minLevel:           minLevel,
+        levelLabels:        copiedLabels,
+        encodedLevelLabels: encodeLevelLabels(copiedLabels),
+        clock:              clockInstance,
     }
+}
+
+/* encodeLevelLabels encodes each configured label once, at construction, as LabelFor answers it for its level, so a record of a configured level carries bytes encoded before any record was written */
+func encodeLevelLabels(labels loggingcontract.LevelLabels) map[loggingcontract.Level][]byte {
+    encoded := make(map[loggingcontract.Level][]byte, len(labels))
+    for level := range labels {
+        encoded[level] = encodeLevelLabel(labels.LabelFor(level))
+    }
+
+    return encoded
+}
+
+/* encodeLevelLabel cannot fail: LabelFor answers a label holding an int or a string, and the label's MarshalJSON encodes that value alone */
+func encodeLevelLabel(label loggingcontract.LevelLabel) []byte {
+    encoded, _ := json.Marshal(label)
+
+    return encoded
+}
+
+func (instance *jsonLogger) encodedLevelLabel(level loggingcontract.Level, label loggingcontract.LevelLabel) []byte {
+    if encoded, exists := instance.encodedLevelLabels[level]; true == exists {
+        return encoded
+    }
+
+    return encodeLevelLabel(label)
 }
 
 type jsonLogger struct {
@@ -82,6 +112,8 @@ type jsonLogger struct {
     output      io.Writer
     minLevel    loggingcontract.Level
     levelLabels loggingcontract.LevelLabels
+    /* read lock-free like levelLabels, and never written after construction */
+    encodedLevelLabels map[loggingcontract.Level][]byte
     /* nil means the process clock: the constructors that cannot be handed a clock — the emergency and exit-path loggers — still have to stamp their records */
     clock clockcontract.Clock
     /* closed is atomic so Closed() can answer without the write lock: the probe is asked by the process-boundary exit handler, and an answer serialized behind an in-flight Write into a stalled pipe would hang the one handler that must reach os.Exit. The writes to the flag still happen under writeMutex — atomicity covers the lock-free read alone. */
@@ -89,26 +121,34 @@ type jsonLogger struct {
     writeFailureOnce sync.Once
 }
 
-func (instance *jsonLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
-    /* a level outside the five known ones weighs as error instead of inheriting the default lowest priority: the unknown level is the case that least deserves silence, and the zero-value exception a recover handler can carry reaches this line with an empty level — filed as debug, its fatal record was dropped by every production threshold. The label keeps the raw level, so the record still says what it was handed. */
-    effectivePriority := priorityForLevel(level)
+/* effectivePriorityForLevel weighs a level outside the five known ones as error instead of inheriting the default lowest priority: the unknown level is the case that least deserves silence, and the zero-value exception a recover handler can carry reaches the logger with an empty level — filed as debug, its fatal record was dropped by every production threshold. The label keeps the raw level, so the record still says what it was handed. */
+func effectivePriorityForLevel(level loggingcontract.Level) int {
     if false == IsValidLevel(level) {
-        effectivePriority = priorityForLevel(loggingcontract.LevelError)
+        return priorityForLevel(loggingcontract.LevelError)
     }
 
-    if effectivePriority < priorityForLevel(instance.minLevel) {
+    return priorityForLevel(level)
+}
+
+func (instance *jsonLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+    if effectivePriorityForLevel(level) < priorityForLevel(instance.minLevel) {
         return
     }
 
     label := instance.levelLabels.LabelFor(level)
 
-    /* the normalization and the encoding of the caller's own context both stay outside the lock. Both run application code — a MarshalJSON, a String, an Error of the caller's own — which is unbounded work this logger does not own and which may itself log through this very logger: under the lock, such a value deadlocked the whole journal on its own record, and every other writer queued behind the slowest caller's encoder. */
+    /* the normalization and the encoding of the caller's own context both stay outside the lock. Both run application code — a MarshalJSON, a String, an Error of the caller's own — which is unbounded work this logger does not own and which may itself log through this very logger: under the lock, such a value deadlocked the whole journal on its own record, and every other writer queued behind the slowest caller's encoder. The message is encoded out here too: a string always encodes, and a long one is work the other writers need not queue behind. */
     normalizedContext := normalizeJsonContext(context)
     encodedContext, contextMarshalErr := marshalJsonContextContained(normalizedContext)
 
     renderedContext := ""
+    encodedMessage := []byte(nil)
+    encodedLabel := []byte(nil)
     if nil != contextMarshalErr {
         renderedContext = renderJsonContextByKey(normalizedContext)
+    } else {
+        encodedMessage, _ = json.Marshal(message)
+        encodedLabel = instance.encodedLevelLabel(level, label)
     }
 
     /* the stamp is taken under the write lock, so the order of the stamps is the order of the writes: taken above the lock it said when the record was FORMED, and the two orders diverged by however long the encoding took — measured at eight goroutines writing records of a dozen keys, 484 of 1600 records reached the file out of stamp order, while LOGGING.md sells the ordering as reconstructible from the stamps.
@@ -124,43 +164,29 @@ func (instance *jsonLogger) Log(level loggingcontract.Level, message string, con
         return
     }
 
-    timestamp := instance.currentInstant().UTC().Format(jsonLogTimestampLayout)
+    instant := instance.currentInstant().UTC()
 
     encoded := []byte(nil)
-    marshalErr := contextMarshalErr
-    if nil == marshalErr {
-        /* the envelope is assembled from parts that are already encoded rather than marshalled as one value: handing the encoded context back to the encoder as a json.RawMessage makes it re-validate the bytes it just produced, and it does so one level deeper than it wrote them, so a context that fits the encoder's depth bound is refused when it is wrapped. Each of the three remaining fields is encoded on its own, so the escaping is the encoder's and not this line's. */
-        encodedMessage, messageErr := json.Marshal(message)
-        encodedLabel, labelErr := json.Marshal(label)
-        encodedTimestamp, timestampErr := json.Marshal(timestamp)
-
-        marshalErr = errors.Join(messageErr, labelErr, timestampErr)
-        if nil == marshalErr {
-            encoded = append(encoded, `{"message":`...)
-            encoded = append(encoded, encodedMessage...)
-            encoded = append(encoded, `,"level":`...)
-            encoded = append(encoded, encodedLabel...)
-            encoded = append(encoded, `,"time":`...)
-            encoded = append(encoded, encodedTimestamp...)
-            encoded = append(encoded, `,"context":`...)
-            encoded = append(encoded, encodedContext...)
-            encoded = append(encoded, '}')
-        }
-    }
-
-    if nil != marshalErr {
-        /* the fallback keeps the context as text rather than dropping it: one unmarshalable value used to cost every other key of the record — the service name, the cause chain — exactly when the record described a failure. Every fallback value is a string, so the second marshal cannot fail. The rendering itself was done above the lock, where the caller's own String methods belong; an outer failure over already-encoded values leaves nothing of the caller to render, so it says so. */
-        renderedFallbackContext := renderedContext
-        if nil == contextMarshalErr {
-            renderedFallbackContext = "the record could not be assembled from its already-encoded parts"
-        }
-
+    if nil == contextMarshalErr {
+        /* the envelope is assembled from parts that are already encoded rather than marshalled as one value: handing the encoded context back to the encoder as a json.RawMessage makes it re-validate the bytes it just produced, and it does so one level deeper than it wrote them, so a context that fits the encoder's depth bound is refused when it is wrapped. The stamp is appended between its quotes as it is formatted: the layout in UTC writes digits, '-', ':', 'T', '.' and 'Z' alone, none of which the encoder would escape. The capacity covers the whole line, the line end the write appends included. */
+        encoded = make([]byte, 0, len(encodedMessage)+len(encodedLabel)+len(jsonLogTimestampLayout)+len(encodedContext)+48)
+        encoded = append(encoded, `{"message":`...)
+        encoded = append(encoded, encodedMessage...)
+        encoded = append(encoded, `,"level":`...)
+        encoded = append(encoded, encodedLabel...)
+        encoded = append(encoded, `,"time":"`...)
+        encoded = instant.AppendFormat(encoded, jsonLogTimestampLayout)
+        encoded = append(encoded, `","context":`...)
+        encoded = append(encoded, encodedContext...)
+        encoded = append(encoded, '}')
+    } else {
+        /* the fallback keeps the context as text rather than dropping it: one unmarshalable value used to cost every other key of the record — the service name, the cause chain — exactly when the record described a failure. Every fallback value is a string or the label, so the second marshal cannot fail. The rendering itself was done above the lock, where the caller's own String methods belong. */
         fallback := map[string]any{
             "message":      message,
             "level":        label,
-            "time":         timestamp,
-            "marshalError": marshalErr.Error(),
-            "context":      renderedFallbackContext,
+            "time":         instant.Format(jsonLogTimestampLayout),
+            "marshalError": contextMarshalErr.Error(),
+            "context":      renderedContext,
         }
 
         encoded, _ = json.Marshal(fallback)
@@ -249,18 +275,13 @@ func (instance *jsonLogger) Closed() bool {
     return instance.closed.Load()
 }
 
-/* Enabled answers the same question Log asks itself first, and answers it with the same arithmetic: a level below the configured threshold is dropped, and an invalid level weighs as error rather than as the lowest priority for the reason written at that branch. A closed logger writes nothing at all, so it reports nothing enabled — the caller asking is about to build a record, and a record built for a logger that has stopped writing is pure waste. */
+/* Enabled answers the same question Log asks itself first, and answers it with the same arithmetic: a level below the configured threshold is dropped, and an invalid level weighs as error rather than as the lowest priority. A closed logger writes nothing at all, so it reports nothing enabled — the caller asking is about to build a record, and a record built for a logger that has stopped writing is pure waste. */
 func (instance *jsonLogger) Enabled(level loggingcontract.Level) bool {
     if true == instance.closed.Load() {
         return false
     }
 
-    effectivePriority := priorityForLevel(level)
-    if false == IsValidLevel(level) {
-        effectivePriority = priorityForLevel(loggingcontract.LevelError)
-    }
-
-    return effectivePriority >= priorityForLevel(instance.minLevel)
+    return effectivePriorityForLevel(level) >= priorityForLevel(instance.minLevel)
 }
 
 var _ loggingcontract.Logger = (*jsonLogger)(nil)
@@ -353,26 +374,65 @@ func rendersItsOwnJson(value any) bool {
     return isTextMarshaler
 }
 
-/* isJsonContextContainer answers for the shapes the walk descends into, which are exactly the ones that can carry a cycle past the encoder */
-func isJsonContextContainer(value any) bool {
-    switch value.(type) {
-    case map[string]any, loggingcontract.Context, []any, []map[string]any:
-        return true
+/* jsonContextContainerKind names which of the plain shapes the walk descends into a value was answered as; the container travels as a struct rather than as an interface, because boxing a slice header back into an interface costs an allocation per container on the hot path */
+type jsonContextContainerKind int
+
+const (
+    jsonContextContainerNone jsonContextContainerKind = iota
+    jsonContextContainerMap
+    jsonContextContainerSlice
+    jsonContextContainerMapSlice
+)
+
+type jsonContextContainer struct {
+    kind          jsonContextContainerKind
+    mapValue      map[string]any
+    sliceValue    []any
+    mapSliceValue []map[string]any
+}
+
+/* plainJsonContextContainer answers the value in the plain shape the walk descends into — a map[string]any, a []any or a []map[string]any — for exactly the values that can carry a cycle past the encoder, and the none kind for every other value.
+
+   A value that marshals itself — a map or slice type carrying its own MarshalJSON or MarshalText, a redacting one above all — said how it renders, and the conversion would strip exactly the methods that say it: it is not a container, at any depth. A defined type whose underlying type is one of the plain shapes — the exception contract's Context is one, and it is what a producer reaches for when nesting structured data — fails the assertions while carrying the same shape; left unconverted it rides past the cycle keying, and the cycle it holds reaches the encoder. The conversion keeps the backing pointer, which is what the keying is built on. */
+func plainJsonContextContainer(value any) jsonContextContainer {
+    switch typedValue := value.(type) {
+    case map[string]any:
+        return jsonContextContainer{kind: jsonContextContainerMap, mapValue: typedValue}
+
+    /* the exception contract's Context is an alias of this one, so the single case covers the context maps both packages put into a record */
+    case loggingcontract.Context:
+        return jsonContextContainer{kind: jsonContextContainerMap, mapValue: typedValue}
+
+    case []any:
+        return jsonContextContainer{kind: jsonContextContainerSlice, sliceValue: typedValue}
+
+    case []map[string]any:
+        return jsonContextContainer{kind: jsonContextContainerMapSlice, mapSliceValue: typedValue}
     }
 
     if true == rendersItsOwnJson(value) {
-        return false
+        return jsonContextContainer{kind: jsonContextContainerNone}
     }
 
     reflectedValue := reflect.ValueOf(value)
     switch reflectedValue.Kind() {
     case reflect.Map:
-        return reflectedValue.Type().ConvertibleTo(plainJsonContextMapType)
+        if true == reflectedValue.Type().ConvertibleTo(plainJsonContextMapType) {
+            return jsonContextContainer{
+                kind:     jsonContextContainerMap,
+                mapValue: reflectedValue.Convert(plainJsonContextMapType).Interface().(map[string]any),
+            }
+        }
     case reflect.Slice:
-        return reflectedValue.Type().ConvertibleTo(plainJsonContextSliceType)
+        if true == reflectedValue.Type().ConvertibleTo(plainJsonContextSliceType) {
+            return jsonContextContainer{
+                kind:       jsonContextContainerSlice,
+                sliceValue: reflectedValue.Convert(plainJsonContextSliceType).Interface().([]any),
+            }
+        }
     }
 
-    return false
+    return jsonContextContainer{kind: jsonContextContainerNone}
 }
 
 /* normalizeJsonValue renders every error in the context as its message, however deep the containers this package nests put it: an error left to the encoder marshals as an empty object — every field unexported, no marshaler — so a cause carried inside a chain entry survived as "{}" while the same error one level up rendered fine. A typed nil is the nil its producer meant and renders as null instead of panicking on the Error call; the normalization descends the map and slice shapes the package itself produces and leaves every other value to the encoder. */
@@ -390,7 +450,7 @@ func normalizeJsonValue(value any, remainingDepth int, seen map[jsonContextVisit
         }
 
         /* a container is the one value the floor may not hand on as it is: nothing has walked what it holds, so a cycle closing below the bound would reach the encoder — and from there the fmt fallback that cannot survive one. A scalar carries no such risk and passes through. */
-        if true == isJsonContextContainer(value) {
+        if jsonContextContainerNone != plainJsonContextContainer(value).kind {
             return normalizeJsonContextDepthMarker
         }
 
@@ -410,46 +470,21 @@ func normalizeJsonValue(value any, remainingDepth int, seen map[jsonContextVisit
         return recoveredErrorMessage(err)
     }
 
-    switch typedValue := value.(type) {
-    case map[string]any:
-        return normalizeJsonContextMap(typedValue, remainingDepth, seen)
+    container := plainJsonContextContainer(value)
+    switch container.kind {
+    case jsonContextContainerMap:
+        return normalizeJsonContextMap(container.mapValue, remainingDepth, seen)
 
-    /* the exception contract's Context is an alias of this one, so the single case covers the context maps both packages put into a record */
-    case loggingcontract.Context:
-        return normalizeJsonContextMap(typedValue, remainingDepth, seen)
+    case jsonContextContainerSlice:
+        return normalizeJsonContextSlice(container.sliceValue, remainingDepth, seen)
 
-    case []any:
-        return normalizeJsonContextSlice(typedValue, remainingDepth, seen)
-
-    case []map[string]any:
-        normalized := make([]any, len(typedValue))
-        for index, element := range typedValue {
+    case jsonContextContainerMapSlice:
+        normalized := make([]any, len(container.mapSliceValue))
+        for index, element := range container.mapSliceValue {
             normalized[index] = normalizeJsonValue(element, remainingDepth-1, seen)
         }
 
         return normalized
-    }
-
-    /* a value that marshals itself — a map or slice type carrying its own MarshalJSON or MarshalText, a redacting one above all — said how it renders, and the conversion below would strip exactly the methods that say it: the encoder is handed it as it is */
-    if true == rendersItsOwnJson(value) {
-        return value
-    }
-
-    /* a defined type whose underlying type is one of the shapes above — the exception contract's Context is one, and it is what a producer reaches for when nesting structured data — fails every assertion above while carrying the same shape. Left unconverted it rides past the cycle keying, and the cycle it holds reaches the encoder. The conversion keeps the backing pointer, which is what the keying is built on. */
-    reflectedValue := reflect.ValueOf(value)
-    switch reflectedValue.Kind() {
-    case reflect.Map:
-        if true == reflectedValue.Type().ConvertibleTo(plainJsonContextMapType) {
-            converted := reflectedValue.Convert(plainJsonContextMapType).Interface().(map[string]any)
-
-            return normalizeJsonContextMap(converted, remainingDepth, seen)
-        }
-    case reflect.Slice:
-        if true == reflectedValue.Type().ConvertibleTo(plainJsonContextSliceType) {
-            converted := reflectedValue.Convert(plainJsonContextSliceType).Interface().([]any)
-
-            return normalizeJsonContextSlice(converted, remainingDepth, seen)
-        }
     }
 
     return value

@@ -179,6 +179,71 @@ func TestApplicationClose_ConcurrentClosesReportOneFailureOnce(t *testing.T) {
     }
 }
 
+/* gatedCloseProbe holds the teardown open inside the service's Close until released, so a second close can be observed while the first is still performing */
+type gatedCloseProbe struct {
+    entered chan struct{}
+    release chan struct{}
+}
+
+func (instance *gatedCloseProbe) Close() error {
+    close(instance.entered)
+    <-instance.release
+
+    return nil
+}
+
+/* a sibling close must not return before the performer's teardown has finished: returning early, it let the exit path proceed over a teardown still running, and entering the container itself it became the call that ran the teardown */
+func TestApplicationClose_ASiblingCloseWaitsForThePerformersTeardown(t *testing.T) {
+    kernelInstance := newTestKernel()
+    applicationInstance := newScopedServiceApplication(kernelInstance)
+
+    probe := &gatedCloseProbe{entered: make(chan struct{}), release: make(chan struct{})}
+
+    serviceContainer := kernelInstance.ServiceContainer()
+
+    registerErr := serviceContainer.Register(
+        "app.gated.close",
+        func(resolver containercontract.Resolver) (*gatedCloseProbe, error) {
+            return probe, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get("app.gated.close"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    performerDone := make(chan error, 1)
+    go func() {
+        performerDone <- applicationInstance.close(context.Background())
+    }()
+
+    <-probe.entered
+
+    siblingDone := make(chan error, 1)
+    go func() {
+        siblingDone <- applicationInstance.close(context.Background())
+    }()
+
+    select {
+    case <-siblingDone:
+        t.Fatalf("expected the sibling close to wait while the performer's teardown is open")
+    case <-time.After(50 * time.Millisecond):
+    }
+
+    close(probe.release)
+
+    if performerErr := <-performerDone; nil != performerErr {
+        t.Fatalf("expected the performer to close cleanly, got %v", performerErr)
+    }
+
+    if siblingErr := <-siblingDone; nil != siblingErr {
+        t.Fatalf("expected the sibling to report nothing, got %v", siblingErr)
+    }
+}
+
 /* overrunSleeper is the plain closer that eats a budget and answers nil: bounded by nothing but itself, and named by nobody until the deadline record */
 type overrunSleeper struct {
     sleep time.Duration

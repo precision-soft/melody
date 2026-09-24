@@ -22,8 +22,7 @@ func LogOnRecover(
         return
     }
 
-    exitError, isExitError := recoveredValue.(*exception.ExitError)
-    if true == isExitError && nil != exitError {
+    if exitError, isExitError := internal.RecoveredExitError(recoveredValue); true == isExitError {
         err := exitError.ErrorValue()
         if nil == err {
             err = exception.NewError(
@@ -336,8 +335,7 @@ func resolveRecoveredExit(
     recovered any,
     exitCode int,
 ) (*exception.Error, int, bool) {
-    exitError, isExitError := recovered.(*exception.ExitError)
-    if true == isExitError && nil != exitError {
+    if exitError, isExitError := internal.RecoveredExitError(recovered); true == isExitError {
         ownExitCode := exitError.ExitCode()
 
         /* the rule NewExitError enforces at construction, read again at the one door that decides how the process ends: the zero value is constructible outside the constructor and answers 0, which os.Exit would report as success after a fatal panic. A wrapper carrying an out-of-range code is not honored as an exit — it is normalized under the caller's code, like the typed nil below. The upper bound is latent by construction, since the fields are unexported and the constructor refuses anything outside the range. */

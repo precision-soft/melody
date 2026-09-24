@@ -2,6 +2,7 @@ package opentelemetry
 
 import (
     "bufio"
+    "errors"
     "net"
     nethttp "net/http"
     "net/http/httptest"
@@ -151,6 +152,53 @@ func TestStatusRecordingResponseWriter_FlushReachesThroughAWrapperThatForwardsUn
 
     if false == inner.Flushed {
         t.Fatalf("expected the flush to reach the writer behind the wrapper")
+    }
+}
+
+/* the error the server's own writer answers once the client has gone: the header is already committed, and the flush reports the write that failed */
+type failingFlushResponseWriter struct {
+    *httptest.ResponseRecorder
+}
+
+func (instance *failingFlushResponseWriter) FlushError() error {
+    return errors.New("write: broken pipe")
+}
+
+func TestStatusRecordingResponseWriter_AFailedFlushKeepsTheStatusTheConnectionCarried(t *testing.T) {
+    recorder := &statusRecordingResponseWriter{ResponseWriter: &failingFlushResponseWriter{ResponseRecorder: httptest.NewRecorder()}, statusCode: nethttp.StatusOK}
+
+    recorder.Flush()
+    recorder.WriteHeader(nethttp.StatusInternalServerError)
+
+    if nethttp.StatusOK != recorder.statusCode {
+        t.Fatalf("expected the status committed by the failed flush, got %d", recorder.statusCode)
+    }
+}
+
+/* a writer with no flusher behind it is a writer the flush committed nothing on */
+type plainResponseWriter struct {
+    header nethttp.Header
+}
+
+func (instance *plainResponseWriter) Header() nethttp.Header {
+    return instance.header
+}
+
+func (instance *plainResponseWriter) Write(payload []byte) (int, error) {
+    return len(payload), nil
+}
+
+func (instance *plainResponseWriter) WriteHeader(statusCode int) {
+}
+
+func TestStatusRecordingResponseWriter_AFlushWithNoFlusherLeavesTheHeaderUnwritten(t *testing.T) {
+    recorder := &statusRecordingResponseWriter{ResponseWriter: &plainResponseWriter{header: nethttp.Header{}}, statusCode: nethttp.StatusOK}
+
+    recorder.Flush()
+    recorder.WriteHeader(nethttp.StatusNotFound)
+
+    if nethttp.StatusNotFound != recorder.statusCode {
+        t.Fatalf("expected the status the handler wrote after a flush that committed nothing, got %d", recorder.statusCode)
     }
 }
 

@@ -69,6 +69,29 @@ func TestRoot_SetWriterReachesACommandRegisteredAfterIt(t *testing.T) {
     }
 }
 
+/* the engine defaults each command's error stream on its own, as it does the output stream, so the door has to reach the commands whichever side of the registration it is called on */
+func TestRoot_SetErrorWriterReachesACommandRegisteredBeforeOrAfterIt(t *testing.T) {
+    for _, setErrorWriterFirst := range []bool{true, false} {
+        runtimeInstance := newTestRuntime(t)
+        rootCommand := NewRoot("app", "desc")
+        buffer := &bytes.Buffer{}
+
+        command := &testCommand{nameValue: "probe", descriptionValue: "probe"}
+
+        if true == setErrorWriterFirst {
+            rootCommand.SetErrorWriter(buffer)
+            Register(rootCommand, command, runtimeInstance)
+        } else {
+            Register(rootCommand, command, runtimeInstance)
+            rootCommand.SetErrorWriter(buffer)
+        }
+
+        if buffer != rootCommand.command.Commands[0].ErrWriter {
+            t.Fatalf("expected the command's error stream to be the tree's (set first: %v)", setErrorWriterFirst)
+        }
+    }
+}
+
 func runProbeCommandThroughRoot(t *testing.T, setWriterFirst bool) []byte {
     t.Helper()
 

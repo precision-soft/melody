@@ -2,11 +2,9 @@ package application
 
 import (
     "context"
-    "errors"
     "io/fs"
     "os"
     "sync"
-    "sync/atomic"
     "time"
 
     applicationcontract "github.com/precision-soft/melody/v3/application/contract"
@@ -54,12 +52,8 @@ type Application struct {
     unboundedDefaultCacheBackend bool
     /* set when the framework had to supply the session storage itself; paired with an unbounded session ttl it is the same unbounded growth, reached from the request path rather than from anything the application wrote */
     defaultInMemorySessionStorage bool
-    /* claimed by the one close that performs the teardown: the container's own closedness cannot answer "was it me", because two concurrent closes both probe it open before either enters Close, and both would then report the single failure as their own incident */
-    closePerformerClaimed atomic.Bool
-
-    /* closed by the performer once its teardown has finished, so a losing sibling can wait for the whole teardown instead of racing the container's own Close: a sibling that entered the container first USED to be the one whose call ran the actual teardown, and the performer then read the closedness probe as "somebody else's close" and suppressed the report — the one failure reported by nobody, and an exit path proceeding over it. Lazily built, because tests construct the Application by literal. */
-    closeDoneOnce sync.Once
-    closeDone     chan struct{}
+    /* runs the one close that performs the teardown, and holds every sibling until that teardown has finished. The container's own closedness cannot answer "was it me", because two concurrent closes both probe it open before either enters Close, and both would then report the single failure as their own incident; and a sibling let through before the performer's teardown ended USED to be the one whose call ran the actual teardown, so the performer read the closedness probe as "somebody else's close" and suppressed the report — the one failure reported by nobody, and an exit path proceeding over it. The zero value works, which an Application built by literal needs. */
+    closePerformerOnce sync.Once
 }
 
 func (instance *Application) Boot() kernelcontract.Kernel {
@@ -288,18 +282,8 @@ func (instance *Application) Run() {
 
 /* resolveCliExitError answers the exit error a failed cli run should end the process with, or nil when the failure carries none. The exit-coded error may arrive wrapped — the cli action folds a command's error together with shutdown-close failures — so the cause chain is walked rather than the top type asserted, or an intended exit code degrades into a panic with a different code. The branch is a function so the typed-nil decision can be handed a chain rather than reached through a process exit. */
 func resolveCliExitError(runCliErr error) (*exception.ExitError, bool) {
-    var exitError *exception.ExitError
-
-    if false == errors.As(runCliErr, &exitError) {
-        return nil, false
-    }
-
-    /* errors.As matches this type on a typed-nil link and reports success. Answering that as an exit would hand Exit a nil it refuses, and the run's real error would be discarded in favour of a message about melody's own plumbing, so the run falls through to the ordinary panic that carries it. The answer is a separate boolean because the typed nil and the absence are the same pointer, and only the boolean can tell the caller them apart. */
-    if nil == exitError {
-        return nil, false
-    }
-
-    return exitError, true
+    /* a typed-nil link is answered as absent: answered as an exit it would hand Exit a nil it refuses, and the run's real error would be discarded in favour of a message about melody's own plumbing, so the run falls through to the ordinary panic that carries it */
+    return internal.ExitErrorInChain(runCliErr)
 }
 
 func (instance *Application) RegisterConfiguration(name string, configuration any) {

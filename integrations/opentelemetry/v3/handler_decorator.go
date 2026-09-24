@@ -146,9 +146,10 @@ func (instance *statusRecordingResponseWriter) Write(payload []byte) (int, error
     return instance.ResponseWriter.Write(payload)
 }
 
-/* Flush goes through http.ResponseController, which follows Unwrap down the chain: an assertion on the direct writer found no Flusher behind a middleware wrapper that forwards Unwrap alone, and the flush the wrapper claims to offer did nothing while the stream sat in the buffers */
+/* Flush goes through http.ResponseController, which follows Unwrap down the chain: an assertion on the direct writer found no Flusher behind a middleware wrapper that forwards Unwrap alone, and the flush the wrapper claims to offer did nothing while the stream sat in the buffers. A flush that reached a flusher committed the header even when it failed — the server's writer answers the write error of a client that has gone, with the status already fixed — so only a writer with no flusher at all leaves the header unwritten, and a status the handler tries after a failed flush is not the one the connection carried. */
 func (instance *statusRecordingResponseWriter) Flush() {
-    if flushErr := nethttp.NewResponseController(instance.ResponseWriter).Flush(); nil == flushErr {
+    flushErr := nethttp.NewResponseController(instance.ResponseWriter).Flush()
+    if false == errors.Is(flushErr, nethttp.ErrNotSupported) {
         instance.wroteHeader = true
     }
 }
