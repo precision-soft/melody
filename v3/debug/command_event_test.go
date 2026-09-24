@@ -601,7 +601,6 @@ func TestEventCommand_DispatcherWithoutInspection_PrintsTheEmptySummaryInTheTabl
 func TestEventCommand_VerboseListsListenersInDispatchOrder(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
 
-    /* eleven same-priority listeners reach two-digit ids — the range the text comparison used to invert — and the paired A,A,B,B rhythm is what makes that inversion visible: a strictly alternating sequence happens to survive the "1,10,11,2..." permutation unchanged */
     registrationPattern := []string{"A", "A", "B", "B", "A", "A", "B", "B", "A", "B", "A"}
     for _, mark := range registrationPattern {
         if "A" == mark {

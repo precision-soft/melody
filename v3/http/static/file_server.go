@@ -257,7 +257,7 @@ func (instance *FileServer) resolveAndOpen(
     }
 
     /* the spelling the router matched, not the decoded URL.Path: net/http decodes "%2F" into a separator, so "/static/private%2Fsecret.txt" was "/static/private/secret.txt" here — the file under a protected prefix, served — while the access-control matcher read the one segment "private%2Fsecret.txt" under the public rule of "/static"; measured, an anonymous request read the protected file. Read as routed, the request names a file whose name literally carries "%2F", which the disk does not hold. */
-    routedPath := melodyhttp.RequestPathAsRouted(request.HttpRequest().URL.EscapedPath())
+    routedPath := melodyhttp.RequestPathAsRouted(internal.RequestPathAsSent(request.HttpRequest().URL))
     requestPath := routedPath
 
     if true == hasExcludedPathPrefix(requestPath, instance.config.excludedPathList) {

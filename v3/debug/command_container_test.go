@@ -453,9 +453,6 @@ func TestSanitizeErrorContextValue_SharedSiblingContainerIsNotACycle(t *testing.
     }
 }
 
-/* The cycle guard above answers a context that holds itself. It says nothing about one that is merely very deep, and until this bound nothing else did either: the walk descended until the goroutine stack was gone, which is `fatal error: stack overflow` — not a panic, so no recover in the command layer turns it into a reported failure and the process dies rendering a debug page. Measured with the stack capped at 16 MiB it took some five hundred thousand levels; the production cap of a gigabyte scales that up rather than removing it.
-
-   The depth used here is one past the bound rather than half a million, because what has to be pinned is the refusal, not the machine's stack size — a test that needs a real overflow to fail can only fail by killing the test binary. */
 func TestSanitizeErrorContextValue_RefusesToDescendPastTheDepthBound(t *testing.T) {
     deepest := map[string]any{"leaf": "value"}
 
@@ -512,7 +509,6 @@ func TestSanitizeErrorContextValue_LeavesAnOrdinaryContextIntact(t *testing.T) {
     }
 }
 
-/* newCyclicNamedMapErrorContext parks the self-reference inside a value typed as the framework's own defined context type, the shape that used to slip past the tracked walk entirely: the cycle survived into json.Marshal, whose cycle error routed it to the fmt fallback that has no cycle detection at all */
 func newCyclicNamedMapErrorContext() exceptioncontract.Context {
     inner := exceptioncontract.Context{
         "serviceName": "broken.service",
@@ -606,7 +602,6 @@ func TestResolveErrorContextJson_DoesNotTruncateTheJsonFormat(t *testing.T) {
     }
 }
 
-/* the report names why the build failed, not only that it did: the message of a melody error is its message alone, and the causes below it used to reach neither the table nor the json */
 func TestContainerCommand_ReportsTheCauseChainOfAFailedBuild(t *testing.T) {
     serviceContainer := container.NewContainer()
     serviceContainer.MustRegister(
@@ -660,7 +655,6 @@ func TestContainerCommand_ReportsTheCauseChainOfAFailedBuild(t *testing.T) {
         t.Fatalf("expected the cause line in the table, got %q", tableRendered)
     }
 
-    /* the list view cuts the message and the context by verbosity, never the causes: the sweep is run to learn why a service failed, and at the default verbosity it used to say only that one did; the sweep itself is opt-in, since a bare listing no longer builds */
     listTableRendered, _ := runDebugCommand(
         &ContainerCommand{},
         newTestRuntime(serviceContainer),
@@ -705,7 +699,6 @@ func TestLimitErrorLinesByVerbosity_CutsTheMessageAndTheContextAndKeepsEveryCaus
     }
 }
 
-/* the context is read through the ContextProvider contract: an HttpException in the resolution chain used to contribute nothing */
 func TestResolveErrorContextJson_ReadsAnHttpExceptionContext(t *testing.T) {
     httpException := exception.NewHttpException(503, "backend down")
     httpException.SetContextValue("backend", "redis")
@@ -1028,7 +1021,6 @@ func TestContainerCommand_DefaultListingGroupsTheLifetimes(t *testing.T) {
     }
 }
 
-/* a scoped name asked for by argument builds through the run's own scope — the scope a console command's services live in — and reports its lifetime; it used to answer debug.notFound, the exact failure the diagnosis comment promises to prevent */
 func TestContainerCommand_SingleScopedServiceResolvesThroughTheRunScope(t *testing.T) {
     serviceContainer := container.NewContainer()
 
@@ -1157,7 +1149,6 @@ func TestContainerCommand_DefaultListingRunsNoProvider(t *testing.T) {
     }
 }
 
-/* the sweep's failures have to reach the exit code, not only the data. Render answers a non-zero exit for an envelope carrying an error, which is what makes `app debug:container --build --format=json || exit 1` a deployment gate; the sweep — the one command whose declared purpose is to build everything and report the failures — used to answer "error": null and exit 0 over every one of them. The single-name door beside it has always reported its own. */
 func TestContainerCommand_BuildSweepReportsItsFailuresInTheEnvelope(t *testing.T) {
     serviceContainer := container.NewContainer()
     serviceContainer.MustRegister(
@@ -1356,7 +1347,6 @@ func TestContainerCommand_JsonItemFieldsKeepOneTypeAcrossRows(t *testing.T) {
     }
 }
 
-/* the sanitizing walk passes an unrecognised scalar through untouched, so a context carrying a chan, a func or a complex reaches json.Marshal and is refused there. The field is documented as parseable json on every row — `.errorContextJson | fromjson` — and the %v rendering it used to answer is Go syntax, which parses nowhere. */
 func TestResolveErrorContextJson_AContextTheEncoderRefusesStaysParseableJson(t *testing.T) {
     resolveErr := exception.NewError(
         "boot failed",
@@ -1637,7 +1627,6 @@ func TestContainerCommand_TheTeardownBlockReadsTheOrderingOnBothSidesOfANode(t *
     }
 }
 
-/* the check that arming makes possible has to read the same on every form of the command: the --build sweep used to render no teardown block at all */
 func TestContainerCommand_TheTeardownBlockRendersOnTheBuildSweep(t *testing.T) {
     rendered, runErr := runDebugCommand(
         &ContainerCommand{},
@@ -1682,7 +1671,6 @@ func TestContainerCommand_TheTeardownBlockRendersTheOneRowOfASingleService(t *te
     }
 }
 
-/* the block keeps to the window the listing applied, with the wave index of the whole plan: a listing of one service used to render every node */
 func TestContainerCommand_TheTeardownBlockKeepsToTheWindowAndTheGlobalWave(t *testing.T) {
     rendered, runErr := runDebugCommand(
         &ContainerCommand{},
@@ -2118,7 +2106,6 @@ func TestContainerCommand_BuildSweepKeepsTheContainerTwinsTeardownAndCarriesEach
     }
 }
 
-/* a window that holds only the scoped twin shows no teardown row: the row it used to show was the container twin's, a service the window had excluded */
 func TestContainerCommand_AWindowHoldingOnlyTheScopedTwinRendersNoTeardownRow(t *testing.T) {
     for _, arguments := range [][]string{
         {"--format=table", "--limit=1", "--offset=2"},
@@ -2139,7 +2126,6 @@ func TestContainerCommand_AWindowHoldingOnlyTheScopedTwinRendersNoTeardownRow(t 
     }
 }
 
-/* the single-service door answers the scoped registration a console process reaches, and shows no teardown row for it: the row it used to show under `lifetime: scoped` was the container twin's */
 func TestContainerCommand_TheSingleDoorOnATwinNameAnswersScopedWithoutTheContainerTwinsRow(t *testing.T) {
     rendered, runErr := runDebugCommand(&ContainerCommand{}, newTestRuntime(newTwinRegistrationContainer(t)), []string{"view.shared", "--format=table"})
     if nil != runErr {

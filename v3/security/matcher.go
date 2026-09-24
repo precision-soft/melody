@@ -37,7 +37,7 @@ func (instance *PathPrefixMatcher) Matches(request httpcontract.Request) bool {
     }
 
     /* the spelling the router reads, so a firewall written for "/admin/" does not claim "/admin%2Fusers", a one-segment resource the router never routes under "/admin" — the access-control matcher behind the firewall reads the same spelling */
-    path := http.RequestPathAsRouted(request.HttpRequest().URL.EscapedPath())
+    path := http.RequestPathAsRouted(internal.RequestPathAsSent(request.HttpRequest().URL))
 
     if "" == instance.prefix {
         return true

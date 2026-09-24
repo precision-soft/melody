@@ -4,7 +4,7 @@ import (
     "unicode"
 )
 
-/* wideRuneRangeTable holds the principal East Asian Wide and Fullwidth blocks — CJK, Hangul, Kana, the fullwidth forms, and the emoji planes terminals render at two cells. It is deliberately the principal blocks and not the full Unicode East-Asian-Width database: ambiguous-width characters count as narrow, which is the convention terminals outside legacy CJK locales follow, and the blocks below cover what a table cell realistically carries. */
+/* wideRuneRangeTable holds the principal East Asian Wide and Fullwidth blocks and the emoji planes; ambiguous-width characters count as narrow, as terminals outside legacy CJK locales render them. */
 var wideRuneRangeTable = &unicode.RangeTable{
     R16: []unicode.Range16{
         {Lo: 0x1100, Hi: 0x115F, Stride: 1},
@@ -43,7 +43,7 @@ var wideRuneRangeTable = &unicode.RangeTable{
     },
 }
 
-/* zeroWidthRuneRangeTable holds what occupies no cell of its own: the Hangul jungseong and jongseong jamo, which compose into the syllable that precedes them. The combining marks and the format characters are matched by category below rather than listed here. */
+/* zeroWidthRuneRangeTable holds the Hangul jungseong and jongseong jamo; combining marks and format characters are matched by category. */
 var zeroWidthRuneRangeTable = &unicode.RangeTable{
     R16: []unicode.Range16{
         {Lo: 0x1160, Hi: 0x11FF, Stride: 1},
@@ -51,9 +51,8 @@ var zeroWidthRuneRangeTable = &unicode.RangeTable{
     },
 }
 
-/* RuneDisplayWidth answers how many terminal cells the rune occupies: zero for a combining mark, an enclosing mark, a format character — the zero-width joiners and the variation selectors live in those categories — and the trailing Hangul jamo; two for the principal East Asian Wide and Fullwidth blocks; one for everything else. A control character answers one, because every renderer here escapes controls before measuring. */
+/* RuneDisplayWidth answers the terminal cells a rune occupies: zero for a combining or enclosing mark, a format character and a trailing Hangul jamo, two for the East Asian Wide and Fullwidth blocks, one for everything else. A control character answers one, because every renderer escapes controls before measuring. */
 func RuneDisplayWidth(value rune) int {
-    /* ASCII holds no combining mark, no format character and no wide rune, so the three table probes below have one answer for it: a table column is mostly ASCII, and measured they cost fifty nanoseconds a rune */
     if 0x80 > value && 0 <= value {
         return 1
     }
@@ -73,7 +72,7 @@ func RuneDisplayWidth(value rune) int {
     return 1
 }
 
-/* DisplayWidth answers the terminal cells the string occupies — the measure a table's column arithmetic needs, where a rune count reads a CJK ideogram as one cell and renders a column two cells short of where it measured. */
+/* DisplayWidth answers the terminal cells a string occupies. */
 func DisplayWidth(value string) int {
     width := 0
     for _, runeValue := range value {

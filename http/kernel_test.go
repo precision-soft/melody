@@ -2887,7 +2887,7 @@ func TestKernel_ServesCanonicalRequestPathThroughToTheHandler(t *testing.T) {
 
 /* net/http decodes "%2F" into a separator before the kernel reads the path, so "/admin%2Fusers" — one segment to a proxy or a WAF rule written against the raw request line — reached the "/admin/users" handler; a spelling that carries an encoded separator is refused before routing acts on it, in either case of the hex digit */
 func TestKernel_RefusesAnEncodedSeparatorBeforeTheHandler(t *testing.T) {
-    for _, rawPath := range []string{"/admin%2Fusers", "/admin%2fusers", "/public%2F", "/files/a%2Fb/c"} {
+    for _, rawPath := range []string{"/admin%2Fusers", "/admin%2fusers", "/public%2F", "/files/a%2Fb/c", "/admin%2Fusers{", "/admin%2Fusers/\xc3\xa9"} {
         handlerRan := ""
 
         router := NewRouter()
@@ -2928,6 +2928,7 @@ func TestKernel_ServesTheSpellingsThatCarryNoEncodedSeparator(t *testing.T) {
         "/admin/users?x=%2F": "users",
         "/a/caf%C3%A9":       "café",
         "/a/x%20y":           "x y",
+        "/a/caf\xc3\xa9{":    "café{",
     } {
         router := NewRouter()
         router.Handle(

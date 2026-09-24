@@ -89,7 +89,6 @@ func (instance *selfHoldingService) Close() error {
     return nil
 }
 
-/* a service filed under its name AND its type is one node, and what it holds of itself is not an edge: the identity the walk records for the service used to be keyed on whichever of the two filings the map handed out last, so the skip of a node's own identity missed on the other filing and the plan listed the service closed before itself — an ordering "proved" over one node, in seven runs out of eight. The check is asked in the canonical key space now, where both filings are the same node. */
 func TestContainer_TeardownPlan_AServiceFiledUnderItsNameAndTypeHoldingItselfListsNoDependency(t *testing.T) {
     for round := 0; round < 8; round = round + 1 {
         serviceContainer := NewContainer()

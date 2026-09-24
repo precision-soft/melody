@@ -407,7 +407,6 @@ func TestFromError_TypedNil_ReturnsNil(t *testing.T) {
         t.Fatalf("expected nil for a typed-nil *Error")
     }
 
-    /* the http exception variant is the one that used to panic: the assertion to *Error fails, so the walk reached err.Error() through the nil receiver */
     typedNilHttpException := (*HttpException)(nil)
 
     if nil != FromError(typedNilHttpException) {
@@ -1148,7 +1147,6 @@ func TestLogged_AnErrorWhoseMessagePanicsIsMarkedAndReturned(t *testing.T) {
     }
 }
 
-/* the two chains are read side by side — an operator reading causeChain[N] wants its context at causeContextChain[N] — and until now nothing asserted the alignment itself: the two walks were hand-copied loops that agreed, so an edit to one could part them silently. They take one walk now, and this pin is what says the alignment is the contract and not a coincidence: a join whose branches are a typed nil, a link that carries context and a link that carries none exercises every way the two could drift. */
 func TestBuildCauseContextChain_StaysIndexAlignedWithBuildCauseChainAcrossAJoin(t *testing.T) {
     var typedNil *Error
     withContext := NewError("carries context", map[string]any{"key": "value"}, nil)

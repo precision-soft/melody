@@ -320,7 +320,6 @@ func (instance *typedNilPanicError) Error() string {
     return instance.detail
 }
 
-/* a provider panicking with a TYPED-NIL error passes the recovery's error assertion as a non-nil interface whose Error() dereferences a nil receiver. The recovery runs with the container mutex unlocked, so a second panic there used to escape as a fatal unlock-of-unlocked-mutex through the caller's deferred Unlock, with every waiter parked forever. The typed nil is normalized away, the resolution fails cleanly, and the error stays loggable. */
 func TestCreationGuard_TypedNilPanicValue_FailsWithoutSecondPanic(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -362,7 +361,6 @@ func (instance *panickingPanicValueError) Error() string {
     panic("the error message gives up")
 }
 
-/* a provider panicking with an error whose Error() itself panics used to blow up the recovery handler while it rendered the context — the same unlocked-mutex escape as the typed nil, from a live receiver. The rendering is contained on its own: the report loses that context and nothing else. */
 func TestCreationGuard_PanickingErrorMessage_FailsWithoutSecondPanic(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -605,7 +603,6 @@ func awaitCreationWaiter(t *testing.T, serviceContainer *container, serviceName 
     }
 }
 
-/* a service the container memoizes is created once and handed to the owner AND to every goroutine that arrived while it was being built — so a creation that FAILED has to reach the waiters as a failure too. Nothing had ever entered that branch: a waiter released after a failed creation used to be proven only by the absence of a crash, and a branch that instead fell through to the lookup would have answered "service was not available after creation finished" and sent the reader looking for a missing registration rather than for the provider that refused. */
 func TestCreationGuard_AWaiterInheritsTheOwnersCreationFailure(t *testing.T) {
     serviceContainer := NewContainer().(*container)
 

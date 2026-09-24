@@ -23,7 +23,7 @@ func FromResolver[T any](resolver containercontract.Resolver, serviceName string
     }
 
     value, getErr := resolver.Get(serviceName)
-    /* a resolver implemented outside this package can report success with a typed-nil error */
+    /* a foreign resolver can report success with a typed-nil error */
     if true == internal.IsNilInterface(getErr) {
         getErr = nil
     }
@@ -33,14 +33,14 @@ func FromResolver[T any](resolver containercontract.Resolver, serviceName string
         var melodyErr *exception.Error
         isMelodyErr := errors.As(getErr, &melodyErr)
 
-        /* the original error travels out whole, with the service name written into its context in place: a rebuilt copy sheds the log level, the already-logged mark, the capture stack and every wrapper above it */
+        /* the original error travels out whole, the service name written into its context */
         if true == isMelodyErr && nil != melodyErr {
             melodyErr.SetContextValue("serviceName", serviceName)
 
             return zero, getErr
         }
 
-        /* a foreign error — a resolver implemented outside this package, a provider handing back its driver's error raw — is wrapped under a title that names the resolution and keeps it as the cause: the service may well be registered and its provider the one that failed, so the title does not say "not registered" for it. Whether the service exists is read from the cause. */
+        /* a foreign error is wrapped under a title naming the resolution, not "not registered", and kept as the cause */
         return zero, exception.NewError(
             "service resolution failed in resolver",
             map[string]any{
@@ -104,7 +104,7 @@ func FromResolverByType[T any](resolver containercontract.Resolver) (T, error) {
     }
 
     value, getByTypeErr := resolver.GetByType(canonicalTargetType)
-    /* a resolver implemented outside this package can report success with a typed-nil error */
+    /* a foreign resolver can report success with a typed-nil error */
     if true == internal.IsNilInterface(getByTypeErr) {
         getByTypeErr = nil
     }
@@ -114,7 +114,7 @@ func FromResolverByType[T any](resolver containercontract.Resolver) (T, error) {
         var melodyErr *exception.Error
         isMelodyErr := errors.As(getByTypeErr, &melodyErr)
 
-        /* the failure is dressed the way the name-keyed twin dresses it: the original error travels out whole with the type written into its context in place, and a foreign error is wrapped under the title of the resolution, naming the type, with the error as its cause — a rebuilt copy would shed the log level, the already-logged mark, the capture stack and every wrapper above it, and a title of "not registered" would blame the registration for a provider that failed */
+        /* dressed as the name-keyed twin dresses it, the type written into the context */
         if true == isMelodyErr && nil != melodyErr {
             melodyErr.SetContextValue("serviceType", canonicalTargetType.String())
 

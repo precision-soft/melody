@@ -281,7 +281,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         scheme := detectSchemeWithForwardedHeadersPolicy(request, instance.options.ForwardedHeadersPolicy)
 
         /* the route is matched on the path as the client SPELLED it, not on its decoded form: net/http decodes "%2F" into a separator, so "/admin%2Fusers" — one segment naming a resource called "admin/users" — became two segments and reached the "/admin/users" handler, while a proxy or WAF rule written against the raw request line matched neither spelling. splitRequestPath unescapes each segment after the split, so the value a parameter binds is still the decoded one. */
-        matchPath := request.URL.EscapedPath()
+        matchPath := internal.RequestPathAsSent(request.URL)
 
         matchResult, _ := instance.router.Match(
             request.Method,
@@ -531,7 +531,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
         /* a request path that folds to a different spelling is refused before the security dispatch below runs and before the handler: the router matched the path as sent while the access-control matcher folds it, so a request routed to a protected handler under one spelling could be authorized against the folded spelling's rule. Refused here — after the route is matched but before anything acts on the match: not authorized, not handled, not served by any route — the router, the firewall matchers and the access control never disagree about which resource this is. A trailing slash is not a fold and is not refused; requestPathIsCanonical states the boundary exactly. The question is asked of the spelling the router reads — RequestPathAsRouted, where an encoded separator stays inside its segment — which is the spelling the access-control matcher reads too, so the three cannot disagree about a "%2F" the decoded path turned into a separator. */
         /* the leading form of the padded path is asked of the decoded path as well: " /public", handed in by a handler mounted in front of the kernel, is "%20/public" as routed — a target that does not begin with "/", which the guard leaves to the router, and the router answered it 404 where the two frozen majors answer 400 and the upgrade notes promise it; asked here, the three majors refuse it alike */
-        if false == requestPathIsCanonical(RequestPathAsRouted(request.URL.EscapedPath())) || ("" != request.URL.Path && strings.TrimLeftFunc(request.URL.Path, unicode.IsSpace) != request.URL.Path) {
+        if false == requestPathIsCanonical(RequestPathAsRouted(internal.RequestPathAsSent(request.URL))) || ("" != request.URL.Path && strings.TrimLeftFunc(request.URL.Path, unicode.IsSpace) != request.URL.Path) {
             requestLogger.Warning(
                 "request path refused before the handler",
                 loggingcontract.Context{

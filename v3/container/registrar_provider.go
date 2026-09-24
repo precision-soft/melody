@@ -13,9 +13,9 @@ var (
     errorInterfaceType    = reflect.TypeOf((*error)(nil)).Elem()
 )
 
-/* reflectedProvider validates a provider as written by hand and wraps it into the container's own provider shape, re-checking the produced value against the declared service type. It is the one place the provider contract is enforced, so a container registration, a scoped registration and a registration made on a live scope cannot drift apart. It yields the wrapped provider and the service type the signature declares. */
+/* reflectedProvider validates a hand-written provider and wraps it into the container's provider shape, re-checking the produced value against the declared type. It is the one place the provider contract is enforced, for every registration path. */
 func reflectedProvider(serviceName string, provider any) (providerAny, reflect.Type, error) {
-    /* the callers' own nil checks compare against the untyped nil, which a typed-nil function value — var f containercontract.Provider[T] handed in uninitialized — passes. Such a provider registers a signature-valid function that panics on its first call, so boot would report success for a service every resolution of which fails; it is refused here, the one gate all three registration paths go through. */
+    /* a typed-nil provider function passes the callers' nil checks and would fail every resolution, so it is refused here */
     if true == internal.IsNilInterface(provider) {
         return nil, nil, exception.NewError(
             "the provider is required to register a service",
@@ -50,7 +50,7 @@ func reflectedProvider(serviceName string, provider any) (providerAny, reflect.T
 
         errorInterface := results[1].Interface()
 
-        /* a provider declared with a concrete error type — func(resolver) (*T, *MyErr) — boxes a nil *MyErr into a NON-nil error interface. A typed-nil error is the provider saying "no error", and it is normalized to exactly that; taken at face value it would fail every resolution of a healthy service and panic the first Error() walk at log time. */
+        /* a typed-nil error from a concrete error type means no error */
         if true == internal.IsNilInterface(errorInterface) {
             errorInterface = nil
         }
@@ -70,7 +70,7 @@ func reflectedProvider(serviceName string, provider any) (providerAny, reflect.T
             }
         }
 
-        /* the assignability re-check judges only a value the provider reported as delivered: with a provider error present, the error is the failure worth naming, and a type complaint about a value the caller will never receive would bury the cause. */
+        /* the assignability re-check judges only a delivered value; with an error present the error is the failure */
         if nil == err && nil != value {
             valueType := reflect.TypeOf(value)
             if false == valueType.AssignableTo(serviceType) {

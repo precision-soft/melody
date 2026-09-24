@@ -197,7 +197,6 @@ func (instance *mutualChildService) Close() error {
     return nil
 }
 
-/* two services that hold EACH OTHER gain no edge at all, so an armed teardown closes them in the order it closed them before and reports nothing. Written both ways the pair is a ring, and a ring fails a teardown in which every service closed — measured on this very fixture, unarmed nil against armed "dependency cycle detected" over two closes that both answered nil. Dropping both is the rule the walk already states about itself: an edge it does not reach is an edge the graph does not gain, and the pair keeps the position the sequential teardown gave it. The sibling above, where the holding goes ONE way, is what keeps this from being a filter that swallows the walk's whole purpose. */
 func TestContainer_Close_ArmedAMutuallyHeldPairGainsNoEdgeAndReportsNoCycle(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -453,7 +452,6 @@ func TestHeldPointerIdentities_FindsAServiceAtTheDepthLimitWhicheverFieldComesFi
     }
 }
 
-/* the depth limit is measured along the path: a service four links down the chain sits exactly at the limit and is found, five links down it is two past the limit and is not — there is no shorter path here to find it by */
 func TestHeldPointerIdentities_StopsAtTheDepthLimit(t *testing.T) {
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
@@ -629,7 +627,6 @@ func TestHeldPointerIdentities_KeepsAHeldCollaboratorAlive(t *testing.T) {
     t.Fatalf("expected the collaborator to be collectable once the record was dropped")
 }
 
-/* ringNode holds the next node of a ring. A ring longer than the walk's reach is one inferred edge per link and no ordering, and the pair rule alone leaves it standing — measured, eight nodes reported a cycle over a teardown in which all eight closed. */
 type ringNode struct {
     next     *ringNode
     recorder *closeOrderRecorder
@@ -720,7 +717,6 @@ func TestContainer_Close_ArmedAHeldEdgeAgainstAResolvedEdgeIsNotWritten(t *testi
     closeSequence := make([]string, 0, 2)
     recorder := &closeOrderRecorder{mutex: &mutex, closeSequence: &closeSequence}
 
-    /* the holder exists before either provider runs, so the collaborator HOLDS it from its own construction — which is when the walk reads it — and the holder's provider then resolves the collaborator, which is the edge the container writes itself. The holder does NOT keep what it resolved: kept, the pair would hold each other and the pair rule alone would drop both inferences, and this test would pass without ever asking the inference against the resolution — measured, it did */
     holder := &resolvingHolder{recorder: recorder}
 
     if registerErr := serviceContainer.Register(
@@ -756,7 +752,6 @@ func TestContainer_Close_ArmedAHeldEdgeAgainstAResolvedEdgeIsNotWritten(t *testi
     }
 }
 
-/* a slice is never read, not even in the value's own memory: the value cannot tell a slice it allocated from a header it was HANDED — a registry answering All() with its internal slice — and the elements of a handed slice are rewritten by their owner while the walk reads them. The cost is the collaborator held in a slice, which keeps the order it had; measured on the three example applications, no service holds a service that way. */
 type foreignBag struct{ items []*closeOrderServiceB }
 
 type bagHolder struct {
@@ -888,7 +883,6 @@ func (instance *pairMemberHolder) Close() error {
     return nil
 }
 
-/* a pair held both ways is no ordering, and it is no way back either: the edge from a service holding one member of the pair used to be dropped because the ring it seemed to close ran through the pair's own edge — an inference that did not survive itself — so the holder landed in a wave AFTER what it holds, twenty times out of twenty, where the sequential teardown had closed it first by the accident of creation order. */
 func TestContainer_Close_ArmedAHeldEdgeBesideAMutualPairIsStillWritten(t *testing.T) {
     var mutex sync.Mutex
     closeSequence := make([]string, 0, 3)
@@ -1130,7 +1124,6 @@ func TestContainer_Close_ReleasesTheHeldIdentityRecords(t *testing.T) {
     t.Fatalf("expected the collaborator to be collectable once the container had closed")
 }
 
-/* an inference is this plan's, not the graph's: the operator's view computes a plan too, and an inference it wrote into the graph outlived the state it was drawn from — a lazy resolution made after the view in the opposite direction then closed a ring nothing had inferred, measured twenty times out of twenty. */
 func TestContainer_TeardownPlan_DoesNotWriteAnInferredEdgeIntoTheGraph(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1382,7 +1375,6 @@ func TestHeldPointerIdentities_CountsAStructOfScalarsAsOneNode(t *testing.T) {
     }
 }
 
-/* cellTable is the shape the breadth-first order pays for at the QUEUE: every cell holds a pointer, so every cell is walkable, and a budget charged when an item is taken queued all of them before it took any — measured, four million cells cost 781 MB of queue and half a second, where the walk bounded at the queue costs the budget and nothing more */
 type cellTable struct {
     cells [16][256][256]struct{ pointer *closeOrderServiceB }
     peer  *collaboratorLink
@@ -1732,7 +1724,6 @@ func TestHeldPointerIdentities_ReadsAPreBuiltValueAProviderHandsBackAsPublishedM
     writes.Wait()
 }
 
-/* the plan names the group a wave closes one service at a time: a pair held both ways shares a figure, a service in no group reads zero, and the view built on the plan can say "these two close one after the other" where "same wave, no dependencies" used to say the opposite */
 func TestContainer_TeardownPlan_NamesTheSerialGroupOfAMutuallyHeldPair(t *testing.T) {
     var mutex sync.Mutex
     closeSequence := make([]string, 0, 3)

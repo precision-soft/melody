@@ -746,8 +746,9 @@ func TestFileServer_Filesystem_RefusesANonCanonicalPath(t *testing.T) {
 /* the file is resolved from the spelling the router matched, not from the decoded URL.Path: decoded, "/static/private%2Fsecret.txt" was "/static/private/secret.txt" here — the file under a protected prefix, served — while the access-control matcher read the one segment "private%2Fsecret.txt" under the rule of "/static" alone; measured, an anonymous request read the protected file. Routed, the request names a file whose name literally carries "%2F", which the disk does not hold */
 func TestFileServer_StripPrefix_ResolvesTheFileFromTheSpellingTheRouterRoutes(t *testing.T) {
     fileSystem := fstest.MapFS{
-        "private/secret.txt": &fstest.MapFile{Data: []byte("TOP SECRET")},
-        "caf\u00e9.txt":       &fstest.MapFile{Data: []byte("café")},
+        "private/secret.txt":  &fstest.MapFile{Data: []byte("TOP SECRET")},
+        "private/secret.txt{": &fstest.MapFile{Data: []byte("TOP SECRET")},
+        "caf\u00e9.txt":        &fstest.MapFile{Data: []byte("café")},
     }
 
     config := NewFileServerConfig(
@@ -775,6 +776,15 @@ func TestFileServer_StripPrefix_ResolvesTheFileFromTheSpellingTheRouterRoutes(t 
 
     if true == served {
         t.Fatalf("expected the encoded separator not to reach the file beneath it, got body %q", string(body))
+    }
+
+    _, _, body, served = server.Serve(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/static/private%2Fsecret.txt{"),
+        logging.NewNopLogger(),
+    )
+
+    if true == served {
+        t.Fatalf("expected the encoded separator beside a byte the escaped path does not keep not to reach the file beneath it, got body %q", string(body))
     }
 
     statusCode, _, body, served := server.Serve(

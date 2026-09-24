@@ -3119,10 +3119,11 @@ func TestKernel_AsksTheCanonicalQuestionOfThePathAsSpelled(t *testing.T) {
         code    int
         catchAll bool
     }{
-        "/a%2F..%2Fb": {code: nethttp.StatusOK, catchAll: true},
-        "/public%2F":  {code: nethttp.StatusOK, catchAll: true},
-        "/public":     {code: nethttp.StatusOK, catchAll: false},
-        "/a/../b":     {code: nethttp.StatusBadRequest, catchAll: false},
+        "/a%2F..%2Fb":  {code: nethttp.StatusOK, catchAll: true},
+        "/a%2F..%2Fb{": {code: nethttp.StatusOK, catchAll: true},
+        "/public%2F":   {code: nethttp.StatusOK, catchAll: true},
+        "/public":      {code: nethttp.StatusOK, catchAll: false},
+        "/a/../b":      {code: nethttp.StatusBadRequest, catchAll: false},
     } {
         reached := ""
 
@@ -3417,11 +3418,20 @@ func TestKernel_MatchesTheRouteOnThePathAsSpelled(t *testing.T) {
 
     handler := NewKernel(router).ServeHttp(newHttpTestContainer())
 
-    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/admin%2Fusers", nil)
-    handler.ServeHTTP(httptest.NewRecorder(), httpRequest)
+    for rawPath, expected := range map[string]string{
+        "/admin%2Fusers":         "one-segment:admin/users",
+        "/admin%2Fusers{":        "one-segment:admin/users{",
+        "/admin%2Fusers|x":       "one-segment:admin/users|x",
+        "/admin%2Fusers\xc3\xa9": "one-segment:admin/users\xc3\xa9",
+    } {
+        reached = ""
 
-    if "one-segment:admin/users" != reached {
-        t.Fatalf("the encoded separator was read as a path separator: reached %q", reached)
+        httpRequest := httptest.NewRequest(nethttp.MethodGet, rawPath, nil)
+        handler.ServeHTTP(httptest.NewRecorder(), httpRequest)
+
+        if expected != reached {
+            t.Fatalf("the encoded separator of %q was read as a path separator: reached %q", rawPath, reached)
+        }
     }
 }
 

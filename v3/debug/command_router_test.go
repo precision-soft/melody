@@ -411,7 +411,6 @@ func TestRouterCommand_RendersThePriorityAndTheRegistrationOrder(t *testing.T) {
     }
 }
 
-/* the machine document carries every discriminator the introspection exposes, and the verbose table folds them into columns; a json consumer used to see six fields for a ten-field definition */
 func TestRouterCommand_CarriesTheDiscriminatorsInJsonAndVerboseTable(t *testing.T) {
     router := http.NewRouter()
 
@@ -641,7 +640,6 @@ func TestRouterCommand_KeepsTheDocumentWhenAnAttributeCannotBeSerialized(t *test
     }
 }
 
-/* a self-referential attribute reaches json.Marshal, which answers a cycle error, which used to route the value into the %v fallback — and fmt has no cycle detection, so the command died of a stack overflow no recover in the command layer turns into a reported failure. The walk that command_container.go already carries replaces the cycle with its marker, and the report survives. */
 func TestRouterCommand_ACyclicAttributeIsRenderedAsAMarkerRatherThanKillingTheProcess(t *testing.T) {
     cyclicAttribute := map[string]any{"name": "self-referential"}
     cyclicAttribute["self"] = cyclicAttribute

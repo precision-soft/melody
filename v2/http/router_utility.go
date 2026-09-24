@@ -218,9 +218,9 @@ func splitRequestPath(value string) []string {
     return splitNormalizedPath(value)
 }
 
-/* requestPathCarriesEncodedSeparator reports whether the path as the client spelled it carries an encoded "/", "%2F" in either case of the hex digit. net/http decodes it into a separator before the kernel reads URL.Path, so "/admin%2Fusers" — one segment naming a resource called "admin/users" to a proxy or a WAF rule written against the raw request line — reached the "/admin/users" handler, a route the rule never saw requested. Every consumer of the path here — the router, the canonical guard, the access-control and firewall matchers, the static file server — reads the decoded string, so they agree with each other and disagree only with the raw line; matching the router alone on the escaped spelling would make them disagree with each other instead, the access-control matcher granting "/public%2F" the rule of "/public" while the router carried it to another handler. Such a spelling is refused rather than routed: there is no route it can name that its decoded form does not name differently. A literal "%2F" a segment carries once decoded is spelled "%252F" and is not a separator. */
-func requestPathCarriesEncodedSeparator(escapedPath string) bool {
-    return true == strings.Contains(strings.ToLower(escapedPath), "%2f")
+/* requestPathCarriesEncodedSeparator reports whether the raw path the client sent, URL.RawPath, carries an encoded "/" in either case of the hex digit. Every consumer of the path reads the decoded URL.Path, where such an escape is already a separator, so "/admin%2Fusers" would reach the "/admin/users" handler while a proxy or a WAF rule reading the raw request line sees one segment; the kernel refuses it instead. URL.EscapedPath is not read: it falls back to re-escaping the decoded path whenever the raw spelling carries a byte it does not keep, and the separator is lost there. A literal "%2F" a segment carries once decoded is spelled "%252F" and is not a separator. */
+func requestPathCarriesEncodedSeparator(rawPath string) bool {
+    return true == strings.Contains(strings.ToLower(rawPath), "%2f")
 }
 
 func splitNormalizedPath(value string) []string {

@@ -8,7 +8,7 @@ import (
     "github.com/precision-soft/melody/v3/exception"
 )
 
-/* RefuseNonJsonOutputTarget refuses to replace a file that is not a JSON document. Every command that writes a generated json artifact replaces its target whole, so an existing file holding anything else is someone's source a mistyped --out points at rather than a previous output of this command, and overwriting it is not recoverable. */
+/* RefuseNonJsonOutputTarget refuses to replace an existing file that is not a JSON document, since a generated json artifact replaces its target whole and such a file is someone's source. */
 func RefuseNonJsonOutputTarget(outputPath string, artifactName string) *exception.Error {
     existingContent, readErr := os.ReadFile(outputPath)
     if nil != readErr && false == os.IsNotExist(readErr) {
@@ -42,7 +42,7 @@ func RefuseNonJsonOutputTarget(outputPath string, artifactName string) *exceptio
     )
 }
 
-/* WriteFileAtomically lands a generated artifact through a temp file and a rename, so a write that dies partway — a full disk, a killed process — leaves the previous artifact intact instead of a torn file published as the thing it describes. The parent directories are created, because a fresh checkout has none of them and the raw open error names nothing. */
+/* WriteFileAtomically writes through a temp file and a rename, so a write that dies partway leaves the previous artifact intact. The parent directories are created. */
 func WriteFileAtomically(outputPath string, payload []byte, artifactName string) *exception.Error {
     directoryPath := filepath.Dir(outputPath)
 
@@ -78,7 +78,7 @@ func WriteFileAtomically(outputPath string, payload []byte, artifactName string)
         )
     }
 
-    /* flush the bytes before the rename so a crash after the rename cannot publish a present-but-empty artifact under the name it describes; the sibling writers in migrate and cron sync for the same reason */
+    /* the bytes are flushed before the rename, so a crash cannot publish an empty artifact */
     if syncErr := tempFile.Sync(); nil != syncErr {
         _ = tempFile.Close()
         _ = os.Remove(tempPath)
@@ -101,7 +101,7 @@ func WriteFileAtomically(outputPath string, payload []byte, artifactName string)
         )
     }
 
-    /* the temp file is born 0600; keep the mode the destination already carries so a deliberately-0600 file is not silently widened, and fall back to 0644 — the mode a direct write gives a new file — when there is no destination to read. The old unconditional chmod 0644 reset a 0600 file to world-readable on every rewrite. Mirrors the migrate writer's destinationFileMode. */
+    /* the temp file is born 0600: the destination's mode is kept, 0644 for a new file */
     chmodErr := os.Chmod(tempPath, destinationFileMode(outputPath))
     if nil != chmodErr {
         _ = os.Remove(tempPath)
@@ -124,7 +124,7 @@ func WriteFileAtomically(outputPath string, payload []byte, artifactName string)
         )
     }
 
-    /* fsync the directory that received the rename, where the file's NAME lives — the temp file's own Sync covered only its bytes, so without this the content survives a crash and the entry naming it need not. The artifact is already in place; a caller of these commands regenerates idempotently, so reporting the failure is safe. */
+    /* the directory is synced so the rename itself survives a crash; the artifact is already in place, so the failure is only reported */
     if directorySyncErr := syncDirectory(directoryPath); nil != directorySyncErr {
         return exception.NewError(
             "could not fsync the output directory of the "+artifactName,
@@ -136,7 +136,6 @@ func WriteFileAtomically(outputPath string, payload []byte, artifactName string)
     return nil
 }
 
-/* destinationFileMode reads the permission the destination already carries so an atomic rewrite keeps it, and falls back to 0644 — the mode a direct write gives a new file — when the destination cannot be read. */
 func destinationFileMode(outputPath string) os.FileMode {
     info, statErr := os.Stat(outputPath)
     if nil != statErr {
@@ -146,7 +145,6 @@ func destinationFileMode(outputPath string) os.FileMode {
     return info.Mode().Perm()
 }
 
-/* syncDirectory fsyncs the directory that received the rename so the rename itself is durable: without it the file's content survives a crash and the directory entry naming it need not. */
 func syncDirectory(directoryPath string) error {
     directory, openErr := os.Open(directoryPath)
     if nil != openErr {

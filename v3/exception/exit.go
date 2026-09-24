@@ -11,7 +11,7 @@ func NewExitError(exitCode int, err *Error) *ExitError {
         )
     }
 
-    /* the operating system keeps only the low 8 bits of the code: 256 would report success from a dying process and a negative would read as 255, while 0 contradicts the error this constructor requires */
+    /* the operating system keeps only the low 8 bits, and 0 would contradict the error */
     if 1 > exitCode || 255 < exitCode {
         Panic(
             NewEmergency(
@@ -36,7 +36,6 @@ type ExitError struct {
 }
 
 func (instance *ExitError) Error() string {
-    /* the zero value is constructible outside the constructor that refuses a nil error, and a typed-nil receiver is the link errors.As matches in a chain whose cause is FromError(nil) — the accessors answer for it, this one included */
     if nil == instance || nil == instance.err {
         return "exit error carries no error value"
     }
@@ -45,7 +44,7 @@ func (instance *ExitError) Error() string {
 }
 
 func (instance *ExitError) Unwrap() error {
-    /* errors.Is and errors.As call Unwrap on every link of a chain, and a typed-nil *ExitError stored as a cause is a link they reach before any guard; the receiver is answered for the way the accessors beside it are. Returning the nil field through the interface would box a typed nil that passes every nil comparison downstream. */
+    /* a nil receiver answers nil, not a typed nil boxed through the interface */
     if nil == instance || nil == instance.err {
         return nil
     }
@@ -53,7 +52,7 @@ func (instance *ExitError) Unwrap() error {
     return instance.err
 }
 
-/* ExitCode answers the nil receiver with the out-of-range 0 rather than dereferencing it: errors.As matches this type on a typed-nil link and reports success with a nil pointer, which the callers that decide how the process ends read the code straight off. */
+/* ExitCode answers 0 on a nil receiver, the typed nil errors.As can match. */
 func (instance *ExitError) ExitCode() int {
     if nil == instance {
         return 0

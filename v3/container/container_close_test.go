@@ -1045,7 +1045,6 @@ func (instance *replacedBuiltProbe) Close() error {
     return nil
 }
 
-/* an override replacing an instance the container built evicts it from the only maps the close sweep reads: it used to leak forever, with both the resolution and the override reporting success. The evicted value waits in the graveyard and the teardown closes it — once — alongside the override that took its place. */
 func TestContainer_Close_ReplacedBuiltInstanceIsClosed(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1223,13 +1222,11 @@ func TestContainer_Close_ReplacedOverrideIsNotClosed(t *testing.T) {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
-    /* MEASURED, not assumed: the surviving override IS closed with the container, and only the EVICTED one is left to its installer. A loop that merely refuses the evicted label passes over an empty slice too, so it cannot tell this apart from a teardown that closed nothing at all */
     if 1 != len(closeSequence) || "second-override" != closeSequence[0] {
         t.Fatalf("expected only the surviving override to be closed, got %v", closeSequence)
     }
 }
 
-/* a close that both fails and cycles used to keep the failures and drop the cycle's node list — the operator saw WHICH services failed but not which ones cycled. The nodes ride inside the failure text now. */
 func TestContainer_Close_CycleFailureNamesTheNodes(t *testing.T) {
     serviceContainer := NewContainer().(*container)
 
@@ -1322,7 +1319,6 @@ func (instance *lazyHoldingService) Close() error {
     return nil
 }
 
-/* a service that keeps its resolver and reaches through it after its provider returned depends on what it then resolves exactly as hard as one that resolved it during construction. The edge used to be read from the live resolution stack, which is empty by then, so no edge was recorded at all — here that closes the dependency FIRST, and the holder's own Close then runs over a service that has already ended. Without the edge the creation-order tie-break decides, and it disagrees with the graph: the dependency is built AFTER the holder that reaches for it, so latest-first closes it before its holder. */
 func TestContainer_Close_ClosesAHolderBeforeTheServiceItResolvedThroughAKeptResolver(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1493,7 +1489,6 @@ func assertCloseFailureDetails(t *testing.T, context exceptioncontract.Context, 
     }
 }
 
-/* a teardown whose failures carry nothing beyond their line renders as before: no details key. Driven through a real close, because every melody error seeds its context with its own message — so a plain refusal used to record an entry holding the failure line a second time, under the same node key, on EVERY failed teardown, and the white-box form of this control could not see it. */
 func TestContainer_Close_AFailureThatSaysNothingBeyondItsLineAddsNoDetailsMap(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1673,7 +1668,6 @@ func TestContainer_Close_TheFramesOfAPanickingCloseAreBounded(t *testing.T) {
     }
 }
 
-/* the details are read under the same containment the failure line beside them has: LogContext walks the error's own chain through Unwrap, which is the class errorText exists for one link deeper, and an error whose Unwrap panics used to end the teardown loop from inside the one place built to survive a bad close — under a teardown armed in waves, on a goroutine no caller can recover. LogContext now walks under a recover of its own and writes the cut into the chain, so the details carry the reason where the teardown's own containment used to leave only its marker; that containment stays, for a reading no door of the exception package contains. */
 func TestContainer_Close_ACloseErrorWhoseUnwrapPanicsDoesNotEndTheTeardown(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1755,7 +1749,6 @@ func TestContainer_Close_APanickingCloseWithoutAnErrorValueStillRecordsTheStack(
     }
 }
 
-/* TestContainer_Close_ClosesTheEarliestCreatedServiceLast pins the tie-break the dependency graph leaves open. It used to be the node key descending — a string comparison nobody wrote — so a service resolved first at boot and used silently by everything afterwards, the logger being the case that matters, was closed in the middle of the teardown by nothing but its name. Whether a worker still had somewhere to report its drain came down to whether it sorted above or below its dependency: renaming app.worker to zz.worker was the whole difference. */
 func TestContainer_Close_ClosesTheEarliestCreatedServiceLast(t *testing.T) {
     for _, dependentName := range []string{"service.aaa.worker", "service.zzz.worker"} {
         serviceContainer := NewContainer()
@@ -1867,7 +1860,6 @@ func (instance *closeTimeResolvingService) Close() error {
     return nil
 }
 
-/* TestContainer_Close_AServiceStillResolvesDuringTheTeardown pins the first of the two closing states against the second. Refusing every resolution from the moment Close begins would take away the very thing closing the logger last exists to give: a worker reporting its drain resolves what it reports through, from inside its own Close. What is refused is a resolution made after the LAST close returned, which used to answer the instance found in the map — already closed — with a nil error. */
 func TestContainer_Close_AServiceStillResolvesDuringTheTeardown(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -2915,7 +2907,6 @@ func TestTeardownCloseOrder_TwoIndependentRingsCloseLatestFirst(t *testing.T) {
     }
 }
 
-/* the rings are found once and the count of what depends on each is kept as nodes close, so a stall reads the next ring off the counts: found and scanned again at every stall, a teardown of hundreds of disjoint rings spent seconds where the sequential close spent milliseconds — measured, four hundred rings closed in seven milliseconds this way — twenty under the race detector — and in two seconds the other; the bound is a quarter of the retired form's figure and over ten times the honest one under the detector, wide enough for a loaded host and still four times short of the form it retires */
 func TestTeardownCloseOrder_HundredsOfRingsCloseInMilliseconds(t *testing.T) {
     const ringCount = 400
 
@@ -3244,7 +3235,6 @@ func (instance *concurrentCloser) Close() error {
     return nil
 }
 
-/* the cycle remainder is the one wave whose members are related — each waits on the next, in a ring the drain could not open — so an armed teardown closes it one service at a time, in the remainder's own order, and reports the cycle as before. Measured before, three services declared in a ring were all inside their Close at once. */
 func TestContainer_Close_ArmedTheCycleRemainderClosesOneAfterTheOther(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -3369,7 +3359,6 @@ func TestContainer_Close_TheCycleReportNamesTheRingMembersAlone(t *testing.T) {
     }
 }
 
-/* a scoped service is built and closed by each scope, so it never has a node in the container's graph and an edge towards it can never order anything; the arming guard used to count the scoped registration as registered and admit an ordering the walk then dropped in silence. */
 func TestContainer_ArmParallelTeardown_RefusesADeclaredDependencyOnAScopedService(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -3400,7 +3389,6 @@ func TestContainer_ArmParallelTeardown_RefusesADeclaredDependencyOnAScopedServic
     }
 }
 
-/* the built instances an override evicted carry no edges, so nothing can be said about what they hold — of one another either; they used to share one wave and close at once. */
 func TestContainer_Close_ArmedTheReplacedInstancesCloseOneAfterTheOther(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -3452,7 +3440,6 @@ func (instance *mutualConcurrentCloser) Close() error {
     return (&concurrentCloser{running: instance.running, peak: instance.peak, closed: instance.closed}).Close()
 }
 
-/* two services that hold each other gain no edge, because no ordering between them is true — but they are not unrelated, and under waves "no edge" used to mean "same wave", so the two closed at once, each Close entering the other. They are one group inside the wave, closed one after the other. */
 func TestContainer_Close_ArmedAMutuallyHeldPairClosesOneAfterTheOther(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -3641,7 +3628,6 @@ func namedDurations(t *testing.T, record exceptioncontract.Context, key string) 
     return named
 }
 
-/* the measured case: an eighty-millisecond close under a forty-millisecond budget answers nil — a spent budget is not a failure — and used to leave no trace of the service that ate it */
 func TestContainer_CloseWithContext_AnOverrunNamesTheServiceThatSpentTheBudget(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -4001,7 +3987,6 @@ func TestContainer_Close_ADeclarationOnATypeResolvedThroughItselfLeavesNoRawEdge
         WithTypeRegistration(false),
     )
 
-    /* resolved through the TYPE, so a "type:<T>" node exists and is aliased onto the first pool — the node the raw edge used to be translated through */
     serviceContainer.MustGetByType(reflect.TypeOf((*sharedPoolService)(nil)))
 
     serviceContainer.MustRegister(
@@ -4024,7 +4009,6 @@ type capturedDeclarerPool struct {
 
 func (instance *capturedDeclarerPool) Close() error { return nil }
 
-/* a pointer held back against a declaration keyed by a TYPE is no ordering the walk may write: the declaration is expanded for the plan, and the ring check reads the plan's graph — it used to translate the raw graph a second time for itself, where the expansion never arrived, so the inference stood beside the declaration, the plan carried both directions, and the armed close reported a cycle over a teardown in which every service closed. The name form of the same declaration never had the defect, which is the control. */
 func TestContainer_Close_ArmedACapturedPointerBackAgainstATypeDeclarationIsNoRing(t *testing.T) {
     for _, byType := range []bool{true, false} {
         serviceContainer := NewContainer()
@@ -4114,7 +4098,6 @@ func TestContainer_Close_TheViewLeavesNoExpandedTypeEdgeBehindOnTheDefaultPath(t
     serviceContainer.MustRegister(
         "app.pool.first",
         func(resolver containercontract.Resolver) (*sharedPoolService, error) {
-            /* resolved, so the graph carries the first pool before the declarer — the other half of the ring the expansion used to close */
             if _, resolveErr := resolver.Get("app.declarer"); nil != resolveErr {
                 return nil, resolveErr
             }
@@ -4126,7 +4109,6 @@ func TestContainer_Close_TheViewLeavesNoExpandedTypeEdgeBehindOnTheDefaultPath(t
 
     MustFromResolver[*sharedPoolService](serviceContainer, "app.pool.first")
 
-    /* the view between the registrations is what used to write the expansion into the graph */
     serviceContainer.(interface {
         TeardownPlan() []containercontract.TeardownPlanEntry
     }).TeardownPlan()

@@ -14,7 +14,6 @@ func New(
     scope containercontract.Scope,
     container containercontract.Container,
 ) runtimecontract.Runtime {
-    /* the guards read through the interface: a typed nil passes a plain nil comparison and every resolution through the runtime then panics on the request path instead of failing here, at the construction the panic can name */
     if true == internal.IsNilInterface(ctx) {
         exception.Panic(
             exception.NewError("context may not be nil on runtime", nil, nil),

@@ -299,6 +299,12 @@ func TestHmacTokenSource_EndpointIsBoundToTheSpellingTheRouterRoutes(t *testing.
         t.Fatal("expected an envelope signed for /internal/files/a/b to be refused for the one-segment resource /internal/files/a%2Fb")
     }
 
+    decodedBraceHeader, _ := signer.Sign("GET", "/internal/files/a/b{", nil, nil)
+    crossedBrace, _ := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/files/a%2Fb{", nil, signer.HeaderName(), decodedBraceHeader))
+    if true == crossedBrace.IsAuthenticated() {
+        t.Fatal("expected an envelope signed for /internal/files/a/b{ to be refused for the one-segment resource /internal/files/a%2Fb{")
+    }
+
     routedHeader, _ := signer.Sign("GET", "/internal/files/a%2Fb", nil, nil)
     routed, _ := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/files/a%2Fb", nil, signer.HeaderName(), routedHeader))
     if false == routed.IsAuthenticated() {

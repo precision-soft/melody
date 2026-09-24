@@ -724,17 +724,19 @@ func TestCompressionMiddleware_ReadsTheExclusionListAgainstTheSpellingTheRouterR
         },
     )
 
-    request := httptest.NewRequest(nethttp.MethodGet, "/assets%2Fapp.js", nil)
-    request.Header.Set("Accept-Encoding", "gzip")
-    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+    for _, rawPath := range []string{"/assets%2Fapp.js", "/assets%2Fapp.js{"} {
+        request := httptest.NewRequest(nethttp.MethodGet, rawPath, nil)
+        request.Header.Set("Accept-Encoding", "gzip")
+        melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
-    resultResponse, err := handler(nil, httptest.NewRecorder(), melodyRequest)
-    if nil != err {
-        t.Fatalf("unexpected error: %v", err)
-    }
+        resultResponse, err := handler(nil, httptest.NewRecorder(), melodyRequest)
+        if nil != err {
+            t.Fatalf("unexpected error for %q: %v", rawPath, err)
+        }
 
-    if "gzip" != resultResponse.Headers().Get("Content-Encoding") {
-        t.Fatalf("expected the one-segment resource outside the excluded prefix to be compressed, got: %q", resultResponse.Headers().Get("Content-Encoding"))
+        if "gzip" != resultResponse.Headers().Get("Content-Encoding") {
+            t.Fatalf("expected the one-segment resource %q outside the excluded prefix to be compressed, got: %q", rawPath, resultResponse.Headers().Get("Content-Encoding"))
+        }
     }
 }
 

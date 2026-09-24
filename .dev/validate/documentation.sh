@@ -1224,4 +1224,201 @@ if [[ 0 -lt ${STALE_COUNT_INTEGER} ]]; then
     fail "${STALE_COUNT_INTEGER} stale baseline line(s): the gap each one excuses has been closed, so the line has to go"
 fi
 
-success "package documentation agrees with the code of every major outside the ${GAP_COUNT_INTEGER} recorded divergences"
+# history in a comment. The house rule keeps the story of a change in the CHANGELOG and the package documents,
+# and a comment states the present contract only, so a comment on the third major that narrates what the code
+# used to do, or carries a measurement, is counted per file against comment.baseline. Only comment text is
+# read: a phrase inside a string literal, a raw string or a rune is code, and `//go:` directives and the
+# generated-code header are not prose. The baseline is a ratchet — a file above its line fails, and a file
+# below it fails until the line is lowered — so the count only ever goes down.
+COMMENT_BASELINE_PATH_STRING=".dev/validate/comment.baseline"
+
+if [[ ! -f "${COMMENT_BASELINE_PATH_STRING}" ]]; then
+    fail "the baseline is missing: ${COMMENT_BASELINE_PATH_STRING}. Without it every history clause reads as new, so restore it rather than let the run invent a verdict"
+fi
+
+# prints "path<tab>count" for every file whose comments carry at least one history phrase.
+list_history_comment_count() {
+    awk '
+        function count_history(text,    lowered, remaining, position, prefix, total) {
+            lowered = tolower(text)
+            total = 0
+            remaining = lowered
+            while (0 < (position = index(remaining, "used to"))) {
+                prefix = substr(remaining, 1, position - 1)
+                if (prefix !~ /(^|[^a-z])(is|are|be|been|being) $/) {
+                    total++
+                }
+                remaining = substr(remaining, position + 7)
+            }
+            if (lowered ~ /(^|[^a-z])measured([^a-z]|$)/) { total++ }
+            if (lowered ~ /the old /) { total++ }
+            if (lowered ~ /(^|[^a-z])previously([^a-z]|$)/) { total++ }
+            if (lowered ~ /until now/) { total++ }
+            if (lowered ~ /before the (fix|change|repair)/) { total++ }
+            if (lowered ~ /this change/) { total++ }
+            if (lowered ~ /the previous (form|tree|code|version|shape|behaviou?r|implementation)/) { total++ }
+            return total
+        }
+        FNR == 1 { state = "code" }
+        {
+            line = $0
+            text = ""
+            line_length = length(line)
+            cursor = 1
+            if ("line" == state) { state = "code" }
+            while (cursor <= line_length) {
+                character = substr(line, cursor, 1)
+                pair = substr(line, cursor, 2)
+                if ("block" == state) {
+                    if ("*/" == pair) { state = "code"; cursor += 2; continue }
+                    text = text character
+                } else if ("string" == state) {
+                    if ("\\" == character) { cursor += 2; continue }
+                    if ("\"" == character) { state = "code" }
+                } else if ("raw" == state) {
+                    if ("`" == character) { state = "code" }
+                } else if ("rune" == state) {
+                    if ("\\" == character) { cursor += 2; continue }
+                    if ("\047" == character) { state = "code" }
+                } else {
+                    if ("/*" == pair) { state = "block"; cursor += 2; continue }
+                    if ("//" == pair) {
+                        rest = substr(line, cursor + 2)
+                        if (rest !~ /^go:/ && rest !~ /^ Code generated/) { text = text rest }
+                        break
+                    }
+                    if ("\"" == character) { state = "string" }
+                    else if ("`" == character) { state = "raw" }
+                    else if ("\047" == character) { state = "rune" }
+                }
+                cursor++
+            }
+            if ("" != text) {
+                found = count_history(text)
+                if (0 < found) { history[FILENAME] += found }
+            }
+        }
+        END { for (path in history) { print path "\t" history[path] } }
+    ' "$@" | sort
+}
+
+# the controls run before the tree is read: a planted history clause has to be counted, and the same phrase in
+# a string, a raw string spanning a comment opener and a directive has to count nothing.
+COMMENT_CONTROL_DIRECTORY_STRING="$(mktemp -d)"
+trap 'rm -rf "${COMMENT_CONTROL_DIRECTORY_STRING}"' EXIT
+
+printf '%s\n' \
+    'package control' \
+    '' \
+    '/* Run answers the result. This used to panic. */' \
+    'func Run() {' \
+    '    value := 1 // measured on the probe' \
+    '    _ = value' \
+    '}' > "${COMMENT_CONTROL_DIRECTORY_STRING}/positive.go"
+
+printf '%s\n' \
+    'package control' \
+    '' \
+    '//go:generate echo used to' \
+    'const message = "this used to fail, measured"' \
+    'const query = `/* used to' \
+    'the old */ previously`' \
+    "const quote = '\"'" \
+    '/* Handler is used to serve the request. */' \
+    'type Handler struct{}' > "${COMMENT_CONTROL_DIRECTORY_STRING}/negative.go"
+
+COMMENT_CONTROL_OUTPUT_STRING="$(list_history_comment_count "${COMMENT_CONTROL_DIRECTORY_STRING}/positive.go" "${COMMENT_CONTROL_DIRECTORY_STRING}/negative.go")"
+if [[ "${COMMENT_CONTROL_DIRECTORY_STRING}/positive.go"$'\t'"2" != "${COMMENT_CONTROL_OUTPUT_STRING}" ]]; then
+    fail "the history comment control failed: expected the planted file alone with 2, read [${COMMENT_CONTROL_OUTPUT_STRING}] — no verdict over the tree is possible"
+fi
+
+declare -A COMMENT_BASELINE_COUNT_INTEGER_MAP=()
+declare -A COMMENT_BASELINE_LINE_INTEGER_MAP=()
+COMMENT_BROKEN_COUNT_INTEGER=0
+COMMENT_BASELINE_LINE_NUMBER_INTEGER=0
+
+while IFS= read -r COMMENT_BASELINE_LINE_STRING || [[ "" != "${COMMENT_BASELINE_LINE_STRING}" ]]; do
+    COMMENT_BASELINE_LINE_NUMBER_INTEGER=$((COMMENT_BASELINE_LINE_NUMBER_INTEGER + 1))
+
+    if [[ "" = "${COMMENT_BASELINE_LINE_STRING// /}" ]]; then
+        continue
+    fi
+
+    case "${COMMENT_BASELINE_LINE_STRING}" in \#*) continue ;; esac
+
+    IFS='~' read -r ROW_PATH_STRING ROW_COUNT_STRING <<< "${COMMENT_BASELINE_LINE_STRING}"
+    ROW_PATH_STRING="$(trim_field "${ROW_PATH_STRING}")"
+    ROW_COUNT_STRING="$(trim_field "${ROW_COUNT_STRING}")"
+
+    if [[ "" = "${ROW_PATH_STRING}" || ! "${ROW_COUNT_STRING}" =~ ^[1-9][0-9]*$ ]]; then
+        println "  broken   ${COMMENT_BASELINE_PATH_STRING}:${COMMENT_BASELINE_LINE_NUMBER_INTEGER} does not split into path ~ positive count"
+        COMMENT_BROKEN_COUNT_INTEGER=$((COMMENT_BROKEN_COUNT_INTEGER + 1))
+
+        continue
+    fi
+
+    if [[ "" != "${COMMENT_BASELINE_LINE_INTEGER_MAP[${ROW_PATH_STRING}]:-}" ]]; then
+        println "  broken   ${COMMENT_BASELINE_PATH_STRING}:${COMMENT_BASELINE_LINE_NUMBER_INTEGER} repeats the path first written at line ${COMMENT_BASELINE_LINE_INTEGER_MAP[${ROW_PATH_STRING}]}"
+        COMMENT_BROKEN_COUNT_INTEGER=$((COMMENT_BROKEN_COUNT_INTEGER + 1))
+
+        continue
+    fi
+
+    COMMENT_BASELINE_LINE_INTEGER_MAP["${ROW_PATH_STRING}"]="${COMMENT_BASELINE_LINE_NUMBER_INTEGER}"
+    COMMENT_BASELINE_COUNT_INTEGER_MAP["${ROW_PATH_STRING}"]="${ROW_COUNT_STRING}"
+done < "${COMMENT_BASELINE_PATH_STRING}"
+
+if [[ 0 -lt ${COMMENT_BROKEN_COUNT_INTEGER} ]]; then
+    fail "${COMMENT_BROKEN_COUNT_INTEGER} unreadable line(s) in ${COMMENT_BASELINE_PATH_STRING}: no verdict is possible over a baseline that does not parse"
+fi
+
+COMMENT_FILE_STRING_LIST=()
+while IFS= read -r COMMENT_FILE_STRING; do
+    if [[ -f "${COMMENT_FILE_STRING}" ]]; then
+        COMMENT_FILE_STRING_LIST+=("${COMMENT_FILE_STRING}")
+    fi
+done < <(list_repository_path 'v3/*.go' 'integrations/*/v3/*.go')
+
+declare -A COMMENT_SEEN_INTEGER_MAP=()
+COMMENT_HISTORY_TOTAL_INTEGER=0
+COMMENT_OVER_COUNT_INTEGER=0
+COMMENT_UNDER_COUNT_INTEGER=0
+
+while IFS=$'\t' read -r COMMENT_PATH_STRING COMMENT_COUNT_STRING; do
+    if [[ "" = "${COMMENT_PATH_STRING}" ]]; then
+        continue
+    fi
+
+    COMMENT_SEEN_INTEGER_MAP["${COMMENT_PATH_STRING}"]=1
+    COMMENT_HISTORY_TOTAL_INTEGER=$((COMMENT_HISTORY_TOTAL_INTEGER + COMMENT_COUNT_STRING))
+    COMMENT_ALLOWED_INTEGER="${COMMENT_BASELINE_COUNT_INTEGER_MAP[${COMMENT_PATH_STRING}]:-0}"
+
+    if [[ ${COMMENT_COUNT_STRING} -gt ${COMMENT_ALLOWED_INTEGER} ]]; then
+        println "  history  ${COMMENT_PATH_STRING}: ${COMMENT_COUNT_STRING} history clause(s) in comments, the baseline allows ${COMMENT_ALLOWED_INTEGER} — state the present contract and leave the story to the CHANGELOG"
+        COMMENT_OVER_COUNT_INTEGER=$((COMMENT_OVER_COUNT_INTEGER + 1))
+    elif [[ ${COMMENT_COUNT_STRING} -lt ${COMMENT_ALLOWED_INTEGER} ]]; then
+        println "  lower    ${COMMENT_BASELINE_PATH_STRING}:${COMMENT_BASELINE_LINE_INTEGER_MAP[${COMMENT_PATH_STRING}]} allows ${COMMENT_ALLOWED_INTEGER} for ${COMMENT_PATH_STRING}, which now carries ${COMMENT_COUNT_STRING} — lower the line"
+        COMMENT_UNDER_COUNT_INTEGER=$((COMMENT_UNDER_COUNT_INTEGER + 1))
+    fi
+done < <(if [[ 0 -lt ${#COMMENT_FILE_STRING_LIST[@]} ]]; then list_history_comment_count "${COMMENT_FILE_STRING_LIST[@]}"; fi)
+
+for COMMENT_PATH_STRING in "${!COMMENT_BASELINE_COUNT_INTEGER_MAP[@]}"; do
+    if [[ "" != "${COMMENT_SEEN_INTEGER_MAP[${COMMENT_PATH_STRING}]:-}" ]]; then
+        continue
+    fi
+
+    println "  stale    ${COMMENT_BASELINE_PATH_STRING}:${COMMENT_BASELINE_LINE_INTEGER_MAP[${COMMENT_PATH_STRING}]} allows history in ${COMMENT_PATH_STRING}, which carries none — delete the line"
+    COMMENT_UNDER_COUNT_INTEGER=$((COMMENT_UNDER_COUNT_INTEGER + 1))
+done
+
+info "read the comments of ${#COMMENT_FILE_STRING_LIST[@]} file(s) of the third major: ${COMMENT_HISTORY_TOTAL_INTEGER} history clause(s) in ${#COMMENT_SEEN_INTEGER_MAP[@]} file(s), all within ${COMMENT_BASELINE_PATH_STRING} unless reported above"
+
+if [[ 0 -lt ${COMMENT_OVER_COUNT_INTEGER} ]]; then
+    fail "${COMMENT_OVER_COUNT_INTEGER} file(s) carry more history in their comments than ${COMMENT_BASELINE_PATH_STRING} allows"
+fi
+
+if [[ 0 -lt ${COMMENT_UNDER_COUNT_INTEGER} ]]; then
+    fail "${COMMENT_UNDER_COUNT_INTEGER} line(s) of ${COMMENT_BASELINE_PATH_STRING} allow more than the file carries: lower or delete them, so the count only goes down"
+fi
+
+success "package documentation agrees with the code of every major outside the ${GAP_COUNT_INTEGER} recorded divergences, and no comment of the third major carries more history than ${COMMENT_BASELINE_PATH_STRING} allows"

@@ -270,7 +270,6 @@ func TestEscapeJsonC1Block_LeavesEveryOtherByteAsItWas(t *testing.T) {
     }
 }
 
-/* the escapes are spelled by table, not by a formatted print per rune: measured, a sixty-four byte value half made of control bytes cost thirty-four allocations through fmt.Sprintf and two through the table — the builder's own growth */
 func TestEscapeControlCharacters_SpellsTheEscapesWithoutAFormattedPrintPerRune(t *testing.T) {
     value := strings.Repeat("a\x01", 32)
 

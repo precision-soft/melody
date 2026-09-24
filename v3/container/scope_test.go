@@ -917,7 +917,6 @@ func (instance dualFiledValueService) Close() error {
     return nil
 }
 
-/* a VALUE-typed scoped service with an uncomparable field, filed under name and type, defeats both identity marks — no pointer, no equality — and used to be closed once per node. The alias link recorded at filing time is what tells the teardown the two nodes are one filing. */
 func TestScopeClose_DualFiledUncomparableValue_ClosedOnce(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -2051,7 +2050,6 @@ func TestScope_GetByTypeClosedAfterTheEntryCheckIsRefusedByTheLookup(t *testing.
     }
 }
 
-/* scopeContextDoorService carries both close doors and records which one the scope took, and what the context handed through the preferred one said — the two facts that tell the container's preference from the plain Close the scope used to reach. */
 type scopeContextDoorService struct {
     closeCalls            int
     closeWithContextCalls int

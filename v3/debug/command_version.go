@@ -8,7 +8,7 @@ import (
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/* VersionCommand answers with three rows: the application's version, melody's, and the Go runtime's. The application row reads the process-wide declaration made through output.SetApplicationVersion — the composition root's main is where an application hands its version over, from whatever source it keeps it in — and an explicit ApplicationVersion set on the command wins over it. */
+/* VersionCommand answers three rows: the application's version, melody's and the Go runtime's. The application row reads the declaration made through output.SetApplicationVersion, and an explicit ApplicationVersion on the command wins over it. */
 type VersionCommand struct {
     ApplicationVersion string
 }
@@ -58,7 +58,7 @@ func (instance *VersionCommand) Run(
             []string{"component", "version"},
         )
 
-        /* the rows read the meta, where NewMeta already applied the fallback chain: the command's explicit value, then the process-wide declaration, then nothing */
+        /* NewMeta already applied the fallback: the command's value, then the process-wide declaration */
         if "" != envelope.Meta.Version.Application {
             block.AddRow("application", envelope.Meta.Version.Application)
         } else {

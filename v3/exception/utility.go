@@ -9,7 +9,7 @@ import (
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
-/* isNilInterfaceValue reports whether value is an interface holding a typed nil. It duplicates internal.IsNilInterface because that package imports this one. */
+/* isNilInterfaceValue duplicates internal.IsNilInterface, since that package imports this one. */
 func isNilInterfaceValue(value any) bool {
     if nil == value {
         return true
@@ -63,7 +63,7 @@ func LogContext(err error, extra ...exceptioncontract.Context) exceptioncontract
         }
     }
 
-    /* the chain is anchored on the top error's own wrap links, not on the nearest *Error a deep search would find: anchoring deep drops the context of every link above it. Links, plural, because a joined error has several of them and taking only the first would keep exactly the branch the reader already sees rendered in the message */
+    /* anchored on the top error's own wrap links, all of them for a joined error, so no link's context above the nearest *Error is dropped */
     causeErrs := causesOf(err)
     if 0 < len(causeErrs) {
         _, hasCause := context["cause"]
@@ -122,7 +122,7 @@ func FromError(err error) *Error {
         context = renderedContextOf(provider)
     }
 
-    /* the message is rendered under a recover, as LogContext renders it: these doors run inside the kernel's recovery defers, where a second panic — an Error() that dereferences what the first panic left nil — would unwind past the 500 and the kernel.exception dispatch that defer exists to produce */
+    /* rendered under a recover: these doors run inside the kernel's recovery defers, where a second panic would unwind past the 500 */
     return NewError(renderErrorText(err), context, err)
 }
 
@@ -162,7 +162,7 @@ func FromErrorWithLevelAndContext(err error, level loggingcontract.Level, contex
     return newWithLevel(renderErrorText(err), mergedContext, err, level)
 }
 
-/* renderedContextOf reads a provider's context under a recover, the way renderErrorText reads the message: LogContext runs inside recovery defers, and the From* constructors run on the same paths, so a foreign Context() that panics — typically on the very field that made the error worth raising — would otherwise raise a second panic past the recovery that is reporting the first. A panicking context costs the context and nothing else, with the panic value kept in its place. */
+/* renderedContextOf reads a provider's context under a recover, since LogContext runs inside recovery defers; a panicking Context costs the context alone, with the panic value in its place. */
 func renderedContextOf(provider exceptioncontract.ContextProvider) (context exceptioncontract.Context) {
     defer func() {
         recoveredValue := recover()
@@ -178,7 +178,7 @@ func renderedContextOf(provider exceptioncontract.ContextProvider) (context exce
     return provider.Context()
 }
 
-/* renderErrorText produces the loggable text of an error under a recover: LogContext runs inside recovery defers, where a value whose Error() panics — often on the very nil field that made it panic-worthy in the first place — would raise a second panic past the recovery that is reporting the first, and the connection was reset with the original failure reaching no record at all. The container teardown's close-error rendering makes the same trade for the same reason. */
+/* renderErrorText renders an error's text under a recover, since LogContext runs inside recovery defers where a panicking Error would unwind past the recovery reporting the first failure. */
 func renderErrorText(err error) (text string) {
     defer func() {
         recoveredValue := recover()
@@ -192,7 +192,7 @@ func renderErrorText(err error) (text string) {
     return err.Error()
 }
 
-/* MarkLogged marks the nearest AlreadyLogged implementer in the chain — the depth IsAlreadyLogged reads the mark back from — and returns the error unchanged. The mark lives on that implementer whoever wraps it, so an error one value is shared by several readers is marked for all of them once one has filed it: the container's creation guard relies on exactly that, handing every caller coalesced on one failed creation a wrapper over the same failure so the owner's record is not filed once per waiter. The sharing ends with the creation — a later resolution runs the provider again and carries a fresh, unmarked failure. */
+/* MarkLogged marks the nearest AlreadyLogged implementer in the chain, the depth IsAlreadyLogged reads, and returns the error unchanged. Every reader sharing that implementer sees the mark. */
 func MarkLogged(err error) error {
     if true == isNilInterfaceValue(err) {
         return err
@@ -206,7 +206,7 @@ func MarkLogged(err error) error {
     return err
 }
 
-/* markContained leaves the mark under a recover: MarkLogged runs in the recovery defers that file a failure, and a foreign MarkAsLogged that panics would raise a second panic past the recovery reporting the first. A mark that could not be left costs a second record of the same failure, never the first. */
+/* markContained leaves the mark under a recover; a mark that cannot be left costs a second record, never the first. */
 func markContained(alreadyLoggedValue exceptioncontract.AlreadyLogged) {
     defer func() {
         _ = recover()
@@ -215,7 +215,7 @@ func markContained(alreadyLoggedValue exceptioncontract.AlreadyLogged) {
     alreadyLoggedValue.MarkAsLogged()
 }
 
-/* Logged answers an error that reports itself already logged, and is what a writer returns after filing its record. An error whose chain carries an AlreadyLogged implementer is marked in place and handed back unchanged, so its identity — and every errors.Is and errors.As its readers perform on it — survives. An error whose chain carries none has nowhere for the mark to live: errors.New, fmt.Errorf and every runtime error make MarkLogged a silent no-op, and the next reader then files the same failure a second time. That error is wrapped in a marked melody error keeping it as its cause, so the mark the writer meant to leave is the mark the reader finds. The wrap cannot change how a status is resolved: it happens exactly when no HttpException is in the chain, which is exactly when the status was already going to be the generic one. */
+/* Logged answers an error that reports itself already logged. A chain carrying an AlreadyLogged implementer is marked in place and returned unchanged; one carrying none is wrapped in a marked melody error that keeps it as its cause. The wrap happens only when no HttpException is in the chain, so the resolved status cannot change. */
 func Logged(err error) error {
     if true == isNilInterfaceValue(err) {
         return err
@@ -230,7 +230,7 @@ func Logged(err error) error {
     return MarkLogged(FromError(err))
 }
 
-/* IsAlreadyLogged reads the mark at the depth MarkLogged writes it. It is the single reader: reading the mark off a concrete *Error instead misses a marked HttpException and anything wrapping a marked error, which are then rendered a second time. */
+/* IsAlreadyLogged reads the mark at the depth MarkLogged writes it, and is its single reader. */
 func IsAlreadyLogged(err error) bool {
     if true == isNilInterfaceValue(err) {
         return false
@@ -244,7 +244,7 @@ func IsAlreadyLogged(err error) bool {
     return reportsAlreadyLogged(alreadyLoggedValue)
 }
 
-/* reportsAlreadyLogged reads the mark under a recover, for the reason markContained leaves it under one: a foreign AlreadyLogged that panics answers not logged, which files the failure once more rather than losing it. */
+/* reportsAlreadyLogged reads the mark under a recover; a panicking implementer answers not logged. */
 func reportsAlreadyLogged(alreadyLoggedValue exceptioncontract.AlreadyLogged) (alreadyLogged bool) {
     defer func() {
         if nil != recover() {
@@ -255,7 +255,7 @@ func reportsAlreadyLogged(alreadyLoggedValue exceptioncontract.AlreadyLogged) (a
     return alreadyLoggedValue.AlreadyLogged()
 }
 
-/* chainHolds is errors.As under a recover, and the one door through which this package searches a chain. errors.As calls the Unwrap and the As of every link it passes, and the chain is whatever a failure carried — a recovered panic value included — so a link whose Unwrap or As panics raised a second panic inside the defer that had already spent its recover. On the bare goroutine of a worker that is the end of the process, raised by the reader writing down why a single item failed. A chain that cannot be searched answers that it holds nothing: the reader keeps the message, rendered under its own recover, and loses what that link would have added. */
+/* chainHolds is errors.As under a recover, the one door through which this package searches a chain; a chain that cannot be searched answers that it holds nothing. */
 func chainHolds(err error, target any) (found bool) {
     defer func() {
         if nil != recover() {
@@ -266,7 +266,7 @@ func chainHolds(err error, target any) (found bool) {
     return errors.As(err, target)
 }
 
-/* unwrapPanicked stands in a walked chain for the links an Unwrap that panicked would have answered, so the record says that the chain was cut and by what rather than ending at the link as if it had no cause. It exists only in the chains this package renders, never in the error a caller holds. */
+/* unwrapPanicked stands in a rendered chain for the causes of an Unwrap that panicked, and never reaches the error a caller holds. */
 type unwrapPanicked struct {
     recoveredValue any
 }
@@ -275,7 +275,7 @@ func (instance *unwrapPanicked) Error() string {
     return fmt.Sprintf("the links below could not be read, their Unwrap panicked: %v", instance.recoveredValue)
 }
 
-/* PanicCause reads a recovered panic value as the cause of the error a recovery boundary fabricates in its place. An error-shaped panic value belongs in the cause slot, not in a context slot: kept only in the context it collapses to its bare message at the render boundary — the json logger stringifies an error it finds in a context — so the context map and the cause chain of the very error that was raised reach no record at all, and the reason a write failed is gone while the stack that says where survives. A typed nil answers no cause, because its Error() would dereference a nil receiver at the first render, and a panic value that is not an error has no cause to give. */
+/* PanicCause answers a recovered panic value as the cause of the error a recovery boundary fabricates, so its context and cause chain reach the record. A typed nil and a value that is not an error answer no cause. */
 func PanicCause(recoveredValue any) error {
     recoveredErr, isRecoveredError := recoveredValue.(error)
     if false == isRecoveredError || true == isNilInterfaceValue(recoveredErr) {
@@ -299,14 +299,10 @@ func copyStringMap[T any](input map[string]T) map[string]T {
     return copied
 }
 
-/* causeChainCapacityHint bounds the pre-allocated capacity of the cause-chain builders; the walk still honours the caller's maxDepth. An unclamped maxDepth of math.MaxInt panics in makeslice. */
+/* causeChainCapacityHint bounds the pre-allocated capacity of the cause-chain builders; maxDepth still bounds the walk. */
 const causeChainCapacityHint = 8
 
-/* causesOf answers the links below an error, in both the shapes the standard library defines: the single Unwrap() error a wrap produces, and the Unwrap() []error an errors.Join produces. Every reader here anchored on errors.Unwrap alone, which answers nothing at all for a joined error — so a failure that gathered what several replicas, several destinations or several rules had to say reached the record as one flattened line of text, with the context of every branch and every link beneath them gone. The writers this framework repaired are one producer of the shape; a joined error can arrive from any dependency and from any application, and it is the readers that were blind to all of them.
-
-   The single form is tried first because it is the overwhelmingly common one and answers without allocating, and a link that carries both is a wrap whose own Unwrap wins, which is what errors.Is and errors.As do with it too.
-
-   Both Unwrap forms are foreign code called from the recovery defers that file a failure, so they run under a recover, as Error and Context do: an Unwrap that panics answers one unwrapPanicked link in place of its causes, and the walk ends there with the reason written into the chain. */
+/* causesOf answers the links below an error in both standard shapes, Unwrap() error first and then Unwrap() []error. Both run under a recover: an Unwrap that panics answers one unwrapPanicked link, and the walk ends there. */
 func causesOf(err error) (causeErrs []error) {
     defer func() {
         recoveredValue := recover()
@@ -361,7 +357,7 @@ func BuildCauseChain(causeErr error, maxDepth int) []string {
     return buildCauseChainFromRoots([]error{causeErr}, maxDepth)
 }
 
-/* walkCauseChain is the one walk both chains take, so they stay index-aligned by construction rather than by two hand-copied loops an edit could part. It is breadth-first over both unwrap shapes, so a chain of single wraps produces exactly the sequence it always did while a join contributes its branches side by side instead of ending the chain at its own link. maxDepth bounds the number of LINKS visited, not the depth of the tree, which is what keeps a wide join from costing more than a deep chain. */
+/* walkCauseChain is the one breadth-first walk both chains take, so they stay index-aligned. maxDepth bounds the number of links visited, not the depth of the tree. */
 func walkCauseChain(roots []error, maxDepth int, visit func(link error)) {
     pending := append([]error{}, roots...)
     visited := 0
@@ -370,7 +366,7 @@ func walkCauseChain(roots []error, maxDepth int, visit func(link error)) {
         current := pending[0]
         pending = pending[1:]
 
-        /* a typed-nil link is the nil its producer meant and contributes nothing */
+        /* a typed-nil link contributes nothing */
         if true == isNilInterfaceValue(current) {
             continue
         }
@@ -416,9 +412,8 @@ func buildCauseContextChainFromRoots(roots []error, maxDepth int) []map[string]a
     chain := make([]map[string]any, 0, causeChainCapacity(maxDepth))
     hasAnyContext := false
 
-    /* the same walk BuildCauseChain takes, so the two chains stay index-aligned: an operator reading causeChain[2] finds its context at causeContextChain[2] whether the failure below was one wrap or a join of several */
     walkCauseChain(roots, maxDepth, func(link error) {
-        /* the immediate node is asserted rather than searched with errors.As: a deep search emits the nearest provider's context once per intervening wrapper, while the cursor advances one link at a time */
+        /* the immediate node is asserted rather than searched, so a provider's context is not repeated once per intervening wrapper */
         causeProvider, isProvider := link.(exceptioncontract.ContextProvider)
         if false == isProvider {
             chain = append(chain, nil)

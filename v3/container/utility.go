@@ -20,7 +20,7 @@ func canonicalServiceType(targetType reflect.Type) reflect.Type {
     return targetType
 }
 
-/* typeIdentityKey is a stable map/stack key that is unique per type identity, unlike String(), which two same-named types from different packages share. A package cannot declare two types of the same name, so the named type's import path — reached through any pointer, slice, array, channel or map wrapping — plus the full String() distinguishes them without a registry or a lock. Reached through pointers alone, the key of an unnamed composite type carried no path at all, so a slice of one package's Bus and a slice of another package's Bus of the same short name were one key: a declaration on the first passed as registered through the second, and the plan wrote an edge onto a service nothing had named. */
+/* typeIdentityKey is a map and stack key unique per type identity, unlike String(): the import path of the named type, reached through any wrapping, plus the full String(). */
 func typeIdentityKey(targetType reflect.Type) string {
     if nil == targetType {
         return ""
@@ -29,7 +29,7 @@ func typeIdentityKey(targetType reflect.Type) string {
     return typeIdentityPath(targetType) + "\x00" + targetType.String()
 }
 
-/* typeIdentityPath is the import path a type's identity comes from: its own when it is named, and its named element's when it is a pointer, slice, array or channel of one — a map's is the paths of its key and its element, joined. A type built of nothing named — a function, an unnamed struct, an unnamed interface — has no path, and two of them built of same-named types from two packages key identically, String() included: that residue is bounded by the boot refusal recordTypeIdentityKeyLocked gives a colliding key, so the second such registration fails the boot rather than answering the first's teardown declaration. */
+/* typeIdentityPath is the import path a type's identity comes from: its own when named, its named element's through a pointer, slice, array or channel, a map's key and element paths joined. A type built of nothing named has no path; a colliding key is refused at registration by recordTypeIdentityKeyLocked. */
 func typeIdentityPath(targetType reflect.Type) string {
     if "" != targetType.PkgPath() {
         return targetType.PkgPath()
@@ -55,7 +55,7 @@ func defaultServiceNameForType(targetType reflect.Type) string {
     return uniqueTypeName(canonicalType)
 }
 
-/* uniqueTypeName is the service name a type registration derives from the type. It qualifies the type with its import path, so two same-named types from different packages — which share a String() built from the short package name — get distinct names and can both be type-registered. An unnamed or builtin type, never a real service type, keeps its String(). */
+/* uniqueTypeName is the service name a type registration derives, qualified with the import path so same-named types of different packages get distinct names. An unnamed or builtin type keeps its String(). */
 func uniqueTypeName(targetType reflect.Type) string {
     pointerPrefix := ""
     named := targetType
@@ -71,7 +71,7 @@ func uniqueTypeName(targetType reflect.Type) string {
     return pointerPrefix + named.PkgPath() + "." + named.Name()
 }
 
-/* overrideValueFitsRegisteredType decides whether an override value may sit under a registered type, judging it the way the readers will: raw assignability covers the interface registrations, whose stored value is asserted against the interface at resolution; the canonical-identity arm covers the value-typed registrations, whose canonical key already holds raw values built by the provider itself — a string service is registered under *string, so a string override occupies exactly the slot a built string occupies, and raw assignability alone would refuse what the registration's own creations serve. */
+/* overrideValueFitsRegisteredType decides whether an override value may sit under a registered type: by assignability for interface registrations, and by canonical identity for value-typed ones, whose canonical key holds raw values. */
 func overrideValueFitsRegisteredType(valueType reflect.Type, registeredType reflect.Type) bool {
     if true == valueType.AssignableTo(registeredType) {
         return true

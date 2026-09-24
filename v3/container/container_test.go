@@ -343,7 +343,6 @@ func TestHasType_AnswersForTheValueTypeOfAScopeOverride(t *testing.T) {
     }
 }
 
-/* a closed container used to accept registrations and overrides silently: the registration named a service no resolution would ever build, and the override landed in a map the teardown had already swept — served by later lookups, closed by nobody. Both refuse now, the way the scoped registrar always has. */
 func TestContainer_RegisterAndOverrideRefusedAfterClose(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -379,7 +378,6 @@ func TestContainer_RegisterAndOverrideRefusedAfterClose(t *testing.T) {
     }
 }
 
-/* the override propagates to every type its name is registered under, and a type-keyed resolution hands out whatever sits there without a re-check — the provider contract's call-time guard never sees overrides. A value the registered type cannot hold used to ride that hole straight through GetByType, poisoning the type cache with it. */
 func TestContainer_OverrideTypeIncompatibleValueRefused(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1125,7 +1123,6 @@ func TestContainer_Register_AfterArmingRefusesASecondRegistrationUnderADeclaredT
     }
 }
 
-/* what an override holds is recorded where a built value's is, under the same node: an armed teardown used to read the override as holding nothing, so its holder shared a wave with what it held. */
 func TestContainer_OverrideProtectedInstance_ArmedRecordsWhatTheOverrideHolds(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1179,7 +1176,6 @@ func TestContainer_OverrideProtectedInstance_ArmedRecordsWhatTheOverrideHolds(t 
     }
 }
 
-/* the record of the value an override evicted does not outlive it: an armed teardown used to keep it, and read what the evicted value held as if the new value held it. */
 func TestContainer_OverrideProtectedInstance_ReplacesTheRecordOfTheValueItEvicted(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1233,7 +1229,6 @@ func TestContainer_OverrideProtectedInstance_ReplacesTheRecordOfTheValueItEvicte
     }
 }
 
-/* the walk's memo of a value an override evicted goes with the value: keyed on its address, the memo kept every collaborator the evicted value held alive until Close — measured, five hundred overrides installed one after the other under the armed teardown kept all five hundred evicted values from collection */
 func TestContainer_OverrideProtectedInstance_ArmedReleasesTheMemoOfTheValueItEvicted(t *testing.T) {
     serviceContainer := NewContainer()
 

@@ -80,6 +80,7 @@ func TestPathPrefixMatcher_ReadsThePathTheRouterRoutes(t *testing.T) {
 
     for path, claimed := range map[string]bool{
         "/admin%2Fusers":    false,
+        "/admin%2Fusers{":   false,
         "/admin/caf%C3%A9":  true,
         "/admin/users":      true,
     } {

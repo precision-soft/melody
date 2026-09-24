@@ -124,7 +124,6 @@ func (instance *typedNilScopeRuntime) Container() containercontract.Container {
     return instance.container
 }
 
-/* a typed-nil scope used to be preferred over the healthy container and the promised may-not-be-nil error became a panic inside the resolution on the request path */
 func TestFromRuntime_FallsBackToTheContainerPastATypedNilScope(t *testing.T) {
     serviceContainer := container.NewContainer()
 
@@ -192,7 +191,6 @@ func TestFromRuntime_RefusesATypedNilRuntime(t *testing.T) {
     }, "runtime may not be nil")
 }
 
-/* the refusal has to name the RUNTIME rather than the resolver behind it. With the guard reading a plain nil, a typed-nil runtime travels past this door and is refused three lines later for carrying no resolver — an error either way, which is why the assertion reads the message instead of its presence. Measured before it was written: the same mutant survives every test of the released v2 suite, so the gap is the released major's. */
 func TestFromRuntime_RefusesATypedNilRuntimeByNameRatherThanByItsMissingResolver(t *testing.T) {
     _, resolveErr := FromRuntime[string]((*typedNilRuntime)(nil), "service.test")
     if nil == resolveErr {

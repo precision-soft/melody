@@ -535,7 +535,6 @@ func TestContainer_RegisterScoped_RefusesATeardownDependency(t *testing.T) {
 
 type scopedTeardownProbeService struct{}
 
-/* the declaration keyed by TYPE is the same declaration, and the door refuses it for the same reason: it would install nothing while reading as an ordering that holds. Measured before the refusal, the type form was accepted with nil at both scoped doors. */
 func TestContainer_RegisterScoped_RefusesATeardownDependencyKeyedByType(t *testing.T) {
     serviceContainer := NewContainer()
 

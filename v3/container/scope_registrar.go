@@ -8,7 +8,7 @@ import (
     "github.com/precision-soft/melody/v3/exception"
 )
 
-/* RegisterScoped adds a service to this one scope, layered over the plan its container was booted with, for the caller that only knows what to build once the request is in front of it. What it registers is built on the first Get through this scope and closed when the scope closes, like a planned scoped service. It is refused when the name is already taken at either level, unless Replacing was declared. */
+/* RegisterScoped adds a service to this one scope, layered over the plan: built on the first Get through the scope and closed with it. A name already taken at either level is refused unless Replacing was declared. */
 func (instance *scope) RegisterScoped(
     serviceName string,
     provider any,
@@ -32,7 +32,7 @@ func (instance *scope) RegisterScoped(
         )
     }
 
-    /* the "service." namespace is protected from substitution at the container-level registrar too; a registration on a live scope is the same substitution, one request wide */
+    /* the "service." namespace is protected from substitution here too */
     if true == strings.HasPrefix(serviceName, "service.") {
         return exception.NewError(
             "service is protected and cannot be registered as a scoped service",
@@ -83,7 +83,7 @@ func (instance *scope) registerOnScope(
 ) error {
     registerOption := applyRegisterServiceOptions(options)
 
-    /* refused here for the reason the container's scoped door states: a scope keeps its own teardown graph, recorded from the resolutions that scope actually made, so a declaration written at registration has nowhere to be written into. Accepting it would install nothing while reading as an ordering that holds. The form keyed by type is the same declaration and gets the same refusal. */
+    /* a scope keeps its own teardown graph, so a declaration at registration is refused in both forms */
     if 0 < len(registerOption.TeardownDependencyNames) || 0 < len(registerOption.TeardownDependencyTypes) {
         return exception.NewError(
             "a scoped registration cannot declare a teardown dependency",
@@ -108,7 +108,7 @@ func (instance *scope) registerOnScope(
 
     canonicalType := canonicalServiceType(serviceType)
 
-    /* the container is asked first and its lock is released before the scope's is taken, never held across it: Has holds the scope lock and reaches for the container's, so the reverse order closes a cycle the moment a writer queues on the container mutex, a pending writer blocking new readers. The window this leaves is a registration racing a registration, which has no ordering to preserve. */
+    /* the container is asked, and its lock released, before the scope's is taken */
     containerInstance.mutex.RLock()
     containerIsClosed := containerInstance.isClosed
     _, containerHasName := containerInstance.providers[serviceName]
@@ -118,7 +118,7 @@ func (instance *scope) registerOnScope(
     }
     containerInstance.mutex.RUnlock()
 
-    /* a closed container is refused here as at the other two registration doors: a registration accepted on a live scope would report success for a service whose every resolution the creation guard then refuses. The flag is read under the read lock this block already takes, so the lock ordering above is untouched. */
+    /* a closed container is refused, as at the other registration doors */
     if true == containerIsClosed {
         return newContainerClosedError(serviceName)
     }
@@ -223,7 +223,7 @@ func (instance *scope) registerTypeOnScopeLocked(
         return nil
     }
 
-    /* refuse a type whose identity key another, DIFFERENT scoped type already claimed on this scope, the way the container refuses it at its own registration door: scopedTypeNodeKey folds a type through typeIdentityKey, so a colliding pair shares one teardown node and one creation-guard key while holding two instances — one instance's Close is skipped and a resolution of one reads as a cycle through the other. The container door and the boot scope plan already run this check; only the live RegisterScoped path reached the maps without it. */
+    /* a type whose identity key another scoped type claimed on this scope is refused, as the container refuses it */
     if collidingType, collides := instance.scopedTypeIdentityCollision(canonicalType); true == collides {
         return exception.NewError(
             "scoped service type identity key collides with a different registered scoped type",
@@ -291,7 +291,7 @@ func (instance *scope) registerTypeOnScopeLocked(
     return nil
 }
 
-/* scopedTypeIdentityCollision reports a scoped type already registered on this scope whose identity key equals canonicalType's while being a DIFFERENT type. The same canonicalType registering again is not a collision — that is the ordinary multi-name registration the caller above handles — so the equal-type case is skipped. */
+/* scopedTypeIdentityCollision reports a different scoped type registered on this scope under the same identity key; the same type is not a collision. */
 func (instance *scope) scopedTypeIdentityCollision(canonicalType reflect.Type) (reflect.Type, bool) {
     identityKey := typeIdentityKey(canonicalType)
 
@@ -308,7 +308,7 @@ func (instance *scope) scopedTypeIdentityCollision(canonicalType reflect.Type) (
     return nil, false
 }
 
-/* scopedProviderByName yields the provider this scope would build the name from: its own registration first, then the plan. The plan is immutable and shared, so it is read without a lock. */
+/* scopedProviderByName yields the provider for a name: this scope's own registration first, then the immutable plan. */
 func (instance *scope) scopedProviderByName(serviceName string) (providerAny, bool) {
     instance.mutex.RLock()
     provider, exists := instance.ownProviders[serviceName]
@@ -323,7 +323,7 @@ func (instance *scope) scopedProviderByName(serviceName string) (providerAny, bo
     return provider, exists
 }
 
-/* scopedTypeRegistrationNames yields the scoped services registered under a type, the scope's own before the plan's. A name found here resolves through the named path, so a scoped service reached by type and by name is one instance. */
+/* scopedTypeRegistrationNames yields the scoped services registered under a type, the scope's own first; a name found here resolves through the named path, so type and name reach one instance. */
 func (instance *scope) scopedTypeRegistrationNames(canonicalType reflect.Type) ([]string, bool) {
     instance.mutex.RLock()
     serviceNames, exists := instance.ownTypeRegistrationNamesByType[canonicalType]

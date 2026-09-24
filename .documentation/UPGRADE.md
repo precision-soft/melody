@@ -49,7 +49,7 @@ From the move on, that document plays this file's role: it records, per v3 relea
 
 ### HTTP: a request path carrying an encoded separator is refused with 400
 
-**What changed.** The kernel refuses, with `400`, a request whose path as the client spelled it carries an encoded `/` — `%2F` or `%2f` — before it is routed or authorized. net/http decodes the escape into a separator before the kernel reads the path, so `/admin%2Fusers`, which a proxy or a WAF rule written against the raw request line reads as one segment, reached the `/admin/users` handler. Every consumer of the path inside the framework still reads the one decoded path; a literal `%2F` a segment carries once decoded (`%252F`) and `%2F` in the query string are served as before.
+**What changed.** The kernel refuses, with `400`, a request whose path as the client spelled it carries an encoded `/` — `%2F` or `%2f` — after the route is matched and before it is authorized or handled, whatever else the raw spelling carries beside it. net/http decodes the escape into a separator before the kernel reads the path, so `/admin%2Fusers`, which a proxy or a WAF rule written against the raw request line reads as one segment, reached the `/admin/users` handler. Every consumer of the path inside the framework still reads the one decoded path; a literal `%2F` a segment carries once decoded (`%252F`) and `%2F` in the query string are served as before.
 
 **Symptom.** A client that sends a path with an encoded slash is answered `400 bad request` where the request was previously routed to the handler of the decoded path.
 
