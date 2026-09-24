@@ -201,7 +201,7 @@ func TestPrefersHtml_ATypedNilRequestIsNotHtml(t *testing.T) {
     }
 }
 
-/* excess trailing zeros are precision the qvalue grammar cannot carry and the value cannot change, and clients do write them: refusing them dropped the member from the negotiation entirely, so an api client that asked for application/json;q=1.0000 was handed the html error page. A fourth digit that is not a zero still carries a weight the grammar cannot express, and its member is still dropped. */
+/* a fourth digit that is not a zero carries a weight the grammar cannot express, and its member is dropped */
 func TestPrefersHtml_ReadsAJsonPreferenceWrittenWithExcessTrailingZeros(t *testing.T) {
     htmlPreferred := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/", "text/html;q=0.9, application/json;q=1.0000")
     if true == PrefersHtml(htmlPreferred) {
@@ -230,7 +230,7 @@ func acceptListWithTailPast(head string, fillers int, tail string) string {
     return strings.Join(append(members, tail), ", ")
 }
 
-/* A header the member cap cut is read as unparsable: the refusal past the cap (text/html;q=0) used to be lost with the tail, and the type wildcard before it answered html for a client that had refused it. The sister list one member short of the cap still honours the refusal. */
+/* the sister list one member short of the cap still honours the refusal */
 func TestPrefersHtml_AHeaderCutAtTheCapIsReadAsUnparsable(t *testing.T) {
     cut := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/", acceptListWithTailPast("text/*", 63, "text/html;q=0"))
     if true == PrefersHtml(cut) {

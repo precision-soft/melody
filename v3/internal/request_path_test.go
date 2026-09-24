@@ -37,3 +37,45 @@ func TestRequestPathAsSent_ReadsTheEscapedPathWhenTheRawSpellingNoLongerMatchesT
         t.Fatalf("expected a raw spelling that no longer unescapes to the path to be ignored, got %q", actual)
     }
 }
+
+func TestRequestRawPathIsStale_AnswersWhetherTheRawSpellingStillNamesThePath(t *testing.T) {
+    requestUrl, parseErr := url.ParseRequestURI("/api/admin%2Fusers")
+    if nil != parseErr {
+        t.Fatalf("parse: %v", parseErr)
+    }
+
+    if true == RequestRawPathIsStale(requestUrl) {
+        t.Fatal("expected the raw spelling of an untouched request not to be stale")
+    }
+
+    requestUrl.Path = "/admin/users"
+
+    if false == RequestRawPathIsStale(requestUrl) {
+        t.Fatal("expected a raw spelling the rewritten path no longer unescapes from to be stale")
+    }
+
+    requestUrl.RawPath = ""
+
+    if true == RequestRawPathIsStale(requestUrl) {
+        t.Fatal("expected an empty raw spelling not to be stale")
+    }
+}
+
+func TestRequestPathCarriesLiteralEncodedSeparator_ReadsEachSegmentAsSent(t *testing.T) {
+    for target, expected := range map[string]bool{
+        "/files/a%252Fb": true,
+        "/files/a%252fb": false,
+        "/files/a%2Fb":   false,
+        "/files/a%2525b": false,
+        "/files/a/b":     false,
+    } {
+        requestUrl, parseErr := url.ParseRequestURI(target)
+        if nil != parseErr {
+            t.Fatalf("parse %q: %v", target, parseErr)
+        }
+
+        if actual := RequestPathCarriesLiteralEncodedSeparator(requestUrl); expected != actual {
+            t.Fatalf("expected %q to answer %v, got %v", target, expected, actual)
+        }
+    }
+}

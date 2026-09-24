@@ -350,7 +350,6 @@ func TestServerSentEventHub_SetBackplaneRefusesToInstallOverALiveOne(t *testing.
     first := &closeRecordingBackplane{}
     hub.SetBackplane(first)
 
-    /* the overwrite left the previous backplane running with nothing in the process able to reach it; closing it from this door cannot be the remedy, because the shipped backplanes clear themselves from the hub as the first step of their own Close and would re-enter here to clear the one just installed */
     testhelper.AssertPanicsWithError(
         t,
         func() {
@@ -423,7 +422,6 @@ func TestServerSentEventHub_RecordsABackplanePublishFailureAtError(t *testing.T)
 
     hub.Broadcast("topic", ServerSentEvent{Data: "payload"})
 
-    /* counted into a private atomic nobody polls, a redis outage silenced cross-node delivery on every node while each node kept serving its own subscribers and nothing was recorded anywhere */
     if 1 != logger.errorCount() {
         t.Fatalf("expected the publish failure to be recorded at error, got %d records", logger.errorCount())
     }

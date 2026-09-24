@@ -29,9 +29,9 @@ type acceptedMime struct {
     qualityValue float64
 }
 
-/* a member whose q parameter falls outside the RFC 7231 qvalue grammar is dropped whole rather than rounded to a guess: the previous leniency scored an unparseable q as full acceptance, clamped a negative one into a refusal and let NaN through as a weight that no comparison could select or refuse, so the same malformed header could open, close or silently poison the negotiation depending on the spelling */
+/* parseAcceptHeader drops a member whose q falls outside the RFC 7231 qvalue grammar rather than guessing a weight. */
 func parseAcceptHeader(acceptHeader string) ([]acceptedMime, bool) {
-    /* a header the member cap cut is reported as such, and the manager refuses it as not acceptable: the members past the cap can carry the refusal (application/json;q=0) that a wildcard before them does not, so scoring half a list served the type the client had refused, and serving the default instead could serve it too */
+    /* a header the member cap cut is reported, and the manager refuses it as not acceptable, since a member past the cap may carry a refusal */
     parts, cut := internal.SplitOutsideQuotes(acceptHeader, ',')
     if true == cut {
         return nil, true
@@ -134,7 +134,7 @@ func matchWildcardSubtype(wildcardMime string, candidateMime string) bool {
     return true == strings.HasPrefix(candidateMime, prefix)
 }
 
-/* a q of 0 is a refusal, not an absence: it is kept in the parsed list so a candidate it covers can be excluded rather than falling through to the default */
+/* acceptMatchSpecificity keeps q=0 in the parsed list as a refusal, so a candidate it covers is excluded rather than served as the default. */
 func acceptMatchSpecificity(acceptedMimeValue string, candidateMime string) int {
     acceptedMimeValue = normalizeMime(acceptedMimeValue)
     candidateMime = normalizeMime(candidateMime)

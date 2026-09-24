@@ -109,7 +109,7 @@ func TestGenerateEtag_ChangesWithinTheSameSecond(t *testing.T) {
     }
 }
 
-/* a filesystem that reports no modification time — every embedded one — used to make the tag degenerate into size alone, identical across rebuilds, so a redeployed asset that kept its length revalidated 304 and stayed served stale. The build version stands in for the timestamp there, inside the digest: the undated derivation must differ from every dated one of the same size, and still tell two sizes apart. */
+/* the undated derivation must differ from every dated one of the same size, and still tell two sizes apart */
 func TestGenerateEtag_AZeroModificationTimeDerivesFromTheBuildVersionInsteadOfTheTimestamp(t *testing.T) {
     zeroTimed := GenerateEtag(&staticEtagFileInfo{size: 1024}, false)
 

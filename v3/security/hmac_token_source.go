@@ -215,8 +215,17 @@ func (instance *HmacTokenSource) verifyEndpoint(envelope hmacEnvelope, request h
         )
     }
 
-    /* the signed path is bound to the spelling the router matched, not to the decoded URL.Path: decoded, "/files/a%2Fb" read "/files/a/b" here, so an envelope signed for the two-segment resource authenticated a request for the one-segment resource "a/b" the router serves elsewhere and the matchers judge under its own spelling. A signer that names a plain path signs the same string either way; only a separator encoded inside a segment is bound as "%2F" now. */
+    /* the signed path is bound to the spelling the router matched, not to the decoded URL.Path, so an envelope signed for the two-segment "/files/a/b" does not authenticate the one-segment resource "/files/a%2Fb" */
     requestPath := http.RequestPathAsRouted(internal.RequestPathAsSent(httpRequest.URL))
+
+    /* a segment that decodes to a literal "%2F" shares its routed spelling with a separator encoded inside a segment, so the envelope cannot say which of the two resources it names: refused */
+    if true == internal.RequestPathCarriesLiteralEncodedSeparator(httpRequest.URL) {
+        return exception.NewError(
+            "internal-auth path carries a literal encoded separator the signed path cannot name",
+            map[string]any{"request": requestPath},
+            nil,
+        )
+    }
 
     if envelope.Path != requestPath {
         return exception.NewError(

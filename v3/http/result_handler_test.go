@@ -224,7 +224,6 @@ func TestNormalizeResultToResponse_TypedNilContractResponseBecomesNilInterface(t
     }
 }
 
-/* the fallback that serves the default representation no longer swallows the resolution failure: the record is the only diagnostic a client that named an available type and received another will ever produce */
 func TestNormalizeResultToResponse_ARefusedResolutionIsRecordedBeforeTheFallback(t *testing.T) {
     serviceContainer := container.NewContainer()
 

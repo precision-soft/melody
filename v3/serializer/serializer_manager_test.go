@@ -246,7 +246,6 @@ func TestResolveByAcceptHeader_WithoutJsonFallsBackToTheFirstConfiguredSerialize
     }
 }
 
-/* a member whose q parameter falls outside the qvalue grammar is dropped whole: the previous leniency kept the member at full acceptance, so application/json;q=abc outweighed the sibling the client actually weighted */
 func TestResolveByAcceptHeader_MalformedQualityDropsTheMember(t *testing.T) {
     manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
         MimeApplicationJson: NewJsonSerializer(),
@@ -275,7 +274,6 @@ func TestResolveByAcceptHeader_MalformedQualityDropsTheMember(t *testing.T) {
     }
 }
 
-/* a comma inside a quoted parameter value stays inside its member: without quote awareness the refusal in text/plain;version="1,2";q=0 detached from the type it covered and the client was served the very representation it refused */
 func TestResolveByAcceptHeader_QuotedCommaKeepsTheRefusal(t *testing.T) {
     manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
         MimeTextPlain: NewPlainTextSerializer(),
@@ -522,7 +520,7 @@ func acceptListWithTailPast(head string, fillers int, tail string) string {
     return strings.Join(append(members, tail), ", ")
 }
 
-/* A header the member cap cut is read as unparsable and refused as not acceptable: the refusal past the cap (application/json;q=0) used to be lost with the tail, and the wildcard before it served json to a client that had refused it. The sister list one member short of the cap still honours the refusal and falls to the other type. */
+/* the sister list one member short of the cap still honours the refusal and falls to the other type */
 func TestResolveByAcceptHeader_AHeaderCutAtTheCapIsRefused(t *testing.T) {
     manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
         MimeApplicationJson: NewJsonSerializer(),

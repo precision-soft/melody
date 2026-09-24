@@ -371,7 +371,7 @@ func TestKernel_DoesNotDoublePersistSessionWhenWriteFailsAfterCommit(t *testing.
     }
 }
 
-/* the wiring panics of the request setup are raised above the main recovery guard, so a client used to meet a reset connection with nothing recorded; the early guard answers them, and it has to sit between the terminate guard and the scope close, which the status read at close time is what proves. */
+/* the early guard has to sit between the terminate guard and the scope close, which the status read at close time proves */
 func TestKernel_ServeHttpClosesScopeWhenRequestLoggerSetupFails(t *testing.T) {
     recorder := httptest.NewRecorder()
 
@@ -562,9 +562,7 @@ func TestKernel_KernelRequestListenerResponseStillWinsOverDispatchError(t *testi
     }
 }
 
-/* the guarantee this pins is the one F-134 exists for, and it is the exact case the neighbouring test does NOT cover: there a listener fails while producing a response and the response wins, which is right, because nothing required was skipped. Here a listener marked required sits BEHIND the one that stops and answers, so the response it produced would be served with access control never consulted — the cached /admin page handed to an anonymous caller. The kernel is required to drop that response for the error page, and it tells the two cases apart by the TYPE of the error the dispatch returned, not by whether a response exists.
-
-   Measured on all three majors before it was written: no suite anywhere pins the kernel half of this refusal. v1 and v2 shipped the repair and proved only the dispatcher's half, so this test is what puts the two in disagreement. */
+/* a required listener sits behind the one that stops and answers, so the kernel must drop that response for the error page; it tells this case from the neighbouring one by the type of the dispatch error, not by whether a response exists */
 func TestKernel_KernelRequestStoppingListenerThatAnswersStillFailsClosedBeforeARequiredListener(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -627,7 +625,7 @@ func TestKernel_KernelRequestStoppingListenerThatAnswersStillFailsClosedBeforeAR
     }
 }
 
-/* the may-skip twin of the test above, and the case the mark was never written for: the listener does not stop, it FAILS, and it fails after producing a response. Read on the failure branch the mark suppressed the skip refusal, so the dispatch returned an ordinary listener failure, the kernel's type test did not fire, and the response the failing listener had set was served — the cached /admin page handed to an anonymous caller by the branch the neighbouring test closes for the stop. */
+/* the may-skip twin of the test above: the listener fails after producing a response, with a required listener behind it */
 func TestKernel_KernelRequestFailingMaySkipListenerThatAnswersStillFailsClosedBeforeARequiredListener(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -1019,7 +1017,6 @@ func TestKernel_PanicRecoveryClosesTheDiscardedFileBackedResponse(t *testing.T) 
         t.Fatal("the discarded file-backed response body was never closed: one file descriptor leaks per request")
     }
 }
-
 
 /* the dispatcher contains a listener's panic per listener and answers it as an error, with ONE exception:
    an exit error, which it re-raises by contract so it reaches the edge of the process. On the recovery
@@ -1682,7 +1679,6 @@ func TestKernel_RouteAttributesCannotReplaceTheKernelOwnedAttributes(t *testing.
     }
 }
 
-/* A handler returning (nil, nil) was answered with an empty 204 written straight out, without kernel.response ever being dispatched — so the one hook that decorates a response never saw it. Measured with the framework's own cross-origin wiring, a nil-returning DELETE came back with no Access-Control-Allow-Origin at all while the identical explicit 204 carried the full set, and the access log recorded status 0. */
 func TestKernel_DispatchesResponseEventForHandlerReturningNoResponse(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -3220,7 +3216,6 @@ func TestNormalizeBodyLimitError_LeavesOtherErrorsUntouched(t *testing.T) {
     }
 }
 
-/* a typo in a trusted-proxy entry used to narrow the trust in silence: both readers of the list skipped what they could not parse, so the hop it named stopped being believed, X-Forwarded-For from it was no longer read, and every client behind that proxy collapsed onto the direct peer's single rate-limit bucket with no record anywhere. */
 func TestKernel_RefusesAMalformedTrustedProxyEntry(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
@@ -3432,6 +3427,51 @@ func TestKernel_MatchesTheRouteOnThePathAsSpelled(t *testing.T) {
         if expected != reached {
             t.Fatalf("the encoded separator of %q was read as a path separator: reached %q", rawPath, reached)
         }
+    }
+}
+
+func TestKernel_RefusesARawPathAFrontHandlerLeftStale(t *testing.T) {
+    reached := ""
+
+    router := NewRouter()
+    router.Handle(nethttp.MethodGet, "/admin/users", func(
+        runtimeInstance runtimecontract.Runtime,
+        writer nethttp.ResponseWriter,
+        request httpcontract.Request,
+    ) (httpcontract.Response, error) {
+        reached = "two-segment"
+
+        return NewResponse(nethttp.StatusOK, []byte("ok")), nil
+    })
+    router.Handle(nethttp.MethodGet, "/:name", func(
+        runtimeInstance runtimecontract.Runtime,
+        writer nethttp.ResponseWriter,
+        request httpcontract.Request,
+    ) (httpcontract.Response, error) {
+        reached = "one-segment:" + request.Params()["name"]
+
+        return NewResponse(nethttp.StatusOK, []byte("ok")), nil
+    })
+
+    kernelHandler := NewKernel(router).ServeHttp(newHttpTestContainer())
+
+    pathOnlyRewrite := nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+        request.URL.Path = strings.TrimPrefix(request.URL.Path, "/api")
+        kernelHandler.ServeHTTP(writer, request)
+    })
+
+    recorder := httptest.NewRecorder()
+    pathOnlyRewrite.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/api/admin%2Fusers", nil))
+
+    if nethttp.StatusBadRequest != recorder.Code || "" != reached {
+        t.Fatalf("expected a raw path the front handler left stale to be refused with no handler run, got %d reaching %q", recorder.Code, reached)
+    }
+
+    recorder = httptest.NewRecorder()
+    nethttp.StripPrefix("/api", kernelHandler).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/api/admin%2Fusers", nil))
+
+    if nethttp.StatusOK != recorder.Code || "one-segment:admin/users" != reached {
+        t.Fatalf("expected a front handler rewriting both fields to be served as the one segment, got %d reaching %q", recorder.Code, reached)
     }
 }
 

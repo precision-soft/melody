@@ -175,7 +175,6 @@ func TestBagFloat64_ConversionsAndErrors(t *testing.T) {
     }
 }
 
-/* a key set to nil is present but carries no value: String used to report it as set while Int, Bool, Float64 and Duration reported it as unset, so Has and the typed accessors contradicted each other on the same state */
 func TestValue_PresentNilReportsUnsetAcrossAllAccessors(t *testing.T) {
     parameterBag := NewParameterBag()
     parameterBag.Set("key", nil)
@@ -207,7 +206,6 @@ func TestValue_PresentNilReportsUnsetAcrossAllAccessors(t *testing.T) {
     }
 }
 
-/* the request bags keep the single and the repeated key apart by type, and a repeated key answers its first value the way Input and url.Values.Get do; the documented reads through StringOrDefault and HasNonEmptyString used to inherit a panic here, raised by one duplicated query key. */
 func TestString_ReadsTheFirstValueOfARepeatedKey(t *testing.T) {
     parameterBag := NewParameterBagFromValues(url.Values{"name": {"a", "b"}})
 

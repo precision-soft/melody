@@ -17,7 +17,7 @@ func NewRouteManifestCommand() *RouteManifestCommand {
     return &RouteManifestCommand{}
 }
 
-/* RouteManifestCommand emits the frontend route manifest (the exposed routes) as JSON, to a file or stdout. It mirrors the OpenAPI generate command so applications wire it the same way. */
+/* RouteManifestCommand writes the frontend route manifest, the exposed routes, as JSON to a file or stdout, wired like the openapi generate command. */
 type RouteManifestCommand struct {
 }
 
@@ -29,7 +29,7 @@ func (instance *RouteManifestCommand) Description() string {
     return "export the exposed routes as a JSON manifest for frontend URL generation"
 }
 
-/* the standard set joins the command's own so the machine-readable output has the quiet contract: without it the flag did not exist here, quiet could not suppress the run banner, and the manifest printed to stdout arrived framed inside it — unparseable from the first byte for the pipeline reading it */
+/* the standard set gives the machine-readable output the quiet flag, so no banner frames it */
 func (instance *RouteManifestCommand) Flags() []clicontract.Flag {
     return output.MergeFlags(output.StandardFlags(), []clicontract.Flag{
         &clicontract.StringFlag{
@@ -43,18 +43,12 @@ func (instance *RouteManifestCommand) Flags() []clicontract.Flag {
     })
 }
 
-/* Run emits the manifest. It mirrors the openapi generate command in the four places that decide whether the artifact is trustworthy, none of which it used to: a relative --out is anchored at the project directory rather than at whatever directory the process happened to start in, a target that is not a JSON document is refused rather than destroyed, the write lands through a temp file and a rename so an interrupted run leaves the previous manifest intact, and the output travels through the command writer rather than process stdout — the cli layer redirects that writer, and in json mode a raw print splices the document into the machine-readable stream. */
+/* Run writes the manifest: a relative --out is anchored at the project directory, a target that is not a JSON document is refused rather than overwritten, the write lands through a temp file and a rename, and output goes through the command writer. */
 func (instance *RouteManifestCommand) Run(
     runtimeInstance runtimecontract.Runtime,
     commandContext clicontract.Context,
 ) error {
-    /* the flag is handed over AS TYPED: the gate is the door's, and it reads the zone the way it reads
-       every other caller's — the command trimming first made the two disagree about a zone that is
-       nothing but space, which the door refuses and the command, having trimmed it to empty, read as no
-       gate and answered the manifest whole. One reader, one meaning. The refusal still lands before
-       anything is written, which is the whole of what the copy here bought: an unrecognised zone matched
-       no entry, so the command wrote an empty manifest over the good one and reported success, and the
-       frontend then failed to resolve every route it asked for, at runtime, with the build green. */
+    /* the flag is handed over as typed, so FilterRouteManifestByZone is the one reader of a zone; its refusal lands before anything is written */
     zone := commandContext.String("zone")
 
     router := RouterMustFromContainer(runtimeInstance.Container())

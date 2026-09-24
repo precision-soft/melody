@@ -318,6 +318,29 @@ func TestHmacTokenSource_EndpointIsBoundToTheSpellingTheRouterRoutes(t *testing.
     }
 }
 
+func TestHmacTokenSource_RefusesASegmentThatDecodesToALiteralEncodedSeparator(t *testing.T) {
+    signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "wms-service", Secrets: hmacTestSecrets()})
+    source := hmacTestSource(NewMemoryNonceGuard())
+
+    routedHeader, _ := signer.Sign("GET", "/internal/files/a%2Fb", nil, nil)
+    crossed, _ := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/files/a%252Fb", nil, signer.HeaderName(), routedHeader))
+    if true == crossed.IsAuthenticated() {
+        t.Fatal("expected an envelope signed for the encoded separator /internal/files/a%2Fb to be refused for /internal/files/a%252Fb")
+    }
+
+    lowercaseLiteralHeader, _ := signer.Sign("GET", "/internal/files/a%2fb", nil, nil)
+    lowercaseLiteral, _ := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/files/a%252fb", nil, signer.HeaderName(), lowercaseLiteralHeader))
+    if false == lowercaseLiteral.IsAuthenticated() {
+        t.Fatal("expected a lowercase literal, which no encoded separator is routed as, to authenticate under its routed spelling")
+    }
+
+    literalPercentHeader, _ := signer.Sign("GET", "/internal/files/a%25b", nil, nil)
+    literalPercent, _ := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/files/a%2525b", nil, signer.HeaderName(), literalPercentHeader))
+    if false == literalPercent.IsAuthenticated() {
+        t.Fatal("expected a literal percent that does not spell an encoded separator to authenticate")
+    }
+}
+
 func TestHmacTokenSource_BodyTamperingIsAnonymous(t *testing.T) {
     signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "wms-service", Secrets: hmacTestSecrets()})
     headerValue, _ := signer.Sign("POST", "/internal/orders", []byte(`{"sku":"X-1"}`), nil)

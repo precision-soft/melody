@@ -834,7 +834,7 @@ func TestCompressionMiddleware_StalledBodyReaderDoesNotSpin(t *testing.T) {
     }
 }
 
-/* the two exclusion setters are the supported way to re-aim a compression policy after the defaults were taken, and neither had a test. Each keeps a copy, so a caller that reuses the slice it passed cannot rewrite the policy of a running middleware, and each reads an explicit nil as "exclude nothing" rather than leaving the previous list in place. */
+/* each exclusion setter keeps a copy and reads an explicit nil as "exclude nothing" */
 
 func TestCompressionConfig_SetExcludedContentTypesKeepsACopyAndClearsOnNil(t *testing.T) {
     config := DefaultCompressionConfig()
@@ -1234,7 +1234,7 @@ func TestCompressionMiddleware_AnInvalidCompressionLevelIsRefused(t *testing.T) 
     }
 }
 
-/* a gzip body is shorter than the plain one the handler measured, so a Content-Length that survived the compression names bytes that are never sent: a client reading that many either truncates the frame or waits for a remainder that never arrives, and a shared cache stores the mismatch. The header describes what is actually on the wire, so compressing has to drop it. */
+/* a gzip body is shorter than the plain one the handler sized, so a Content-Length that survived the compression names bytes that are never sent: a client reading that many either truncates the frame or waits for a remainder that never arrives, and a shared cache stores the mismatch. The header describes what is actually on the wire, so compressing has to drop it. */
 func TestCompressionMiddleware_DropsTheContentLengthTheUncompressedBodyDeclared(t *testing.T) {
     config := NewCompressionConfig(6, 10, nil, nil)
     middleware := CompressionMiddleware(config)
@@ -1436,7 +1436,7 @@ func listWithTailPast(head string, fillers int, tail string) string {
     return strings.Join(append(members, tail), ", ")
 }
 
-/* A header the member cap cut is read as unparsable: the refusal past the cap (gzip;q=0) used to be lost with the tail, and the wildcard before it switched compression on for a client that had refused it. The sister list one member short of the cap still honours the refusal. */
+/* the sister list one member short of the cap still honours the refusal */
 func TestAcceptsGzip_AHeaderCutAtTheCapIsReadAsUnparsable(t *testing.T) {
     if true == acceptsGzip(listWithTailPast("*;q=1", 63, "gzip;q=0")) {
         t.Fatalf("expected a header cut at the member cap to switch compression off")

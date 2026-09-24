@@ -20,7 +20,7 @@ func NewInMemoryStorageWithCleanupInterval(cleanupInterval time.Duration) *InMem
     return NewInMemoryStorageWithClock(cleanupInterval, clock.NewSystemClock())
 }
 
-/* NewInMemoryStorageWithClock reads every expiry instant — the one stored, the one compared, the sweep's tick — from the given clock, which is what lets a test freeze session time and what makes the framework-wired storage agree with the kernel's clock. The comparison this storage makes is monotonic where the process clock is: a *time.Time kept in memory carries the monotonic reading, so an NTP step does not lapse or resurrect a session, and no entry survives a restart anyway. FileStorage is the wall-clock half of that trade — SESSION.md names it. */
+/* NewInMemoryStorageWithClock reads every expiry instant, the stored one, the compared one and the sweep's tick, from the given clock. The comparison is monotonic where the clock is, so an NTP step neither lapses nor resurrects a session; FileStorage is the wall-clock half of that trade, which SESSION.md names. */
 func NewInMemoryStorageWithClock(cleanupInterval time.Duration, clockInstance clockcontract.Clock) *InMemoryStorage {
     if 0 >= cleanupInterval {
         exception.Panic(
@@ -76,7 +76,7 @@ func (instance *InMemoryStorage) Load(sessionId string) (map[string]any, bool, e
 
     instance.mutex.RLock()
 
-    /* a closed storage refuses the operation the way FileStorage does. Serving a closed store would be worse than the error: the cleanup goroutine is stopped by then, so an entry saved after Close is never reclaimed by anything but a Load that happens to name it — the map grows for the rest of the process. The two storages the framework ships have to answer the same way here, or an application that swaps one for the other inherits a different failure. */
+    /* a closed storage refuses the operation as FileStorage does, since its cleanup goroutine has stopped */
     if true == instance.closed {
         instance.mutex.RUnlock()
 
@@ -212,7 +212,7 @@ func (instance *InMemoryStorage) cleanupLoop(ctx context.Context) {
 
 const sessionCleanupChunkSize = 1024
 
-/* the sweep takes the ids once and then expires them in chunks, releasing the lock between chunks: Load takes the same lock, so a single whole-map pass under one lock stalls every request in flight for as long as the map is large — this is the default session storage, the map grows with the number of signed-in users, and the stall lands on every one of them once per interval. Measured at two hundred thousand sessions, one pass held the lock for ten milliseconds and a concurrent Load waited exactly that long. The cache backend's sweep was cut the same way, for the same reason — and like there, the snapshot itself only reads, so it holds the read lock and stalls only the writers. */
+/* cleanupExpired takes the ids once under the read lock and expires them in chunks, releasing the lock between chunks, so Load is not stalled for a whole-map pass. */
 func (instance *InMemoryStorage) cleanupExpired() {
     now := instance.clock.Now()
 
@@ -237,7 +237,7 @@ func (instance *InMemoryStorage) cleanupExpired() {
     }
 }
 
-/* deleteLapsedLocked reads the entry again under the lock the chunk holds, and that second reading is what the chunking costs: the list of ids was taken before the lock was released, so by the time a later chunk reaches one of them the session may have been saved again with a fresh expiry, or deleted and replaced under the same id. Deleting on the strength of the first reading would sign out a user who was active in between. Load takes the same second reading before it deletes a lapsed entry it just served past. */
+/* deleteLapsedLocked reads the entry again under the chunk's lock, since it may have been saved again or replaced since the ids were taken. */
 func (instance *InMemoryStorage) deleteLapsedLocked(sessionId string, now time.Time) {
     entry, exists := instance.sessions[sessionId]
     if false == exists {
@@ -253,7 +253,7 @@ func (instance *InMemoryStorage) deleteLapsedLocked(sessionId string, now time.T
     }
 }
 
-/* isLapsed answers whether an expiry instant has been reached, and the instant itself counts as reached — the same boundary FileStorage draws with `now >= ExpiresAt`. A session stored with a one second lifetime is therefore gone exactly one second later in both storages, rather than living one instant longer in this one; an application that moves between the two storages must not find the boundary moving with it. */
+/* isLapsed treats the expiry instant itself as reached, the boundary FileStorage draws. */
 func isLapsed(expiresAt *time.Time, now time.Time) bool {
     return false == expiresAt.After(now)
 }

@@ -1164,7 +1164,7 @@ func TestWriteResponse_SkipsPersistenceForATypedNilManager(t *testing.T) {
     }
 }
 
-/* A session deleted while the request was running is not a storage outage and must not be answered as one: the write is refused so the deleted session cannot be re-created, the browser cookie is expired so the client stops presenting an id that no longer exists, and the handler's own response is served unchanged. */
+/* A session deleted while the request was running is not a storage outage and must not be answered as one: the write is refused so the deleted session cannot be re-created, the browser cookie is expired so the client stops presenting an id the storage does not hold, and the handler's own response is served unchanged. */
 func TestWriteResponse_ADeletedSessionExpiresTheCookieAndKeepsTheResponse(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"

@@ -13,11 +13,11 @@ import (
 const (
     ResponseListenerPriority = -100
 
-    /* RequestListenerPriority places the preflight answer ahead of the security chain: token resolution listens at 50 and access control at 20, and a preflight carries neither cookie nor Authorization by specification, so behind them it could only be refused. */
+    /* RequestListenerPriority places the preflight answer ahead of token resolution (50) and access control (20), since a preflight carries no credentials by specification. */
     RequestListenerPriority = 100
 )
 
-/* RegisterListeners wires both cors doors at once: the request listener that answers a preflight before the security chain can refuse it, and the response listener that decorates every response — the security refusals and the error pages the middleware chain never sees included. An application serving cross-origin traffic registers these; the Middleware remains for decorating the handler path inside the chain. */
+/* RegisterListeners wires both cors doors: the request listener that answers a preflight before the security chain, and the response listener that decorates every response, security refusals and error pages included. The Middleware decorates the handler path inside the chain. */
 func RegisterListeners(eventDispatcher eventcontract.EventDispatcher, service *Service) {
     if nil == service {
         service = DefaultService()
@@ -27,7 +27,7 @@ func RegisterListeners(eventDispatcher eventcontract.EventDispatcher, service *S
     RegisterResponseListener(eventDispatcher, service)
 }
 
-/* RegisterRequestListener answers a well-formed preflight from an allowed origin before the security chain runs. A disallowed or absent origin and an OPTIONS request that is not a preflight fall through untouched, so the listener can only answer what the cors middleware would have answered had the request reached it, never widen what security refuses. A preflight from an allowed origin that a listener ahead of this one already answered is the one case that is neither answered nor left alone: its STATUS is untouched, and it is decorated with the cross-origin headers for the reason spelled out at that branch. */
+/* RegisterRequestListener answers a well-formed preflight from an allowed origin before the security chain runs; anything else falls through untouched, so it never widens what security refuses. A preflight an earlier listener already answered keeps its status and is decorated with the cross-origin headers. */
 func RegisterRequestListener(eventDispatcher eventcontract.EventDispatcher, service *Service) {
     if nil == service {
         service = DefaultService()
@@ -50,7 +50,7 @@ func RegisterRequestListener(eventDispatcher eventcontract.EventDispatcher, serv
                 return nil
             }
 
-            /* a listener ahead of this one already answered the preflight — the rate limiter at priority 200 answering a 429 among them. A browser reads a preflight refusal only if it carries the cross-origin headers, so decorate that refusal with them rather than leaving it opaque and letting the page report a bare network failure it cannot distinguish from a rate limit; the status the earlier listener chose is left untouched. */
+            /* an earlier listener, the rate limiter among them, answered the preflight: its refusal is decorated so the browser can read it, and its status is left untouched */
             if existingResponse := requestEvent.Response(); nil != existingResponse {
                 if nil == existingResponse.Headers() {
                     existingResponse.SetHeaders(make(nethttp.Header))
@@ -72,7 +72,7 @@ func RegisterRequestListener(eventDispatcher eventcontract.EventDispatcher, serv
     )
 }
 
-/* RegisterResponseListener decorates the response the kernel is about to write, which is how the cross-origin headers reach the security refusals and the error pages the middleware chain never sees. It writes into the response and nothing else, so a handler that committed its own headers to the writer before returning — a Server-Sent Events stream, a long poll — is past its reach: the headers it sets on that response are discarded with the response. Such a handler needs the Middleware, which writes them to the writer before the handler runs; the listener is not a replacement for it on a streaming route. */
+/* RegisterResponseListener decorates the response the kernel is about to write. A handler that committed its own headers before returning, a stream or a long poll, is past its reach and needs the Middleware. */
 func RegisterResponseListener(eventDispatcher eventcontract.EventDispatcher, service *Service) {
     if nil == service {
         service = DefaultService()

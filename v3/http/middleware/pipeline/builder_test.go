@@ -344,7 +344,7 @@ func TestSupportedEnvironments_MatchesTheConfigurationPackage(t *testing.T) {
     }
 }
 
-/* Several groups are built from one builder in one process, each from its own selection. A pair of definitions confined to `api` says nothing about the `web` build, which assembles neither of them — yet the gating pass was handed every definition the builder holds, so `web` refused to build over a reference no request to it could reach. The check still fires for the group that does carry the pair. */
+/* a pair of definitions confined to `api` does not refuse the `web` build, which assembles neither; the check still fires for the group that carries the pair */
 func TestBuild_GatingOfAnotherGroupDoesNotRefuseThisOne(t *testing.T) {
     profiler := NewHttpMiddlewareDefinition("profiler", 0, nil, nil, []string{"api"}, []string{"dev"}, passthroughFactory(), false, false)
     audit := NewHttpMiddlewareDefinition("audit", 0, []string{"profiler"}, nil, []string{"api"}, nil, passthroughFactory(), false, false)

@@ -120,7 +120,6 @@ func TestRouteManifestCommand_AnchorsARelativeOutAtTheProjectDirectory(t *testin
     }
 }
 
-/* a mistyped --out used to destroy whatever was at that path before anything was written */
 func TestRouteManifestCommand_RefusesToOverwriteAForeignFile(t *testing.T) {
     projectDirectory := t.TempDir()
     runtimeInstance := newManifestCommandRuntime(t, projectDirectory)
@@ -170,10 +169,6 @@ func TestRouteManifestCommand_RefusesAZoneThatIsNotDeclared(t *testing.T) {
     }
 }
 
-/* the command and the exported door are one reader of the zone. The command used to trim its flag before
-   calling, so for a zone that is nothing but space the two answered differently — the door refused it, the
-   command, having trimmed it to empty, read it as no gate and wrote the manifest WHOLE over the previous
-   one. That is the class the door's own paragraph exists to close, reopened one caller up. */
 func TestRouteManifestCommand_ReadsAZoneMadeOnlyOfSpaceTheWayTheDoorDoes(t *testing.T) {
     projectDirectory := t.TempDir()
     runtimeInstance := newManifestCommandRuntime(t, projectDirectory)

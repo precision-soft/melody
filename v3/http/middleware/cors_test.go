@@ -252,7 +252,6 @@ func TestCorsConfig_AllowOriginFuncIsReportedAndDecidesTheOrigin(t *testing.T) {
     }
 }
 
-/* the deprecated door reads nil as the default service, the reading its replacement gives the same absence; it used to die on the dereference. */
 func TestCorsMiddleware_NilConfigReadsAsTheDefaultService(t *testing.T) {
     handler := CorsMiddleware(nil)(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         return http.TextResponse(nethttp.StatusOK, "ok"), nil

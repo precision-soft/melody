@@ -16,7 +16,7 @@ const (
     RouteAttributeLocales = "_locales"
     RouteAttributeLocale  = "_locale"
 
-    /* RouteAttributeExpose, when set to the bool true in a route's options attributes, opts the route into the frontend route manifest (melody:routes:manifest). RouteAttributeZone tags it with one of the RouteZone* values so the manifest can be scoped per zone. */
+    /* RouteAttributeExpose, set to the bool true in a route's options attributes, opts the route into the frontend route manifest. RouteAttributeZone tags it with one of the RouteZone* values. */
     RouteAttributeExpose = "expose"
     RouteAttributeZone   = "zone"
 
@@ -26,9 +26,7 @@ const (
     RouteZoneClient   = "client"
 )
 
-/* ExposedRouteAttributes builds the options-attributes map that opts a route into the frontend manifest under the given zone (pass an empty zone to expose without one). Merge it into a route's RouteOptions attributes.
-
-   A zone that is not one of the RouteZone* values is refused by name. Accepted, it produced an artifact no filter can ever select — the manifest command compares the requested zone against the route's own string, so a misspelled zone on the route silently omits it from the zoned export while the unfiltered one still carries it, and a misspelled zone on the command writes an empty manifest over the good one and reports success. */
+/* ExposedRouteAttributes builds the options-attributes map that opts a route into the frontend manifest under the given zone; an empty zone exposes it without one. A zone that is not one of the RouteZone* values is refused by name. */
 func ExposedRouteAttributes(zone string) map[string]any {
     attributes := map[string]any{RouteAttributeExpose: true}
     if "" != zone {
@@ -51,7 +49,7 @@ func ExposedRouteAttributes(zone string) map[string]any {
     return attributes
 }
 
-/* RouteZones answers the declared zones, in the order they are declared, so a command that takes a zone can name the accepted spellings in its refusal instead of restating them. */
+/* RouteZones answers the declared zones in declaration order. */
 func RouteZones() []string {
     return []string{
         RouteZonePublic,
@@ -81,7 +79,7 @@ type route struct {
     schemes      []string
     requirements map[string]*regexp.Regexp
 
-    /* the pattern the caller declared, kept beside the compiled one: the compiled form carries the anchoring and the non-capturing wrapper the registration adds, so introspection — the route manifest, the openapi document, the debug listing — published "^(?:en|de)$" where the developer wrote "en|de", a spelling that is not theirs, that re-wraps on every round trip, and that carries RE2-only syntax into consumers whose engine is ECMA-262. */
+    /* the requirement as declared, kept beside the compiled, anchored form, so introspection publishes the developer's spelling */
     requirementSources map[string]string
 
     defaults     map[string]string

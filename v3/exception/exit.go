@@ -52,7 +52,7 @@ func (instance *ExitError) Unwrap() error {
     return instance.err
 }
 
-/* ExitCode answers 0 on a nil receiver, the typed nil errors.As can match. */
+/* ExitCode answers the code in 1..255 the constructor admitted, or 0, a code it never admits, on a nil receiver: errors.As can match a typed-nil link, so a caller reads 0 as no exit code, never as a successful exit. */
 func (instance *ExitError) ExitCode() int {
     if nil == instance {
         return 0

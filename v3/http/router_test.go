@@ -963,7 +963,6 @@ func TestRouterAddRoute_ADeclinedDuplicateDoesNotEnterTheMatchingTree(t *testing
     }
 }
 
-/* splitRequestPath unescapes per segment precisely so an encoded separator stays inside the value the client put it in — a parameter may legitimately carry a slash. The catch-all then rebuilt its value by joining the segments back on "/", which puts the encoded separator back where a segment boundary is: a handler reassembling a storage key or a proxy target could no longer tell the two requests apart. */
 func TestRouter_CatchAllKeepsAnEncodedSeparatorInsideItsSegment(t *testing.T) {
     router := NewRouter()
 

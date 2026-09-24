@@ -340,7 +340,7 @@ func TestFileStorage_Delete_RefusesAnEmptySessionId(t *testing.T) {
     }
 }
 
-/* a closed storage refuses to delete, exactly as it refuses to load and to save: the file is gone and the map is no longer authoritative, so a delete that reported success would tell a caller a session was dropped when nothing was written */
+/* a closed storage refuses to delete, exactly as it refuses to load and to save: the file is gone and the map is not authoritative, so a delete that reported success would tell a caller a session was dropped when nothing was written */
 func TestFileStorage_Delete_AfterCloseReturnsError(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
@@ -517,7 +517,7 @@ func TestNewFileStorageFromPath_RefusesAPathWhoseDirectoryCannotBeCreated(t *tes
     }
 }
 
-/* a closed storage refuses to load as well as to save and delete: the map it still holds is no longer authoritative, and answering from it would serve a session the file may no longer carry */
+/* a closed storage refuses to load as well as to save and delete: the map it still holds is not authoritative, and answering from it would serve a session the file may not carry */
 func TestFileStorage_Load_AfterCloseReturnsError(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
@@ -1112,7 +1112,7 @@ func TestFileStorage_Save_KeepsTheNewEntryWhenTheFlushFailsAfterThePersist(t *te
     }
 }
 
-/* the deletion twin of the kept-entry rule: the document without the session already sits on disk when the flush failure strikes, so restoring the entry in memory would resurrect a session the persisted state no longer holds. */
+/* the deletion twin of the kept-entry rule: the document without the session already sits on disk when the flush failure strikes, so restoring the entry in memory would resurrect a session the persisted state does not hold. */
 func TestFileStorage_Delete_KeepsTheEntryDeletedWhenTheFlushFailsAfterThePersist(t *testing.T) {
     devNull, openErr := os.OpenFile(os.DevNull, os.O_RDWR, 0)
     if nil != openErr {
@@ -1313,9 +1313,7 @@ func TestFileStorage_InPlaceWrite_ARefusedWriteLeavesThePersistedSessionsIntact(
         t.Fatalf("the refused write left the file empty, destroying every persisted session: %q", string(output))
     }
 
-    /* the child answers a distinct token per exit, so a run that never applied the limit cannot be read as
-    a pass: the earlier form wrote "intact" on three paths where nothing had been injected, and the parent
-    asked only whether that word appeared anywhere. */
+    /* the child answers a distinct token per exit, so a run that never applied the limit cannot read as a pass */
     if true == strings.Contains(string(output), "probe-unavailable") {
         t.Skipf("the environment refused the file size limit this probe injects with: %q", string(output))
     }

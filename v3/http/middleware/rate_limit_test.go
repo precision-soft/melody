@@ -847,7 +847,7 @@ func TestSlidingWindowLimiter_HoldsTheRateWhereTheFixedWindowDoesNot(t *testing.
     }
 }
 
-/* the deprecated spelling must keep working: it is a type alias plus two forwarding constructors, so an application on the old name is unaffected */
+/* the deprecated spelling keeps working: a type alias plus two forwarding constructors */
 func TestTokenBucketLimiter_DeprecatedAliasStillConstructsTheFixedWindowLimiter(t *testing.T) {
     var limiter *FixedWindowLimiter = NewTokenBucketLimiter(2, time.Minute)
 

@@ -250,7 +250,6 @@ func TestJsonHandler_AnswersAnOversizedBodyWith413RatherThanInvalidJson(t *testi
         t.Fatalf("expected an http exception, got %T: %v", handleErr, handleErr)
     }
 
-    /* the limit used to be laundered into a flat 400 "invalid json": the client retried the same payload forever because it was told its json was broken, and the 413-at-warning treatment the kernel builds for every other body path was bypassed */
     if nethttp.StatusRequestEntityTooLarge != httpException.StatusCode() {
         t.Fatalf("expected status %d, got %d", nethttp.StatusRequestEntityTooLarge, httpException.StatusCode())
     }
@@ -273,7 +272,6 @@ func TestJsonHandler_CarriesTheDecoderDiagnosisAsTheRefusalCause(t *testing.T) {
         t.Fatalf("expected an http exception, got %T: %v", handleErr, handleErr)
     }
 
-    /* the decoder's own diagnosis — offending offset, field, type — used to die on the line that replaced it with a flat message, so the operator had nothing to read */
     if nil == httpException.CauseErr() {
         t.Fatalf("expected the decoder cause to travel with the refusal")
     }
@@ -360,7 +358,6 @@ func TestJsonHandler_KeepsTheRefusalWhenTheResponderAnswersNothing(t *testing.T)
 
     response, handleErr := handler(runtimeInstance, httptest.NewRecorder(), request)
 
-    /* returned as it was, the nil pair was read by the kernel as a handler that answered nothing and served an empty 204 — a refused write reporting success to its client with no record filed */
     if nil != response {
         t.Fatalf("expected no response, got %v", response)
     }
@@ -397,7 +394,6 @@ func TestJsonHandler_ContainsAPanickingResponder(t *testing.T) {
         t.Fatalf("expected no response from a responder that panicked, got %v", response)
     }
 
-    /* the refusal the responder was called to render is what stands: the panic-derived error put in its place carried no status, so a deliberate 400 recorded at warning was answered as a 500 recorded at error */
     requireJsonHandlerBadRequest(t, handleErr)
 
     logContext, logged := recordingLogger.errorContextFor("json handler error responder panicked")
@@ -448,7 +444,6 @@ func TestJsonHandler_HandsTheResponderTheCauseItNeedsToRenderTheDetail(t *testin
         t.Fatalf("expected the responder's response to be served, got %v", handleErr)
     }
 
-    /* the responder used to receive a status and a flattened string, so an application that wanted the structured body could not get it from this hook either */
     if nil == receivedCause {
         t.Fatalf("expected the responder to be handed the refusal itself")
     }

@@ -8,7 +8,7 @@ import (
 )
 
 func PrefersHtml(request httpcontract.Request) bool {
-    /* every line of a repeated Accept field is joined before parsing, through the same door the error renderer reads the header with for the serialized branch: the header is list-typed, and reading only the first line let the two readers of one error response see two different views of the client's preference — one spelling of the join, so the two readers cannot drift apart again */
+    /* every line of a repeated Accept field is joined through the door the error renderer uses, so both readers of one response see one preference */
     acceptHeader := joinedAcceptHeader(request)
     if "" == acceptHeader {
         return false
@@ -33,7 +33,7 @@ func PrefersHtml(request httpcontract.Request) bool {
     return htmlPosition < jsonPosition
 }
 
-/* acceptQuality reports the weight the Accept header gives a media type and where it was named. A client ranks alternatives with the q parameter — "text/html;q=0.1, application/json" asks for json, and q=0 refuses a type outright — so reading the header by substring position alone serves a representation the client down-weighted or rejected. A wildcard range (a type wildcard, or the catch-all range) supplies the weight when the exact type is absent. Returns a quality of -1 when nothing matches. */
+/* acceptQuality reports the weight the Accept header gives a media type and where it was named, honouring q and a refusal with q=0; a wildcard range supplies the weight when the exact type is absent. It answers -1 when nothing matches. */
 func acceptQuality(acceptHeader string, mediaType string) (float64, int) {
     quality := -1.0
     position := -1
@@ -42,8 +42,8 @@ func acceptQuality(acceptHeader string, mediaType string) (float64, int) {
     slashIndex := strings.IndexByte(mediaType, '/')
     typeWildcard := mediaType[:slashIndex+1] + "*"
 
-    /* members and parameters split outside quoted sections, the serializer reader's grammar: a bare split cuts through a quoted parameter value, so text/html;p="a,b";q=0 lost the refusal it carries for this reader while the serialized branch honoured it */
-    /* a header the member cap cut is read as unparsable — nothing matches — because the members past the cap can carry the refusal (text/html;q=0) that a wildcard before it does not, and scoring half a list served html to a client that had refused it */
+    /* members and parameters split outside quoted sections, the serializer reader's grammar */
+    /* a header the member cap cut reads as unparsable, since a member past the cap may carry a refusal */
     entries, cut := internal.SplitOutsideQuotes(acceptHeader, ',')
     if true == cut {
         return quality, position
@@ -68,7 +68,7 @@ func acceptQuality(acceptHeader string, mediaType string) (float64, int) {
             continue
         }
 
-        /* a member whose q parameter falls outside the RFC 7231 qvalue grammar is dropped whole, the serializer reader's rule: a bare float parse honoured q=Inf as an infinite weight and let q=NaN poison every comparison, so the two negotiators of one response disagreed on the same header */
+        /* a q outside the RFC 7231 qvalue grammar drops the member, the serializer reader's rule */
         entryQuality := 1.0
         entryQualityValid := true
         for _, parameter := range parameters[1:] {
@@ -91,7 +91,7 @@ func acceptQuality(acceptHeader string, mediaType string) (float64, int) {
             continue
         }
 
-        /* the most specific matching range supplies the weight: a more specific match replaces a less specific one outright (so a wildcard can never override an exact type's q, including an explicit q=0 refusal), and equal-specificity ties fall to the higher q */
+        /* the most specific matching range supplies the weight, so a wildcard never overrides an exact type's q; equal specificity takes the higher q */
         if entrySpecificity > specificity || (entrySpecificity == specificity && entryQuality > quality) {
             specificity = entrySpecificity
             quality = entryQuality

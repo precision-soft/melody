@@ -250,7 +250,6 @@ func TestParameterBag_SetAllocatesTheZeroValueMap(t *testing.T) {
 }
 
 /* the separating probe mutates what Get answered and reads the bag again: with the live reference, the write went into the bag behind its lock — visible to every later reader and racing a concurrent All copy */
-/* presence is answered without the copy Get pays for an aliasing shape: measured, Has on a stored []string cost two allocations per call through Get */
 func TestParameterBag_HasDoesNotCopyTheStoredValue(t *testing.T) {
     parameterBag := NewParameterBag()
     parameterBag.Set("roles", []string{"a", "b", "c"})

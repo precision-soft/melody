@@ -1168,11 +1168,7 @@ func TestNewManagerWithClock_RefusesANilClock(t *testing.T) {
     )
 }
 
-/* the two ways an id stops being writable have to be told apart at the save path, because the response path
-answers them differently: a logout ends the identity and the browser cookie is expired, a rotation moves the
-identity to a fresh id the rotating request is handing the client, and expiring the cookie there logs the user
-out immediately after the login that rotated the session. Both refusals still carry ErrSessionDeleted, so a
-caller that only asks whether the write was refused reads the same answer it always did. */
+/* a logout and a rotation are told apart at the save path, since the response path expires the cookie for one and keeps it for the other; both refusals carry ErrSessionDeleted */
 func TestManager_SaveSession_NamesARotationApartFromADeletion(t *testing.T) {
     manager := NewManager(NewInMemoryStorage(), 30*time.Minute)
 

@@ -237,7 +237,6 @@ func TestWriteToHttpResponseWriter_RefusesAStatusOutsideTheWritableRangeByName(t
     }
 }
 
-/* the refusal runs ahead of the first mutation, headers included: the response's headers used to be copied onto the writer before the status was judged, so a caller that handled the returned error and wrote its own response sent it carrying the refused response's Set-Cookie on top of its own. */
 func TestWriteToHttpResponseWriter_ARefusedStatusLeavesNoHeaderOnTheWriter(t *testing.T) {
     recorder := httptest.NewRecorder()
 

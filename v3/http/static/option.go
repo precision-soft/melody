@@ -11,7 +11,7 @@ const (
     ModeEmbedded   Mode = "embedded"
 )
 
-/* DefaultAllowedDotPrefix is the one dot-prefixed path element a file server retrieves out of the box: RFC 8615 publishes an ACME http-01 challenge, security.txt and assetlinks.json under it, and a deployment that renews its certificate through the application would otherwise lose that renewal to the dot-prefix refusal. */
+/* DefaultAllowedDotPrefix is the one dot-prefixed element a file server retrieves by default: RFC 8615 publishes an ACME http-01 challenge, security.txt and assetlinks.json under it. */
 const DefaultAllowedDotPrefix = ".well-known"
 
 type FileServerConfig struct {
@@ -68,7 +68,7 @@ func NewOptions(
     }
 }
 
-/* SetAllowedDotPrefixList names the dot-prefixed first path elements the file server may retrieve. The default carries ".well-known" alone, which is where an ACME http-01 challenge, security.txt and assetlinks.json are published, and every other dot-prefixed element stays refused so a stray .env or .git never leaves the public directory. The allowance never reaches past the first element, so ".well-known/.env" is refused exactly like "/.env". An empty list refuses every dot-prefixed path. NewFileServer copies the configuration at construction, so this is set before the server is built; called later it configures the next server, not one already serving. */
+/* SetAllowedDotPrefixList names the dot-prefixed first path elements the file server may retrieve; every other dot-prefixed element is refused, and the allowance never reaches past the first element. An empty list refuses every dot-prefixed path. NewFileServer copies the configuration, so this is set before the server is built. */
 func (instance *FileServerConfig) SetAllowedDotPrefixList(allowedDotPrefixList []string) {
     copied := []string{}
     if nil != allowedDotPrefixList {
@@ -78,11 +78,11 @@ func (instance *FileServerConfig) SetAllowedDotPrefixList(allowedDotPrefixList [
     instance.allowedDotPrefixList = copied
 }
 
-/* SetExcludedPathList names the path prefixes the file server declines without looking at the disk. A declined request continues down the rest of the chain, so an excluded prefix is how the part of the url it names is handed to the application: to a middleware that authenticates it, to a stricter policy, or to a file server of its own. An entry is a prefix of the request path exactly as security.NewPathPrefixMatcher reads one — the spelling the router matched, each segment decoded on its own with an encoded separator kept as "%2F", before the strip prefix is removed and before the path is folded — so a rule written for a firewall and a rule written here select the same requests. An empty entry therefore names every path and switches the file server off entirely. The default list is empty, which excludes nothing. NewFileServer copies the configuration at construction, so this is set before the server is built; called later it configures the next server, not one already serving. */
+/* SetExcludedPathList names the path prefixes the file server declines without looking at the disk, handing them down the chain to the application. An entry is a prefix of the request path as security.NewPathPrefixMatcher reads it, before the strip prefix and any fold, so a firewall rule and this list select the same requests; an empty entry switches the server off. The default excludes nothing. NewFileServer copies the configuration, so this is set before the server is built. */
 func (instance *FileServerConfig) SetExcludedPathList(excludedPathList []string) {
     copied := []string{}
     for _, excludedPath := range excludedPathList {
-        /* an excluded path is compared with a prefix test against the request path, which always begins with a slash, so an entry without one could never match and would silently exclude nothing — the configuration door refuses such an entry; here it is normalized to the shape that matches, so a caller who wrote "admin" excludes "/admin" as intended rather than nothing. */
+        /* an entry without a leading slash could never match, so it is normalized; the configuration door refuses one */
         if 0 < len(excludedPath) && '/' != excludedPath[0] {
             excludedPath = "/" + excludedPath
         }

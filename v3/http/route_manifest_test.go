@@ -80,7 +80,6 @@ func TestBuildRouteManifest_OnlyExposedNamedRoutes(t *testing.T) {
 }
 
 func TestRouterRegistration_RefusesAnExposedRouteWithNoName(t *testing.T) {
-    /* the projection used to drop it in silence: the developer stated the intention and the artifact contradicted it with no diagnostic anywhere */
     testhelper.AssertPanicsWithError(
         t,
         func() {
@@ -147,7 +146,6 @@ func TestBuildRouteManifest_CarriesEveryMatchDiscriminatorAGeneratedUrlMustSatis
 
     entry := manifest.Routes[0]
 
-    /* each of these three used to be absent, and each absence made the frontend mint a url the router refuses: the wrong origin, the wrong scheme, and no locale at all */
     if "api.example.com" != entry.Host {
         t.Fatalf("expected the host to be carried, got %q", entry.Host)
     }
@@ -209,8 +207,7 @@ func TestFilterRouteManifestByZone_RefusesAZoneThatIsNotDeclared(t *testing.T) {
     }
 }
 
-/* the empty zone is read the way the command reads its empty --zone flag: no gate, the whole manifest — not the routes whose own zone is empty, which is the third reading the door used to give it */
-/* the door reads the zone the way the command reads its flag, surrounding space included: the command trims, so a zone the command accepts was refused by the door under a sentence that says the two read alike */
+/* the empty zone is no gate: the whole manifest, not the routes whose own zone is empty */
 func TestFilterRouteManifestByZone_ReadsAZoneWithSurroundingSpaceAsTheCommandDoes(t *testing.T) {
     manifest := BuildRouteManifest(manifestTestRouter().RouteDefinitions())
 

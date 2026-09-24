@@ -206,7 +206,7 @@ func TestServerSentEventWriter_StripsNulFromId(t *testing.T) {
     }
 }
 
-/* a writer that cannot flush its way to the connection must be refused BEFORE the response is committed. The probe used to be made at the kernel's recording writer, which always carries a Flush method and forwards it only when its own delegate can flush — so the refusal was dead code for every in-framework caller and the handler went on to write events into a buffer nothing would ever flush. nonFlushingResponseWriter is the shared fixture in fixture_test.go. */
+/* nonFlushingResponseWriter is the shared fixture in fixture_test.go */
 func TestNewServerSentEventWriter_RefusesADelegateThatCannotFlushThroughTheRecordingWriter(t *testing.T) {
     delegate := &nonFlushingResponseWriter{}
     recorder := newRecordingResponseWriter(delegate)
@@ -602,10 +602,7 @@ func (instance *discardingFlushWriter) WriteHeader(statusCode int) {}
 
 func (instance *discardingFlushWriter) Flush() {}
 
-/* a frame costs the text it writes and nothing else: the sanitizer built a new strings.Replacer on every call, and
-   measured on this writer a one-byte keepalive paid six allocations for it and an event frame thirty-one, one
-   replacer per field read. What stays is the frame's own: for a comment its text and the byte conversion a writer
-   without WriteString costs, for an event the builder's growth, the split lines and the same conversion. */
+/* what a frame keeps is its own: for a comment its text and the byte conversion a writer without WriteString costs, for an event the builder's growth, the split lines and the same conversion */
 func TestServerSentEventWriter_AFrameAllocatesOnlyItsText(t *testing.T) {
     writer, writerErr := NewServerSentEventWriter(&discardingFlushWriter{})
     if nil != writerErr {
@@ -622,9 +619,6 @@ func TestServerSentEventWriter_AFrameAllocatesOnlyItsText(t *testing.T) {
     }
 }
 
-/* a writer that answered once that it cannot take a deadline is not asked again: every frame used to build a
-   ResponseController and walk it to the ErrNotSupported net/http allocates for such a writer, two allocations a
-   frame for a budget that could never apply */
 func TestServerSentEventWriter_StopsAskingAWriterThatCannotTakeADeadline(t *testing.T) {
     writer, writerErr := NewServerSentEventWriter(&discardingFlushWriter{})
     if nil != writerErr {

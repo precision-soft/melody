@@ -743,7 +743,6 @@ func TestFileServer_Filesystem_RefusesANonCanonicalPath(t *testing.T) {
 }
 
 /* the strip prefix is configuration, so the spelling has to be judged against the whole path: the doubled slash of "/static//a.txt" is swallowed by the strip and would leave a canonical-looking remainder behind */
-/* the file is resolved from the spelling the router matched, not from the decoded URL.Path: decoded, "/static/private%2Fsecret.txt" was "/static/private/secret.txt" here — the file under a protected prefix, served — while the access-control matcher read the one segment "private%2Fsecret.txt" under the rule of "/static" alone; measured, an anonymous request read the protected file. Routed, the request names a file whose name literally carries "%2F", which the disk does not hold */
 func TestFileServer_StripPrefix_ResolvesTheFileFromTheSpellingTheRouterRoutes(t *testing.T) {
     fileSystem := fstest.MapFS{
         "private/secret.txt":  &fstest.MapFile{Data: []byte("TOP SECRET")},
@@ -1767,7 +1766,7 @@ func (instance *trackingFile) Close() error {
     return instance.File.Close()
 }
 
-/* statFailingFileSystem opens successfully and then refuses to describe what it opened, which is the shape that reaches the stat refusal: a file unlinked between the open and the description, or a mount that answers an open out of a cache it can no longer stat. */
+/* statFailingFileSystem opens successfully and then refuses to describe what it opened, which is the shape that reaches the stat refusal: a file unlinked between the open and the description, or a mount that answers an open out of a cache it cannot stat. */
 type statFailingFileSystem struct {
     statErr     error
     closedCount int
@@ -3206,7 +3205,6 @@ func TestNewFileServer_RefusesNilOptionsByName(t *testing.T) {
     )
 }
 
-/* an embedded filesystem reports the zero instant for every file, and rendering it as year 1 published a validator that is not one: the zero time is never After anything, so every If-Modified-Since without an entity tag was answered 304 for the life of the deployment */
 func TestFileServer_AnUndatedFileEmitsNoLastModifiedAndAnswersNoConditional304(t *testing.T) {
     fileSystem := fstest.MapFS{
         "a.txt": &fstest.MapFile{
@@ -3323,7 +3321,6 @@ func TestFileServer_ADatedFileKeepsItsLastModifiedAndItsConditional304(t *testin
     }
 }
 
-/* MELODY_PUBLIC_DIR stays a runtime key while the embedded layout is frozen at compile time, so a value the build did not embed used to boot cleanly and answer 404 for every asset in the binary */
 func TestNewFileServer_RefusesAPublicDirectoryTheEmbeddedFileSystemDoesNotHold(t *testing.T) {
     fileSystem := fstest.MapFS{
         "public/app.css": &fstest.MapFile{
