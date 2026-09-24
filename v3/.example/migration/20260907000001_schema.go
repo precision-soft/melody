@@ -15,10 +15,14 @@ const UserUsernameIndexName = "melody_example_v3_user_username_folded"
 
 /* upSchema creates the six tables this example owns and declares the one constraint it needs, in one step. The set is one migration rather than a history of them because this application has no history: an example has a single state, the present one, and its schema is the statement of that state. A volume left in an older shape is brought to it by example:db:reset, not by a step that repairs its past.
 
-   Every statement tolerates a volume provisioned before the set, and several processes of this example applying it at the same time: the tables are created IF NOT EXISTS, and the constraint — MySQL having no ADD KEY IF NOT EXISTS — is added only after the catalogue is asked whether it is already there.
+   The set does not adopt a volume that already holds its tables without recording it (see refuseAdoption): the fingerprint it writes last vouches only for tables it built. Its statements stay tolerant of a second run all the same — the tables are created IF NOT EXISTS, and the constraint, MySQL having no ADD KEY IF NOT EXISTS, is added only after the catalogue is asked whether it is already there — because the refusal reads the volume once, ahead of them.
 
    The constraint comes last because it is declared on a table this step has just created. */
 func upSchema(ctx context.Context, database *bun.DB) error {
+    if adoptionErr := refuseAdoption(ctx, database, catalogMigrationSetName, schemaTableNameList); nil != adoptionErr {
+        return adoptionErr
+    }
+
     for _, statement := range schemaUpStatementList {
         if _, execErr := database.ExecContext(ctx, statement); nil != execErr {
             return execErr

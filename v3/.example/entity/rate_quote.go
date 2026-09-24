@@ -15,9 +15,10 @@ func NewRateQuote(rate float64, asOf time.Time, providerAsOf time.Time) RateQuot
    AsOf is the same instant moved onto THIS application's clock, by the offset measured between the two clocks
    when the reading arrived. Every judgement of ORDER is made on it: the provider's clock may run ahead of this
    one, or be set back between two readings, and a stamp compared with a stamp taken before that correction
-   read an honest reading as older than one stamped by the clock that was wrong. A replay is still older on
-   this clock — its stamp is old and the clock that answers it is current — while a clock set back moves the
-   stamp and the answer together.
+   read an honest reading as older than one stamped by the clock that was wrong. A replay under a current Date
+   is older on this clock — its stamp is old and the clock that answers it is current — while a clock set back
+   moves the stamp and the answer together; a replay that kept its old Date, or carries none, reads as that
+   moved clock and is admitted within the five-minute bound the refresh trusts an offset to.
 
    The two instants are one and the same for a reading taken on this clock, which is what NewCurrency builds. */
 type RateQuote struct {

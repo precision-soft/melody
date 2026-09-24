@@ -53,15 +53,7 @@ func (instance *Module) registerRatesHttpClientService(registrar melodyapplicati
                and reach a resource one segment up — measured against the running provider, 404 where the
                relative spelling answers 200. A base whose path lacks the slash is refused at construction,
                which is where the wiring mistake is made. */
-            return httpclient.NewHttpClient(
-                httpclient.NewHttpClientConfig(
-                    baseUrl,
-                    outboundRequestTimeout,
-                    map[string]string{
-                        "accept": "application/json",
-                    },
-                ),
-            ), nil
+            return httpclient.NewHttpClient(ratesHttpClientConfig(baseUrl)), nil
         },
         outboundClientRegisterOptions()...,
     )
@@ -85,18 +77,34 @@ func (instance *Module) registerReportExportHttpClientService(registrar melodyap
     registrar.RegisterService(
         service.ServiceReportExportHttpClient,
         func(resolver melodycontainercontract.Resolver) (*httpclient.HttpClient, error) {
-            return httpclient.NewHttpClient(
-                httpclient.NewHttpClientConfig(
-                    "",
-                    outboundRequestTimeout,
-                    map[string]string{
-                        "accept": "application/json",
-                    },
-                ).WithoutRedirects(),
-            ), nil
+            return httpclient.NewHttpClient(reportExportHttpClientConfig()), nil
         },
         outboundClientRegisterOptions()...,
     )
+}
+
+/* ratesHttpClientConfig is the rates client: based on the provider's url, bounded by the outbound budget,
+   asking for json. */
+func ratesHttpClientConfig(baseUrl string) *httpclient.HttpClientConfig {
+    return httpclient.NewHttpClientConfig(
+        baseUrl,
+        outboundRequestTimeout,
+        map[string]string{
+            "accept": "application/json",
+        },
+    )
+}
+
+/* reportExportHttpClientConfig is the export client: no base, the same budget and accept, and no redirect
+   followed. */
+func reportExportHttpClientConfig() *httpclient.HttpClientConfig {
+    return httpclient.NewHttpClientConfig(
+        "",
+        outboundRequestTimeout,
+        map[string]string{
+            "accept": "application/json",
+        },
+    ).WithoutRedirects()
 }
 
 /* outboundClientRegisterOptions keeps both clients OFF the by-type index, and neither of them is the one

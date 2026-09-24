@@ -2,6 +2,7 @@ package twofactor
 
 import (
     "encoding/json"
+    "errors"
     "io"
     nethttp "net/http"
     "net/http/httptest"
@@ -9,7 +10,9 @@ import (
     "testing"
     "time"
 
+    store2fa "github.com/precision-soft/melody/v3/.example/twofactor"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
+    melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v3/security"
     "github.com/precision-soft/melody/v3/security/totp"
 )
@@ -60,7 +63,7 @@ func TestEnrollHandlerWritesTheTokensRowWhateverTheRequestNames(t *testing.T) {
     store, connector := enrolledStore(t, "", "")
     request, runtimeInstance := authenticatedTwoFactorRequest(t, "/twofactor/enroll?user=admin", "alice", nil)
 
-    response, handlerErr := EnrollHandler(store)(runtimeInstance, httptest.NewRecorder(), request)
+    response, handlerErr := EnrollHandler(fixedStore(store))(runtimeInstance, httptest.NewRecorder(), request)
     if nil != handlerErr || nil == response || nethttp.StatusOK != response.StatusCode() {
         t.Fatalf("expected the enrollment to answer 200, got %v, %v", response, handlerErr)
     }
@@ -109,7 +112,7 @@ func TestVerifyHandlerChecksTheTokensEnrollmentWhateverTheRequestNames(t *testin
         map[string]string{melodysecurity.DefaultTotpCodeHeaderName: code},
     )
 
-    response, handlerErr := VerifyHandler(store)(runtimeInstance, httptest.NewRecorder(), request)
+    response, handlerErr := VerifyHandler(fixedStore(store))(runtimeInstance, httptest.NewRecorder(), request)
     if nil != handlerErr || nil == response || nethttp.StatusOK != response.StatusCode() {
         t.Fatalf("expected the token's own code to verify with 200, got %v, %v, reads %q", response, handlerErr, connector.recorded())
     }
@@ -131,7 +134,7 @@ func TestVerifyHandlerRedeemsAgainstTheTokensEnrollmentWhateverTheRequestNames(t
         map[string]string{melodysecurity.DefaultTotpRecoveryHeaderName: "recovery-one"},
     )
 
-    response, handlerErr := VerifyHandler(store)(runtimeInstance, httptest.NewRecorder(), request)
+    response, handlerErr := VerifyHandler(fixedStore(store))(runtimeInstance, httptest.NewRecorder(), request)
     if nil != handlerErr || nil == response || nethttp.StatusOK != response.StatusCode() {
         t.Fatalf("expected the token's own recovery code to be redeemed with 200, got %v, %v, statements %q", response, handlerErr, connector.recorded())
     }
@@ -142,5 +145,82 @@ func TestVerifyHandlerRedeemsAgainstTheTokensEnrollmentWhateverTheRequestNames(t
         if true == strings.Contains(statement, "'admin'") {
             t.Fatalf("expected the recovery door never to reach the account the request named, got %q", statement)
         }
+    }
+}
+
+/* healingStore answers the given refusal on its first call and the store on every later one: the source a
+   door meets while the store's migration is refused and after it heals, inside one process */
+func healingStore(store *store2fa.Store, refusal error) (store2fa.StoreSource, *int) {
+    calls := 0
+
+    return func(runtimeInstance melodyruntimecontract.Runtime) (*store2fa.Store, error) {
+        calls = calls + 1
+        if 1 == calls {
+            return nil, refusal
+        }
+
+        return store, nil
+    }, &calls
+}
+
+/* the store is resolved at each request, so a refusal is the request's and not the process's: the door that
+   met it answers 503 without a statement reaching the database, and the next request in the same process,
+   the cause gone, enrolls. Built once at boot, the same refusal left the route unregistered — 404 until the
+   process restarted. */
+func TestEnrollHandlerAnswersAStoreRefusalWith503AndEnrollsOnceItHeals(t *testing.T) {
+    store, connector := enrolledStore(t, "", "")
+    storeSource, calls := healingStore(store, errors.New("the catalogue database refused the migration"))
+    handler := EnrollHandler(storeSource)
+
+    request, runtimeInstance := authenticatedTwoFactorRequest(t, "/twofactor/enroll", "alice", nil)
+    response, handlerErr := handler(runtimeInstance, httptest.NewRecorder(), request)
+    if nil != handlerErr || nil == response || nethttp.StatusServiceUnavailable != response.StatusCode() {
+        t.Fatalf("expected a refused store to answer 503, got %v, %v", response, handlerErr)
+    }
+
+    if 0 != len(connector.recorded()) {
+        t.Fatalf("expected no statement while the store is refused, got %q", connector.recorded())
+    }
+
+    request, runtimeInstance = authenticatedTwoFactorRequest(t, "/twofactor/enroll", "alice", nil)
+    response, handlerErr = handler(runtimeInstance, httptest.NewRecorder(), request)
+    if nil != handlerErr || nil == response || nethttp.StatusOK != response.StatusCode() {
+        t.Fatalf("expected the next request to enroll once the store resolves, got %v, %v", response, handlerErr)
+    }
+
+    if 2 != *calls || 1 != len(connector.recorded()) {
+        t.Fatalf("expected the store asked once per request and one row written, got %d asks and %q", *calls, connector.recorded())
+    }
+}
+
+/* the verification door resolves the same way: 503 while the store is refused, and the code alice's own
+   secret produces verifies at the next request */
+func TestVerifyHandlerAnswersAStoreRefusalWith503AndVerifiesOnceItHeals(t *testing.T) {
+    secret, secretErr := totp.GenerateSecret()
+    if nil != secretErr {
+        t.Fatalf("generating the fixture secret failed: %v", secretErr)
+    }
+
+    code, codeErr := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
+    if nil != codeErr {
+        t.Fatalf("generating the fixture code failed: %v", codeErr)
+    }
+
+    store, _ := enrolledStore(t, "alice", secret)
+    storeSource, _ := healingStore(store, errors.New("the catalogue database refused the migration"))
+    handler := VerifyHandler(storeSource)
+
+    headers := map[string]string{melodysecurity.DefaultTotpCodeHeaderName: code}
+
+    request, runtimeInstance := authenticatedTwoFactorRequest(t, "/twofactor/verify", "alice", headers)
+    response, handlerErr := handler(runtimeInstance, httptest.NewRecorder(), request)
+    if nil != handlerErr || nil == response || nethttp.StatusServiceUnavailable != response.StatusCode() {
+        t.Fatalf("expected a refused store to answer 503, got %v, %v", response, handlerErr)
+    }
+
+    request, runtimeInstance = authenticatedTwoFactorRequest(t, "/twofactor/verify", "alice", headers)
+    response, handlerErr = handler(runtimeInstance, httptest.NewRecorder(), request)
+    if nil != handlerErr || nil == response || nethttp.StatusOK != response.StatusCode() {
+        t.Fatalf("expected the next request to verify once the store resolves, got %v, %v", response, handlerErr)
     }
 }

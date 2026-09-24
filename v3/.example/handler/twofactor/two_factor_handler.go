@@ -39,11 +39,16 @@ type enrollPayload struct {
 }
 
 /* EnrollHandler enrolls the CALLER's TOTP second factor: it generates a secret and single-use recovery codes, persists them encrypted, and returns the secret + otpauth URI (the QR payload) and the recovery codes to show once. The secret is returned only here, and only to the account it belongs to — which is what the authenticated route buys. Enrolling again replaces the previous secret and its unused recovery codes, so an account whose authenticator is lost has a way back. */
-func EnrollHandler(store *store2fa.Store) melodyhttpcontract.Handler {
+func EnrollHandler(storeSource store2fa.StoreSource) melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         user, authenticated := enrolledIdentifier(runtimeInstance)
         if false == authenticated {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusUnauthorized, "unauthorized"), nil
+        }
+
+        store, storeErr := storeSource(runtimeInstance)
+        if nil != storeErr {
+            return unavailableStore(runtimeInstance, request, storeErr), nil
         }
 
         secret, uri, recoveryCodes, enrollErr := store.Enroll(runtimeInstance.Context(), user, "Melody Example")
@@ -63,13 +68,18 @@ func EnrollHandler(store *store2fa.Store) melodyhttpcontract.Handler {
 /* VerifyHandler verifies a second factor submitted for the CALLER's own enrollment: a TOTP code on the X-2FA-Code header is checked against the stored secret, or a single-use recovery code on X-2FA-Recovery-Code is atomically redeemed. It reports 200 on success and 401 on a wrong/replayed factor, over the same store the framework's TOTP authenticator would read if this example registered one — it does not; the two routes are how the store is exercised here.
 
    An accepted TOTP code stays valid for its whole window, so — exactly as the framework's authenticator does — it is burned in a replay guard the moment it is accepted. The nonce is keyed on the NORMALIZED code, because Verify normalizes before comparing: keying on the raw code would let "409 643" replay a code already spent as "409643". */
-func VerifyHandler(store *store2fa.Store) melodyhttpcontract.Handler {
+func VerifyHandler(storeSource store2fa.StoreSource) melodyhttpcontract.Handler {
     replayGuard := melodysecurity.NewMemoryNonceGuard()
 
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         user, authenticated := enrolledIdentifier(runtimeInstance)
         if false == authenticated {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusUnauthorized, "unauthorized"), nil
+        }
+
+        store, storeErr := storeSource(runtimeInstance)
+        if nil != storeErr {
+            return unavailableStore(runtimeInstance, request, storeErr), nil
         }
 
         if recoveryCode := request.Header(melodysecurity.DefaultTotpRecoveryHeaderName); "" != recoveryCode {
@@ -119,6 +129,13 @@ func VerifyHandler(store *store2fa.Store) melodyhttpcontract.Handler {
 
         return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, map[string]any{"factor": "totp", "verified": true}), nil
     }
+}
+
+/* unavailableStore answers a door whose store could not be resolved — its migration refused, its database
+   down — with 503 and the cause journaled: the condition is the dependency's and passes with it, and the next
+   request resolves the store again. */
+func unavailableStore(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, storeErr error) melodyhttpcontract.Response {
+    return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusServiceUnavailable, "the second factor is unavailable", storeErr)
 }
 
 /* totpCodeValidityWindow is the span an accepted code stays verifiable — (2*skew+1) periods — and therefore how long a spent code must stay burned. It resolves through the totp package so it can never drift from what Verify honours. */

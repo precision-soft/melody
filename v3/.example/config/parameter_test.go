@@ -144,3 +144,15 @@ func TestRegisterParameters_MarksACredentialOnlyWhereTheEnvironmentDefinesIt(t *
         }
     }
 }
+
+/* the rates provider's url is a DECLARED parameter with an empty fallback, not the auto-registered .env key:
+   the refresh's constructor reads it through the generated MustGet, which panics on a parameter never
+   registered — and an auto-registered key disappears with its line */
+func TestRegisterParameters_DeclaresTheRatesBaseUrlWithAnEmptyFallback(t *testing.T) {
+    registrar := newRecordingParameterRegistrar()
+    moduleWithEnvironment(t, map[string]string{}).RegisterParameters(registrar)
+
+    if "%env(default::RATES_BASE_URL)%" != registrar.registered[parameterRatesBaseUrl] {
+        t.Fatalf("expected app.rates.base_url declared over RATES_BASE_URL with an empty fallback, got %v", registrar.registered[parameterRatesBaseUrl])
+    }
+}

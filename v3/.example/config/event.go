@@ -6,6 +6,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v3/.example/subscriber"
+    "github.com/precision-soft/melody/v3/.example/twofactor"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     melodyeventcontract "github.com/precision-soft/melody/v3/event/contract"
     melodyexception "github.com/precision-soft/melody/v3/exception"
@@ -45,10 +46,10 @@ func (instance *Module) registerSubscribers(eventDispatcher melodyeventcontract.
         subscriber.NewSecurityAuthenticationEventSubscriber(),
     )
 
-    /* the store is nil when the environment gave the example no database, and then there is no enrollment to release — the same switch the enroll and verify routes read. It is registered AFTER the cache subscriber and runs BEFORE it: the release carries a higher priority on the deletion event, because a dispatch ends at the first listener that fails and a cache outage must not leave the enrollment standing */
-    if nil != instance.twoFactorStore {
+    /* without a database the environment has no enrollment to release — the same switch the enroll and verify routes read; with one, the release resolves the store at each deletion and a store that cannot be resolved fails the deletion rather than passing it with the enrollment standing. It is registered AFTER the cache subscriber and runs BEFORE it: the release carries a higher priority on the deletion event, because a dispatch ends at the first listener that fails and a cache outage must not leave the enrollment standing */
+    if nil != instance.database {
         eventDispatcher.AddSubscriber(
-            subscriber.NewTwoFactorEnrollmentSubscriber(instance.twoFactorStore),
+            subscriber.NewTwoFactorEnrollmentSubscriber(twofactor.StoreFromRuntime),
         )
     }
 
@@ -102,6 +103,9 @@ func (instance *Module) registerRateLimitRequestListener(eventDispatcher melodye
     melodyhttpmiddleware.RegisterRateLimitRequestListener(eventDispatcher, requestBudgetConfig(budget, instance.trustedProxyResolver))
 }
 
+/* requestBudgetWindow is the window the request budget is counted over: the switch names a budget per hour */
+const requestBudgetWindow = time.Hour
+
 /* requestBudgetConfig is the hourly budget as this example wires it. The client key is resolved through the
    same trusted-proxy door the write throttle uses, over the same list: with the peer address alone, every
    client behind the compose load balancer — behind any reverse proxy — is charged to one key, so the budget
@@ -111,7 +115,7 @@ func (instance *Module) registerRateLimitRequestListener(eventDispatcher melodye
    it was charged to. */
 func requestBudgetConfig(budget int, trustedProxyResolver *trustedProxyResolver) *melodyhttpmiddleware.RateLimitConfig {
     rateLimitConfig := melodyhttpmiddleware.NewRateLimitConfig(
-        melodyhttpmiddleware.NewFixedWindowLimiter(budget, time.Hour),
+        melodyhttpmiddleware.NewFixedWindowLimiter(budget, requestBudgetWindow),
         nil,
         nil,
     )

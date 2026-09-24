@@ -34,6 +34,7 @@ func TestUpSchemaCreatesEveryTableTolerantlyThenTheConstraint(t *testing.T) {
     }
 
     assertQueryOrder(t, recorder.recordedQueries(), []string{
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN ('melody_example_v3_schema_fingerprint', 'melody_example_v3_two_factor', 'melody_example_v3_catalog_journal', 'melody_example_v3_user', 'melody_example_v3_product', 'melody_example_v3_currency', 'melody_example_v3_category')",
         "CREATE TABLE IF NOT EXISTS `melody_example_v3_category`",
         "CREATE TABLE IF NOT EXISTS `melody_example_v3_currency`",
         "CREATE TABLE IF NOT EXISTS `melody_example_v3_product`",

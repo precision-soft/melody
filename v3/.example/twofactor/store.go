@@ -9,6 +9,8 @@ import (
     "time"
 
     melodyencrypt "github.com/precision-soft/melody/integrations/bunorm/v3/encrypt"
+    melodycontainer "github.com/precision-soft/melody/v3/container"
+    "github.com/precision-soft/melody/v3/exception"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     melodysecuritycontract "github.com/precision-soft/melody/v3/security/contract"
     "github.com/precision-soft/melody/v3/security/totp"
@@ -27,6 +29,33 @@ type Enrollment struct {
 
 func NewStore(database *bun.DB) *Store {
     return &Store{database: database}
+}
+
+/* ServiceStore is the container name of the store the two doors and the enrollment release read. */
+const ServiceStore = "service-example-two-factor-store"
+
+/* StoreSource answers the store a door acts on, at the moment it acts: the doors are handed the door below
+   in production and a fixed store in their tests. */
+type StoreSource func(runtimeInstance melodyruntimecontract.Runtime) (*Store, error)
+
+/* StoreFromRuntime resolves the store through the container, and it is the single door that does so. The
+   store is resolved at the moment a request or a deletion needs it rather than built once at boot, because
+   building it applies the example's migration set to the catalogue's database: built at boot, a refusal — a
+   database briefly down, a volume the reset has yet to bring here — left the two doors unwired and the
+   enrollment unreleased for the life of the process, while every repository beside it healed at its next
+   resolution. The container keeps a successful resolution only, so a refusal is answered to the caller who
+   met it and the next one asks again. */
+func StoreFromRuntime(runtimeInstance melodyruntimecontract.Runtime) (*Store, error) {
+    store, storeErr := melodycontainer.FromResolver[*Store](runtimeInstance.Container(), ServiceStore)
+    if nil != storeErr {
+        return nil, storeErr
+    }
+
+    if nil == store {
+        return nil, exception.NewError("the two-factor store resolved to nothing", nil, nil)
+    }
+
+    return store, nil
 }
 
 type Store struct {

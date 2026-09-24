@@ -241,7 +241,18 @@ func (instance *CurrencyService) Update(
         return nil, false, nil
     }
 
-    updatedEvent := event.NewCurrencyUpdatedEvent(&modified)
+    /* the rename writes the code and the name alone, and a refresh may have written the quote between the read
+       above and the write: the entity answered and published is the row as it now stands, read back, not the
+       copy of what was read before the write — which carried the quote the refresh had just replaced */
+    written, stillFound, rereadErr := instance.currencyRepository.FindById(ctx, currencyId)
+    if nil != rereadErr {
+        return nil, true, rereadErr
+    }
+    if false == stillFound {
+        return nil, false, nil
+    }
+
+    updatedEvent := event.NewCurrencyUpdatedEvent(written)
     _, dispatchErr := instance.eventDispatcher.DispatchName(
         runtimeInstance,
         event.CurrencyUpdatedEventName,
@@ -251,7 +262,7 @@ func (instance *CurrencyService) Update(
         return nil, true, dispatchErr
     }
 
-    return &modified, true, nil
+    return written, true, nil
 }
 
 /* RateUpdateOutcome is what UpdateRate did with a quote, in a word the caller can count under the right

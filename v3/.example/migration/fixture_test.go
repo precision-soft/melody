@@ -177,6 +177,13 @@ func (instance *fakeConnection) QueryContext(ctx context.Context, query string, 
         return &fakeRows{columns: []string{"column_name"}, rows: rows}, nil
     }
 
+    /* asked which of its tables a set finds before it runs, the double answers none: a set runs only on a volume
+       that does not record it, and the fresh volume is the one it builds. A volume that holds them answers
+       through the query hook */
+    if true == strings.Contains(query, "information_schema.tables") {
+        return &fakeRows{columns: []string{"table_name"}, rows: nil}, nil
+    }
+
     /* asked for the fingerprint a set recorded, the double answers the one this code records: the present schema */
     if fingerprint, isFingerprintSelect := presentFingerprintAsked(query); true == isFingerprintSelect {
         return &fakeRows{columns: []string{"fingerprint"}, rows: [][]driver.Value{{fingerprint}}}, nil

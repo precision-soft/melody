@@ -19,13 +19,14 @@ import (
     melodylogging "github.com/precision-soft/melody/v3/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     melodyruntime "github.com/precision-soft/melody/v3/runtime"
+    melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
 func deleteEnrollmentStatementsAfter(t *testing.T, eventName string, payload any) []string {
     t.Helper()
 
     database, recorder := newRecordingDatabase()
-    subscriberInstance := NewTwoFactorEnrollmentSubscriber(twofactor.NewStore(database))
+    subscriberInstance := NewTwoFactorEnrollmentSubscriber(fixedTwoFactorStore(twofactor.NewStore(database)))
 
     containerInstance := melodycontainer.NewContainer()
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
@@ -80,7 +81,7 @@ func (instance *refusingCache) Delete(key string) error {
 /* the dispatcher ends a dispatch at the first listener that fails, and the composition root registers the cache subscriber before this one: at the cache listener's own priority a redis outage at the moment of the deletion meant the account was deleted, the door answered 500, the event was never published again for that identifier, and the enrollment stayed for the next holder of it. The release outranks the cache listener on the deletion event, read off the two real subscribers, and with the cache refusing its first delete the enrollment is still released: the dispatch fails on the cache, after the row is gone. */
 func TestTwoFactorEnrollmentSubscriber_ReleasesTheEnrollmentBeforeTheCacheListenerRuns(t *testing.T) {
     database, recorder := newRecordingDatabase()
-    enrollmentSubscriber := NewTwoFactorEnrollmentSubscriber(twofactor.NewStore(database))
+    enrollmentSubscriber := NewTwoFactorEnrollmentSubscriber(fixedTwoFactorStore(twofactor.NewStore(database)))
     cacheSubscriber := NewUserEventSubscriber()
 
     releasePriority := enrollmentSubscriber.SubscribedEvents()[event.UserDeletedEventName][0].Priority()
@@ -127,5 +128,33 @@ func TestTwoFactorEnrollmentSubscriber_ReleasesTheEnrollmentBeforeTheCacheListen
     }
     if 1 != released {
         t.Fatalf("expected the enrollment of user-4 released ahead of the cache listener that failed, got %d releases in %v", released, recorder.recordedQueries())
+    }
+}
+
+/* the release resolves the store at each deletion, and a store that cannot be resolved FAILS the deletion
+   rather than passing it with the enrollment standing: the listener hands the refusal back, so the dispatch —
+   and the door that deleted the account — answers it. Built at boot, the
+   same refusal left the release unsubscribed for the life of the process and every deletion passed. */
+func TestTwoFactorEnrollmentSubscriber_AStoreThatCannotBeResolvedFailsTheDeletion(t *testing.T) {
+    refusal := errors.New("the catalogue database refused the migration")
+    asked := 0
+
+    subscriberInstance := NewTwoFactorEnrollmentSubscriber(func(runtimeInstance melodyruntimecontract.Runtime) (*twofactor.Store, error) {
+        asked = asked + 1
+
+        return nil, refusal
+    })
+
+    containerInstance := melodycontainer.NewContainer()
+    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+
+    listener := subscriberInstance.SubscribedEvents()[event.UserDeletedEventName][0].Listener()
+    listenErr := listener(runtimeInstance, melodyevent.NewEvent(event.UserDeletedEventName, event.NewUserDeletedEvent("user-4", "dave"), melodyclock.NewSystemClock()))
+    if false == errors.Is(listenErr, refusal) {
+        t.Fatalf("expected the deletion to fail with the store's refusal, got %v", listenErr)
+    }
+
+    if 1 != asked {
+        t.Fatalf("expected the store asked once for the deletion, got %d asks", asked)
     }
 }

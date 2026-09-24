@@ -1367,15 +1367,104 @@ func TestJsonLogger_ContainsAContextErrorWhoseErrorPanics(t *testing.T) {
     }
 }
 
-/* the encoder hands back as a panic anything a value's MarshalJSON raises that is not its own error: the record falls back to the text rendering it keeps for a context the encoder refuses, and names why */
+/* the encoder hands back as a panic anything a value's MarshalJSON raises that is not its own error: the record falls back to the text it keeps for a context the encoder refuses and names why, and in that text the value whose encoding panicked is the one key that says so — the worker beside it keeps its value */
 func TestJsonLogger_ContainsAContextValueWhoseEncodingPanics(t *testing.T) {
     logger, buffer := testNewJsonLogger()
 
     logger.Error("the worker recovered a panic", map[string]any{"value": panickingJsonMarshaler{}, "worker": "audit"})
 
-    record := buffer.String()
-    if false == strings.Contains(record, "encoding the context panicked") || false == strings.Contains(record, "worker:audit") {
-        t.Fatalf("expected the record written with the encoding's panic named and the context kept as text, got %q", record)
+    fallbackContext := fallbackContextOf(t, buffer.String())
+    if "audit" != fallbackContext["worker"] || false == strings.HasPrefix(fmt.Sprint(fallbackContext["value"]), "<unencodable: encoding the context panicked: the value's encoding dereferences a nil field") {
+        t.Fatalf("expected the worker kept and the panicking value named in the fallback, got %v", fallbackContext)
+    }
+}
+
+/* fallbackContextOf reads a fallback record's context text back as the object it spells */
+func fallbackContextOf(t *testing.T, line string) map[string]any {
+    t.Helper()
+
+    data := decodeJsonLine(t, strings.TrimSpace(line))
+    if nil == data["marshalError"] {
+        t.Fatalf("expected a fallback record, got %s", line)
+    }
+
+    contextText, isString := data["context"].(string)
+    if false == isString {
+        t.Fatalf("expected the fallback context as text, got %T", data["context"])
+    }
+
+    fallbackContext := map[string]any{}
+    if decodeErr := json.Unmarshal([]byte(contextText), &fallbackContext); nil != decodeErr {
+        t.Fatalf("expected the fallback context to spell one object, got %q: %v", contextText, decodeErr)
+    }
+
+    return fallbackContext
+}
+
+/* cyclicThroughAField holds a map through a struct field, the one shape of cycle the normalization does not
+   walk into */
+type cyclicThroughAField struct {
+    Held map[string]any
+}
+
+/* the context the encoder refuses was handed to fmt whole, and fmt has no cycle detection: a map that closes
+   on itself through a struct field recursed until the goroutine stack was gone — a fatal error, not a panic, so
+   no recover anywhere turned it into a record and the process ended. Rendered key by key, the encoder detects
+   the cycle and the one key that carries it says so; the service beside it keeps its value. */
+func TestJsonLogger_FallbackSurvivesACycleHeldThroughAStructField(t *testing.T) {
+    logger, buffer := testNewJsonLogger()
+
+    held := map[string]any{}
+    held["self"] = cyclicThroughAField{Held: held}
+
+    logger.Error("record", map[string]any{"cycle": held, "service": "the-culprit"})
+
+    fallbackContext := fallbackContextOf(t, buffer.String())
+    if "the-culprit" != fallbackContext["service"] || false == strings.HasPrefix(fmt.Sprint(fallbackContext["cycle"]), "<unencodable: ") {
+        t.Fatalf("expected the service kept and the cycle named in the fallback, got %v", fallbackContext)
+    }
+}
+
+/* selfPanickingError panics with itself when asked its message */
+type selfPanickingError struct{}
+
+func (instance selfPanickingError) Error() string {
+    panic(instance)
+}
+
+/* selfPanickingJsonMarshaler raises, from its encoding, a value that panics with itself when named */
+type selfPanickingJsonMarshaler struct{}
+
+func (instance selfPanickingJsonMarshaler) MarshalJSON() ([]byte, error) {
+    panic(selfPanickingError{})
+}
+
+/* the containment names what it caught through the caught value's own Error, and fmt contains one panic there
+   but re-raises one raised while it prints the first: a value that panics with itself when named went past
+   the recover that named it, out of the record and out of the recovery that was writing it. Named by its type
+   instead, the record is written — for a context error whose message panics that way, and for an encoding
+   that raises such a value. */
+func TestJsonLogger_NamesAPanicWhoseNamingPanicsByItsType(t *testing.T) {
+    for _, context := range []map[string]any{
+        {"panic": selfPanickingError{}, "worker": "audit"},
+        {"value": selfPanickingJsonMarshaler{}, "worker": "audit"},
+    } {
+        logger, buffer := testNewJsonLogger()
+
+        written := func() (escaped any) {
+            defer func() {
+                escaped = recover()
+            }()
+
+            logger.Error("the worker recovered a panic", context)
+
+            return nil
+        }()
+
+        record := buffer.String()
+        if nil != written || false == strings.Contains(record, "selfPanickingError whose rendering panicked") || false == strings.Contains(record, "audit") {
+            t.Fatalf("expected the record written with the panic named by its type, escaped %v, got %q", written, record)
+        }
     }
 }
 

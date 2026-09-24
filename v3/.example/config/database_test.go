@@ -4,6 +4,7 @@ import (
     "context"
     "database/sql"
     "errors"
+    "io"
     "strings"
     "testing"
     "time"
@@ -17,6 +18,7 @@ import (
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
     melodylogging "github.com/precision-soft/melody/v3/logging"
+    melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     bun "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/pgdialect"
 )
@@ -213,5 +215,124 @@ func TestRegisterArchiveStorageService_BindsTheProcessContext(t *testing.T) {
 
     if ctx != storage.Context() {
         t.Fatal("expected the published storage to carry the process context")
+    }
+}
+
+/* recordingProvider opens a handle over a connector that is never dialed and records the logger the registry
+   handed it: the journal an open reports through is the registry's current logger at that moment */
+type recordingProvider struct {
+    openedWith []melodyloggingcontract.Logger
+}
+
+func (instance *recordingProvider) Open(params melodybunorm.ConnectionParameters, logger melodyloggingcontract.Logger) (*bun.DB, error) {
+    instance.openedWith = append(instance.openedWith, logger)
+
+    return newUndialedDatabase(), nil
+}
+
+/* databaseServicesOver registers the database services of a module whose registry declares the catalogue and
+   the archive over recording providers, beside a logger service that counts its resolutions; the logger it
+   publishes is returned, so a test compares what an open was handed with it */
+func databaseServicesOver(t *testing.T, archiveWired bool) (melodycontainercontract.Container, *recordingProvider, *recordingProvider, melodyloggingcontract.Logger, *int) {
+    t.Helper()
+
+    catalogProvider := &recordingProvider{}
+    archiveProvider := &recordingProvider{}
+
+    registry, registryErr := melodybunorm.NewManagerRegistryWithContext(
+        context.Background(),
+        melodylogging.NewNopLogger(),
+        melodybunorm.ProviderDefinition{
+            Name:      databaseManagerName,
+            Provider:  catalogProvider,
+            Params:    melodybunorm.ConnectionParameters{Host: "mysql", Port: "3306", Database: "catalogue", User: "melody"},
+            IsDefault: true,
+        },
+        melodybunorm.ProviderDefinition{
+            Name:     databaseArchiveManagerName,
+            Provider: archiveProvider,
+            Params:   melodybunorm.ConnectionParameters{Host: "postgres", Port: "5432", Database: "archive", User: "melody"},
+        },
+    )
+    if nil != registryErr {
+        t.Fatalf("build the registry: %v", registryErr)
+    }
+
+    /* a logger of its own, so the open handed THIS one and not the one the registry was built on */
+    journal := melodylogging.NewJsonLogger(io.Discard, melodyloggingcontract.LevelDebug)
+    loggerResolutions := 0
+
+    containerInstance := melodycontainer.NewContainer()
+    t.Cleanup(func() { _ = containerInstance.Close() })
+    containerInstance.MustRegister(
+        melodylogging.ServiceLogger,
+        func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
+            loggerResolutions++
+
+            return journal, nil
+        },
+    )
+
+    moduleInstance := moduleWithEnvironment(t, map[string]string{environmentKeyMysqlHost: "mysql"})
+    moduleInstance.databaseRegistry = registry
+    moduleInstance.archiveWired = archiveWired
+    moduleInstance.catalogLocation = "mysql:3306/catalogue"
+    moduleInstance.archiveLocation = "postgres:5432/archive"
+    moduleInstance.registerDatabaseServices(containerRegistrar{Container: containerInstance})
+
+    return containerInstance, catalogProvider, archiveProvider, journal, &loggerResolutions
+}
+
+/* the chain the catalogue storage starts — storage, handle, registry, journal — continues here: the handle
+   RESOLVES the registry, and the registry's provider hands it the container's journal before the handle is
+   opened, so the open reports through the application's logger rather than the emergency one the registry was
+   built on. A handle that captured the registry resolved nothing: the registry provider never ran, the swap
+   never happened and the teardown had no edge to order the two closes by. */
+func TestRegisterDatabaseServices_EachHandleResolvesTheRegistryWhichTakesTheJournalFirst(t *testing.T) {
+    for _, handle := range []struct {
+        serviceName string
+        archive     bool
+    }{
+        {serviceName: serviceDatabase},
+        {serviceName: serviceArchiveDatabase, archive: true},
+    } {
+        containerInstance, catalogProvider, archiveProvider, journal, loggerResolutions := databaseServicesOver(t, true)
+
+        database, openErr := melodycontainer.FromResolver[*bun.DB](containerInstance, handle.serviceName)
+        if nil != openErr || nil == database {
+            t.Fatalf("%s: expected the handle opened, got %v, %v", handle.serviceName, database, openErr)
+        }
+
+        opened := catalogProvider
+        if true == handle.archive {
+            opened = archiveProvider
+        }
+
+        if 1 != *loggerResolutions {
+            t.Fatalf("%s: expected the registry's provider to run and resolve the journal once, got %d", handle.serviceName, *loggerResolutions)
+        }
+
+        if 1 != len(opened.openedWith) || journal != opened.openedWith[0] {
+            t.Fatalf("%s: expected the open handed the container's journal, got %v", handle.serviceName, opened.openedWith)
+        }
+    }
+}
+
+/* both handles are asked for by NAME: a resolution by type between two handles of one concrete type could only
+   answer whichever landed first, so the question is not askable at all. And without an archive the archive's
+   handle is not registered, the catalogue's still is. */
+func TestRegisterDatabaseServices_KeepsBothHandlesOffTheTypeIndexAndTheArchiveBehindItsSwitch(t *testing.T) {
+    containerInstance, _, _, _, _ := databaseServicesOver(t, true)
+    if false == containerInstance.Has(serviceDatabase) || false == containerInstance.Has(serviceArchiveDatabase) {
+        t.Fatal("expected both handles registered with both databases declared")
+    }
+
+    if _, byTypeErr := melodycontainer.FromResolverByType[*bun.DB](containerInstance); nil == byTypeErr {
+        t.Fatal("expected no handle on the by-type index")
+    }
+
+    withoutArchive, _, _, _, _ := databaseServicesOver(t, false)
+    if false == withoutArchive.Has(serviceDatabase) || true == withoutArchive.Has(serviceArchiveDatabase) {
+        t.Fatal("expected the catalogue's handle alone without the archive")
     }
 }

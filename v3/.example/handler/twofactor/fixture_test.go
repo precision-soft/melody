@@ -226,3 +226,11 @@ func twoFactorRequest(t *testing.T, target string) (*melodyhttp.Request, melodyr
 
     return request, runtimeInstance
 }
+
+/* fixedStore hands a door one store whatever the runtime, the source its tests need where production
+   resolves the store through the container */
+func fixedStore(store *store2fa.Store) store2fa.StoreSource {
+    return func(runtimeInstance melodyruntimecontract.Runtime) (*store2fa.Store, error) {
+        return store, nil
+    }
+}

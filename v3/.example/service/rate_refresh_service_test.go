@@ -607,6 +607,58 @@ func TestRateRefreshServiceRefresh_ADatelessReadingAheadDoesNotPinTheCatalogue(t
     }
 }
 
+/* the trade the bound makes, pinned so moving it is a decision: inside the skew, a replay that kept its Date and
+   dropped its Age reads exactly as a provider whose clock runs late, and one answer cannot tell them apart — so
+   it is lifted to the moment it was replayed and WRITTEN over the reading taken since. The bound is what limits
+   it: four minutes late is admitted, an hour late is refused (see the pin above) */
+func TestRateRefreshServiceRefresh_AdmitsAReplayThatKeptItsDateInsideTheSkew(t *testing.T) {
+    refresh, currencyService, runtimeInstance, _ := rateRefreshAnswering(
+        t,
+        providerAnswer{body: `{"base":"EUR","asOf":"2026-09-08T08:58:00Z","rates":{"USD":1.2}}`},
+        providerAnswer{body: `{"base":"EUR","asOf":"2026-09-08T08:56:00Z","rates":{"USD":1.3}}`, clockAhead: -4 * time.Minute},
+    )
+
+    if _, err := refresh.Refresh(runtimeInstance); nil != err {
+        t.Fatalf("the first reading failed: %v", err)
+    }
+
+    outcome, err := refresh.Refresh(runtimeInstance)
+    if nil != err || 1 != outcome.Updated {
+        t.Fatalf("the replay inside the skew reported %+v, %v; the bound admits it", outcome, err)
+    }
+
+    held, _, _ := currencyService.currencyRepository.FindById(context.Background(), "cur-usd")
+    if 1.3 != held.Rate || false == held.ProviderRateAsOf.Equal(time.Date(2026, time.September, 8, 8, 56, 0, 0, time.UTC)) {
+        t.Errorf("the replay left cur-usd at %v stamped %s, wanted 1.3 under its own stamp", held.Rate, held.ProviderRateAsOf)
+    }
+}
+
+/* the same trade on the dateless branch: a stamp later than its arrival is ordered by the ARRIVAL (see the pin
+   above, whose honest reading it lets in), so a dateless replay of an older stamp from the provider's lead
+   window, arriving after the newer one, is WRITTEN over it — from one dateless answer it cannot be told from a
+   provider about to be set back. The skew bounds the stamp: one more than five minutes ahead is refused */
+func TestRateRefreshServiceRefresh_AdmitsADatelessReplayFromTheLeadWindow(t *testing.T) {
+    refresh, currencyService, runtimeInstance, _ := rateRefreshAnswering(
+        t,
+        providerAnswer{body: `{"base":"EUR","asOf":"2026-09-08T09:04:00Z","rates":{"USD":1.2}}`, omitDate: true},
+        providerAnswer{body: `{"base":"EUR","asOf":"2026-09-08T09:03:00Z","rates":{"USD":1.3}}`, omitDate: true},
+    )
+
+    if _, err := refresh.Refresh(runtimeInstance); nil != err {
+        t.Fatalf("the first reading failed: %v", err)
+    }
+
+    outcome, err := refresh.Refresh(runtimeInstance)
+    if nil != err || 1 != outcome.Updated {
+        t.Fatalf("the dateless replay from the lead window reported %+v, %v; the arrival order admits it", outcome, err)
+    }
+
+    held, _, _ := currencyService.currencyRepository.FindById(context.Background(), "cur-usd")
+    if 1.3 != held.Rate || false == held.ProviderRateAsOf.Equal(time.Date(2026, time.September, 8, 9, 3, 0, 0, time.UTC)) {
+        t.Errorf("the replay left cur-usd at %v stamped %s, wanted 1.3 under its own stamp", held.Rate, held.ProviderRateAsOf)
+    }
+}
+
 /* a document older than the reading the catalogue holds is a replay; the newer reading is kept and the
    run says so under its own heading, not under "updated" or "skipped" */
 func TestRateRefreshServiceRefresh_CountsAReplayedDocumentAsStale(t *testing.T) {

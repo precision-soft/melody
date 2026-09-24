@@ -125,3 +125,15 @@ func TestExpectedSchemaOf_KeepsAQuotedCommaInsideItsItem(t *testing.T) {
         t.Fatalf("expected the columns a and b, got %v", table.columnNameList)
     }
 }
+
+/* inside a string literal a backslash escapes the character after it, so `it\'s` does not close the literal: read
+   as a close, the comma after it split the item, the next quote opened a literal that swallowed the rest of the
+   body, and the check named a column `x',` and lost `b`. A backslash inside a backquoted identifier is itself: read as an escape, the identifier's closing quote was
+   skipped and the column after it swallowed. */
+func TestExpectedSchemaOf_ReadsABackslashEscapedQuoteInsideItsLiteral(t *testing.T) {
+    table, isCreate := expectedTableOf("CREATE TABLE IF NOT EXISTS `probe` (`a` INT COMMENT 'it\\'s, x', `b` VARCHAR(8) DEFAULT \"a\\\",b\", `c\\` INT, `d` INT, PRIMARY KEY (`a`))")
+
+    if false == isCreate || false == reflect.DeepEqual([]string{"a", "b", "c\\", "d"}, table.columnNameList) {
+        t.Fatalf("expected the columns a, b, c\\ and d, got %v", table.columnNameList)
+    }
+}

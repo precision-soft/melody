@@ -7,6 +7,7 @@ import (
     "io"
     "os"
     "reflect"
+    "sort"
     "sync"
     "sync/atomic"
     "time"
@@ -106,8 +107,7 @@ func (instance *jsonLogger) Log(level loggingcontract.Level, message string, con
 
     renderedContext := ""
     if nil != contextMarshalErr {
-        /* fmt has no cycle detection, so this line is safe only because normalizeJsonContext hands back a finite structure: it marks the containers that close on themselves and refuses to pass an unwalked one past its depth bound. Reached with a cyclic context it would recurse until the goroutine stack was gone — a fatal error no recover turns into a record. */
-        renderedContext = fmt.Sprintf("%+v", normalizedContext)
+        renderedContext = renderJsonContextByKey(normalizedContext)
     }
 
     /* the stamp is taken under the write lock, so the order of the stamps is the order of the writes: taken above the lock it said when the record was FORMED, and the two orders diverged by however long the encoding took — measured at eight goroutines writing records of a dozen keys, 484 of 1600 records reached the file out of stamp order, while LOGGING.md sells the ordering as reconstructible from the stamps.
@@ -443,8 +443,50 @@ func marshalJsonContextContained(normalizedContext any) (encoded []byte, marshal
         }
 
         encoded = nil
-        marshalErr = fmt.Errorf("encoding the context panicked: %v", recoveredValue)
+        marshalErr = errors.New("encoding the context panicked: " + describeRecoveredValue(recoveredValue))
     }()
 
     return json.Marshal(normalizedContext)
+}
+
+/* renderJsonContextByKey is the text a record carries when its context as a whole does not encode: each key is
+   encoded on its own, so one value the encoder refuses costs that key alone and every other key of the record —
+   the service name, the cause chain — keeps its encoded value. It is written as one json object in a string,
+   the keys sorted, and a refused key reads as its reason.
+
+   It does not hand the context to fmt: fmt has no cycle detection, and the normalization walks maps and slices
+   but not structs, so a map held through a struct field that closes on itself reached fmt whole — and fmt
+   recursed until the goroutine stack was gone, a fatal error no recover turns into a record. The encoder
+   detects that cycle and refuses the value; the refusal is what the key then says. */
+func renderJsonContextByKey(normalizedContext map[string]any) string {
+    keyList := make([]string, 0, len(normalizedContext))
+    for key := range normalizedContext {
+        keyList = append(keyList, key)
+    }
+
+    sort.Strings(keyList)
+
+    rendered := make([]byte, 0, 64)
+    rendered = append(rendered, '{')
+
+    for index, key := range keyList {
+        if 0 < index {
+            rendered = append(rendered, ',')
+        }
+
+        encodedKey, _ := json.Marshal(key)
+        rendered = append(rendered, encodedKey...)
+        rendered = append(rendered, ':')
+
+        encodedValue, valueErr := marshalJsonContextContained(normalizedContext[key])
+        if nil != valueErr {
+            encodedValue, _ = json.Marshal("<unencodable: " + valueErr.Error() + ">")
+        }
+
+        rendered = append(rendered, encodedValue...)
+    }
+
+    rendered = append(rendered, '}')
+
+    return string(rendered)
 }

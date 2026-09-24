@@ -1,16 +1,21 @@
 package config
 
 import (
+    "bytes"
     "context"
     "database/sql"
     "database/sql/driver"
     "errors"
+    "strings"
     "testing"
 
     "github.com/precision-soft/melody/v3/.example/persistence"
+    "github.com/precision-soft/melody/v3/.example/subscriber"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
     melodyhttp "github.com/precision-soft/melody/v3/http"
+    melodylogging "github.com/precision-soft/melody/v3/logging"
+    melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     bun "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/mysqldialect"
 )
@@ -102,57 +107,64 @@ func TestRegisterCatalogStorageService_PublishesAHandlelessStorageWithoutADataba
     }
 }
 
-/* countingBackplane closes the way the shipped ones do — clearing itself from the hub as the first step —
-   and counts the calls, which is the whole question the composition root's second Close raised. */
-type countingBackplane struct {
-    hub    *melodyhttp.ServerSentEventHub
-    closes int
+/* refusingBackplane refuses every publish, the failure the hub files */
+type refusingBackplane struct{}
+
+func (instance refusingBackplane) Publish(topic string, event melodyhttp.ServerSentEvent) error {
+    return errors.New("the backplane is down")
 }
 
-func (instance *countingBackplane) Publish(topic string, event melodyhttp.ServerSentEvent) error {
+func (instance refusingBackplane) Close() error {
     return nil
 }
 
-func (instance *countingBackplane) Close() error {
-    instance.closes++
-    instance.hub.SetBackplane(nil)
+/* the hub files its own failures, and its provider is where it is handed the application's journal: without
+   the swap a redis outage silenced cross-node delivery into a counter nobody reads. A publish the backplane
+   refuses after the hub was resolved reaches the logger the container publishes. */
+func TestRegisterServerSentEventHubService_HandsTheHubTheContainersJournal(t *testing.T) {
+    /* read after Shutdown, which waits for the publishes in flight: the record is written before it returns */
+    journal := &bytes.Buffer{}
 
-    return nil
-}
+    containerInstance := melodycontainer.NewContainer()
+    containerInstance.MustRegister(
+        melodylogging.ServiceLogger,
+        func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
+            return melodylogging.NewJsonLogger(journal, melodyloggingcontract.LevelDebug), nil
+        },
+    )
 
-/* The hub owns the backplane and closes it: this is the rationale the composition root now carries instead of
-   a Close of its own. Measured on the running stack before the repair, the example's hook and the hub's own
-   Shutdown ran on separate goroutines and both reached the backplane — the losing path closed one that was
-   already closed, and which of the two drained the publishes in flight was decided by the race. */
-func TestServerSentEventHubShutdown_ClosesTheBackplaneItOwnsExactlyOnce(t *testing.T) {
-    hub := melodyhttp.NewServerSentEventHub()
-    backplane := &countingBackplane{hub: hub}
-    hub.SetBackplane(backplane)
+    moduleInstance := &Module{}
+    moduleInstance.buildServerSentEvent()
+    moduleInstance.registerServerSentEventHubService(containerRegistrar{Container: containerInstance})
 
+    hub, hubErr := melodycontainer.FromResolver[*melodyhttp.ServerSentEventHub](containerInstance, subscriber.ServiceCatalogNotificationHub)
+    if nil != hubErr || moduleInstance.serverSentEventHub != hub {
+        t.Fatalf("expected the module's hub published, got %v, %v", hub, hubErr)
+    }
+
+    hub.SetBackplane(refusingBackplane{})
+    hub.Broadcast("catalog", melodyhttp.ServerSentEvent{Event: "notification", Data: "changed"})
     hub.Shutdown()
 
-    if 1 != backplane.closes {
-        t.Fatalf("expected the hub to close its backplane exactly once, got %d", backplane.closes)
+    if false == strings.Contains(journal.String(), "server sent event backplane publish failed") {
+        t.Fatalf("expected the refused publish in the container's journal, got %q", journal.String())
     }
 }
 
-/* The sister case, which is what the second closer in the composition root actually bought. The count is not
-   even stable: it depends on which of the two http shutdown hooks won, and both orders were observed on the
-   running stack. Hook first, the hub finds the backplane already cleared and closes nothing — one call, and
-   the drain happens inside the backplane's own SetBackplane(nil). Hub first, the order this test drives, the
-   hub takes the reference, drains, closes it, and the hook then closes a backplane that is already closed.
-   Two closers, one duty, and the race deciding where the publishes in flight were waited for. */
-func TestServerSentEventHubShutdown_ASecondCloserBesideItClosesAnAlreadyClosedBackplane(t *testing.T) {
-    hub := melodyhttp.NewServerSentEventHub()
-    backplane := &countingBackplane{hub: hub}
-    hub.SetBackplane(backplane)
+/* without an archive the archive's storage is still published, carrying nothing — the generated wiring fills
+   the archive repository by type — and it does not reach for the archive's handle, which is not registered */
+func TestRegisterArchiveStorageService_PublishesAHandlelessStorageWithoutAnArchive(t *testing.T) {
+    containerInstance := melodycontainer.NewContainer()
 
-    hub.Shutdown()
+    moduleInstance := &Module{}
+    moduleInstance.registerArchiveStorageService(containerRegistrar{Container: containerInstance})
 
-    /* the shape of the hook this example used to register beside hub.Shutdown */
-    _ = backplane.Close()
+    storage, storageErr := melodycontainer.FromResolver[*persistence.ArchiveStorage](containerInstance, persistence.ServiceArchiveStorage)
+    if nil != storageErr {
+        t.Fatalf("resolve the archive storage: %v", storageErr)
+    }
 
-    if 2 != backplane.closes {
-        t.Fatalf("expected the second closer to close an already-closed backplane, got %d calls", backplane.closes)
+    if true == storage.IsPersistent() {
+        t.Fatal("expected an archive storage without a handle when no archive is wired")
     }
 }

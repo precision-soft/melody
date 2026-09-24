@@ -16,6 +16,7 @@ import (
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodyexception "github.com/precision-soft/melody/v3/exception"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
+    melodyeventcontract "github.com/precision-soft/melody/v3/event/contract"
     melodylogging "github.com/precision-soft/melody/v3/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     melodyruntime "github.com/precision-soft/melody/v3/runtime"
@@ -464,5 +465,60 @@ func TestCachedCurrencyIsRow_ComparesEveryFieldOfTheEntity(t *testing.T) {
         if true == cachedListCarriesRow([]*entity.Currency{&changed}, row) {
             t.Errorf("a list whose entry's %s differs from the row read as carrying the row", rowType.Field(fieldIndex).Name)
         }
+    }
+}
+
+/* quoteBeforeRenameRepository lands a refresh's quote between the rename's read and its write, the window the
+   rename had to survive */
+type quoteBeforeRenameRepository struct {
+    repository.CurrencyRepository
+    quote entity.RateQuote
+}
+
+func (instance *quoteBeforeRenameRepository) Update(ctx context.Context, currency *entity.Currency) (bool, error) {
+    if _, quoteErr := instance.CurrencyRepository.UpdateQuote(ctx, currency.Id, instance.quote); nil != quoteErr {
+        return false, quoteErr
+    }
+
+    return instance.CurrencyRepository.Update(ctx, currency)
+}
+
+/* the rename writes the code and the name alone, so a refresh landing between its read and its write keeps
+   its quote in the row — and the currency the door answers and publishes is that row, read back: built from
+   the copy read before the write, it carried the quote the refresh had just replaced to the caller and to
+   every listener */
+func TestCurrencyServiceUpdate_AnswersAndPublishesTheRowAsWrittenAfterAConcurrentQuote(t *testing.T) {
+    currencyService, dispatcher, runtimeInstance := currencyServiceUnderTest(t)
+
+    later := currencyQuoteInstant.Add(time.Hour)
+    currencyService.currencyRepository = &quoteBeforeRenameRepository{
+        CurrencyRepository: currencyService.currencyRepository,
+        quote:              entity.NewRateQuote(9.9, later, later),
+    }
+
+    var published *entity.Currency
+    dispatcher.dispatcher.AddListener(
+        event.CurrencyUpdatedEventName,
+        func(listenerRuntime melodyruntimecontract.Runtime, eventValue melodyeventcontract.Event) error {
+            if updatedEvent, isUpdated := eventValue.Payload().(*event.CurrencyUpdatedEvent); true == isUpdated {
+                published = updatedEvent.Currency()
+            }
+
+            return nil
+        },
+        0,
+    )
+
+    renamed, found, err := currencyService.Update(runtimeInstance, "cur-usd", "USD", "Dollar")
+    if nil != err || false == found {
+        t.Fatalf("the rename answered %v, %v", found, err)
+    }
+
+    if "Dollar" != renamed.Name || 9.9 != renamed.Rate || false == renamed.RateAsOf.Equal(later) {
+        t.Fatalf("expected the renamed row at the refresh's quote, got %s at %v, %s", renamed.Name, renamed.Rate, renamed.RateAsOf)
+    }
+
+    if nil == published || "Dollar" != published.Name || 9.9 != published.Rate {
+        t.Fatalf("expected the published currency to be the row as written, got %+v", published)
     }
 }

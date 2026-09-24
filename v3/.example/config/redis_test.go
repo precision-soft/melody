@@ -3,6 +3,7 @@ package config
 import (
     "strings"
     "testing"
+    "time"
 
     examplecache "github.com/precision-soft/melody/v3/.example/cache"
 )
@@ -17,5 +18,14 @@ func TestCacheKeyPrefix_CarriesTheLayoutTokenInsideTheNamespace(t *testing.T) {
 
     if redisCacheKeyPrefixRoot+examplecache.LayoutToken()+":" != prefix {
         t.Fatalf("expected the layout token between the namespace and the key, got %q", prefix)
+    }
+}
+
+/* the write allowance is thirty catalogue writes a minute per address: a person editing the nomenclature
+   never meets it and a script does. The limiter it is handed to is redis's and exposes neither number, so the
+   two constants are what is pinned; the call site reads them. */
+func TestCatalogWriteThrottle_AllowsThirtyWritesAMinute(t *testing.T) {
+    if 30 != catalogWriteAllowance || time.Minute != catalogWriteWindow {
+        t.Fatalf("expected thirty writes a minute, got %d per %s", catalogWriteAllowance, catalogWriteWindow)
     }
 }

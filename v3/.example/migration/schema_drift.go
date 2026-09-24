@@ -78,9 +78,24 @@ func splitAtDepthOne(body string) []string {
     depth := 0
     itemStart := 0
     quote := rune(0)
+    escaped := false
 
     for index, character := range body {
         if 0 != quote {
+            /* inside a string literal mysql reads a backslash as escaping the character after it, so an escaped
+               quote does not close the literal; inside a backquoted identifier a backslash is itself */
+            if true == escaped {
+                escaped = false
+
+                continue
+            }
+
+            if '\\' == character && '`' != quote {
+                escaped = true
+
+                continue
+            }
+
             if character == quote {
                 quote = 0
             }
@@ -223,18 +238,23 @@ func driftOf(table expectedTable, liveColumnNameList []string) tableDrift {
     return drift
 }
 
-/* liveColumnNameListOf reads the columns a table carries from the information schema of the database the handle is
-   connected to: mysql names that database DATABASE(), postgres names the schema it resolves unqualified tables in
-   current_schema(). */
-func liveColumnNameListOf(ctx context.Context, database *bun.DB, tableName string) ([]string, error) {
-    scope := "DATABASE()"
+/* informationSchemaScopeOf names, in the handle's own dialect, the schema the information schema is read in: the
+   database the handle is connected to — mysql names it DATABASE(), postgres names the schema it resolves
+   unqualified tables in current_schema(). */
+func informationSchemaScopeOf(database *bun.DB) string {
     if dialect.PG == database.Dialect().Name() {
-        scope = "current_schema()"
+        return "current_schema()"
     }
 
+    return "DATABASE()"
+}
+
+/* liveColumnNameListOf reads the columns a table carries from the information schema of the database the handle is
+   connected to. */
+func liveColumnNameListOf(ctx context.Context, database *bun.DB, tableName string) ([]string, error) {
     rows, queryErr := database.QueryContext(
         ctx,
-        "SELECT column_name FROM information_schema.columns WHERE table_schema = "+scope+" AND table_name = ?",
+        "SELECT column_name FROM information_schema.columns WHERE table_schema = "+informationSchemaScopeOf(database)+" AND table_name = ?",
         tableName,
     )
     if nil != queryErr {

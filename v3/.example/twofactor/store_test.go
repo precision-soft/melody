@@ -1,11 +1,15 @@
 package twofactor
 
 import (
+    "context"
     "strings"
     "testing"
     "time"
 
     melodyencrypt "github.com/precision-soft/melody/integrations/bunorm/v3/encrypt"
+    melodycontainer "github.com/precision-soft/melody/v3/container"
+    melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v3/runtime"
 )
 
 /* the write is read as the dialect renders it: what has to be pinned is the clause that decides what a
@@ -64,5 +68,32 @@ func TestEnrollmentDeleteIsKeyedOnTheAccountIdentifierAlone(t *testing.T) {
 
     if false == strings.HasPrefix(rendered, "DELETE FROM `melody_example_v3_two_factor`") || false == strings.Contains(rendered, "WHERE (user_identifier = 'user-4')") {
         t.Fatalf("expected the enrollment of user-4 alone to be deleted, got %q", rendered)
+    }
+}
+
+/* the door resolves the store the container publishes under its one name, and answers a store that is not
+   registered — an environment without a database — as a refusal rather than as a nil the doors would reach */
+func TestStoreFromRuntime_ResolvesTheRegisteredStoreAndRefusesAnAbsentOne(t *testing.T) {
+    published := NewStore(nil)
+
+    containerInstance := melodycontainer.NewContainer()
+    containerInstance.MustRegister(
+        ServiceStore,
+        func(resolver melodycontainercontract.Resolver) (*Store, error) {
+            return published, nil
+        },
+    )
+
+    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    store, storeErr := StoreFromRuntime(runtimeInstance)
+    if nil != storeErr || published != store {
+        t.Fatalf("expected the published store, got %p, %v", store, storeErr)
+    }
+
+    emptyContainer := melodycontainer.NewContainer()
+    emptyRuntime := melodyruntime.New(context.Background(), emptyContainer.NewScope(), emptyContainer)
+    store, storeErr = StoreFromRuntime(emptyRuntime)
+    if nil == storeErr || nil != store {
+        t.Fatalf("expected an absent store to be refused, got %p, %v", store, storeErr)
     }
 }

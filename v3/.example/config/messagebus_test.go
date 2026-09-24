@@ -1,11 +1,19 @@
 package config
 
 import (
+    "context"
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v3/.example/message"
+    "github.com/precision-soft/melody/v3/.example/subscriber"
     melodyconfig "github.com/precision-soft/melody/v3/config"
+    melodycontainer "github.com/precision-soft/melody/v3/container"
+    melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
+    melodyhttp "github.com/precision-soft/melody/v3/http"
     melodymessagebus "github.com/precision-soft/melody/v3/messagebus"
+    melodymessagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
+    melodyruntime "github.com/precision-soft/melody/v3/runtime"
 )
 
 func moduleWithEnvironment(t *testing.T, values map[string]string) *Module {
@@ -69,5 +77,70 @@ func TestBuildMessageBusTransport_FallsBackToTheInProcessTransportWithoutADsn(t 
 
     if _, isInMemory := transport.(*melodymessagebus.InMemoryTransport); false == isInMemory {
         t.Fatalf("expected the in-process transport without a dsn, got %T", transport)
+    }
+}
+
+/* the notification handler RESOLVES the hub through the runtime at each message: the hub the container
+   publishes is the one that broadcasts, not the one the composition root held when the bus was built — a
+   handler that captured it left the hub's provider, its logger swap and its teardown edge unrun. The module's
+   own hub and the registered one are two hubs here, so a capture broadcasts where nobody listens. */
+func TestBuildMessageBus_TheNotificationHandlerResolvesTheHubAtEachMessage(t *testing.T) {
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
+    moduleInstance.buildServerSentEvent()
+    moduleInstance.buildMessageBus()
+
+    registeredHub := melodyhttp.NewServerSentEventHub()
+    t.Cleanup(registeredHub.Shutdown)
+
+    containerInstance := melodycontainer.NewContainer()
+    containerInstance.MustRegister(
+        subscriber.ServiceCatalogNotificationHub,
+        func(resolver melodycontainercontract.Resolver) (*melodyhttp.ServerSentEventHub, error) {
+            return registeredHub, nil
+        },
+    )
+
+    listener := registeredHub.Subscribe("catalog", 1)
+    capturedListener := moduleInstance.serverSentEventHub.Subscribe("catalog", 1)
+
+    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    if _, dispatchErr := moduleInstance.messageBusDispatch.Dispatch(runtimeInstance, message.Notification{Topic: "catalog", Text: "changed"}); nil != dispatchErr {
+        t.Fatalf("dispatch the notification: %v", dispatchErr)
+    }
+
+    select {
+    case received := <-listener.Events():
+        if "notification" != received.Event || "changed" != received.Data {
+            t.Fatalf("expected the notification event, got %+v", received)
+        }
+    default:
+        t.Fatal("expected the hub the container publishes to broadcast the notification")
+    }
+
+    select {
+    case received := <-capturedListener.Events():
+        t.Fatalf("expected the module's own hub to broadcast nothing, got %+v", received)
+    default:
+    }
+}
+
+/* the dispatch bus claims the Bus contract on the type index and the consume bus is asked for by name only:
+   both are the same contract, and a second registration by type is refused by the container */
+func TestRegisterMessageBusServices_TheDispatchBusOwnsTheTypeAndTheConsumeBusIsByName(t *testing.T) {
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
+    moduleInstance.buildServerSentEvent()
+    moduleInstance.buildMessageBus()
+
+    containerInstance := melodycontainer.NewContainer()
+    moduleInstance.registerMessageBusServices(containerRegistrar{Container: containerInstance})
+
+    byType, byTypeErr := melodycontainer.FromResolverByType[melodymessagebuscontract.Bus](containerInstance)
+    if nil != byTypeErr || moduleInstance.messageBusDispatch != byType {
+        t.Fatalf("expected the dispatch bus on the type index, got %v, %v", byType, byTypeErr)
+    }
+
+    consume, consumeErr := melodycontainer.FromResolver[melodymessagebuscontract.Bus](containerInstance, melodymessagebus.ServiceConsumeBus)
+    if nil != consumeErr || moduleInstance.messageBusConsume != consume {
+        t.Fatalf("expected the consume bus by name, got %v, %v", consume, consumeErr)
     }
 }

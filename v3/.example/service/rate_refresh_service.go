@@ -171,7 +171,8 @@ func (instance *RateRefreshService) Refresh(runtimeInstance melodyruntimecontrac
     /* the reading is written with its instant in both frames: the provider's stamp as it came, which names the
        reading, and the same instant moved onto this clock, on which its order against the stored reading is
        judged — so a provider whose clock was set back between two readings has the later one written, while a
-       replay, whose stamp is old under a clock that answers now, is still older here */
+       replay whose stamp is old under a Date that answers now is older here; one that kept its Date, or carries
+       none, is admitted within the bound below (see providerClockReading) */
     quoteAsOf := reading.providerClock.onThisClock(document.AsOf)
 
     currencies, listErr := instance.currencyService.List()

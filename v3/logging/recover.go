@@ -104,10 +104,26 @@ func recoveredErrorMessage(value error) (text string) {
             return
         }
 
-        text = fmt.Sprintf("error message panicked: %v", recoveredValue)
+        text = "error message panicked: " + describeRecoveredValue(recoveredValue)
     }()
 
     return value.Error()
+}
+
+/* describeRecoveredValue names a recovered panic value. The naming runs the value's own Error or String, and
+   fmt contains one panic there but re-raises a second one raised while it prints the first; the naming runs
+   inside the defers that report a failure, where that second panic went past the recovery reporting the first.
+   A value whose naming panics is named by its type, which calls none of its methods. */
+func describeRecoveredValue(value any) (text string) {
+    defer func() {
+        if nil == recover() {
+            return
+        }
+
+        text = fmt.Sprintf("a value of type %T whose rendering panicked", value)
+    }()
+
+    return fmt.Sprintf("%v", value)
 }
 
 /* newRecoveredPanicError wraps a panic payload that carries no usable error together with the stack of the panic still in flight: the deferred handler runs with the panicking frames intact, and this is the only moment the origin of a runtime panic can be captured. */

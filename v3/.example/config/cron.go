@@ -8,8 +8,11 @@ import (
 )
 
 func newCronConfiguration(kernelInstance melodykernelcontract.Kernel) *melodycron.Configuration {
-    productUser := kernelInstance.Config().Get("app.cron.product_user").String()
+    return cronConfiguration(kernelInstance.Config().Get("app.cron.product_user").String())
+}
 
+/* cronConfiguration is the schedule itself, under the account the catalogue commands run as. */
+func cronConfiguration(productUser string) *melodycron.Configuration {
     return melodycron.NewConfiguration().
         /* the reading is what a request would otherwise take on a cold cache, so it is taken on the hour and left warm for whoever asks next */
         Schedule(melodycron.CommandName(cli.NewCatalogReportRefreshCommand), &melodycron.EntryConfig{

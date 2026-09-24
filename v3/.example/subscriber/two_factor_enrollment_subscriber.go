@@ -12,11 +12,11 @@ import (
 
    It listens AHEAD of the cache listener on the same event. The dispatcher ends a dispatch at the first listener that fails, so at the priority the cache listener runs at, a redis outage at the moment of the deletion — the cache listener refusing its first delete — meant the row was deleted, the door answered 500, the event was never published again for that identifier, and this listener never ran: the enrollment stayed for the next holder of the identifier, which is the very leak it exists to close. The release runs first, and the cache's failure, which is best-effort, comes after it; the schema releases the row as well, through the cascade on the account, so a listener that never ran cannot leave one behind either. */
 type TwoFactorEnrollmentSubscriber struct {
-    store *twofactor.Store
+    storeSource twofactor.StoreSource
 }
 
-func NewTwoFactorEnrollmentSubscriber(store *twofactor.Store) *TwoFactorEnrollmentSubscriber {
-    return &TwoFactorEnrollmentSubscriber{store: store}
+func NewTwoFactorEnrollmentSubscriber(storeSource twofactor.StoreSource) *TwoFactorEnrollmentSubscriber {
+    return &TwoFactorEnrollmentSubscriber{storeSource: storeSource}
 }
 
 func (instance *TwoFactorEnrollmentSubscriber) SubscribedEvents() map[string][]melodyeventcontract.SubscribedEvent {
@@ -34,7 +34,15 @@ func (instance *TwoFactorEnrollmentSubscriber) onUserDeleted() melodyeventcontra
             return nil
         }
 
-        _, deleteErr := instance.store.DeleteEnrollment(runtimeInstance, payloadInstance.UserId())
+        /* a store that cannot be resolved fails the deletion rather than letting it pass with the enrollment
+           standing: the refusal reaches the door that deleted the account, which answers it, and the cascade on
+           the account releases the row when the database takes the deletion at all */
+        store, storeErr := instance.storeSource(runtimeInstance)
+        if nil != storeErr {
+            return storeErr
+        }
+
+        _, deleteErr := store.DeleteEnrollment(runtimeInstance, payloadInstance.UserId())
 
         return deleteErr
     }

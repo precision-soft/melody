@@ -87,3 +87,53 @@ func TestSchemaFingerprintOf_MovesWithEveryStatement(t *testing.T) {
         t.Error("the catalogue's fingerprint does not cover the username key it adds after its tables")
     }
 }
+
+/* tablesAnswering answers the read of which of its tables a set finds with the ones given */
+func tablesAnswering(presentList ...string) func(query string) ([]string, [][]driver.Value, error) {
+    return func(query string) ([]string, [][]driver.Value, error) {
+        if false == strings.Contains(query, "information_schema.tables") {
+            return nil, nil, nil
+        }
+
+        rows := make([][]driver.Value, 0, len(presentList))
+        for _, tableName := range presentList {
+            rows = append(rows, []driver.Value{tableName})
+        }
+
+        return []string{"table_name"}, rows, nil
+    }
+}
+
+/* a set runs only on a volume that does not record it, and on one that already held its tables every CREATE ...
+   IF NOT EXISTS was a no-op after which the set wrote this code's fingerprint over tables it did not build — the
+   fingerprint then vouched for statements that never ran. The set refuses before it writes anything, naming the
+   tables it found and the reset; asked of the catalogue's own database, in its own dialect */
+func TestUpSchemaRefusesToAdoptTablesItDidNotBuild(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = tablesAnswering("melody_example_v3_user", "melody_example_v3_currency")
+
+    upErr := upSchema(context.Background(), database)
+    if nil == upErr || false == strings.Contains(upErr.Error(), "the catalogue set is not recorded on this volume but finds its tables already there (melody_example_v3_currency, melody_example_v3_user)") || false == strings.Contains(upErr.Error(), schemaResetCommand) {
+        t.Fatalf("expected the set to refuse the tables it found by name with the reset, got %v", upErr)
+    }
+
+    recordedList := recorder.recordedQueries()
+    if 1 != len(recordedList) || false == strings.Contains(recordedList[0], "table_schema = DATABASE()") {
+        t.Fatalf("expected the one read of the catalogue's database and nothing written, got %q", recordedList)
+    }
+}
+
+/* the archive set refuses the same way, before it writes anything */
+func TestUpArchiveSchemaRefusesToAdoptTablesItDidNotBuild(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = tablesAnswering(CatalogReadingTableName)
+
+    upErr := upArchiveSchema(context.Background(), database)
+    if nil == upErr || false == strings.Contains(upErr.Error(), "the archive set is not recorded on this volume but finds its tables already there ("+CatalogReadingTableName+")") {
+        t.Fatalf("expected the archive set to refuse the table it found by name, got %v", upErr)
+    }
+
+    if 1 != len(recorder.recordedQueries()) {
+        t.Fatalf("expected nothing written after the refusal, got %q", recorder.recordedQueries())
+    }
+}

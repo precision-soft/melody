@@ -1,6 +1,7 @@
 package config
 
 import (
+    "fmt"
     nethttp "net/http"
     "net/http/httptest"
     "strings"
@@ -8,7 +9,6 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v3/.example/event"
-    "github.com/precision-soft/melody/v3/.example/twofactor"
     melodyclock "github.com/precision-soft/melody/v3/clock"
     melodyevent "github.com/precision-soft/melody/v3/event"
     melodyhttp "github.com/precision-soft/melody/v3/http"
@@ -86,8 +86,8 @@ func TestRequestBudgetConfig_AnEmptyListChargesThePeer(t *testing.T) {
     }
 }
 
-/* the release of a second factor with its account is a subscriber the composition root INSTALLS: its own tests pin what it does once installed, and nothing pinned that it is — the wiring line could go and every test stayed green. Read off a real dispatcher: with a store, one more owner on the deletion event, and it is this one. */
-func TestRegisterSubscribers_InstallsTheTwoFactorEnrollmentReleaseWhenThereIsAStore(t *testing.T) {
+/* the release of a second factor with its account is a subscriber the composition root INSTALLS: its own tests pin what it does once installed, and nothing pinned that it is — the wiring line could go and every test stayed green. Read off a real dispatcher: with a database, one more owner on the deletion event, and it is this one. */
+func TestRegisterSubscribers_InstallsTheTwoFactorEnrollmentReleaseWhenThereIsADatabase(t *testing.T) {
     ownersOnDeletion := func(moduleInstance *Module) []string {
         eventDispatcher := melodyevent.NewEventDispatcher(melodyclock.NewSystemClock())
         moduleInstance.registerSubscribers(eventDispatcher)
@@ -109,11 +109,11 @@ func TestRegisterSubscribers_InstallsTheTwoFactorEnrollmentReleaseWhenThereIsASt
     without := ownersOnDeletion(moduleWithEnvironment(t, map[string]string{}))
 
     withStore := moduleWithEnvironment(t, map[string]string{})
-    withStore.twoFactorStore = twofactor.NewStore(newUndialedDatabase())
+    withStore.database = newUndialedDatabase()
     with := ownersOnDeletion(withStore)
 
     if len(without)+1 != len(with) {
-        t.Fatalf("expected the store to add one owner on %s, got %v without and %v with", event.UserDeletedEventName, without, with)
+        t.Fatalf("expected the database to add one owner on %s, got %v without and %v with", event.UserDeletedEventName, without, with)
     }
 
     found := false
@@ -131,7 +131,7 @@ func TestRegisterSubscribers_InstallsTheTwoFactorEnrollmentReleaseWhenThereIsASt
 /* the composition root registers the cache subscriber before the release, and the dispatcher ends a dispatch at the first listener that fails: registered at equal priority, the release ran behind a cache listener whose backend was gone and never ran at all — the row stayed for the next holder of the identifier. Read off the dispatcher the root fills: on the deletion event the release outranks the cache subscriber's listener, whatever order they were registered in. */
 func TestRegisterSubscribers_TheEnrollmentReleaseOutranksTheCacheClearOnUserDeleted(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
-    moduleInstance.twoFactorStore = twofactor.NewStore(newUndialedDatabase())
+    moduleInstance.database = newUndialedDatabase()
 
     eventDispatcher := melodyevent.NewEventDispatcher(melodyclock.NewSystemClock())
     moduleInstance.registerSubscribers(eventDispatcher)
@@ -158,5 +158,64 @@ func TestRegisterSubscribers_TheEnrollmentReleaseOutranksTheCacheClearOnUserDele
     }
     if releasePriority <= cachePriority {
         t.Fatalf("expected the release (%d) to outrank the cache clear (%d) on %s", releasePriority, cachePriority, event.UserDeletedEventName)
+    }
+}
+
+/* the budget is the switch's number of requests per HOUR: the limiter admits exactly that many from one
+   client inside the window and refuses the next */
+func TestRequestBudgetConfig_AdmitsTheBudgetPerHourAndRefusesTheNext(t *testing.T) {
+    if time.Hour != requestBudgetWindow {
+        t.Fatalf("expected the budget counted per hour, got %s", requestBudgetWindow)
+    }
+
+    limiter := requestBudgetConfig(3, newTrustedProxyResolver("", time.Now)).Limiter()
+    for request := 1; request <= 3; request++ {
+        if false == limiter.Allow("203.0.113.7") {
+            t.Fatalf("expected request %d of a budget of 3 admitted", request)
+        }
+    }
+
+    if true == limiter.Allow("203.0.113.7") {
+        t.Fatal("expected the fourth request of a budget of 3 refused")
+    }
+}
+
+/* the switch arms the door on a positive integer, spaces around it tolerated, and refuses any other value by
+   name rather than reading it as unset: swallowed, a typo disarmed the global budget with no signal anywhere */
+func TestRegisterRateLimitRequestListener_ArmsOnAPositiveBudgetAndRefusesAnyOtherValueByName(t *testing.T) {
+    kernelRequestListeners := func(moduleInstance *Module) int {
+        eventDispatcher := melodyevent.NewEventDispatcher(melodyclock.NewSystemClock())
+        moduleInstance.registerRateLimitRequestListener(eventDispatcher)
+
+        count := 0
+        for _, registered := range eventDispatcher.RegisteredEvents() {
+            count = count + len(registered.Listeners)
+        }
+
+        return count
+    }
+
+    if 0 != kernelRequestListeners(moduleWithEnvironment(t, map[string]string{})) {
+        t.Fatal("expected the door unwired without the switch")
+    }
+
+    if 1 != kernelRequestListeners(moduleWithEnvironment(t, map[string]string{environmentKeyRequestBudgetPerHour: " 120 "})) {
+        t.Fatal("expected the door armed on a positive budget")
+    }
+
+    for _, value := range []string{"abc", "0", "-5", "1.5"} {
+        refusal := func() (recovered any) {
+            defer func() {
+                recovered = recover()
+            }()
+
+            kernelRequestListeners(moduleWithEnvironment(t, map[string]string{environmentKeyRequestBudgetPerHour: value}))
+
+            return nil
+        }()
+
+        if nil == refusal || false == strings.Contains(fmt.Sprint(refusal), "the request budget switch does not hold a positive integer") {
+            t.Fatalf("expected %q refused by name, got %v", value, refusal)
+        }
     }
 }

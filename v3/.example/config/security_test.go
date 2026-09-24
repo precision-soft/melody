@@ -9,7 +9,7 @@ import (
     melodysecuritycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
-/* compiledSecurityModule builds the module up to what RegisterSecurity reads — the internal-auth secrets, the token validators, the impersonation resolver and the two-factor store — and compiles the configuration it registers, so a test asks the rule table the same question the access-control listener asks. */
+/* compiledSecurityModule builds the module up to what RegisterSecurity reads — the internal-auth secrets, the token validators, and the impersonation resolver — and compiles the configuration it registers, so a test asks the rule table the same question the access-control listener asks. */
 func compiledSecurityModule(t *testing.T) *melodysecurityconfig.Builder {
     t.Helper()
 
@@ -17,7 +17,6 @@ func compiledSecurityModule(t *testing.T) *melodysecurityconfig.Builder {
     moduleInstance.buildInternalAuth()
     moduleInstance.buildTokenAuth()
     moduleInstance.buildImpersonation()
-    moduleInstance.buildTwoFactor()
 
     builder := melodysecurityconfig.NewBuilder()
     moduleInstance.RegisterSecurity(builder)

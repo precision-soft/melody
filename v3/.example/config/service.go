@@ -38,23 +38,7 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
     instance.registerRatesHttpClientService(registrar)
     instance.registerReportExportHttpClientService(registrar)
 
-    /* the hub is registered so the event listeners can reach it. They follow every change to the nomenclature and are where the notification belongs, beside the cache invalidation and the journal entry — but a listener is handed a runtime rather than this module, and the container is what the two have in common. */
-    serverSentEventHub := instance.serverSentEventHub
-
-    registrar.RegisterService(
-        subscriber.ServiceCatalogNotificationHub,
-        func(resolver melodycontainercontract.Resolver) (*melodyhttp.ServerSentEventHub, error) {
-            /* the hub files its own failures — a backplane whose publish fails, a subscriber whose buffer overflows — and without a journal those are counted into an atomic nobody reads: a redis outage would silence cross-node delivery with no record anywhere */
-            logger, loggerErr := melodylogging.LoggerFromResolver(resolver)
-            if nil != loggerErr {
-                return nil, loggerErr
-            }
-
-            serverSentEventHub.SetLogger(logger)
-
-            return serverSentEventHub, nil
-        },
-    )
+    instance.registerServerSentEventHubService(registrar)
 
     if nil == instance.redisClient {
         opaqueTokenStore := instance.opaqueTokenStore
@@ -74,21 +58,7 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
         },
     )
 
-    registrar.RegisterService(
-        melodymessagebus.ServiceBus,
-        func(resolver melodycontainercontract.Resolver) (melodymessagebuscontract.Bus, error) {
-            return instance.messageBusDispatch, nil
-        },
-    )
-
-    registrar.RegisterService(
-        melodymessagebus.ServiceConsumeBus,
-        func(resolver melodycontainercontract.Resolver) (melodymessagebuscontract.Bus, error) {
-            return instance.messageBusConsume, nil
-        },
-        /* the dispatch bus already claims the contract.Bus type; the consume bus is resolved by name only, so it must not also register under the shared type. */
-        melodycontainer.WithoutTypeRegistration(),
-    )
+    instance.registerMessageBusServices(registrar)
 
     melodymessagebus.RegisterTransports(
         registrar,
@@ -129,12 +99,53 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
     instance.registerLockerService(registrar)
     instance.registerArchiveLockerService(registrar)
     instance.registerDatabaseServices(registrar)
+    instance.registerTwoFactorStoreService(registrar)
 
     /* the repositories, the domain services and the reporting services are not registered here: melody:wiring:generate scans the packages declared in NewWiringBindSet, resolves every constructor argument that is a service from the container and every scalar from the parameter it is bound to, and renders the registrations below. Adding one is a matter of writing the constructor and regenerating. Regenerate with `go run . melody:wiring:generate --package generated --function RegisterGeneratedServices --out generated/wiring_gen.go`. */
     generated.RegisterGeneratedServices(registrar)
 }
 
 var _ melodyapplicationcontract.ServiceModule = (*Module)(nil)
+
+/* registerServerSentEventHubService registers the hub so the event listeners can reach it. They follow every change to the nomenclature and are where the notification belongs, beside the cache invalidation and the journal entry — but a listener is handed a runtime rather than this module, and the container is what the two have in common. */
+func (instance *Module) registerServerSentEventHubService(registrar melodyapplicationcontract.ServiceRegistrar) {
+    serverSentEventHub := instance.serverSentEventHub
+
+    registrar.RegisterService(
+        subscriber.ServiceCatalogNotificationHub,
+        func(resolver melodycontainercontract.Resolver) (*melodyhttp.ServerSentEventHub, error) {
+            /* the hub files its own failures — a backplane whose publish fails, a subscriber whose buffer overflows — and without a journal those are counted into an atomic nobody reads: a redis outage would silence cross-node delivery with no record anywhere */
+            logger, loggerErr := melodylogging.LoggerFromResolver(resolver)
+            if nil != loggerErr {
+                return nil, loggerErr
+            }
+
+            serverSentEventHub.SetLogger(logger)
+
+            return serverSentEventHub, nil
+        },
+    )
+}
+
+/* registerMessageBusServices publishes the two buses: the dispatch bus, which sends a routed message to its
+   transport and handles the rest in process, and the consume bus the worker hands what it received. */
+func (instance *Module) registerMessageBusServices(registrar melodyapplicationcontract.ServiceRegistrar) {
+    registrar.RegisterService(
+        melodymessagebus.ServiceBus,
+        func(resolver melodycontainercontract.Resolver) (melodymessagebuscontract.Bus, error) {
+            return instance.messageBusDispatch, nil
+        },
+    )
+
+    registrar.RegisterService(
+        melodymessagebus.ServiceConsumeBus,
+        func(resolver melodycontainercontract.Resolver) (melodymessagebuscontract.Bus, error) {
+            return instance.messageBusConsume, nil
+        },
+        /* the dispatch bus already claims the contract.Bus type; the consume bus is resolved by name only, so it must not also register under the shared type. */
+        melodycontainer.WithoutTypeRegistration(),
+    )
+}
 
 /* registerCatalogStorageService publishes the handle every repository is built on. It is registered whether or not there is a connection behind it, because the generated wiring fills the repository constructors by resolving their arguments from the container by type: a handle that were absent without a database would take the whole nomenclature with it.
 

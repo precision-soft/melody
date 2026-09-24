@@ -9,7 +9,6 @@ import (
     melodybunorm "github.com/precision-soft/melody/integrations/bunorm/v3"
     melodyencrypt "github.com/precision-soft/melody/integrations/bunorm/v3/encrypt"
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
-    "github.com/precision-soft/melody/v3/.example/twofactor"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     melodyconfigcontract "github.com/precision-soft/melody/v3/config/contract"
     melodyhttp "github.com/precision-soft/melody/v3/http"
@@ -40,8 +39,6 @@ type Module struct {
     hmacApps    melodysecurity.HmacAppRegistry
 
     impersonatedUsers melodysecuritycontract.ImpersonatedUserResolver
-
-    twoFactorStore *twofactor.Store
 
     translator melodytranslationcontract.Translator
 
@@ -102,7 +99,6 @@ func NewExampleModule(ctx context.Context, configuration melodyconfigcontract.Co
     moduleInstance.buildTokenAuth()
     moduleInstance.buildInternalAuth()
     moduleInstance.buildImpersonation()
-    moduleInstance.buildTwoFactor()
     moduleInstance.buildTranslation()
     moduleInstance.buildOpenApi()
     moduleInstance.buildMailer()

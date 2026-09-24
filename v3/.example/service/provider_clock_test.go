@@ -69,9 +69,10 @@ func TestReadProviderClock_AddsTheAgeOfACachedAnswer(t *testing.T) {
     }
 }
 
-/* an Age that is not a non-negative integer is ignored, as the caching rules say */
+/* an Age that is not delta-seconds — digits and nothing else — is ignored, as the caching rules say; a leading
+   sign is not a digit, so "+5" is ignored too rather than read as five seconds */
 func TestReadProviderClock_IgnoresAnAgeThatIsNotANonNegativeInteger(t *testing.T) {
-    for _, age := range []string{"-5", "soon", "1.5"} {
+    for _, age := range []string{"-5", "soon", "1.5", "+5"} {
         reading := readProviderClock(providerClockHeaders("Tue, 08 Sep 2026 09:00:00 GMT", age), providerClockSentAt, providerClockSentAt)
 
         if false == reading.Measured || 0 != reading.Offset {
@@ -114,10 +115,12 @@ func TestReadProviderClock_AnAgeWidensTheResolutionToTwoSeconds(t *testing.T) {
     }
 }
 
-/* an Age above the largest a cache may send is no age any cache kept an answer for: the answer's clock is
-   unreadable, rather than moved by decades — or wrapped by an overflow — onto this one */
+/* an Age at the largest a cache may send or past it is no age any cache kept an answer for — 2^31 is what a cache
+   whose count overflowed is told to send, and a count past the integer it is read into is the same overflow:
+   the answer's clock is unreadable, one verdict for every length, rather than moved by decades — or wrapped,
+   or read as the Date alone — onto this one. The largest count below the ceiling is still an age. */
 func TestReadProviderClock_AnAgeAboveTheCeilingLeavesTheClockUnmeasured(t *testing.T) {
-    for _, age := range []string{"2147483649", "9999999999", "9223372036854775807"} {
+    for _, age := range []string{"2147483648", "2147483649", "9999999999", "9223372036854775807", "99999999999999999999"} {
         reading := readProviderClock(providerClockHeaders("Tue, 08 Sep 2026 09:00:00 GMT", age), providerClockSentAt, providerClockSentAt)
 
         if true == reading.Measured || 0 != reading.Offset || age != reading.Age {
@@ -125,9 +128,9 @@ func TestReadProviderClock_AnAgeAboveTheCeilingLeavesTheClockUnmeasured(t *testi
         }
     }
 
-    ceiling := readProviderClock(providerClockHeaders("Tue, 08 Sep 2026 09:00:00 GMT", "2147483648"), providerClockSentAt, providerClockSentAt)
-    if false == ceiling.Measured {
-        t.Errorf("expected the ceiling itself to be read as an age, got %+v", ceiling)
+    belowCeiling := readProviderClock(providerClockHeaders("Tue, 08 Sep 2026 09:00:00 GMT", "2147483647"), providerClockSentAt, providerClockSentAt)
+    if false == belowCeiling.Measured {
+        t.Errorf("expected the largest count below the ceiling to be read as an age, got %+v", belowCeiling)
     }
 }
 

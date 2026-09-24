@@ -6,6 +6,8 @@ import (
     "database/sql"
     "encoding/hex"
     "errors"
+    "sort"
+    "strings"
 
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
@@ -111,4 +113,72 @@ func shortFingerprint(fingerprint string) string {
     }
 
     return fingerprint[:12]
+}
+
+/* refuseAdoption refuses to apply a set over tables it did not build. The set runs on a volume only when the
+   volume does not record it, and its tables are created IF NOT EXISTS, so on a volume that already held them —
+   provisioned before the set, or whose record was lost — every CREATE was a no-op and the set then wrote THIS
+   code's fingerprint over tables built from anything: the fingerprint vouched for statements that never ran, and
+   a collation, a key or a constraint changed under the same column names passed the check that exists to see
+   it. A set that is not recorded finds none of its own tables, or refuses naming the ones it found and the one
+   door that brings the volume here. The migration lock serializes the processes applying a set, so a second
+   process finds the set recorded and never reaches this read. */
+func refuseAdoption(ctx context.Context, database *bun.DB, setName string, tableNameList []string) error {
+    placeholderList := make([]string, 0, len(tableNameList))
+    argumentList := make([]any, 0, len(tableNameList))
+    for _, tableName := range tableNameList {
+        placeholderList = append(placeholderList, "?")
+        argumentList = append(argumentList, tableName)
+    }
+
+    rows, queryErr := database.QueryContext(
+        ctx,
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = "+informationSchemaScopeOf(database)+" AND table_name IN ("+strings.Join(placeholderList, ", ")+")",
+        argumentList...,
+    )
+    if nil != queryErr {
+        return exception.NewError(
+            "migration: reading which of its tables the volume already holds did not complete on the "+setName+" set",
+            exceptioncontract.Context{"set": setName},
+            queryErr,
+        )
+    }
+    defer rows.Close()
+
+    presentList := []string{}
+    for rows.Next() {
+        tableName := ""
+        if scanErr := rows.Scan(&tableName); nil != scanErr {
+            return exception.NewError(
+                "migration: reading which of its tables the volume already holds did not complete on the "+setName+" set",
+                exceptioncontract.Context{"set": setName},
+                scanErr,
+            )
+        }
+
+        presentList = append(presentList, tableName)
+    }
+    if rowsErr := rows.Err(); nil != rowsErr {
+        return exception.NewError(
+            "migration: reading which of its tables the volume already holds did not complete on the "+setName+" set",
+            exceptioncontract.Context{"set": setName},
+            rowsErr,
+        )
+    }
+
+    if 0 == len(presentList) {
+        return nil
+    }
+
+    sort.Strings(presentList)
+
+    return exception.NewError(
+        "migration: the "+setName+" set is not recorded on this volume but finds its tables already there ("+strings.Join(presentList, ", ")+"); it does not adopt tables it did not build — run "+schemaResetCommand,
+        exceptioncontract.Context{
+            "set":          setName,
+            "presentTables": presentList,
+            "remedy":       schemaResetCommand,
+        },
+        nil,
+    )
 }

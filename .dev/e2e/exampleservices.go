@@ -38,6 +38,7 @@ var exampleProcessServiceInventory = map[string]processServiceClassification{
     "service-example-database-registry":                                             {typeName: "*bunorm.ManagerRegistry", category: processServiceConnection},
     "service-example-product-service":                                               {typeName: "*service.ProductService", category: processServiceStateless},
     "service-example-rate-refresh-service":                                          {typeName: "*service.RateRefreshService", category: processServiceStateless},
+    "service-example-two-factor-store":                                              {typeName: "*twofactor.Store", category: processServiceStateless},
     "service-example-user-service":                                                  {typeName: "*service.UserService", category: processServiceStateless},
     "service.application.process_role":                                              {typeName: "string", category: processServiceStateless},
     "service.cache":                                                                 {typeName: "*cache.Manager", category: processServiceStateless},

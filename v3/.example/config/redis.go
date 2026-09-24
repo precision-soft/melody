@@ -16,6 +16,9 @@ const (
 
     /* the allowance covers a person editing the nomenclature and stops a script: a burst of catalogue writes from one address is refused until the window rolls over. */
     catalogWriteAllowance = 30
+
+    /* the window the write allowance is counted over */
+    catalogWriteWindow = time.Minute
 )
 
 /* cacheKeyPrefix is the cache namespace with the layout token of the cached types inside it: the entities are gob-encoded under keys with no expiry, and gob decodes an older payload into a newer struct with the new field at zero, silently. A build reads only under the prefix of its own layout; the entries an older build left stand orphaned until example:db:reset clears the namespace, which the readme says. */
