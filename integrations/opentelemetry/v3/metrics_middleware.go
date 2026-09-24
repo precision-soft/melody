@@ -51,16 +51,7 @@ func NewMetricsMiddleware(meter metric.Meter) (httpcontract.Middleware, error) {
             defer func() {
                 statusCode := nethttp.StatusInternalServerError
                 if true == completed {
-                    statusCode = recorder.statusCode
-                    if true == recorder.hijacked {
-                        statusCode = nethttp.StatusSwitchingProtocols
-                    }
-                    if false == isNilResponse(response) {
-                        statusCode = response.StatusCode()
-                    }
-                    if nil != handlerErr {
-                        statusCode = statusCodeForError(handlerErr)
-                    }
+                    statusCode = completedStatusCode(handlerErr, response, recorder)
                 }
 
                 attributes := metric.WithAttributes(
@@ -84,6 +75,19 @@ func NewMetricsMiddleware(meter metric.Meter) (httpcontract.Middleware, error) {
 }
 
 /* statusCodeForError maps a handler error to the status the client will actually receive, the same mapping the kernel's exception listener makes: a deliberate sub-500 an HttpException carries is graphed at its own status rather than folded into the 5xx series, so a route whose normal contract is 404 does not read as 100% server errors on the per-route instruments. Anything that is not a sub-500 http exception is a server error. */
+/* completedStatusCode answers the status of a handler that returned, in the order the kernel answers it: the handler's error decides first, then the response it returned, and only a handler that returned neither is read off what it committed to the writer directly */
+func completedStatusCode(handlerErr error, response httpcontract.Response, recorder *statusRecordingResponseWriter) int {
+    if nil != handlerErr {
+        return statusCodeForError(handlerErr)
+    }
+
+    if false == isNilResponse(response) {
+        return response.StatusCode()
+    }
+
+    return recorder.observedStatusCode()
+}
+
 func statusCodeForError(handlerErr error) int {
     httpException := exception.AsHttpException(handlerErr)
     if nil != httpException && nethttp.StatusInternalServerError > httpException.StatusCode() {

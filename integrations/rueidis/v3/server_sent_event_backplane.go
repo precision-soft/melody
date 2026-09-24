@@ -61,11 +61,7 @@ func WithServerSentEventBackplaneReconnectConfig(reconnectConfig *ReconnectConfi
 /* WithServerSentEventBackplaneCallTimeout bounds one Publish round trip so a broadcasting request fails fast instead of hanging on an unresponsive store — the caller is typically an http handler fanning an event out to the other nodes, and its context carries no deadline. A non-positive timeout falls back to the default, following this package's zero-means-default convention, so a config-sourced unset value can never build an already-cancelled context that fails every publish. */
 func WithServerSentEventBackplaneCallTimeout(timeout time.Duration) ServerSentEventBackplaneOption {
     return func(backplane *ServerSentEventBackplane) {
-        if 0 >= timeout {
-            timeout = defaultServerSentEventBackplaneCallTimeout
-        }
-
-        backplane.callTimeout = timeout
+        backplane.callTimeout = resolvedCallTimeout(timeout, defaultServerSentEventBackplaneCallTimeout)
     }
 }
 

@@ -1405,3 +1405,28 @@ func TestIsNilInterface_AnswersTheNilInterfaceAndTheTypedNil(t *testing.T) {
         t.Fatalf("expected a live pointer to be read as present")
     }
 }
+
+func TestOpenWithRetry_AZeroAttemptBudgetTakesTheDefaultBudget(t *testing.T) {
+    logger := &capturingProviderLogger{}
+
+    provider := NewProvider(
+        WithTimeoutConfig(NewTimeoutConfig(time.Second, time.Second, time.Second)),
+        WithRetryConfig(NewRetryConfig(0, time.Millisecond, 2*time.Millisecond, 2.0)),
+    )
+
+    if _, openErr := provider.OpenContext(context.Background(), newTestParams("127.0.0.1", "1", "melody", "melody", "melody"), logger); nil == openErr {
+        t.Fatal("expected the open against a refused port to fail")
+    }
+
+    for _, entry := range logger.entries {
+        if "database connection failed after max retry attempts" == entry.message {
+            if DefaultRetryConfig().MaxAttempts != entry.context["maxAttempts"] || DefaultRetryConfig().MaxAttempts != entry.context["attempt"] {
+                t.Fatalf("expected the default budget of %d attempts spent, got %v", DefaultRetryConfig().MaxAttempts, entry.context)
+            }
+
+            return
+        }
+    }
+
+    t.Fatalf("expected the terminal record of a spent budget, got %v", logger.entries)
+}

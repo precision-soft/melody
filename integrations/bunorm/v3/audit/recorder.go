@@ -21,7 +21,7 @@ func isNilInterface(value any) bool {
 
     reflected := reflect.ValueOf(value)
     switch reflected.Kind() {
-    case reflect.Ptr, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func, reflect.Interface:
+    case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func, reflect.Interface:
         return reflected.IsNil()
     default:
         return false

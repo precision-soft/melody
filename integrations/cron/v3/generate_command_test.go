@@ -4310,3 +4310,26 @@ func TestRunLeavesADialectEmbeddingABuiltinAsItIsInsteadOfReplacingItWithTheBare
         t.Fatalf("expected no application line on a dialect the generator does not own, got: %s", content)
     }
 }
+
+/* the marker line is read with its surrounding whitespace trimmed, so a destination saved with CRLF line endings still proves itself this generator's; the tenth line is still inside the head and the eleventh is not */
+func TestFileCarriesOwnershipMarker_ReadsTheMarkerLineTrimmedUpToTheTenthLine(t *testing.T) {
+    tempDir := t.TempDir()
+
+    carriageReturn := filepath.Join(tempDir, "crlf")
+    if writeErr := os.WriteFile(carriageReturn, []byte("# GENERATED FILE\r\n"+CrontabOwnershipMarker+"  \r\n0 3 * * * job\r\n"), 0o644); nil != writeErr {
+        t.Fatalf("write crlf: %v", writeErr)
+    }
+
+    if carries, checkErr := fileCarriesOwnershipMarker(carriageReturn, CrontabOwnershipMarker); nil != checkErr || false == carries {
+        t.Fatalf("expected a CRLF destination to carry the marker, got %v, %v", carries, checkErr)
+    }
+
+    tenth := filepath.Join(tempDir, "tenth")
+    if writeErr := os.WriteFile(tenth, []byte(strings.Repeat("# filler line\n", ownershipMarkerLineLimit-1)+CrontabOwnershipMarker), 0o644); nil != writeErr {
+        t.Fatalf("write tenth: %v", writeErr)
+    }
+
+    if carries, checkErr := fileCarriesOwnershipMarker(tenth, CrontabOwnershipMarker); nil != checkErr || false == carries {
+        t.Fatalf("expected the marker on the tenth line, the last without a newline, to count, got %v, %v", carries, checkErr)
+    }
+}

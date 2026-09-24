@@ -247,3 +247,34 @@ func TestStatusCodeForError_MapsSubFiveHundredHttpExceptionsAndDefaultsToFiveHun
         t.Fatalf("expected a non-http error to be a server error")
     }
 }
+
+func TestCompletedStatusCode_TheErrorDecidesThenTheResponseThenTheWriter(t *testing.T) {
+    hijackedRecorder := &statusRecordingResponseWriter{statusCode: nethttp.StatusOK, hijacked: true}
+    writtenRecorder := &statusRecordingResponseWriter{statusCode: nethttp.StatusAccepted}
+
+    cases := map[string]struct {
+        handlerErr error
+        response   httpcontract.Response
+        recorder   *statusRecordingResponseWriter
+        expected   int
+    }{
+        "error over response and upgrade": {
+            handlerErr: exception.NewHttpException(nethttp.StatusNotFound, "not found"),
+            response:   &typedNilProneResponse{statusCode: nethttp.StatusCreated},
+            recorder:   hijackedRecorder,
+            expected:   nethttp.StatusNotFound,
+        },
+        "response over upgrade":     {response: &typedNilProneResponse{statusCode: nethttp.StatusCreated}, recorder: hijackedRecorder, expected: nethttp.StatusCreated},
+        "typed-nil response":        {response: (*typedNilProneResponse)(nil), recorder: writtenRecorder, expected: nethttp.StatusAccepted},
+        "upgrade over the status":   {recorder: &statusRecordingResponseWriter{statusCode: nethttp.StatusAccepted, hijacked: true}, expected: nethttp.StatusSwitchingProtocols},
+        "status committed directly": {recorder: writtenRecorder, expected: nethttp.StatusAccepted},
+    }
+
+    for name, testCase := range cases {
+        t.Run(name, func(t *testing.T) {
+            if statusCode := completedStatusCode(testCase.handlerErr, testCase.response, testCase.recorder); testCase.expected != statusCode {
+                t.Fatalf("expected %d, got %d", testCase.expected, statusCode)
+            }
+        })
+    }
+}

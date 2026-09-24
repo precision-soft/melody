@@ -210,3 +210,47 @@ func TestStatusRecordingResponseWriter_HijackReachesThroughAWrapperThatForwardsU
         t.Fatalf("expected the hijack to reach the writer behind the wrapper, got %v", hijackErr)
     }
 }
+
+func TestStatusRecordingResponseWriter_AnUpgradeIsObservedAsSwitchingProtocolsWhateverWasWritten(t *testing.T) {
+    if statusCode := (&statusRecordingResponseWriter{statusCode: nethttp.StatusInternalServerError, hijacked: true}).observedStatusCode(); nethttp.StatusSwitchingProtocols != statusCode {
+        t.Fatalf("expected %d for a hijacked connection, got %d", nethttp.StatusSwitchingProtocols, statusCode)
+    }
+
+    if statusCode := (&statusRecordingResponseWriter{statusCode: nethttp.StatusInternalServerError}).observedStatusCode(); nethttp.StatusInternalServerError != statusCode {
+        t.Fatalf("expected the written %d, got %d", nethttp.StatusInternalServerError, statusCode)
+    }
+}
+
+func TestHandlerDecorator_AnUpgradedConnectionIsTracedAsSwitchingProtocols(t *testing.T) {
+    tracer, recorder := newDecoratorTestTracer(t)
+
+    decorator, decoratorErr := NewHandlerDecorator(HandlerDecoratorConfig{Tracer: tracer})
+    if nil != decoratorErr {
+        t.Fatalf("unexpected decorator error: %v", decoratorErr)
+    }
+
+    upgrading := nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+        if _, _, hijackErr := nethttp.NewResponseController(writer).Hijack(); nil != hijackErr {
+            t.Errorf("unexpected hijack error: %v", hijackErr)
+        }
+    })
+
+    decorator(upgrading).ServeHTTP(&hijackableResponseWriter{ResponseRecorder: httptest.NewRecorder()}, httptest.NewRequest(nethttp.MethodGet, "/socket", nil))
+
+    spans := recorder.Ended()
+    if 1 != len(spans) {
+        t.Fatalf("expected exactly one lifecycle span, got %d", len(spans))
+    }
+
+    for _, spanAttribute := range spans[0].Attributes() {
+        if "http.response.status_code" == string(spanAttribute.Key) {
+            if nethttp.StatusSwitchingProtocols != int(spanAttribute.Value.AsInt64()) {
+                t.Fatalf("expected the upgraded connection traced as %d, got %d", nethttp.StatusSwitchingProtocols, spanAttribute.Value.AsInt64())
+            }
+
+            return
+        }
+    }
+
+    t.Fatal("expected the lifecycle span to carry a status attribute")
+}

@@ -1,6 +1,7 @@
 package cron
 
 import (
+    "bytes"
     "errors"
     "fmt"
     "io"
@@ -181,6 +182,11 @@ type runOptions struct {
     restartPolicy      string
 }
 
+/* rendersK8s answers whether the run renders the builtin CronJob manifest, the one question every decision the run takes by the template's name asks */
+func (instance *runOptions) rendersK8s() bool {
+    return TemplateNameK8s == instance.template.Name()
+}
+
 /* reportWarning is a non-fatal finding the run wants in its report on both branches: a warning line in text mode, an envelope warning under --format=json. */
 type reportWarning struct {
     code    string
@@ -210,7 +216,7 @@ func (instance *GenerateCommand) runWithConfiguration(
     }
 
     /* the k8s template ignores the heartbeat entirely (it logs to stdout and models liveness with a dedicated CronJob), so an explicitly requested one is reported as dropped rather than silently swallowed or hard-failed on a setting the template just declared ignored. */
-    if true == options.heartbeatEnabled && TemplateNameK8s == options.template.Name() {
+    if true == options.heartbeatEnabled && true == options.rendersK8s() {
         warnings = append(warnings, reportWarning{
             code:    "cron.heartbeatIgnored",
             message: "cron: heartbeat options are set but the k8s template ignores them; no liveness CronJob will be generated — model cluster liveness with a dedicated scheduled command instead",
@@ -223,7 +229,7 @@ func (instance *GenerateCommand) runWithConfiguration(
     }
 
     writeErr := (error)(nil)
-    writes, pruned, emptyMessage, writeErr = instance.writeDestinations(option, options, entries)
+    writes, pruned, emptyMessage, writeErr = instance.writeDestinations(options, entries)
 
     return writeErr
 }
@@ -255,7 +261,7 @@ func (instance *GenerateCommand) resolveRunOptions(
     options.template = template
 
     /* the builtin k8s template ignores the heartbeat (it logs to stdout and models liveness with a dedicated CronJob), so a heartbeat path is never auto-derived for it; an explicitly requested heartbeat still flows through so the run can warn that it is dropped */
-    isK8s := TemplateNameK8s == template.Name()
+    isK8s := options.rendersK8s()
 
     /* a dialect that renders no user column at all (busybox crond, per-user crontabs, a CronJob manifest) never needs a user to place the heartbeat line — demanding one turns a valid configuration into a hard error */
     rendersUserColumn := templateRendersUserColumn(template)
@@ -385,7 +391,7 @@ func (instance *GenerateCommand) collectScheduledEntries(options *runOptions) ([
     options.binary = binary
 
     /* only the crontab template redirects each entry's output to a log file; the k8s template logs to container stdout and never reads Entry.LogPath, so it must not inherit the crontab-only logs-dir requirement */
-    requiresLogPath := TemplateNameK8s != options.template.Name()
+    requiresLogPath := false == options.rendersK8s()
 
     entries := make([]Entry, 0, len(scheduledCommands))
     for _, scheduled := range scheduledCommands {
@@ -413,12 +419,11 @@ type destinationWrite struct {
 
 /* writeDestinations answers what it wrote, what there was to say about an empty run and what stopped it, leaving the one report door to the caller's defer: reporting from here left the seven failure paths below with no document at all, and the writes accumulated before a failure are exactly what tells the consumer which files a partial run left on disk — the destinations are written one by one with no rollback. */
 func (instance *GenerateCommand) writeDestinations(
-    option output.Option,
     options *runOptions,
     entries []Entry,
 ) ([]destinationWrite, []string, string, error) {
     /* the k8s namespace is a single global option, so resource-name collisions span every destination file; catch them across the whole set before any manifest is rendered or written */
-    if TemplateNameK8s == options.template.Name() {
+    if true == options.rendersK8s() {
         if uniqueErr := ensureK8sNamesUnique(entries); nil != uniqueErr {
             return nil, nil, "", uniqueErr
         }
@@ -438,7 +443,7 @@ func (instance *GenerateCommand) writeDestinations(
 
     if 0 == len(entriesByDestination) && true == options.heartbeatEnabled {
         /* heartbeat is crontab-only; the k8s template never synthesizes a heartbeat CronJob, so an empty Configuration leaves nothing to render — but the sweep still runs, for the same emptied-configuration reason as above */
-        if TemplateNameK8s == options.template.Name() {
+        if true == options.rendersK8s() {
             pruned, pruneErr := pruneStaleDestinations(options, nil)
 
             return nil, pruned, "the cron Configuration is empty and the k8s template does not emit heartbeat CronJobs; nothing to write", pruneErr
@@ -455,7 +460,7 @@ func (instance *GenerateCommand) writeDestinations(
 
     /* the k8s template ignores heartbeat options entirely (see the dropped-heartbeat warning and the crontab-only render); resolving a --heartbeat-destination against the written destinations would hard-fail the command on a setting it just declared ignored, so the requested destinations are dropped for k8s */
     heartbeatRequested := options.heartbeatRequested
-    if TemplateNameK8s == options.template.Name() {
+    if true == options.rendersK8s() {
         heartbeatRequested = nil
     }
 
@@ -643,15 +648,18 @@ func fileCarriesOwnershipMarker(path string, marker string) (bool, error) {
         )
     }
 
-    lines := strings.SplitN(string(head[:read]), "\n", ownershipMarkerLineLimit+1)
-    if ownershipMarkerLineLimit < len(lines) {
-        lines = lines[:ownershipMarkerLineLimit]
-    }
-
-    for _, line := range lines {
-        if marker == strings.TrimSpace(line) {
+    remaining := head[:read]
+    for lineIndex := 0; lineIndex < ownershipMarkerLineLimit; lineIndex++ {
+        line, rest, _ := bytes.Cut(remaining, []byte("\n"))
+        if marker == string(bytes.TrimSpace(line)) {
             return true, nil
         }
+
+        if 0 == len(rest) {
+            break
+        }
+
+        remaining = rest
     }
 
     return false, nil
@@ -1214,21 +1222,11 @@ func resolveDefault(
     flagName string,
     parameterName string,
 ) string {
-    if true == commandContext.IsSet(flagName) {
-        value := commandContext.String(flagName)
-        if "" != value {
-            return value
-        }
+    if value, typed := typedFlagValue(commandContext, flagName); true == typed {
+        return value
     }
 
-    if nil != configuration {
-        parameter := configuration.Get(parameterName)
-        if nil != parameter {
-            return parameter.String()
-        }
-    }
-
-    return ""
+    return parameterValue(configuration, parameterName)
 }
 
 /* resolveDefaultPath is resolveDefault for a value that names a path, and it differs in one thing: a relative path that came from a PARAMETER is anchored at the project directory, while one typed as a cli FLAG stays relative to the working directory. The two sources answer to different conventions. A flag is typed in a shell, next to the paths that shell already resolves, and anchoring it elsewhere would surprise every operator. A parameter is part of the application's configuration and belongs to the project: melody resolves MELODY_LOG_PATH, kernel.logs_dir and kernel.cache_dir against the project directory for exactly that reason, and cron was the one place where "melody.cron.logs_dir = var/log/cron" meant a different directory depending on where the binary was invoked from — under a supervisor that starts from /, the generated crontab baked /var/log/cron into itself. The shipped defaults hid it by carrying %kernel.project_dir% themselves. */
@@ -1238,13 +1236,25 @@ func resolveDefaultPath(
     flagName string,
     parameterName string,
 ) string {
-    if true == commandContext.IsSet(flagName) {
-        value := commandContext.String(flagName)
-        if "" != value {
-            return value
-        }
+    if value, typed := typedFlagValue(commandContext, flagName); true == typed {
+        return value
     }
 
+    return anchorConfiguredPath(parameterValue(configuration, parameterName), configuration)
+}
+
+/* typedFlagValue answers the value of a flag the operator typed; a flag typed empty is not an answer, so the parameter behind it still is */
+func typedFlagValue(commandContext clicontract.Context, flagName string) (string, bool) {
+    if false == commandContext.IsSet(flagName) {
+        return "", false
+    }
+
+    value := commandContext.String(flagName)
+
+    return value, "" != value
+}
+
+func parameterValue(configuration configcontract.Configuration, parameterName string) string {
     if nil == configuration {
         return ""
     }
@@ -1254,7 +1264,7 @@ func resolveDefaultPath(
         return ""
     }
 
-    return anchorConfiguredPath(parameter.String(), configuration)
+    return parameter.String()
 }
 
 /* anchorConfiguredPath carries locally the rule application/bootstrap.go applies to every other melody runtime path; it cannot call that door, which is unexported and in another module. A configuration that names no project directory keeps the working-directory anchoring, because there is nothing better to anchor to and refusing would turn a generator that works today into a boot failure. */

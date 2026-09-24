@@ -17,6 +17,7 @@ import (
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/internal/testhelper"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
+    urfavecli "github.com/urfave/cli/v3"
 )
 
 func TestRegister_PanicsOnNilRootCommand(t *testing.T) {
@@ -1067,6 +1068,21 @@ func TestNewEngineFlags_RefusesASpellingOfTheEnginesHelpFlag(t *testing.T) {
     requireSpellingRefusal(t, []clicontract.Flag{
         &clicontract.BoolFlag{Name: "help"},
     }, "cli flag spelling declared twice", "help")
+}
+
+/* a nil HelpFlag is the engine's own way to mount no help flag; there is then no spelling to take over, and the seed must not read it */
+func TestNewEngineFlags_AcceptsAnEngineThatMountsNoHelpFlag(t *testing.T) {
+    helpFlag := urfavecli.HelpFlag
+    urfavecli.HelpFlag = nil
+    t.Cleanup(func() {
+        urfavecli.HelpFlag = helpFlag
+    })
+
+    engineFlags := newEngineFlags([]clicontract.Flag{&clicontract.StringFlag{Name: "host", Aliases: []string{"h"}}})
+
+    if 1 != len(engineFlags) {
+        t.Fatalf("expected the one flag mapped, got %d", len(engineFlags))
+    }
 }
 
 func TestNewEngineFlags_RefusesAnEmptyAlias(t *testing.T) {

@@ -133,7 +133,7 @@ func (instance *Tracker) resolveEntityId(entityId string, model any) string {
 /* entityIdFromModel reads the bun primary-key value(s) off a model via its table schema; a composite key is joined with ":". Returns "" when the model is not a struct pointer, has no primary key, or a primary-key field is reached through a nil pointer. */
 func entityIdFromModel(database *bun.DB, model any) string {
     value := reflect.ValueOf(model)
-    if reflect.Ptr != value.Kind() || true == value.IsNil() {
+    if reflect.Pointer != value.Kind() || true == value.IsNil() {
         return ""
     }
 
@@ -154,7 +154,7 @@ func entityIdFromModel(database *bun.DB, model any) string {
             return ""
         }
 
-        for reflect.Ptr == fieldValue.Kind() {
+        for reflect.Pointer == fieldValue.Kind() {
             if true == fieldValue.IsNil() {
                 return ""
             }
@@ -180,7 +180,7 @@ func escapeEntityIdPart(part string) string {
 
 func cloneModel(model any) (any, error) {
     value := reflect.ValueOf(model)
-    if reflect.Ptr != value.Kind() || true == value.IsNil() || reflect.Struct != value.Elem().Kind() {
+    if reflect.Pointer != value.Kind() || true == value.IsNil() || reflect.Struct != value.Elem().Kind() {
         return nil, exception.NewError("audited model must be a non-nil pointer to a struct", nil, nil)
     }
 

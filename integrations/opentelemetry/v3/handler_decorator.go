@@ -86,12 +86,7 @@ func NewHandlerDecorator(config HandlerDecoratorConfig) (applicationcontract.Htt
             defer func() {
                 recoveredValue := recover()
 
-                statusCode := recorder.statusCode
-
-                /* a hijacked connection left the request/response model at the upgrade, so recording it as the constructor's default 200 puts a connection that lives for hours in the same duration series as an ordinary request and destroys the latency distribution */
-                if true == recorder.hijacked {
-                    statusCode = nethttp.StatusSwitchingProtocols
-                }
+                statusCode := recorder.observedStatusCode()
 
                 if nil != recoveredValue {
                     statusCode = nethttp.StatusInternalServerError
@@ -176,6 +171,15 @@ func (instance *statusRecordingResponseWriter) ReadFrom(reader io.Reader) (int64
 }
 
 /* Unwrap exposes the underlying writer so http.ResponseController can reach its flush/hijack/deadline support through the wrapper, mirroring the http kernel's recording writer. */
+/* observedStatusCode is the status the connection carried as far as the writer saw it. A hijacked connection left the request/response model at the upgrade, so recording it as the constructor's default 200 puts a connection that lives for hours in the same duration series as an ordinary request and destroys the latency distribution. */
+func (instance *statusRecordingResponseWriter) observedStatusCode() int {
+    if true == instance.hijacked {
+        return nethttp.StatusSwitchingProtocols
+    }
+
+    return instance.statusCode
+}
+
 func (instance *statusRecordingResponseWriter) Unwrap() nethttp.ResponseWriter {
     return instance.ResponseWriter
 }

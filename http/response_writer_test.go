@@ -1,6 +1,7 @@
 package http
 
 import (
+    "errors"
     nethttp "net/http"
     "net/http/httptest"
     "strings"
@@ -387,4 +388,27 @@ func TestRecordingResponseWriter_FlushReachesTheConnectionThroughAnIntermediateW
     if false == writer.HeadersWritten() {
         t.Fatal("expected the flush that reached the connection to record the commit")
     }
+}
+
+/* a flush that reached the connection and failed under a departed client has still committed the header: the kernel reading it as uncommitted wrote its 500 over the status on the wire and logged the 500 */
+func TestRecordingResponseWriter_AFailedFlushStillRecordsTheCommit(t *testing.T) {
+    writer := newRecordingResponseWriter(&failingFlushResponseWriter{httptest.NewRecorder()})
+
+    writer.Flush()
+
+    if false == writer.HeadersWritten() {
+        t.Fatal("expected a flush that reached a flusher to record the commit even though it failed")
+    }
+
+    if nethttp.StatusOK != writer.CommittedStatusCode() {
+        t.Fatalf("expected the implicit 200 to be recorded, got %d", writer.CommittedStatusCode())
+    }
+}
+
+type failingFlushResponseWriter struct {
+    *httptest.ResponseRecorder
+}
+
+func (instance *failingFlushResponseWriter) FlushError() error {
+    return errors.New("write tcp 127.0.0.1:8080->127.0.0.1:51234: write: broken pipe")
 }

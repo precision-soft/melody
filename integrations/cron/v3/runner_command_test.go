@@ -485,7 +485,7 @@ func TestRunnerCommand_LoopEvaluatesTheTimerTargetedMinute(t *testing.T) {
 
     finished := make(chan error, 1)
     go func() {
-        finished <- runner.runLoop(newRunnerTestRuntime(ctx))
+        finished <- runner.runLoop(newRunnerTestRuntime(ctx), runner.location, nil)
     }()
 
     select {
@@ -550,7 +550,7 @@ func TestRunnerCommand_LoopTicksWhileAJobIsStillRunning(t *testing.T) {
 
     finished := make(chan error, 1)
     go func() {
-        finished <- runner.runLoop(newRunnerTestRuntime(ctx))
+        finished <- runner.runLoop(newRunnerTestRuntime(ctx), runner.location, nil)
     }()
 
     select {
@@ -616,7 +616,7 @@ func TestRunnerCommand_LoopWaitsForInFlightJobsOnCancellation(t *testing.T) {
 
     finished := make(chan error, 1)
     go func() {
-        finished <- runner.runLoop(newRunnerTestRuntime(ctx))
+        finished <- runner.runLoop(newRunnerTestRuntime(ctx), runner.location, nil)
     }()
 
     select {
@@ -657,7 +657,7 @@ func TestRunnerCommand_InvokeReportsChildScopeCloseError(t *testing.T) {
         failingScopeContainer{Container: serviceContainer, scopeCloseErr: scopeCloseErr},
     )
 
-    _, invokeErr := runner.invoke(runtimeInstance, runner.entries[0])
+    invokeErr := runner.invokeRun(runtimeInstance, runner.entries[0], logging.GenerateProcessId())
     if nil == invokeErr {
         t.Fatal("expected the child scope close error to surface from invoke")
     }
@@ -1177,7 +1177,7 @@ func TestRunnerCommand_LoopAnchorsAndArmsFromOneClockRead(t *testing.T) {
 
     finished := make(chan error, 1)
     go func() {
-        finished <- runner.runLoop(newRunnerTestRuntime(ctx))
+        finished <- runner.runLoop(newRunnerTestRuntime(ctx), runner.location, nil)
     }()
 
     select {
@@ -1254,7 +1254,7 @@ func TestRunnerCommand_LoopDoesNotRedispatchTheMinuteItJustDispatched(t *testing
 
     finished := make(chan error, 1)
     go func() {
-        finished <- runner.runLoop(newRunnerTestRuntime(ctx))
+        finished <- runner.runLoop(newRunnerTestRuntime(ctx), runner.location, nil)
     }()
 
     select {
@@ -1327,7 +1327,7 @@ func TestRunnerCommand_LoopSuppressesAFixedTimeEntryAcrossTheFallBackRepeat(t *t
 
     finished := make(chan error, 1)
     go func() {
-        finished <- runner.runLoop(newRunnerTestRuntime(ctx))
+        finished <- runner.runLoop(newRunnerTestRuntime(ctx), runner.location, nil)
     }()
 
     for wildcardWake := 0; wildcardWake < 3; wildcardWake++ {
@@ -1529,7 +1529,7 @@ func TestRunnerCommand_TimeoutCancelsACommandThatWatchesItsContext(t *testing.T)
     at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
 
     started := time.Now()
-    _, invokeErr := runner.invoke(newRunnerTestRuntime(context.Background()), runner.entries[0])
+    invokeErr := runner.invokeRun(newRunnerTestRuntime(context.Background()), runner.entries[0], logging.GenerateProcessId())
     elapsed := time.Since(started)
 
     if nil == invokeErr {
@@ -1581,7 +1581,7 @@ func TestRunnerCommand_WedgedCommandIsAbandonedAndItsScopeReleased(t *testing.T)
 
     completed := make(chan error, 1)
     go func() {
-        completed <- invokeDiscardingRunId(runner, runtimeInstance, runner.entries[0])
+        completed <- invokeUnderAFreshRunId(runner, runtimeInstance, runner.entries[0])
     }()
 
     var invokeErr error
@@ -1714,7 +1714,7 @@ func TestRunnerCommand_AnEntrysGracefulWindowGovernsWhenItIsAbandoned(t *testing
 
     completed := make(chan error, 1)
     go func() {
-        completed <- invokeDiscardingRunId(runner, runtimeInstance, runner.entries[0])
+        completed <- invokeUnderAFreshRunId(runner, runtimeInstance, runner.entries[0])
     }()
 
     var invokeErr error
@@ -1763,7 +1763,7 @@ func TestRunnerCommand_AnEntryWhoseWindowsCannotBeSummedStillRunsToCompletion(t 
 
     completed := make(chan error, 1)
     go func() {
-        completed <- invokeDiscardingRunId(runner, newRunnerTestRuntime(context.Background()), runner.entries[0])
+        completed <- invokeUnderAFreshRunId(runner, newRunnerTestRuntime(context.Background()), runner.entries[0])
     }()
 
     select {
@@ -1795,7 +1795,7 @@ func TestRunnerCommand_TheAbandonErrorNamesTheWindowTheRunWasActuallyGiven(t *te
 
     completed := make(chan error, 1)
     go func() {
-        completed <- invokeDiscardingRunId(runner, newRunnerTestRuntime(context.Background()), runner.entries[0])
+        completed <- invokeUnderAFreshRunId(runner, newRunnerTestRuntime(context.Background()), runner.entries[0])
     }()
 
     var invokeErr error
@@ -1918,7 +1918,7 @@ func TestRunnerCommand_InvokeNormalizesATypedNilCommandError(t *testing.T) {
 
     runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
 
-    _, invokeErr := runner.invoke(newRunnerTestRuntime(context.Background()), runner.entries[0])
+    invokeErr := runner.invokeRun(newRunnerTestRuntime(context.Background()), runner.entries[0], logging.GenerateProcessId())
     if nil != invokeErr {
         t.Fatalf("expected the typed-nil command error to normalize to success, got %v", invokeErr)
     }
@@ -2141,7 +2141,7 @@ func TestRunnerCommand_InvokeInstallsThePerRunIdentity(t *testing.T) {
 
     runtimeInstance := runtime.New(context.Background(), parentScope, serviceContainer)
 
-    if _, invokeErr := runner.invoke(runtimeInstance, runner.entries[0]); nil != invokeErr {
+    if invokeErr := runner.invokeRun(runtimeInstance, runner.entries[0], logging.GenerateProcessId()); nil != invokeErr {
         t.Fatalf("invoke: %v", invokeErr)
     }
 
@@ -2190,11 +2190,9 @@ func TestRunnerCommand_CarriesTheStandardFlags(t *testing.T) {
     }
 }
 
-/* invokeDiscardingRunId adapts invoke's two-value answer to the single error the completion channels of these tests carry; the runId's presence on the records has its own test. */
-func invokeDiscardingRunId(runner *RunnerCommand, runtimeInstance runtimecontract.Runtime, entry *scheduledRunEntry) error {
-    _, invokeErr := runner.invoke(runtimeInstance, entry)
-
-    return invokeErr
+/* invokeUnderAFreshRunId mints the run id the dispatch would, for the tests that drive one run directly; the runId's presence on the records has its own test. */
+func invokeUnderAFreshRunId(runner *RunnerCommand, runtimeInstance runtimecontract.Runtime, entry *scheduledRunEntry) error {
+    return runner.invokeRun(runtimeInstance, entry, logging.GenerateProcessId())
 }
 
 /* the classification that keeps a clean shutdown out of the failure aggregate: only the parent's cancellation qualifies, and a deadline the entry asked for stays a failure whatever the shutdown is doing. */
@@ -2223,25 +2221,6 @@ func TestIsShutdownCancellation_OnlyTheParentsCancellationQualifies(t *testing.T
 
     if true == isShutdownCancellation(cancelledRuntime, errors.New("job broke")) {
         t.Fatal("expected an ordinary failure to stay one under shutdown")
-    }
-}
-
-/* the run's id is minted first and returned beside the outcome, so the runner's records about the run carry the cronRunId the run's own records carry. */
-func TestInvoke_AnswersTheRunIdBesideTheOutcome(t *testing.T) {
-    job := newRecordingCommand("job:runid")
-
-    configuration := NewConfiguration().
-        Schedule("job:runid", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
-
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
-
-    runId, invokeErr := runner.invoke(newRunnerTestRuntime(context.Background()), runner.entries[0])
-    if nil != invokeErr {
-        t.Fatalf("expected the run to succeed, got %v", invokeErr)
-    }
-
-    if "" == runId {
-        t.Fatal("expected a non-empty run id beside the outcome")
     }
 }
 
@@ -2920,7 +2899,7 @@ func TestInvoke_ACommandFailureAndAScopeCloseFailureBothSurvive(t *testing.T) {
         failingScopeContainer{Container: serviceContainer, scopeCloseErr: scopeCloseErr},
     )
 
-    _, invokeErr := runner.invoke(runtimeInstance, runner.entries[0])
+    invokeErr := runner.invokeRun(runtimeInstance, runner.entries[0], logging.GenerateProcessId())
     if nil == invokeErr {
         t.Fatal("expected the run to fail")
     }
@@ -3018,7 +2997,7 @@ func driveOneIdleLoopMinute(t *testing.T, reportIdle bool) (*bytes.Buffer, chan 
     }
 
     buffer := &bytes.Buffer{}
-    runner.reporting = &runReporting{
+    reporting := &runReporting{
         commandContext: &clicontract.StaticContext{WriterValue: buffer},
         option:         output.NormalizeOption(output.Option{Format: output.FormatJson}),
         reportIdle:     reportIdle,
@@ -3028,7 +3007,7 @@ func driveOneIdleLoopMinute(t *testing.T, reportIdle bool) (*bytes.Buffer, chan 
 
     finished := make(chan error, 1)
     go func() {
-        finished <- runner.runLoop(newRunnerTestRuntime(ctx))
+        finished <- runner.runLoop(newRunnerTestRuntime(ctx), runner.location, reporting)
     }()
 
     /* the boundary is five milliseconds away; the wait is generous because what is asserted is what the loop wrote, not how fast it woke */
@@ -3352,6 +3331,32 @@ func TestRunnerCommand_TheTimezoneFlagWinsOverTheConfiguration(t *testing.T) {
     }
 }
 
+/* the flag's zone belongs to the invocation that named it: the registered command is the same object across invocations, and a zone written onto it outlived the flag, so the next invocation without one still ran another region's calendar. */
+func TestRunnerCommand_ATimezoneFlagDoesNotOutliveItsInvocation(t *testing.T) {
+    job := newRecordingCommand("job:evening")
+
+    configuration := NewConfiguration().
+        InTimezone("UTC").
+        Schedule("job:evening", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "18"}})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner.now = func() time.Time {
+        return time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
+    }
+
+    if runErr := newRunnerDispatch(runner, nil, nil).Run(context.Background(), []string{runner.Name(), "--once", "--timezone=Asia/Tokyo"}); nil != runErr {
+        t.Fatalf("unexpected error running --once under the flag: %v", runErr)
+    }
+
+    if runErr := newRunnerDispatch(runner, nil, nil).Run(context.Background(), []string{runner.Name(), "--once"}); nil != runErr {
+        t.Fatalf("unexpected error running --once without the flag: %v", runErr)
+    }
+
+    if 1 != job.runCount {
+        t.Fatalf("expected only the flagged invocation to find the entry due, ran %d", job.runCount)
+    }
+}
+
 /* a zone the standard library cannot load is a wiring mistake and fails at CONSTRUCTION, beside the malformed schedules and the unknown command names: a scheduler that fell back to the process zone would run every job at the right clock time in the wrong place, which nobody notices until the reports are wrong. */
 func TestNewRunnerCommand_PanicsForAZoneItCannotLoad(t *testing.T) {
     configuration := NewConfiguration().
@@ -3611,7 +3616,7 @@ func TestRunnerCommand_ShutdownAbandonsAJobThatIgnoresItsCancellation(t *testing
 
     finished := make(chan error, 1)
     go func() {
-        finished <- runner.runLoop(newLoggingRunnerTestRuntime(ctx, captured))
+        finished <- runner.runLoop(newLoggingRunnerTestRuntime(ctx, captured), runner.location, nil)
     }()
 
     job.awaitStart(t)
@@ -3648,7 +3653,7 @@ func TestRunnerCommand_ShutdownAbandonsAJobWhoseDeadlineIsOutOfReach(t *testing.
 
     completed := make(chan error, 1)
     go func() {
-        completed <- invokeDiscardingRunId(runner, newRunnerTestRuntime(ctx), runner.entries[0])
+        completed <- invokeUnderAFreshRunId(runner, newRunnerTestRuntime(ctx), runner.entries[0])
     }()
 
     job.awaitStart(t)
@@ -3706,6 +3711,36 @@ func TestDispatchDue_AShutdownAbandonedRunIsFailedNotCancelled(t *testing.T) {
     }
 }
 
+/* a run that honours the shutdown is a clean stop: its row is cancelled and not failed, the same verdict the minute's aggregate gives it */
+func TestDispatchDue_ARunThatHonoursTheShutdownIsCancelledNotFailed(t *testing.T) {
+    job := newContextWatchingCommand("job:watching")
+
+    configuration := NewConfiguration().
+        Schedule("job:watching", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
+    wait := runner.dispatchDue(newRunnerTestRuntime(ctx), at, true, true)
+
+    awaitWithin(t, 2*time.Second, "the watching job to start", func() { <-job.started })
+    cancel()
+
+    var report dueReport
+    awaitWithin(t, 2*time.Second, "the --once wait over a job honouring the shutdown", func() { report, _ = wait() })
+
+    if 1 != len(report.Ran) {
+        t.Fatalf("expected one run in the document, got %v", report.Ran)
+    }
+
+    if true == report.Ran[0].Failed || false == report.Ran[0].Cancelled {
+        t.Fatalf("a run that honoured the shutdown is cancelled, not failed: got failed=%v cancelled=%v", report.Ran[0].Failed, report.Ran[0].Cancelled)
+    }
+}
+
 /* the graceful window is a wait, not a kill: a job that unwinds inside it after the shutdown reports its own outcome. */
 func TestRunnerCommand_ShutdownWaitsForAJobThatUnwindsInsideTheGracefulWindow(t *testing.T) {
     job := newIgnoringCommand("job:ignoring")
@@ -3721,7 +3756,7 @@ func TestRunnerCommand_ShutdownWaitsForAJobThatUnwindsInsideTheGracefulWindow(t 
 
     completed := make(chan error, 1)
     go func() {
-        completed <- invokeDiscardingRunId(runner, newRunnerTestRuntime(ctx), runner.entries[0])
+        completed <- invokeUnderAFreshRunId(runner, newRunnerTestRuntime(ctx), runner.entries[0])
     }()
 
     job.awaitStart(t)

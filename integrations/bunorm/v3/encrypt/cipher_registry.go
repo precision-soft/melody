@@ -36,7 +36,7 @@ func UseCipherNamed(name string, cipherInstance Cipher) {
 func storeCipher(name string, cipherInstance Cipher) {
     if nil != cipherInstance {
         reflected := reflect.ValueOf(cipherInstance)
-        if reflect.Ptr == reflected.Kind() && true == reflected.IsNil() {
+        if reflect.Pointer == reflected.Kind() && true == reflected.IsNil() {
             exception.Panic(exception.NewError("cipher instance is a typed nil", map[string]any{"cipherName": name}, nil))
         }
     }

@@ -828,11 +828,16 @@ func (instance *Transport) abandonWedgedPublish(exchange string, routingKey stri
 }
 
 func (instance *Transport) resolvedPublishTimeout() time.Duration {
-    if 0 >= instance.publishTimeout {
-        return defaultPublishTimeout
+    return positiveOrDefault(instance.publishTimeout, defaultPublishTimeout)
+}
+
+/* positiveOrDefault is the zero-means-default reading both publish budgets of this package share: a non-positive duration, which is what a struct literal or an unset config-sourced value leaves, is the door's own default rather than a budget that has already run out. */
+func positiveOrDefault(value time.Duration, fallback time.Duration) time.Duration {
+    if 0 >= value {
+        return fallback
     }
 
-    return instance.publishTimeout
+    return value
 }
 
 /* closes the cached publish channel only when it is still the one the caller failed on, so a concurrent publisher that already reopened a healthy channel is not torn down. A nil failed channel (the caller never obtained one, e.g. ensurePublishChannel itself failed) identifies no specific channel, so it is a no-op rather than closing whatever channel is currently cached — a stale/closed cached channel is re-detected by ensurePublishChannel's IsClosed guard on the next publish. */

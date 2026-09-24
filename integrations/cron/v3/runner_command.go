@@ -67,9 +67,7 @@ type RunnerCommand struct {
     unwindGrace time.Duration
     inFlight    sync.WaitGroup
     /* the scheduler loop hands each minute's wait to a goroutine of its own, so two minutes' documents can complete in any order: the writer is guarded to keep one document one line */
-    writeMutex sync.Mutex
-    /* the output posture the scheduler loop reports under, installed by Run from the parsed flags before the loop starts and read by it alone. It is nil for a loop driven directly, which is how the loop's own tests reach it without a cli command context, and a nil reporting loop writes nothing — the behaviour every caller had before the document existed. */
-    reporting           *runReporting
+    writeMutex          sync.Mutex
     userIgnoredCommands []string
 }
 
@@ -233,15 +231,15 @@ func loadLocation(name string) (*time.Location, error) {
     return location, nil
 }
 
-/* nowInZone is the one clock reading this runner makes. Everything below it — the schedule matcher's calendar fields, the wall-minute chain's offset folding, the document's own timestamp — reads the time it answers, so the zone is applied here and in no other place. */
-func (instance *RunnerCommand) nowInZone() time.Time {
+/* nowInZone is the one clock reading this runner makes. Everything below it — the schedule matcher's calendar fields, the wall-minute chain's offset folding, the document's own timestamp — reads the time it answers, so the zone is applied here and in no other place. The zone is the invocation's: the configured one, or the one a --timezone flag named for this invocation alone. */
+func (instance *RunnerCommand) nowInZone(location *time.Location) time.Time {
     now := instance.now()
 
-    if nil == instance.location {
+    if nil == location {
         return now
     }
 
-    return now.In(instance.location)
+    return now.In(location)
 }
 
 func scheduleOfEntry(scheduled *ScheduledCommand) *Schedule {
@@ -336,30 +334,33 @@ func (instance *RunnerCommand) Run(
     option := output.NormalizeOption(output.ParseOptionFromCommand(commandContext))
 
     /* the flag WINS over the configuration: the zone is a property of the schedule, but an operator running one invocation against another region's calendar — a catch-up after a migration, a rehearsal — says so at the invocation. It is refused by name rather than by panic, because a flag is what the caller typed, and a mistyped zone deserves the command's own error rather than a stack trace. */
+    location := instance.location
     if timezoneName := commandContext.String(flagNameTimezone); "" != timezoneName {
-        location, loadErr := loadLocation(timezoneName)
+        flagLocation, loadErr := loadLocation(timezoneName)
         if nil != loadErr {
             return loadErr
         }
 
-        instance.location = location
+        location = flagLocation
     }
 
     if true == commandContext.Bool(flagNameOnce) {
         /* the minute is dispatched and reported as the wall minute, the one form the scheduler loop reports, so the document's timestamp has one shape whichever door produced it; the clock reading keeps its seconds for the envelope's own meta */
-        startedAt := instance.nowInZone()
+        startedAt := instance.nowInZone(location)
         report, runErr := instance.dispatchDue(runtimeInstance, startedAt.Truncate(time.Minute), true, true)()
 
         return instance.renderRunReport(commandContext, option, startedAt, report, runErr)
     }
 
-    instance.reporting = &runReporting{
-        commandContext: commandContext,
-        option:         option,
-        reportIdle:     commandContext.Bool(flagNameReportIdle),
-    }
-
-    return instance.runLoop(runtimeInstance)
+    return instance.runLoop(
+        runtimeInstance,
+        location,
+        &runReporting{
+            commandContext: commandContext,
+            option:         option,
+            reportIdle:     commandContext.Bool(flagNameReportIdle),
+        },
+    )
 }
 
 /* declareSchedule writes what this process is driving before it drives anything. A scheduler built over a configuration emptied by a refactor, or whose entries an environment gate filtered away, used to run forever, exit successfully and write not one byte on any channel: nothing distinguished a healthy scheduler from one that would never dispatch anything, and the absence was noticed days later, when the nightly sweep turned out not to have run. The empty case is a warning for the same reason the generator's nothingToWrite is one. */
@@ -478,13 +479,11 @@ func failedSuffixOf(report dueReport) string {
     return ", failed: " + strings.Join(failed, ", ")
 }
 
-/* runLoop wakes at each minute boundary until the runtime context is cancelled. The evaluation is pinned to the minute the (monotonic) timer was armed for, so a wall-clock step between arming and firing neither replays nor skips a minute; the armed minute's wall rendering is then reconciled against the last evaluated minute by reconcileWallClock, which resolves daylight-saving transitions and larger clock jumps with vixie-cron semantics. The chain anchor and the first armed minute derive from one clock read — two reads could straddle a minute boundary and manufacture a jump that never happened. A wake that re-arrives at the wall minute the previous wake already dispatched is skipped: a backward wall step inside the armed window makes the loop arm for that minute a second time, and dispatching it again would run every wildcard entry twice seconds apart — the repeated wall minute of a daylight-saving fall-back is a different case, since a whole hour of other minutes runs in between. Due commands are dispatched without waiting for them, so arming the next minute never blocks on a running job; command failures are logged by the dispatch as the commands complete. On cancellation the loop stops ticking and waits for the in-flight jobs — their contexts derive from the runtime context, so the cancellation has already reached them — before returning; a job that ignores the cancellation is waited for one graceful window and then abandoned, so the wait ends. */
-func (instance *RunnerCommand) runLoop(runtimeInstance runtimecontract.Runtime) error {
-    now := instance.nowInZone()
+/* runLoop wakes at each minute boundary until the runtime context is cancelled. The evaluation is pinned to the minute the (monotonic) timer was armed for, so a wall-clock step between arming and firing neither replays nor skips a minute; the armed minute's wall rendering is then reconciled against the last evaluated minute by reconcileWallClock, which resolves daylight-saving transitions and larger clock jumps with vixie-cron semantics. The chain anchor and the first armed minute derive from one clock read — two reads could straddle a minute boundary and manufacture a jump that never happened. A wake that re-arrives at the wall minute the previous wake already dispatched is skipped: a backward wall step inside the armed window makes the loop arm for that minute a second time, and dispatching it again would run every wildcard entry twice seconds apart — the repeated wall minute of a daylight-saving fall-back is a different case, since a whole hour of other minutes runs in between. Due commands are dispatched without waiting for them, so arming the next minute never blocks on a running job; command failures are logged by the dispatch as the commands complete. On cancellation the loop stops ticking and waits for the in-flight jobs — their contexts derive from the runtime context, so the cancellation has already reached them — before returning; a job that ignores the cancellation is waited for one graceful window and then abandoned, so the wait ends. It reads the clock in the zone and reports under the posture the invocation hands it — Run passes both from its parsed flags, so neither outlives the invocation on the registered command — and a nil reporting, a loop driven directly as its own tests drive it, writes nothing. */
+func (instance *RunnerCommand) runLoop(runtimeInstance runtimecontract.Runtime, location *time.Location, reporting *runReporting) error {
+    now := instance.nowInZone(location)
     previousTarget := now.Truncate(time.Minute)
     dispatchedIndex := wallMinuteIndex(previousTarget)
-
-    reporting := instance.reporting
 
     for {
         nextWake := now.Truncate(time.Minute).Add(time.Minute)
@@ -501,7 +500,7 @@ func (instance *RunnerCommand) runLoop(runtimeInstance runtimecontract.Runtime) 
         case <-timer.C:
         }
 
-        now = instance.nowInZone()
+        now = instance.nowInZone(location)
 
         if wallMinuteIndex(nextWake) == dispatchedIndex {
             continue
@@ -538,7 +537,7 @@ func (instance *RunnerCommand) runLoop(runtimeInstance runtimecontract.Runtime) 
                 }
 
                 _ = instance.renderRunReport(reporting.commandContext, reporting.option, minuteStartedAt, report, runErr)
-            }(wait, instance.nowInZone())
+            }(wait, instance.nowInZone(location))
         }
     }
 }
@@ -684,16 +683,7 @@ func (instance *RunnerCommand) runDispatched(
             exception.PanicCause(recovered),
         )
 
-        row = dueRun{
-            Command:              entry.commandName,
-            Schedule:             entry.schedule,
-            Arguments:            argumentsOrEmpty(entry.arguments),
-            RunId:                runId,
-            DurationMilliseconds: time.Since(invokedAt).Milliseconds(),
-            Failed:               true,
-            Cancelled:            false,
-            Error:                failure.Error(),
-        }
+        row = newDueRun(entry, runId, invokedAt, failure, false)
         counted = true
 
         instance.reportContained(runtimeInstance, entry, runId, failure)
@@ -704,20 +694,25 @@ func (instance *RunnerCommand) runDispatched(
     /* the document classifies the run the same way the aggregate does: a shutdown cancellation is a clean stop, so it is reported as cancelled rather than failed and the two never disagree about the same run */
     cancelled := nil != invokeErr && true == isShutdownCancellation(runtimeInstance, invokeErr)
 
-    row = dueRun{
+    row = newDueRun(entry, runId, invokedAt, invokeErr, cancelled)
+
+    counted = instance.reportRunOutcome(runtimeInstance, entry, runId, invokeErr, cancelled)
+
+    return row, invokeErr, counted
+}
+
+/* newDueRun is the document's row for one run, the one shape both the run that returned and the run the runner panicked on are reported in: a shutdown cancellation is a clean stop, reported as cancelled and never as failed */
+func newDueRun(entry *scheduledRunEntry, runId string, invokedAt time.Time, runErr error, cancelled bool) dueRun {
+    return dueRun{
         Command:              entry.commandName,
         Schedule:             entry.schedule,
         Arguments:            argumentsOrEmpty(entry.arguments),
         RunId:                runId,
         DurationMilliseconds: time.Since(invokedAt).Milliseconds(),
-        Failed:               nil != invokeErr && false == cancelled,
+        Failed:               nil != runErr && false == cancelled,
         Cancelled:            cancelled,
-        Error:                errorTextOrEmpty(invokeErr),
+        Error:                errorTextOrEmpty(runErr),
     }
-
-    counted = instance.reportRunOutcome(runtimeInstance, entry, runId, invokeErr, cancelled)
-
-    return row, invokeErr, counted
 }
 
 /* reportContained files the record of a run the runner itself panicked on and swallows a second panic: the logger is one of the collaborators that may have raised the first, and the row and the minute's aggregate carry the failure whether or not the record could be written. */
@@ -828,19 +823,11 @@ func reconcileWallClock(previousTarget time.Time, current time.Time) ([]minuteEv
     return evaluations, previousTarget, ""
 }
 
-/* invoke runs one command on a child runtime: a fresh scope so scoped services do not bleed across ticks, and a context derived from the runner's so a shutdown reaches the command in flight, carrying the entry's deadline so a command that never finishes does not run for the life of the process. The command line is dispatched through cli.DispatchCommand with the command's declared flags, so unset flags read their declared defaults, the output writers are usable and the parsed arguments are initialized — the same surface a command sees under the cli entry point, minus the banner, the scope close and the exit handling the registration path adds around a command. An error carrying an exit code comes back as an error rather than ending the process: both doors onto the parsing engine install melody's inert exit handler in place of the engine's own, which calls os.Exit on such an error and here would take the whole scheduler down with the one job. A panic inside the command is recovered and reported as an error, and a child scope close failure travels beside the command's own error in its context, so one bad job neither takes the scheduler down nor hides a shutdown failure.
+/* invokeRun runs one command on a child runtime, under the run id the caller minted — the dispatch mints it before anything that can fail, so the row it files for a run the runner's own preparation or reporting panicked on still carries the id the run's records were about to carry: a fresh scope so scoped services do not bleed across ticks, and a context derived from the runner's so a shutdown reaches the command in flight, carrying the entry's deadline so a command that never finishes does not run for the life of the process. The command line is dispatched through cli.DispatchCommand with the command's declared flags, so unset flags read their declared defaults, the output writers are usable and the parsed arguments are initialized — the same surface a command sees under the cli entry point, minus the banner, the scope close and the exit handling the registration path adds around a command. An error carrying an exit code comes back as an error rather than ending the process: both doors onto the parsing engine install melody's inert exit handler in place of the engine's own, which calls os.Exit on such an error and here would take the whole scheduler down with the one job. A panic inside the command is recovered and reported as an error, and a child scope close failure travels beside the command's own error in its context, so one bad job neither takes the scheduler down nor hides a shutdown failure.
 
    The command runs on its own goroutine, which is what lets a cancellation be enforced against a command that never looks at its context. The escalation is deliberate and has three steps, and it is the same whether the entry's deadline or the runner's shutdown cancels the run. The cancellation ends the command's context — a signal, not a kill. A command that watches it unwinds inside the graceful window and has its own error reported together with the timeout, which is the path essentially every command takes. Only a command that ignores the cancellation reaches the third step: once the window lapses the run is abandoned, the failure is reported at warning naming the entry and how long it overran, the scope is closed under it, and it stops counting towards the shutdown wait.
 
    That last step is a kill and is described as one. Closing the scope gives the resources back — the pools, the handles, everything the run built — and the alternative is the leak this exists to stop, one scope and one goroutine per matching minute until the process ends. It is not free of consequence: a scope.Get from the closed scope returns an error, but scope.MustGet panics, and the recover here covers only the goroutine this runner started. A command that hands work to a goroutine of its own and resolves from the scope there can therefore take the process down. That is why the window before the kill is measured in minutes rather than seconds, and why a command whose unwind is legitimately slow should name its own with EntryConfig.GracefulTimeout rather than rely on the default. */
-func (instance *RunnerCommand) invoke(runtimeInstance runtimecontract.Runtime, entry *scheduledRunEntry) (runId string, invokeErr error) {
-    /* the run's id is minted first and returned beside the outcome, so the runner's own records about this run — the failure line, the abandon warning — carry the same cronRunId the run's records carry */
-    runId = logging.GenerateProcessId()
-
-    return runId, instance.invokeRun(runtimeInstance, entry, runId)
-}
-
-/* invokeRun is invoke for a run whose id the caller minted: the dispatch mints it before anything that can fail, so the row it files for a run the runner's own preparation or reporting panicked on still carries the id the run's records were about to carry. */
 func (instance *RunnerCommand) invokeRun(runtimeInstance runtimecontract.Runtime, entry *scheduledRunEntry, runId string) (invokeErr error) {
     childContext, cancel := commandContextOf(runtimeInstance.Context(), entry.timeout)
     defer cancel()
@@ -921,12 +908,7 @@ func (instance *RunnerCommand) invokeRun(runtimeInstance runtimecontract.Runtime
     for {
         select {
         case runErr := <-completed:
-            /* a command that returned nil finished its work, whatever the clock did in the same instant; only a failure is attributed to the deadline */
-            if nil != runErr && true == errors.Is(childContext.Err(), context.DeadlineExceeded) {
-                return instance.timeoutError(entry, false, runErr)
-            }
-
-            return runErr
+            return instance.completedRunError(entry, childContext, runErr)
         case <-abandon:
             return instance.resolveAbandonedRun(runtimeInstance, entry, runId, childContext, completed, abandonedAfterDeadline)
         case <-shutdown:
@@ -940,6 +922,15 @@ func (instance *RunnerCommand) invokeRun(runtimeInstance runtimecontract.Runtime
             return instance.resolveAbandonedRun(runtimeInstance, entry, runId, childContext, completed, abandonedAfterShutdown)
         }
     }
+}
+
+/* completedRunError reads the answer of a run that returned: a command that returned nil finished its work, whatever the clock did in the same instant; only a failure is attributed to the deadline */
+func (instance *RunnerCommand) completedRunError(entry *scheduledRunEntry, childContext context.Context, runErr error) error {
+    if nil != runErr && true == errors.Is(childContext.Err(), context.DeadlineExceeded) {
+        return instance.timeoutError(entry, false, runErr)
+    }
+
+    return runErr
 }
 
 /* abandonCause names which cancellation a run ignored for the whole of its graceful window: the deadline its entry asked for, or the runner's shutdown. */
@@ -1139,11 +1130,7 @@ func (instance *RunnerCommand) resolveAbandonedRun(
 ) error {
     select {
     case runErr := <-completed:
-        if nil != runErr && true == errors.Is(childContext.Err(), context.DeadlineExceeded) {
-            return instance.timeoutError(entry, false, runErr)
-        }
-
-        return runErr
+        return instance.completedRunError(entry, childContext, runErr)
     default:
     }
 

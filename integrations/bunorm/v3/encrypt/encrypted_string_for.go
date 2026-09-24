@@ -99,7 +99,7 @@ func refCipher[R CipherRef]() (Cipher, error) {
     var ref R
 
     /* a pointer-form marker (EncryptedStringFor[*CrmCipher]) compiles whenever the value form does, and its zero value is a nil pointer whose CipherName() call dereferences nil — a panic raised from inside database/sql on the first column read or write. It is answered as an error naming the marker instead. */
-    if reflected := reflect.ValueOf(any(ref)); reflect.Ptr == reflected.Kind() && true == reflected.IsNil() {
+    if reflected := reflect.ValueOf(any(ref)); reflect.Pointer == reflected.Kind() && true == reflected.IsNil() {
         return nil, exception.NewError(
             "cipher reference is a pointer type; a CipherRef must be a zero-size value type",
             map[string]any{"cipherRef": fmt.Sprintf("%T", ref)},

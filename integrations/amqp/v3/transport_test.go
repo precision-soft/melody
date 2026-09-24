@@ -3091,3 +3091,29 @@ func TestTransport_CloseWithContextStillReportsAnOwnedConnectionThatOutlivesAPos
         t.Fatalf("an owned connection whose close outlived a positive bound was reported as a clean close")
     }
 }
+
+func TestPositiveOrDefault_ANonPositiveDurationIsTheDefault(t *testing.T) {
+    cases := map[string]struct {
+        value    time.Duration
+        expected time.Duration
+    }{
+        "zero":           {value: 0, expected: 3 * time.Second},
+        "negative":       {value: -1 * time.Nanosecond, expected: 3 * time.Second},
+        "one nanosecond": {value: time.Nanosecond, expected: time.Nanosecond},
+        "positive":       {value: 750 * time.Millisecond, expected: 750 * time.Millisecond},
+    }
+
+    for name, testCase := range cases {
+        t.Run(name, func(t *testing.T) {
+            if resolved := positiveOrDefault(testCase.value, 3*time.Second); testCase.expected != resolved {
+                t.Fatalf("expected %v, got %v", testCase.expected, resolved)
+            }
+        })
+    }
+}
+
+func TestTransport_AZeroPublishTimeoutIsTheDefaultBudget(t *testing.T) {
+    if resolved := (&Transport{}).resolvedPublishTimeout(); defaultPublishTimeout != resolved {
+        t.Fatalf("expected a transport built without a publish timeout to take the default %v, got %v", defaultPublishTimeout, resolved)
+    }
+}

@@ -253,11 +253,7 @@ func WithTokenStoreContext(ctx context.Context) TokenStoreOption {
 /* WithTokenStoreCallTimeout bounds one round trip of every door: the contract's context-less half (Put, PutWithTtl, Delete, DeleteByUser, PurgeExpired, RevokeBefore) and the runtime half (Lookup, RevocationEpoch), where it caps the request context so a request carrying no deadline — melody's http kernel attaches none — still fails fast, while a request that already carries a tighter deadline keeps it. Without a bound a store that accepts connections but stops answering holds a write for the client's own connection timeout (five seconds at the provider's default) and a read for good: the client retries a read-only command — the SSCAN behind DeleteByUser, the SCAN behind PurgeExpired, the HMGET behind RevocationEpoch — on a fresh connection for as long as the context allows, and a context without deadline allows forever. The bound is per round trip, not per operation, so a walk over a large user's index gets one budget per batch. A non-positive timeout falls back to the default, following this package's zero-means-default convention, so a config-sourced unset value can never build an already-cancelled context that fails every call; the cache subpackage deliberately reads its command timeout the other way and says so on its own option. */
 func WithTokenStoreCallTimeout(timeout time.Duration) TokenStoreOption {
     return func(store *RedisTokenStore) {
-        if 0 >= timeout {
-            timeout = defaultTokenStoreCallTimeout
-        }
-
-        store.callTimeout = timeout
+        store.callTimeout = resolvedCallTimeout(timeout, defaultTokenStoreCallTimeout)
     }
 }
 

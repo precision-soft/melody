@@ -194,7 +194,7 @@ func isAuditableEmbed(field reflect.StructField) bool {
 
 /* structValueOf resolves a value to the struct behind it and records every pointer it walks through, reporting as its second result whether the chase met a pointer this walk had already been through. Go permits `type Node struct { *Node }` where it rejects the non-pointer form, so an embedded pointer can lead back to a struct the walk is already inside; that loop carries no nil to end the chase and, unrecorded, the embed recursion runs until the stack is gone — a fatal error, not a panic, so nothing downstream can recover it. */
 func structValueOf(value reflect.Value, seen map[embedVisitKey]struct{}, after bool) (reflect.Value, bool) {
-    for reflect.Ptr == value.Kind() {
+    for reflect.Pointer == value.Kind() {
         if true == value.IsNil() {
             return reflect.Value{}, false
         }
@@ -253,7 +253,7 @@ func structValue(value any, seen map[embedVisitKey]struct{}, after bool) reflect
 func dereferencePointerType(pointerType reflect.Type) reflect.Type {
     visited := map[reflect.Type]struct{}{}
 
-    for reflect.Ptr == pointerType.Kind() {
+    for reflect.Pointer == pointerType.Kind() {
         if _, seen := visited[pointerType]; true == seen {
             return pointerType
         }
@@ -294,11 +294,11 @@ type redactVisitKey struct {
 }
 
 func valueContainsRedactTagReflect(value reflect.Value, seen map[redactVisitKey]struct{}) bool {
-    for reflect.Ptr == value.Kind() || reflect.Interface == value.Kind() {
+    for reflect.Pointer == value.Kind() || reflect.Interface == value.Kind() {
         if true == value.IsNil() {
             return false
         }
-        if reflect.Ptr == value.Kind() {
+        if reflect.Pointer == value.Kind() {
             key := redactVisitKey{pointer: value.Pointer()}
             if _, visited := seen[key]; true == visited {
                 return false
@@ -390,7 +390,7 @@ func valueContainsRedactTagReflect(value reflect.Value, seen map[redactVisitKey]
 
    Ending it with false is the exact answer rather than a concession. The walk is a reachability question whose result is an OR over the fields, and the first true returns straight out through every frame; a type already under examination can therefore only be reached from a frame that is still exploring it and will report any tag it finds on its own. False here means no redact tag is reachable by any path, and the alternative — answering true for a back-edge — would redact every self-referential shape, `type Category struct { Children []Category }` included, turning the audit trail into a column of placeholders. */
 func typeContainsRedactTag(fieldType reflect.Type, seen map[reflect.Type]struct{}) bool {
-    for reflect.Ptr == fieldType.Kind() || reflect.Slice == fieldType.Kind() || reflect.Array == fieldType.Kind() {
+    for reflect.Pointer == fieldType.Kind() || reflect.Slice == fieldType.Kind() || reflect.Array == fieldType.Kind() {
         if _, visited := seen[fieldType]; true == visited {
             return false
         }

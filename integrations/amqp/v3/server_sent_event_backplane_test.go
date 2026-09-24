@@ -1113,3 +1113,9 @@ func TestServerSentEventBackplane_CloseWithContextStillReportsACutWedgedWrite(t 
         t.Fatalf("a cut wedged write was reported as a clean close")
     }
 }
+
+func TestServerSentEventBackplane_AZeroCallTimeoutIsTheDefaultBudget(t *testing.T) {
+    if resolved := (&ServerSentEventBackplane{}).resolvedCallTimeout(); defaultServerSentEventBackplaneCallTimeout != resolved {
+        t.Fatalf("expected a backplane built without a call timeout to take the default %v, got %v", defaultServerSentEventBackplaneCallTimeout, resolved)
+    }
+}

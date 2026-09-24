@@ -245,10 +245,6 @@ func (instance *ManagerRegistry) CloseMigrationDatabase(name string) error {
 
     instance.lock.Unlock()
 
-    if nil == database {
-        return nil
-    }
-
     /* the close travels the wire — COM_QUIT to a peer that may be partitioned, on a connection whose write deadlines are deliberately lifted — so it runs outside the registry-wide lock, the same discipline Close keeps and for the same reason */
     return database.Close()
 }
@@ -591,9 +587,7 @@ func (instance *ManagerRegistry) CloseWithContext(closeContext context.Context) 
     }
 
     for _, name := range sortedNamesOf(instance.migrationDatabases) {
-        if migrationDatabase := instance.migrationDatabases[name]; nil != migrationDatabase {
-            closers = append(closers, namedCloser{name: name + " (migration)", close: migrationDatabase.Close})
-        }
+        closers = append(closers, namedCloser{name: name + " (migration)", close: instance.migrationDatabases[name].Close})
     }
 
     /* the opens still in flight are photographed alongside the pools, so the teardown can WAIT for them below. Close used to return while a dial was still in the air: the open publishes afterwards, reads the closed flag and ends its own database — nothing leaks — but the caller was told the teardown was over while it was not, and a process exiting on that answer left the dial outstanding, its server-side session to be reaped by a timeout rather than ended. The registry cancels the opens' context itself when the refusal is published, so what is waited for here is the retry loop noticing that — a dial already in the driver's hands ends when the driver honours the cancellation, which the providers of this repository do. */

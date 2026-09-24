@@ -258,10 +258,12 @@ func newEngineFlags(flags []clicontract.Flag) []urfavecli.Flag {
 
     engineFlags := make([]urfavecli.Flag, 0, len(flags))
 
-    /* the engine mounts its own help flag on every command, and a command's flag declaring one of its spellings is parsed in its place: -h stopped printing the usage and ran the command, in silence */
+    /* the engine mounts its own help flag on every command, and a command's flag declaring one of its spellings is parsed in its place: -h stopped printing the usage and ran the command, in silence. A nil HelpFlag is the engine's own way to mount none, and every read the engine makes of it is guarded the same way. */
     declaredBy := map[string]string{}
-    for _, spelling := range urfavecli.HelpFlag.Names() {
-        declaredBy[spelling] = urfavecli.HelpFlag.Names()[0]
+    if nil != urfavecli.HelpFlag {
+        for _, spelling := range urfavecli.HelpFlag.Names() {
+            declaredBy[spelling] = urfavecli.HelpFlag.Names()[0]
+        }
     }
 
     for _, flag := range flags {

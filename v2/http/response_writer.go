@@ -2,6 +2,7 @@ package http
 
 import (
     "bufio"
+    "errors"
     "io"
     "net"
     nethttp "net/http"
@@ -139,8 +140,9 @@ func (instance *recordingResponseWriter) Write(data []byte) (int, error) {
 
    It is forwarded through a ResponseController rather than by asserting on the immediate delegate, because the delegate is whatever wrapped the connection before the kernel did: an operator's own net/http middleware that implements Unwrap for ResponseController compatibility but forwards no Flush of its own left this assertion failing, and every flush a streaming handler issued became a silent no-op — the frames sat in the buffer, the handler saw no error, and the client received nothing until the response ended. The controller unwraps the chain the way the standard library does, so the flush reaches the connection whatever sits between. */
 func (instance *recordingResponseWriter) Flush() {
+    /* a flush that reached a flusher has committed the header even when the write under it failed: a client gone answers its write error with the status already on the wire, and a commit left unrecorded let the recovery write a 500 over it and the access log name the 500. Only ErrNotSupported means nothing was flushed. */
     flushErr := nethttp.NewResponseController(instance.ResponseWriter).Flush()
-    if nil == flushErr {
+    if false == errors.Is(flushErr, nethttp.ErrNotSupported) {
         instance.recordImplicitCommit()
     }
 }

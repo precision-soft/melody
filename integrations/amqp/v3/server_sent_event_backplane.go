@@ -298,11 +298,7 @@ func (instance *ServerSentEventBackplane) abandonWedgedPublish(written <-chan st
 }
 
 func (instance *ServerSentEventBackplane) resolvedCallTimeout() time.Duration {
-    if 0 >= instance.callTimeout {
-        return defaultServerSentEventBackplaneCallTimeout
-    }
-
-    return instance.callTimeout
+    return positiveOrDefault(instance.callTimeout, defaultServerSentEventBackplaneCallTimeout)
 }
 
 func (instance *ServerSentEventBackplane) listen() {
