@@ -184,10 +184,7 @@ func TestFirewallRegistry_Match_ATypedNilRequestSelectsNoFirewall(t *testing.T) 
     }
 }
 
-/* the matcher comes through NewCompiledFirewall, which is public and validates nothing, so a nil pointer of an
-application's own matcher type arrives here as a non-nil interface: `nil ==` reads it as a live matcher and the
-Matches call below dereferences it. This is the walk that decides which firewall claims a request, so the crash
-lands on EVERY request rather than on a rare path. Written before the repair, it panics with SIGSEGV. */
+/* the matcher comes through NewCompiledFirewall unvalidated, so a typed nil is skipped: this walk runs on every request */
 func TestFirewallRegistry_Match_SkipsAFirewallCarryingATypedNilMatcher(t *testing.T) {
     var typedNilMatcher *PathPrefixMatcher
 

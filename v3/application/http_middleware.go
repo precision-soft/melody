@@ -20,7 +20,7 @@ import (
 const (
     MiddlewareGroupHttp = "http"
 
-    /* the pipeline sorts ascending and the first entry becomes the outermost wrapper, so a priority BELOW the default puts the static file server outermost, which is where it is. A request for a file that exists is therefore answered before anything registered through Use observes it: the file server never calls the rest of the chain, so the rate limiter, the compressor and the access log are all skipped for exactly the requests that read files off disk. That is the deliberate trade — the alternative is running the whole application chain for every asset — and an application that needs its own middleware to see static requests registers that middleware below this priority rather than above it. */
+    /* MiddlewarePriorityStatic puts the static file server outermost, below the default priority: a request for a file that exists is answered before anything registered through Use observes it, so the rate limiter, the compressor and the access log are skipped for it. A middleware that must see static requests registers below this priority. */
     MiddlewarePriorityStatic = -1000
     MiddlewareNameStatic     = "static"
 
@@ -122,7 +122,7 @@ func (instance *HttpMiddleware) UseFactoriesWithPriority(priority int, factories
             []string{MiddlewareGroupHttp},
             make([]string, 0),
             func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
-                /* a factory that yields nil is refused at the build instead of being dropped from the chain, and the refusal is louder than the pipeline's own reading on purpose: the builder records such a definition as inactive under "factory returned no middleware", which is honest for a framework definition that has a reason to be inactive, but an application factory has no way to express that reason and a nil from one is a wiring mistake far more often than a decision. An operator who registered a rate limiter here would otherwise run every request without it and find out only by reading a report. A middleware meant to be conditional is left unregistered at the composition root, where the condition is; declaring one inactive from this door needs a way to say so, which does not exist yet. The typed-nil yield is the same absence one assertion later — it would join the chain and panic per request. */
+                /* a factory that yields nil, or a typed nil, is refused at the build: an application factory has no way to declare a middleware inactive, so a nil is a wiring mistake that would otherwise run every request without it. A conditional middleware is left unregistered at the composition root. */
                 middlewareInstance := factoryInstance(kernelInstance)
                 if true == internal.IsNilInterface(middlewareInstance) {
                     return nil, exception.NewError(
@@ -165,7 +165,7 @@ func (instance *HttpMiddleware) all(kernelInstance kernelcontract.Kernel) httpMi
     return middlewares
 }
 
-/* describe answers what all() would build without building it: no factory runs and the last build report — the serving process's record — is left alone, which is what lets a console command list the pipeline of a process that will never serve */
+/* describe answers what all() would build without running any factory or touching the last build report, so a console command can list the pipeline of a process that never serves */
 func (instance *HttpMiddleware) describe(kernelInstance kernelcontract.Kernel) ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
     builder := middlewarepipeline.NewBuilder(instance.defaultDefinitions(kernelInstance)...)
     builder.Add(instance.definitions...)

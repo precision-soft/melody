@@ -14,14 +14,14 @@ import (
 const (
     hmacEnvelopeAlgorithm = "HS256"
 
-    /* hmacEnvelopeType is the header typ every envelope is signed under and the only typ the decoder accepts. It is the domain separation between the envelope and every other HS256 credential — the JSON web token above all, which is byte-identical in shape and signs through the same primitive: without a type of its own, the only thing keeping one credential from verifying as the other was the two secrets happening to differ, which nothing enforces. */
+    /* hmacEnvelopeType is the header typ every envelope is signed under and the only one the decoder accepts: it separates the envelope from the JSON web token, which has the same shape and signs through the same primitive */
     hmacEnvelopeType = "melody-internal"
 
     /* DefaultHmacHeaderName is the request header the internal-auth envelope is carried on unless a source/signer overrides it. */
     DefaultHmacHeaderName = "X-Melody-Internal-Auth"
 )
 
-/* hmacEnvelope is the signed payload of the internal-auth header. Every field that matters for authorization is inside the envelope so the single HMAC signature covers all of it — there is no separate-header canonicalization to get wrong. Method/Path/Query bind the envelope to one endpoint (a captured envelope cannot be replayed against another route, nor have its query parameters tampered with), Audience optionally binds it to the intended callee service (so a shared caller's envelope captured en route to service Y cannot be replayed against service Z that also trusts the caller), IssuedAt/ExpiresAt/Nonce bound its lifetime and single use, BodyHash makes the request body tamper-evident, and Actor optionally carries the originating actor (F1) so the callee authorizes/audits as the upstream principal. */
+/* hmacEnvelope is the signed payload of the internal-auth header, one signature covering every field: Method, Path and Query bind it to one endpoint, Audience optionally to one callee, IssuedAt, ExpiresAt and Nonce bound its lifetime and single use, BodyHash covers the body, and Actor carries the originating actor. */
 type hmacEnvelope struct {
     App       string                      `json:"app"`
     Audience  string                      `json:"audience,omitempty"`
@@ -72,7 +72,7 @@ func decodeHmacHeaderValue(headerValue string, secrets HmacSecretProvider) (hmac
     return decodeHmacHeaderValueAcceptingUntypedEnvelopes(headerValue, secrets, false)
 }
 
-/* decodeHmacHeaderValueAcceptingUntypedEnvelopes is the same reading with one difference the migration window needs: an envelope carrying NO typ is accepted. A typ that is present and wrong is still refused, so the window admits exactly the envelopes a signer that predates the typ can mint and nothing else. */
+/* decodeHmacHeaderValueAcceptingUntypedEnvelopes is the same reading, except that an envelope carrying no typ is accepted for the migration window; a present, wrong typ is still refused. */
 func decodeHmacHeaderValueAcceptingUntypedEnvelopes(headerValue string, secrets HmacSecretProvider, acceptUntypedEnvelopes bool) (hmacEnvelope, string, error) {
     parts := strings.Split(headerValue, ".")
     if 3 != len(parts) {
@@ -97,7 +97,7 @@ func decodeHmacHeaderValueAcceptingUntypedEnvelopes(headerValue string, secrets 
         )
     }
 
-    /* the typ is REQUIRED, not merely accepted when present: a JSON web token carries no typ (or "JWT"), so requiring the envelope's own type refuses a JWT presented on the internal-auth header even under a custom secret provider that resolves the empty key id — the structural half of the domain separation, the other half being the JWT validator refusing this type. */
+    /* the typ is required: a JSON web token carries none, so it is refused on this header even under a secret provider that resolves the empty key id */
     if hmacEnvelopeType != header.Type && false == (true == acceptUntypedEnvelopes && "" == header.Type) {
         return hmacEnvelope{}, "", exception.NewError(
             "internal-auth type is not accepted",

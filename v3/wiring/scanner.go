@@ -81,9 +81,9 @@ type ScanResult struct {
     Skipped      []*SkippedConstructor
     /* SkippedVendorDirectories names the vendor trees the walk stepped over; they cannot contribute services, so they are reported separately from the skipped constructors strict fails on. */
     SkippedVendorDirectories []string
-    /* ExcludedFiles names the source files a build constraint kept out of the scan even though they hold constructor candidates — a service the running binary carries under a build tag the scan was not told about. They are reported on request rather than skipped, since strict cannot know which tags the binary was built with; passing them through --tags brings the file back in. */
+    /* ExcludedFiles names the source files a build constraint kept out of the scan although they hold constructor candidates. They are reported on request rather than failing strict, which cannot know which tags the binary was built with; --tags brings a file back in. */
     ExcludedFiles []string
-    /* UnusedExcludes names the exclude patterns that matched no constructor, in declaration order. An exclusion that stopped matching — a renamed type, a typo in the pattern — silently registers the very constructor it was declared to keep out, so it is reported the way an unused bind is. */
+    /* UnusedExcludes names the exclude patterns that matched no constructor, in declaration order. An exclusion that stopped matching silently registers the constructor it was declared to keep out, so it is reported as an unused bind is. */
     UnusedExcludes []string
 }
 
@@ -94,7 +94,7 @@ type SkippedConstructor struct {
     Reason string
 }
 
-/* Scan walks the directory of a package binding and returns every constructor it can wire. A directory below the one declared is scanned as its own package, its import path derived from the relative path, so a package declared as the root of a domain covers the packages beneath it. A symlink standing where the declared directory should be is resolved before the walk — the walk itself does not follow symlinks, and a symlinked root would otherwise be read as an empty package with nothing to report; a symlinked subdirectory stays out of the scan, exactly as the go tool leaves it out of a build. */
+/* Scan walks the directory of a package binding and returns every constructor it can wire. A directory below the declared one is scanned as its own package, its import path derived from the relative path. A symlink at the declared directory is resolved before the walk; a symlinked subdirectory stays out of the scan, as the go tool leaves it out of a build. */
 func Scan(projectDirectory string, packageBinding *PackageBinding, buildTags []string) (*ScanResult, error) {
     rootDirectory := packageBinding.Directory()
     if false == filepath.IsAbs(rootDirectory) {
@@ -114,7 +114,7 @@ func Scan(projectDirectory string, packageBinding *PackageBinding, buildTags []s
     }
     rootDirectory = resolvedRootDirectory
 
-    /* a malformed pattern is refused before anything is walked: path.Match answers ErrBadPattern for it on every name, so the exclusion the operator declared would otherwise match nothing and the constructor it names would be registered anyway, with no trace */
+    /* a malformed pattern is refused before anything is walked: path.Match answers ErrBadPattern for it on every name, so it would match nothing and register the constructor it names */
     excludes := packageBinding.Excludes()
     for _, pattern := range excludes {
         if _, matchErr := path.Match(pattern, ""); nil != matchErr {
@@ -148,7 +148,7 @@ func Scan(projectDirectory string, packageBinding *PackageBinding, buildTags []s
                 return nil
             }
 
-            /* a directory the go tool never compiles as part of the module cannot contribute services; a skipped vendor tree is recorded so the report can name it on request */
+            /* a directory the go tool never compiles as part of the module cannot contribute services; a skipped vendor tree is recorded for the report */
             baseName := entry.Name()
             if "vendor" == baseName {
                 result.SkippedVendorDirectories = append(result.SkippedVendorDirectories, currentPath)
@@ -206,7 +206,7 @@ func scanFile(
     matchedExcludes map[string]bool,
     result *ScanResult,
 ) error {
-    /* a file the build excludes — a //go:build ignore script, the unsatisfied half of a tag pair, a foreign GOOS suffix — contributes no constructors to the binary the wiring is generated for, and scanning it anyway would register phantom services or the same service twice. The scan is told which tags the binary carries so a file gated on one of them is included rather than dropped; the generated source is then specific to that tag set, naming constructors a build without those tags does not have. */
+    /* a file the build excludes contributes no constructors to the binary, so scanning it would register phantom or duplicate services. The scan is told the binary's tags, so the generated source is specific to that tag set. */
     buildContext := build.Default
     buildContext.BuildTags = buildTags
     isIncluded, matchErr := buildContext.MatchFile(filepath.Dir(currentPath), filepath.Base(currentPath))
@@ -221,7 +221,7 @@ func scanFile(
     }
 
     if false == isIncluded {
-        /* an excluded file that holds a constructor candidate is coverage a build tag kept out; it is named on request so a missing service is traceable to the tag it needs, without failing strict on a file legitimately excluded for another target */
+        /* an excluded file that holds a constructor candidate is named on request, without failing strict on a file legitimately excluded for another target */
         if true == fileHasConstructorCandidate(fileSet, currentPath) {
             result.ExcludedFiles = append(result.ExcludedFiles, currentPath)
         }
@@ -240,7 +240,7 @@ func scanFile(
         )
     }
 
-    /* a main package is a program, not an importable package; a constructor under cmd/ would render an import the compiler refuses. Its candidates are reported as skipped instead of dropped without a trace, so --strict surfaces the lost coverage and //melody:ignore acknowledges it. */
+    /* a main package is not importable, so its candidates are reported as skipped for --strict to surface and //melody:ignore to acknowledge */
     if "main" == fileNode.Name.Name {
         for _, declaration := range fileNode.Decls {
             functionDeclaration, isFunction := declaration.(*ast.FuncDecl)
@@ -394,7 +394,7 @@ func parseDirectives(
     for _, comment := range functionDeclaration.Doc.List {
         text := strings.TrimSpace(comment.Text)
 
-        /* the remainder of an ignore is its reason, which the directive does not read: //melody:ignore kept as a test double is the natural spelling, and demanding the bare form would silently register the constructor the comment says to leave out */
+        /* the remainder of an ignore is its reason, which the directive does not read */
         if _, isIgnore := directiveRemainder(text, ignoreDirective); true == isIgnore {
             directives.isIgnored = true
 
@@ -410,7 +410,7 @@ func parseDirectives(
         if remainder, isService := directiveRemainder(text, serviceDirective); true == isService {
             fields := strings.Fields(remainder)
 
-            /* a service directive with no constant named is a directive dropped, and a dropped directive fails open: the constructor registers by type alone, every name-based lookup of the service fails at boot, far from the comment that caused it, so the empty directive is refused where it was written */
+            /* a service directive with no constant would fail open, registering by type alone and breaking every name-based lookup at boot, so it is refused where it was written */
             if 0 == len(fields) {
                 return nil, exception.NewError(
                     "a service directive names the exported constant of the service name",
@@ -431,7 +431,7 @@ func parseDirectives(
         if remainder, isBind := directiveRemainder(text, bindDirective); true == isBind {
             assignments := strings.Fields(remainder)
 
-            /* a bind directive with no assignment binds nothing, and the override written beside the constructor is then silently not the one in effect — the same failure the malformed assignment below is refused for */
+            /* a bind directive with no assignment binds nothing, so the override written beside the constructor would silently not be in effect */
             if 0 == len(assignments) {
                 return nil, exception.NewError(
                     "a bind directive carries at least one argument=parameter assignment",
@@ -447,7 +447,7 @@ func parseDirectives(
             for _, assignment := range assignments {
                 separatorIndex := strings.Index(assignment, "=")
 
-                /* a bind spelled without the equals sign, or with an empty half, would otherwise fall back to a broader bind — or to none — and the override written right beside the constructor would silently not be the one in effect */
+                /* a bind without the equals sign, or with an empty half, would fall back to a broader bind or to none, so it is refused */
                 if 0 >= separatorIndex || len(assignment)-1 == separatorIndex {
                     return nil, exception.NewError(
                         "a bind directive assignment must be spelled argument=parameter",
@@ -467,7 +467,7 @@ func parseDirectives(
             continue
         }
 
-        /* any other spelling under the directive prefix is a typo of one of the four directives, and every one of them fails open when it is dropped: a mistyped scoped demotes a request-lifetime service to a singleton, a mistyped ignore registers the constructor it acknowledges, so the unknown directive is refused where it was written */
+        /* any other spelling under the directive prefix is a typo of one of the four directives, and each fails open when dropped: a mistyped scoped makes a singleton, a mistyped ignore registers the constructor */
         if true == strings.HasPrefix(text, directivePrefix) {
             return nil, exception.NewError(
                 "an unknown melody directive is not one of bind, ignore, service or scoped",
@@ -485,7 +485,7 @@ func parseDirectives(
     return directives, nil
 }
 
-/* directiveRemainder matches a directive exactly or followed by whitespace. A plain prefix match would also claim a longer word — //melody:serviceFoo — and read a name out of what is not the directive at all. */
+/* directiveRemainder matches a directive exactly or followed by whitespace, so //melody:serviceFoo is not the service directive. */
 func directiveRemainder(text string, directive string) (string, bool) {
     if text == directive {
         return "", true
@@ -633,7 +633,7 @@ func describeType(
             return nil
         }
 
-        /* a dot import makes an unqualified exported name ambiguous — it may belong to the scanned package or to the dot-imported one, and the parser alone cannot tell — so the type is unrenderable rather than misattributed */
+        /* a dot import makes an unqualified exported name ambiguous, so the type is unrenderable rather than misattributed */
         if _, hasDotImport := fileImports["."]; true == hasDotImport {
             return nil
         }
@@ -690,7 +690,7 @@ func isStandardDuration(typeReference *TypeReference) bool {
 func collectImports(fileNode *ast.File) map[string]string {
     fileImports := make(map[string]string)
 
-    /* explicit aliases first: Go guarantees their uniqueness in a file, so they own their name outright */
+    /* explicit aliases first: Go guarantees their uniqueness in a file */
     for _, importSpec := range fileNode.Imports {
         if nil == importSpec.Name {
             continue
@@ -704,7 +704,7 @@ func collectImports(fileNode *ast.File) map[string]string {
         fileImports[importSpec.Name.Name] = importPath
     }
 
-    /* a path base never overrides an alias, and a base two unnamed imports share is ambiguous — the file compiles because the packages' real names differ, so the base identifies neither and is dropped for both */
+    /* a path base never overrides an alias, and a base two unnamed imports share identifies neither and is dropped for both */
     basePathByName := make(map[string]string)
     baseCountByName := make(map[string]int)
 
@@ -733,7 +733,7 @@ func collectImports(fileNode *ast.File) map[string]string {
         }
     }
 
-    /* the qualifier a file uses is the package name, which the last path segment does not always spell: a major-version directory (melody/v3), a gopkg.in versioned base (yaml.v3), a hyphenated repository (go-redis). The conventional names those shapes resolve to are added as fallbacks — an explicit alias or an exact base always wins over a guess, and a guess two imports both produce is ambiguous and added for neither. */
+    /* the qualifier is the package name, which the last path segment does not always spell (melody/v3, yaml.v3, go-redis); the conventional names are added as fallbacks, an alias or an exact base always winning, and a guess two imports produce is added for neither */
     candidatePathByName := make(map[string]string)
     candidateCountByName := make(map[string]int)
 
@@ -748,7 +748,7 @@ func collectImports(fileNode *ast.File) map[string]string {
         }
 
         for _, candidate := range packageNameCandidates(importPath) {
-            /* a name two unnamed bases already contested identifies neither of them, and a guess must not claim it for a third import */
+            /* a name two unnamed bases contested is not claimed by a guess for a third import */
             if 1 < baseCountByName[candidate] {
                 continue
             }
@@ -827,7 +827,7 @@ func derivedImportPath(rootImportPath string, rootDirectory string, filePath str
     return rootImportPath + "/" + filepath.ToSlash(relativeDirectory), nil
 }
 
-/* isExcluded reports whether an exclude pattern claims the type name, recording every pattern that matched so the scan can name the ones that never did. A malformed pattern cannot reach this loop: Scan refuses it before the walk starts. */
+/* isExcluded reports whether an exclude pattern claims the type name, recording every pattern that matched so the scan can name the ones that never did. */
 func isExcluded(typeExpression string, excludes []string, matchedExcludes map[string]bool) bool {
     typeName := strings.TrimPrefix(typeExpression, "*")
 

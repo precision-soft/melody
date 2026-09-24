@@ -4,7 +4,7 @@ import (
     "io"
 )
 
-/* Context is what a command's Run receives: the flags the command declared, already parsed, and the positional arguments left over. It is melody's own contract, so the flag parsing engine behind it is an implementation detail of the cli package and no consumer of this interface ever names it — before this contract existed the type handed to a command was the engine's own command struct, which put every field that struct has, mutable, into melody's public surface and made the engine's API part of melody's compatibility promise. */
+/* Context is what a command's Run receives: the flags the command declared, already parsed, and the positional arguments left over. The flag parsing engine behind it is an implementation detail of the cli package. */
 type Context interface {
     /* String answers the value of a string flag, or its declared default when the flag was not given. */
     String(flagName string) string

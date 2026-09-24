@@ -579,7 +579,7 @@ func TestHmacTokenSource_PerRequestBodyBeforeNonceOverride(t *testing.T) {
     }
 }
 
-/* tamperHmacPayload flips a character in the signed payload (the middle base64 segment) so the HMAC over `header.payload` no longer matches the signature — a reliable corruption, unlike flipping the signature's trailing base64 character whose low bits are not significant and can decode to the same bytes. */
+/* tamperHmacPayload flips a character in the signed payload, the middle base64 segment, so the HMAC over `header.payload` does not match the signature; flipping the signature's trailing character may decode to the same bytes. */
 func tamperHmacPayload(headerValue string) string {
     parts := strings.SplitN(headerValue, ".", 3)
 
@@ -982,7 +982,7 @@ func TestHmacTokenSource_AnEnvelopeIssuedInTheFutureIsRefused(t *testing.T) {
     }
 }
 
-/* the refusal fires only when the two queries differ byte for byte, and the journal used to render a reordered pair as two identical strings — the operator read "the queries differ" above two equal lines */
+/* the refusal fires only when the two queries differ byte for byte, so a reordered pair renders as two different strings in the journal */
 func TestHmacTokenSource_QueryMismatchByReorderingRendersTwoDifferentQueries(t *testing.T) {
     signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "wms-service", Secrets: hmacTestSecrets()})
     headerValue, signErr := signer.Sign("GET", "/internal/ping?b=2&a=1", nil, nil)

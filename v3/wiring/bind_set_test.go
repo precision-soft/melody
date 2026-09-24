@@ -29,7 +29,7 @@ func TestBindSet_NameKeepsTheDeclarationOrderAndTheLastValue(t *testing.T) {
     }
 }
 
-/* every reader hands out a copy: the generator walks these lists while it renders, and a caller that reordered or truncated what it read would be rewriting the declaration the report is measured against */
+/* every reader hands out a copy: the generator walks these lists while it renders, and the report is checked against them */
 func TestBindSet_ReadersHandOutCopies(t *testing.T) {
     bindSet := NewBindSet()
     bindSet.Name("address", "parameter.address")

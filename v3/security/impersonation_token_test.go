@@ -79,7 +79,7 @@ func TestImpersonationToken_ImpersonatorRoleModeChangesOnlyTheRoles(t *testing.T
     }
 }
 
-/* sharingToken hands back its OWN backing slice and map, which is what an application's token is free to do. It is the only shape that separates this copy from the one AuthenticatedToken already makes on the way out: measured, a probe built from the framework's own token leaves this guard shadowed and the mutant that removes it alive. */
+/* sharingToken hands back its own backing slice and map, as an application's token may; a probe built from the framework's own token, which already copies, would leave this guard unexercised */
 type sharingToken struct {
     roles []string
     scope map[string]any

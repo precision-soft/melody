@@ -8,7 +8,7 @@ import (
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
-/* RuleConfig carries everything a rule declares beside its path and its matching mode. It is a struct rather than a variadic attribute list so a dimension added later — a method set, a host, an address range — arrives as a field on a call site that already compiles, instead of as another constructor. */
+/* RuleConfig carries everything a rule declares beside its path and its matching mode. */
 type RuleConfig struct {
     /* Attributes are the authorization attributes a matching request must satisfy: role names, or the single securitycontract.AttributePublicAccess. At least one is required, and PUBLIC_ACCESS may not be combined with any other. */
     Attributes []string
@@ -57,9 +57,7 @@ func (instance Rule) Matching() Matching {
     return MatchingRawPrefix
 }
 
-/* NewRule builds a rule with the matching mode named at the call site. It is the door a caller reaches for when the mode is chosen by a variable; when it is chosen by the code, the mode-specific constructors below say the same thing in one fewer argument.
-
-The mode is refused when unspecified: a default would let a caller inherit a reach they never chose, and the reach is exactly what an access control rule is for. */
+/* NewRule builds a rule with the matching mode named at the call site. An unspecified mode is refused, since the reach is what an access control rule is for. */
 func NewRule(path string, matching Matching, config RuleConfig) Rule {
     switch matching {
     case MatchingExact:
@@ -106,9 +104,7 @@ func NewExactRule(path string, config RuleConfig) Rule {
     }
 }
 
-/* NewSegmentPrefixRule builds a rule bounded to a path SEGMENT: the path itself and any descendant under a "/" boundary, never a path that merely begins with the same letters. "/admin" governs "/admin" and "/admin/panel" but not "/administrator".
-
-An empty path is refused rather than made a catch-all: an empty prefix would normalize to "" and answer for every path no other rule claimed, so a rule declared for one section would silently govern the whole application. A genuinely global rule declares "/". */
+/* NewSegmentPrefixRule builds a rule bounded to a path segment: "/admin" governs "/admin" and "/admin/panel" but not "/administrator". An empty path is refused rather than made a catch-all; a global rule declares "/". */
 func NewSegmentPrefixRule(path string, config RuleConfig) Rule {
     normalizedPrefix := normalizePathPrefix(path)
     if "" == normalizedPrefix {
@@ -124,9 +120,7 @@ func NewSegmentPrefixRule(path string, config RuleConfig) Rule {
     }
 }
 
-/* NewRawPrefixRule builds a rule that reaches across segment boundaries: every path beginning with the spelling, so "/admin" governs "/administrator" and "/admin-tools" as readily as "/admin/panel". It is the sharp tool, and PUBLIC_ACCESS is refused on it — being the longest match, a raw public rule opens every path that merely begins with the prefix, shadowing a bounded denial that would have refused.
-
-Reach for NewSegmentPrefixRule unless the cross-segment reach is exactly what the rule means. */
+/* NewRawPrefixRule builds a rule that reaches across segment boundaries: "/admin" governs "/administrator" and "/admin-tools" as readily as "/admin/panel". PUBLIC_ACCESS is refused on it, since a raw public rule, being the longest match, would shadow a bounded denial. Reach for NewSegmentPrefixRule unless the cross-segment reach is what the rule means. */
 func NewRawPrefixRule(path string, config RuleConfig) Rule {
     refusePublicAccess(config.Attributes, "a raw prefix rule; use a segment prefix, exact, or regex rule")
 
@@ -136,9 +130,7 @@ func NewRawPrefixRule(path string, config RuleConfig) Rule {
     }
 }
 
-/* NewRegexRule builds a rule that matches when the pattern is found ANYWHERE in the canonicalized request path. The pattern is compiled unanchored and tested with MatchString, so it is a substring match, not a whole-path one: "/public" matches "/admin/public-notes" and "/x/publications" as readily as "/public". This mirrors the path regex of other frameworks, and it is the opposite of a route requirement, which melody anchors with ^(?:…)$ — a rule meant to name one section must anchor itself. Write "^/public(/|$)" to bound it to the /public tree.
-
-Regex rules are the lowest match priority, after exact and prefix rules, and among themselves the first registered that matches wins. */
+/* NewRegexRule builds a rule that matches when the pattern is found anywhere in the canonicalized request path: it is compiled unanchored, so "/public" matches "/admin/public-notes"; write "^/public(/|$)" to bound it to the /public tree. Regex rules match after exact and prefix rules, and among themselves the first registered that matches wins. */
 func NewRegexRule(pattern string, config RuleConfig) Rule {
     normalizedPattern := strings.TrimSpace(pattern)
     if "" == normalizedPattern {
@@ -191,7 +183,7 @@ func normalizeAttributes(attributes []string) []string {
         )
     }
 
-    /* a rule whose attributes all normalize away still matches its path, and an empty attribute list grants every authenticated principal while shadowing any longer-prefixed rule that would have denied; the blank attribute is refused here rather than degrading the guard silently */
+    /* a blank attribute is refused: a rule whose attributes all normalize away would grant every authenticated principal and shadow any longer-prefixed denial */
     if 0 == len(normalizedAttributes) {
         exception.Panic(
             exception.NewError("access control rule requires at least one attribute", nil, nil),

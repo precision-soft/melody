@@ -4,7 +4,7 @@ import (
     "github.com/precision-soft/melody/v3/security/accesscontrol"
 )
 
-/* AccessControlRule is an alias for accesscontrol.Rule, which owns the type since the access control vocabulary moved to its own package. Existing code that names security.AccessControlRule keeps compiling and keeps holding the same type. */
+/* AccessControlRule is an alias for accesscontrol.Rule. */
 type AccessControlRule = accesscontrol.Rule
 
 /* AccessControl is an alias for accesscontrol.Control. */

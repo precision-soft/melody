@@ -90,7 +90,7 @@ func (instance *ImpersonationToken) Impersonator() (securitycontract.Token, bool
     return instance.impersonator, true
 }
 
-/* OnBehalfOf is the originating actor that propagates the impersonation across services: the impersonated user (identified, carrying the effective roles of the active role mode) acting behind the impersonator (the accountable admin, with the admin's own identity and roles). Encoding both — rather than only the impersonated identity — keeps the admin auditable downstream and lets the impersonator's roles travel the whole flow. */
+/* OnBehalfOf is the originating actor that propagates the impersonation across services: the impersonated user acting behind the accountable impersonator, each with their own identity and roles. */
 func (instance *ImpersonationToken) OnBehalfOf() (securitycontract.Actor, bool) {
     impersonator := NewActor(
         instance.impersonator.UserIdentifier(),

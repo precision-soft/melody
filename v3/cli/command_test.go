@@ -168,7 +168,7 @@ func (instance *closeCountingScope) Close() error {
     return instance.Scope.Close()
 }
 
-/* the positive half of the action's teardown: the failing double proves the failure is reported, this one proves the close is made — on a fixture that hands the action an open scope, where the shared double used to hand it one closed in its constructor */
+/* the positive half of the action's teardown: on a fixture that hands the action an open scope, the close is made */
 func TestRegister_ActionClosesTheScopeOnce(t *testing.T) {
     serviceContainer := container.NewContainer()
     scope := &closeCountingScope{Scope: serviceContainer.NewScope()}
@@ -635,7 +635,7 @@ func TestRegister_ActionLeavesTheContainerOpenWhenTheCommandSucceeds(t *testing.
     }
 }
 
-/* the finish banner reads commandErr, and a panic in the command leaves the linear path that assigns it: the unwinding used to run the banner defer over a nil commandErr and print [finished] [success] for a command that died. The panic is re-raised unchanged so the recover handler that owns the process boundary still sees it. */
+/* a panic in the command prints the failed banner and is re-raised unchanged, so the recover handler that owns the process boundary still sees it */
 func TestRegister_ActionPrintsTheFailedBannerAndRepanicsWhenTheCommandPanics(t *testing.T) {
     runtimeInstance := newTestRuntime(t)
 
@@ -813,7 +813,7 @@ func TestRegister_ActionDoesNotReportTheCloseFailureOfAContainerTheCommandAlread
     }
 }
 
-/* the flag promises the absence of ansi sequences, and the banner is written to the same stream the command's own output goes to: a --no-color run redirected into a file used to carry escape codes around an output that honoured the flag */
+/* a --no-color run redirected into a file carries no escape codes in its banner */
 func TestRegister_ActionPrintsThePlainBannerUnderNoColor(t *testing.T) {
     written := runRegisteredCommand(t, []string{"--no-color"})
 

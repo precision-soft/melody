@@ -46,7 +46,7 @@ func newJwtTokenValidator(config JwtConfig, epochStore securitycontract.Revocati
         exception.Panic(exception.NewError("jwt secret is empty", nil, nil))
     }
 
-    /* a negative skew is refused rather than carried: RevocationEpochSkew widens a boundary to absorb clock skew, and a negative value moves the boundary BACKWARDS instead — tokens issued before the revocation verify again, a revocation bypass reachable from a config typo. */
+    /* a negative skew is refused: it would move the revocation boundary backwards, and tokens issued before the revocation would verify again */
     if 0 > config.RevocationEpochSkew {
         exception.Panic(exception.NewError(
             "jwt revocation epoch skew may not be negative",
@@ -71,7 +71,7 @@ func newJwtTokenValidator(config JwtConfig, epochStore securitycontract.Revocati
     }
 
     return &JwtTokenValidator{
-        /* the secret is copied on the way in, the way StaticHmacSecretProvider copies on ingest: retained by reference, the caller's slice stayed mutable under every later signature check. */
+        /* the secret is copied on the way in, so the caller's slice cannot change it under a later signature check */
         secret:               append([]byte{}, config.Secret...),
         clock:                clockInstance,
         subjectClaim:         subjectClaim,
@@ -153,7 +153,7 @@ func (instance *JwtTokenValidator) Validate(
         )
     }
 
-    /* domain separation from every other HS256 credential melody mints — the internal-auth envelope above all, which is byte-identical in shape and signs through the same primitive under its own "melody-internal" type. An absent typ is accepted (RFC 7519 makes it optional) and "JWT" is compared case-insensitively as §5.1 recommends; anything else is refused, so a credential of another type verifying under a shared or reused secret cannot be replayed here even with SubjectClaim re-pointed at one of its fields. */
+    /* domain separation from every other HS256 credential melody mints, the internal-auth envelope above all: an absent typ is accepted, as RFC 7519 makes it optional, and "JWT" is compared case-insensitively; any other typ is refused, so a credential of another type cannot be replayed here under a shared secret */
     if "" != header.Type && false == strings.EqualFold("JWT", header.Type) {
         return securitycontract.Claims{}, exception.NewError(
             "jwt type is not accepted",
@@ -232,7 +232,7 @@ func (instance *JwtTokenValidator) verifyRevocationEpoch(
 
     epoch, epochErr := instance.epochStore.RevocationEpoch(runtimeInstance, claims.UserIdentifier, claims.DeviceIdentifier)
     if nil != epochErr {
-        /* the store failing to answer is the platform's failure, not the credential's: the mark is what lets the bearer source log it as the incident it is instead of the routine Info a bad token earns, while the request still fails closed either way. */
+        /* the store failing to answer is the platform's failure, marked so the bearer source logs it as an incident; the request fails closed either way */
         return exception.NewError(
             "jwt revocation epoch is unavailable",
             map[string]any{"user": claims.UserIdentifier},

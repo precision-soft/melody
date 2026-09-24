@@ -7,7 +7,7 @@ import (
     "testing"
 )
 
-/* the denied handler is what an unauthorized caller actually receives: the status must be 403 and the body must not name what was refused, because the reason is the authorization decision and a client that may not read the resource may not read why either */
+/* the denied handler is what an unauthorized caller receives: the status is 403 and the body does not name the decision's reason, since a client that may not read the resource may not read why either */
 func TestJsonAccessDeniedHandler_AnswersForbiddenWithoutTheDecisionReason(t *testing.T) {
     handler := NewJsonAccessDeniedHandler()
 

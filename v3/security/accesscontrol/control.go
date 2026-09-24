@@ -22,9 +22,7 @@ func (instance *Control) Rules() []Rule {
     return append([]Rule{}, instance.rules...)
 }
 
-/* Match resolves by category before position: an exact rule beats every prefix rule, a longer prefix beats a shorter one regardless of registration order, every prefix beats every regex, and the empty-prefix fallback answers only when nothing else did. Position in the rule list — what the merge strategies order — breaks only the ties inside a category: equal-length prefixes, regexes, exact duplicates and fallbacks each resolve to the first registered.
-
-A false second answer means no rule claimed the path. That is not a refusal: the caller decides what an unclaimed path means, and melody's own listener serves it. */
+/* Match resolves by category before position: an exact rule beats every prefix rule, a longer prefix beats a shorter one, every prefix beats every regex, and the empty-prefix fallback answers only when nothing else did; the position in the rule list breaks only the ties inside a category. A false second answer means no rule claimed the path, and the caller decides what that means. */
 func (instance *Control) Match(path string) ([]string, bool) {
     matchedIndex, matched := instance.MatchRuleIndex(path)
     if false == matched {
@@ -100,7 +98,6 @@ func (instance *Control) MatchRuleIndex(path string) (int, bool) {
     return -1, false
 }
 
-/* claimsPath answers whether a prefix rule — raw or segment-bounded — reaches the path. */
 func (instance Rule) claimsPath(normalizedPath string) bool {
     if false == strings.HasPrefix(normalizedPath, instance.pathPrefix) {
         return false
@@ -123,11 +120,7 @@ func (instance Rule) claimsPath(normalizedPath string) bool {
     return prefixLength < len(normalizedPath) && '/' == normalizedPath[prefixLength]
 }
 
-/* CanonicalizePath folds the spellings that reach the same resource into the one the rules are written in. net/http hands the path through unfolded, so "//admin/panel" and "/open/../admin/panel" are matched by no rule that names "/admin" — and no rule matched is granted, with the token never consulted.
-
-Folding is NOT sufficient on its own, and the http kernel does not rely on it: because the router matches the path as sent and does not fold "..", a request routed to a protected handler under a folded spelling would be authorized here against the folded spelling's rule — a different, possibly more permissive one, or none. The kernel closes that by refusing a non-canonical request path before it is routed or authorized (http.requestPathIsCanonical), so every path this sees is already the one spelling. The fold remains for a caller that consults a Control without that guard, and it is not a defence on its own any more than the trim below is: it makes the matcher answer for the folded spelling where the router serves the sent one, in either direction — under a closed catch-all rule the unfolded "/x/../public" is claimed by the closed rule and the fold hands it the exact public rule of "/public", which opens what the closed rule had claimed.
-
-The surrounding whitespace is trimmed before the fold, and the trim is NOT a defence: it makes the matcher answer for the trimmed spelling where the router serves the sent one, and "/public " — the decoded "/public%20" — was answered with the public rule of "/public" while the router carried it to the catch-all, protected, handler: an anonymous request served. The kernel refuses a path that trimming would change before it is routed or authorized (http.requestPathIsCanonical), which is the whole of what closes that; the trim stays because a matcher without it leaves the whitespace spelling with no rule where no catch-all rule claims it, which is a grant as well, and a caller consulting the matcher without the kernel's guard is not defended by either. */
+/* CanonicalizePath folds the spellings that reach the same resource, "//admin/panel", "/open/../admin/panel" and surrounding whitespace, into the one the rules are written in. Neither the fold nor the trim is a defence on its own: the router serves the sent spelling, so the http kernel refuses a non-canonical path before it is authorized, and a caller consulting a Control without that guard is defended by neither. */
 func CanonicalizePath(requestPath string) string {
     canonicalPath := strings.TrimSpace(requestPath)
     if "" == canonicalPath {

@@ -4,7 +4,7 @@ import (
     "errors"
 )
 
-/* infrastructureFailure marks an error whose cause is the platform the security machinery stands on — a nonce guard that could not answer, a revocation epoch store that is down, an enrichment lookup that failed — as opposed to a credential that failed its checks. The token sources fail CLOSED on both (the request proceeds anonymous either way), but the two must not share a log severity: a forged signature rejected at Info is routine noise, while a fleet silently degrading every caller to anonymous because its shared backend is down is an incident nothing else will report. The mark travels as a link in the cause chain, so wrapping the marked error in further melody errors keeps it readable through errors.As. */
+/* infrastructureFailure marks an error caused by the platform the security machinery stands on, as opposed to a credential that failed its checks. Both fail closed to anonymous, but a platform failure is logged as an incident. The mark is a link in the cause chain, readable through errors.As. */
 type infrastructureFailure struct {
     cause error
 }

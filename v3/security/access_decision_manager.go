@@ -58,7 +58,7 @@ func (instance *AccessDecisionManager) Strategy() securitycontract.DecisionStrat
 }
 
 func (instance *AccessDecisionManager) DecideAll(token securitycontract.Token, attributes []string, subject any) error {
-    /* an empty attribute list is a refusal, not a vacuous grant. Read as "every one of nothing is granted" it opens the decision to a caller that asked for nothing — an attribute list a configuration value resolved away, or a variadic call with no attribute — and DecideAny refuses the same input. The compiled access control cannot produce an empty list, so the refusal is reached only through a direct caller, which is exactly the caller nothing else guards. */
+    /* an empty attribute list is a refusal, not a vacuous grant, as in DecideAny; the compiled access control never produces one, so only a direct caller reaches it */
     if 0 == len(attributes) {
         return exception.Forbidden("forbidden")
     }

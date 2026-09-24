@@ -14,7 +14,7 @@ type AccessControlBuilder struct {
     rules []security.AccessControlRule
 }
 
-/* Require declares the attributes a path and everything beginning with it must satisfy. The reach is the raw prefix, so "/admin" also governs "/administrator" — a builder method takes one path and cannot name its own mode, and this is the reach it has always had. A rule that must stop at the segment boundary is declared with accesscontrol.NewSegmentPrefixRule and handed to NewAccessControl directly. */
+/* Require declares the attributes a path and everything beginning with it must satisfy. The reach is the raw prefix, so "/admin" also governs "/administrator"; a segment-bounded rule is declared with accesscontrol.NewSegmentPrefixRule and handed to NewAccessControl. */
 func (instance *AccessControlBuilder) Require(pathPrefix string, attributes ...string) *AccessControlBuilder {
     instance.rules = append(
         instance.rules,

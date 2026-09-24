@@ -279,7 +279,7 @@ func TestTablePrinter_ShrinksTheWidestColumnAndWrapsTheSurplus(t *testing.T) {
         }
     }
 
-    /* the header, the separator and a row that no longer fits on one line */
+    /* the header, the separator and a row that does not fit on one line */
     if 4 > renderedLineCount {
         t.Fatalf("expected the oversized row to wrap onto more than one line, got %d rendered lines in %q", renderedLineCount, written)
     }
@@ -422,7 +422,7 @@ func (instance *failingTableWriter) Write(payload []byte) (int, error) {
     return len(payload), nil
 }
 
-/* a writer that answers fewer bytes than it was handed, with no error, has truncated the report exactly as a full disk does; the sink is the application's, so the wrapper cannot trust it to say so */
+/* a writer that answers fewer bytes than it is handed, with no error, has truncated the report as a full disk does */
 type shortTableWriter struct {
     dropped int
 }
@@ -507,7 +507,7 @@ func TestTablePrinter_EscapesControlCharactersInTheTextChannels(t *testing.T) {
     }
 }
 
-/* the escaping runs before the widths are measured, so the escaped spelling is what the alignment counts — escaped at print time instead, the cell renders wider than it measured and the row breaks out of its column. */
+/* the escaping runs before the widths are computed, so the escaped spelling is what the alignment counts */
 func TestTablePrinter_EscapedCellsStayAligned(t *testing.T) {
     envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
     envelope.Table = &TableData{
@@ -560,7 +560,7 @@ func TestTablePrinter_EscapedCellsStayAligned(t *testing.T) {
     }
 }
 
-/* the alignment oracle is display cells, not runes: with the rune measure a CJK cell measured 2 and rendered 4, so its own row's closing pipe sat two cells past every other row's */
+/* the alignment oracle is display cells, not runes: a CJK ideogram occupies two cells */
 func TestTablePrinter_CjkCellsStayAlignedInDisplayCells(t *testing.T) {
     envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
     envelope.Table = &TableData{
@@ -621,7 +621,7 @@ func TestTablePrinter_WrapsByDisplayCellsNotRunes(t *testing.T) {
     }
 }
 
-/* this printer keeps a newline as a real line break, so a cell's width is the width of its widest LINE. Measured whole, "12345\n67890" reads eleven cells wide — a column sized for text no line ever renders. */
+/* a cell's width is the width of its widest line: taken whole, "12345\n67890" would read eleven cells wide */
 func TestTablePrinter_MeasuresAMultiLineCellByItsWidestLine(t *testing.T) {
     printer := NewDefaultTablePrinter()
 
@@ -725,7 +725,7 @@ func TestCellDisplayWidth_AnswersTheWidestLine(t *testing.T) {
     }
 }
 
-/* a column header is sanitized keeping its newlines and wrapped by the same renderer, so it is measured by its widest line exactly as a cell is — on both the measure pass and the minimum the shrink pass floors it at */
+/* a column header is sanitized keeping its newlines and wrapped by the same renderer, so it is sized by its widest line as a cell is, on both the width pass and the minimum the shrink pass floors it at */
 func TestTablePrinter_MeasuresAMultiLineColumnHeaderByItsWidestLine(t *testing.T) {
     printer := NewDefaultTablePrinter()
 
@@ -757,7 +757,7 @@ func TestTablePrinter_MeasuresAMultiLineColumnHeaderByItsWidestLine(t *testing.T
         t.Fatalf("expected a separator row in the output, got %q", buffer.String())
     }
 
-    /* the header's widest line is five cells; measured whole it reads eight */
+    /* the header's widest line is five cells; taken whole it reads eight */
     if "| ----- | ---- |" != separator {
         t.Fatalf("expected the multi-line header measured by its widest line (5), got %q", separator)
     }

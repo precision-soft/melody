@@ -270,7 +270,7 @@ func TestEngineFlagValidator_AFlagWithoutAValidatorInstallsNone(t *testing.T) {
     }
 }
 
-/* the contract promises a plain decimal integer: with the base inferred from the literal, a zero-padded number from a shell loop or a cron entry read as octal or was refused, and a hexadecimal literal was accepted */
+/* the contract promises a plain decimal integer: a zero-padded number reads as decimal and a hexadecimal literal is refused */
 func TestNewEngineFlag_ReadsAnIntegerFlagAsDecimal(t *testing.T) {
     parsed := runFlagProbe(t, []clicontract.Flag{&clicontract.IntFlag{Name: "limit"}}, "--limit=010")
     if 10 != parsed.Int("limit") {
@@ -352,7 +352,7 @@ func (instance *positiveLimitFlagWithoutADefault) Definition() clicontract.FlagD
     }
 }
 
-/* the parsed values are the caller's own: a command that sorts or truncates what it was handed would otherwise rewrite the parsed command line under every later reader of the same flag */
+/* the parsed values are the caller's own: a command that sorts or truncates what it is handed must not rewrite the parsed command line under a later reader of the same flag */
 func TestEngineContext_AnswersACopyOfWhatTheEngineHolds(t *testing.T) {
     parsed := runFlagProbe(
         t,

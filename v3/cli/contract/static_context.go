@@ -5,9 +5,7 @@ import (
     "reflect"
 )
 
-/* StaticContext is a Context whose answers are given rather than parsed. It exists because a command's body is worth testing without a command line: before melody owned this contract a caller could build the engine's command struct itself and drive argv through it, and taking that away without offering a door would have made a command harder to test than it was. Hand it the values a run would have produced and call the command's Run directly.
-
-   A zero StaticContext answers the zero value of every flag, no arguments, and a writer that discards. It is a value holder, not a parser: it does not know which flags a command declares, so a name nothing set reads as unset rather than as the flag's declared default — pass the default when the case under test depends on it. It is not safe for concurrent modification while a command reads it. */
+/* StaticContext is a Context whose answers are given rather than parsed, for testing a command's body: hand it the values a run would produce and call the command's Run directly. A zero StaticContext answers the zero value of every flag, no arguments and a discarding writer. It does not know which flags a command declares, so an unset name reads as unset, not as the declared default. It is not safe for concurrent modification while a command reads it. */
 type StaticContext struct {
     StringValues      map[string]string
     BoolValues        map[string]bool
@@ -59,7 +57,7 @@ func (instance *StaticContext) Writer() io.Writer {
     return instance.WriterValue
 }
 
-/* isNilWriter reads the shape internal.IsNilInterface reads, spelled here because no contract package of this major imports a concrete melody package and internal carries exception with it. The shape matters at this door in particular: a caller assembling a StaticContext from a field of their own hands WriterValue a nil *os.File or a nil *bytes.Buffer, which is an io.Writer that is not nil, so the comparison against nil answers false and the contract's promise — a context built without a writer answers io.Discard — is kept for the true nil alone while the typed nil is handed back to panic on its first write. */
+/* isNilWriter reads the shape internal.IsNilInterface reads, spelled here because a contract package imports no concrete melody package: a nil *os.File or *bytes.Buffer handed to WriterValue is a non-nil io.Writer, and it must answer io.Discard like a true nil. */
 func isNilWriter(writer io.Writer) bool {
     if nil == writer {
         return true
@@ -75,7 +73,7 @@ func isNilWriter(writer io.Writer) bool {
     }
 }
 
-/* copyStringValues keeps the contract the parsed context keeps: what a command is handed is its own, so a command that sorts or truncates it does not rewrite the values every later reader sees */
+/* copyStringValues keeps the contract the parsed context keeps: a command that sorts or truncates what it is handed does not rewrite what later readers see */
 func copyStringValues(values []string) []string {
     if nil == values {
         return nil

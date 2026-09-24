@@ -15,7 +15,7 @@ import (
 
 const defaultHmacSignerTtl = 30 * time.Second
 
-/* HmacEnvelopeSignerConfig configures the client side of the internal-auth scheme — the helper a calling service uses to sign an outgoing request so the callee's HmacTokenSource accepts it. Both products share this signer so the canonical envelope form stays identical on both ends. */
+/* HmacEnvelopeSignerConfig configures the client side of the internal-auth scheme, which a calling service uses to sign a request its callee's HmacTokenSource accepts. */
 type HmacEnvelopeSignerConfig struct {
     /* App is the calling application's own name, recorded in the envelope and matched against the callee's app registry. */
     App string
@@ -28,7 +28,7 @@ type HmacEnvelopeSignerConfig struct {
     /* Ttl is how long a signed envelope stays valid; defaults to defaultHmacSignerTtl. */
     Ttl time.Duration
 
-    /* Audience, when set, names the callee service this envelope is minted for and is signed into the envelope; the callee's HmacTokenSource rejects it unless its configured ServiceIdentity matches, so an envelope captured en route to one service cannot be replayed against another that trusts the same caller. Optional and opt-in: leave it empty and the callee's audience check (which is itself only active when it configures a ServiceIdentity) is not engaged, preserving the previous behavior. */
+    /* Audience, when set, names the callee service and is signed into the envelope; a callee whose ServiceIdentity differs refuses it. Empty leaves the callee's audience check disengaged. */
     Audience string
 
     /* Clock is the clock the envelope's issue and expiry instants are stamped from; nil uses the system clock. Inject a frozen clock for deterministic tests. */
@@ -44,7 +44,7 @@ func NewHmacEnvelopeSigner(config HmacEnvelopeSignerConfig) *HmacEnvelopeSigner 
         exception.Panic(exception.NewError("hmac signer secrets provider is nil", nil, nil))
     }
 
-    /* the verifier refuses an envelope whose key id is not bound to its claimed app, so fail fast here rather than emit envelopes the callee will silently reject: the signer's current key must be issued to the app it signs for. */
+    /* the signer's current key must be issued to the app it signs for, since the verifier refuses any other */
     currentKeyId := config.Secrets.CurrentKeyId()
     if boundApp, keyBound := config.Secrets.AppForKeyId(currentKeyId); false == keyBound || boundApp != config.App {
         exception.Panic(
@@ -94,7 +94,7 @@ func (instance *HmacEnvelopeSigner) HeaderName() string {
     return instance.headerName
 }
 
-/* Sign builds the internal-auth header value binding the call to method, path, query string and the given body, optionally propagating an originating actor. The path argument may carry a query string (everything after the first '?'); it is signed separately and matched against the request's raw query at the callee. The path is matched at the callee against the spelling its router matched — each segment decoded on its own, a separator encoded inside a segment kept as "%2F" — so a caller signs "/files/café" for a request line "/files/caf%C3%A9" and "/files/a%2Fb" for the one-segment resource "a/b"; a request whose segment decodes to a literal "%2F" cannot be signed and is refused. The returned string is written to HeaderName() on the outgoing request. */
+/* Sign builds the internal-auth header value binding the call to method, path, query string and the given body, optionally propagating an originating actor. The path argument may carry a query string (everything after the first '?'); it is signed separately and matched against the request's raw query at the callee. The path is matched at the callee against the spelling its router matched — each segment decoded on its own, a separator encoded inside a segment kept as "%2F", in upper case whatever case the request line used — so a caller signs "/files/café" for a request line "/files/caf%C3%A9" and "/files/a%2Fb" for the one-segment resource "a/b"; a request whose segment decodes to a literal "%2F" cannot be signed and is refused. The returned string is written to HeaderName() on the outgoing request. */
 func (instance *HmacEnvelopeSigner) Sign(
     method string,
     path string,

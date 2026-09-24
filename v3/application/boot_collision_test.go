@@ -368,7 +368,7 @@ func bootCollisionTestHandler() httpcontract.Handler {
     }
 }
 
-/* a duplicate route used to panic one at a time from inside bootHttp, outside the aggregated report this file exists for; while the recorder is armed it joins the report — the first registration wins — and its origin lands on the registration call site, not on the router's plumbing */
+/* while the recorder is armed a duplicate route joins the aggregated report, the first registration winning, and its origin is the registration call site, not the router's plumbing */
 func TestBootCollision_ADuplicateRouteJoinsTheAggregatedReportWhileTheRecorderIsArmed(t *testing.T) {
     routeRegistry := http.NewRouteRegistry()
     router := http.NewRouterWithRouteRegistry(routeRegistry)

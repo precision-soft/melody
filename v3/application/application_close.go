@@ -14,16 +14,14 @@ func (instance *Application) Close() {
     _ = instance.close(context.Background())
 }
 
-/* closeBeforeExit is the shape the exit handler's before-exit hook takes: it carries the deadline the shield holds the teardown to, so the services being released can end themselves in time for the failure they report to reach the record the handler is about to write. */
+/* closeBeforeExit is the exit handler's before-exit hook; it carries the deadline the shield holds the teardown to. */
 func (instance *Application) closeBeforeExit(closeContext context.Context) {
     _ = instance.close(closeContext)
 }
 
-/* close tears the application down and returns the teardown failure only when this call was the one that discovered it. A container somebody else already closed hands its memoized error to every later Close; re-reporting it here would present one failure as two incidents, and its exit code already belongs to whoever performed that close.
-
-   Only the claim's winner enters the container at all. When every racing sibling called the container's Close too, whichever sibling arrived FIRST was the one whose call ran the actual teardown — the container serializes on its own once — and when that first arrival was a claim LOSER, the winner then read the closedness probe as "somebody else's close" and suppressed the report: the single failure was reported by nobody, and an exit path gated on it proceeded over a failed teardown. A loser now waits for the performer's whole teardown instead, so the probe's answer can only mean a close that genuinely came from outside this application. */
+/* close tears the application down and returns the teardown failure only when this call discovered it; a container someone else closed answers its memoized error, whose exit code belongs to that close. Only the claim's winner enters the container, and a loser waits for the winner's whole teardown, so the closedness probe can only mean a close from outside this application. */
 func (instance *Application) close(closeContext context.Context) error {
-    /* a boot that died before the kernel was assembled has nothing to tear down: the exit handler now runs this close as its before-exit hook, and dereferencing the absent kernel there would replace a clean exit with a panic inside the one handler that must not panic. The check reads through the interface, since a typed nil passes a plain comparison and reaches the same dereference. */
+    /* a boot that died before the kernel was assembled has nothing to tear down, and this runs inside the exit handler that must not panic; read through the interface, since a typed nil passes a plain comparison */
     if true == internal.IsNilInterface(instance.kernel) {
         return nil
     }
@@ -43,7 +41,6 @@ func (instance *Application) close(closeContext context.Context) error {
     return performErr
 }
 
-/* performClose is the teardown the claim's winner runs */
 func (instance *Application) performClose(closeContext context.Context) error {
     emergencyLogger := logging.EmergencyLogger()
 
@@ -67,7 +64,7 @@ func (instance *Application) performClose(closeContext context.Context) error {
             return serviceContainerCloseErr
         }
 
-        /* a teardown that ran past its deadline and failed nothing is a diagnostic, not a failure: it returns nil and exits clean, and the record of who spent the budget would be lost with it — the only close that could have named the service was the one that answered nil. The container keeps that record behind a door, read here under the same discoverer-only rule as the failure above, and written to the same journal as a warning; a Container implementation without the door has nothing to say, and a close with no deadline leaves no record. */
+        /* a teardown that overran its deadline and failed nothing returns nil, so the container's record of who spent the budget is read here, under the same discoverer-only rule, and written as a warning; a Container without that door, or a close with no deadline, leaves no record */
         overrunReporter, reportsOverrun := serviceContainer.(interface {
             TeardownDeadlineOverrun() exceptioncontract.Context
         })
@@ -83,7 +80,7 @@ func (instance *Application) performClose(closeContext context.Context) error {
     return nil
 }
 
-/* closeServiceContainerWithin prefers the container's context-taking teardown when it has one, exactly the way this file already discovers IsClosed on the same value: the contract declares Close alone, so a method added to it would be a method every application carrying its own Container implementation would have to grow, and the door is reached by asking the value instead. A container that carries only Close is closed with it, and the budget then bounds the shield around this step rather than the closes inside it — which is the state every container was in before the door existed. */
+/* closeServiceContainerWithin uses the container's context-taking teardown when the value has one, since the contract declares Close alone; a container with only Close is closed with it, and the budget then bounds the shield around this step. */
 func closeServiceContainerWithin(closeContext context.Context, serviceContainer containercontract.Container) error {
     contextCloser, isContextCloser := serviceContainer.(containercontract.ContextCloser)
     if true == isContextCloser {

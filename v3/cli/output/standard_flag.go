@@ -7,7 +7,7 @@ import (
     "github.com/precision-soft/melody/v3/exception"
 )
 
-/* nonNegativeIntValidator refuses a negative value at parsing, naming the flag: the option normalization clamps a negative to zero, and zero means unlimited for the limit and "from the start" for the offset — an argument asking for less than nothing silently delivered everything. The clamp stays as the defensive floor for an Option assembled in code, exactly like the format coercion. */
+/* nonNegativeIntValidator refuses a negative value at parsing, naming the flag: the option normalization clamps a negative to zero, which means unlimited for the limit. The clamp stays as the floor for an Option assembled in code. */
 func nonNegativeIntValidator(flagName string) func(value int) error {
     return func(value int) error {
         if 0 > value {

@@ -3475,6 +3475,56 @@ func TestKernel_RefusesARawPathAFrontHandlerLeftStale(t *testing.T) {
     }
 }
 
+func TestKernel_ARefusedStaleRawPathCarriesNoRouteAndLogsTheRawPath(t *testing.T) {
+    router := NewRouter()
+    router.HandleNamed("admin_users", nethttp.MethodGet, "/admin/users", routeRegistryTestHandler())
+
+    recordingLogger := &warningRecordingLogger{}
+
+    serviceContainer := newHttpTestContainer()
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger)
+
+    responseRouteName := "unread"
+    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher.AddListener(
+        kernelcontract.EventKernelResponse,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            responseEvent, ok := eventValue.Payload().(*KernelResponseEvent)
+            if true == ok {
+                responseRouteName = responseEvent.Request().RouteName()
+            }
+
+            return nil
+        },
+        0,
+    )
+
+    kernelHandler := NewKernel(router).ServeHttp(serviceContainer)
+
+    pathOnlyRewrite := nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+        request.URL.Path = strings.TrimPrefix(request.URL.Path, "/api")
+        kernelHandler.ServeHTTP(writer, request)
+    })
+
+    recorder := httptest.NewRecorder()
+    pathOnlyRewrite.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/api/admin%2Fusers", nil))
+
+    if nethttp.StatusBadRequest != recorder.Code {
+        t.Fatalf("expected the stale raw path refused, got %d", recorder.Code)
+    }
+    if "" != responseRouteName {
+        t.Fatalf("expected the refusal to carry no route, the kernel.response listener read %q", responseRouteName)
+    }
+
+    warningContext, logged := recordingLogger.warningContextFor("request path refused before the handler")
+    if false == logged {
+        t.Fatalf("expected the refusal to leave its warning, got %v", recordingLogger.warningMessages)
+    }
+    if "/api/admin%2Fusers" != warningContext["rawPath"] {
+        t.Fatalf("expected the refusal record to carry the raw path, got %v", warningContext["rawPath"])
+    }
+}
+
 /* the tie-break is registration order, deliberately, and specificity is not a factor. The rule is written on the RouteHandler contract; this pins it so a future change to the selection has to be a decision rather than an accident. */
 func TestRouter_EqualPriorityIsWonByTheFirstRegistration(t *testing.T) {
     router := NewRouter()

@@ -14,7 +14,7 @@ func RequestPathAsSent(requestUrl *url.URL) string {
     return requestUrl.EscapedPath()
 }
 
-/* RequestRawPathIsStale reports whether URL.RawPath is set and no longer unescapes to URL.Path, the state a handler in front of the kernel leaves when it rewrites Path alone: the spelling the client sent can then no longer be read, so the kernel refuses the request rather than route it on the re-escaped decoded path. */
+/* RequestRawPathIsStale reports whether URL.RawPath is set and does not unescape to URL.Path, the state a handler in front of the kernel leaves when it rewrites Path alone: the spelling the client sent cannot then be read, so the kernel refuses the request rather than route it on the re-escaped decoded path. A cleared RawPath is indistinguishable from a request that carried no escape. */
 func RequestRawPathIsStale(requestUrl *url.URL) bool {
     if "" == requestUrl.RawPath {
         return false

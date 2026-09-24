@@ -232,7 +232,7 @@ func TestImpersonation_AnonymousCanNotSwitch(t *testing.T) {
     }
 }
 
-/* the resolver's error used to be dropped: the journal said only "could not resolve", indistinguishable from a mistyped target, and the failure's cause survived nowhere. */
+/* the resolver's error travels as the cause into the journal */
 func TestImpersonation_ResolverErrorCarriesItsCauseIntoTheJournal(t *testing.T) {
     admin := NewAuthenticatedToken("admin-1", []string{securitycontract.RoleAllowedToSwitch})
     source := NewImpersonationTokenSource(ImpersonationTokenSourceConfig{

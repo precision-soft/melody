@@ -94,14 +94,12 @@ func (instance *SecurityContext) MatchedFirewallMatcher() string {
 func (instance *SecurityContext) IsGranted(role string) bool {
     token := instance.Token()
 
-    /* read the same way the constructor reads the firewall beside it: NewSecurityContext is public and does not refuse a typed-nil token, so one arrives here as a non-nil interface and Roles() below dereferences it */
+    /* NewSecurityContext does not refuse a typed-nil token, and Roles() below would dereference it */
     if true == internal.IsNilInterface(token) {
         return false
     }
 
-    /* the voters refuse a token that reports roles while answering IsAuthenticated false, and this door has to
-    answer the same: it is called straight from a handler to branch on privilege, so a token the firewall denied
-    the route would otherwise still open the content behind it */
+    /* a token that reports roles while answering IsAuthenticated false is refused, as the voters refuse it: this door is called from a handler to branch on privilege, so a token the firewall denied must not open the content behind it */
     if false == token.IsAuthenticated() {
         return false
     }

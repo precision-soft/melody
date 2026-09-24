@@ -36,7 +36,7 @@ func TestStaticHmacAppRegistry_RolesForAppAnswersFalseForAnUnknownApp(t *testing
     }
 }
 
-/* the registry is the authorization table of every service principal: a caller that kept the slice it handed in, or that mutates the slice it was handed back, would be rewriting the roles of a live caller */
+/* the registry is the authorization table of every service principal: a caller that kept the slice it handed in, or mutates the slice it is handed back, must not rewrite the roles of a live caller */
 func TestStaticHmacAppRegistry_OwnsItsRoles(t *testing.T) {
     callerRoles := []string{"ROLE_SERVICE"}
     registry := NewStaticHmacAppRegistry(map[string][]string{"billing": callerRoles})

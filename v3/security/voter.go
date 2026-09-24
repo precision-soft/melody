@@ -22,9 +22,7 @@ func (instance *RoleVoter) Vote(token securitycontract.Token, attribute string, 
         return securitycontract.VoteAbstain
     }
 
-    /* the token comes from the application's token source, and a nil pointer of its own token type
-    reaches here as a non-nil interface: a bare comparison takes it for a live token, IsAuthenticated
-    answers true without touching the receiver, and the Roles() call below dereferences the nil */
+    /* IsNilInterface: a typed nil token of the application's type answers IsAuthenticated true without its receiver, and Roles() below would dereference it */
     if true == internal.IsNilInterface(token) {
         return securitycontract.VoteDenied
     }

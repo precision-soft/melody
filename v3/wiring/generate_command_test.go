@@ -110,9 +110,7 @@ func newCommandFixtureRuntime(t *testing.T, projectDirectory string) runtimecont
     return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 }
 
-/* runGenerateCommand drives the command through the cli library rather than around it, so the flags it declares are the flags the arguments are parsed against: a flag the command stops declaring fails here instead of silently reading its zero value.
-
-   Unless the caller gives --out itself, the source goes to a file of its own and the report to the writer — the mode in which the writer carries the report; in stdout mode the writer carries the source alone and the report goes to the journal. What comes back is the writer followed by the generated source, so a caller reads both where it used to read one stream. */
+/* runGenerateCommand drives the command through the cli library, so a flag the command stops declaring fails here instead of reading its zero value. Unless the caller gives --out, the source goes to a file and the report to the writer; what comes back is the writer followed by the generated source. */
 func runGenerateCommand(
     t *testing.T,
     projectDirectory string,
@@ -382,7 +380,7 @@ func TestGenerateCommand_NamesTheVendorDirectoryOnlyOnRequest(t *testing.T) {
     }
 }
 
-/* a build context carries plain tag identifiers; a constraint expression handed to it matches no file, so the scan would behave as if nothing had been passed and strict would still report success */
+/* a build context carries plain tag identifiers; a constraint expression matches no file, so the scan would behave as if no tag were passed while strict reports success */
 func TestSplitBuildTags_RejectsAConstraintExpression(t *testing.T) {
     for _, tags := range []string{"!postgres", "postgres,!mysql", "postgres mysql", "post-gres", "(postgres)"} {
         buildTags, splitErr := splitBuildTags(tags)
@@ -463,7 +461,7 @@ func TestGenerateCommand_StrictCarriesEveryViolationInOneRefusal(t *testing.T) {
     }
 }
 
-/* a generated file inside a scanned directory is read back by the next scan with a package clause the surrounding sources do not carry, so the package stops compiling and the tool can no longer regenerate its way out. */
+/* a generated file inside a scanned directory is read back by the next scan with a package clause the surrounding sources do not carry, so the package stops compiling and the tool cannot regenerate its way out */
 func TestGenerateCommand_RefusesAnOutPathInsideAScannedDirectory(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
 

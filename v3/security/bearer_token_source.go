@@ -61,7 +61,7 @@ func (instance *BearerTokenSource) Resolve(
 
     claims, validateErr := instance.validator.Validate(runtimeInstance, tokenString)
     if nil != validateErr {
-        /* the request fails closed to anonymous either way, but a credential failing its checks and the platform failing to check it must not share a severity: a revocation epoch store or token store that cannot answer degrades every bearer of a valid token to anonymous at once, and this record is where that incident surfaces. */
+        /* the request fails closed to anonymous either way, but a store that cannot answer degrades every bearer at once, so it is logged above a credential that failed its checks */
         logger := logging.LoggerFromRuntime(runtimeInstance)
         if nil != logger {
             if true == isInfrastructureFailure(validateErr) {

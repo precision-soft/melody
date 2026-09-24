@@ -154,7 +154,6 @@ func TestRegisterModuleProvider_RegistersChildrenWithoutProvider(t *testing.T) {
     assertModuleNames(t, instance.modules, []string{"child-a", "child-b"})
 }
 
-/* a provider that is itself a module boots as that module: this door used to keep only the children and silently drop the provider's own hooks, so the two registration doors registered different applications from the same value */
 func TestRegisterModuleProvider_AProviderThatIsAModuleBootsAsThatModule(t *testing.T) {
     instance := &Application{}
 
@@ -168,7 +167,6 @@ func TestRegisterModuleProvider_AProviderThatIsAModuleBootsAsThatModule(t *testi
     assertModuleNames(t, instance.modules, []string{"provider", "child-a", "child-b"})
 }
 
-/* one instance reached through two providers used to boot twice — the loud half was a duplicate service name, the silent half its listeners and middlewares attached twice */
 func TestRegisterModule_TheSameInstanceThroughTwoProvidersBootsOnce(t *testing.T) {
     instance := &Application{}
 

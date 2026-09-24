@@ -186,7 +186,6 @@ func (instance *paddedNameProbeCommand) Run(
     return instance.inner.Run(runtimeInstance, commandContext)
 }
 
-/* the suggestion refusal travels unmarked so the exit path writes it to the application log: the rendered table lives only on stderr, and a run refused here used to be invisible to anything reading the log file */
 func TestSuggestCliCommand_ReturnsTheRefusalUnmarked(t *testing.T) {
     /* the input is a substring of the available name, so this refusal travels through the matches-found branch, not the zero-match one */
     suggestErr := suggestCliCommand(

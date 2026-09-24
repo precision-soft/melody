@@ -10,7 +10,7 @@ import (
 func ParseOptionFromCommand(commandContext clicontract.Context) Option {
     option := DefaultOption()
 
-    /* read through the interface: the parameter is a contract now, so a caller handing back a typed nil of its own context type produces a non-nil interface that a plain comparison lets through, and the first flag read below dereferences it */
+    /* read through the interface: a typed nil context passes a plain comparison, and the first flag read below dereferences it */
     if true == internal.IsNilInterface(commandContext) {
         return option
     }

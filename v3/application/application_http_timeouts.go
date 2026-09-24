@@ -8,7 +8,7 @@ import (
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
-/* the per-request server limits are fixed in this major: nothing implements an override and nothing can inject one — the configuration the application consults is always the one it built itself. The values bound every request the server admits; a slow client is cut instead of holding a connection open forever. The write timeout is armed by net/http once, from the request line, so a handler that streams re-arms it per frame through the event-stream writer's write budget rather than through a larger figure here — and gives up, with that, the absolute cut this figure gave a stalled client: a stream is bounded per write, and a client that stops reading holds its connection until the socket buffers fill, unless the handler bounds the stream's life itself. The shutdown wait is the one limit that is configurable, through MELODY_HTTP_SHUTDOWN_TIMEOUT, because its right value belongs to the supervisor's termination grace rather than to the framework. */
+/* the per-request server limits are fixed in this major; a slow client is cut instead of holding a connection open. net/http arms the write timeout once, from the request line, so a streaming handler re-arms it per frame through the event-stream writer's write budget, and a client that stops reading then holds its connection until the socket buffers fill unless the handler bounds the stream. The shutdown wait is configurable through MELODY_HTTP_SHUTDOWN_TIMEOUT, since its value belongs to the supervisor's termination grace. */
 const (
     defaultHttpReadTimeout       = 15 * time.Second
     defaultHttpReadHeaderTimeout = 5 * time.Second
@@ -25,7 +25,7 @@ func applyHttpServerTimeouts(httpServer *nethttp.Server) {
     httpServer.MaxHeaderBytes = defaultHttpMaxHeaderBytes
 }
 
-/* applyHttpServerErrorLog routes what net/http reports on its own into the application's journal. Everything the http kernel never sees arrives through this door — a connection that fails before a request exists, a request the server rejects before any handler, the listener degrading — and with it unset net/http prints all of it to stderr as unstructured text while every other line the process writes is structured. */
+/* applyHttpServerErrorLog routes what net/http reports on its own, a connection failing before a request exists or a request rejected before any handler, into the application's journal instead of unstructured stderr. */
 func applyHttpServerErrorLog(httpServer *nethttp.Server, logger loggingcontract.Logger) {
     httpServer.ErrorLog = logging.NewStandardErrorLogger(logger, "http server error")
 }

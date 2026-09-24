@@ -335,7 +335,7 @@ func TestConfiguration_UnescapedLiteralPercentFailsTheBootResolveWithAnActionabl
     }
 }
 
-/* the deferral exists for exactly this flow: a .env value referencing a parameter the composition root registers between construction and boot used to kill the process inside the constructor, before the registration it referenced could ever run */
+/* a .env value referencing a parameter the composition root registers between construction and boot is deferred, not refused in the constructor */
 func TestConfiguration_AForwardReferenceDefersAndTheBootResolveSettlesIt(t *testing.T) {
     configuration, newConfigurationErr := NewConfiguration(
         &Environment{
@@ -823,7 +823,7 @@ func TestResolveTemplate_UnterminatedEnvPlaceholderIsRefused(t *testing.T) {
     }
 }
 
-/* a name-shaped run a percent opened and nothing closed is a reference with a typo: %app-name% used to survive as literal text while the contract already demands a literal percent be doubled */
+/* a name-shaped run a percent opened and nothing closed is a reference with a typo, refused, since a literal percent must be doubled */
 func TestResolveTemplate_UnclosedParameterReferenceIsRefused(t *testing.T) {
     configuration := &Configuration{
         environment: &Environment{values: map[string]string{}},
@@ -845,7 +845,7 @@ func TestResolveTemplate_UnclosedParameterReferenceIsRefused(t *testing.T) {
         t.Fatalf("expected the malformed reference report, got: %v", resolveErr)
     }
 
-    /* the sentence alone does not say WHICH percent was refused: the trailing percent of this same template opens no reference and, with the guard reading the flag the other way round, produces the identical sentence from offset 17 — so the offset of the percent is the observable that tells the two paths apart, where the name-shaped run used to be, until a password holding a percent had its tail carried into the log through it */
+    /* the offset of the percent tells the two refusals apart: the trailing percent of this template opens no reference and would produce the identical sentence from offset 17 */
     if 8 != contextOfError(t, resolveErr)["offset"] {
         t.Fatalf("expected the percent that opened the name-shaped run to be the refused one, got offset %v", contextOfError(t, resolveErr)["offset"])
     }
@@ -1082,7 +1082,7 @@ func TestResolveTemplate_ARefusalInsideAnEnvironmentValueNamesTheEnvironmentKey(
     }
 }
 
-/* a %parameter% reference inside an environment value is scanned under the referenced parameter's own name, and its refusal's offset indexes that parameter's value; the environment key used to be added to it too, pointing the operator at a string the offset does not index */
+/* a %parameter% reference inside an environment value is scanned under the referenced parameter's own name, so its refusal names no environment key */
 func TestResolveTemplate_ARefusalInsideAParameterReferencedFromAnEnvironmentValueNamesNoEnvironmentKey(t *testing.T) {
     configuration := &Configuration{
         environment: &Environment{values: map[string]string{

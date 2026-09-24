@@ -5,7 +5,7 @@ import (
     "crypto/subtle"
 )
 
-/* constantTimeSecretEquals compares a presented secret against the expected one without leaking anything through time — the length included. subtle.ConstantTimeCompare is constant-time only over inputs of EQUAL length and answers immediately on unequal ones, so the comparison's duration told a caller when a guess had the right length, shrinking the search space to strings of one size. Hashing both sides first makes every comparison run over the same thirty-two bytes whatever the inputs measure, and the digests preserve exactly the equality being asked. Both api-key doors — the authenticator and the rule — compare through this one spelling, so the two cannot drift into disagreeing timing shapes. */
+/* constantTimeSecretEquals compares a presented secret against the expected one without leaking its length through time: subtle.ConstantTimeCompare answers at once on unequal lengths, so both sides are hashed first and every comparison runs over thirty-two bytes. Both api-key doors, the authenticator and the rule, compare through it. */
 func constantTimeSecretEquals(expectedValue string, presentedValue string) bool {
     expectedDigest := sha256.Sum256([]byte(expectedValue))
     presentedDigest := sha256.Sum256([]byte(presentedValue))

@@ -12,7 +12,7 @@ import (
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
-/* nonceGuardPurgeInterval bounds how often the expired-entry sweep runs: an O(n) sweep on every Remember would be O(n²) under a high volume of distinct nonces, yet correctness never depends on the sweep (an expired entry is ignored by the per-nonce expiry check at read time regardless). Sweeping at most once per interval keeps reclamation timely while capping the amortized cost; between sweeps the map holds at most the entries added within one interval beyond what has expired. */
+/* nonceGuardPurgeInterval bounds how often the expired-entry sweep runs, so distinct nonces at volume do not pay an O(n) sweep on every Remember; correctness never depends on the sweep, since the read checks each nonce's expiry. */
 const nonceGuardPurgeInterval = 1 * time.Second
 
 /* NewMemoryNonceGuard is NewMemoryNonceGuardWithClock on the system clock. */
@@ -50,7 +50,6 @@ func (instance *MemoryNonceGuard) Remember(
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    /* sweep expired entries at most once per interval — correctness comes from the per-nonce expiry check below, not the sweep, so amortizing it keeps a high volume of distinct nonces from paying an O(n) sweep on every call. The zero lastPurge makes the first Remember sweep. */
     if now.Sub(instance.lastPurge) >= nonceGuardPurgeInterval {
         instance.purgeExpired(now)
         instance.lastPurge = now

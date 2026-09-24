@@ -227,7 +227,7 @@ func TestNewKernelConfiguration_AcceptsAValidSetAndKeepsEveryValue(t *testing.T)
     }
 }
 
-/* the log level decides what every later record is measured against, so a name the logger does not know is refused instead of falling back: a deployment that misspells it would otherwise run at whatever level the fallback picked, and find out when an incident is missing from the log */
+/* the log level decides what every later record is filtered against, so a name the logger does not know is refused instead of falling back */
 func TestParseKernelLogLevel_MapsEveryKnownNameAndRefusesTheRest(t *testing.T) {
     known := []loggingcontract.Level{
         loggingcontract.LevelDebug,

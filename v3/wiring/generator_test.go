@@ -957,7 +957,7 @@ type Clock struct {
 type replayClock struct {
 }
 
-/* the control the two guards above rest on, measured at the container: the emitted pair is refused in BOTH boot orders while the scoped side carries no option, and admitted in both once it carries WithReplacesContainerService. Register and RegisterScopedType are the very calls the emitted MustRegister forms delegate to, so the error is read instead of a panic. */
+/* the control the two guards above rest on, checked at the container: the emitted pair is refused in both boot orders while the scoped side carries no option, and admitted in both once it carries WithReplacesContainerService */
 func TestGenerate_ScopedShadowOfANamedContainerServiceBootsOnlyWithTheReplacesOption(t *testing.T) {
     registerContainerService := func(target containercontract.Container) error {
         return container.Register[*replayClock](

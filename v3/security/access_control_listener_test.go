@@ -239,7 +239,7 @@ func TestAccessControlListener_WhenNoSecurityContext_EmitsAuthorizationDeniedAnd
     }
 }
 
-/* the listener reads the spelling the router routes: "/public%2F" is the one-segment resource "public/" for the router, served through the protected catch-all, and the decoded "/public/" it used to read was folded onto the exact public rule of "/public" — an anonymous request served the protected handler. Read as routed, the request is claimed by the closed rule and refused */
+/* the listener reads the spelling the router routes: "/public%2F" is the one-segment resource the protected catch-all serves, so the closed rule claims and refuses it */
 func TestAccessControlListener_ReadsThePathTheRouterRoutes(t *testing.T) {
     for path, denied := range map[string]bool{
         "/public":         false,
@@ -849,7 +849,7 @@ func TestAccessControlListener_TheDecisionIsDecideAllOverTheWholeAttributeSet(t 
     }
 }
 
-/* TestRegisterKernelAccessControlListener_ADispatcherWithoutTheCapabilityIsNamed pins the branch that used to be silent. The required-listener mark is what makes a listener stopping propagation ahead of access control fail the dispatch closed instead of letting the request reach its handler unchecked; a dispatcher that cannot take the mark disarms that guarantee for the whole process, and the framework's own event adapter refuses the very same condition with a panic rather than swallowing it. The record goes to the emergency channel because this runs at boot, before the configured logger is resolvable. */
+/* a dispatcher that cannot take the required-listener mark disarms the fail-closed guarantee for the whole process, so it is named on the emergency channel */
 func TestRegisterKernelAccessControlListener_ADispatcherWithoutTheCapabilityIsNamed(t *testing.T) {
     readEnd, writeEnd, pipeErr := os.Pipe()
     if nil != pipeErr {

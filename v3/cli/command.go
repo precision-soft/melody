@@ -52,7 +52,7 @@ func Register(root *Root, command clicontract.Command, runtimeInstance runtimeco
         )
     }
 
-    /* the list is the tree's own and this is the only thing that writes into it, so every entry it holds was built four lines below and none of them can be nil */
+    /* the list is the tree's own and only this writes into it, so no entry can be nil */
     for _, existing := range root.command.Commands {
         if normalizedCommandName == strings.TrimSpace(existing.Name) {
             exception.Panic(
@@ -73,7 +73,7 @@ func Register(root *Root, command clicontract.Command, runtimeInstance runtimeco
             Name:  normalizedCommandName,
             Usage: copied.Description(),
             Flags: newEngineFlags(copied.Flags()),
-            /* the tree's streams travel with the registration, because the engine defaults each command's own separately and a command registered after SetWriter would otherwise write past it */
+            /* the tree's streams travel with the registration, since the engine defaults each command's own separately */
             Writer:    root.writer,
             ErrWriter: root.errorWriter,
             Action: func(ctx context.Context, actionCommand *urfavecli.Command) error {
@@ -92,7 +92,7 @@ func runCommandAction(
 ) error {
     writer := commandContext.Writer()
 
-    /* in json mode the command writes one machine-readable document to this same stream, so the banner would make it unparseable from the first byte; nothing is lost because output.Meta already carries the command, arguments, start time and duration. The final status is the exit code, not the document: the scope and container are closed after the document was written, so a shutdown failure discovered there can no longer enter it. */
+    /* in json mode the command writes one machine-readable document to this stream, so there is no banner; output.Meta carries the command, arguments, start time and duration. The final status is the exit code, since a shutdown failure found after the document was written cannot enter it. */
     resolvedOption := output.NormalizeOption(
         output.ParseOptionFromCommand(commandContext),
     )
@@ -104,7 +104,7 @@ func runCommandAction(
     startedAt := time.Now()
     const logFiller = "======================================"
 
-    /* the banner is decoration, and quiet is the documented governor of decoration: StandardFlags defaults it to true so a scripted invocation stays clean without asking, DebugFlags to false so an introspection command keeps its frame, and a command that declares neither reads false and keeps the banner it always had. The banner ignored the flag entirely, so the one output the contract promises quiet suppresses was the one it never touched — melody:routes:manifest piped into jq carried the frame into the document. */
+    /* the banner is decoration, which quiet governs: StandardFlags defaults it to true, DebugFlags to false, and a command declaring neither reads false */
     quiet := resolvedOption.Quiet
 
     banner := commandBanner{writer: writer, noColor: resolvedOption.NoColor}
@@ -157,7 +157,7 @@ func runCommandAction(
         banner.printFullLine()
     }()
 
-    /* the finish banner reads commandErr, and a panic in the command leaves the linear path that assigns it: without this the unwinding ran the banner defer over a nil commandErr and printed [finished] [success] for a command that died. The panic itself is re-raised unchanged — an *exception.ExitError keeps its exit code — and the closes are deliberately NOT performed here on this path: the scope is closed by the caller's defer, and the container — on every path — by the recover handler that owns the exit, after it resolved the logger; closing the container here would hand that handler a closed logger and downgrade the fatal record to the emergency fallback. */
+    /* a panic in the command leaves the path that assigns commandErr, so the finish banner reads it here; the panic is re-raised unchanged, keeping an *exception.ExitError's code. Nothing is closed on this path: the caller's defer closes the scope, and the recover handler that owns the exit closes the container after resolving its logger. */
     defer func() {
         recoveredValue := recover()
         if nil == recoveredValue {
@@ -175,12 +175,12 @@ func runCommandAction(
         panic(recoveredValue)
     }()
 
-    /* a command that returns its error through a concrete typed pointer hands over a non-nil interface around a nil value: read as a failure it reaches Error() on a nil receiver on the printing line below. The same normalization guards the scope's Close result, which crosses the substitutable runtime contract. */
+    /* normalized through the interface: a command returning a concrete typed nil pointer hands over a non-nil interface; the scope's Close result, from the substitutable runtime contract, gets the same reading */
     runErr := normalizeCliError(command.Run(runtimeInstance, commandContext))
 
     closeErrorByName := map[string]error{}
 
-    /* the container is deliberately not closed here, on either outcome — the reading the panic path above already had is the linear path's too: the recover handler that owns the process exit resolves the final record's logger through the container and closes it between the record and os.Exit, so a close here would downgrade a failed command's final record to the stderr fallback. The scope stays this action's to close, and its failure this action's to report. */
+    /* the container is not closed here on either outcome: the recover handler that owns the exit resolves the final record's logger through it and closes it between the record and os.Exit. The scope is this action's to close and report. */
     scopeCloseErr := normalizeCliError(runtimeInstance.Scope().Close())
     if nil != scopeCloseErr {
         closeErrorByName["scope"] = scopeCloseErr
@@ -196,7 +196,7 @@ func runCommandAction(
     return nil
 }
 
-/* commandBanner prints the frame a registered command runs inside, on the stream the command's own output goes to. The flag promises the absence of ansi sequences, so a --no-color run redirected into a file carries no escape codes around an output that honoured it. */
+/* commandBanner prints the frame a registered command runs inside, on the stream its output goes to; under --no-color it carries no escape codes. */
 type commandBanner struct {
     writer  io.Writer
     noColor bool
@@ -216,12 +216,11 @@ func (instance commandBanner) printFullLine() {
     )
 }
 
-/* printStatusLine is the line with no verdict in it */
 func (instance commandBanner) printStatusLine(background string, text string) {
     instance.printLine(background, text, "", false, "")
 }
 
-/* printLine escapes the text on either side of the verdict as data and colours the verdict AFTER that. The text embeds the command's own error, which routinely echoes downstream and client-derived values: escaped, an embedded carriage return or escape sequence cannot repaint the line as another verdict. Coloured before the escaping, the banner's own escape sequence went through it together with the data, and every failed run with colour on — the default — printed \x1b[31m as literal text around [failed], while the no-color run, which never coloured the verdict, printed it right. A sanitiser handed an already formatted line cannot tell the author's bytes from the client's, so the presentation is added last. */
+/* printLine escapes the text on either side of the verdict as data and colours the verdict after that: the text embeds the command's error, which may echo client-derived values, so an embedded carriage return or escape sequence cannot repaint the line, and the banner's own colour is not escaped with the data. */
 func (instance commandBanner) printLine(background string, textBeforeVerdict string, verdict string, failed bool, textAfterVerdict string) {
     escapedBefore := internal.EscapeControlCharacters(textBeforeVerdict)
     escapedAfter := internal.EscapeControlCharacters(textAfterVerdict)
@@ -258,7 +257,7 @@ func newEngineFlags(flags []clicontract.Flag) []urfavecli.Flag {
 
     engineFlags := make([]urfavecli.Flag, 0, len(flags))
 
-    /* the engine mounts its own help flag on every command, and a command's flag declaring one of its spellings is parsed in its place: -h stopped printing the usage and ran the command, in silence. A nil HelpFlag is the engine's own way to mount none, and every read the engine makes of it is guarded the same way. */
+    /* the engine mounts its own help flag on every command, so a flag declaring one of its spellings is refused; a nil HelpFlag is the engine's way to mount none */
     declaredBy := map[string]string{}
     if nil != urfavecli.HelpFlag {
         for _, spelling := range urfavecli.HelpFlag.Names() {
@@ -275,7 +274,7 @@ func newEngineFlags(flags []clicontract.Flag) []urfavecli.Flag {
     return engineFlags
 }
 
-/* refuseARepeatedFlagSpelling refuses a spelling — a name or an alias — that the command already declares, and an empty alias: the parser resolves a spelling to the FIRST flag declaring it and says nothing about the second, so an alias that repeats another flag's name was parsed as that other flag while the help listed it under both. MergeFlags refuses a repeated name between the standard flags and a command's own; this is the door every declared spelling passes. */
+/* refuseARepeatedFlagSpelling refuses a name or alias the command already declares, and an empty alias: the parser resolves a spelling to the first flag declaring it, silently. MergeFlags refuses a repeated name between the standard flags and a command's own. */
 func refuseARepeatedFlagSpelling(definition clicontract.FlagDefinition, declaredBy map[string]string) {
     spellingList := append([]string{definition.Name}, definition.Aliases...)
 
@@ -300,7 +299,7 @@ func refuseARepeatedFlagSpelling(definition clicontract.FlagDefinition, declared
     }
 }
 
-/* normalizeCliError reads the error through the interface: a command or a substituted runtime declared with a concrete error type hands back a typed nil boxed into a non-nil interface, which would be treated as the failure it is not — and would panic the first line that renders it. */
+/* normalizeCliError reads the error through the interface: a command or a substituted runtime declared with a concrete error type hands back a typed nil in a non-nil interface, which is not a failure. */
 func normalizeCliError(err error) error {
     if true == internal.IsNilInterface(err) {
         return nil
@@ -365,7 +364,7 @@ func aggregateCliErrors(runErr error, closeErrorByName map[string]error) error {
         runErr,
     )
 
-    /* the exit code is resolved with errors.As, which matches the outermost ExitError in the chain: returning the aggregate unwrapped would hand the caller the command's own exit error instead, and the shutdown failures — carried only here — would never reach the log. A typed-nil link matches too and answers code 0, which NewExitError refuses with a panic, so the match is honoured only for a wrapper that carries one and the aggregate is returned plainly otherwise. */
+    /* errors.As matches the outermost ExitError in the chain, so the aggregate is returned wrapped and the shutdown failures it alone carries reach the log; a typed-nil link would answer code 0, which NewExitError refuses, so the aggregate is returned plainly then */
     if exitError, isExit := internal.ExitErrorInChain(runErr); true == isExit {
         return exception.NewExitError(exitError.ExitCode(), aggregatedErr)
     }

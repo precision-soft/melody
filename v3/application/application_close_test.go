@@ -87,7 +87,7 @@ func TestApplicationClose_AFailureSomebodyElseAlreadyCarriedAwayIsNotReportedAga
     }
 }
 
-/* the failure the teardown DID discover has to travel out of it, because the exit code of the process is built from it — a shutdown that lost a connection back to nobody used to exit zero. */
+/* the failure the teardown discovered travels out of it, since the exit code of the process is built from it */
 func TestApplicationClose_AFailureItDiscoversItselfTravelsOut(t *testing.T) {
     kernelInstance := newTestKernel()
     applicationInstance := newScopedServiceApplication(kernelInstance)

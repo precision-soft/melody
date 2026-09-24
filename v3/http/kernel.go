@@ -275,12 +275,16 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         /* the route is matched on the path as the client spelled it, so an encoded separator stays inside its segment; splitRequestPath unescapes each segment after the split, so a parameter binds the decoded value */
         matchPath := internal.RequestPathAsSent(request.URL)
 
-        matchResult, _ := instance.router.Match(
-            request.Method,
-            matchPath,
-            request.Host,
-            scheme,
-        )
+        /* a stale RawPath is not matched: the canonical guard below refuses it, and a route selected on the re-escaped decoded path would be one the client never named, read by every kernel.response and kernel.terminate listener */
+        var matchResult *httpcontract.MatchResult
+        if false == internal.RequestRawPathIsStale(request.URL) {
+            matchResult, _ = instance.router.Match(
+                request.Method,
+                matchPath,
+                request.Host,
+                scheme,
+            )
+        }
 
         /* a nil result is a valid "no match" under the contract, and dereferenced here, above the recovery defer, it would close the connection with no response */
         if nil == matchResult {
@@ -528,8 +532,9 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             requestLogger.Warning(
                 "request path refused before the handler",
                 loggingcontract.Context{
-                    "method": request.Method,
-                    "path":   request.URL.Path,
+                    "method":  request.Method,
+                    "path":    request.URL.Path,
+                    "rawPath": request.URL.RawPath,
                 },
             )
 

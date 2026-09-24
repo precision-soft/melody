@@ -37,7 +37,7 @@ func applicationBootRouteHandler() httpcontract.Handler {
     }
 }
 
-/* dynamicRouteModule registers the parameterized route that used to shadow the root's static one */
+/* dynamicRouteModule registers a parameterized route that would shadow the root's static one if it registered first */
 type dynamicRouteModule struct {
     fakeModule
 }
@@ -46,7 +46,7 @@ func (instance dynamicRouteModule) RegisterHttpRoutes(kernelInstance kernelcontr
     kernelInstance.HttpRouter().Handle(nethttp.MethodGet, "/users/:id", applicationBootRouteHandler())
 }
 
-/* the application's own routes register before any module's: /users/me written by the composition root used to be dispatched as the module's /users/:id with id="me", because the module phase registered first and the router breaks a priority tie on registration order */
+/* the root's /users/me must not be dispatched as the module's /users/:id with id="me": the router breaks a priority tie on registration order */
 func TestBoot_TheRootsRoutesRegisterBeforeAnyModules(t *testing.T) {
     applicationInstance := NewApplication(
         context.Background(),
@@ -627,7 +627,7 @@ func (instance *panickingProbeApplicationCommand) Run(
     return nil
 }
 
-/* the one proof that the fatal record survives the teardown ordering: the record must land in the configured file logger BEFORE Close runs, because the teardown closes that logger and a closed file logger silently drops every write. The child re-execution is required — the handler ends in os.Exit — and the mutant that restores the old defer order (teardown first) leaves the log file without the record. */
+/* the fatal record must land in the file logger before Close runs, since the teardown closes that logger; the child re-execution is required, since the handler ends in os.Exit */
 func TestRun_PanicPathWritesTheFatalRecordThroughTheLiveLoggerBeforeTeardown(t *testing.T) {
     projectDirectory := os.Getenv(runPanicPathProbeMarker)
 
@@ -747,7 +747,7 @@ func TestClose_SurvivesANilKernel(t *testing.T) {
 /* the marker tells a re-executed test binary that it is the child whose Boot must die and take the teardown hook with it rather than the parent that watches */
 const bootPanicTeardownProbeMarker = "MELODY_TEST_BOOT_PANIC_TEARDOWN_PROBE"
 
-/* the proof that a boot panic tears the container down before the exit: the child's container holds a built service whose Close fails, so the teardown leaves a visible trace — the emergency record naming the failed container close — that the old path, which took os.Exit with the container never closed, could not produce. The boot dies on a command-name collision, which panics inside Boot under Boot's own handler. */
+/* a boot panic tears the container down before the exit: the child's container holds a built service whose Close fails, so the teardown leaves the emergency record naming it. The boot dies on a command-name collision inside Boot. */
 func TestBoot_PanicPathRunsTheTeardownHook(t *testing.T) {
     projectDirectory := os.Getenv(bootPanicTeardownProbeMarker)
 
@@ -909,7 +909,6 @@ func TestResolveExitLogger_AnswersTheEmergencyLoggerWhenNothingIsConfigured(t *t
     }
 }
 
-/* the kernel's default listeners belong to Boot, in every process shape: the console's dispatcher answers introspection with the set the serving process runs, where it used to answer an empty list for a correctly wired application */
 func TestBoot_RegistersTheKernelListenersInEveryProcessShape(t *testing.T) {
     applicationInstance := NewApplication(
         context.Background(),
@@ -1055,7 +1054,7 @@ func TestCloseAndExitOnFailure_WithoutAConfigurationTheShieldGetsTheDefaultBudge
     }
 }
 
-/* the third sister: a declared budget of zero reaches the shield as zero. Zero is the operator asking for no deadline — the configuration admits it explicitly and refuses only a negative value — so folding it into the package default here would answer a question the operator had already answered. Pinned on the value the shield receives, with the shield's run asserted first, because a zero that never reached it would read the same as a zero it was handed. */
+/* a declared budget of zero reaches the shield as zero, no deadline; asserted on the value the shield receives, after asserting the shield ran */
 func TestCloseAndExitOnFailure_AZeroBudgetReachesTheShieldAsNoDeadline(t *testing.T) {
     originalStep := shieldedCloseStep
     originalExit := applicationExit

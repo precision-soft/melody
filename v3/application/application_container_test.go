@@ -581,7 +581,6 @@ func TestBootContainer_TheSerializerManagerIsSubstitutedNotCollided(t *testing.T
     }
 }
 
-/* TestBootContainer_TheValidatorAndUrlGeneratorAreSubstitutedNotCollided pins the other two the boot used to make unsubstitutable. Both have exported constructors, so a replacement built outside is a whole answer — which is the line that separates them from the router, the dispatcher and the clock, where a gate would promise a substitution the request path would then ignore. */
 func TestBootContainer_TheValidatorAndUrlGeneratorAreSubstitutedNotCollided(t *testing.T) {
     applicationInstance := NewApplication(
         context.Background(),
@@ -760,7 +759,6 @@ func TestApplication_AScopedNameCollidingWithAContainerServiceIsReportedAtBoot(t
         applicationInstance.panicOnBootCollisions()
     }, "duplicate registrations detected at boot")
 }
-
 
 /* recordingCloseTransport records whether the container's teardown ever reached it. */
 type recordingCloseTransport struct {

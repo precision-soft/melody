@@ -5,10 +5,10 @@ import (
     "fmt"
 )
 
-/* ErrFlagValueTypeMismatch is the cause of a validation refusal when the value handed to a flag's neutral validator is not of the type its kind names. It cannot happen for the flags melody ships — the engine adapter builds each kind's parser from the kind itself — so it reports a wiring mistake in an adapter or in a hand-written flag type, and reporting it is what stops such a mistake from being swallowed by a validator that quietly passed everything it could not read. */
+/* ErrFlagValueTypeMismatch is the cause of a validation refusal when the value handed to a flag's neutral validator is not of the type its kind names. The shipped flags never produce it; it reports a wiring mistake in an adapter or a hand-written flag type. */
 var ErrFlagValueTypeMismatch = errors.New("cli flag value type does not match the flag kind")
 
-/* FlagKind names the value a flag carries. It is the whole vocabulary the engine adapter switches on, which is why a flag type melody does not ship can still be declared: it describes itself with one of these kinds and the adapter knows how to parse it. */
+/* FlagKind names the value a flag carries. It is the whole vocabulary the engine adapter switches on, so a flag type melody does not ship can describe itself with one of these kinds. */
 type FlagKind string
 
 const (
@@ -135,7 +135,7 @@ func (instance *StringSliceFlag) Definition() FlagDefinition {
     }
 }
 
-/* neutralValidator wraps a typed validator into the neutral form the definition carries. A flag that declares no validator answers nil rather than a function that accepts everything, because the engine tells the two apart: installing a validator that always passes is not the same as installing none. The type assertion is the wiring guard described on ErrFlagValueTypeMismatch — it refuses naming the flag and the kind instead of returning nil for a value the typed validator never saw. */
+/* neutralValidator wraps a typed validator into the neutral form. A flag with no validator answers nil, not a function that accepts everything, since the engine tells the two apart; the type assertion refuses a mismatched value naming the flag and the kind (ErrFlagValueTypeMismatch). */
 func neutralValidator[T any](kind FlagKind, flagName string, validator func(value T) error) func(value any) error {
     if nil == validator {
         return nil

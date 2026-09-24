@@ -45,7 +45,7 @@ func TestParameter_Duration_RejectsUnparsableAndUnsetValues(t *testing.T) {
     }{
         {"unparsableString", "not-a-duration"},
         {"bareNumberString", "30"},
-        /* a bare integer is refused for the same missing unit as the bare number string — it used to be read as nanoseconds, a timeout that fired instantly with no error anywhere */
+        /* a bare integer is refused for the same missing unit as the bare number string, not read as nanoseconds */
         {"bareInt", int(5)},
         {"bareInt64", int64(5)},
         {"unset", nil},

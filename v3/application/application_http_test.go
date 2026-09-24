@@ -720,7 +720,7 @@ func TestRegisterKernelHttpListeners_RegistersTheExceptionListenerWithoutAnError
     }
 }
 
-/* the property the boot-end move was made for, asserted directly instead of through the timing that used to carry it: what a serving process ends up running is exactly what a console process exposes to the introspection command. The exception listener is the one decision an http process defers to runHttp, because SetErrorHandler stays open until ServeHttp; the set has to come out the same either way. */
+/* what a serving process runs is exactly what a console process exposes to the introspection command; the exception listener is the one decision runHttp makes, and the set comes out the same either way */
 func TestRunHttp_ExposesTheSameListenerSetAConsoleProcessInspects(t *testing.T) {
     servingApplication := newCacheWarningTestApplication(t, config.ModeHttp, logging.NewNopLogger())
     servingApplication.registerKernelHttpListeners()
@@ -780,7 +780,7 @@ func (instance *countingHttpKernel) OpenRequestScopes() int64 {
 
 var _ httpcontract.Kernel = (*countingHttpKernel)(nil)
 
-/* the drain holds the exit until the last request scope closes. Shutdown answers only for the connections the server still owns, so a hijacked one — a websocket — returns it immediately and the process used to announce a clean stop with that handler still running under a container that was closing. */
+/* Shutdown returns at once for a hijacked connection, so the drain is what holds the exit until the last request scope closes */
 func TestAwaitOpenRequestScopes_WaitsUntilTheLastScopeCloses(t *testing.T) {
     httpKernel := &countingHttpKernel{}
     httpKernel.openScopes.Store(2)

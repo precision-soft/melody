@@ -9,11 +9,7 @@ import (
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
-/* DefaultTeardownTimeout is how long a process shutting down cleanly may spend releasing what it holds before the teardown is abandoned and the process exits non-zero, when MELODY_TEARDOWN_TIMEOUT says nothing. It is the budget the whole ordered teardown spends, not one per service, because a supervisor budgets for the process rather than for its parts — which stays true when an application arms the container's dependency waves, since the waves change who waits for whom and not what the whole is allowed to spend.
-
-   Ten seconds is deliberately far below what a stalled dependency can cost, and the figure it is below was measured rather than estimated: one amqp transport whose broker has stopped reading takes 29.5 seconds to close at framework defaults, because the close handshake waits out a publish timeout that never gets its reply, and a second transport doubles that. The default is what the commonest supervisor grants before it escalates to SIGKILL, so raising it past that would trade an abandoned teardown for a killed one; a deployment whose supervisor grants longer raises this to match, and gets a teardown that runs to its end and names the service that failed instead of one line saying the shutdown was given up on. That naming is the whole return on the parameter: with the budget too small the failure is never reported at all, because the step that would have reported it was abandoned before it got there.
-
-   Zero is a value rather than an absence: it asks for NO deadline, and the teardown is then waited out for as long as its slowest component needs. It is the honest answer for a deployment whose supervisor grants an open-ended stop, and it trades the guarantee that the process ends for the guarantee that nothing is left unreleased and every failure is named. A negative duration means neither and fails the boot. */
+/* DefaultTeardownTimeout is how long a process shutting down cleanly may spend releasing what it holds, when MELODY_TEARDOWN_TIMEOUT says nothing, before the teardown is abandoned and the process exits non-zero. It is the budget of the whole ordered teardown, not one per service, since a supervisor budgets for the process. A stalled dependency can cost far more, and the default matches what the commonest supervisor grants before SIGKILL; a deployment granted longer raises it, so the teardown runs to its end and names the service that failed. Zero asks for no deadline; a negative duration fails the boot. */
 const DefaultTeardownTimeout = 10 * time.Second
 
 func newKernelConfiguration(
@@ -172,7 +168,7 @@ func (instance *kernelConfiguration) validateProcessRole() error {
     )
 }
 
-/* validateEnvironment names the key and the files a refusal is about, because the emptiness it refuses is READ somewhere else and read differently: the dotenv source answers "dev" for a present-but-empty MELODY_ENV and goes on to load .env.dev, so a deployment template rendering `MELODY_ENV=` boots far enough to read the development files and then dies here. Told only that "environment may not be empty", an operator has neither the key to search for nor the reason the development values were the ones loaded. */
+/* validateEnvironment names the key and the files a refusal is about: the dotenv source reads a present-but-empty MELODY_ENV as "dev" and loads .env.dev before the boot dies here. */
 func (instance *kernelConfiguration) validateEnvironment() error {
     environment := instance.Env()
     if "" == environment {
@@ -226,7 +222,7 @@ func (instance *kernelConfiguration) validateLogPath() error {
         return nil
     }
 
-    /* resolution fails on any placeholder it cannot expand, so a resolved path can only carry a percent as data — the doubled-percent escape produces one — and a placeholder-shaped check here would reject exactly those legitimate values */
+    /* resolution fails on any placeholder it cannot expand, so a resolved path carries a percent only as data, which a placeholder check would reject */
 
     return nil
 }

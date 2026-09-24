@@ -1239,6 +1239,16 @@ fi
 # prints "path<tab>count" for every file whose comments carry at least one history phrase.
 list_history_comment_count() {
     awk '
+        # every occurrence counts, so a comment that already carries a phrase cannot grow a second one for free;
+        # the search resumes on the last character of a match, which may be the boundary the next one needs
+        function occurrences(text, pattern,    total) {
+            total = 0
+            while (0 < match(text, pattern)) {
+                total++
+                text = substr(text, RSTART + RLENGTH - 1)
+            }
+            return total
+        }
         function count_history(text,    lowered, remaining, position, prefix, total) {
             lowered = tolower(text)
             gsub(/[ \t]+/, " ", lowered)
@@ -1251,16 +1261,16 @@ list_history_comment_count() {
                 }
                 remaining = substr(remaining, position + 7)
             }
-            if (lowered ~ /(^|[^a-z])measured([^a-z]|$)/) { total++ }
-            if (lowered ~ /the old /) { total++ }
-            if (lowered ~ /(^|[^a-z])previously([^a-z]|$)/) { total++ }
-            if (lowered ~ /until now/) { total++ }
-            if (lowered ~ /before the (fix|change|repair)/) { total++ }
-            if (lowered ~ /this change/) { total++ }
-            if (lowered ~ /the previous (form|tree|code|version|shape|behaviou?r|implementation)/) { total++ }
-            if (lowered ~ /(^|[^a-z])no longer([^a-z]|$)/) { total++ }
-            if (lowered ~ /(^|[^a-z])was (answered|handed|refused|called|served|routed|recorded|reported)([^a-z]|$)/) { total++ }
-            if (lowered ~ /(^|[^a-z])had been([^a-z]|$)/) { total++ }
+            total += occurrences(lowered, "(^|[^a-z])measured([^a-z]|$)")
+            total += occurrences(lowered, "the old ")
+            total += occurrences(lowered, "(^|[^a-z])previously([^a-z]|$)")
+            total += occurrences(lowered, "until now")
+            total += occurrences(lowered, "before the (fix|change|repair)")
+            total += occurrences(lowered, "this change")
+            total += occurrences(lowered, "the previous (form|tree|code|version|shape|behaviou?r|implementation)")
+            total += occurrences(lowered, "(^|[^a-z])no longer([^a-z]|$)")
+            total += occurrences(lowered, "(^|[^a-z])was (answered|handed|refused|called|served|routed|recorded|reported)([^a-z]|$)")
+            total += occurrences(lowered, "(^|[^a-z])had been([^a-z]|$)")
             return total
         }
         FNR == 1 { state = "code"; block_text = "" }
@@ -1307,12 +1317,24 @@ list_history_comment_count() {
     ' "$@" | sort
 }
 
+# every temporary path the run makes is registered here and removed by the one EXIT trap, since bash keeps a single
+# EXIT trap and a second one would silently replace the first
+TEMPORARY_PATH_STRING_LIST=()
+remove_temporary_path() {
+    if [[ 0 -lt ${#TEMPORARY_PATH_STRING_LIST[@]} ]]; then
+        rm -rf "${TEMPORARY_PATH_STRING_LIST[@]}"
+    fi
+}
+trap remove_temporary_path EXIT
+
 # the controls run before the tree is read: a planted history clause has to be counted, and the same phrase in
 # a string, a raw string spanning a comment opener, a string or a rune carrying an escaped quote, a directive and the
 # generated-code header has to count nothing. A block comment is read as one text, so a phrase broken across its lines
-# is counted and "is used to" broken the same way is not.
+# is counted and "is used to" broken the same way is not. The planted file carries the shapes a broken string, rune or
+# escape state would leak through AHEAD of its last history comments, so a leak lowers the count instead of passing
+# unseen, and a comment repeating a phrase counts each occurrence.
 COMMENT_CONTROL_DIRECTORY_STRING="$(mktemp -d)"
-trap 'rm -rf "${COMMENT_CONTROL_DIRECTORY_STRING}"' EXIT
+TEMPORARY_PATH_STRING_LIST+=("${COMMENT_CONTROL_DIRECTORY_STRING}")
 
 printf '%s\n' \
     'package control' \
@@ -1325,7 +1347,10 @@ printf '%s\n' \
     '' \
     '/* Serve answers the page. The request was' \
     '   refused before the route. */' \
-    '// the guard no longer panics' \
+    "const quote = '\"' // the guard previously panicked" \
+    'const escaped = "a \" b"' \
+    'const address = "http://host/path used to"' \
+    '// the guard no longer panics and no longer hangs' \
     'func Serve() {}' > "${COMMENT_CONTROL_DIRECTORY_STRING}/positive.go"
 
 printf '%s\n' \
@@ -1346,8 +1371,8 @@ printf '%s\n' \
     'type Handler struct{}' > "${COMMENT_CONTROL_DIRECTORY_STRING}/negative.go"
 
 COMMENT_CONTROL_OUTPUT_STRING="$(list_history_comment_count "${COMMENT_CONTROL_DIRECTORY_STRING}/positive.go" "${COMMENT_CONTROL_DIRECTORY_STRING}/negative.go")"
-if [[ "${COMMENT_CONTROL_DIRECTORY_STRING}/positive.go"$'\t'"4" != "${COMMENT_CONTROL_OUTPUT_STRING}" ]]; then
-    fail "the history comment control failed: expected the planted file alone with 4, read [${COMMENT_CONTROL_OUTPUT_STRING}] — no verdict over the tree is possible"
+if [[ "${COMMENT_CONTROL_DIRECTORY_STRING}/positive.go"$'\t'"6" != "${COMMENT_CONTROL_OUTPUT_STRING}" ]]; then
+    fail "the history comment control failed: expected the planted file alone with 6, read [${COMMENT_CONTROL_OUTPUT_STRING}] — no verdict over the tree is possible"
 fi
 
 declare -A COMMENT_BASELINE_COUNT_INTEGER_MAP=()

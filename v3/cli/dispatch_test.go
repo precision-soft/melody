@@ -212,9 +212,7 @@ func TestDispatchCommand_PanicsOnEmptyArguments(t *testing.T) {
     }, "cli dispatch arguments may not be empty")
 }
 
-/* the document promises that a nil writer discards, and the writer is the caller's own value: a cron runner handing the field of a capture it has not opened, a caller forwarding a *bytes.Buffer it left nil, gives an io.Writer that is not nil. The comparison against nil answered false and the engine was handed that writer.
-
-   The probe writes through the ENGINE, not through the command: what the command is handed goes through the engine context's own guard, so a refused flag — which the engine writes about on the writer this door gave it, before any command runs — is the one effect this guard produces alone. */
+/* a typed-nil writer is a non-nil io.Writer and must discard as nil does. The probe writes through the engine: its message about a refused flag, written before any command runs, is the one effect this guard alone produces. */
 func TestDispatchCommand_ATypedNilWriterDiscardsRatherThanPanicking(t *testing.T) {
     var absentBuffer *bytes.Buffer
 

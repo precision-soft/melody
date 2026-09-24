@@ -83,7 +83,7 @@ func TestNewRuleAnswersTheSameAsTheModeSpecificConstructor(t *testing.T) {
     }
 }
 
-/* the zero value is refused rather than defaulted: the reach is what an access control rule IS, and a caller who omits it would inherit one they never chose — which is how a rule silently stops governing a path it used to. */
+/* the zero value is refused rather than defaulted: a caller who omits the reach would inherit one they never chose */
 func TestNewRuleRefusesAnUnspecifiedMatching(t *testing.T) {
     defer func() {
         if nil == recover() {

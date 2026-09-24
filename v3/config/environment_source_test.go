@@ -149,7 +149,7 @@ func TestPreprocessDotEnvContent_WhitespacePrecededHashIsComment(t *testing.T) {
     }
 }
 
-/* godotenv trims the leading spaces of the value region and its countback skips index zero, so a comment that opens before any value byte is the one cut the countback can never make — "APP_SECRET= # fill this in" used to boot the application with the comment as the secret */
+/* a comment that opens before any value byte is the one cut godotenv's countback cannot make, so the value reads empty */
 func TestLoad_EmptyValueFollowedByAComment_ReadsEmpty(t *testing.T) {
     cases := []struct {
         line     string

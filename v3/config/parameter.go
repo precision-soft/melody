@@ -25,15 +25,15 @@ func NewParameter(environmentKey string, environmentValue any, value any, isDefa
 type Parameter struct {
     environmentKey   string
     environmentValue any
-    /* the registration name, for the parameters that have no environment key: a runtime parameter identified in an error only by its empty environmentKey was anonymous — "cannot convert" named nothing an operator could find */
+    /* the registration name, which identifies a parameter that has no environment key in an error */
     name string
-    /* valueMutex guards value on its own, because the configuration lock does not reach the readers: a service handed the *Parameter reads it through the accessors below without ever touching the configuration, while Resolve rewrites every parameter under the configuration write lock. Two different locks around the same field are no lock at all, so the write side goes through storeValue and every read through loadValue. */
+    /* valueMutex guards value on its own: a service holding the *Parameter reads it without the configuration lock, while Resolve rewrites it under that lock, so writes go through storeValue and reads through loadValue */
     valueMutex sync.RWMutex
     value      any
     isDefault  bool
-    /* atomic because MarkSecret may mark a parameter under the configuration lock while a consumer that already holds the pointer asks IsSecret without it */
+    /* atomic because MarkSecret marks under the configuration lock while a consumer holding the pointer asks IsSecret without it */
     isSecret atomic.Bool
-    /* deferred marks a parameter whose template referenced a name that was not defined while the constructor resolved placeholders: the composition root registers its parameters between construction and boot, so the tolerant constructor pass leaves such a parameter for the boot resolution to settle in one order-independent batch. Atomic because the boot resolution clears the flag under the configuration write lock while a consumer that already holds the pointer reads through loadValue without it. */
+    /* deferred marks a parameter whose template referenced a name not yet defined when the constructor resolved placeholders, left for the boot resolution. Atomic because the boot clears it under the configuration write lock while a consumer reads through loadValue without it. */
     deferred atomic.Bool
 }
 
@@ -49,7 +49,7 @@ func (instance *Parameter) diagnosticContext() map[string]any {
     return context
 }
 
-/* conversionName is the identity the shared parsers stamp into their error context: the environment key where one exists, the registration name otherwise — a runtime parameter has no environment key, and passing the empty key put a nameless parameterName inside the cause of an error whose outer context names the parameter, so the operator reading the cause chain concluded the parameter was anonymous. */
+/* conversionName is the identity the shared parsers stamp into their error context: the environment key where one exists, the registration name otherwise. */
 func (instance *Parameter) conversionName() string {
     if "" != instance.environmentKey {
         return instance.environmentKey
@@ -58,7 +58,7 @@ func (instance *Parameter) conversionName() string {
     return instance.name
 }
 
-/* conversionCause hands the parse failure through for an ordinary parameter and withholds it for a secret one: the underlying strconv and parse errors quote the value they refused — exactly the right diagnostic for a mistyped pool size, and exactly the wrong log line for a credential that failed a conversion it was never meant for. */
+/* conversionCause hands the parse failure through for an ordinary parameter and withholds it for a secret one, since the parse errors quote the value they refused. */
 func (instance *Parameter) conversionCause(causeErr error) error {
     if true == instance.isSecret.Load() {
         return nil
@@ -68,7 +68,7 @@ func (instance *Parameter) conversionCause(causeErr error) error {
 }
 
 func (instance *Parameter) loadValue() any {
-    /* a deferred parameter still holds its raw template: handing that out would serve %app.user% as though it were the value, so every accessor refuses loudly instead. The window is construction to boot — the boot resolution either settles the reference and clears the flag, or fails the boot naming it. */
+    /* a deferred parameter still holds its raw template, so every accessor refuses until the boot resolution settles the reference or fails the boot naming it */
     if true == instance.deferred.Load() {
         exception.Panic(
             exception.NewError(
@@ -141,7 +141,7 @@ func (instance *Parameter) MustString() string {
     return ""
 }
 
-/* Bool reads the value through the same parser its sibling accessors use, the last typed door that used to carry a grammar of its own. What it accepts and refuses is unchanged — the hand-written branches recognised exactly the shapes internal.Bool recognises — and what changes is what a refusal SAYS: a parameter holding a number, which is what RegisterRuntime("feature.flag", 1) hands over, was refused with a nil cause and a context carrying only the key, so the operator learned that something failed and nothing about what, while every sibling answered with a ParseError naming the parameter, the target type and the value. */
+/* Bool reads the value through internal.Bool, the parser its sibling accessors use, so a refusal is a ParseError naming the parameter, the target type and the value. */
 func (instance *Parameter) Bool() (bool, error) {
     boolValue, isSet, boolErr := internal.Bool(instance.loadValue(), instance.conversionName())
     if nil != boolErr || false == isSet {
@@ -155,7 +155,7 @@ func (instance *Parameter) Bool() (bool, error) {
     return boolValue, nil
 }
 
-/* Int reads the value through the same parser its sibling accessors use, so one grammar answers for every typed reading of a parameter: an int64 registered at runtime — what a caller writing RegisterRuntime("app.batch_size", int64(500)) hands over — converted through Float and refused through Int, on a value that is plainly a whole number. The one thing this door adds is the narrowing: internal.Int answers an int64 while an int is what a caller asked for, so a value outside the int range is refused by name rather than truncated, which is the silent corruption the shared parser already refuses for a float64 too wide to hold. */
+/* Int reads the value through internal.Int, the parser its sibling accessors use, and narrows it: a value outside the int range is refused by name rather than truncated. */
 func (instance *Parameter) Int() (int, error) {
     intValue, isSet, intErr := internal.Int(instance.loadValue(), instance.conversionName())
     if nil != intErr || false == isSet {

@@ -206,7 +206,7 @@ func TestConfigurationRegisterRuntime_PreBootTemplateIsDeferredThenResolves(t *t
     }
 }
 
-/* a percent the scan treats as data carries no template, so the value is its own resolved form and a module may read it before boot — the deferral used to be decided on the presence of a percent */
+/* a percent the scan treats as data carries no template, so the value is its own resolved form and a module may read it before boot */
 func TestConfigurationRegisterRuntime_PreBootLiteralPercentIsReadable(t *testing.T) {
     for _, literal := range []string{"Coverage 95%", "a%2Fb", "50% off"} {
         environment, err := NewEnvironment(&testEnvironmentSource{values: map[string]string{}})
@@ -618,7 +618,7 @@ func TestMarkSecret_PropagatesRetroactivelyToDirectReaders(t *testing.T) {
     }
 }
 
-/* a late mark covers the whole derivation chain, not the direct readers alone: the second hop used to keep printing the assembled value while the first was redacted, because the retroactive scan stopped after one step */
+/* a late mark covers the whole derivation chain, not the direct readers alone */
 func TestMarkSecret_PropagatesRetroactivelyThroughDerivationChains(t *testing.T) {
     environment := &Environment{values: map[string]string{
         "G6_SECRET": "hunter2",

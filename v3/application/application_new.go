@@ -25,7 +25,7 @@ func NewApplication(
     embeddedEnvFiles fs.FS,
     embeddedPublicFiles fs.FS,
 ) *Application {
-    /* NewApplication is the outermost frame an application error can reach — there is no application yet, so nothing above it can log or answer for the failure. It therefore owns the process boundary and takes the exit itself, through the helper named for it; logging.LogOnRecover deliberately does not exit, so leaving that one here would let a construction failure walk out as a bare runtime panic. */
+    /* NewApplication is the outermost frame an application error can reach, with nothing above it to log or answer for the failure, so it owns the process boundary and takes the exit itself; logging.LogOnRecover does not exit */
     defer func() {
         logging.LogOnRecoverAndExit(logging.EmergencyLogger(), recover(), 1)
     }()
@@ -53,7 +53,7 @@ func NewApplication(
 
     configuration, newConfigurationErr := config.NewConfiguration(environment, projectDirectory)
     if nil != newConfigurationErr {
-        /* the wrap names construction, not resolution: NewConfiguration also fails on validation and on building the cli, kernel and http views, and a top-level "could not resolve" sent the diagnosis to the placeholders for an http port that was simply out of range — while the genuine resolve failure already carries that exact message from resolvePlaceholders, so repeating it here doubled it */
+        /* the wrap names construction, not resolution: NewConfiguration also fails on validation and on building its views, and a resolve failure already carries its own message */
         exception.Panic(
             exception.NewError("could not initialize the configuration", nil, newConfigurationErr),
         )
@@ -181,7 +181,7 @@ func computeProjectDirectory() (string, error) {
     return absoluteExecutableDirectory, nil
 }
 
-/* isGoRunExecutableDirectory recognizes the temporary directories the go tool builds into: a path segment named go-build followed by nothing but digits (go-build2932477933). A bare substring match would also classify an installation path that merely contains a segment starting with go-build — /opt/go-builder/bin — as a go run build, silently redirecting all configuration discovery from the executable's directory to the working directory. */
+/* isGoRunExecutableDirectory recognizes the temporary directories the go tool builds into: a path segment named go-build followed by digits only, so /opt/go-builder/bin is not one. */
 func isGoRunExecutableDirectory(executableDirectory string) bool {
     for _, segment := range strings.Split(executableDirectory, string(filepath.Separator)) {
         if false == strings.HasPrefix(segment, "go-build") {
@@ -206,7 +206,7 @@ func isGoRunExecutableDirectory(executableDirectory string) bool {
     return false
 }
 
-/* workingDirectoryHasEnvironmentFile reports whether the directory holds any environment file the source would load — .env, .env.local, or the development-environment pair that applies when no .env names another environment. A project configured solely through .env.dev boots fine without a .env, so ignoring that shape would emit a missing-.env hint that misattributes a plain unresolved key, or walk away from a working directory that is in fact the project root. A directory named like an environment file is not one. A stat error other than not-exist cannot prove the file absent, so it counts as present: both callers act on absence, and acting is the wrong move while the file may in fact be there. */
+/* workingDirectoryHasEnvironmentFile reports whether the directory holds any environment file the source would load: .env, .env.local, or the development pair that applies when no .env names another environment. A directory named like one is not one, and a stat error other than not-exist counts as present, since both callers act on absence. */
 func workingDirectoryHasEnvironmentFile(directoryPath string) bool {
     candidates := []string{
         ".env",
