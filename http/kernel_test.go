@@ -2885,6 +2885,85 @@ func TestKernel_ServesCanonicalRequestPathThroughToTheHandler(t *testing.T) {
     }
 }
 
+/* net/http decodes "%2F" into a separator before the kernel reads the path, so "/admin%2Fusers" — one segment to a proxy or a WAF rule written against the raw request line — reached the "/admin/users" handler; a spelling that carries an encoded separator is refused before routing acts on it, in either case of the hex digit */
+func TestKernel_RefusesAnEncodedSeparatorBeforeTheHandler(t *testing.T) {
+    for _, rawPath := range []string{"/admin%2Fusers", "/admin%2fusers", "/public%2F", "/files/a%2Fb/c"} {
+        handlerRan := ""
+
+        router := NewRouter()
+        for _, pattern := range []string{"/admin/users", "/public", "/files/*rest...", "/*path..."} {
+            routePattern := pattern
+            router.Handle(
+                nethttp.MethodGet,
+                routePattern,
+                func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                    handlerRan = routePattern
+                    return TextResponse(nethttp.StatusOK, routePattern), nil
+                },
+            )
+        }
+
+        serviceContainer := newHttpTestContainer()
+        handler := NewKernel(router).ServeHttp(serviceContainer)
+
+        request := httptest.NewRequest(nethttp.MethodGet, rawPath, nil)
+        recorder := httptest.NewRecorder()
+
+        handler.ServeHTTP(recorder, request)
+
+        if nethttp.StatusBadRequest != recorder.Code {
+            t.Fatalf("expected %q to be refused with %d, got %d", rawPath, nethttp.StatusBadRequest, recorder.Code)
+        }
+
+        if "" != handlerRan {
+            t.Fatalf("the handler of %q ran for %q, which should have been refused before routing to it", handlerRan, rawPath)
+        }
+    }
+}
+
+/* the refusal reads the separator the client encoded and nothing else: a literal "%2F" a segment carries once decoded ("%252F"), an encoded separator in the query and an escape that is not a separator are served as they were */
+func TestKernel_ServesTheSpellingsThatCarryNoEncodedSeparator(t *testing.T) {
+    for rawPath, expectedBody := range map[string]string{
+        "/a/x%252Fy":         "x%2Fy",
+        "/admin/users?x=%2F": "users",
+        "/a/caf%C3%A9":       "café",
+        "/a/x%20y":           "x y",
+    } {
+        router := NewRouter()
+        router.Handle(
+            nethttp.MethodGet,
+            "/a/:x",
+            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                value, _ := request.Param("x")
+                return TextResponse(nethttp.StatusOK, value), nil
+            },
+        )
+        router.Handle(
+            nethttp.MethodGet,
+            "/admin/users",
+            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                return TextResponse(nethttp.StatusOK, "users"), nil
+            },
+        )
+
+        serviceContainer := newHttpTestContainer()
+        handler := NewKernel(router).ServeHttp(serviceContainer)
+
+        request := httptest.NewRequest(nethttp.MethodGet, rawPath, nil)
+        recorder := httptest.NewRecorder()
+
+        handler.ServeHTTP(recorder, request)
+
+        if nethttp.StatusOK != recorder.Code {
+            t.Fatalf("expected %q to be served with %d, got %d", rawPath, nethttp.StatusOK, recorder.Code)
+        }
+
+        if expectedBody != recorder.Body.String() {
+            t.Fatalf("expected %q to answer %q, got %q", rawPath, expectedBody, recorder.Body.String())
+        }
+    }
+}
+
 /* a multipart upload past the body limit surfaces as a handler's *MaxBytesError, which is not an HttpException and so was rendered 500 at error level while the urlencoded and json paths answered 413; the normalizer maps it onto a 413 HttpException so the three body paths agree, and leaves any other error untouched. */
 func TestNormalizeBodyLimitError_MapsMaxBytesErrorTo413(t *testing.T) {
     maxBytesError := &nethttp.MaxBytesError{Limit: 1048576}

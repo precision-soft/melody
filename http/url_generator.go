@@ -98,7 +98,7 @@ func (instance *UrlGenerator) GeneratePath(routeName string, parameters map[stri
             }
 
             if true == strings.Contains(value, "/") {
-                /* a ":param" spans exactly one path segment, and matchPath binds it to a single segment (never a "/"-joined remainder); emitting url.PathEscape here would encode the slash as %2F, which the net/http server decodes back to "/" before the kernel matches on request.URL.Path, so the generated link would resolve to a different route or 404. Reject the slash instead of minting a url this router cannot answer, mirroring the single-segment wildcard branch below. */
+                /* a ":param" spans exactly one path segment, and matchPath binds it to a single segment (never a "/"-joined remainder); emitting url.PathEscape here would encode the slash as %2F, which the kernel refuses with 400 before it routes, so the generated link would answer nothing. Reject the slash instead of minting a url this router cannot answer, mirroring the single-segment wildcard branch below. */
                 return "", exception.NewError(
                     "route parameter value cannot contain slash",
                     exceptioncontract.Context{

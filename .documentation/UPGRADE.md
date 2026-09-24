@@ -47,6 +47,14 @@ From the move on, that document plays this file's role: it records, per v3 relea
 **Remedy.** Send the path without the padding; nothing legitimate names a resource by a trailing space. There is no opt-out: the previous behaviour let a request reach a handler under an authorization decision made for a different path, which is the defect the refusal closes.
 
 
+### HTTP: a request path carrying an encoded separator is refused with 400
+
+**What changed.** The kernel refuses, with `400`, a request whose path as the client spelled it carries an encoded `/` — `%2F` or `%2f` — before it is routed or authorized. net/http decodes the escape into a separator before the kernel reads the path, so `/admin%2Fusers`, which a proxy or a WAF rule written against the raw request line reads as one segment, reached the `/admin/users` handler. Every consumer of the path inside the framework still reads the one decoded path; a literal `%2F` a segment carries once decoded (`%252F`) and `%2F` in the query string are served as before.
+
+**Symptom.** A client that sends a path with an encoded slash is answered `400 bad request` where the request was previously routed to the handler of the decoded path.
+
+**Remedy.** Send the separator unencoded, or carry a value that contains a `/` in the query string. A route that must bind a segment containing a `/` is a v3 capability: the v3 router matches the path as the client spelled it. There is no opt-out: the previous behaviour served a handler to a request a rule in front of the application had judged as a different path, which is the defect the refusal closes.
+
 Every entry below is the consequence of fixing a defect, not a preference: each one describes behaviour that was wrong, and the changelog entry for it names the failure it produced. The release train's two data-loss fixes are in the v3-only `awss3` object storage integration and are recorded in [`v3/.documentation/UPGRADE.md`](../v3/.documentation/UPGRADE.md).
 
 Every section below shipped in the `[v1.19.0]` block of [`CHANGELOG.md`](../CHANGELOG.md), released as a MINOR. The heading stays `Unreleased` because this guide promotes at a MAJOR boundary, the way [`v3/.documentation/UPGRADE.md`](../v3/.documentation/UPGRADE.md) carries `v3.0.0`; the entries that have landed since are patch-level defect and security fixes, and none of them asks the upgrader for an action.

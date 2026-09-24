@@ -1757,6 +1757,23 @@ func TestRequestPathIsCanonical_RefusesFoldsAndAllowsTrailingSlash(t *testing.T)
     }
 }
 
+func TestRequestPathCarriesEncodedSeparator_ReadsTheEscapedSeparatorInEitherCase(t *testing.T) {
+    for escapedPath, expected := range map[string]bool{
+        "/admin%2Fusers": true,
+        "/admin%2fusers": true,
+        "%2F":            true,
+        "/a/x%252Fy":     false,
+        "/admin/users":   false,
+        "/caf%C3%A9":     false,
+        "/a%2":           false,
+        "":               false,
+    } {
+        if expected != requestPathCarriesEncodedSeparator(escapedPath) {
+            t.Fatalf("expected requestPathCarriesEncodedSeparator(%q) to be %v", escapedPath, expected)
+        }
+    }
+}
+
 func TestRequestPathIsCanonical_LeavesNonPathTargetsToTheRouter(t *testing.T) {
     /* the asterisk-form of OPTIONS and an authority-form CONNECT do not begin with "/" and are not path-routed, so the fold guard must not answer for them */
     for _, target := range []string{"*", "example.com:443", ""} {
