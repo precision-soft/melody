@@ -9,6 +9,7 @@ import (
     "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     messagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
+    "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
@@ -147,20 +148,26 @@ func (instance *InMemoryTransport) requeueAfter(
     timer := time.NewTimer(delay)
     defer timer.Stop()
 
+    /* a drop is journaled on the logger captured at the Nack, or on the emergency logger where that runtime carried none: the drop is the moment a line is owed, so the fallback is taken here rather than at every delayed Nack */
+    if true == internal.IsNilInterface(logger) {
+        logger = logging.EmergencyLogger()
+    }
+
     select {
     case <-timer.C:
         if requeueErr := instance.requeue(envelopeInstance); nil != requeueErr {
-            if false == internal.IsNilInterface(logger) {
-                logger.Error("in-memory transport dropped a delayed requeue", exception.LogContext(requeueErr))
-            }
+            logger.Error("in-memory transport dropped a delayed requeue", exception.LogContext(requeueErr))
         }
     case <-instance.done:
+        /* the transport closed while the message waited out its delay: the requeue can no longer happen, and the loss is said as the timer-branch loss is, rather than ending with the goroutine */
+        logger.Error("in-memory transport dropped a delayed requeue: the transport was closed before its delay ran out", map[string]any{"delay": delay.String()})
     }
 }
 
 /* resolveLogger prefers the runtime's logger — present in every framework-assembled scope — and falls back to the one configured through WithLogger. */
 func (instance *InMemoryTransport) resolveLogger(runtimeInstance runtimecontract.Runtime) loggingcontract.Logger {
-    if logger := logging.LoggerFromRuntime(runtimeInstance); false == internal.IsNilInterface(logger) {
+    /* resolved without logging.LoggerFromRuntime, which writes an emergency line for every runtime that carries no logger: this runs on every delayed Nack, and the line is owed only when a requeue is dropped */
+    if logger, resolveErr := runtime.FromRuntime[loggingcontract.Logger](runtimeInstance, logging.ServiceLogger); nil == resolveErr && false == internal.IsNilInterface(logger) {
         return logger
     }
 

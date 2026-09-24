@@ -45,6 +45,13 @@ func ConsumeBusFromResolver(resolver containercontract.Resolver) messagebuscontr
 
 /* RegisterTransports registers the named transports the consume command resolves at run time, so registering them is enough for the framework to expose melody:messagebus:consume. It also registers a TransportsCloser beside the map, resolved as a dependency of it: the container's ordered teardown closes what answers Close() error and a map answers nothing, so without the closer no transport could ever join the shutdown — whichever run resolves the transports thereby guarantees their broker connections are closed after every consumer that depends on them. */
 func RegisterTransports(registrar ServiceRegistrar, transports map[string]messagebuscontract.Transport) {
+    /* a nil — or typed-nil — entry is refused here, at boot, in the framed form RouteType uses: the consume command resolves the map by name at run time and would dereference it there, far from the wiring that put it in. The closer's own nil branch stays for an entry written into the map after this call. */
+    for name, transport := range transports {
+        if true == isNilTransport(transport) {
+            exception.Panic(exception.NewError("messagebus transport is nil", map[string]any{"name": name}, nil))
+        }
+    }
+
     registrar.RegisterService(
         ServiceTransportsCloser,
         func(resolver containercontract.Resolver) (*TransportsCloser, error) {
@@ -83,7 +90,7 @@ func (instance *TransportsCloser) CloseWithContext(closeContext context.Context)
 
     var closeErrs []error
     for _, name := range names {
-        /* a nil entry is a wiring mistake, and it must not cost the transports that come after it. The container recovers a panicking Close and records it, so the process survives — but the panic still abandons THIS loop, and everything sorted later than the offending name would never be closed at all, its broker connection living as long as the process while the record blames one service. The amqp module already refuses a nil transport at its own registration door; this map is handed in whole by the composition root, which has no such door. */
+        /* a nil entry is a wiring mistake, and it must not cost the transports that come after it. The container recovers a panicking Close and records it, so the process survives — but the panic still abandons THIS loop, and everything sorted later than the offending name would never be closed at all, its broker connection living as long as the process while the record blames one service. RegisterTransports refuses a nil entry at boot; this branch answers for one written into the map after that call. */
         if true == isNilTransport(instance.transports[name]) {
             closeErrs = append(
                 closeErrs,
@@ -129,10 +136,17 @@ func (instance *TransportsCloser) closeOne(closeContext context.Context, name st
     /* the transport's own context-taking door is preferred when it carries one, which is what makes the deadline reach the amqp stretches rather than stopping at this loop */
     contextCloseable, isContextCloseable := transport.(containercontract.ContextCloser)
     if true == isContextCloseable {
-        return contextCloseable.CloseWithContext(closeContext)
+        closeErr = contextCloseable.CloseWithContext(closeContext)
+    } else {
+        closeErr = transport.Close()
     }
 
-    return transport.Close()
+    /* a typed nil is the nil its producer meant, the container's own close answers the same: read as a failure it named a transport that had closed */
+    if true == internal.IsNilInterface(closeErr) {
+        return nil
+    }
+
+    return closeErr
 }
 
 func TransportsMustFromResolver(resolver containercontract.Resolver) map[string]messagebuscontract.Transport {

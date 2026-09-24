@@ -1,6 +1,7 @@
 package opentelemetry
 
 import (
+    "errors"
     nethttp "net/http"
     "net/http/httptest"
     "strings"
@@ -12,6 +13,7 @@ import (
     "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
+    "go.opentelemetry.io/otel/codes"
 )
 
 func TestTracingMiddleware_RequiresTracer(t *testing.T) {
@@ -117,5 +119,63 @@ func TestTracingMiddleware_RecordsTheClientStatusWhenTheHandlerReturnsAnHttpExce
 
     if 404 != statusCode {
         t.Fatalf("expected the span to carry the client-facing 404 rather than omitting the status on error, got %d", statusCode)
+    }
+}
+
+func tracedHandlerSpan(t *testing.T, handlerErr error) sdktrace.ReadOnlySpan {
+    t.Helper()
+
+    recorder := tracetest.NewSpanRecorder()
+    provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+    middleware := NewTracingMiddleware(provider.Tracer("melody-status-test"), nil)
+
+    request, runtimeInstance := testRequestAndRuntime()
+    handler := middleware(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return nil, handlerErr
+    })
+
+    _, _ = handler(runtimeInstance, httptest.NewRecorder(), request)
+
+    spans := recorder.Ended()
+    if 1 != len(spans) {
+        t.Fatalf("expected exactly one span, got %d", len(spans))
+    }
+
+    return spans[0]
+}
+
+/* a handled sub-500 is the client's error: the server span keeps its status unset, and the error stays recorded as the span's exception event */
+func TestTracingMiddleware_AHandledSubFiveHundredLeavesTheSpanStatusUnset(t *testing.T) {
+    span := tracedHandlerSpan(t, exception.NewHttpException(nethttp.StatusNotFound, "not found"))
+
+    if codes.Unset != span.Status().Code || 1 != len(span.Events()) {
+        t.Fatalf("expected an unset status and the error recorded as one event, got %v with %d events", span.Status(), len(span.Events()))
+    }
+}
+
+func TestTracingMiddleware_AServerErrorSetsTheSpanStatusToError(t *testing.T) {
+    span := tracedHandlerSpan(t, errors.New("database is gone"))
+
+    if codes.Error != span.Status().Code || "database is gone" != span.Status().Description {
+        t.Fatalf("expected the error status carrying the message, got %v", span.Status())
+    }
+}
+
+type tracingTypedNilError struct {
+    message *string
+}
+
+func (instance *tracingTypedNilError) Error() string {
+    return *instance.message
+}
+
+/* a typed nil answers Error() with a panic: the middleware reads the message through the exception package and records the span without panicking on the handler's value */
+func TestTracingMiddleware_ATypedNilHandlerErrorIsRecordedWithoutPanicking(t *testing.T) {
+    var typedNil *tracingTypedNilError
+
+    span := tracedHandlerSpan(t, typedNil)
+
+    if codes.Error != span.Status().Code || 1 != len(span.Events()) {
+        t.Fatalf("expected the typed nil recorded as a server error, got %v with %d events", span.Status(), len(span.Events()))
     }
 }

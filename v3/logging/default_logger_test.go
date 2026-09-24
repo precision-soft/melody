@@ -175,3 +175,23 @@ func TestDefaultLogger_KeepsOneRecordOneLine(t *testing.T) {
         t.Fatalf("expected the escaped spellings, got %q", written)
     }
 }
+
+func TestDefaultLogger_RendersACyclicContextValueAsTheCycleMarker(t *testing.T) {
+    defer boundTextValueStack()()
+
+    var buffer bytes.Buffer
+    originalWriter := log.Writer()
+    log.SetOutput(&buffer)
+    defer func() {
+        log.SetOutput(originalWriter)
+    }()
+
+    cyclic := map[string]any{}
+    cyclic["self"] = cyclic
+
+    NewDefaultLogger().Info("probe", map[string]any{"k": cyclic})
+
+    if false == strings.Contains(buffer.String(), "{k=map[self:<cycle>]}") {
+        t.Fatalf("expected the context value rendered with the cycle marker, got %q", buffer.String())
+    }
+}

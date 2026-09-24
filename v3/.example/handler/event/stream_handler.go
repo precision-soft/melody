@@ -34,6 +34,13 @@ func StreamHandler() melodyhttpcontract.Handler {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "the event stream is unavailable", hubErr), nil
         }
 
+        /* a hub that shut down still takes a subscription and ends it at once, so the client would read a
+           committed 200 that closes and reconnect into the same answer until the process is gone: a stream that
+           cannot be served is refused before the writer commits anything */
+        if true == hub.IsClosed() {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusServiceUnavailable, "the event stream is shutting down"), nil
+        }
+
         serverSentEventWriter, serverSentEventErr := melodyhttp.NewServerSentEventWriter(writer)
         if nil != serverSentEventErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "streaming is not supported", serverSentEventErr), nil

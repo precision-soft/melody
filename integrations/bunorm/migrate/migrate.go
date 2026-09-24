@@ -135,7 +135,11 @@ func RunQueries(ctx context.Context, db *bun.DB, direction string, migrationName
 }
 
 func RunQueriesWithOption(ctx context.Context, db *bun.DB, direction string, migrationName string, queries []Query, option RunnerOption) error {
+    /* an option that names no writer takes the one the run already prints under — the command's posture on the context, then the process fallback, then the package default — so a migration that passes its own option to set the colour alone does not print its per-query lines past the writer its command chose, into the middle of a --format=json document */
     writer := option.Writer
+    if nil == writer {
+        writer = resolveRunnerOption(ctx).Writer
+    }
     if nil == writer {
         writer = os.Stdout
     }

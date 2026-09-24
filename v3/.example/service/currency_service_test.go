@@ -3,6 +3,7 @@ package service
 import (
     "context"
     "encoding/json"
+    "errors"
     "math"
     "reflect"
     "sync/atomic"
@@ -520,5 +521,42 @@ func TestCurrencyServiceUpdate_AnswersAndPublishesTheRowAsWrittenAfterAConcurren
 
     if nil == published || "Dollar" != published.Name || 9.9 != published.Rate {
         t.Fatalf("expected the published currency to be the row as written, got %+v", published)
+    }
+}
+
+/* a repository whose read of the row fails after the first: the row the rename wrote cannot be read back */
+type rereadRefusingCurrencyRepository struct {
+    repository.CurrencyRepository
+    reads int
+}
+
+func (instance *rereadRefusingCurrencyRepository) FindById(ctx context.Context, id string) (*entity.Currency, bool, error) {
+    instance.reads++
+    if 1 < instance.reads {
+        return nil, false, errors.New("the read-back could not complete")
+    }
+
+    return instance.CurrencyRepository.FindById(ctx, id)
+}
+
+/* the rename is written, and the caches that serve the old code and name never expire: a read-back that fails still dispatches the event, carrying the fields as written, and answers the failure */
+func TestCurrencyServiceUpdate_AFailedReadBackAfterTheWriteStillDispatchesTheEvent(t *testing.T) {
+    _, dispatcher, runtimeInstance := currencyServiceUnderTest(t)
+
+    currencyRepository, repositoryErr := repository.NewCurrencyRepository(persistence.NewCatalogStorage(nil))
+    if nil != repositoryErr {
+        t.Fatalf("building the repository failed: %v", repositoryErr)
+    }
+
+    refusing := &rereadRefusingCurrencyRepository{CurrencyRepository: currencyRepository}
+    currencyService := NewCurrencyService(refusing, newTtlRecordingCache(), dispatcher.dispatcher, &frozenClock{instant: currencyQuoteInstant})
+
+    _, found, updateErr := currencyService.Update(runtimeInstance, "cur-usd", "USD", "US dollar renamed")
+    if nil == updateErr || false == found {
+        t.Fatalf("expected the read-back failure answered over a written row, got found %v and %v", found, updateErr)
+    }
+
+    if 1 != len(dispatcher.names()) || event.CurrencyUpdatedEventName != dispatcher.names()[0] {
+        t.Fatalf("expected the update event dispatched once despite the failed read-back, got %v", dispatcher.names())
     }
 }

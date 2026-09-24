@@ -1375,3 +1375,60 @@ const declaredBudgetProbeMarker = "MELODY_DECLARED_BUDGET_PROBE"
 
 /* the declared budget is far below the package constant, so the deadline the hook receives separates the two: under the declared one it is at most this, under the package constant it is seconds. */
 const declaredHookBudget = 200 * time.Millisecond
+
+/* the exit line carries request-derived text, and a raw escape sequence in it repaints the terminal the operator reads the exit on */
+func TestEchoExitToStderr_EscapesAControlCharacterOfTheErrorText(t *testing.T) {
+    readEnd, writeEnd, pipeErr := os.Pipe()
+    if nil != pipeErr {
+        t.Fatalf("pipe: %v", pipeErr)
+    }
+    savedStandardError := os.Stderr
+    os.Stderr = writeEnd
+
+    echoExitToStderr(errors.New("before"+string(rune(0x1b))+"[31mafter"), 1)
+
+    os.Stderr = savedStandardError
+    _ = writeEnd.Close()
+    written, _ := io.ReadAll(readEnd)
+
+    if true == bytes.ContainsRune(written, 0x1b) || false == strings.Contains(string(written), "[31mafter") {
+        t.Fatalf("expected the escape byte spelled rather than written raw, got %q", written)
+    }
+}
+
+func TestRunExitStepShieldedWithin_EscapesAndRendersThePanicValueItReports(t *testing.T) {
+    defer boundTextValueStack()()
+
+    readEnd, writeEnd, pipeErr := os.Pipe()
+    if nil != pipeErr {
+        t.Fatalf("pipe: %v", pipeErr)
+    }
+    savedStandardError := os.Stderr
+    os.Stderr = writeEnd
+
+    cyclic := map[string]any{"text": "before" + string(rune(0x1b)) + "[31mafter"}
+    cyclic["self"] = cyclic
+
+    runExitStepShieldedWithin(time.Second, "probing", func(stepContext context.Context) {
+        panic(cyclic)
+    })
+
+    os.Stderr = savedStandardError
+    _ = writeEnd.Close()
+    written, _ := io.ReadAll(readEnd)
+
+    if true == bytes.ContainsRune(written, 0x1b) || false == strings.Contains(string(written), "self:<cycle>") || false == strings.Contains(string(written), "panic while probing during the exit handler") {
+        t.Fatalf("expected the panic value rendered with the cycle marker and its escape byte spelled, got %q", written)
+    }
+}
+
+func TestDescribeRecoveredValue_RendersACyclicPanicValueWithTheCycleMarker(t *testing.T) {
+    defer boundTextValueStack()()
+
+    cyclic := map[string]any{}
+    cyclic["self"] = cyclic
+
+    if "map[self:<cycle>]" != describeRecoveredValue(cyclic) {
+        t.Fatalf("expected the cyclic panic value named with the cycle marker, got %q", describeRecoveredValue(cyclic))
+    }
+}

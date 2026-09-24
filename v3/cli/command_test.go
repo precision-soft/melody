@@ -997,3 +997,42 @@ func TestRegister_ActionPrintsThePlainFailedVerdictUnderNoColor(t *testing.T) {
         t.Fatalf("expected the plain failed verdict and no escape sequence, got %q", written)
     }
 }
+
+func requireSpellingRefusal(t *testing.T, flags []clicontract.Flag, expectedMessage string, expectedSpelling string) {
+    t.Helper()
+
+    defer func() {
+        recovered := recover()
+        recoveredErr, isError := recovered.(error)
+        if false == isError || false == strings.Contains(recoveredErr.Error(), expectedMessage) {
+            t.Fatalf("expected the registration refused with %q, got %v", expectedMessage, recovered)
+        }
+
+        if "" != expectedSpelling && expectedSpelling != exception.LogContext(recoveredErr)["spelling"] {
+            t.Fatalf("expected the refusal to name the spelling %q, got %v", expectedSpelling, exception.LogContext(recoveredErr))
+        }
+    }()
+
+    newEngineFlags(flags)
+}
+
+/* the parser resolves a spelling to the FIRST flag declaring it and says nothing about the second: an alias repeating another flag's name is refused at registration */
+func TestNewEngineFlags_RefusesAnAliasThatRepeatsAnotherFlagsName(t *testing.T) {
+    requireSpellingRefusal(t, []clicontract.Flag{
+        &clicontract.StringFlag{Name: "alpha"},
+        &clicontract.StringFlag{Name: "beta", Aliases: []string{"alpha"}},
+    }, "cli flag spelling declared twice", "alpha")
+}
+
+func TestNewEngineFlags_RefusesTwoFlagsSharingAnAlias(t *testing.T) {
+    requireSpellingRefusal(t, []clicontract.Flag{
+        &clicontract.StringFlag{Name: "alpha", Aliases: []string{"a"}},
+        &clicontract.BoolFlag{Name: "beta", Aliases: []string{"a"}},
+    }, "cli flag spelling declared twice", "a")
+}
+
+func TestNewEngineFlags_RefusesAnEmptyAlias(t *testing.T) {
+    requireSpellingRefusal(t, []clicontract.Flag{
+        &clicontract.StringFlag{Name: "alpha", Aliases: []string{""}},
+    }, "cli flag alias is empty", "")
+}

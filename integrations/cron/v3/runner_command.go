@@ -562,6 +562,19 @@ type dueRun struct {
     Error                string   `json:"error"`
 }
 
+/* dueRunSortsBefore orders two runs of one minute by the command, then by the schedule and the arguments: two entries may schedule one command, and ordered by the command alone their rows keep the order the runs finished in, which is the difference between two identical minutes the ordering exists to remove */
+func dueRunSortsBefore(first dueRun, second dueRun) bool {
+    if first.Command != second.Command {
+        return first.Command < second.Command
+    }
+
+    if first.Schedule != second.Schedule {
+        return first.Schedule < second.Schedule
+    }
+
+    return strings.Join(first.Arguments, "\x00") < strings.Join(second.Arguments, "\x00")
+}
+
 /* dueReport is one evaluated minute: the minute itself, how many entries the runner drives at all, and the runs it dispatched for it. Both counts matter to a consumer — a minute with an empty ran list and a configured count of zero is a scheduler that will never do anything, while the same list with a configured count of seven is simply a quiet minute. */
 type dueReport struct {
     At         time.Time `json:"at"`
@@ -630,7 +643,7 @@ func (instance *RunnerCommand) dispatchDue(
 
         /* the runs are ordered by the command name rather than by the order they happened to finish in: the entries of one minute run concurrently, so completion order is scheduling luck and a document that changes shape between two identical minutes cannot be diffed */
         sort.Slice(report.Ran, func(first int, second int) bool {
-            return report.Ran[first].Command < report.Ran[second].Command
+            return dueRunSortsBefore(report.Ran[first], report.Ran[second])
         })
 
         if 0 < len(aggregatedNames) {

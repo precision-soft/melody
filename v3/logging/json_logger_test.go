@@ -1575,3 +1575,43 @@ func TestJsonLogger_ContainsAContextErrorWhoseErrorPanicsAtTheDepthFloor(t *test
         t.Fatalf("expected the error at the floor rendered as panicked, got a record of %d bytes", buffer.Len())
     }
 }
+
+/* a map type that marshals itself — a masking one above all — said how it renders, and the normalization hands it to the encoder as it is */
+type maskingContextMap map[string]any
+
+func (instance maskingContextMap) MarshalJSON() ([]byte, error) {
+    return []byte(`{"masked":true}`), nil
+}
+
+type labelContextSlice []any
+
+func (instance labelContextSlice) MarshalText() ([]byte, error) {
+    return []byte("labels"), nil
+}
+
+func TestJsonLogger_ADefinedMapTypeRendersThroughItsOwnMarshaler(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    NewJsonLogger(buffer, loggingcontract.LevelDebug).Info("probe", map[string]any{"k": maskingContextMap{"secret": "x"}})
+
+    if false == strings.Contains(buffer.String(), `"k":{"masked":true}`) || true == strings.Contains(buffer.String(), "secret") {
+        t.Fatalf("expected the map rendered through its own MarshalJSON, got %s", buffer.String())
+    }
+}
+
+func TestJsonLogger_ADefinedSliceTypeRendersThroughItsOwnTextMarshaler(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    NewJsonLogger(buffer, loggingcontract.LevelDebug).Info("probe", map[string]any{"k": labelContextSlice{"a", "b"}})
+
+    if false == strings.Contains(buffer.String(), `"k":"labels"`) {
+        t.Fatalf("expected the slice rendered through its own MarshalText, got %s", buffer.String())
+    }
+}
+
+/* at the depth floor a container is replaced by the marker because nothing walked it; a value that marshals itself is not a container the walk descends into, and passes the floor as it is */
+func TestNormalizeJsonValue_AMarshalerAtTheDepthFloorPassesAsItIs(t *testing.T) {
+    normalized := normalizeJsonValue(maskingContextMap{"secret": "x"}, 0, map[jsonContextVisitKey]struct{}{})
+
+    if _, kept := normalized.(maskingContextMap); false == kept {
+        t.Fatalf("expected the marshaler handed on at the floor, got %#v", normalized)
+    }
+}

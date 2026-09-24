@@ -565,3 +565,25 @@ func TestStreamHandler_KeepsAnIdleStreamAliveAtHalfTheServersWriteBudget(t *test
         t.Fatalf("an idle stream under a one-second budget carried %d keepalive frames in 1.3 s, wanted at least two; the stream read %q", keepalives, body)
     }
 }
+
+/* a hub that shut down still takes a subscription and ends it at once: the stream is refused with 503 before the writer commits a 200 the client would reconnect into until the process is gone */
+func TestStreamHandler_RefusesWithoutCommittingWhenTheHubHasShutDown(t *testing.T) {
+    request, runtimeInstance := streamRequest(t, "/events/stream/?topic=visitor", true)
+
+    hub, hubErr := subscriber.CatalogNotificationHubFromRuntime(runtimeInstance)
+    if nil != hubErr {
+        t.Fatalf("resolve the hub: %v", hubErr)
+    }
+    hub.Shutdown()
+
+    writer := &recordingResponseWriter{}
+
+    response, handlerErr := StreamHandler()(runtimeInstance, writer, request)
+    if nil != handlerErr || nil == response || nethttp.StatusServiceUnavailable != response.StatusCode() {
+        t.Fatalf("expected the handler to answer 503 itself, got %v and %v", response, handlerErr)
+    }
+
+    if true == writer.HeadersWritten() {
+        t.Fatalf("expected the refusal to leave the response uncommitted, got status %d", writer.CommittedStatusCode())
+    }
+}

@@ -4186,27 +4186,30 @@ func TestContainer_Close_ClosesAServiceThatCarriesOnlyCloseWithContextAndHandsIt
 /* a service whose Close answers a TYPED nil: the interface is not nil, the pointer
 inside it is, which is what an application closer built on a *exception.Error it
 never assigned hands back. */
-type typedNilCloseErrorService struct{}
+type typedNilCloseErrorService struct {
+    closeCount int
+}
 
 func (instance *typedNilCloseErrorService) Close() error {
+    instance.closeCount++
+
     var refusal *exception.Error
 
     return refusal
 }
 
-/* The teardown guard is nil != closeErr, which a typed nil passes, while LogContext
-answers a NIL map for it -- so the details of that failure are recorded into a map
-with no storage. Under a teardown armed in waves the write runs on a goroutine with
-no recover above it, so what it ends is the process, not the service's line; the
-serial path pinned here shares the one function with it. */
-func TestContainerClose_ATypedNilCloseErrorIsRecordedWithoutWritingIntoANilMap(t *testing.T) {
+/* a typed nil is the nil its producer meant: the close of a service that answers
+one is a close that succeeded, and the teardown reports no failure for it. The
+service counts its closes, so the answer is a close that RAN, not one skipped. */
+func TestContainerClose_ATypedNilCloseErrorIsReadAsASuccessfulClose(t *testing.T) {
     containerInstance := NewContainer()
+    service := &typedNilCloseErrorService{}
 
     registerErr := Register[*typedNilCloseErrorService](
         containerInstance,
         "service.typednil",
         func(resolver containercontract.Resolver) (*typedNilCloseErrorService, error) {
-            return &typedNilCloseErrorService{}, nil
+            return service, nil
         },
     )
     if nil != registerErr {
@@ -4217,19 +4220,27 @@ func TestContainerClose_ATypedNilCloseErrorIsRecordedWithoutWritingIntoANilMap(t
         t.Fatalf("resolve: %v", resolveErr)
     }
 
-    closeErr := containerInstance.Close()
-
-    if nil == closeErr {
-        t.Fatal("expected the typed nil to be reported as a failed close")
+    if closeErr := containerInstance.Close(); nil != closeErr {
+        t.Fatalf("expected the typed nil to read as a successful close, got %v", closeErr)
     }
 
-    failures, hasFailures := exception.LogContext(closeErr)["failures"].(map[string]string)
-    if false == hasFailures {
-        t.Fatalf("the teardown error carries no failure map: %v", exception.LogContext(closeErr))
+    if 1 != service.closeCount {
+        t.Fatalf("expected the service to be closed exactly once, closed %d times", service.closeCount)
     }
+}
 
-    if _, named := failures["service:service.typednil"]; false == named {
-        t.Fatalf("the failure map does not name the service: %v", failures)
+/* LogContext answers a NIL map for a typed nil, and the details of a failed close are
+written into what it answers: the book is read without a write into it, and a context
+with nothing in it books nothing. Latent since the containment reads a typed nil as
+success; a write into the nil map would end this test with a panic. */
+func TestRecordCloseFailureDetails_ATypedNilErrorWritesIntoNoNilMap(t *testing.T) {
+    failureDetails := map[string]exceptioncontract.Context{}
+    var refusal *exception.Error
+
+    recordCloseFailureDetails(failureDetails, "service:typednil", refusal, "typed nil")
+
+    if 0 != len(failureDetails) {
+        t.Fatalf("expected a typed nil, which carries no context, to book no details, got %v", failureDetails)
     }
 }
 

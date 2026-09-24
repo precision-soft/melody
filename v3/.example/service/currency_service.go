@@ -246,7 +246,16 @@ func (instance *CurrencyService) Update(
        copy of what was read before the write — which carried the quote the refresh had just replaced */
     written, stillFound, rereadErr := instance.currencyRepository.FindById(ctx, currencyId)
     if nil != rereadErr {
-        return nil, true, rereadErr
+        /* the row is written, and the caches that serve its old code and name expire never: the event goes out
+           with the fields as written — the quote as it was read before the write — so they are dropped even
+           though the row cannot be read back, and the read-back failure is what the caller is answered */
+        _, dispatchErr := instance.eventDispatcher.DispatchName(
+            runtimeInstance,
+            event.CurrencyUpdatedEventName,
+            event.NewCurrencyUpdatedEvent(&modified),
+        )
+
+        return nil, true, errors.Join(rereadErr, dispatchErr)
     }
     if false == stillFound {
         return nil, false, nil

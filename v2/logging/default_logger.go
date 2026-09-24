@@ -74,7 +74,7 @@ func (instance *defaultLogger) formatContext(context loggingcontract.Context) st
 
     pairs := make([]string, 0, len(context))
     for _, key := range keys {
-        pairs = append(pairs, fmt.Sprintf("%s=%v", key, context[key]))
+        pairs = append(pairs, key+"="+renderTextValue(context[key]))
     }
 
     return fmt.Sprintf("{%s}", instance.joinPairs(pairs))

@@ -281,12 +281,40 @@ func newEngineFlags(flags []clicontract.Flag) []urfavecli.Flag {
     }
 
     engineFlags := make([]urfavecli.Flag, 0, len(flags))
+    declaredBy := map[string]string{}
 
     for _, flag := range flags {
-        engineFlags = append(engineFlags, newEngineFlag(flag))
+        engineFlag := newEngineFlag(flag)
+        refuseARepeatedFlagSpelling(flag.Definition(), declaredBy)
+        engineFlags = append(engineFlags, engineFlag)
     }
 
     return engineFlags
+}
+
+/* refuseARepeatedFlagSpelling refuses a spelling — a name or an alias — that the command already declares, and an empty alias: the parser resolves a spelling to the FIRST flag declaring it and says nothing about the second, so an alias that repeats another flag's name was parsed as that other flag while the help listed it under both. MergeFlags refuses a repeated name between the standard flags and a command's own; this is the door every declared spelling passes. */
+func refuseARepeatedFlagSpelling(definition clicontract.FlagDefinition, declaredBy map[string]string) {
+    spellingList := append([]string{definition.Name}, definition.Aliases...)
+
+    for index, spelling := range spellingList {
+        if "" == spelling && 0 < index {
+            exception.Panic(
+                exception.NewError("cli flag alias is empty", map[string]any{"flagName": definition.Name}, nil),
+            )
+        }
+
+        if firstFlagName, declared := declaredBy[spelling]; true == declared {
+            exception.Panic(
+                exception.NewError(
+                    "cli flag spelling declared twice",
+                    map[string]any{"spelling": spelling, "flagName": definition.Name, "firstFlagName": firstFlagName},
+                    nil,
+                ),
+            )
+        }
+
+        declaredBy[spelling] = definition.Name
+    }
 }
 
 /* normalizeCliError reads the error through the interface: a command or a substituted runtime declared with a concrete error type hands back a typed nil boxed into a non-nil interface, which would be treated as the failure it is not — and would panic the first line that renders it. */

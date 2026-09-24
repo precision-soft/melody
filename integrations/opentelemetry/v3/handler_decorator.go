@@ -2,6 +2,7 @@ package opentelemetry
 
 import (
     "bufio"
+    "errors"
     "io"
     "net"
     nethttp "net/http"
@@ -145,22 +146,19 @@ func (instance *statusRecordingResponseWriter) Write(payload []byte) (int, error
     return instance.ResponseWriter.Write(payload)
 }
 
+/* Flush goes through http.ResponseController, which follows Unwrap down the chain: an assertion on the direct writer found no Flusher behind a middleware wrapper that forwards Unwrap alone, and the flush the wrapper claims to offer did nothing while the stream sat in the buffers */
 func (instance *statusRecordingResponseWriter) Flush() {
-    flusher, isFlusher := instance.ResponseWriter.(nethttp.Flusher)
-    if true == isFlusher {
+    if flushErr := nethttp.NewResponseController(instance.ResponseWriter).Flush(); nil == flushErr {
         instance.wroteHeader = true
-
-        flusher.Flush()
     }
 }
 
 func (instance *statusRecordingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-    hijacker, isHijacker := instance.ResponseWriter.(nethttp.Hijacker)
-    if false == isHijacker {
+    /* through http.ResponseController for the reason Flush gives: a wrapper between this one and the connection that forwards Unwrap alone still reaches the hijacker behind it */
+    connection, readWriter, hijackErr := nethttp.NewResponseController(instance.ResponseWriter).Hijack()
+    if true == errors.Is(hijackErr, nethttp.ErrNotSupported) {
         return nil, nil, exception.NewError("the underlying response writer does not support hijacking", nil, nil)
     }
-
-    connection, readWriter, hijackErr := hijacker.Hijack()
     if nil == hijackErr {
         instance.hijacked = true
         instance.wroteHeader = true

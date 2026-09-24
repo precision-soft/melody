@@ -7,6 +7,7 @@ import (
     nethttp "net/http"
     "net/http/httptest"
     "strings"
+    "sync"
     "sync/atomic"
     "testing"
 )
@@ -171,5 +172,60 @@ func TestConfig_RedactsCredentialsOnEveryFmtVerb(t *testing.T) {
     pointerRendered := fmt.Sprintf("%v", &config)
     if true == strings.Contains(pointerRendered, "wJalrXUtn-the-secret") {
         t.Fatalf("a *Config leaked the secret key: %s", pointerRendered)
+    }
+}
+
+/* recheckFailingConflictServer answers the creation conflict, the bucket absent at the first read of its location — the one the creation makes — and a server error at every read after it: the client's existence check is that read, so the re-check that would settle the conflict cannot answer */
+type recheckFailingConflictServer struct {
+    mutex  sync.Mutex
+    checks int
+}
+
+func (instance *recheckFailingConflictServer) ServeHTTP(writer nethttp.ResponseWriter, request *nethttp.Request) {
+    if nethttp.MethodPut == request.Method {
+        writer.WriteHeader(nethttp.StatusConflict)
+
+        type errorResponse struct {
+            XMLName xml.Name `xml:"Error"`
+            Code    string   `xml:"Code"`
+            Message string   `xml:"Message"`
+        }
+
+        _ = xml.NewEncoder(writer).Encode(errorResponse{Code: "BucketAlreadyExists", Message: "taken"})
+
+        return
+    }
+
+    instance.mutex.Lock()
+    instance.checks++
+    firstCheck := 1 == instance.checks
+    instance.mutex.Unlock()
+
+    if true == firstCheck {
+        writer.WriteHeader(nethttp.StatusNotFound)
+
+        return
+    }
+
+    writer.WriteHeader(nethttp.StatusInternalServerError)
+}
+
+/* a re-check that could not answer leaves the conflict unsettled rather than answered "taken elsewhere": the refusal says the re-check failed, so a network failure reads as one */
+func TestEnsureBucketNamesAReCheckThatCouldNotComplete(t *testing.T) {
+    server := httptest.NewServer(&recheckFailingConflictServer{})
+    defer server.Close()
+
+    client, clientErr := NewClient(Config{
+        Endpoint:  strings.TrimPrefix(server.URL, "http://"),
+        AccessKey: "access",
+        SecretKey: "secret",
+    })
+    if nil != clientErr {
+        t.Fatalf("could not build the client: %v", clientErr)
+    }
+
+    ensureErr := EnsureBucket(context.Background(), client, "contested-bucket", "")
+    if nil == ensureErr || false == strings.Contains(ensureErr.Error(), "the re-check of its existence could not complete") {
+        t.Fatalf("expected the refusal to name the failed re-check, got %v", ensureErr)
     }
 }

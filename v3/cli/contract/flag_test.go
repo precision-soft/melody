@@ -113,3 +113,25 @@ func TestFlagDefinition_TheNeutralValidatorRefusesAValueOfAnotherType(t *testing
         t.Fatalf("expected the typed validator not to be reached")
     }
 }
+
+/* each shipped flag hands the three capabilities to its definition, and the aliases as a copy: the definition is read by the adapter after registration, and a slice shared with the command would move under it */
+func TestFlagDefinition_CarriesRequiredAliasesAndHiddenOfEveryKind(t *testing.T) {
+    aliases := []string{"a"}
+
+    for name, flag := range map[string]Flag{
+        "string":      &StringFlag{Name: "string", Required: true, Aliases: aliases, Hidden: true},
+        "bool":        &BoolFlag{Name: "bool", Required: true, Aliases: aliases, Hidden: true},
+        "int":         &IntFlag{Name: "int", Required: true, Aliases: aliases, Hidden: true},
+        "stringSlice": &StringSliceFlag{Name: "stringSlice", Required: true, Aliases: aliases, Hidden: true},
+    } {
+        definition := flag.Definition()
+        if false == definition.Required || false == definition.Hidden || 1 != len(definition.Aliases) || "a" != definition.Aliases[0] {
+            t.Fatalf("%s: expected the three capabilities carried, got %+v", name, definition)
+        }
+
+        definition.Aliases[0] = "changed"
+        if "a" != aliases[0] {
+            t.Fatalf("%s: expected the definition's aliases to be a copy", name)
+        }
+    }
+}

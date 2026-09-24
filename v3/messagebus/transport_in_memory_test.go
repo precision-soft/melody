@@ -1,12 +1,16 @@
 package messagebus
 
 import (
+    "bytes"
+    "os"
+    "strings"
     "sync"
     "testing"
     "time"
 
     "github.com/precision-soft/melody/v3/internal/testhelper"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
+    "github.com/precision-soft/melody/v3/logging"
 )
 
 func TestInMemoryTransport_RequeueOnFullQueueDoesNotBlock(t *testing.T) {
@@ -192,4 +196,139 @@ func TestInMemoryTransport_ConcurrentSendsAndCloseAreRaceFreeAndNeverPanic(t *te
 
     senders.Wait()
     close(stopReader)
+}
+
+/* the transport closed while the message waited out its delay: the requeue can no longer happen, and the loss is journaled on the logger captured at the Nack */
+func TestInMemoryTransport_ADelayedRequeueDroppedAtCloseIsLogged(t *testing.T) {
+    transport := NewInMemoryTransport(4)
+
+    runtimeInstance, logger := newTestRuntimeWithRecordingLogger()
+
+    delayed := NewEnvelope(taskCreated{TaskId: 3}).WithStamp(DelayStamp{Delay: time.Hour})
+    if nackErr := transport.Nack(runtimeInstance, delayed, true); nil != nackErr {
+        t.Fatalf("unexpected nack error: %v", nackErr)
+    }
+
+    if closeErr := transport.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    deadline := time.Now().Add(2 * time.Second)
+    for time.Now().Before(deadline) {
+        if true == logger.hasMessageContaining("the transport was closed before its delay ran out") {
+            return
+        }
+        time.Sleep(5 * time.Millisecond)
+    }
+
+    t.Fatalf("expected the requeue dropped at close to be logged through the runtime's logger")
+}
+
+/* emergencyJournalCapture installs, before any goroutine can reach it, an emergency logger writing into a pipe, and
+   collects what it writes: the emergency logger reads os.Stderr once, when it is created, so creating it here keeps the
+   transport's goroutine from ever reading the variable this test reassigns */
+type emergencyJournalCapture struct {
+    mutex    sync.Mutex
+    written  bytes.Buffer
+    finished chan struct{}
+    restore  func()
+}
+
+func captureEmergencyJournal(t *testing.T) *emergencyJournalCapture {
+    t.Helper()
+
+    readEnd, writeEnd, pipeErr := os.Pipe()
+    if nil != pipeErr {
+        t.Fatalf("pipe: %v", pipeErr)
+    }
+
+    capture := &emergencyJournalCapture{finished: make(chan struct{})}
+
+    savedStandardError := os.Stderr
+    logging.CloseEmergencyLogger()
+    os.Stderr = writeEnd
+    _ = logging.EmergencyLogger()
+    os.Stderr = savedStandardError
+
+    go func() {
+        defer close(capture.finished)
+
+        chunk := make([]byte, 4096)
+        for {
+            read, readErr := readEnd.Read(chunk)
+            capture.mutex.Lock()
+            capture.written.Write(chunk[:read])
+            capture.mutex.Unlock()
+
+            if nil != readErr {
+                return
+            }
+        }
+    }()
+
+    capture.restore = func() {
+        logging.CloseEmergencyLogger()
+        _ = writeEnd.Close()
+        <-capture.finished
+        _ = readEnd.Close()
+    }
+
+    return capture
+}
+
+func (instance *emergencyJournalCapture) text() string {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return instance.written.String()
+}
+
+/* the logger is resolved at every delayed Nack, and a runtime without one is no loss yet: the emergency line is owed at a drop, not at the Nack */
+func TestInMemoryTransport_ADelayedNackOnARuntimeWithoutALoggerWritesNoEmergencyLine(t *testing.T) {
+    capture := captureEmergencyJournal(t)
+
+    transport := NewInMemoryTransport(4)
+
+    delayed := NewEnvelope(taskCreated{TaskId: 4}).WithStamp(DelayStamp{Delay: time.Hour})
+    if nackErr := transport.Nack(newTestRuntime(), delayed, true); nil != nackErr {
+        t.Fatalf("unexpected nack error: %v", nackErr)
+    }
+
+    /* the capture is closed before it is read: closing waits for its reader to drain the pipe, so a line the Nack wrote
+       is in the text rather than still in flight */
+    capture.restore()
+    written := capture.text()
+
+    _ = transport.Close()
+
+    if true == strings.Contains(written, "could not get the logger from runtime") {
+        t.Fatalf("expected no emergency line for a Nack that lost nothing, got %q", written)
+    }
+}
+
+/* a drop on a Nack whose runtime carried no logger is the moment the line is owed: it goes to the emergency logger */
+func TestInMemoryTransport_ADropOnARuntimeWithoutALoggerIsJournaledOnTheEmergencyLogger(t *testing.T) {
+    capture := captureEmergencyJournal(t)
+    defer capture.restore()
+
+    transport := NewInMemoryTransport(4)
+
+    delayed := NewEnvelope(taskCreated{TaskId: 5}).WithStamp(DelayStamp{Delay: time.Hour})
+    if nackErr := transport.Nack(newTestRuntime(), delayed, true); nil != nackErr {
+        t.Fatalf("unexpected nack error: %v", nackErr)
+    }
+
+    if closeErr := transport.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    deadline := time.Now().Add(2 * time.Second)
+    for time.Now().Before(deadline) {
+        if true == strings.Contains(capture.text(), "the transport was closed before its delay ran out") {
+            return
+        }
+        time.Sleep(5 * time.Millisecond)
+    }
+
+    t.Fatalf("expected the drop journaled on the emergency logger, got %q", capture.text())
 }

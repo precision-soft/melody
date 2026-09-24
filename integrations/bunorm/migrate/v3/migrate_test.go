@@ -509,3 +509,17 @@ func TestRestoreDefaultRunnerOption_KeepsAValueTheHostInstalledEvenWhenALaterCom
         t.Fatalf("expected the value the host installed mid-run kept over the older saved one, got %v", resolveDefaultRunnerOption().Writer)
     }
 }
+
+/* an explicit option that names no writer prints under the command's posture, so a migration that passes one to set the colour alone does not print past the writer its command chose */
+func TestUpWithOption_AnOptionWithoutAWriterPrintsUnderTheCommandsPosture(t *testing.T) {
+    var commandWriter bytes.Buffer
+    ctx := withRunnerOption(context.Background(), RunnerOption{Writer: &commandWriter, NoColor: true})
+
+    if upErr := UpWithOption(ctx, nil, "probe", nil, RunnerOption{NoColor: true}); nil != upErr {
+        t.Fatalf("expected the empty set to succeed, got %v", upErr)
+    }
+
+    if false == strings.Contains(commandWriter.String(), "[migration:up] probe") {
+        t.Fatalf("expected the line printed on the command's writer, got %q", commandWriter.String())
+    }
+}

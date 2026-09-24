@@ -288,7 +288,7 @@ func refuseEmptyTokens(entryName string, field string, tokens []string) error {
             return exception.NewError(
                 fmt.Sprintf("cron: entry %q has a %s token at position %d that is not valid UTF-8; the manifest would silently rewrite it", entryName, field, index),
                 exceptioncontract.Context{"entry": entryName, "field": field, "index": index},
-                ErrEntryEmptyCommand,
+                ErrForbiddenCharacter,
             )
         }
     }

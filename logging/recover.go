@@ -122,7 +122,7 @@ func describeRecoveredValue(value any) (text string) {
         text = fmt.Sprintf("a value of type %T whose rendering panicked", value)
     }()
 
-    return fmt.Sprintf("%v", value)
+    return renderTextValue(value)
 }
 
 /* newRecoveredPanicError wraps a panic payload that carries no usable error together with the stack of the panic still in flight: the deferred handler runs with the panicking frames intact, and this is the only moment the origin of a runtime panic can be captured. */
@@ -237,7 +237,7 @@ func runExitStepShielded(stepName string, step func()) bool {
         defer func() {
             recoveredValue := recover()
             if nil != recoveredValue {
-                _, _ = fmt.Fprintf(os.Stderr, "melody: panic while %s during the exit handler: %v\n", stepName, recoveredValue)
+                _, _ = fmt.Fprintf(os.Stderr, "melody: panic while %s during the exit handler: %s\n", stepName, internal.EscapeControlCharacters(renderTextValue(recoveredValue)))
             }
 
             stepDone <- stepCompleted
@@ -270,7 +270,7 @@ func resolveRecoveredExitShielded(recovered any, exitCode int) (err *exception.E
         err = exception.NewEmergency(
             "recovered panic value could not be resolved",
             map[string]any{
-                "resolvePanic": fmt.Sprintf("%v", recoveredValue),
+                "resolvePanic": renderTextValue(recoveredValue),
             },
             nil,
         )
@@ -406,5 +406,5 @@ func echoExitToStderr(err error, exitCode int) {
         }
     }
 
-    _, _ = fmt.Fprintf(os.Stderr, "melody: exiting with code %d after unrecovered error: %s\n", exitCode, message)
+    _, _ = fmt.Fprintf(os.Stderr, "melody: exiting with code %d after unrecovered error: %s\n", exitCode, internal.EscapeControlCharacters(message))
 }

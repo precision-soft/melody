@@ -15,15 +15,20 @@ const UserUsernameIndexName = "melody_example_v3_user_username_folded"
 
 /* upSchema creates the six tables this example owns and declares the one constraint it needs, in one step. The set is one migration rather than a history of them because this application has no history: an example has a single state, the present one, and its schema is the statement of that state. A volume left in an older shape is brought to it by example:db:reset, not by a step that repairs its past.
 
-   The set does not adopt a volume that already holds its tables without recording it (see refuseAdoption): the fingerprint it writes last vouches only for tables it built. Its statements stay tolerant of a second run all the same — the tables are created IF NOT EXISTS, and the constraint, MySQL having no ADD KEY IF NOT EXISTS, is added only after the catalogue is asked whether it is already there — because the refusal reads the volume once, ahead of them.
+   The set does not adopt a volume that already holds its tables without recording it (see beginSchemaSet): its row is written as building before the first statement and sealed as built after the last, so it vouches only for tables this code built, and a run the set itself began and did not finish is finished by the next. Its statements stay tolerant of a second run all the same — the tables are created IF NOT EXISTS, and the constraint, MySQL having no ADD KEY IF NOT EXISTS, is added only after the catalogue is asked whether it is already there — because the refusal reads the volume once, ahead of them.
 
    The constraint comes last because it is declared on a table this step has just created. */
 func upSchema(ctx context.Context, database *bun.DB) error {
-    if adoptionErr := refuseAdoption(ctx, database, catalogMigrationSetName, schemaTableNameList); nil != adoptionErr {
-        return adoptionErr
+    if beginErr := beginSchemaSet(ctx, database, catalogueSchemaSetRecord, schemaTableNameList); nil != beginErr {
+        return beginErr
     }
 
     for _, statement := range schemaUpStatementList {
+        /* the record's own table is created by beginSchemaSet, ahead of the row it holds; it stays in the list for the fingerprint and the drift check, which read the whole schema */
+        if catalogueSchemaSetRecord.createTableSql == statement {
+            continue
+        }
+
         if _, execErr := database.ExecContext(ctx, statement); nil != execErr {
             return execErr
         }
@@ -33,7 +38,7 @@ func upSchema(ctx context.Context, database *bun.DB) error {
         return indexErr
     }
 
-    return recordSchemaFingerprint(ctx, database, recordSchemaFingerprintSql, catalogMigrationSetName, catalogueSchemaFingerprint)
+    return sealSchemaSet(ctx, database, catalogueSchemaSetRecord)
 }
 
 /* downSchema reverses upSchema: the constraint goes first, because the table it stands on is one of the ones the drops below take away, and the tables go in the reverse order of their creation. */
@@ -161,8 +166,8 @@ func dropStatementList(tableNameList []string) []string {
     return statementList
 }
 
-/* the set's own discipline is that a step tolerates a volume provisioned before it — every table is
-   created IF NOT EXISTS. MySQL has no ADD KEY IF NOT EXISTS, so the same tolerance is spelled by asking
+/* the set's own discipline is that a step tolerates a second run of the set — the run it began and did not
+   finish — so every table is created IF NOT EXISTS. MySQL has no ADD KEY IF NOT EXISTS, so the same tolerance is spelled by asking
    the catalogue first; without it a volume whose table was created by a build that already carries the
    key would fail the step on a duplicate index name. */
 func addUserUsernameIndex(ctx context.Context, database *bun.DB) error {

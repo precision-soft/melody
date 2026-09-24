@@ -184,9 +184,9 @@ func (instance *fakeConnection) QueryContext(ctx context.Context, query string, 
         return &fakeRows{columns: []string{"table_name"}, rows: nil}, nil
     }
 
-    /* asked for the fingerprint a set recorded, the double answers the one this code records: the present schema */
+    /* asked for the row a set recorded, the double answers the one this code seals: the present schema, built */
     if fingerprint, isFingerprintSelect := presentFingerprintAsked(query); true == isFingerprintSelect {
-        return &fakeRows{columns: []string{"fingerprint"}, rows: [][]driver.Value{{fingerprint}}}, nil
+        return &fakeRows{columns: []string{"fingerprint", "state"}, rows: [][]driver.Value{{fingerprint, schemaSetBuilt}}}, nil
     }
 
     /* a COUNT select always answers a row on a real server, so a double that answers none turns a step
@@ -219,11 +219,11 @@ func presentColumnNameListAsked(query string) ([]string, bool) {
 
 /* presentFingerprintAsked answers, for a read of the fingerprint a set recorded, the fingerprint this code records for the set the read names. */
 func presentFingerprintAsked(query string) (string, bool) {
-    if true == strings.HasPrefix(query, "SELECT fingerprint FROM "+ArchiveSchemaFingerprintTableName+" ") {
+    if true == strings.HasPrefix(query, "SELECT fingerprint, state FROM "+ArchiveSchemaFingerprintTableName+" ") {
         return archiveSchemaFingerprint, true
     }
 
-    if true == strings.HasPrefix(query, "SELECT fingerprint FROM "+SchemaFingerprintTableName+" ") {
+    if true == strings.HasPrefix(query, "SELECT fingerprint, state FROM "+SchemaFingerprintTableName+" ") {
         return catalogueSchemaFingerprint, true
     }
 

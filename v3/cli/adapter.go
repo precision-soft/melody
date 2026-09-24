@@ -33,6 +33,9 @@ func newEngineFlag(flag clicontract.Flag) urfavecli.Flag {
             Usage:     definition.Usage,
             Value:     engineFlagValue[string](definition),
             Validator: engineFlagValidator[string](definition),
+            Required:  definition.Required,
+            Aliases:   append([]string(nil), definition.Aliases...),
+            Hidden:    definition.Hidden,
         }
 
     case clicontract.FlagKindBool:
@@ -41,6 +44,9 @@ func newEngineFlag(flag clicontract.Flag) urfavecli.Flag {
             Usage:     definition.Usage,
             Value:     engineFlagValue[bool](definition),
             Validator: engineFlagValidator[bool](definition),
+            Required:  definition.Required,
+            Aliases:   append([]string(nil), definition.Aliases...),
+            Hidden:    definition.Hidden,
         }
 
     case clicontract.FlagKindInt:
@@ -51,6 +57,9 @@ func newEngineFlag(flag clicontract.Flag) urfavecli.Flag {
             Value:     engineFlagValue[int](definition),
             Validator: engineFlagValidator[int](definition),
             Config:    urfavecli.IntegerConfig{Base: 10},
+            Required:  definition.Required,
+            Aliases:   append([]string(nil), definition.Aliases...),
+            Hidden:    definition.Hidden,
         }
 
     case clicontract.FlagKindStringSlice:
@@ -59,6 +68,9 @@ func newEngineFlag(flag clicontract.Flag) urfavecli.Flag {
             Usage:     definition.Usage,
             Value:     engineFlagValue[[]string](definition),
             Validator: engineFlagValidator[[]string](definition),
+            Required:  definition.Required,
+            Aliases:   append([]string(nil), definition.Aliases...),
+            Hidden:    definition.Hidden,
         }
     }
 

@@ -1,6 +1,8 @@
 package debug
 
 import (
+    "bytes"
+    "encoding"
     "encoding/json"
     "fmt"
     "reflect"
@@ -617,6 +619,11 @@ func sanitizeErrorContextValueTracked(value any, seen map[errorContextVisitKey]s
         return errorContextDepthMarker
     }
 
+    /* a value that renders itself — a map or slice type with its own MarshalJSON or MarshalText, a masking one above all — is rendered through that method and its result walked like any other context: the conversion below would strip the methods that say how it renders, and the walk after it still drops the noise and guards the cycles and the depth */
+    if rendered, isRendered := renderedThroughItsOwnJson(value); true == isRendered {
+        value = rendered
+    }
+
     mapValue, isMap := value.(map[string]any)
     if false == isMap {
         /* a defined type whose underlying type is map[string]any — the framework's own exceptioncontract.Context is one, and it is exactly what a producer reaches for when nesting structured data — fails the assertion above while carrying the same shape. Left unconverted it rode past all three guards at once: a cycle survived into json.Marshal, whose cycle error routed it to the fmt fallback that has no cycle detection of its own — a fatal stack overflow no recover reaches — a depth past the bound recursed inside the encoder, and a dropped key inside it reached the fallbacks in the clear. */
@@ -661,6 +668,40 @@ func sanitizeErrorContextValueTracked(value any, seen map[errorContextVisitKey]s
     }
 
     return value
+}
+
+/* renderedThroughItsOwnJson renders a map or slice value that marshals itself through its own method and decodes the result into the plain shapes the walk reads, numbers kept as written; a value that marshals nothing of its own, or whose method fails or panics, is answered as not rendered and walked as it is */
+func renderedThroughItsOwnJson(value any) (rendered any, isRendered bool) {
+    /* only the shapes the walk would otherwise convert: any other value that marshals itself — an error that renders structurally — is already handed to the encoder as it is, and in the text table it keeps the rendering it has */
+    if kind := reflect.ValueOf(value).Kind(); reflect.Map != kind && reflect.Slice != kind {
+        return nil, false
+    }
+
+    _, isMarshaler := value.(json.Marshaler)
+    _, isTextMarshaler := value.(encoding.TextMarshaler)
+    if false == isMarshaler && false == isTextMarshaler {
+        return nil, false
+    }
+
+    defer func() {
+        if nil != recover() {
+            rendered = nil
+            isRendered = false
+        }
+    }()
+
+    encoded, marshalErr := json.Marshal(value)
+    if nil != marshalErr {
+        return nil, false
+    }
+
+    decoder := json.NewDecoder(bytes.NewReader(encoded))
+    decoder.UseNumber()
+    if decodeErr := decoder.Decode(&rendered); nil != decodeErr {
+        return nil, false
+    }
+
+    return rendered, true
 }
 
 func sanitizeErrorContextMap(value map[string]any, seen map[errorContextVisitKey]struct{}, depth int, keepNoiseKeys bool) map[string]any {

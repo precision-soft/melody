@@ -4039,3 +4039,22 @@ func TestDispatchDue_AContainedPanicIsRecordedWhenTheLoggerCanWrite(t *testing.T
         t.Fatalf("expected the record to carry the panic value, got %v", record.context)
     }
 }
+
+/* two entries may schedule one command: ordered by the command alone their rows would keep the order the runs finished in */
+func TestDueRunSortsBefore_OrdersOneCommandsRunsByScheduleThenArguments(t *testing.T) {
+    earlierSchedule := dueRun{Command: "report", Schedule: "*/5 * * * *"}
+    laterSchedule := dueRun{Command: "report", Schedule: "0 * * * *"}
+    if false == dueRunSortsBefore(earlierSchedule, laterSchedule) || true == dueRunSortsBefore(laterSchedule, earlierSchedule) {
+        t.Fatalf("expected two runs of one command ordered by their schedule")
+    }
+
+    fewerArguments := dueRun{Command: "report", Schedule: "0 * * * *", Arguments: []string{"a"}}
+    moreArguments := dueRun{Command: "report", Schedule: "0 * * * *", Arguments: []string{"b"}}
+    if false == dueRunSortsBefore(fewerArguments, moreArguments) || true == dueRunSortsBefore(moreArguments, fewerArguments) {
+        t.Fatalf("expected two runs of one command and schedule ordered by their arguments")
+    }
+
+    if false == dueRunSortsBefore(dueRun{Command: "alpha", Schedule: "9"}, dueRun{Command: "beta", Schedule: "0"}) {
+        t.Fatalf("expected the command to order first")
+    }
+}

@@ -332,3 +332,52 @@ func TestTransportsCloser_APanickingCloseDoesNotStrandTheOthers(t *testing.T) {
         t.Fatalf("expected the panic value to travel as the cause, got chain %v", causeChain)
     }
 }
+
+/* a nil entry is refused at boot, named, rather than dereferenced by the consume command at run time */
+func TestRegisterTransports_RefusesANilOrTypedNilEntryByName(t *testing.T) {
+    for name, transport := range map[string]messagebuscontract.Transport{
+        "untyped": nil,
+        "typed":   (*typedNilTransport)(nil),
+    } {
+        func() {
+            defer func() {
+                recovered := recover()
+                if nil == recovered || false == strings.Contains(exception.LogContext(recovered.(error))["error"].(string), "messagebus transport is nil") || name != exception.LogContext(recovered.(error))["name"] {
+                    t.Fatalf("%s: expected the nil entry refused by name at registration, got %v", name, recovered)
+                }
+            }()
+
+            RegisterTransports(
+                transportRegistrarAdapter{serviceContainer: container.NewContainer()},
+                map[string]messagebuscontract.Transport{name: transport},
+            )
+        }()
+    }
+}
+
+type typedNilErrorOnCloseTransport struct {
+    recordingCloseTransport
+}
+
+func (instance *typedNilErrorOnCloseTransport) Close() error {
+    _ = instance.recordingCloseTransport.Close()
+
+    var refusal *exception.Error
+
+    return refusal
+}
+
+/* a typed nil is the nil its producer meant: the transport that answered it closed */
+func TestTransportsCloser_ATypedNilCloseErrorIsReadAsAClose(t *testing.T) {
+    transport := &typedNilErrorOnCloseTransport{}
+
+    closer := &TransportsCloser{transports: map[string]messagebuscontract.Transport{"async": transport}}
+
+    if closeErr := closer.Close(); nil != closeErr {
+        t.Fatalf("expected the typed nil read as a close that succeeded, got %v", closeErr)
+    }
+
+    if false == transport.closed.Load() {
+        t.Fatalf("expected the transport's Close to have run")
+    }
+}

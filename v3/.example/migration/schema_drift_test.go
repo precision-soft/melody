@@ -25,7 +25,7 @@ func TestExpectedSchemaOf_ReadsTheColumnsTheSetCreates(t *testing.T) {
         "melody_example_v3_currency":   {"id", "code", "name", "rate", "rate_as_of", "provider_rate_as_of"},
         "melody_example_v3_two_factor": {"user_identifier", "secret", "recovery_codes", "created_at"},
         "melody_example_v3_category":   {"id", "name"},
-        SchemaFingerprintTableName:     {"set_name", "fingerprint"},
+        SchemaFingerprintTableName:     {"set_name", "fingerprint", "state"},
     }
     for tableName, columnNameList := range wanted {
         if false == reflect.DeepEqual(columnNameList, columnListByTable[tableName]) {
@@ -34,7 +34,7 @@ func TestExpectedSchemaOf_ReadsTheColumnsTheSetCreates(t *testing.T) {
     }
 
     archive := expectedSchemaOf(archiveUpStatementList)
-    if 2 != len(archive) || false == reflect.DeepEqual([]string{"taken_at", "headline", "payload", "product_count", "journal_count"}, archive[0].columnNameList) || ArchiveSchemaFingerprintTableName != archive[1].name || false == reflect.DeepEqual([]string{"set_name", "fingerprint"}, archive[1].columnNameList) {
+    if 2 != len(archive) || false == reflect.DeepEqual([]string{"taken_at", "headline", "payload", "product_count", "journal_count"}, archive[0].columnNameList) || ArchiveSchemaFingerprintTableName != archive[1].name || false == reflect.DeepEqual([]string{"set_name", "fingerprint", "state"}, archive[1].columnNameList) {
         t.Fatalf("expected the archive's table with its five columns and its fingerprint table, got %v", archive)
     }
 }

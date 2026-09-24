@@ -511,3 +511,55 @@ func TestNewEngineFlag_AValidatorThatPanicsWithAnExitErrorReRaisesIt(t *testing.
         },
     })
 }
+
+/* one flag of each kind under the capability named, so a mapping dropped on one kind fails its own case */
+func eachFlagKind(required bool, aliases []string, hidden bool) map[string]clicontract.Flag {
+    return map[string]clicontract.Flag{
+        "text":   &clicontract.StringFlag{Name: "text", Required: required, Aliases: aliases, Hidden: hidden},
+        "switch": &clicontract.BoolFlag{Name: "switch", Required: required, Aliases: aliases, Hidden: hidden},
+        "count":  &clicontract.IntFlag{Name: "count", Required: required, Aliases: aliases, Hidden: hidden},
+        "role":   &clicontract.StringSliceFlag{Name: "role", Required: required, Aliases: aliases, Hidden: hidden},
+    }
+}
+
+/* a required flag left out refuses the invocation before the command runs, naming the flag */
+func TestNewEngineFlag_ARequiredFlagLeftOutIsRefusedByName(t *testing.T) {
+    for name, flag := range eachFlagKind(true, nil, false) {
+        runErr := runFlagProbeError(t, []clicontract.Flag{flag})
+        if nil == runErr || false == strings.Contains(runErr.Error(), `"`+name+`"`) {
+            t.Fatalf("%s: expected the invocation refused naming the required flag, got %v", name, runErr)
+        }
+    }
+}
+
+/* an alias is a further spelling the flag parses under, read back under the flag's name */
+func TestNewEngineFlag_AnAliasParsesUnderTheFlagsName(t *testing.T) {
+    arguments := map[string][]string{
+        "text":   {"--t=value"},
+        "switch": {"--t"},
+        "count":  {"--t=7"},
+        "role":   {"--t=admin"},
+    }
+
+    for name, flag := range eachFlagKind(false, []string{"t"}, false) {
+        parsed := runFlagProbe(t, []clicontract.Flag{flag}, arguments[name]...)
+        if false == parsed.IsSet(name) {
+            t.Fatalf("%s: expected the value given under the alias read under the flag's name", name)
+        }
+    }
+}
+
+/* a hidden flag stays out of the help output and still parses */
+func TestNewEngineFlag_AHiddenFlagIsNotVisibleAndStillParses(t *testing.T) {
+    for name, flag := range eachFlagKind(false, nil, true) {
+        visible, isVisibleFlag := newEngineFlag(flag).(urfavecli.VisibleFlag)
+        if false == isVisibleFlag || true == visible.IsVisible() {
+            t.Fatalf("%s: expected the engine flag hidden from the help output", name)
+        }
+    }
+
+    parsed := runFlagProbe(t, []clicontract.Flag{&clicontract.StringFlag{Name: "secret-mode", Hidden: true}}, "--secret-mode=on")
+    if "on" != parsed.String("secret-mode") {
+        t.Fatalf("expected the hidden flag parsed, got %q", parsed.String("secret-mode"))
+    }
+}

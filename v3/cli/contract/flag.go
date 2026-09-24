@@ -25,6 +25,12 @@ type FlagDefinition struct {
     Usage     string
     Value     any
     Validator func(value any) error
+    /* Required refuses an invocation that leaves the flag out, naming it, before the command runs */
+    Required bool
+    /* Aliases are further spellings the flag is parsed and listed under; each is refused at registration when it repeats a spelling the command already declares */
+    Aliases []string
+    /* Hidden keeps the flag out of the help output while it still parses */
+    Hidden bool
 }
 
 /* Flag is a command line flag a command declares. The single method is the description the engine adapter reads: melody ships the four kinds below, and a package that needs its own flag type — a port number that validates its range, a path that must exist — implements this interface over one of the kinds instead of asking melody for a new one. */
@@ -42,6 +48,9 @@ type StringFlag struct {
     Usage     string
     Value     string
     Validator func(value string) error
+    Required  bool
+    Aliases   []string
+    Hidden    bool
 }
 
 func (instance *StringFlag) Definition() FlagDefinition {
@@ -51,6 +60,9 @@ func (instance *StringFlag) Definition() FlagDefinition {
         Usage:     instance.Usage,
         Value:     instance.Value,
         Validator: neutralValidator(FlagKindString, instance.Name, instance.Validator),
+        Required:  instance.Required,
+        Aliases:   append([]string(nil), instance.Aliases...),
+        Hidden:    instance.Hidden,
     }
 }
 
@@ -59,6 +71,9 @@ type BoolFlag struct {
     Usage     string
     Value     bool
     Validator func(value bool) error
+    Required  bool
+    Aliases   []string
+    Hidden    bool
 }
 
 func (instance *BoolFlag) Definition() FlagDefinition {
@@ -68,6 +83,9 @@ func (instance *BoolFlag) Definition() FlagDefinition {
         Usage:     instance.Usage,
         Value:     instance.Value,
         Validator: neutralValidator(FlagKindBool, instance.Name, instance.Validator),
+        Required:  instance.Required,
+        Aliases:   append([]string(nil), instance.Aliases...),
+        Hidden:    instance.Hidden,
     }
 }
 
@@ -76,6 +94,9 @@ type IntFlag struct {
     Usage     string
     Value     int
     Validator func(value int) error
+    Required  bool
+    Aliases   []string
+    Hidden    bool
 }
 
 func (instance *IntFlag) Definition() FlagDefinition {
@@ -85,6 +106,9 @@ func (instance *IntFlag) Definition() FlagDefinition {
         Usage:     instance.Usage,
         Value:     instance.Value,
         Validator: neutralValidator(FlagKindInt, instance.Name, instance.Validator),
+        Required:  instance.Required,
+        Aliases:   append([]string(nil), instance.Aliases...),
+        Hidden:    instance.Hidden,
     }
 }
 
@@ -93,6 +117,9 @@ type StringSliceFlag struct {
     Usage     string
     Value     []string
     Validator func(value []string) error
+    Required  bool
+    Aliases   []string
+    Hidden    bool
 }
 
 func (instance *StringSliceFlag) Definition() FlagDefinition {
@@ -102,6 +129,9 @@ func (instance *StringSliceFlag) Definition() FlagDefinition {
         Usage:     instance.Usage,
         Value:     instance.Value,
         Validator: neutralValidator(FlagKindStringSlice, instance.Name, instance.Validator),
+        Required:  instance.Required,
+        Aliases:   append([]string(nil), instance.Aliases...),
+        Hidden:    instance.Hidden,
     }
 }
 

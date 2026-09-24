@@ -2,6 +2,7 @@ package awss3
 
 import (
     "context"
+    "errors"
     "fmt"
 
     "github.com/minio/minio-go/v7"
@@ -85,6 +86,11 @@ func EnsureBucket(ctx context.Context, client *minio.Client, bucket string, regi
         existsNow, recheckErr := client.BucketExists(ctx, bucket)
         if nil == recheckErr && true == existsNow {
             return nil
+        }
+
+        /* a re-check that could not answer leaves the question open rather than answered "taken by another account": the refusal carries both, so an operator reads a network failure as one instead of chasing a name clash */
+        if nil != recheckErr {
+            return exception.NewError("object storage bucket creation failed and the re-check of its existence could not complete", map[string]any{"bucket": bucket}, errors.Join(makeErr, recheckErr))
         }
     }
 

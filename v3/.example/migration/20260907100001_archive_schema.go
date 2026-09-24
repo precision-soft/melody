@@ -15,21 +15,26 @@ const CatalogReadingTableName = "melody_example_v3_catalog_reading"
 
 /* upArchiveSchema creates the one table the archive owns. Like the catalogue set beside it, it is a single migration rather than a history of them, because this application has no history: an example has a single state, the present one, and the schema is the statement of that state. A volume left in an older shape is brought to it by example:db:reset, not by a step that repairs its past.
 
-   Like the catalogue set, it does not adopt a volume that already holds its tables without recording it (see refuseAdoption); postgres has CREATE TABLE IF NOT EXISTS, so unlike the catalogue's unique key its statement needs no read of the catalog to be idempotent.
+   Like the catalogue set, it does not adopt a volume that already holds its tables without recording it (see beginSchemaSet); postgres has CREATE TABLE IF NOT EXISTS, so unlike the catalogue's unique key its statement needs no read of the catalog to be idempotent.
 
    taken_at is the PRIMARY KEY rather than a surrogate, and that is the archive's identity rather than a convenience: a reading is the catalogue as it stood at one instant, so two rows at one instant are the same reading recorded twice. It is what makes a duplicated refresh a conflict the repository can name instead of a second row nobody can tell from the first. */
 func upArchiveSchema(ctx context.Context, database *bun.DB) error {
-    if adoptionErr := refuseAdoption(ctx, database, archiveMigrationSetName, archiveTableNameList); nil != adoptionErr {
-        return adoptionErr
+    if beginErr := beginSchemaSet(ctx, database, archiveSchemaSetRecord, archiveTableNameList); nil != beginErr {
+        return beginErr
     }
 
     for _, statement := range archiveUpStatementList {
+        /* the record's own table is created by beginSchemaSet, ahead of the row it holds; it stays in the list for the fingerprint and the drift check, which read the whole schema */
+        if archiveSchemaSetRecord.createTableSql == statement {
+            continue
+        }
+
         if _, execErr := database.ExecContext(ctx, statement); nil != execErr {
             return execErr
         }
     }
 
-    return recordSchemaFingerprint(ctx, database, recordArchiveSchemaFingerprintSql, archiveMigrationSetName, archiveSchemaFingerprint)
+    return sealSchemaSet(ctx, database, archiveSchemaSetRecord)
 }
 
 /* downArchiveSchema reverses upArchiveSchema. */

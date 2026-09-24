@@ -597,3 +597,43 @@ type panickingMessageError struct {
 func (instance *panickingMessageError) Error() string {
     panic("the error message dereferences a nil field")
 }
+
+func TestLogError_NilLogger_RendersACyclicExceptionContextWithTheCycleMarker(t *testing.T) {
+    defer boundTextValueStack()()
+
+    var buffer bytes.Buffer
+    originalWriter := log.Writer()
+    log.SetOutput(&buffer)
+    defer func() {
+        log.SetOutput(originalWriter)
+    }()
+
+    cyclic := map[string]any{}
+    cyclic["self"] = cyclic
+
+    LogError(nil, exception.NewError("probe", map[string]any{"k": cyclic}, nil))
+
+    if false == strings.Contains(buffer.String(), "context=map[k:map[self:<cycle>]]") {
+        t.Fatalf("expected the exception's context rendered with the cycle marker, got %q", buffer.String())
+    }
+}
+
+func TestLogError_NilLogger_RendersACyclicWrappedContextWithTheCycleMarker(t *testing.T) {
+    defer boundTextValueStack()()
+
+    var buffer bytes.Buffer
+    originalWriter := log.Writer()
+    log.SetOutput(&buffer)
+    defer func() {
+        log.SetOutput(originalWriter)
+    }()
+
+    cyclic := map[string]any{}
+    cyclic["self"] = cyclic
+
+    LogError(nil, fmt.Errorf("wrapped: %w", exception.NewError("probe", map[string]any{"k": cyclic}, nil)))
+
+    if false == strings.Contains(buffer.String(), "k:map[self:<cycle>]") || false == strings.Contains(buffer.String(), "context=map[") {
+        t.Fatalf("expected the wrapped error's context rendered with the cycle marker, got %q", buffer.String())
+    }
+}

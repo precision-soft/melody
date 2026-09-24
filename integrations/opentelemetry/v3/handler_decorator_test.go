@@ -1,6 +1,8 @@
 package opentelemetry
 
 import (
+    "bufio"
+    "net"
     nethttp "net/http"
     "net/http/httptest"
     "testing"
@@ -118,5 +120,45 @@ func TestHandlerDecorator_MarksServerErrorStatus(t *testing.T) {
 func TestHandlerDecorator_RequiresTracer(t *testing.T) {
     if _, decoratorErr := NewHandlerDecorator(HandlerDecoratorConfig{}); nil == decoratorErr {
         t.Fatalf("expected a nil tracer to be rejected")
+    }
+}
+
+/* a middleware wrapper between the recorder and the connection that forwards Unwrap alone */
+type unwrapOnlyResponseWriter struct {
+    nethttp.ResponseWriter
+}
+
+func (instance *unwrapOnlyResponseWriter) Unwrap() nethttp.ResponseWriter {
+    return instance.ResponseWriter
+}
+
+type hijackableResponseWriter struct {
+    *httptest.ResponseRecorder
+    hijacked bool
+}
+
+func (instance *hijackableResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+    instance.hijacked = true
+
+    return nil, nil, nil
+}
+
+func TestStatusRecordingResponseWriter_FlushReachesThroughAWrapperThatForwardsUnwrapAlone(t *testing.T) {
+    inner := httptest.NewRecorder()
+    recorder := &statusRecordingResponseWriter{ResponseWriter: &unwrapOnlyResponseWriter{ResponseWriter: inner}, statusCode: nethttp.StatusOK}
+
+    recorder.Flush()
+
+    if false == inner.Flushed {
+        t.Fatalf("expected the flush to reach the writer behind the wrapper")
+    }
+}
+
+func TestStatusRecordingResponseWriter_HijackReachesThroughAWrapperThatForwardsUnwrapAlone(t *testing.T) {
+    inner := &hijackableResponseWriter{ResponseRecorder: httptest.NewRecorder()}
+    recorder := &statusRecordingResponseWriter{ResponseWriter: &unwrapOnlyResponseWriter{ResponseWriter: inner}, statusCode: nethttp.StatusOK}
+
+    if _, _, hijackErr := recorder.Hijack(); nil != hijackErr || false == inner.hijacked || false == recorder.hijacked {
+        t.Fatalf("expected the hijack to reach the writer behind the wrapper, got %v", hijackErr)
     }
 }

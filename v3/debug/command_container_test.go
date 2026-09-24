@@ -2159,3 +2159,25 @@ func TestContainerCommand_TheSingleDoorOnATwinNameAnswersScopedWithoutTheContain
 func sanitizeErrorContextValue(value any) any {
     return sanitizeErrorContextValueTracked(value, map[errorContextVisitKey]struct{}{}, 0, false)
 }
+
+/* a map type that marshals itself — a masking one above all — is rendered through its own method, and the walk then reads what it rendered: the noise drop still reaches inside it */
+type maskingErrorContextMap map[string]any
+
+func (instance maskingErrorContextMap) MarshalJSON() ([]byte, error) {
+    return []byte(`{"masked":true,"trace":"frames"}`), nil
+}
+
+func TestSanitizeErrorContextValue_RendersADefinedMapThroughItsOwnMarshalerThenWalksIt(t *testing.T) {
+    sanitized := sanitizeErrorContextValue(map[string]any{
+        "value": maskingErrorContextMap{"secret": "x"},
+    })
+
+    encoded, marshalErr := json.Marshal(sanitized)
+    if nil != marshalErr {
+        t.Fatalf("the sanitized context must stay marshalable: %v", marshalErr)
+    }
+
+    if `{"value":{"masked":true}}` != string(encoded) {
+        t.Fatalf("expected the map rendered through its own MarshalJSON with the noise key dropped, got %s", encoded)
+    }
+}

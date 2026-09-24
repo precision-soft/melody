@@ -1,6 +1,7 @@
 package opentelemetry
 
 import (
+    "errors"
     nethttp "net/http"
 
     "go.opentelemetry.io/otel/attribute"
@@ -67,13 +68,34 @@ func NewTracingMiddleware(tracer trace.Tracer, propagator propagation.TextMapPro
             }
 
             if nil != handlerErr {
-                span.RecordError(handlerErr)
-                span.SetStatus(codes.Error, handlerErr.Error())
+                /* the message is read through the exception package, under the recover its readers carry, because the error is the handler's own value and a typed nil of a pointer type answers Error() with a panic this middleware would then charge to itself */
+                message, isRendered := exception.LogContext(handlerErr)["error"].(string)
+                if false == isRendered {
+                    message = "the handler error could not be rendered"
+                }
+
+                recordSpanError(span, handlerErr, message)
+
+                /* a server span is in error for a failure of the server: a deliberate sub-500 the handler answered — a 404, a 422 — is the client's, and the span keeps its status unset while the error stays recorded as an event */
+                if nethttp.StatusInternalServerError <= statusCodeForError(handlerErr) {
+                    span.SetStatus(codes.Error, message)
+                }
             }
 
             return response, handlerErr
         }
     }
+}
+
+/* recordSpanError records the handler error as the span's exception event, and records its rendered message instead when the recording itself panics — the sdk asks the error for its text, which a typed nil cannot give */
+func recordSpanError(span trace.Span, handlerErr error, message string) {
+    defer func() {
+        if nil != recover() {
+            span.RecordError(errors.New(message))
+        }
+    }()
+
+    span.RecordError(handlerErr)
 }
 
 func spanName(request httpcontract.Request) string {

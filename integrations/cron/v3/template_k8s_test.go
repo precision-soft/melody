@@ -427,3 +427,14 @@ func TestK8sRenderRefusesInvalidUtf8(t *testing.T) {
         t.Fatalf("expected the invalid UTF-8 token to be refused")
     }
 }
+
+/* the refusal of an invalid UTF-8 token names the class it belongs to — a character the manifest cannot carry — and not the empty-command class, which a caller that sorts refusals by sentinel would read it as */
+func TestK8sRenderFilesAnInvalidUtf8TokenUnderTheForbiddenCharacterClass(t *testing.T) {
+    withInvalidToken := k8sSampleEntry("product:list")
+    withInvalidToken.Args = []string{"--flag=\xff"}
+
+    _, renderErr := defaultK8sTemplate.Render([]Entry{withInvalidToken}, RenderOptions{Image: "img"})
+    if false == errors.Is(renderErr, ErrForbiddenCharacter) || true == errors.Is(renderErr, ErrEntryEmptyCommand) {
+        t.Fatalf("expected the refusal filed under ErrForbiddenCharacter alone, got %v", renderErr)
+    }
+}

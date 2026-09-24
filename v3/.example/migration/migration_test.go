@@ -35,16 +35,17 @@ func TestUpSchemaCreatesEveryTableTolerantlyThenTheConstraint(t *testing.T) {
 
     assertQueryOrder(t, recorder.recordedQueries(), []string{
         "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN ('melody_example_v3_schema_fingerprint', 'melody_example_v3_two_factor', 'melody_example_v3_catalog_journal', 'melody_example_v3_user', 'melody_example_v3_product', 'melody_example_v3_currency', 'melody_example_v3_category')",
+        "CREATE TABLE IF NOT EXISTS `melody_example_v3_schema_fingerprint`",
+        "INSERT INTO `melody_example_v3_schema_fingerprint` (`set_name`, `fingerprint`, `state`) VALUES ('catalogue', '" + catalogueSchemaFingerprint + "', 'building')",
         "CREATE TABLE IF NOT EXISTS `melody_example_v3_category`",
         "CREATE TABLE IF NOT EXISTS `melody_example_v3_currency`",
         "CREATE TABLE IF NOT EXISTS `melody_example_v3_product`",
         "CREATE TABLE IF NOT EXISTS `melody_example_v3_user`",
         "CREATE TABLE IF NOT EXISTS `melody_example_v3_catalog_journal`",
         "CREATE TABLE IF NOT EXISTS `melody_example_v3_two_factor`",
-        "CREATE TABLE IF NOT EXISTS `melody_example_v3_schema_fingerprint`",
         "information_schema.STATISTICS",
         "ADD UNIQUE KEY",
-        "INSERT IGNORE INTO `melody_example_v3_schema_fingerprint` (`set_name`, `fingerprint`) VALUES ('catalogue', '" + catalogueSchemaFingerprint + "')",
+        "UPDATE `melody_example_v3_schema_fingerprint` SET `state` = 'built' WHERE `set_name` = 'catalogue'",
     })
 }
 

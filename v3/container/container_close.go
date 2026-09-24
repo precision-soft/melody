@@ -1042,7 +1042,13 @@ func containedClose(close func() error) (closeErr error) {
         )
     }()
 
-    return close()
+    /* a typed nil is the nil its producer meant: a Close declared to return its own error type hands back a non-nil interface around a nil pointer on success, and read as a failure it was a service reported as not closed that had closed */
+    closeErr = close()
+    if true == internal.IsNilInterface(closeErr) {
+        return nil
+    }
+
+    return closeErr
 }
 
 /* closeFailureStackLimit bounds the frames one failed close contributes. A contained panic carries the whole debug.Stack of the goroutine that ran the close — about a kilobyte on an ordinary one, three on a deep one — and the teardown error is ONE record the application journals, so a shutdown that loses twenty services wrote sixty kilobytes of it in a single line. The top frames are the ones that name the close; what the cut drops is the runtime's own tail. */
@@ -1085,11 +1091,11 @@ func recordCloseFailureDetails(
     }
 
     /* a key is bounded only where it IS: LogContext answers a NIL map for an error
-    that is nil or typed nil, and the guard that reaches here is nil != closeErr,
-    which a typed nil passes -- so writing the two keys unconditionally assigned
-    into a nil map and ended the teardown with "assignment to entry in nil map".
-    Under a teardown armed in waves that write runs on a goroutine with no recover
-    above it, so it took the process with it rather than one service's line. */
+    that is nil or typed nil, and writing the two keys unconditionally into it ends
+    the teardown with "assignment to entry in nil map" -- under a teardown armed in
+    waves, on a goroutine with no recover above it, the process. The containment
+    answers a typed nil as success, so none reaches here through a close; the guard
+    holds for whatever error does. */
     for _, boundedKey := range []string{"panicStack", "recoveredValue"} {
         existing, exists := details[boundedKey]
         if false == exists {

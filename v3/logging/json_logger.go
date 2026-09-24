@@ -1,6 +1,7 @@
 package logging
 
 import (
+    "encoding"
     "encoding/json"
     "errors"
     "fmt"
@@ -341,11 +342,26 @@ func normalizeJsonContextSlice(
     return normalized
 }
 
+/* rendersItsOwnJson answers whether the encoder renders the value through a method of its own rather than by its shape: a value that answers it is not a container the walk descends into, at any depth, whatever its underlying type */
+func rendersItsOwnJson(value any) bool {
+    if _, isMarshaler := value.(json.Marshaler); true == isMarshaler {
+        return true
+    }
+
+    _, isTextMarshaler := value.(encoding.TextMarshaler)
+
+    return isTextMarshaler
+}
+
 /* isJsonContextContainer answers for the shapes the walk descends into, which are exactly the ones that can carry a cycle past the encoder */
 func isJsonContextContainer(value any) bool {
     switch value.(type) {
     case map[string]any, loggingcontract.Context, []any, []map[string]any:
         return true
+    }
+
+    if true == rendersItsOwnJson(value) {
+        return false
     }
 
     reflectedValue := reflect.ValueOf(value)
@@ -412,6 +428,11 @@ func normalizeJsonValue(value any, remainingDepth int, seen map[jsonContextVisit
         }
 
         return normalized
+    }
+
+    /* a value that marshals itself — a map or slice type carrying its own MarshalJSON or MarshalText, a redacting one above all — said how it renders, and the conversion below would strip exactly the methods that say it: the encoder is handed it as it is */
+    if true == rendersItsOwnJson(value) {
+        return value
     }
 
     /* a defined type whose underlying type is one of the shapes above — the exception contract's Context is one, and it is what a producer reaches for when nesting structured data — fails every assertion above while carrying the same shape. Left unconverted it rides past the cycle keying, and the cycle it holds reaches the encoder. The conversion keeps the backing pointer, which is what the keying is built on. */

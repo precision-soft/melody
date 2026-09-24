@@ -343,7 +343,7 @@ func run(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS)
 
 ### Registration APIs
 
-- [`(*Application).RegisterConfiguration(name, configuration)`](../../application/application.go)
+- [`(*Application).RegisterConfiguration(name, configuration)`](../../application/application.go) — accepts exactly one name in this major, `loggingcontract.LoggingConfigurationName`; any other name panics at registration, because nothing can ever consume it
 - [`(*Application).RegisterParameter(name, value)`](../../application/application.go)
 - [`(*Application).RegisterService(name, factory)`](../../application/application_container.go)
 - [`(*Application).RegisterScopedService(serviceName, provider)`](../../application/application_container.go) — the scoped counterpart: what it registers is built on the first resolution through a scope and closed when that scope closes
