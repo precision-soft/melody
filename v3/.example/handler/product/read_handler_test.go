@@ -86,9 +86,7 @@ func TestConvertedPriceFor_RestatesThePriceInTheCurrencyTheCallerNamed(t *testin
 }
 
 /* the SHAPE of a query parameter is the client's to choose, so ?currency=USD&currency=RON has to be answered
-   rather than refused: the string accessor beside the one this door uses panics on a repeated key, which
-   through a public door is an unauthenticated five-hundred. The first value wins, which is what the
-   framework's own Input door settled on for the same reason. */
+   rather than refused: the first value wins, as it does at the framework's own Input door. */
 func TestConvertedPriceFor_TakesTheFirstValueOfARepeatedParameter(t *testing.T) {
     converted, err := convertedPriceFor(
         conversionRequest(t, "/products/api/read/prod-1/?currency=USD&currency=RON"),

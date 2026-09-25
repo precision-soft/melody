@@ -39,7 +39,7 @@ if nil != middlewareErr {
 // expose the registry; e.g. route GET /metrics -> opentelemetry.MetricsHandler(registry)
 ```
 
-`NewMetricsMiddleware` records `http.server.request.count` and `http.server.request.duration` (ms) with `http.request.method`, `http.route`, and `http.response.status_code` attributes. The status attribute follows the response a handler returns, or — for the nil-response streaming/proxy shape — the status the handler committed directly to the writer (`101` for a hijacked upgrade).
+`NewMetricsMiddleware` records `http.server.request.count` and `http.server.request.duration` (ms) with `http.request.method`, `http.route`, and `http.response.status_code` attributes. The status attribute is the status the client receives, in the order the kernel answers it: a handler error decides first (an `HttpException` below `500` at its own status, anything else as `500`), then the response the handler returns, and — for the nil-response streaming/proxy shape — the status the handler committed directly to the writer (`101` for a hijacked upgrade).
 
 `NewPrometheusMeter` builds a pull-based meter: the underlying meter provider has no background goroutine and no close door is offered — it lives for the process, which is the lifetime a Prometheus registry serves anyway.
 

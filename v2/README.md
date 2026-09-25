@@ -73,10 +73,10 @@ These are intentionally independent so you can embed one family while keeping th
 
 ```bash
 # filesystem env (default)
-go build -o app ./...
+go build -o app .
 
 # embedded env
-go build -tags melody_env_embedded -o app ./...
+go build -tags melody_env_embedded -o app .
 ```
 
 ---
@@ -99,10 +99,10 @@ go build -tags melody_env_embedded -o app ./...
 
 ```bash
 # filesystem static (default)
-go build -o app ./...
+go build -o app .
 
 # embedded static assets
-go build -tags melody_static_embedded -o app ./...
+go build -tags melody_static_embedded -o app .
 ```
 
 ---
@@ -112,7 +112,7 @@ go build -tags melody_static_embedded -o app ./...
 You can combine the tags to embed both families:
 
 ```bash
-go build -tags "melody_env_embedded melody_static_embedded" -o app ./...
+go build -tags "melody_env_embedded melody_static_embedded" -o app .
 ```
 
 For a complete example that shows the same build-tag matrix applied end-to-end in a userland application, see [`.example/README.md`](./.example/README.md).

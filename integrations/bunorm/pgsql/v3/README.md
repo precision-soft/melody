@@ -14,7 +14,7 @@ provider := pgsql.NewProvider()
 
 Register it through the core registry by attaching it to a [`bunorm.ProviderDefinition`](../../v3/provider_definition.go) (see the [bunorm README](../../v3/README.md)).
 
-Unlike the [MySQL provider](../../mysql/v3/README.md), this package ships no self-registering application module or registration helper — register the provider through the core registry as shown above. It does ship an application-level service: an advisory-lock [`Locker`](./lock.go) (see [Distributed lock](#distributed-lock) below).
+The provider itself is registered through the core registry as shown above. Like the [MySQL provider](../../mysql/v3/README.md), the package also ships an application-level service, an advisory-lock [`Locker`](./lock.go), with a registration helper and a self-registering application module for it (see [Distributed lock](#distributed-lock) below).
 
 ### Options
 

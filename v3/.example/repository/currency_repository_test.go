@@ -25,7 +25,7 @@ func TestValidateCurrencyNamesTheFirstFieldItFailsOn(t *testing.T) {
 }
 
 func TestNextCurrencyIdContinuesTheSeededNumbering(t *testing.T) {
-    if "cur-3" != nextCurrencyId([]string{"cur-1", "cur-2"}) {
-        t.Fatalf("expected cur-3, got %q", nextCurrencyId([]string{"cur-1", "cur-2"}))
+    if "cur-6" != nextCurrencyId([]string{"cur-1", "cur-5", "cur-2"}) {
+        t.Fatalf("expected cur-6, got %q", nextCurrencyId([]string{"cur-1", "cur-5", "cur-2"}))
     }
 }

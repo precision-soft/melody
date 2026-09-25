@@ -17,6 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- documentation: the README says that the status the metrics record is decided by the handler's error first, then by its response, then by what it wrote directly.
 - the tracing middleware set the server span's status to error for a deliberate sub-500 a handler answered — a 404, a 422 — which is the client's error; the status stays unset below 500 and the error is still recorded as the span's exception event.
 - the tracing middleware read a handler error's message through `Error()` bare, so a typed nil panicked inside the middleware; the message is read through the exception package and the span records it.
 - the recording writer flushed and hijacked by assertion on the writer it wraps, so behind a middleware wrapper that forwards `Unwrap` alone a stream's flush did nothing and an upgrade was refused; both go through net/http's response controller, and a flush that reached a flusher and failed — the write error of a client that has gone, the status already committed — still counts as the header written, so a status the handler tries afterwards is not recorded in place of the one the connection carried.

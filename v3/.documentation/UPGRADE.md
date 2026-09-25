@@ -285,7 +285,7 @@ The full width is what makes the stamps sortable as text, which is the whole of 
 
 ### Serializer: the accept header is read on the one strict grammar
 
-**What changed.** The manager's own header parser reads `q` through [`internal.ParseQualityValue`](../internal/quality_value.go) and splits members and parameters through [`internal.SplitOutsideQuotes`](../internal/split_outside_quotes.go), the grammar the http readers already shared. A `q` outside the RFC 7231 qvalue grammar drops its whole member instead of being scored as full acceptance, clamped into a fabricated refusal, or carried through as a `NaN` weight no comparison could select or refuse; and a comma or semicolon inside a quoted parameter value stays inside its member, so the `q=0` in `text/plain;version="1,2";q=0` keeps covering the type it names instead of being detached from it.
+**What changed.** The manager's own header parser reads `q` through [`internal.ParseQualityValue`](../internal/quality_value.go) and splits members and parameters through [`internal.SplitOutsideQuotes`](../internal/split_outside_quotes.go), the grammar the http readers already shared. A `q` outside the RFC 7231 qvalue grammar — digits past the third decimal are tolerated when they are zeros — drops its whole member instead of being scored as full acceptance, clamped into a fabricated refusal, or carried through as a `NaN` weight no comparison could select or refuse; and a comma or semicolon inside a quoted parameter value stays inside its member, so the `q=0` in `text/plain;version="1,2";q=0` keeps covering the type it names instead of being detached from it.
 
 **Symptom.** `q=1e-1` and `q=1.5`, which used to be accepted, now drop their member. A header whose every member is malformed is refused by the manager, and the http result handler answers that refusal with the default serializer.
 
@@ -436,7 +436,7 @@ debug.NewMiddlewareCommand(
 
 ### Container: a lazy handle over a request scope becomes terminal when that scope closes
 
-**What changed.** `container.Lazy` and `container.LazyByType` ask the resolver they captured whether it has closed. The first closed answer makes the handle terminal: the scope-is-closed error on that call and on every later one, with the memoized value, the closure and the resolver dropped. `Scope.Closed()` is the door the question is asked through; a resolver that cannot answer it is read as open.
+**What changed.** `container.Lazy` and `container.LazyByType` ask the resolver they captured whether it has closed. The first closed answer makes the handle terminal: the scope-is-closed error on that call and on every later one, with the memoized value, the closure and the resolver dropped. The resolver's `Closed()` or `IsClosed()` is the door the question is asked through; a resolver that carries neither is read as open.
 
 **Symptom.** A handle built over a request scope and used after the request stops answering the memoized value and returns `lazy service scope is closed`. `LazyService.Get` panics with that error rather than handing back a dead request's state.
 
@@ -525,7 +525,7 @@ debug.NewMiddlewareCommand(
 
 ### Http: the server-sent-event writer refuses what it used to emit, and the hub closes what it owns
 
-**What changed.** `NewServerSentEventWriter` refuses an already-committed response and a connection that cannot really flush (the probe now reads through the kernel's response-writer wrapper instead of at it). `Send` refuses an event carrying a name and no data, an id or name that would collapse to empty once its control bytes are removed, and a negative retry; a frame that failed partway poisons the writer, so every later frame is refused rather than appended onto torn bytes. The writer serializes its own frames, so a handler and a keepalive ticker may share it. `ServerSentEventHub` closes the backplane it owns on `Shutdown`, refuses to install one over a live one or into a hub that has already shut down, reads a typed nil as nothing, gains `Close() error` so the container's teardown can see it, and takes a logger through `SetLogger`.
+**What changed.** `NewServerSentEventWriter` refuses an already-committed response and a connection that cannot really flush (the probe now reads through the kernel's response-writer wrapper instead of at it). `Send` refuses an event carrying a name and no data, an id or name that would collapse to empty once its control bytes are removed, and a negative retry; a frame that failed partway poisons the writer, so every later frame is refused rather than appended onto torn bytes. The writer serializes its own frames, so a handler and a keepalive ticker may share it. `ServerSentEventHub` closes the backplane it owns on `Shutdown`, refuses to install a different one over a live one or any into a hub that has already shut down, reads a typed nil as nothing, gains `Close() error` so the container's teardown can see it, and takes a logger through `SetLogger`.
 
 **Symptom.** A `Send` call that used to return nil may now return an error — most often `ServerSentEvent{Event: "x"}` with no `Data`, which the event-stream grammar discards without dispatching anything, so the listener that named `x` never fired. A composition root that installed a second backplane over a live hub now gets a refusal naming the situation, where the first one used to be orphaned in silence. An application that resolved the hub from the container will now have it closed by the ordered teardown.
 
@@ -541,7 +541,7 @@ debug.NewMiddlewareCommand(
 
 ### Http: a request path padded with whitespace is refused with a 400 before the handler
 
-**What changed.** The kernel refuses, with `400`, a request path that leading or trailing whitespace would be trimmed from — the decoded form of `/public%20`, `/public%09` or `/public%C2%A0` — before it is routed or authorized, the way it refuses a path carrying `..`, `.` or `//`. The router keeps the whitespace, so `/public%20` reached a catch-all handler as its own spelling, while the access-control matcher trims it and authorized the request under the rule of `/public`: an exact `PUBLIC_ACCESS` rule beside a protected catch-all handler served the protected handler to an anonymous client. Whitespace inside the path (`/a%20b`) is read alike by every consumer and still routes.
+**What changed.** The kernel refuses, with `400`, a request path that leading or trailing whitespace would be trimmed from — the decoded form of `/public%20`, `/public%09` or `/public%C2%A0` — after the route is matched and before it is authorized or handled, the way it refuses a path carrying `..`, `.` or `//`. The router keeps the whitespace, so `/public%20` reached a catch-all handler as its own spelling, while the access-control matcher trims it and authorized the request under the rule of `/public`: an exact `PUBLIC_ACCESS` rule beside a protected catch-all handler served the protected handler to an anonymous client. Whitespace inside the path (`/a%20b`) is read alike by every consumer and still routes.
 
 **Symptom.** A client that sends a path ending, or beginning after a stripped prefix, in an encoded space, tab or no-break space is answered `400 bad request` where the request was previously routed to a handler, or answered `404`.
 
@@ -597,7 +597,7 @@ debug.NewMiddlewareCommand(
 
 ### Http: the negotiation readers share one strict grammar
 
-**What changed.** `PrefersHtml`, the compression middleware's `acceptsGzip` and the error-body negotiation read their headers under the serializer's rules: every line of a repeated field joined, members and parameters split outside quoted sections, the `q` parameter compared case-insensitively, and a member whose q falls outside the RFC 7231 qvalue grammar dropped whole. A repeated Accept-Encoding coding resolves to its higher quality.
+**What changed.** `PrefersHtml`, the compression middleware's `acceptsGzip` and the error-body negotiation read their headers under the serializer's rules: every line of a repeated field joined, members and parameters split outside quoted sections, the `q` parameter compared case-insensitively, and a member whose q falls outside the RFC 7231 qvalue grammar, zeros past the third decimal aside, dropped whole. A repeated Accept-Encoding coding resolves to its higher quality.
 
 **Symptom.** `gzip;Q=0` stops being compressed; `q=Inf`, `q=NaN`, `q=5` and `q=-1` stop being honoured as weights and drop their member; a refusal carried in a quoted parameter (`text/html;p="a,b";q=0`) or on a second header line starts being honoured.
 
@@ -815,7 +815,7 @@ debug.NewMiddlewareCommand(
 
 **What changed.** `EntryConfig.DestinationFile` joins `Command` and `Instances` in `NewRunnerCommand`'s construction refusal: an entry routed to another crontab addresses an external scheduler, and accepted by the runner as well it executed twice whenever the generated manifests were live.
 
-**Symptom.** A boot that used to succeed panics with `cron: the in-process runner supports only name-scheduled single-instance entries; the entry routes to another crontab file`.
+**Symptom.** A boot that used to succeed panics with a message that opens with `cron: the in-process runner supports only name-scheduled single-instance entries; the entry routes to another crontab file`.
 
 **Remedy.** Keep the routed entry out of the runner's `Configuration` (schedule it only for the generator), or drop its `DestinationFile` if in-process execution is the intent.
 
@@ -967,11 +967,11 @@ The refusal existed because the flag types were the parsing engine's own — `cl
 
 ### Application: a teardown that hangs is abandoned and exits non-zero
 
-**What changed.** The normal return of `Run` closes the container through the same ten-second shield the panic path now uses, and takes exit code 1 when the budget runs out. Previously the clean path had no budget at all: one `Close` that never returned parked every service behind it and the process with them, so the healthy shutdown was the one without an emergency exit while the dying one had a way out.
+**What changed.** The normal return of `Run` closes the container through the shield the panic path uses, under the teardown budget `MELODY_TEARDOWN_TIMEOUT` declares (`kernel.teardown_timeout`, ten seconds when it says nothing, zero for no deadline), and takes exit code 1 when the budget runs out. Previously the clean path had no budget at all: one `Close` that never returned parked every service behind it and the process with them, so the healthy shutdown was the one without an emergency exit while the dying one had a way out.
 
-**Symptom.** A process whose teardown blocks for more than ten seconds now prints one line to stderr naming the abandoned step and exits 1, where it used to hang until the supervisor killed it.
+**Symptom.** A process whose teardown blocks for longer than the budget now prints one line to stderr naming the abandoned step and exits 1, where it used to hang until the supervisor killed it.
 
-**Remedy.** None required — the exit is the intended outcome. A service whose `Close` legitimately takes longer than ten seconds should bound its own work: the shield abandons the step, it does not shorten it.
+**Remedy.** None required — the exit is the intended outcome. A deployment whose teardown legitimately takes longer raises `MELODY_TEARDOWN_TIMEOUT`; a service should still bound its own work, since the shield abandons the step, it does not shorten it.
 
 ### Logging: every fatal exit writes a certificate record at emergency level
 
@@ -1130,7 +1130,7 @@ func (instance *CustomSessionManager) RegenerateSession(
 }
 ```
 
-The framework's own `Session` is latched out of use rather than merely cleared, because `Session.Set` lifts the cleared flag and a caller that rotated and then kept writing to the original object would otherwise have the response path re-create the just-deleted id and re-issue it as the cookie. That latch is unexported and no contract method was added for it, so an out-of-tree `Session` implementation is only `Clear()`ed — which a later write still undoes. An application that supplies its own `Session` must therefore not write to the object it rotated away.
+The rotated-away `Session` is cleared, and the framework's own `Clear` latches: a caller that rotated and then kept writing to the original object cannot make it live again, so the response path cannot re-create the just-deleted id and re-issue it as the cookie. An out-of-tree `Session` implementation is cleared through its own `Clear()`, which latches only if that implementation makes it; an application whose `Session` does not latch must therefore not write to the object it rotated away.
 
 See [Versioning policy for breaking changes](#versioning-policy-for-breaking-changes) for why an added contract method ships as a MINOR, and [`package/SESSION.md`](./package/SESSION.md) for what a rotation has to guarantee.
 
@@ -1305,11 +1305,11 @@ A correct size, a zero declared size, and a body **shorter** than its declared s
 
 ### HTTP: `JsonHandler` rejects a literal `null` body
 
-**What changed.** [`JsonHandler`](../http/typed_handler.go) answers `400` for a literal `null` request body when its request type is instantiated as a pointer. The four-byte body decoded without error and left the value nil, the validator took its nil-pointer early return and reported every constraint satisfied, and the handler then dereferenced nil.
+**What changed.** [`JsonHandler`](../http/typed_handler.go) answers `400` for a literal `null` request body when its request type is a kind a json `null` leaves nil — a pointer, a map, a slice, an interface, a channel or a function. The four-byte body decoded without error and left the value nil, the validator took its nil-pointer early return and reported every constraint satisfied, and the handler then dereferenced nil.
 
 **Symptom.** That request is now a client error instead of a `500`.
 
-**Remedy.** None. A value instantiation and a `{}` body were never affected, and a caller-supplied [`WithJsonHandlerErrorResponder`](../http/typed_handler.go) still shapes the response.
+**Remedy.** None. A struct value instantiation and a `{}` body were never affected, and a caller-supplied [`WithJsonHandlerErrorResponder`](../http/typed_handler.go) still shapes the response.
 
 ### HTTP client: `MaxIdleConnsPerHost` is set on the transport
 
@@ -1393,7 +1393,7 @@ The module supplies no default of its own on purpose: the only thing that reaps 
 
 * **`bunorm` deterministic encryption.** `melody:encrypt:database --mode=encrypt --deterministic` ([`encrypt_database_command.go`](../../integrations/bunorm/v3/encrypt/encrypt_database_command.go)) now rewrites a column that was already bulk-encrypted with random nonces into its deterministic form, keeping the key each value already carries ([`migrate.go`](../../integrations/bunorm/v3/encrypt/migrate.go)). Every such value previously authenticated under a live key and was passed through untouched, so the command reported success while converting nothing and every [`CiphertextCandidates`](../../integrations/bunorm/v3/encrypt/cipher.go) equality lookup on that column returned zero rows. *Symptom:* a deterministic run over an already-encrypted column now writes rows where it used to write none. *Remedy:* none — it remains idempotent and never rotates keys, so `--mode=reencrypt --target-key=...` is still the only way to change a key.
 * **`bunorm` audit change-sets.** [`audit.ChangeSet`](../../integrations/bunorm/v3/audit/change.go) always serialises an empty change-set as `[]` rather than the json literal `null`. *Symptom:* a trail consumer that special-cased `null` in the `changes` column sees `[]` instead. *Remedy:* drop the special case; `jsonb_array_length(changes::jsonb)` now reads `0` where it errored or read `1`.
-* **`bunorm` encrypted columns and json.** The four encrypted column types ([`encrypted_string.go`](../../integrations/bunorm/v3/encrypt/encrypted_string.go)) gain an `UnmarshalJSON` that refuses the redaction placeholder `<redacted>`. Until now a json document rendered from a model — where `MarshalJSON` redacts — and decoded back into the model stored the placeholder as the column value, and the next write sealed `<redacted>` in place of the secret, silently. *Symptom:* decoding such a document now fails with `a redacted encrypted value cannot be decoded back into an encrypted column`, naming the column type in the context; a plaintext string still decodes as itself and a `null` leaves the value untouched. *Remedy:* do not post a redacted rendering back into the model — carry the secret separately, or read the stored value through the column and leave the field out of the document.
+* **`bunorm` encrypted columns and json.** The four encrypted column types ([`encrypted_string.go`](../../integrations/bunorm/v3/encrypt/encrypted_string.go)) gain an `UnmarshalJSON` that refuses the redaction placeholder `<redacted>`. Until now a json document rendered from a model — where `MarshalJSON` redacts — and decoded back into the model stored the placeholder as the column value, and the next write sealed `<redacted>` in place of the secret, silently. *Symptom:* decoding such a document now fails with a message that opens with `a redacted encrypted value cannot be decoded back into an encrypted column`, naming the column type in the context; a plaintext string still decodes as itself and a `null` leaves the value untouched. *Remedy:* do not post a redacted rendering back into the model — carry the secret separately, or read the stored value through the column and leave the field out of the document.
 * **`bunorm` encrypted columns and numeric verbs.** The four encrypted column types ([`encrypted_string.go`](../../integrations/bunorm/v3/encrypt/encrypted_string.go)) implement `fmt.Formatter`, so the numeric verbs (`%d`, `%o`, `%b`, `%c`, `%U`) can no longer bypass the redaction and print the plaintext. `String`, `GoString`, `LogValue` and `MarshalJSON` already redacted, but a numeric verb reaches none of them and printed the underlying string through fmt's badverb form. *Symptom:* `fmt.Sprintf("%d", someEncryptedColumn)` now renders `<redacted>` instead of the plaintext. *Remedy:* none.
 * **`bunorm` deterministic columns.** `EncryptDeterministic` and `EncryptDeterministicWithKeyId` ([`cipher.go`](../../integrations/bunorm/v3/encrypt/cipher.go)), and through them `EncryptedDeterministicString` and `EncryptedDeterministicStringFor[R]`, no longer pass a random-nonce seal through: it is re-sealed deterministically under the key id it already carries. *Symptom:* a deterministic column handed a value sealed by `Encrypt` (a value copied from a random column, or sealed before the column type changed) now stores a ciphertext `CiphertextCandidates` finds, where it used to store one the equality lookup could never match. *Remedy:* none; a deterministic seal, under any key still in the set, passes through as before and the random doors are unchanged.
 * **`bunorm` all-zero encryption key.** `NewStaticKeyProvider` ([`key_provider.go`](../../integrations/bunorm/v3/encrypt/key_provider.go)) panics at construction on a key of 32 zero bytes, naming the key id, as it already did on a key of the wrong length. *Symptom:* a process whose key material was never generated — a zeroed buffer, an unset variable decoded and padded — refuses to boot instead of sealing every column under a key any reader can guess. *Remedy:* generate the key from `crypto/rand`; a key of any other content, however weak, is not judged.
@@ -1695,7 +1695,7 @@ func (instance *CustomHttpConfiguration) SessionTombstoneRetention() time.Durati
 
 **Symptom.** `Close` can now block for as long as a dial started before it takes to finish. It never leaked before either: such an open ends its own freshly opened database against the closed flag. What changes is the answer's meaning — `Close` returning now means the teardown is over, where it used to mean the teardown of everything already memoized was over while a dial was still in the air, and a process exiting on that answer left the connection outstanding for a server-side timeout to reap.
 
-**Remedy.** Build the registry with [`NewManagerRegistryWithContext`](../../integrations/bunorm/v3/manager_registry.go) and cancel that context as part of the shutdown: the cancellation reaches the open in flight — its refusal before the attempt, its configuration hook, its boot ping, its retry sleep — so the wait is as short as the provider can make it. Without a context there is nothing to cancel, which is the case the wait exists for.
+**Remedy.** Build the registry with [`NewManagerRegistryWithContext`](../../integrations/bunorm/v3/manager_registry.go) and cancel that context as part of the shutdown: the cancellation reaches the open in flight — its refusal before the attempt, its configuration hook, its boot ping, its retry sleep — so the wait is as short as the provider can make it. Registered as a service, the registry is closed through `CloseWithContext`, so the teardown budget bounds the wait; a direct `Close` on a registry built without a context has nothing to cancel, which is the case the wait exists for.
 
 ### Behavioural: the retry backoff has a floor, and a constant multiplier no longer costs the square
 

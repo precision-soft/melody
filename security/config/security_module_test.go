@@ -970,3 +970,45 @@ func TestBuilder_SetGlobalAcceptsUndeclaredDependencies(t *testing.T) {
         t.Fatalf("expected the builder back")
     }
 }
+
+/* the remedy for a firewall that wants no global inheritance starts from any override, the zero value included, and holds in either order of its two setters: the firewall enforces its own rules and not the global ones. */
+func TestFirewallOverride_TurningInheritanceOffOnTheZeroValueHoldsInEitherOrder(t *testing.T) {
+    orders := map[string]func(localAccessControl *security.AccessControl) FirewallOverrideConfiguration{
+        "inheritance first": func(localAccessControl *security.AccessControl) FirewallOverrideConfiguration {
+            return FirewallOverrideConfiguration{}.WithInheritGlobalAccessControl(false).WithAccessControl(localAccessControl)
+        },
+        "access control first": func(localAccessControl *security.AccessControl) FirewallOverrideConfiguration {
+            return FirewallOverrideConfiguration{}.WithAccessControl(localAccessControl).WithInheritGlobalAccessControl(false)
+        },
+    }
+
+    for name, build := range orders {
+        t.Run(name, func(t *testing.T) {
+            builder := NewBuilder()
+            builder.SetGlobal(
+                security.NewAccessControl(security.NewAccessControlRule("/admin", "ROLE_ADMIN")),
+                nil,
+                security.NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, security.NewRoleVoter()),
+                nil,
+                nil,
+            )
+
+            builder.AddStatelessFirewall(
+                "api",
+                security.NewPathPrefixMatcher("/"),
+                nil,
+                &anonymousTokenSource{},
+                build(security.NewAccessControl(security.NewAccessControlRule("/local", "ROLE_USER"))),
+            )
+
+            firewall := builder.BuildAndCompile().Firewalls()[0]
+            if _, matched := firewall.AccessControl().Match("/admin"); true == matched {
+                t.Fatalf("expected the firewall to leave the global /admin rule out, but it inherited it")
+            }
+
+            if _, matched := firewall.AccessControl().Match("/local"); false == matched {
+                t.Fatalf("expected the firewall to enforce its own /local rule")
+            }
+        })
+    }
+}

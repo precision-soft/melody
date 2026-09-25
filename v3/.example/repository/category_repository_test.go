@@ -21,7 +21,7 @@ func TestValidateCategoryNamesTheFirstFieldItFailsOn(t *testing.T) {
 }
 
 func TestNextCategoryIdContinuesTheSeededNumbering(t *testing.T) {
-    if "cat-3" != nextCategoryId([]string{"cat-1", "cat-2"}) {
-        t.Fatalf("expected cat-3, got %q", nextCategoryId([]string{"cat-1", "cat-2"}))
+    if "cat-6" != nextCategoryId([]string{"cat-1", "cat-5", "cat-2"}) {
+        t.Fatalf("expected cat-6, got %q", nextCategoryId([]string{"cat-1", "cat-5", "cat-2"}))
     }
 }

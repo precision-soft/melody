@@ -37,21 +37,32 @@ The example lives entirely under the [`./.example/`](./) directory and follows a
 
 ```
 .example/
+├── assets/           # frontend sources (TypeScript) and the route manifest they read, built into public/
 ├── cache/            # cache serializer for the example container
-├── cli/              # the application's own CLI commands (app:info, product:list, catalog:report:refresh, messagebus:dispatch, auth:token, internal:sign, totp:code, mail:send, example:grant:role, example:exclusive:tick, example:db:reset, example:cache:clear)
+├── cli/              # the application's own CLI commands (app:info, product:list, catalog:report:refresh, messagebus:dispatch, auth:token, internal:sign, totp:code, mailer:send, example:currency:refresh-rates, example:grant:role, example:exclusive:tick, example:db:reset, example:cache:clear)
 ├── config/           # application wiring; one file per module hook
 ├── entity/           # domain entities (Category, Currency, Product, User)
 ├── event/            # domain event types
+├── generated/        # generated service wiring
+├── generated_conf/   # generated deployment files (the crontab)
 ├── handler/          # HTTP handlers (pages + JSON APIs), with category/, currency/, product/, user/ subpackages
+├── journal/          # the logger a handler or service writes to, the request's when there is one
+├── message/          # message-bus messages (notifications, the outbox notice, the welcome email)
+├── messagehandler/   # message-bus handlers
+├── migration/        # the schema migrations
 ├── page/             # HTML page templates
+├── persistence/      # the catalogue and archive storages the repositories write through
 ├── presenter/        # HTTP error / response presenters
-├── repository/       # repository interfaces + in-memory implementations
+├── reporting/        # the catalogue reading and its export
+├── repository/       # repository interfaces, their in-memory implementations and the bun-backed ones the shipped .env selects
 ├── route/            # named route constants and patterns
 ├── security/         # session auth wiring (login/logout handlers, entry point, token resolver, password hasher)
 ├── service/          # application services (CategoryService, CurrencyService, ProductService, UserService)
 ├── subscriber/       # event subscribers
+├── twofactor/        # the TOTP enrollment store, encrypted at rest
 ├── url/              # route registry adapters: the route manifest every page is given
 ├── public/           # static assets (CSS / JS)
+├── var/              # runtime cache and logs
 ├── embedded_*.go     # build-tag–controlled embedding for env and static assets
 ├── main.go           # application entry point
 ├── go.mod / go.sum   # standalone module manifest
@@ -63,14 +74,14 @@ The example lives entirely under the [`./.example/`](./) directory and follows a
 
 The [`config/`](./config/) package keeps [`main.go`](./main.go) small by grouping all setup and integration logic in a single place, with each module hook in its own file:
 
-- [`configure.go`](./config/configure.go) — entry point invoked by `main.go`: registers the example module and the integration module facades (observability, otlp, encrypt, outbox, migrate, cron, websocket, awss3, rueidis), each gated on the configuration that enables it
+- [`configure.go`](./config/configure.go) — entry point invoked by `main.go`: registers the example module and the integration module facades (observability, otlp, encrypt, outbox, migrate, cron, websocket, awss3, rueidis); otlp, outbox, awss3 and rueidis are gated on the configuration that enables them, the others are registered unconditionally
 - [`module.go`](./config/module.go) — `Module` struct + `Name()` + `Description()` + interface assertions for the module hooks the example implements
 - [`security.go`](./config/security.go) — `RegisterSecurity`: access-control rules, role hierarchy, decision manager, firewall
 - [`http.go`](./config/http.go) — `RegisterHttpRoutes`: named-route registration for pages and JSON APIs
 - [`cli.go`](./config/cli.go) — `RegisterCliCommands`: the application's own CLI commands; `melody:cron:generate` comes from the cron module registered in [`configure.go`](./config/configure.go)
 - [`event.go`](./config/event.go) — `RegisterEventSubscribers`: wires the example's domain event subscribers
 - [`parameter.go`](./config/parameter.go) — `RegisterParameters`: registers `melody.cron.*` parameters from `APP_CRON_*` env vars plus the example's own `app.*` parameters
-- [`service.go`](./config/service.go) — `registerServices`: container wiring for repositories, services, and the cache serializer
+- [`service.go`](./config/service.go) — `RegisterServices`: container wiring for repositories, services, and the cache serializer
 - [`middleware.go`](./config/middleware.go) — example-specific HTTP middleware (`NewTimingMiddleware`)
 
 ### Cron integration
@@ -84,7 +95,12 @@ cronConfiguration := cron.NewConfiguration().
         User:     productUser,
     }).
     Schedule(cron.CommandName(cli.NewProductListCommand), &cron.EntryConfig{
-        Schedule: &cron.Schedule{Minute: "0", Hour: "*/6"},
+        Schedule:  &cron.Schedule{Minute: "0", Hour: "*/6"},
+        User:      productUser,
+        Arguments: []string{"--limit=2"},
+    }).
+    Schedule(cron.CommandName(cli.NewCurrencyRefreshRatesCommand), &cron.EntryConfig{
+        Schedule: &cron.Schedule{Minute: "*/30", Hour: "*"},
         User:     productUser,
     }).
     Schedule(cron.CommandName(cli.NewAppInfoCommand), &cron.EntryConfig{
@@ -105,7 +121,8 @@ It only:
 - constructs the Melody application using:
     - `embeddedEnvFiles` (from `embedded_env_*`)
     - `embeddedPublicFiles` (from `embedded_static_*`)
-- calls `config.Configure(app)`
+- calls `config.Configure(ctx, app)`
+- boots the application and arms the parallel teardown
 - runs the application
 
 All wiring and integration logic lives outside `main.go`.
@@ -175,7 +192,7 @@ cd v3/.example
 go run . melody:cron:generate --out ./generated_conf/cron/crontab
 ```
 
-The example schedules three commands in [`config/cron.go`](./config/cron.go) (`catalog:report:refresh` hourly, `product:list` every 6 hours, `app:info` daily at noon) plus a heartbeat enabled via `APP_CRON_HEARTBEAT_AUTO_ENABLED=true` in [`.env`](./.env) (the path is auto-derived from `melody.cron.logs_dir`), so the generated crontab is not empty.
+The example schedules four commands in [`config/cron.go`](./config/cron.go) (`catalog:report:refresh` hourly, `product:list` every 6 hours with `--limit=2`, `example:currency:refresh-rates` on the half hour, `app:info` daily at noon) plus a heartbeat enabled via `APP_CRON_HEARTBEAT_AUTO_ENABLED=true` in [`.env`](./.env) (the path is auto-derived from `melody.cron.logs_dir`), so the generated crontab is not empty.
 
 The same `cron.Configuration` also drives an **in-process scheduler** for single-binary deployments with no external crontab. `melody:cron:run` ticks in-process and invokes each scheduled command when it is due; `--once` evaluates every schedule against the current time, runs the due commands and exits:
 
@@ -185,7 +202,7 @@ go run . melody:cron:run --once      # kick whatever is due now, then exit
 go run . melody:cron:run             # run the scheduler loop until interrupted
 ```
 
-The runner dispatches each scheduled command with its declared flags, so declared defaults are honored on a scheduled tick exactly as under the cli entry point: `product:list` declares `--limit` with a default of `5` and prints the value it read (`product list: limit=5`), whether invoked directly or by the runner.
+The runner dispatches each scheduled command with its declared flags, so declared defaults are honored on a scheduled tick exactly as under the cli entry point: `product:list` declares `--limit` with a default of `5` and prints the value it read: `product list: limit=5` when invoked directly, `product list: limit=2` under the runner, which hands it the arguments its entry declares.
 
 `example:grant:role` shows that an application command may declare its own `--role` flag: the runtime's `--role`/`--mode` are recognized only before the command name, so the command receives its flag intact. It also holds the example's user service through a `container.Lazy` handle built at command-registration time — the service is resolved at the command's first run, not during the boot phase. The flag is trimmed and has to name one of the three roles the application knows (`ROLE_USER`, `ROLE_EDITOR`, `ROLE_ADMIN`) — the voter compares a role's spelling exactly, so any other spelling would be stored and grant nothing — and the grant goes through the repository's atomic door, which reads and widens the account's set under one lock, so a grant that runs beside an admin update of the same account cannot lose the other's write; an account that already holds the role is a no-op, not a second entry:
 
@@ -217,7 +234,7 @@ The lock service follows a single priority: Redis if configured, otherwise MySQL
 Several wirings deliberately defer their resolution to first use instead of the composition root:
 
 - `example:exclusive:tick` is wrapped in `lock.NewExclusiveCommand` over `lock.NewLazyLocker`, which resolves the registered locker at the first `CreateLock` — with a distributed locker configured (Redis or MySQL), run it from two shells at once and exactly one executes while the other exits zero. Under the in-memory fallback the exclusivity is per-process, so two separate shells both execute.
-- The in-process cache fallback is per process too, and that bounds what a console writer can promise: the entities are cached with no expiry and cleared by name by listeners subscribed to the write events, which run in the process that DISPATCHED. With Redis the cache is shared and `example:grant:role`, `currency:refresh:rates`, `example:db:reset` or `example:cache:clear` reach the running server; without it they reach their own process, and a server started beside them keeps what it cached until it restarts — each of the four says so on its output when that is the wiring it ran under. `example:cache:clear` is the door that empties this application's namespace and nothing else: a row changed through no door of this application — edited by hand, restored from a backup — dispatches no write event, so its cached entity is served until something clears it, and the command does that without the reset's two databases.
+- The in-process cache fallback is per process too, and that bounds what a console writer can promise: the entities are cached with no expiry and cleared by name by listeners subscribed to the write events, which run in the process that DISPATCHED. With Redis the cache is shared and `example:grant:role`, `example:currency:refresh-rates`, `example:db:reset` or `example:cache:clear` reach the running server; without it they reach their own process, and a server started beside them keeps what it cached until it restarts — each of the four says so on its output when that is the wiring it ran under. `example:cache:clear` is the door that empties this application's namespace and nothing else: a row changed through no door of this application — edited by hand, restored from a backup — dispatches no write event, so its cached entity is served until something clears it, and the command does that without the reset's two databases.
 - The cache keys carry, inside the `melody-example-v3:cache:` namespace, a token computed from the layout of the cached types ([`cache.LayoutToken`](./cache/gob_serializer.go)): gob decodes by field name and stays silent about a field the payload does not carry, so a build that added a field over a live Redis read every entry with that field at zero — a currency with no rate, refused by every conversion — until something dropped the keys. Under the token a build reads only what a build of the same layout wrote. What an older build left stands orphaned in Redis, outside the reach of `example:db:reset` and `example:cache:clear` (which clear the current layout's namespace); after a deploy that changed a cached type, drop the old prefix once — `redis-cli --scan --pattern 'melody-example-v3:cache:*'` lists both.
 - The transactional-outbox module ([`config/outbox.go`](./config/outbox.go)) is registered in the `StoreFactory`/`RelayFactory` shape: the store (which ensures the `melody_outbox` schema) and the relay (which opens the transport) are built from the container at first use, and the module contributes the `melody:outbox:relay` command over the same lazily-resolved relay. Endpoints: `POST /outbox/enqueue`, `POST /outbox/relay`, `GET /outbox/status`.
 - The encrypt module resolves the shared `*bun.DB` through a `DatabaseFactory` evaluated at the first `melody:encrypt:database` run, so http- and worker-mode processes register the command without touching the database.
@@ -352,7 +369,7 @@ This brings up the backing services **and** the example itself: the `dev` contai
 Notes:
 
 - **`--build` rebuilds the dev image** — use it after changing dependencies or the container [`entrypoint.sh`](../../.dev/docker/entrypoint.sh). For day-to-day Go/HTML/asset edits `./dc up:all` (without `--build`) is enough; reflex hot-reloads them.
-- **Always `up:all`, not plain `up`.** The backends live on the compose `all` profile, so `./dc up` / `./dc up:minimal` start only the dev container and load balancer — the example would then have no Redis/MySQL to reach. Use `./dc up:all` whenever you want the live integrations.
+- **Always `up:all`, not plain `up`.** The backends live on the compose `all` profile, so `./dc up` / `./dc up:minimal` start only the three dev containers (`dev`, `dev-v1`, `dev-v2`) and the load balancer — the example would then have no Redis/MySQL to reach. Use `./dc up:all` whenever you want the live integrations.
 - **Cold-start is self-healing.** If a backend is not ready yet — or you start it afterwards — the MySQL/Redis providers retry the initial connection with backoff and the entrypoint supervisor restarts the process, so the app comes up on its own without a manual restart.
 - **A proxy in front has to forward the host the browser asked for.** The websocket module is wired with no origin patterns, so the library's same-origin default is what stops a foreign page from riding a signed-in visitor's session cookie onto the feed — and that default compares the browser's Origin header with the Host the application was handed. An nginx that forwards the server name rather than the raw Host strips the port, so on any published port but 80 the two disagree and every upgrade is refused with 403, which reads exactly like the refusal a foreign origin gets. The dev load balancer forwards the raw Host; a deployment behind a different proxy has to do the same, or name its own allowed origins.
 
@@ -368,6 +385,9 @@ AMQP_DSN="amqp://guest:guest@localhost:5673/" \
 REDIS_ADDRESS="localhost:6380" \
 S3_ENDPOINT="localhost:4566" S3_ACCESS_KEY="test" S3_SECRET_KEY="test" S3_BUCKET="melody-example" \
 MYSQL_HOST="localhost" MYSQL_PORT="3307" MYSQL_DATABASE="melody_example_v3" MYSQL_USER="melody" MYSQL_PASSWORD="melody" \
+PGSQL_HOST="localhost" PGSQL_PORT="5433" \
+SMTP_ADDRESS="localhost:1026" \
+OTEL_EXPORTER_OTLP_ENDPOINT="localhost:4317" \
 go run .
 ```
 
@@ -474,7 +494,7 @@ Ship:
 
 Required at runtime:
 
-- nothing else — the binary carries every `.env` file and every asset that was in `public/` **at the moment `go build` ran**, which is why the frontend build above has to come first
+- nothing else — the binary carries the `.env` file and every asset that was in `public/` **at the moment `go build` ran**, which is why the frontend build above has to come first
 
 ---
 

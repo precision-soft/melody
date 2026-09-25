@@ -43,7 +43,7 @@ func TestNormalizedUsernameFoldsCaseAndSurroundingSpace(t *testing.T) {
 }
 
 func TestNextUserIdContinuesTheSeededNumbering(t *testing.T) {
-    if "user-3" != nextUserId([]string{"user-2", "user-1"}) {
-        t.Fatalf("expected user-3, got %q", nextUserId([]string{"user-2", "user-1"}))
+    if "user-7" != nextUserId([]string{"user-2", "user-6", "user-1"}) {
+        t.Fatalf("expected user-7, got %q", nextUserId([]string{"user-2", "user-6", "user-1"}))
     }
 }

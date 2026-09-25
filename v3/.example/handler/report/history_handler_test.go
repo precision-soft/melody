@@ -89,8 +89,8 @@ func TestHistoryLimitOf_CapsWhatACallerCanAskFor(t *testing.T) {
     }
 }
 
-/* the parameter is read with StringAt rather than with the string accessor beside it, because that one PANICS on a repeated key — the shape of a query parameter is chosen by the client, so through a public door that would be an unauthenticated 500. What a repeated key answers here is the first value, and this is the test that says so: it fails by panicking, not by returning the wrong number, which is exactly the failure it guards. */
-func TestHistoryLimitOf_TakesTheFirstValueOfARepeatedKeyWithoutPanicking(t *testing.T) {
+/* the shape of a query parameter is chosen by the client, so a repeated key at this public door is answered rather than refused: the limit is the first value, as for a single key. */
+func TestHistoryLimitOf_TakesTheFirstValueOfARepeatedKey(t *testing.T) {
     limit, limitErr := historyLimitOf(historyRequest(t, "/reports/api/history/?limit=2&limit=3"))
     if nil != limitErr {
         t.Fatalf("limit: %v", limitErr)

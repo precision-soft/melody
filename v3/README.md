@@ -53,9 +53,10 @@ func main() {
 }
 ```
 
-Run it, then call the endpoint (the HTTP server listens on `:8080` by default):
+An http process refuses to boot when its `.env` files contributed no key, since every built-in parameter has a development default, so the sample carries a one-line `.env` beside its `go.mod`. Run it, then call the endpoint (the HTTP server listens on `:8080` by default):
 
 ```bash
+echo 'MELODY_ENV=dev' > .env
 go run .
 curl http://localhost:8080/health
 # {"status":"ok"}
@@ -146,10 +147,10 @@ These are intentionally independent so you can embed one family while keeping th
 
 ```bash
 # filesystem env (default)
-go build -o app ./...
+go build -o app .
 
 # embedded env
-go build -tags melody_env_embedded -o app ./...
+go build -tags melody_env_embedded -o app .
 ```
 
 ---
@@ -172,10 +173,10 @@ go build -tags melody_env_embedded -o app ./...
 
 ```bash
 # filesystem static (default)
-go build -o app ./...
+go build -o app .
 
 # embedded static assets
-go build -tags melody_static_embedded -o app ./...
+go build -tags melody_static_embedded -o app .
 ```
 
 ---
@@ -185,7 +186,7 @@ go build -tags melody_static_embedded -o app ./...
 You can combine the tags to embed both families:
 
 ```bash
-go build -tags "melody_env_embedded melody_static_embedded" -o app ./...
+go build -tags "melody_env_embedded melody_static_embedded" -o app .
 ```
 
 For a complete example that shows the same build-tag matrix applied end-to-end in a userland application, see [`.example/README.md`](./.example/README.md).

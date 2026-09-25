@@ -105,10 +105,10 @@ Every [`RelayConfig`](./relay.go) tunable is optional; a non-positive value reso
 ### Run the relay
 
 ```sh
-melody:outbox:relay [--interval 1s] [--idle-backoff 5s] [--limit 0]
+melody:outbox:relay [--interval 1s] [--idle-backoff 1s] [--limit 0]
 ```
 
-The command drains batches until interrupted (SIGINT/SIGTERM stop the loop; a signal that lands mid-batch aborts the drain and whatever stayed claimed re-surfaces after `VisibilityTimeout`): `--interval` is the poll cadence, `--idle-backoff` the sleep after an empty batch, `--limit N` stops after `N` batches (for cron-style invocations). Consecutive batch failures back off exponentially (capped at one minute) so a repository outage does not tight-loop. A cancellation exits clean, but a genuine batch failure that merely coincides with the parent context's deadline is returned — a supervisor sees the failed drain. `Relay.RunOnce` stays available for embedding the drain into a custom loop.
+The command drains batches until interrupted (SIGINT/SIGTERM stop the loop; a signal that lands mid-batch aborts the drain and whatever stayed claimed re-surfaces after `VisibilityTimeout`): `--interval` is the poll cadence, `--idle-backoff` the sleep after an empty batch (the interval when absent), `--limit N` stops after `N` batches (for cron-style invocations). Consecutive batch failures back off exponentially (capped at one minute) so a repository outage does not tight-loop. A cancellation exits clean, but a genuine batch failure that merely coincides with the parent context's deadline is returned — a supervisor sees the failed drain. `Relay.RunOnce` stays available for embedding the drain into a custom loop.
 
 ## Delivery semantics
 

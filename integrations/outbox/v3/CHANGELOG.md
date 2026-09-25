@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- documentation: the README says that `--idle-backoff` defaults to the poll interval.
 - `store.go` — `Store.ClaimDueMessages` refuses a non-positive limit by name, with the limit in the error's context, and cuts a limit above the relay's own cap (100000) to it. Bun writes no `LIMIT` clause for a non-positive value and narrows the value to int32 first, so on this public door zero, a negative and a value past the int32 range — where the narrowing wraps to zero or below — claimed the whole table in one transaction and flipped every due row to in-flight, while the allocation hint beside the query was the only thing capped
 - relay: the stored `last_error` cap cuts on a rune boundary — a byte-offset cut through a multi-byte rune left an invalid string a strict utf8mb4 column refuses, failing the very resolution write the cap exists to protect, so the row re-surfaced every visibility timeout with nothing recorded
 - `relay.go` — a dead-lettered or rescheduled row's `last_error` records the failure's CAUSE CHAIN, not the message alone. The error string of a melody error is its message, so a dead letter used to read `amqp publish failed` with no broker verdict, no reply code, nothing — the one place an operator looks to diagnose a dead letter was undiagnosable. The rendering is capped so the narrowest default column the store's own schema can produce still accepts the write

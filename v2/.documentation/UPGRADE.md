@@ -40,7 +40,7 @@ From the move on, that document plays this file's role: it records, per v3 relea
 
 ### HTTP: a request path padded with whitespace is refused with 400
 
-**What changed.** The kernel refuses, with `400`, a request path that leading or trailing whitespace would be trimmed from — the decoded form of `/public%20`, `/public%09` or `/public%C2%A0` — and a path that begins with whitespace, which a handler mounted in front of the kernel that rewrites the path (the standard library's `StripPrefix` on `/api%20/public`) can hand it, before it is routed or authorized, the way it refuses a path carrying `..`, `.` or `//`. The router keeps the whitespace, so `/public%20` reached a catch-all handler as its own spelling, while the access-control matcher trims it and authorized the request under the rule of `/public`: an exact `PUBLIC_ACCESS` rule beside a protected catch-all handler served the protected handler to an anonymous client. Whitespace inside the path (`/a%20b`) is read alike by every consumer and still routes.
+**What changed.** The kernel refuses, with `400`, a request path that leading or trailing whitespace would be trimmed from — the decoded form of `/public%20`, `/public%09` or `/public%C2%A0` — and a path that begins with whitespace, which a handler mounted in front of the kernel that rewrites the path (the standard library's `StripPrefix` on `/api%20/public`) can hand it, after the route is matched and before it is authorized or handled, the way it refuses a path carrying `..`, `.` or `//`. The router keeps the whitespace, so `/public%20` reached a catch-all handler as its own spelling, while the access-control matcher trims it and authorized the request under the rule of `/public`: an exact `PUBLIC_ACCESS` rule beside a protected catch-all handler served the protected handler to an anonymous client. Whitespace inside the path (`/a%20b`) is read alike by every consumer and still routes.
 
 **Symptom.** A client that sends a path ending, or beginning after a stripped prefix, in an encoded space, tab or no-break space is answered `400 bad request` where the request was previously routed to a handler.
 
@@ -55,9 +55,17 @@ From the move on, that document plays this file's role: it records, per v3 relea
 
 **Remedy.** Send the separator unencoded, or carry a value that contains a `/` in the query string. A route that must bind a segment containing a `/` is a v3 capability: the v3 router matches the path as the client spelled it. There is no opt-out: the previous behaviour served a handler to a request a rule in front of the application had judged as a different path, which is the defect the refusal closes.
 
+### Exception: the error types answer a nil receiver
+
+**What changed.** `Error.Unwrap`, `HttpException.Unwrap` and `ExitError.Unwrap` answer nil on a nil receiver; `Error.Error`, `HttpException.Error` and `ExitError.Error` answer a placeholder message (`error carries no value`, `http exception carries no value`, `exit error carries no error value`); and every other accessor of `Error` and `HttpException` answers a nil receiver the way every accessor of `ExitError` does, where each of them dereferenced it. The typed nil that `FromError(nil)` answers is the natural shape of such a receiver once it is stored as another error's cause or held in an `errors.Join`, and `errors.Is`, `errors.As` and `AsHttpException` walk into it.
+
+**Symptom.** A chain carrying a typed-nil link renders the placeholder and is walked past, where it panicked — on the request path, from inside the kernel's recovery.
+
+**Remedy.** None. A caller that stored `FromError(nil)` as a cause keeps a link that says it carries no value; guarding the call is still the cleaner form.
+
 Every entry below is the consequence of fixing a defect, not a preference: each one describes behaviour that was wrong, and the changelog entry for it names the failure it produced. The release train's two data-loss fixes are in the v3-only `awss3` object storage integration and are recorded in [`v3/.documentation/UPGRADE.md`](../../v3/.documentation/UPGRADE.md).
 
-Every section below shipped in the `[v2.13.0]` block of [`CHANGELOG.md`](../CHANGELOG.md), released as a MINOR. The heading stays `Unreleased` because this guide promotes at a MAJOR boundary, the way [`v3/.documentation/UPGRADE.md`](../../v3/.documentation/UPGRADE.md) carries `v3.0.0`; the entries that have landed since are patch-level defect and security fixes, and none of them asks the upgrader for an action.
+Every section below shipped in the `[v2.13.0]` block of [`CHANGELOG.md`](../CHANGELOG.md), released as a MINOR. The heading stays `Unreleased` because this guide promotes at a MAJOR boundary, the way [`v3/.documentation/UPGRADE.md`](../../v3/.documentation/UPGRADE.md) carries `v3.0.0`; the entries that have landed since are patch-level defect and security fixes, listed above: the two path refusals ask a client that sends such a path to change it, and the rest ask for no action.
 
 ### Logging: the json timestamp is fixed width and rendered in UTC
 
@@ -89,7 +97,7 @@ Every section below shipped in the `[v2.13.0]` block of [`CHANGELOG.md`](../CHAN
 
 **Symptom.** A rule declared with `NewAccessControlRule` matches fewer paths than before: a request whose path only shares the prefix text (`/administrator` under a `/admin` rule) is no longer governed by that rule. Where the rule protected such a path and no other rule covers it, the request is now decided by whatever rule does match — a catch-all, or none — which for a protect rule can mean the path is reached under a weaker decision. An empty prefix, previously a catch-all, now refuses at construction.
 
-**Remedy.** A rule that genuinely needs the cross-segment reach — one deliberately governing every path beginning with the text — moves to `NewAccessControlRawPrefixRule` and keeps its old behaviour exactly. A rule that meant a path segment (the common case) needs no change beyond the stricter, intended matching. An empty-prefix catch-all becomes an explicit `"/"` prefix or `NewAccessControlRawPrefixRule("")`. Audit every `NewAccessControlRule` call whose prefix is a bare mount an attacker could extend (`/admin`, `/internal`): under the old raw rule these governed sibling paths by accident, and the bounded rule is what most such rules always meant.
+**Remedy.** A rule that genuinely needs the cross-segment reach — one deliberately governing every path beginning with the text — moves to `NewAccessControlRawPrefixRule` and keeps its old behaviour exactly, unless it carries `PUBLIC_ACCESS`, which a raw prefix rule refuses at construction: such a rule stays segment-bounded, or becomes an exact or regex rule. A rule that meant a path segment (the common case) needs no change beyond the stricter, intended matching. An empty-prefix catch-all becomes an explicit `"/"` prefix or, when it does not grant `PUBLIC_ACCESS`, `NewAccessControlRawPrefixRule("")`. Audit every `NewAccessControlRule` call whose prefix is a bare mount an attacker could extend (`/admin`, `/internal`): under the old raw rule these governed sibling paths by accident, and the bounded rule is what most such rules always meant.
 
 ### Bunorm mysql: the provider negotiates verified TLS by default
 
@@ -101,7 +109,7 @@ Every section below shipped in the `[v2.13.0]` block of [`CHANGELOG.md`](../CHAN
 
 ### HTTP: a request path that folds to a different spelling is refused with 400
 
-**What changed.** The kernel now refuses, with `400`, a request whose path is not canonical — one carrying a `..` or `.` segment, or an empty `//` segment — before it is routed or authorized. A trailing slash is not a fold and still routes as before (`/admin/` reaches the `/admin` route). The router matched the path as sent while the access-control matcher folds it, so a request routed to a protected handler under one spelling could be authorized against the folded spelling's rule: `GET /admin/x/../../login` reached a catch-all `/admin` handler while `/login`'s public rule granted it. The refusal closes that by keeping the router, the firewall matchers and the access control reading one spelling.
+**What changed.** The kernel now refuses, with `400`, a request whose path is not canonical — one carrying a `..` or `.` segment, or an empty `//` segment — after the route is matched and before it is authorized or handled. A trailing slash is not a fold and still routes as before (`/admin/` reaches the `/admin` route). The router matched the path as sent while the access-control matcher folds it, so a request routed to a protected handler under one spelling could be authorized against the folded spelling's rule: `GET /admin/x/../../login` reached a catch-all `/admin` handler while `/login`'s public rule granted it. The refusal closes that by keeping the router, the firewall matchers and the access control reading one spelling.
 
 **Symptom.** A client — typically a non-browser one, since browsers fold before sending — that sends a path containing `..`, `.` or `//` is answered `400 bad request` where the request was previously routed to a handler.
 
@@ -527,7 +535,7 @@ Every section below shipped in the `[v2.13.0]` block of [`CHANGELOG.md`](../CHAN
 
 **What changed.** `EntryConfig.DestinationFile` joins `Command` and `Instances` in `NewRunnerCommand`'s construction refusal: an entry routed to another crontab addresses an external scheduler, and accepted by the runner as well it executed twice whenever the generated manifests were live.
 
-**Symptom.** A boot that used to succeed panics with `cron: the in-process runner supports only name-scheduled single-instance entries; the entry routes to another crontab file`.
+**Symptom.** A boot that used to succeed panics with a message that opens with `cron: the in-process runner supports only name-scheduled single-instance entries; the entry routes to another crontab file`.
 
 **Remedy.** Keep the routed entry out of the runner's `Configuration` (schedule it only for the generator), or drop its `DestinationFile` if in-process execution is the intent.
 
@@ -1097,7 +1105,10 @@ func (instance *TestScope) MustRegisterScoped(
 	provider any,
 	options ...containercontract.RegisterOption,
 ) {
-	exception.Panic(exception.FromError(instance.RegisterScoped(serviceName, provider, options...)))
+	registerErr := instance.RegisterScoped(serviceName, provider, options...)
+	if nil != registerErr {
+		exception.Panic(exception.FromError(registerErr))
+	}
 }
 ```
 
@@ -1141,7 +1152,7 @@ func (instance *CustomSessionManager) RegenerateSession(
 }
 ```
 
-The framework's own `Session` is latched out of use rather than merely cleared, because `Session.Set` lifts the cleared flag and a caller that rotated and then kept writing to the original object would otherwise have the response path re-create the just-deleted id and re-issue it as the cookie. That latch is unexported and no contract method was added for it, so an out-of-tree `Session` implementation is only `Clear()`ed — which a later write still undoes. An application that supplies its own `Session` must therefore not write to the object it rotated away.
+The rotated-away `Session` is cleared, and the framework's own `Clear` latches: a caller that rotated and then kept writing to the original object cannot make it live again, so the response path cannot re-create the just-deleted id and re-issue it as the cookie. An out-of-tree `Session` implementation is cleared through its own `Clear()`, which latches only if that implementation makes it; an application whose `Session` does not latch must therefore not write to the object it rotated away.
 
 See [Versioning policy for breaking changes](#versioning-policy-for-breaking-changes) for why an added contract method ships as a MINOR, and [`package/SESSION.md`](./package/SESSION.md) for what a rotation has to guarantee.
 
@@ -1361,7 +1372,7 @@ func (instance *ExampleHttpMiddlewareModule) RegisterHttpMiddlewares(
 
 ### Application: the kernel's default listeners register at the end of `Boot`
 
-**What changed.** The profiler (debug mode), the response normalizer, the terminate access log and the exception listener (when no error handler was installed by boot) register at the end of `Boot` in every process shape, not inside the http run. They are inert where no kernel event is dispatched, and `debug:events` now shows them in a console process.
+**What changed.** The profiler (debug mode), the response normalizer, the terminate access log and the exception listener (when no error handler was installed) register at the end of `Boot` in every process shape, not inside the http run — except that an http process decides the exception listener where serving begins, so a handler installed between `Boot` and `Run` is the one consulted (see the `Unreleased` entry on the error handler above). They are inert where no kernel event is dispatched, and `debug:events` now shows them in a console process.
 
 **Symptom.** A kernel event dispatched between boot and the http run — or from a console process — now reaches the default listeners; `debug:events` output grew the kernel listeners it used to miss.
 
