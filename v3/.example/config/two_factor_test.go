@@ -32,10 +32,7 @@ func (instance *countingRefusingConnector) Driver() driver.Driver {
     return nil
 }
 
-/* the store is a service whose provider applies the migration set, and a refusal is not remembered by it: the
-   first resolution goes to the database and is refused, and the second goes to the database again — the heal
-   a boot-time build could never reach, since it asked once for the life of the process. The handle is resolved
-   by name, once, and kept by the container. */
+/* the store is a service whose provider applies the migration set, and a refusal is not remembered by it: the first resolution goes to the database and is refused, and the second goes to the database again, a heal a boot-time build cannot reach. The handle is resolved by name, once, and kept by the container. */
 func TestRegisterTwoFactorStoreService_ARefusedMigrationIsAskedAgainAtTheNextResolution(t *testing.T) {
     connector := &countingRefusingConnector{}
     database := bun.NewDB(sql.OpenDB(connector), mysqldialect.New())

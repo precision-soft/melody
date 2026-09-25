@@ -58,9 +58,7 @@ func (instance *Module) buildMessageBusTransport() melodymessagebuscontract.Tran
         return melodymessagebus.NewInMemoryTransport(64)
     }
 
-    /* the transport is handed ONLY a dialer, and nothing dials at boot. The rule is the one its twin states at buildOutboxTransport: a connection opened in the composition root is owned by nobody, because the transport closes only a connection it dialed itself, so the first use dials one the transport owns and its registered closer actually closes.
-
-       The boot-time dial that used to stand here was fail-fast validation of the dsn, and it was paid by every process — a full amqp handshake before db:migrate --help prints its usage — while the transport dialed a second time at first use anyway. Its close was the plain Close of the client, which is an RPC over the send locks: on a broker that stopped reading, boot would have joined a write in flight and never returned. A dsn this application cannot dial now surfaces at the first publish, through the transport's own retry loop, which is where a broker that is merely down surfaces too. */
+    /* the transport is handed only a dialer and nothing dials at boot: it closes only a connection it dialed itself, so a connection opened here would be owned by nobody. A dsn that cannot be dialed surfaces at the first publish, through the transport's retry loop. */
     registry := amqp.NewMessageRegistry()
     amqp.RegisterMessage[message.WelcomeEmail](registry, messageBusWelcomeType)
 

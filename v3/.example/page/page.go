@@ -42,7 +42,7 @@ func Html(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontr
         return melodyhttp.JsonErrorResponse(nethttp.StatusInternalServerError, "failed to load page")
     }
 
-    /* a page without its manifest still renders — the routes are what its scripts resolve, and a page that fails to load over a manifest is worse than one whose links fail — but the loss is journaled: rendered in silence, the empty manifest was the very artifact the manifest command refuses to write, carried to the browser with nothing saying why */
+    /* a page without its manifest still renders, since a page that fails to load is worse than one whose links fail, but the loss is journaled rather than carried to the browser in silence */
     routesJson, routesJsonErr := exampleurl.RoutesJsonFromRuntime(runtimeInstance)
     if nil != routesJsonErr {
         routesJson = exampleurl.EmptyRoutesJson

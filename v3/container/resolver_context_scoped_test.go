@@ -490,7 +490,7 @@ func TestScope_AScopedServiceIsClosedWhenTheScopeCloses(t *testing.T) {
     }
 }
 
-/* the names are chosen so the node-key fallback would produce the opposite order. That fallback no longer decides: it survives only as the last tie-break between two nodes carrying the same creation stamp, and what holds this order is the creation-order tie-break — a dependency built during its dependent is the older node, so latest-first reaches the dependent first with or without the edge. This fixture therefore pins that scoped dependents close before their dependencies, not that the graph is what decides it: cutting the graph leaves it green. */
+/* the names are chosen so the node-key fallback would produce the opposite order. That fallback only breaks a tie between two nodes carrying the same creation stamp, and what holds this order is the creation-order tie-break: a dependency built during its dependent is the older node, so latest-first reaches the dependent first with or without the edge. This fixture therefore pins that scoped dependents close before their dependencies, not that the graph is what decides it: cutting the graph leaves it green. */
 func TestScope_ScopedServicesAreClosedDependentsBeforeDependencies(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -545,7 +545,7 @@ func TestScope_ScopedServicesAreClosedDependentsBeforeDependencies(t *testing.T)
     }
 }
 
-/* the names are chosen so the node-key fallback would close the dependency first. That fallback no longer decides: it survives only as the last tie-break between two nodes carrying the same creation stamp, and the order here is held by the creation-order tie-break, which closes the later-created dependent first. So this pins that an early answer still records its edge, not that the edge outranks the tie-break: cutting the graph leaves it green. */
+/* the names are chosen so the node-key fallback would close the dependency first. That fallback only breaks a tie between two nodes carrying the same creation stamp, and the order here is held by the creation-order tie-break, which closes the later-created dependent first. So this pins that an early answer still records its edge, not that the edge outranks the tie-break: cutting the graph leaves it green. */
 func TestScopedResolution_ExistingInstanceRecordsDependencyEdge(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -675,7 +675,7 @@ func (instance *keptResolverHolder) Close() error {
     return nil
 }
 
-/* the sibling above cannot tell the edge from the creation-order tie-break: a dependency that is ALREADY held was necessarily created before its dependent, so latest-first closes the dependent first whether the edge exists or not. Here the two disagree. The holder is created first and keeps the resolver it was handed; the scoped entry it later reaches for is installed AFTER it, so the tie-break alone would close that entry first — out from under the holder that is still open. The edge recorded on the already-held path is the only thing that puts them back in order. */
+/* the sibling above cannot tell the edge from the creation-order tie-break: a dependency that is already held was necessarily created before its dependent, so latest-first closes the dependent first whether the edge exists or not. Here the two disagree. The holder is created first and keeps the resolver it receives; the scoped entry it later reaches for is installed after it, so the tie-break alone would close that entry first, out from under the holder that is still open. The edge recorded on the already-held path is the only thing that puts them back in order. */
 func TestScopedResolution_ExistingInstanceEdgeOutranksTheCreationOrder(t *testing.T) {
     serviceContainer := NewContainer()
 

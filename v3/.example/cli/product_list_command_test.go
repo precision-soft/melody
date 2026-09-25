@@ -31,8 +31,7 @@ func (instance *refusingCategoryRepository) All(ctx context.Context) ([]*entity.
     return nil, errors.New("zz category table unreachable")
 }
 
-/* the listing still renders when a nomenclature cannot be read — every name of it as the dash — but the loss is
-   journaled with its cause: rendered in silence, a column of dashes read as products filed under nothing */
+/* the listing still renders when a nomenclature cannot be read, every name of it as the dash, but the loss is journaled with its cause, since a column of dashes in silence reads as products filed under nothing */
 func TestProductListCommandJournalsANomenclatureItCouldNotRead(t *testing.T) {
     storage := persistence.NewCatalogStorage(nil)
 

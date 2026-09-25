@@ -69,7 +69,7 @@ func TestDatabaseOpenedBy_NamesTheManagerAndItsLocationWhenTheOpenRefuses(t *tes
     }
 }
 
-/* the class as the operator met it: the reading repository is resolved BY TYPE through the generated wiring, and a refusal of the archive's database on that first resolution used to reach the console as "service not registered in resolver" — the container's relabelling of any error that is not this application's own. Over an archive handle whose connector refuses, the resolution now names the archive set and its step. */
+/* the reading repository is resolved by type through the generated wiring, and a refusal of the archive's database on that first resolution reaches the console naming the archive set and its step, not as the container's "service not registered in resolver", the relabelling it applies to any error that is not this application's own. */
 func TestArchiveReadingRepositoryResolvedByTypeNamesTheArchiveRatherThanTheWiring(t *testing.T) {
     serviceContainer := melodycontainer.NewContainer()
 
@@ -97,7 +97,7 @@ func TestArchiveReadingRepositoryResolvedByTypeNamesTheArchiveRatherThanTheWirin
     }
 }
 
-/* the registry's lazy opens are bound to the process's context: the archive is opened on a request or a scheduled command, and an open in flight when the process is asked to stop has to end with the signal — under a background context it ran its whole retry budget while the teardown waited behind it and reported the open as still in flight. Cancelled, the open ends at once naming the cancellation, and the registry closes with nothing pending. */
+/* the registry's lazy opens are bound to the process's context: the archive is opened on a request or a scheduled command, and an open in flight when the process is asked to stop ends with the signal rather than running its whole retry budget while the teardown waits. Cancelled, the open ends at once naming the cancellation, and the registry closes with nothing pending. */
 func TestBuildDatabase_BindsTheArchiveOpenToTheProcessContext(t *testing.T) {
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
@@ -142,7 +142,7 @@ func TestBuildDatabase_BindsTheArchiveOpenToTheProcessContext(t *testing.T) {
     }
 }
 
-/* the archive's open budget is its own and request-sized: against a postgres that refuses, the open gives up in well under three seconds, where the catalogue's budget — ten attempts, one to five seconds apart — kept a request, a daily app:info and a teardown waiting thirty-seven seconds behind it. Measured at 0.75 s; the bound is four times that. */
+/* the archive's open budget is its own and request-sized: against a postgres that refuses, the open gives up in under three seconds, not after the catalogue's ten attempts one to five seconds apart. */
 func TestBuildDatabase_GivesTheArchiveARequestSizedOpenBudget(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{
         environmentKeyPgsqlHost:     "127.0.0.1",
@@ -167,7 +167,7 @@ func TestBuildDatabase_GivesTheArchiveARequestSizedOpenBudget(t *testing.T) {
     }
 }
 
-/* the first resolution of the archive repository applies the migration set after the dial, a wait of up to the lock window on a held migration lock; that wait runs under the process context the storage carries, so a cancelled process ends it at once — under a background context it ran the whole window while the teardown waited behind it. Over a refusing connector the dial refuses first either way, so the arm that separates the two is the context's refusal being what the migration set hands back. */
+/* the first resolution of the archive repository applies the migration set after the dial, a wait of up to the lock window on a held migration lock; that wait runs under the process context the storage carries, so a cancelled process ends it at once rather than running the whole window while the teardown waits. Over a refusing connector the dial refuses first either way, so the arm that separates the two is the context's refusal being what the migration set hands back. */
 func TestArchiveStorageCarriesTheProcessContextIntoTheMigrationSet(t *testing.T) {
     ctx, cancel := context.WithCancel(context.Background())
     cancel()
@@ -230,9 +230,7 @@ func (instance *recordingProvider) Open(params melodybunorm.ConnectionParameters
     return newUndialedDatabase(), nil
 }
 
-/* databaseServicesOver registers the database services of a module whose registry declares the catalogue and
-   the archive over recording providers, beside a logger service that counts its resolutions; the logger it
-   publishes is returned, so a test compares what an open was handed with it */
+/* databaseServicesOver registers the database services of a module whose registry declares the catalogue and the archive over recording providers, beside a logger service that counts its resolutions; the logger it publishes is returned, so a test compares the logger an open receives with it */
 func databaseServicesOver(t *testing.T, archiveWired bool) (melodycontainercontract.Container, *recordingProvider, *recordingProvider, melodyloggingcontract.Logger, *int) {
     t.Helper()
 
@@ -283,11 +281,7 @@ func databaseServicesOver(t *testing.T, archiveWired bool) (melodycontainercontr
     return containerInstance, catalogProvider, archiveProvider, journal, &loggerResolutions
 }
 
-/* the chain the catalogue storage starts — storage, handle, registry, journal — continues here: the handle
-   RESOLVES the registry, and the registry's provider hands it the container's journal before the handle is
-   opened, so the open reports through the application's logger rather than the emergency one the registry was
-   built on. A handle that captured the registry resolved nothing: the registry provider never ran, the swap
-   never happened and the teardown had no edge to order the two closes by. */
+/* the chain the catalogue storage starts (storage, handle, registry, journal) continues here: the handle resolves the registry, and the registry's provider hands it the container's journal before the handle is opened, so the open reports through the application's logger rather than the emergency one the registry is built on. A handle that captured the registry would resolve nothing, so the swap would not run and the teardown would have no edge to order the two closes by. */
 func TestRegisterDatabaseServices_EachHandleResolvesTheRegistryWhichTakesTheJournalFirst(t *testing.T) {
     for _, handle := range []struct {
         serviceName string

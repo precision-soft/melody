@@ -109,7 +109,7 @@ func lookupTable(t *testing.T, table map[string][]string) *int {
     return &lookups
 }
 
-/* the names are resolved at the first request and again once the interval has passed: a balancer restarted onto a new address is trusted again within the interval, where a list resolved once at build trusted the old address for the life of the process, and a process booted before the balancer's name existed trusted nothing for the same life */
+/* the names are resolved at the first request and again once the interval has passed, so a balancer restarted onto a new address is trusted again within the interval, and a process booted before the balancer's name exists trusts it once the name resolves */
 func TestTrustedProxyResolver_ResolvesAtTheFirstRequestAndAgainAfterTheInterval(t *testing.T) {
     table := map[string][]string{"load-balancer": {balancerAddress}}
     lookups := lookupTable(t, table)
@@ -128,7 +128,7 @@ func TestTrustedProxyResolver_ResolvesAtTheFirstRequestAndAgainAfterTheInterval(
         t.Fatalf("expected the first request to resolve the name once, got %d lookups", *lookups)
     }
 
-    /* the balancer restarts onto a new address inside the interval: the old list is still believed, the new address is a stranger */
+    /* the balancer restarts onto a new address inside the interval: the list last resolved is still believed, and the new address is a stranger */
     table["load-balancer"] = []string{"172.18.0.13"}
     now = now.Add(30 * time.Second)
     if key := resolver.Resolve(requestForwardedBy(t, "172.18.0.13", "203.0.113.7")); "172.18.0.13" != key {
@@ -179,7 +179,7 @@ func TestTrustedProxyResolver_TrustsANameThatBeginsToResolveAfterTheInterval(t *
     }
 }
 
-/* an entry that can be nothing — an address with a port, a bracketed address, a prefix without its length — is refused at build rather than looked up as a name and skipped: skipped, it narrowed the trusted list in silence, which reads at runtime as every client behind that proxy sharing one key */
+/* an entry that can be nothing (an address with a port, a bracketed address, a prefix without its length) is refused at build rather than looked up as a name and skipped, since skipped it would narrow the trusted list in silence, which reads at runtime as every client behind that proxy sharing one key */
 func TestNewTrustedProxyResolver_RefusesAnEntryThatCanBeNothing(t *testing.T) {
     for _, entry := range []string{"172.18.0.9:80", "[::1]", "172.18.0.9/", "load balancer"} {
         refused := func() (refused bool) {
@@ -230,8 +230,7 @@ func TestNewExampleModule_HandsBothBudgetsTheSameTrustedProxyResolver(t *testing
     }
 }
 
-/* slowLookupTable is a lookup that takes as long as it is told and counts, under a lock, how many times it was
-   entered — the figure the single-flight and the "not a burst" promise are measured on */
+/* slowLookupTable is a lookup that takes as long as it is told and counts, under a lock, how many times it is entered, the figure the single-flight and the "not a burst" promise are pinned on */
 func slowLookupTable(t *testing.T, delay time.Duration) *atomic.Int64 {
     t.Helper()
 
@@ -250,9 +249,7 @@ func slowLookupTable(t *testing.T, delay time.Duration) *atomic.Int64 {
     return lookups
 }
 
-/* the FIRST resolution runs outside the lock too: while it is in flight, every other request is charged to its
-   peer — a list that trusts nothing — instead of waiting; the previous form resolved the first list under the
-   lock and a hung lookup held every concurrent request of the process, on the listener ahead of authentication */
+/* the first resolution runs outside the lock too: while it is in flight, every other request is charged to its peer, a list that trusts nothing, instead of waiting behind a lookup that may hang, on the listener ahead of authentication */
 func TestTrustedProxyResolver_DoesNotHoldConcurrentRequestsOnTheFirstLookup(t *testing.T) {
     lookups := slowLookupTable(t, 300*time.Millisecond)
     resolver := resolverOver(t, "load-balancer", time.Now)
@@ -271,12 +268,10 @@ func TestTrustedProxyResolver_DoesNotHoldConcurrentRequestsOnTheFirstLookup(t *t
     key := resolver.Resolve(requestForwardedBy(t, balancerAddress, "203.0.113.7"))
     waited := time.Since(before)
 
-    /* the first lookup outlives the request it was measured against: the test waits for it, so the cleanup
-       that restores the lookup table does not run under a goroutine still inside the table it replaces */
+    /* the first lookup outlives the request it runs under: the test waits for it, so the cleanup that restores the lookup table does not run under a goroutine still inside the table it replaces */
     <-finished
 
-    /* the form that held the request waited ~280 ms of the 300 ms lookup; a bound at two hundred keeps the
-       two forms apart under a loaded runner where a served-at-once request can still take tens of milliseconds */
+    /* the lookup takes 300 ms, so a request held behind it would take nearly that long; a bound at two hundred separates the two under a loaded runner where a request served at once can still take tens of milliseconds */
     if 200*time.Millisecond < waited {
         t.Fatalf("a request during the first lookup waited %s for it, wanted it served at once", waited)
     }
@@ -327,10 +322,7 @@ func TestTrustedProxyResolver_LooksUpOnceAMinuteAndNeverInABurst(t *testing.T) {
     }
 }
 
-/* both budgets ask the resolver about the SAME request — the request budget ahead of authentication, the
-   write throttle once a handler is reached — and a re-resolution landing between the two asks charged the one
-   request to its forwarded client at one budget and to the balancer at the other. The first answer a request
-   was given is the answer it keeps; the next request reads the list as it now is. */
+/* both budgets ask the resolver about the same request, the request budget ahead of authentication and the write throttle once a handler is reached, and a re-resolution landing between the two asks would charge the one request to its forwarded client at one budget and to the balancer at the other. The first answer a request is given is the answer it keeps; the next request reads the list as it now is. */
 func TestTrustedProxyResolver_AnswersOneRequestTheSameAcrossARefresh(t *testing.T) {
     table := map[string][]string{"load-balancer": {balancerAddress}}
     lookupTable(t, table)
@@ -406,8 +398,7 @@ func TestTrustedProxyResolver_ReportsAnEntryThatNamesNothingToTheRequestsLogger(
     }
 }
 
-/* the logger is resolved by the request that re-resolves the list and by no other: asked of every request, it cost
-   each one five allocations and the emergency logger's lock for a record only a re-resolution can write */
+/* the logger is resolved by the request that re-resolves the list and by no other, since only a re-resolution can write the record and asking every request would put the emergency logger's lock on each */
 func TestTrustedProxyResolver_ResolvesTheLoggerOnlyWhenTheListIsResolved(t *testing.T) {
     previous := trustedProxyWarningLogger
     var asked int

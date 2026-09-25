@@ -32,15 +32,7 @@ func moduleWithEnvironment(t *testing.T, values map[string]string) *Module {
     return &Module{configuration: configuration}
 }
 
-/* Nothing dials at boot. The dsn below points at an address no broker answers on, and the transport is built
-   over it without a packet leaving the process: what used to stand here was a full amqp handshake, paid by
-   every process — measured on the running stack, db:migrate --help paid one before printing its usage — and
-   a boot that could not reach the broker panicked instead of starting. A dsn this application cannot dial
-   now surfaces at the first publish, through the transport's own retry loop.
-
-   The test is written as a deadline rather than as an assertion on the return, because the failure it guards
-   against is a dial: the address is a discard port on a host that does not resolve, so a probe restored here
-   would spend the resolver's own timeout before it panicked. */
+/* Nothing dials at boot. The dsn below points at an address no broker answers on, and the transport is built over it without a packet leaving the process; a dsn this application cannot dial surfaces at the first publish, through the transport's own retry loop. The test is written as a deadline rather than as an assertion on the return, because the failure it guards against is a dial: the address is a discard port on a host that does not resolve, so a boot-time dial would spend the resolver's own timeout before it panicked. */
 func TestBuildMessageBusTransport_DoesNotDialAtBoot(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{
         "AMQP_DSN": "amqp://guest:guest@broker.invalid:5672/",
@@ -68,8 +60,7 @@ func TestBuildMessageBusTransport_DoesNotDialAtBoot(t *testing.T) {
     }
 }
 
-/* The gate above it, unchanged and pinned: without a dsn the example runs the whole message bus in process,
-   which is what makes a checkout without a broker functional rather than merely bootable. */
+/* Without a dsn the example runs the whole message bus in process, which is what makes a checkout without a broker functional rather than merely bootable. */
 func TestBuildMessageBusTransport_FallsBackToTheInProcessTransportWithoutADsn(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
 
@@ -80,10 +71,7 @@ func TestBuildMessageBusTransport_FallsBackToTheInProcessTransportWithoutADsn(t 
     }
 }
 
-/* the notification handler RESOLVES the hub through the runtime at each message: the hub the container
-   publishes is the one that broadcasts, not the one the composition root held when the bus was built — a
-   handler that captured it left the hub's provider, its logger swap and its teardown edge unrun. The module's
-   own hub and the registered one are two hubs here, so a capture broadcasts where nobody listens. */
+/* the notification handler resolves the hub through the runtime at each message: the hub the container publishes is the one that broadcasts, not the one the composition root held when the bus was built, and a capture would leave the hub's provider, its logger swap and its teardown edge unrun. The module's own hub and the registered one are two hubs here, so a capture broadcasts where nobody listens. */
 func TestBuildMessageBus_TheNotificationHandlerResolvesTheHubAtEachMessage(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
     moduleInstance.buildServerSentEvent()

@@ -530,7 +530,7 @@ func TestAllImplementing_AContainerCollectionExcludesScopedRegistrations(t *test
     }
 }
 
-/* A container provider collecting through the resolver it was handed must gather only container members, even while the resolution that reached it came through a scope: the dispatcher it is building is a process singleton, and a handler built for one request would be held by it for the life of the process. */
+/* A container provider collecting through the resolver it receives must gather only container members, even while the resolution that reached it came through a scope: the dispatcher it is building is a process singleton, and a handler built for one request would be held by it for the life of the process. */
 func TestAllImplementing_AContainerProviderCollectingThroughAScopeExcludesScopedRegistrations(t *testing.T) {
     serviceContainer := newCollectionContainer(t)
 

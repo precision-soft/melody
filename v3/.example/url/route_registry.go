@@ -8,9 +8,7 @@ import (
     examplesecurity "github.com/precision-soft/melody/v3/.example/security"
 )
 
-/* RouteManifestForRuntime projects the exposed named routes into the RouteManifest shape the frontend RouteGenerator (melody-routes.ts) consumes, injected into every page as window.melodyRoutes. It reuses the framework BuildRouteManifest so it applies the same RouteAttributeExpose opt-in filter as the melody:routes:manifest export command: an example must model shipping only deliberately-exposed route metadata to the browser rather than dumping every route's pattern, requirements and defaults — internal routes stay server-side.
-
-   the ZONE gate is applied here too, and it is applied against the caller. The zone gate used to live only inside the cli command, so the in-process door carried every zone to every page — and the frontend zone is the admin surface (the product and user api routes, each behind RoleEditor/RoleAdmin), enumerated with its patterns and methods into the anonymous login page. The public zone is what an unauthenticated visitor needs (login, logout, health, the openapi document); the frontend zone joins it once the caller is authenticated. */
+/* RouteManifestForRuntime projects the exposed named routes into the RouteManifest shape the frontend RouteGenerator consumes, through the framework's BuildRouteManifest, so only routes opted in with RouteAttributeExpose reach the browser. The zone gate is applied against the caller: an unauthenticated visitor gets the public zone (login, logout, health, the openapi document), and the frontend zone, the admin api routes, joins it once the caller is authenticated. */
 func RouteManifestForRuntime(runtimeInstance runtimecontract.Runtime) (melodyhttp.RouteManifest, error) {
     routeRegistry := melodyhttp.RouteRegistryMustFromContainer(runtimeInstance.Container())
 

@@ -54,11 +54,7 @@ func (instance *CurrencyRefreshRatesCommand) Run(runtimeInstance melodyruntimeco
         return nil
     }
 
-    /* the columns keep the order the live band reads them in — instant, attempts, updated, skipped — and the
-       three headings that were folded into "skipped" or lost in a refusal follow them: a provider between
-       two moves answers UNCHANGED, a replayed document STALE, and a quote the catalogue would not take
-       REFUSED, with the run's exit code naming the currencies it refused; the provider's clock closes the row,
-       the offset its stamps were moved by onto this clock or "unmeasured" for an answer that carried no date */
+    /* the columns keep the order the live band reads them in (instant, attempts, updated, skipped), then UNCHANGED for a provider between two moves, STALE for a replayed document and REFUSED for a quote the catalogue would not take, with the run's exit code naming the refused currencies; the provider's clock closes the row, the offset its stamps are moved by onto this clock or "unmeasured" for an answer that carried no date */
     headers := []string{
         "AS_OF",
         "ATTEMPTS",
@@ -87,7 +83,7 @@ func (instance *CurrencyRefreshRatesCommand) Run(runtimeInstance melodyruntimeco
        section that drives this command can read what it printed without capturing a process stream */
     fprintTable(writer, headers, rows)
 
-    /* the refresh writes through the service so the listeners drop the cached currencies — in THIS process. On the shared cache the server rereads the new rate; on the in-process fallback the server keeps the rate it cached, which is the one failure the two GoDocs of the write path say the design prevents, and it prevents it only with redis. */
+    /* the refresh writes through the service so the listeners drop the cached currencies in this process: on the shared cache the server rereads the new rate, and on the in-process fallback it keeps the rate it cached until it restarts */
     if true == cacheIsProcessLocal(runtimeInstance) {
         _, _ = fmt.Fprintln(writer, processLocalCacheNotice)
     }

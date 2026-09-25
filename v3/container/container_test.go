@@ -290,7 +290,7 @@ type hasTypeProbe struct {
     value string
 }
 
-/* Has and Get have to agree about the same container. A registration made from a provider returning *T is filed under *T, and GetByType canonicalises before it looks — so asking HasType with the value type was answered "no" for a service the very next GetByType resolves happily. A caller that guards a resolution with HasType then took the branch for a service that is registered. */
+/* Has and Get have to agree about the same container. A registration made from a provider returning *T is filed under *T, and GetByType canonicalises before it looks, so HasType asked with the value type must answer "yes" for a service the next GetByType resolves; a caller that guards a resolution with HasType would otherwise take the branch for a service that is registered. */
 func TestHasType_AnswersForTheValueTypeOfAPointerRegistration(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -944,7 +944,6 @@ func TestServiceDescriptions_DescribesBothLifetimesWithoutBuilding(t *testing.T)
         t.Fatalf("expected the built service to be described at all, got %+v", reporter.ServiceDescriptions())
     }
 }
-
 
 /* MustGet delegates to the resolver context so a melody failure panics out WHOLE, with the service name written into its own context — a rebuilt wrapper would shed the log level, the already-logged mark and the capture stack, and the by-type door already keeps this contract. */
 func TestContainer_MustGet_PassesTheOriginalMelodyErrorThroughWhole(t *testing.T) {

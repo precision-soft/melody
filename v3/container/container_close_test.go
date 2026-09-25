@@ -1383,7 +1383,6 @@ func TestContainer_Close_ClosesAHolderBeforeTheServiceItResolvedThroughAKeptReso
     }
 }
 
-
 type panickingCloseWithCauseService struct {
     cause error
 }
@@ -1431,7 +1430,6 @@ func TestContainer_Close_APanickingCloseCarriesItsCauseAndItsStack(t *testing.T)
         t.Fatalf("expected the whole chain beneath the panic, got %v", causeChain)
     }
 }
-
 
 /* the failure map holds one line per service, and a line is where the recovered value, the frames that ran and the cause of a contained panic collapsed; the details map beside it carries them whole, under the same key, only when a close left any */
 func TestContainer_Close_CarriesTheFailureDetailsOfAPanickingCloseBesideItsLine(t *testing.T) {
@@ -1911,7 +1909,7 @@ func TestContainer_Close_AServiceStillResolvesDuringTheTeardown(t *testing.T) {
     }
 }
 
-/* TestContainer_Get_RefusesAfterTheTeardownFinished pins the second closing state. A resolution performed once the teardown is over was answered out of the maps — which the teardown has just emptied of meaning — so a caller holding a resolver received a handle to a service every Close in the process had already run on, with a nil error saying it was fine. The fast path is asked separately because a memoized instance never reaches the creation guard that refuses a closed container. */
+/* TestContainer_Get_RefusesAfterTheTeardownFinished pins the second closing state. A resolution performed once the teardown is over is refused, since answering it out of the maps the teardown has just emptied of meaning would hand a caller holding a resolver a service every Close in the process has already run on, with a nil error. The fast path is asked separately because a memoized instance never reaches the creation guard that refuses a closed container. */
 func TestContainer_Get_RefusesAfterTheTeardownFinished(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -3551,7 +3549,7 @@ func (instance *budgetSleeper) Close() error {
     return instance.CloseWithContext(context.Background())
 }
 
-/* deadlineNotingCloser answers at once through the context-taking door and notes whether it was handed a deadline at all */
+/* deadlineNotingCloser answers at once through the context-taking door and notes whether its context carries a deadline at all */
 type deadlineNotingCloser struct {
     sawDeadline bool
 }
@@ -3965,7 +3963,7 @@ type poolDeclarerService struct {
 
 func (instance *poolDeclarerService) Close() error { return nil }
 
-/* the declaration's raw edge towards "type:<T>" is not written into the graph: a declaration turned ambiguous by a second, non-strict registration under the type expands to nothing, and the raw edge — translated through the alias of the first service the moment the type had been resolved THROUGH ITSELF — closed a ring with the resolution that first service had made, so the close reported a cycle on the default path over a teardown in which every service closed. The sibling test above resolves by name and never creates the type node, which is why it stayed green over the edge. */
+/* the declaration's raw edge towards "type:<T>" is not written into the graph: a declaration turned ambiguous by a second, non-strict registration under the type expands to nothing, and the raw edge, translated through the alias of the first service once the type is resolved through itself, would close a ring with the resolution that first service made, so the close would report a cycle on the default path over a teardown in which every service closes. The sibling test above resolves by name and never creates the type node, which is why it cannot see the edge. */
 func TestContainer_Close_ADeclarationOnATypeResolvedThroughItselfLeavesNoRawEdgeBehind(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -4002,7 +4000,7 @@ func TestContainer_Close_ADeclarationOnATypeResolvedThroughItselfLeavesNoRawEdge
     }
 }
 
-/* capturedDeclarerPool holds the declarer by a pointer it was handed, not one it resolved: the walk sees the pointer, the graph sees nothing */
+/* capturedDeclarerPool holds the declarer by a pointer it received, not one it resolved: the walk sees the pointer, the graph sees nothing */
 type capturedDeclarerPool struct {
     declarer *poolDeclarerService
 }

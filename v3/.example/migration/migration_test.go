@@ -7,10 +7,7 @@ import (
     "testing"
 )
 
-/* the set is ONE migration because the example has one state, so what is pinned here is the CONTENT of
-   that migration — which statements it emits, and in what order — rather than how many steps the schema
-   is spread over. The count this replaced could not see either: a set of seven steps in the wrong order
-   would have satisfied it. */
+/* the set is one migration because the example has one state, so what is pinned is the content of that migration, which statements it emits and in what order; a count of steps cannot see a set emitted in the wrong order. */
 func TestMigrationsHoldOneSchemaMigration(t *testing.T) {
     sorted := Migrations.Sorted()
     if 1 != len(sorted) {
@@ -116,12 +113,7 @@ func isUsernameIndexDrop(query string) bool {
         strings.Contains(query, "DROP INDEX")
 }
 
-/* the expression is the whole point of the constraint: the identity this application gives a username is
-   LOWER(username) compared byte for byte, because NormalizedUsername folds case and nothing else and the
-   lookup door compares on utf8mb4_bin for the same reason. Indexed on the column as it stands, the key
-   would follow the column's own accent-insensitive collation and refuse two names the application holds
-   apart — 'ana' and 'ána' — while admitting 'Ana' beside 'ana', which it holds to be one. Measured on the
-   running server with exactly this expression: 'ana' and 'ANA' collide with 'Ana', 'Ána' does not. */
+/* the expression is the whole point of the constraint: the identity this application gives a username is LOWER(username) compared byte for byte, because NormalizedUsername folds case and nothing else and the lookup door compares on utf8mb4_bin for the same reason. Indexed on the column as it stands, the key would follow the column's own accent-insensitive collation and refuse two names the application holds apart, 'ana' and 'ána', while admitting 'Ana' beside 'ana', which it holds to be one. */
 func TestAddUserUsernameIndexBuildsTheKeyOnTheFoldedSpelling(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = indexPresenceRows(0)
@@ -189,7 +181,7 @@ func TestDropUserUsernameIndexDropsTheKeyOnlyWhenItIsThere(t *testing.T) {
     }
 }
 
-/* every column that holds an entity identifier is compared under utf8mb4_bin: the identity of an id is exact everywhere else — the in-memory repositories and the cache keys — and under the table's default collation a lookup by id folded case and accents, so an alias spelling found the row and was cached under a key nothing invalidates */
+/* every column that holds an entity identifier is compared under utf8mb4_bin: the identity of an id is exact everywhere else, in the in-memory repositories and the cache keys, and under the table's default collation a lookup by id would fold case and accents, so an alias spelling would find the row and be cached under a key nothing invalidates */
 func TestUpSchemaComparesEveryIdentifierColumnByteForByte(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 

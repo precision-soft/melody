@@ -327,7 +327,7 @@ func TestDatabaseResetCommandWithoutForceNamesTheArchiveWhenOneIsWired(t *testin
     }
 }
 
-/* the archive-only environment — MYSQL_HOST blank, PGSQL_HOST set, one of the four combinations the readme promises — used to be refused whole under a message that was false for it. Now the plan names the archive alone, and --force reaches the archive: over an undialed archive handle the refusal is the dial, which is what says the archive half ran. */
+/* the archive-only environment (MYSQL_HOST blank, PGSQL_HOST set), one of the four combinations the readme promises, is not refused: the plan names the archive alone, and --force reaches the archive; over an undialed archive handle the refusal is the dial, which is what says the archive half ran. */
 func TestDatabaseResetCommandArchiveOnlyEnvironmentResetsTheArchiveAlone(t *testing.T) {
     buffer := &bytes.Buffer{}
     runtimeInstance, _ := newResetRuntimeWithArchive(t, persistence.NewCatalogStorage(nil), persistence.NewArchiveStorageAt(newUndialedResetStorage().Database(), "postgres:5432/melody_example_v3_archive"))
@@ -356,7 +356,7 @@ func TestDatabaseResetCommandArchiveOnlyEnvironmentResetsTheArchiveAlone(t *test
     }
 }
 
-/* the catalogue is brought whole — dropped, recreated, trail emptied, reseeded — before the archive is touched: with the archive refusing, every catalogue statement has been recorded, the seed's inserts among them, and the failure names the archive step. The old order returned between the drop and the reseed and left an empty catalogue behind the exit code. */
+/* the catalogue is brought whole (dropped, recreated, trail emptied, reseeded) before the archive is touched: with the archive refusing, every catalogue statement is recorded, the seed's inserts among them, and the failure names the archive step, so an archive refusal cannot leave an empty catalogue behind the exit code. */
 func TestDatabaseResetCommandReseedsTheCatalogueBeforeTouchingTheArchive(t *testing.T) {
     buffer := &bytes.Buffer{}
     storage, recorder := newRecordingResetStorage("mysql:3306/melody_example_v3")
@@ -387,9 +387,7 @@ func TestDatabaseResetCommandReseedsTheCatalogueBeforeTouchingTheArchive(t *test
         }
     }
 
-    /* the cache is the catalogue's and is cleared as the catalogue's last step: an archive that refused after
-       the reseed used to leave every stale entry standing behind a non-zero exit — the account the reset
-       removed still authenticating from the cache */
+    /* the cache is the catalogue's and is cleared as the catalogue's last step, so an archive that refuses after the reseed does not leave every stale entry standing behind a non-zero exit, the account the reset removed still authenticating from the cache */
     if 1 != cacheInstance.clears() {
         t.Fatalf("expected the cache to be cleared once before the archive was reached, got %d clears", cacheInstance.clears())
     }
@@ -428,7 +426,7 @@ func TestDatabaseResetCommandClearsTheCacheOnceAfterTheReseed(t *testing.T) {
     }
 }
 
-/* the drops run under the runtime's context: cancelled, the first statement is refused and nothing is recorded, where a background context let a reset ignore the one signal every other command honours. */
+/* the drops run under the runtime's context: cancelled, the first statement is refused and nothing is recorded, so a reset honours the signal every other command honours. */
 func TestDatabaseResetCommandHonoursTheRuntimeContext(t *testing.T) {
     storage, recorder := newRecordingResetStorage("mysql:3306/melody_example_v3")
     runtimeInstance, _ := newResetRuntimeWithArchive(t, storage, persistence.NewArchiveStorage(nil))

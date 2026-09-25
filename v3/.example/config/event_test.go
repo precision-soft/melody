@@ -43,10 +43,7 @@ func resolvedBudgetKey(t *testing.T, trustedProxyList []string, peer string, for
     return resolver(requestForwardedBy(t, peer, forwardedFor))
 }
 
-/* the budget is per client, which is what its own comment and the shipped .env both promise. Read from the
-   peer address it is per PROXY: measured through the compose stack the key was the balancer's 172.18.0.9,
-   so a single script could spend the hour of everyone behind it — and this listener runs ahead of
-   authentication, so what it spends is everyone's ability to log in. */
+/* the budget is per client, as its own comment and the shipped .env promise; read from the peer address it would be per proxy, so one script could spend the hour of everyone behind the balancer, and this listener runs ahead of authentication, so what it spends is everyone's ability to log in. */
 func TestRequestBudgetConfig_ChargesTheForwardedClientRatherThanTheProxy(t *testing.T) {
     if key := resolvedBudgetKey(t, []string{balancerAddress}, balancerAddress, "203.0.113.7"); "203.0.113.7" != key {
         t.Fatalf("expected the forwarded client to be charged, got %q", key)
@@ -61,7 +58,7 @@ func TestRequestBudgetConfig_IgnoresAForwardedHeaderFromAnUntrustedPeer(t *testi
     }
 }
 
-/* every host client of the compose stack enters through the docker bridge gateway, which nginx appends to the chain: with the whole private space trusted the gateway read as one more hop, the chain ran out and the key fell back onto the balancer — the very key the repair existed to leave — so the whole host population still shared one budget and a header a client sent picked its key. Trusting the balancer alone, the gateway is the client the balancer attested. */
+/* every host client of the compose stack enters through the docker bridge gateway, which nginx appends to the chain: with the whole private space trusted, the gateway would read as one more hop and the key would fall back onto the balancer, so the whole host population would share one budget. Trusting the balancer alone, the gateway is the client the balancer attested. */
 func TestRequestBudgetConfig_ReadsTheDockerGatewayAsTheClientRatherThanAsAHop(t *testing.T) {
     if key := resolvedBudgetKey(t, []string{balancerAddress}, balancerAddress, "172.18.0.1"); "172.18.0.1" != key {
         t.Fatalf("expected the gateway the balancer forwarded to be the client, got %q", key)
@@ -72,7 +69,7 @@ func TestRequestBudgetConfig_ReadsTheDockerGatewayAsTheClientRatherThanAsAHop(t 
     }
 }
 
-/* a neighbouring container of the deployment is not a proxy: with the whole private space trusted, any process beside the example named its own key per request — a fresh budget each time, or a victim's — on the listener that refuses at the door. */
+/* a neighbouring container of the deployment is not a proxy: with the whole private space trusted, any process beside the example could name its own key per request, a fresh budget each time or a victim's, on the listener that refuses at the door. */
 func TestRequestBudgetConfig_DoesNotBelieveANeighbouringContainer(t *testing.T) {
     if key := resolvedBudgetKey(t, []string{balancerAddress}, "172.18.0.11", "203.0.113.7"); "172.18.0.11" != key {
         t.Fatalf("expected a header from a neighbouring container to be ignored, got %q", key)
@@ -86,7 +83,7 @@ func TestRequestBudgetConfig_AnEmptyListChargesThePeer(t *testing.T) {
     }
 }
 
-/* the release of a second factor with its account is a subscriber the composition root INSTALLS: its own tests pin what it does once installed, and nothing pinned that it is — the wiring line could go and every test stayed green. Read off a real dispatcher: with a database, one more owner on the deletion event, and it is this one. */
+/* the release of a second factor with its account is a subscriber the composition root installs; its own tests pin what it does once installed, and this one pins that it is installed. Read off a real dispatcher: with a database, one more owner on the deletion event, and it is this one. */
 func TestRegisterSubscribers_InstallsTheTwoFactorEnrollmentReleaseWhenThereIsADatabase(t *testing.T) {
     ownersOnDeletion := func(moduleInstance *Module) []string {
         eventDispatcher := melodyevent.NewEventDispatcher(melodyclock.NewSystemClock())
@@ -128,7 +125,7 @@ func TestRegisterSubscribers_InstallsTheTwoFactorEnrollmentReleaseWhenThereIsADa
     }
 }
 
-/* the composition root registers the cache subscriber before the release, and the dispatcher ends a dispatch at the first listener that fails: registered at equal priority, the release ran behind a cache listener whose backend was gone and never ran at all — the row stayed for the next holder of the identifier. Read off the dispatcher the root fills: on the deletion event the release outranks the cache subscriber's listener, whatever order they were registered in. */
+/* the composition root registers the cache subscriber before the release, and the dispatcher ends a dispatch at the first listener that fails: at equal priority the release would run behind a cache listener whose backend is gone and never run, leaving the row for the next holder of the identifier. Read off the dispatcher the root fills: on the deletion event the release outranks the cache subscriber's listener, whatever order they are registered in. */
 func TestRegisterSubscribers_TheEnrollmentReleaseOutranksTheCacheClearOnUserDeleted(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
     moduleInstance.database = newUndialedDatabase()
@@ -180,8 +177,7 @@ func TestRequestBudgetConfig_AdmitsTheBudgetPerHourAndRefusesTheNext(t *testing.
     }
 }
 
-/* the switch arms the door on a positive integer, spaces around it tolerated, and refuses any other value by
-   name rather than reading it as unset: swallowed, a typo disarmed the global budget with no signal anywhere */
+/* the switch arms the door on a positive integer, spaces around it tolerated, and refuses any other value by name rather than reading it as unset, since a swallowed typo would disarm the global budget with no signal anywhere */
 func TestRegisterRateLimitRequestListener_ArmsOnAPositiveBudgetAndRefusesAnyOtherValueByName(t *testing.T) {
     kernelRequestListeners := func(moduleInstance *Module) int {
         eventDispatcher := melodyevent.NewEventDispatcher(melodyclock.NewSystemClock())

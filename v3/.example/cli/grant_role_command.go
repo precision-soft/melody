@@ -12,11 +12,7 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/* GrantRoleCommand grants an application role to an account.
-
-   It declares its own --role flag to show that an application command may reuse a name the runtime also understands: the runtime's --mode/--role are recognized only before the command name, so `example:grant:role --role ROLE_ADMIN` reaches this command intact rather than being captured (and rejected) by the process-role parser. It also holds the user service through a container.Lazy handle built at command-registration time — the service is resolved at the first run, not when the command is constructed, so the boot-phase composition never resolves the container early.
-
-   The grant is a real write. It used to be a print: the command looked the account up and then announced "granted role ... to user ...", for an account it had just been told did not exist as readily as for one it had found, and left the directory untouched. */
+/* GrantRoleCommand grants an application role to an account. Its own --role flag shows that an application command may reuse a name the runtime understands, since the runtime's --mode/--role are recognized only before the command name. It holds the user service through a container.Lazy handle, resolved at the first run rather than when the command is constructed. */
 type GrantRoleCommand struct {
     userService *melodycontainer.LazyService[*service.UserService]
 }
@@ -47,11 +43,7 @@ func (instance *GrantRoleCommand) Flags() []melodyclicontract.Flag {
 }
 
 func (instance *GrantRoleCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext melodyclicontract.Context) error {
-    /* the flag is trimmed and judged against the roles the application knows BEFORE anything is read: the
-       two admin doors normalise what they store, and this third role-writing door used to store the flag as
-       typed — " ROLE_EDITOR" with its space, which the no-op check then never matched, so every re-run
-       appended the role again and wrote an audit entry; and ROLE_ADMIM, which the voter compares exactly, so
-       the console reported a grant that granted nothing */
+    /* the flag is trimmed and judged against the roles the application knows before anything is read, as the two admin doors normalise what they store: an untrimmed role would never match the no-op check and be appended on every re-run, and a misspelt one would be reported as granted while the voter, which compares exactly, grants nothing */
     role := strings.TrimSpace(commandContext.String("role"))
     user := commandContext.String("user")
 
@@ -87,17 +79,10 @@ func (instance *GrantRoleCommand) Run(runtimeInstance melodyruntimecontract.Runt
         return fmt.Errorf("user %q does not exist", user)
     }
 
-    /* the role is ADDED through the repository's atomic door, which reads and writes the account under one
-       lock: a grant that ran beside an admin update of the same account used to be a read, an append and a
-       whole-set write, and whichever of the two wrote last took the other's change with it. The repository
-       is the ONLY arbiter of whether the role is already held: the read above may have been served from a
-       cache, and a short-cut on its roles answered "already holds" over an account the directory no longer
-       showed holding it — the grant never reached the row. */
+    /* the role is added through the repository's atomic door, which reads and writes the account under one lock, so a grant beside an admin update of the same account cannot lose either change. The repository alone decides whether the role is already held, because the read above may come from a cache. */
     granted, outcome, grantErr := userService.GrantRole(runtimeInstance, account.Id, role)
     if nil != grantErr {
-        /* a grant whose write COMMITTED and whose listeners then refused is not a grant that failed: the
-           role is in the directory, the cache entries of the account were not dropped, and the operator
-           has to read both — a bare failure sent them to re-run a grant the re-run would find held */
+        /* a grant whose write committed and whose listeners then refused is not a failed grant: the role is in the directory and the account's cache entries are not dropped, and the operator reads both rather than re-running a grant the re-run would find held */
         if nil != granted && repository.GrantRoleGranted == outcome {
             fmt.Printf("granted role %q to user %q, but the listeners that drop the account's cache entries were not told: %v\n", role, user, grantErr)
 
@@ -125,6 +110,5 @@ func (instance *GrantRoleCommand) Run(runtimeInstance melodyruntimecontract.Runt
 
     return nil
 }
-
 
 var _ melodyclicontract.Command = (*GrantRoleCommand)(nil)

@@ -513,11 +513,7 @@ func (instance *lazyTeardownReader) Close() error {
     return nil
 }
 
-/* A service closing through a handle must be served what the resolver beside it still answers directly.
-The container raises the flag IsClosed reports at the START of its teardown and stops answering resolutions
-only at the end, deliberately, so that a service's own Close is entitled to what it depends on. A handle
-that read the earlier flag turned terminal for the whole window and dropped its memoized value on the way,
-so a worker releasing a lease from Close was refused by the handle and served by the door beside it. */
+/* A service closing through a handle must be served what the resolver beside it still answers directly. The container raises the flag IsClosed reports at the start of its teardown and stops answering resolutions only at the end, deliberately, so that a service's own Close is entitled to what it depends on; a handle that read the earlier flag would turn terminal for the whole window and drop its memoized value, and a worker releasing a lease from Close would be refused by the handle and served by the door beside it. */
 func TestLazyService_AContainerBackedHandleServesTheClosingServiceDuringTheTeardown(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -559,9 +555,7 @@ func TestLazyService_AContainerBackedHandleServesTheClosingServiceDuringTheTeard
     }
 }
 
-/* The same window, read through the resolver a provider was handed — the shape the LazyService godoc
-recommends when the teardown ordering matters, and therefore the shape that must not be the broken one.
-That view carries no scope, so its liveness answer comes from the container underneath it. */
+/* The same window, read through the resolver a provider receives, the shape the LazyService godoc recommends when the teardown ordering matters and therefore the shape that must not be the broken one. That view carries no scope, so its liveness answer comes from the container underneath it. */
 func TestLazyService_AProviderResolverBackedHandleServesTheClosingServiceDuringTheTeardown(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -649,9 +643,7 @@ func TestLazyService_AScopeBackedHandleAndTheScopeDoorRefuseTogetherDuringTheSco
     }
 }
 
-/* A handle built over the resolver a SCOPED provider was handed holds that one request's state, so it has
-to turn terminal with the request — the container it layers over is still live and would answer forever.
-This is the arm the container's own teardown window must not be widened onto. */
+/* A handle built over the resolver a scoped provider receives holds that one request's state, so it has to turn terminal with the request; the container it layers over is still live and would answer forever. This is the arm the container's own teardown window must not be widened onto. */
 func TestLazyService_AScopedProviderResolverBackedHandleTurnsTerminalWithTheScope(t *testing.T) {
     serviceContainer := NewContainer()
 

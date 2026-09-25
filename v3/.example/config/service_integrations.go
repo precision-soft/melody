@@ -54,7 +54,7 @@ func (instance *Module) registerLockerService(registrar melodyapplicationcontrac
     )
 }
 
-/* registerArchiveLockerService publishes the archive's locker. With an archive wired it is the advisory lock of the archive's own database, resolved LAZILY through the archive handle's own service so registering it costs no connection. Without one it is the in-process locker, the way the general locker falls back: the archive is then the in-process repository, and a writer that found no locker skipped the write on every run — an archive nobody could fill. One process is the whole population of an in-process archive, so the in-process lock is the exclusion it needs, and the same one the rest of the application already accepts. What that buys is a producer for the command to run against, not a history for the server to show: the refresh records into its own process's archive and exits, and the http server's history door reads its own, which nothing writes — without postgres the history door answers an empty list, the same topology the cache's in-process fallback has. */
+/* registerArchiveLockerService publishes the archive's locker: with an archive wired, the advisory lock of the archive's database, resolved lazily through the archive handle's service; without one, the in-process locker, which is the whole exclusion an in-process archive needs. Without postgres the refresh records into its own process's archive, and the http server's history door answers an empty list. */
 func (instance *Module) registerArchiveLockerService(registrar melodyapplicationcontract.ServiceRegistrar) {
     registrar.RegisterService(
         persistence.ServiceArchiveLocker,

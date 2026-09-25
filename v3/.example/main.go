@@ -21,9 +21,7 @@ func main() {
 
     config.Configure(ctx, app)
 
-    /* the wiring is done, which is where the parallel teardown is armed: arming validates every declared teardown edge, so it needs the registrations. The boot has built services by then — the logger, the transports closer, whatever a module resolves while wiring — and arming walks those as the published memory they are, pointer words and layouts only; everything built from here on is walked where it is built.
-
-       What this application asserts by arming it: every ordering its services need is written down. Measured on this wiring, the graph is thin — most of these services hold nothing of each other and none of them logs while closing — which is exactly why the teardown of the one that takes thirty seconds must not be what the tracer provider waits behind. `debug:container` prints the plan, including the services nothing orders. */
+    /* the wiring is done, which is where the parallel teardown is armed: arming validates every declared teardown edge, so it needs the registrations, and walks the services the boot has already built. Arming asserts that every ordering these services need is written down, so the slowest closer does not hold the tracer provider; debug:container prints the plan, including the services nothing orders. */
     kernel := app.Boot()
 
     if armable, isArmable := kernel.ServiceContainer().(interface{ ArmParallelTeardown() error }); true == isArmable {

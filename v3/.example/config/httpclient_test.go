@@ -11,7 +11,7 @@ import (
     "github.com/precision-soft/melody/v3/httpclient"
 )
 
-/* the export client is the one the exporter posts a reading through, and a redirect followed there turns the POST into a GET without its body: the 200 of whatever page the sink pointed at read as the sink having received the reading. The client the composition root registers hands the 3xx back instead, so the exporter can refuse it by name. */
+/* the export client is the one the exporter posts a reading through, and a redirect followed there turns the POST into a GET without its body, so the 200 of whatever page the sink points at would read as a delivery. The client the composition root registers hands the 3xx back instead, so the exporter can refuse it by name. */
 func TestRegisterReportExportHttpClientService_TheClientDoesNotFollowARedirect(t *testing.T) {
     sinkPosts := 0
     pageGets := 0

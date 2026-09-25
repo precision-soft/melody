@@ -74,11 +74,7 @@ func (instance *ProductListCommand) Run(runtimeInstance melodyruntimecontract.Ru
         "UPDATED_AT",
     }
 
-    /* both nomenclatures are read ONCE and answered from a map, where the listing
-    used to ask FindById per product and per column: a page of N products cost 2N
-    lookups to render two columns whose whole vocabulary is two short tables. A
-    name that has gone missing between the two reads still renders as "-", which
-    is what the per-product lookup answered for it. */
+    /* both nomenclatures are read once and answered from a map rather than looked up per product and per column; a name missing between the two reads renders as "-". */
     categoryNameById, categoryListErr := nameById(categoryService.List, func(category *entity.Category) (string, string) {
         return category.Id, category.Name
     })
@@ -117,10 +113,7 @@ func (instance *ProductListCommand) Run(runtimeInstance melodyruntimecontract.Ru
     return nil
 }
 
-/* nameById reads a whole nomenclature once and keys its names by identifier. A
-read that fails answers an empty map beside its error, so every name renders as
-the dash the per-product lookup rendered when ITS read failed: the listing keeps
-rendering, and the caller journals the loss. */
+/* nameById reads a whole nomenclature once and keys its names by identifier. A read that fails answers an empty map beside its error, so every name renders as a dash, the listing keeps rendering, and the caller journals the loss. */
 func nameById[Entity any](list func() ([]*Entity, error), identify func(*Entity) (string, string)) (map[string]string, error) {
     entityList, listErr := list()
     if nil != listErr {
@@ -155,8 +148,7 @@ func journalLostNomenclature(runtimeInstance melodyruntimecontract.Runtime, nome
     )
 }
 
-/* nameOrDash answers the dash the per-product lookup answered for an identifier
-it could not resolve, and for the empty identifier of a product filed under none. */
+/* nameOrDash answers a dash for an identifier it cannot resolve and for the empty identifier of a product filed under none. */
 func nameOrDash(nameById map[string]string, identifier string) string {
     if "" == identifier {
         return "-"
@@ -178,7 +170,7 @@ func printTable(headers []string, rows [][]string) {
     fprintTable(os.Stdout, headers, rows)
 }
 
-/* the widths are measured in RUNES, not bytes: a multi-byte name padded by its byte length shifts every separator to its right and misaligns the whole table — the frozen majors' examples left this class behind when they moved onto the framework's table builder */
+/* the widths are counted in runes, not bytes: a multi-byte name padded by its byte length shifts every separator to its right and misaligns the table */
 func fprintTable(writer io.Writer, headers []string, rows [][]string) {
     widths := make([]int, len(headers))
     for i, header := range headers {

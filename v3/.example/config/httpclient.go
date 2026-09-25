@@ -10,34 +10,12 @@ import (
     "github.com/precision-soft/melody/v3/httpclient"
 )
 
-/* The two outbound clients this application holds. They are CONTAINER services rather than values their
-   callers build per call for the reason the package's own documentation gives: every client owns a
-   transport with an idle connection pool — a hundred connections per host, kept for ninety seconds — so one
-   built inside the called function leaks a pool per call. Registered here, the container closes each at
-   teardown through the Close() error it declares, with no shutdown hook of this application's own.
+/* The two outbound clients are container services, because each owns a transport with an idle connection pool and the container closes each at teardown through its Close. There are two because they point at two services, and they are the client's two shapes: a based client refuses a target off its origin, a baseless one refuses a relative target. */
 
-   They are two clients and not one because they point at two services, which is the same rule. It also
-   makes them the two SHAPES the client supports, and the shapes are not interchangeable: a client with a
-   base url refuses a target that resolves off that origin, so it cannot be handed an endpoint an operator
-   configured; a client without one refuses a relative target, because the request it would build could name
-   no host at all. The names live beside their consumers, in the service package, the way the server-sent
-   event hub's does. */
-
-/* outboundRequestTimeout bounds one exchange with an outbound provider. It is deliberately far below the
-   ceilings the client would otherwise apply, and those were measured rather than assumed: a per-request
-   budget that is not positive falls back to the CLIENT's timeout, and a client built without one is clamped
-   to thirty seconds by the constructor — while against a provider that accepts the connection and never
-   sends headers the transport's own ResponseHeaderTimeout (fifteen seconds by default) is what actually
-   ends the wait. The buffered path therefore has no unbounded spelling at all, and this budget can only
-   ever NARROW what the client would have allowed. Both callers run on a schedule with nothing waiting on
-   them, so the number is chosen to fail fast and let the caller's retry decide, not to give a slow provider
-   every chance. */
+/* outboundRequestTimeout bounds one exchange with an outbound provider. A non-positive per-request budget falls back to the client's timeout, which the constructor clamps to thirty seconds, so this value can only narrow what the client allows; both callers run on a schedule, so it fails fast and leaves the decision to the caller's retry. */
 const outboundRequestTimeout = 3 * time.Second
 
-/* registerRatesHttpClientService follows the convention every optional integration in this application
-   follows: the env key names the provider, and an absent key leaves the door unwired rather than failing
-   the boot. Nothing resolves this service unless a refresh actually runs, so an http process that never
-   refreshes never builds a client and never opens a pool. */
+/* registerRatesHttpClientService leaves the client unwired when the provider key is absent; nothing resolves it unless a refresh runs, so an http process opens no pool for it. */
 func (instance *Module) registerRatesHttpClientService(registrar melodyapplicationcontract.ServiceRegistrar) {
     baseUrl := instance.environmentValue(parameterRatesBaseUrl)
     if "" == baseUrl {
@@ -47,28 +25,14 @@ func (instance *Module) registerRatesHttpClientService(registrar melodyapplicati
     registrar.RegisterService(
         service.ServiceRatesHttpClient,
         func(resolver melodycontainercontract.Resolver) (*httpclient.HttpClient, error) {
-            /* the base url carries a path and therefore its trailing slash, and every target the refresh
-               names is RELATIVE to it. That is not a style choice: the client resolves a target against the
-               base by RFC 3986, so an absolute-path target ("/latest") would replace the base path entirely
-               and reach a resource one segment up — measured against the running provider, 404 where the
-               relative spelling answers 200. A base whose path lacks the slash is refused at construction,
-               which is where the wiring mistake is made. */
+            /* every target the refresh names is relative to the base url, which carries its trailing slash: the client resolves a target by RFC 3986, so an absolute-path target would replace the base path. A base whose path lacks the slash is refused at construction. */
             return httpclient.NewHttpClient(ratesHttpClientConfig(baseUrl)), nil
         },
         outboundClientRegisterOptions()...,
     )
 }
 
-/* registerReportExportHttpClientService builds the other shape. The export endpoint is a whole url an
-   operator configures, host included, so this client carries NO base: a based client judges the resolved
-   url against its own origin and would refuse the endpoint the moment it named a different host, which is
-   exactly the configuration an operator is entitled to write. The caller therefore hands it the absolute
-   url, the only spelling a baseless client accepts.
-
-   It does not follow a redirect either: a POST answered 301, 302 or 303 is re-sent by net/http as a GET
-   without its body, so a sink that moved — or a proxy in front of it that answers with its login page —
-   would have the export read the 200 of a page nothing was stored at as "someone received it". The 3xx
-   reaches the exporter, which refuses it by name. */
+/* registerReportExportHttpClientService builds the baseless shape, because the export endpoint is a whole url an operator configures and a based client would refuse it once it named another host. It follows no redirect: net/http re-sends a POST answered 301, 302 or 303 as a GET without its body, so the exporter sees the 3xx and refuses it rather than read a moved sink's 200 as a delivery. */
 func (instance *Module) registerReportExportHttpClientService(registrar melodyapplicationcontract.ServiceRegistrar) {
     if "" == instance.environmentValue(parameterReportExportEndpoint) {
         return
@@ -107,13 +71,7 @@ func reportExportHttpClientConfig() *httpclient.HttpClientConfig {
     ).WithoutRedirects()
 }
 
-/* outboundClientRegisterOptions keeps both clients OFF the by-type index, and neither of them is the one
-   that "loses" it: they are the same concrete type, so a resolution by type could only answer with whichever
-   registration happened to land first, and a caller asking for "the http client" of an application that
-   holds two would be answered arbitrarily. Registered by name only, the ambiguity cannot be spelled — asking
-   for a client means naming which provider it points at. Measured before it was written: with both on the
-   index the boot refuses with a serviceType collision on the second, which is the framework saying the same
-   thing. */
+/* outboundClientRegisterOptions keeps both clients off the by-type index: they share a concrete type, so a resolution by type would answer arbitrarily, and a caller names the provider its client points at. */
 func outboundClientRegisterOptions() []melodycontainercontract.RegisterOption {
     return []melodycontainercontract.RegisterOption{
         melodycontainer.WithoutTypeRegistration(),

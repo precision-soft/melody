@@ -1685,7 +1685,7 @@ func TestScope_OverridePropagationCoversTheScopeOwnRegistrations(t *testing.T) {
     }
 }
 
-/* a closed scope enumerates nothing, mirroring Has: the request is over and its collaborators are gone, so a late collection gets an empty set instead of reaching into a container the scope no longer holds */
+/* a closed scope enumerates nothing, mirroring Has: the request is over and its collaborators are gone, so a late collection gets an empty set instead of reaching into a container the scope has let go of */
 func TestScope_TypesImplementingReturnsEmptyWhenClosed(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -2190,7 +2190,6 @@ func TestScope_Close_ContainsAPanickingContextDoor(t *testing.T) {
         }
     }
 }
-
 
 /* the scope's failure map has the same one-line shape as the container's, and the same details map beside it */
 func TestScope_Close_CarriesTheFailureDetailsOfAPanickingCloseBesideItsLine(t *testing.T) {

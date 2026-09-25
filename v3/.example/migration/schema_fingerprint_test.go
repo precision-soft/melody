@@ -124,10 +124,7 @@ func tablesAnswering(presentList ...string) func(query string) ([]string, [][]dr
     }
 }
 
-/* a set runs only on a volume that does not record it, and on one that already held its tables every CREATE ...
-   IF NOT EXISTS was a no-op after which the set wrote this code's fingerprint over tables it did not build — the
-   fingerprint then vouched for statements that never ran. The set refuses before it writes anything, naming the
-   tables it found and the reset; asked of the catalogue's own database, in its own dialect */
+/* a set runs only on a volume that does not record it, and on one that already holds its tables every CREATE ... IF NOT EXISTS is a no-op, so writing this code's fingerprint over them would vouch for statements that never ran. The set refuses before it writes anything, naming the tables it found and the reset; asked of the catalogue's own database, in its own dialect */
 func TestUpSchemaRefusesToAdoptTablesItDidNotBuild(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = tablesAnswering("melody_example_v3_user", "melody_example_v3_currency")

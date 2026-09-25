@@ -31,11 +31,7 @@ func (instance *Module) RegisterParameters(registrar melodyapplicationcontract.P
         "%env(default:app.reporting.default_refresh_interval:APP_REPORTING_REFRESH_INTERVAL)%",
     )
 
-    /* the empty-string fallback, used by both outbound endpoints: they are genuinely absent in most
-       environments, so the parameter resolves to "" instead of every environment having to define a key it
-       does not use. The distinction matters because a constructor argument BOUND to a parameter reads it
-       through MustGet, which panics on a parameter that was never registered — an auto-registered .env key
-       disappears with its line, a parameter declared here does not. */
+    /* the empty-string fallback of both outbound endpoints: a constructor argument bound to a parameter reads it through MustGet, which panics on an unregistered parameter, and a parameter declared here survives its .env line being removed. */
     registrar.RegisterParameter(parameterReportExportEndpoint, "%env(default::"+environmentKeyReportExportEndpoint+")%")
     registrar.RegisterParameter(parameterRatesBaseUrl, "%env(default::"+environmentKeyRatesBaseUrl+")%")
 
@@ -54,20 +50,13 @@ func (instance *Module) RegisterParameters(registrar melodyapplicationcontract.P
         instance.markEnvironmentSecret(registrar, environmentKey, urlCarriesUserinfo)
     }
 
-    /* the credentials melody registers automatically from .env are marked here, so debug:parameters redacts them along with anything whose template reads them. AMQP_DSN is on the list because it carries its credentials INLINE: the amqp credentials sit whole in this one key and no marked source exists to propagate from.
-
-       No parameter of this application assembles a template out of the integration keys — MYSQL_*, PGSQL_* — and none may: those keys are the switches the readme says to REMOVE to boot the fallbacks, and a template that read one without a default made the boot fail the moment its line was gone, over a value nothing consumed. The mysql provider assembles its own connection from the keys it reads directly. */
+    /* the credentials melody registers from .env are marked here, so debug:parameters redacts them and every template that reads them; AMQP_DSN carries its credentials inline. No parameter assembles a template from the MYSQL_* or PGSQL_* keys, because those are the switches the readme says to remove. */
     for _, environmentKey := range []string{environmentKeyMysqlPassword, environmentKeyPgsqlPassword, environmentKeyS3SecretKey, environmentKeyAmqpDsn} {
         instance.markEnvironmentSecret(registrar, environmentKey, nil)
     }
 }
 
-/* markEnvironmentSecret marks a key of the environment secret when the environment defines it — a line present,
-   even blank, is a parameter melody registered from it — and, when carriesSecret is given, only when its value
-   does. A key the environment does not define is not marked: the integration blocks are the switches the readme
-   says to REMOVE to boot the fallbacks, and a mark that matched no parameter warned "a secret marking matched no
-   parameter" at every boot of the very deployment the readme calls ordinary, a mysql-only checkout without the
-   PGSQL block. */
+/* markEnvironmentSecret marks a key secret only when the environment defines it and, with carriesSecret, only when its value does. An undefined key is not marked, because the integration blocks are switches the readme says to remove and a mark that matches no parameter warns at boot. */
 func (instance *Module) markEnvironmentSecret(
     registrar melodyapplicationcontract.ParameterRegistrar,
     environmentKey string,

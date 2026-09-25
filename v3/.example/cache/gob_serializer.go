@@ -30,9 +30,7 @@ func NewGobSerializer() melodycachecontract.Serializer {
     return &gobSerializer{}
 }
 
-/* LayoutToken is a short hash of the layout of every cached type — the type's name and, field by field, each exported field's name and type, into the structs it holds — and it is the reason the cache keys of this application carry it in their prefix. gob decodes by field name and stays silent about a field the payload does not carry: an entry written by a build without that field decodes into the new struct with the field at its zero value, and the entries have no expiry. After a deploy that added a field over a live redis, every read served the zero — a currency with no rate, refused by every conversion — until something happened to drop the keys. Under a prefix that changes with the layout, a build reads only what a build of the same layout wrote; what an older build left stands orphaned in redis until the reset clears the namespace, which is the cost, written down.
-
-   The token is computed, not maintained: a version bumped by hand is a version someone forgets to bump, and the field that was forgotten is exactly the one that decodes to zero. */
+/* LayoutToken is a short hash of the layout of every cached type (its name and, field by field, each exported field's name and type, into the structs it holds), and the cache keys carry it in their prefix. gob decodes by field name and stays silent about a field the payload lacks, and the entries have no expiry, so without it a build that added a field would read the zero from every older entry; under a prefix that changes with the layout a build reads only what its own layout wrote, and older entries stand orphaned until the reset clears the namespace. The token is computed rather than maintained, because a version bumped by hand is one someone forgets. */
 func LayoutToken() string {
     return layoutTokenOf(cachedValueList)
 }

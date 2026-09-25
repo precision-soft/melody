@@ -120,10 +120,7 @@ func TestCurrencyRefreshRatesCommandPrintsTheTableBeforeHandingBackARefusedQuote
     }
 }
 
-/* a backend that failed part way is not a refused quote: the sweep stops, the table shows what was written
-   before it, and the failure — the backend's, not the provider's — takes the exit code after the table. The
-   line agrees with the table it follows: the quote counted UPDATED is named as written, where the operator
-   used to read "could not be written" under UPDATED 1 */
+/* a backend that fails part way is not a refused quote: the sweep stops, the table shows what was written before it, and the failure, the backend's rather than the provider's, takes the exit code after the table. The line agrees with the table it follows: the quote counted UPDATED is named as written, not as "could not be written" */
 func TestCurrencyRefreshRatesCommandPrintsTheTableBeforeHandingBackABackendFailure(t *testing.T) {
     runtimeInstance := rateRefreshCommandRuntime(t, `{"base":"EUR","asOf":"2026-09-08T09:00:00Z","rates":{"EUR":1,"USD":1.0842,"RON":4.9761}}`, func(dispatcher melodyeventcontract.EventDispatcher) melodyeventcontract.EventDispatcher {
         return &refusingDispatcher{EventDispatcher: dispatcher}

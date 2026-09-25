@@ -209,8 +209,7 @@ func newRefreshFixture(t *testing.T, option refreshFixtureOption) *refreshFixtur
     archive := &sequenceArchive{sequence: sequence}
     clockInstance := melodyclock.NewFrozenClock(time.Date(2026, time.September, 13, 9, 0, 0, 0, time.UTC))
 
-    /* the serializer the composition root registers: under the json one a cached list came back as []any, so
-       a second run over the same cache failed on the product list before it reached the archive */
+    /* the serializer the composition root registers: under the json one a cached list comes back as []any, so a second run over the same cache would fail on the product list before it reached the archive */
     backend := melodycache.NewInMemoryBackend(0, 0, clockInstance)
     cacheInstance := &sequenceCache{Cache: melodycache.NewManagerOwningBackend(backend, examplecache.NewGobSerializer()), sequence: sequence}
 
@@ -325,9 +324,7 @@ func TestCatalogReportRefreshCommandDrivesLockRefreshArchiveExportInThatOrder(t 
     }
 }
 
-/* a reading the archive already holds at that instant is not a failure, and the run exits zero — but the table
-   alone answered ARCHIVED false with nothing beside it, which reads as an archive that did not record the
-   reading; the console says why nothing was written */
+/* a reading the archive already holds at that instant is not a failure, and the run exits zero; the table alone would answer ARCHIVED false with nothing beside it, which reads as an archive that did not record the reading, so the console says why nothing was written */
 func TestCatalogReportRefreshCommandSaysWhyAReadingAlreadyRecordedIsNotArchivedAgain(t *testing.T) {
     fixture := newRefreshFixture(t, refreshFixtureOption{})
 
@@ -372,7 +369,7 @@ func TestCatalogReportRefreshCommandSkipsTheWholeRunWhenTheLockIsHeldElsewhere(t
     }
 }
 
-/* a locker that is registered and cannot be resolved is the archive being unreachable — its provider opens the postgres handle — and that is a failure handed back, where it used to read as "no archive wired" and exit zero over a reading never recorded. It is handed back AFTER the reading and the export, which need nothing from postgres: the archive's outage does not take the two halves that do not depend on it. */
+/* a locker that is registered and cannot be resolved is the archive being unreachable (its provider opens the postgres handle), and that is a failure handed back, not read as "no archive wired" with a zero exit over a reading never recorded. It is handed back after the reading and the export, which need nothing from postgres: the archive's outage does not take the two halves that do not depend on it. */
 func TestCatalogReportRefreshCommandHandsBackAnUnreachableArchiveAfterReadingAndExporting(t *testing.T) {
     refusal := errors.New("dial tcp 172.18.0.10:5432: connect: connection refused")
     fixture := newRefreshFixture(t, refreshFixtureOption{
@@ -465,9 +462,7 @@ func TestCatalogReportRefreshCommandNamesTheArchivesOwnRefusalOnTheConsole(t *te
     }
 }
 
-/* an ERROR taking the lock — not a lock held elsewhere — is the archive being unreachable, and the reading and
-   the export go on without it; the previous form returned before either, so a connection lost between the
-   open and the advisory lock cost the tick its reading and its export */
+/* an error taking the lock, not a lock held elsewhere, is the archive being unreachable, and the reading and the export go on without it, so a connection lost between the open and the advisory lock does not cost the tick its reading and its export */
 func TestCatalogReportRefreshCommandReadsAndExportsWhenTheLockCannotBeTaken(t *testing.T) {
     sequence := &refreshSequence{}
     acquireErr := errors.New("pgsql lock acquire failed")
@@ -491,9 +486,7 @@ func TestCatalogReportRefreshCommandReadsAndExportsWhenTheLockCannotBeTaken(t *t
     }
 }
 
-/* the archive's own refusal on the Archive branch reaches the console — the cli engine renders the message
-   alone — with the database it names and the step that did not complete both in the message, where one
-   form wrapped it under a headline that named neither and the next handed it back without the step */
+/* the archive's own refusal on the Archive branch reaches the console, which the cli engine renders from the message alone, with the database it names and the step that did not complete both in the message */
 func TestCatalogReportRefreshCommandKeepsTheArchivesOwnRefusalOnTheArchiveBranch(t *testing.T) {
     fixture := newRefreshFixture(t, refreshFixtureOption{})
     own := exception.NewError("the archive database at postgres:5432/melody_example_v3 refused the insert", nil, errors.New("connection reset"))
@@ -519,8 +512,7 @@ func TestCatalogReportRefreshCommandKeepsTheArchivesOwnRefusalOnTheArchiveBranch
     }
 }
 
-/* both halves failing: the console names the archive's refusal beside the sink's and the exit carries both,
-   where the previous form printed and returned the sink's alone */
+/* both halves failing: the console names the archive's refusal beside the sink's and the exit carries both, so neither hides the other */
 func TestCatalogReportRefreshCommandReportsBothHalvesWhenBothRefuse(t *testing.T) {
     fixture := newRefreshFixture(t, refreshFixtureOption{sinkStatus: http.StatusInternalServerError})
     own := exception.NewError("the archive database at postgres:5432/melody_example_v3 refused the insert", nil, errors.New("connection reset"))
@@ -535,7 +527,7 @@ func TestCatalogReportRefreshCommandReportsBothHalvesWhenBothRefuse(t *testing.T
         t.Fatalf("expected the exit to carry the sink's refusal as well, got %v", runErr)
     }
 
-    /* the cli engine escapes a newline in a failure's message, so a joined error's own rendering reached the console as a literal \n between the two halves */
+    /* the cli engine escapes a newline in a failure's message, so a joined error's own rendering would reach the console as a literal \n between the two halves */
     if true == strings.Contains(runErr.Error(), "\n") {
         t.Fatalf("expected the two halves on one line, got %q", runErr.Error())
     }

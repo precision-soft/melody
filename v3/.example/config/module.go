@@ -64,9 +64,7 @@ type Module struct {
     storageBucket string
     storage       *melodyawss3.Storage
 
-    /* the registry is the one door onto BOTH connections: the db:* command family resolves it by name for the catalogue and the db:archive:* family for the archive, and the catalogue handle below is its default manager rather than a second pool opened beside it.
-
-       There is no archive handle beside it on purpose. The catalogue is opened eagerly here because everything in this application reads it; the archive is opened at its first resolution instead, because a process that never takes a reading — every db:* invocation, every debug command, every --help — would otherwise pay a second handshake for a connection it never uses. */
+    /* the registry is the one door onto both connections, and the catalogue handle is its default manager. The catalogue is opened eagerly because everything reads it; the archive is opened at its first resolution, so a process that never takes a reading pays no second handshake. */
     databaseRegistry *melodybunorm.ManagerRegistry
     database         *bun.DB
 
@@ -149,12 +147,7 @@ const (
 
 )
 
-/* the two outbound endpoints are read through PARAMETERS rather than through the raw .env keys above,
-   because a constructor argument bound to one is read with MustGet: an auto-registered key vanishes with
-   its line in .env and takes the boot down with it, while a parameter declared in RegisterParameters with
-   an empty-string fallback survives the line being removed and answers "" — which is what "this door is
-   unwired" means everywhere else in this application. Both spellings name one value: the parameter reads
-   the key. */
+/* the two outbound endpoints are read through parameters rather than raw .env keys: a bound constructor argument is read with MustGet, and an auto-registered key vanishes with its .env line, while a parameter declared with an empty-string fallback answers "", which means the door is unwired. */
 const (
     parameterRatesBaseUrl        = "app.rates.base_url"
     parameterReportExportEndpoint = "app.reporting.export_endpoint"
@@ -170,7 +163,7 @@ const (
     defaultRatesBaseCurrency          = "EUR"
 )
 
-/* environmentValue reads a value melody auto-registered from the .env files (every env key becomes a same-named parameter). The values are already fully resolved here — NewConfiguration (called in NewApplication, before this composition root runs) applies applyEnvironmentOverrides + resolvePlaceholders, which expand %env(X)%/%name% indirection and unescape %% — so a plain String() read is correct. Returns "" when the key is absent so the eager build steps keep their "unset means skip this integration" behaviour. */
+/* environmentValue reads a value melody auto-registered from the .env files. NewConfiguration has already resolved the env and placeholder indirection, so a plain String() read is correct; an absent key answers "", which leaves its integration unwired. */
 func (instance *Module) environmentValue(key string) string {
     parameter := instance.configuration.Get(key)
     if nil == parameter {

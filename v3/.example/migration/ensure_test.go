@@ -233,7 +233,7 @@ func TestEnsureMigratedCreatesTheJournalTableWithTheCatalogue(t *testing.T) {
     }
 }
 
-/* the released lock is the whole point of the deferred unlock, so a release that FAILED has to become the verdict rather than be dropped: a lock row that survives refuses every later migration on every process, and a resolution that answered success would leave the operator with a database nothing can migrate and no error saying why. Neither frozen major pins it — this is the assertion added here. */
+/* the released lock is the whole point of the deferred unlock, so a release that fails becomes the verdict rather than being dropped: a lock row that survives refuses every later migration on every process, and a resolution that answered success would leave the operator with a database nothing can migrate and no error saying why. */
 func TestEnsureMigratedReportsAFailedUnlockAsTheVerdict(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 
@@ -279,7 +279,7 @@ func TestEnsureMigratedReportsAFailedUnlockAsTheVerdict(t *testing.T) {
     }
 }
 
-/* the two-factor enrollment table is this major's own: neither frozen major carries it, and the set applying without it would leave the enrollment flow unwired at every boot, silently — the build step swallows a schema failure rather than aborting the application */
+/* the two-factor enrollment table is this major's own: neither frozen major carries it, and the set applying without it would leave the enrollment flow reading a table nothing creates */
 func TestEnsureMigratedCreatesTheTwoFactorTableWithTheCatalogue(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 
@@ -292,11 +292,7 @@ func TestEnsureMigratedCreatesTheTwoFactorTableWithTheCatalogue(t *testing.T) {
     }
 }
 
-/* the wait is paid once, not once per resolution. The whole protocol runs under one process mutex, so a
-   lock nobody releases used to cost the window to every caller in turn: measured on a 300ms window, three
-   concurrent resolutions took 1.5s and each later request added its own. What the refusal says does not
-   change — it is the same value, handed back — so the assertion is on the COST and on the identity of what
-   is returned, the two things that separate a remembered refusal from a repeated one. */
+/* the wait is paid once, not once per resolution: the whole protocol runs under one process mutex, so without the memo a lock nobody releases would cost the window to every caller in turn. The refusal is the same value, handed back, so the assertion is on the cost and on the identity of what is returned, the two things that separate a remembered refusal from a repeated one. */
 func TestEnsureMigratedAnswersARememberedRefusalWithoutWaitingAgain(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 
@@ -338,8 +334,7 @@ func TestEnsureMigratedAnswersARememberedRefusalWithoutWaitingAgain(t *testing.T
     }
 }
 
-/* the memory is not a verdict: once the window it was recorded for has passed, the next resolution asks the
-   database again, so a lock that was released heals the process without a restart. */
+/* the memory is not a verdict: once the window it is recorded for has passed, the next resolution asks the database again, so a released lock heals the process without a restart. */
 func TestEnsureMigratedForgetsTheRefusalOnceItsWindowHasPassed(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 
@@ -439,17 +434,7 @@ func TestResetClearsTheMemoForTheHandle(t *testing.T) {
     }
 }
 
-/* the memo key is the handle AND the set together, and this is what that buys: one handle asked for both
-   sets must run BOTH. Keyed by the handle alone — the shape this package carried while it had a single
-   set — the first set applied would answer for the second, and the archive's table would never be created
-   on an application that keeps both on one connection.
-
-   It is driven through the funnel rather than by writing the map directly, because the key is computed
-   INSIDE the funnel: a test that built the key itself would asserting its own arithmetic, and a mutant on
-   the line that computes it would survive untouched.
-
-   The two sets are driven over ONE handle deliberately: over two handles the memo separates them under
-   either key, so the pair is only observable where the handle is shared. */
+/* the memo key is the handle and the set together, so one handle asked for both sets runs both; keyed by the handle alone, the first set applied would answer for the second and the archive's table would never be created on an application that keeps both on one connection. It is driven through the funnel rather than by writing the map, because the key is computed inside the funnel and a test that built it would assert its own arithmetic. The two sets share one handle deliberately: over two handles the memo separates them under either key. */
 func TestTheMemoDoesNotLetOneSetAnswerForTheOther(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 
@@ -482,7 +467,7 @@ func TestTheMemoDoesNotLetOneSetAnswerForTheOther(t *testing.T) {
     }
 }
 
-/* a failure of the database on the archive's first resolution travelled up raw, and the container's by-type resolution relabelled it "service not registered in resolver" — a headline that sent the operator to the wiring for a database that had refused. Every failure of a set is handed back as this application's exception naming the set and the step, with the driver's error as the cause, so the headline says which database and errors.Is still reaches the cause. */
+/* a failure of the database on the archive's first resolution is handed back as this application's exception naming the set and the step, with the driver's error as the cause, so the headline says which database refused rather than the container's by-type relabelling "service not registered in resolver", and errors.Is still reaches the cause. */
 func TestEnsureArchiveMigratedNamesTheArchiveSetAndTheStepOverADatabaseThatRefuses(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 
@@ -522,9 +507,7 @@ func TestMigrationStepFailureLeavesAnOwnExceptionUntouched(t *testing.T) {
     }
 }
 
-/* a lock wait that ends because the process is going away hands back the set's own exception, not a bare
-   context.Canceled: a by-type resolution wraps any foreign error under "service resolution failed in resolver",
-   which is what the console printed for a SIGTERM during the wait. errors.Is still reaches the cancellation. */
+/* a lock wait that ends because the process is going away hands back the set's own exception, not a bare context.Canceled, which a by-type resolution would wrap under "service resolution failed in resolver". errors.Is still reaches the cancellation. */
 func TestEnsureMigratedNamesTheSetWhenTheLockWaitIsCancelled(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 

@@ -6,39 +6,6 @@
 # fails, a file below it fails until the line is lowered, and a line for a file that carries none fails until
 # it is deleted. The comment reduction of the third major lowers these lines slice by slice; the list is empty
 # when it is done.
-v3/container/container_close_test.go                         ~ 4
-v3/container/container_register_test.go                      ~ 1
-v3/container/container_test.go                               ~ 1
-v3/container/lazy_test.go                                    ~ 3
-v3/container/resolver_context.go                             ~ 2
-v3/container/resolver_context_scoped_test.go                 ~ 3
-v3/container/resolver_implementing_test.go                   ~ 1
-v3/container/scope_test.go                                   ~ 1
-v3/debug/command_parameter_test.go                           ~ 1
-v3/.example/cli/cache_clear_command.go                       ~ 1
-v3/.example/cli/catalog_report_refresh_command.go            ~ 4
-v3/.example/cli/catalog_report_refresh_command_test.go       ~ 3
-v3/.example/cli/currency_refresh_rates_command_test.go       ~ 1
-v3/.example/cli/database_reset_command.go                    ~ 1
-v3/.example/cli/database_reset_command_test.go               ~ 3
-v3/.example/cli/grant_role_command.go                        ~ 4
-v3/.example/cli/grant_role_command_test.go                   ~ 5
-v3/.example/cli/product_list_command.go                      ~ 2
-v3/.example/config/configure_test.go                         ~ 2
-v3/.example/config/database.go                               ~ 2
-v3/.example/config/database_test.go                          ~ 3
-v3/.example/config/event_test.go                             ~ 2
-v3/.example/config/httpclient.go                             ~ 3
-v3/.example/config/messagebus.go                             ~ 1
-v3/.example/config/messagebus_test.go                        ~ 2
-v3/.example/config/middleware.go                             ~ 1
-v3/.example/config/security.go                               ~ 1
-v3/.example/config/service_test.go                           ~ 1
-v3/.example/config/trusted_proxy.go                          ~ 1
-v3/.example/config/trusted_proxy_test.go                     ~ 5
-v3/.example/config/wiring_test.go                            ~ 2
-v3/.example/entity/rate_quote.go                             ~ 2
-v3/.example/entity/rate_quote_test.go                        ~ 1
 v3/.example/event/user_updated_event.go                      ~ 2
 v3/.example/handler/event/stream_handler.go                  ~ 2
 v3/.example/handler/event/stream_handler_test.go             ~ 2
@@ -49,14 +16,6 @@ v3/.example/handler/twofactor/two_factor_handler_test.go     ~ 2
 v3/.example/handler/user/read_handler.go                     ~ 1
 v3/.example/handler/user/read_handler_test.go                ~ 1
 v3/.example/handler/user/update_handler_test.go              ~ 1
-v3/.example/main.go                                          ~ 1
-v3/.example/migration/20260907000001_schema.go               ~ 2
-v3/.example/migration/ensure.go                              ~ 5
-v3/.example/migration/ensure_test.go                         ~ 3
-v3/.example/migration/fixture_test.go                        ~ 2
-v3/.example/migration/migration_test.go                      ~ 1
-v3/.example/migration/schema_drift.go                        ~ 1
-v3/.example/migration/schema_drift_test.go                   ~ 1
 v3/.example/presenter/error_presenter.go                     ~ 1
 v3/.example/presenter/error_presenter_test.go                ~ 2
 v3/.example/reporting/report_exporter_test.go                ~ 1
@@ -86,4 +45,3 @@ v3/.example/subscriber/catalog_notification.go               ~ 1
 v3/.example/subscriber/user_event_subscriber.go              ~ 3
 v3/.example/twofactor/store.go                               ~ 2
 v3/.example/twofactor/store_test.go                          ~ 2
-v3/.example/url/route_registry.go                            ~ 1

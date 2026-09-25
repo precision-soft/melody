@@ -52,12 +52,7 @@ func (instance containerRegistrar) RegisterService(
     instance.MustRegister(serviceName, provider, options...)
 }
 
-/* The catalog storage is the one door an ordinary http process passes through on its way to a repository:
-   the generated wiring resolves it by type for every one of them. A provider that CAPTURES the handle the
-   composition root already built resolves nothing, so the container records no dependency — and measured on
-   the running stack that is exactly what happened: over a boot, a login and three authenticated api reads,
-   the registry service and the handle service were resolved ZERO times, SetLogger was never called, and at
-   SIGTERM the container closed neither the pool nor the registry. Resolving is what writes the edge. */
+/* The catalog storage is the one door an ordinary http process passes through on its way to a repository: the generated wiring resolves it by type for every one of them. A provider that captures the handle the composition root already built resolves nothing, so the container records no dependency, the registry's SetLogger never runs and at SIGTERM neither the pool nor the registry is closed. Resolving is what writes the edge. */
 func TestRegisterCatalogStorageService_ResolvesTheHandleRatherThanCapturingIt(t *testing.T) {
     containerInstance := melodycontainer.NewContainer()
 
@@ -118,9 +113,7 @@ func (instance refusingBackplane) Close() error {
     return nil
 }
 
-/* the hub files its own failures, and its provider is where it is handed the application's journal: without
-   the swap a redis outage silenced cross-node delivery into a counter nobody reads. A publish the backplane
-   refuses after the hub was resolved reaches the logger the container publishes. */
+/* the hub files its own failures, and its provider is where it is handed the application's journal; without the swap a redis outage would silence cross-node delivery into a counter nobody reads. A publish the backplane refuses after the hub is resolved reaches the logger the container publishes. */
 func TestRegisterServerSentEventHubService_HandsTheHubTheContainersJournal(t *testing.T) {
     /* read after Shutdown, which waits for the publishes in flight: the record is written before it returns */
     journal := &bytes.Buffer{}

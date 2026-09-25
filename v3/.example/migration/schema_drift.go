@@ -142,14 +142,7 @@ type tableDrift struct {
     unexpectedColumnList []string
 }
 
-/* refuseSchemaDrift compares every table the set creates with the table the volume holds, and refuses a volume
-   that is not in the present shape. The set is a single migration recorded as applied by NAME, and its tables are
-   created IF NOT EXISTS, so a volume provisioned before a column was added keeps its table as it was and the set
-   answers that it has nothing left to do: every statement that named the new column then failed at the first
-   request that reached it — measured, a product read answered 500 on "Unknown column" — far from the one step that
-   could have said what the volume is. Refused here, at the first resolution, the refusal names the set, each table,
-   the columns on either side and the one door that brings the volume here. The refusal is not remembered: the next
-   resolution after the reset finds the present schema and goes on. */
+/* refuseSchemaDrift compares every table the set creates with the table the volume holds and refuses a volume that is not in the present shape. The set is recorded as applied by name and its tables are created IF NOT EXISTS, so a volume provisioned before a column was added passes it untouched and would fail at the first request that reads the column; refused here, the refusal names the set, each table, the columns on either side and the reset command. It is not remembered, so the resolution after the reset goes on. */
 func refuseSchemaDrift(ctx context.Context, database *bun.DB, setName string, expectedSchema []expectedTable) error {
     var driftList []tableDrift
 

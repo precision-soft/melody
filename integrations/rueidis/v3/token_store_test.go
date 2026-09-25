@@ -391,7 +391,7 @@ func sscanCallCount(t *testing.T, client redisclient.Client) int64 {
     return 0
 }
 
-/* Redis runs a script with every other client blocked, so reading a whole index set inside one script would stall the entire server in proportion to that user's token history, around two seconds over a million tokens. The walk has to be incremental, and the batch handed to any one script has to be bounded by this side, because SSCAN treats its count as a hint and can return more. */
+/* Redis runs a script with every other client blocked, so reading a whole index set inside one script would stall the entire server in proportion to that user's token history. The walk has to be incremental, and the batch handed to any one script has to be bounded by this side, because SSCAN treats its count as a hint and can return more. */
 func TestRedisTokenStore_DeleteByUserRevokesInBoundedBatches(t *testing.T) {
     client := newTokenStoreClient(t)
     store := NewTokenStore(

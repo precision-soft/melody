@@ -55,7 +55,7 @@ type resolverContext struct {
     contextId         uint64
     rootRequestedKey  string
     stack             *resolutionStack
-    /* ownerKey is the node whose provider was handed this view, so a resolution made after that provider returned is recorded as its dependency; a view over the container itself has no owner */
+    /* ownerKey is the node whose provider received this view, so a resolution made after that provider returned is recorded as its dependency; a view over the container itself has no owner */
     ownerKey string
     /* scopeSuspended is set while a container-owned provider builds its service, which may read only what the container holds. Suspension is a refusal: a scope-only service is reported as not existing, and the logger is the container's */
     scopeSuspended bool
@@ -713,7 +713,7 @@ func (instance *resolverContext) stackStringWithRepeat(repeatedKey string) strin
     return strings.Join(parts, " -> ")
 }
 
-/* TypesImplementing lets a provider collect through the resolver it was handed. A resolution seeing its scope collects what the scope reaches; a container provider, its scope suspended, collects only the container's services. */
+/* TypesImplementing lets a provider collect through the resolver it receives. A resolution seeing its scope collects what the scope reaches; a container provider, its scope suspended, collects only the container's services. */
 func (instance *resolverContext) TypesImplementing(interfaceType reflect.Type) []reflect.Type {
     if true == instance.scopeVisible() {
         return instance.scopeInstance.TypesImplementing(interfaceType)

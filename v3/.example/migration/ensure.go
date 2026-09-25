@@ -46,9 +46,7 @@ type refusedMigrationAttempt struct {
     refusedAt time.Time
 }
 
-/* EnsureMigrated applies the Migrations set to the example's database, once per handle and per process. The repository constructors the generated wiring fills call it at first resolution, and the provider of the two-factor store calls it before it builds the store, at the first request that needs one, which is what keeps a freshly recreated volume usable without an operator step: the tables appear when the first request reaches a repository, exactly as they did when each repository owned its own create statement.
-
-   A success is recorded for good. A refusal that spent the retry window waiting for another process is recorded for as long as that window, so the resolutions arriving inside it are answered with it instead of each waiting again; every other failure is recorded not at all and is retried at the next resolution. The mutex serializes the callers of one process, and the bun migration lock serializes processes sharing the database — several instances of this example race here whenever a volume starts empty. */
+/* EnsureMigrated applies the Migrations set to the example's database, once per handle and per process; the repository constructors call it at first resolution and the two-factor store's provider at the first request that needs it, so a freshly recreated volume needs no operator step. A success is recorded for good, a refusal that spent the retry window waiting for another process is recorded for that window, and every other failure is retried at the next resolution. The mutex serializes the callers of one process and the bun migration lock the processes sharing the database. */
 func EnsureMigrated(ctx context.Context, database *bun.DB) error {
     return ensureMigratedSet(ctx, database, Migrations, catalogMigrationSetName, migrationUnlockCommand, expectedSchemaOf(schemaUpStatementList), catalogueSchemaSetRecord)
 }
@@ -78,14 +76,7 @@ func ensureMigratedSet(ctx context.Context, database *bun.DB, migrationSet *migr
         return nil
     }
 
-    /* an attempt that was refused is remembered for as long as the wait that produced it, and the callers
-       that arrive inside that span are answered with it rather than made to repeat it.
-
-       Without this the cost of one lock nobody releases is paid per resolution and serially, because the
-       whole protocol runs under this mutex: measured on a window shortened to 300ms, three concurrent
-       resolutions took 1.5s — five windows, not one — and at the real window that is two and a half minutes
-       of requests holding on a refusal already known, each of them answering 500 afterwards. The refusal is
-       the same value, so nothing about what a caller is told changes; only how long it takes to be told. */
+    /* a refusal that spent the wait is remembered for as long as that wait, and callers arriving inside that span are answered with it: the whole protocol runs under this mutex, so without the memo one lock nobody releases would be paid per resolution, serially. The refusal is the same value, so only how long a caller waits changes. */
     if refused, wasRefused := refusedDatabaseList[memoizationKey]; true == wasRefused {
         if migrationLockRetryWindow > time.Since(refused.refusedAt) {
             return refused.refusal
@@ -117,9 +108,7 @@ func ensureMigratedSet(ctx context.Context, database *bun.DB, migrationSet *migr
             refusedDatabaseList[memoizationKey] = refusedMigrationAttempt{refusal: lockErr, refusedAt: time.Now()}
         }
 
-        /* through the same door as every other step: the wait ends bare when the context does — a SIGTERM
-           during a lock wait handed a naked context.Canceled up the by-type resolution, which wrapped it under
-           "service resolution failed in resolver" — and the set's own refusal is left as it is */
+        /* through the same door as every other step: a wait that ends with the context is wrapped with the set and the step rather than handed up bare, and the set's own refusal is left as it is */
         return migrationStepFailure(setName, "waiting for the migration lock", unlockCommand, lockErr)
     }
 
@@ -238,20 +227,7 @@ func migrateWhileLocked(ctx context.Context, migrator *migrate.Migrator, unlockC
     return migrateErr
 }
 
-/* Reset brings the database back to the schema this application declares, whatever shape it was left in:
-   the tables the set owns are dropped, the bookkeeping is dropped and recreated with them, the single
-   migration is applied again, and the memo this package keeps for the handle is cleared so a resolution
-   later in the same process does not answer from a state that no longer exists.
-
-   It is the answer this example gives to a volume provisioned by an older build. An example is not a
-   project with a past: it has one state, the present one, so it carries no migration that repairs its
-   history — the reset is where a database in an older shape is brought to the present one, and dropping
-   the bookkeeping is the half that matters there, because a volume migrated by an older set still holds
-   the rows of steps this schema no longer has.
-
-   No migration lock is taken, and that is not an omission: the reset drops the very table the lock lives
-   in, so no lock could span it. It is an operator command over a development volume, run deliberately,
-   and the caller is what serializes it. */
+/* Reset brings the database back to the schema this application declares, whatever shape it is in: the tables the set owns are dropped, the bookkeeping is dropped and recreated, the single migration is applied again, and this package's memo for the handle is cleared. Dropping the bookkeeping is what brings a volume migrated by an older set to the present one, since its rows name steps this schema does not have. No migration lock is taken, because the reset drops the table the lock lives in; it is a deliberate operator command, and the caller serializes it. */
 func Reset(ctx context.Context, database *bun.DB) error {
     return resetSet(ctx, database, Migrations)
 }
@@ -275,10 +251,7 @@ func resetSet(ctx context.Context, database *bun.DB, migrationSet *migrate.Migra
         return initErr
     }
 
-    /* the down of the set is run before the bookkeeping goes, rather than through the migrator's own
-       rollback: a rollback reverts the last GROUP, so a volume whose rows name steps this schema no
-       longer has would leave its tables standing. The set is one migration, so its down is the whole
-       schema. */
+    /* the down of the set is run before the bookkeeping goes, rather than through the migrator's rollback: a rollback reverts the last group, so a volume whose rows name steps this schema does not have would keep its tables. The set is one migration, so its down is the whole schema. */
     for _, migrationInstance := range migrationSet.Sorted() {
         if nil == migrationInstance.Down {
             continue

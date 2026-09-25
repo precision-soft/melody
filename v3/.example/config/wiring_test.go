@@ -31,7 +31,7 @@ func generateWiring(t *testing.T) (string, *melodywiring.GenerateReport) {
     return source, report
 }
 
-/* the committed file is what the application registers, so it has to stay what the generator produces; without this check a constructor gains an argument and the wiring silently keeps building the old one */
+/* the committed file is what the application registers, so it has to stay what the generator produces; without this check a constructor gains an argument and the committed wiring silently stops matching it */
 func TestWiring_GeneratedFileIsUpToDate(t *testing.T) {
     source, _ := generateWiring(t)
 
@@ -49,11 +49,7 @@ func TestWiring_GeneratedFileIsUpToDate(t *testing.T) {
     }
 }
 
-/* the two assertions carry different properties and neither implies the other. The skip list is "nothing the
-   scan found was left out"; the count is "the scan still finds what it used to", which is the half that
-   notices a package silently dropping out of the bind set — that loses constructors with nothing skipped.
-   The report offers counts and not names, so the count is as specific as this can be: it moves whenever a
-   constructor is added or removed, deliberately, and the number is updated in the same edit that does it. */
+/* the two assertions carry different properties and neither implies the other. The skip list is "nothing the scan found was left out"; the count is "the scan finds every constructor it should", the half that notices a package silently dropping out of the bind set, which loses constructors with nothing skipped. The report offers counts and not names, so the count moves whenever a constructor is added or removed, and the number is updated in the same edit that does it. */
 func TestWiring_CoversEveryConstructorInTheScannedPackages(t *testing.T) {
     _, report := generateWiring(t)
 

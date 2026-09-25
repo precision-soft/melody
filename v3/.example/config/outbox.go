@@ -18,7 +18,7 @@ import (
 
 const outboxNoticeType = "outbox_notice"
 
-/* the outbox wiring hangs the transactional-outbox relay off the module's factory shape (see configure.go): a message enqueued in the same transaction as a business write (atomicity is the whole point) is later drained to the message transport by the relay, with a stable id so a consumer can deduplicate the at-least-once delivery. The factories below are registered as the service providers, so the store and the relay are built from the container at first use — a process that never touches the outbox never opens its schema or its transport. */
+/* the transactional outbox: a message enqueued in the same transaction as a business write is drained to the transport by the relay with a stable id, so a consumer can deduplicate the at-least-once delivery. The store and the relay are built from the container at first use. */
 
 /* outboxStoreFactory is the service.outbox.store provider: it resolves the shared *bun.DB from the container and ensures the outbox schema at the first resolution, not at boot. The relay publishes each row to a dedicated amqp queue (or an in-memory transport without AMQP_DSN). */
 func (instance *Module) outboxStoreFactory(resolver melodycontainercontract.Resolver) (*outbox.Store, error) {
@@ -35,7 +35,7 @@ func (instance *Module) outboxStoreFactory(resolver melodycontainercontract.Reso
     return store, nil
 }
 
-/* serviceOutboxTransport is the container name of the outbox's own amqp transport. It is a registered service rather than a private object of the relay factory for exactly the reason the outbox module's GoDoc warns about: a connection opened inside a factory is invisible to container teardown, so the amqp connection lived exactly as long as the process. Registered, the transport's Close() error joins the ordered teardown once the relay has resolved it. */
+/* serviceOutboxTransport is the container name of the outbox's own amqp transport, registered as a service so its Close joins the ordered teardown; a connection opened inside a factory is invisible to it. */
 const serviceOutboxTransport = "service.outbox.transport"
 
 func (instance *Module) registerOutboxTransportService(registrar melodyapplicationcontract.ServiceRegistrar) {

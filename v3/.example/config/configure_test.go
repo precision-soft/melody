@@ -8,8 +8,7 @@ import (
     melodyhttp "github.com/precision-soft/melody/v3/http"
 )
 
-/* countingBackplane closes the way the shipped ones do — clearing itself from the hub as the first step —
-   and counts the calls, which is the whole question the composition root's second Close raised. */
+/* countingBackplane closes the way the shipped ones do, clearing itself from the hub as the first step, and counts the calls, so a test sees a second Close. */
 type countingBackplane struct {
     hub    *melodyhttp.ServerSentEventHub
     closes int
@@ -36,12 +35,7 @@ func (instance *recordingShutdownRegistrar) OnHttpShutdown(hook func()) {
     instance.hookList = append(instance.hookList, hook)
 }
 
-/* The hub owns the backplane and closes it, and the composition root registers exactly ONE http shutdown hook
-   for the pair: the hub's own Shutdown. Measured on the running stack before the repair, the example also
-   registered a Close of the backplane beside it; the http shutdown hooks run on their own goroutines, so both
-   reached the backplane, the losing path closed one that was already closed, and which of the two drained the
-   publishes in flight was decided by the race. The hook the root registers is run here over the hub the module
-   built, and the container's teardown then closes the hub again through its Close — the pair is idempotent. */
+/* The hub owns the backplane and closes it, and the composition root registers exactly one http shutdown hook for the pair, the hub's own Shutdown: the http shutdown hooks run on their own goroutines, so a second Close of the backplane would race the hub's drain. The hook is run here over the hub the module built, and the container's teardown then closes the hub again through its Close; the pair is idempotent. */
 func TestRegisterHubShutdown_RegistersTheHubsShutdownAloneAndItClosesTheBackplaneOnce(t *testing.T) {
     moduleInstance := &Module{}
     moduleInstance.buildServerSentEvent()
@@ -77,10 +71,7 @@ func TestRegisterHubShutdown_RegistersTheHubsShutdownAloneAndItClosesTheBackplan
     }
 }
 
-/* The base family is PINNED to the catalogue's manager, and the archive is a context named after its own
-   manager, carrying its own set. Unpinned, the base family took the registry's default, and in an environment
-   that armed the archive alone the default IS the archive: an unqualified db:migrate aimed the catalogue's
-   mysql DDL at postgres. The registry is named by the service the database wiring publishes. */
+/* The base family is pinned to the catalogue's manager, and the archive is a context named after its own manager, carrying its own set. Unpinned, the base family would take the registry's default, which in an environment that armed the archive alone is the archive, and an unqualified db:migrate would aim the catalogue's mysql DDL at postgres. The registry is named by the service the database wiring publishes. */
 func TestMigrateModuleConfig_PinsTheBaseFamilyToTheCatalogueAndTheArchiveToItsContext(t *testing.T) {
     config := migrateModuleConfig()
 

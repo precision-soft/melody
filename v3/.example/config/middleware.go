@@ -19,13 +19,7 @@ func (instance *Module) RegisterHttpMiddlewares(kernelInstance melodykernelcontr
     registrar.Use(NewCatalogJournalFlushMiddleware())
 }
 
-/* NewCatalogJournalFlushMiddleware writes what the request changed to the nomenclature, once the request is over and while the caller can still be told it failed.
-
-   The scope closes on the way out of the handler, but it closes from a deferred call that runs AFTER the response has gone to the client (http/kernel.go) — so a caller that reads the journal the moment it receives its 201 would be racing the write. Flushing here instead means the write is committed before the status line is sent, and the failure is a failure of the request rather than a line in a log nobody is reading.
-
-   The trail is resolved from the scope, which is also where the event listeners recorded into it. That both resolutions must be the same object is not decoration: were they not, this would flush an empty trail and nothing would be journalled at all.
-
-   The reported count is measured across the flush — what the trail held before, less what it still holds after — rather than simply what it held. That is what makes the header say the write HAPPENED HERE rather than that there was something to write: the trail's own Close would eventually persist the same entries from the scope's teardown, after the response has gone, and a header taken before the flush could not tell the two apart. */
+/* NewCatalogJournalFlushMiddleware writes what the request changed to the nomenclature before the response is sent, so a failure is the request's failure and a caller reading the journal on its 201 is not racing the write; the scope itself closes after the response has gone. The trail is resolved from the scope the event listeners record into, and the reported count is what the flush wrote, held before less held after, not what the trail held. */
 func NewCatalogJournalFlushMiddleware() melodyhttpcontract.Middleware {
     return func(next melodyhttpcontract.Handler) melodyhttpcontract.Handler {
         return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {

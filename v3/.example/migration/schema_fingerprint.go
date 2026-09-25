@@ -127,14 +127,7 @@ func sealSchemaSet(ctx context.Context, database *bun.DB, record schemaSetRecord
     return execErr
 }
 
-/* refuseSchemaFingerprint refuses a volume whose set was applied from other statements than this code's. The set
-   is recorded as applied by name and its tables are created IF NOT EXISTS, so a volume built before a statement
-   changed keeps what it was built with, and the columns alone do not show it: a type, a collation, a key or a
-   constraint changed under the same column names — the identifier columns moved to utf8mb4_bin were exactly such
-   a change — passed the comparison of the columns untouched. The fingerprint the set recorded when it built the
-   volume is compared with the one this code would record; a volume that holds none was built before the set
-   recorded one. Refused, the refusal names both and the one door that brings the volume here, and it is not
-   remembered, so the resolution after the reset goes on. */
+/* refuseSchemaFingerprint refuses a volume whose set was applied from other statements than this code's: a type, collation, key or constraint changed under the same column names passes the column comparison, so the fingerprint the set recorded when it built the volume is compared with the one this code would record, and a volume holding none predates the record. The refusal names both and the reset command, and it is not remembered, so the resolution after the reset goes on. */
 func refuseSchemaFingerprint(ctx context.Context, database *bun.DB, record schemaSetRecord) error {
     setName := record.setName
     expectedFingerprint := record.fingerprint
@@ -180,17 +173,7 @@ func shortFingerprint(fingerprint string) string {
     return fingerprint[:12]
 }
 
-/* beginSchemaSet opens a set's run on a volume: it refuses to apply the set over tables it did not build, and it
-   writes the set's row as building before the first statement. The set runs on a volume only when the volume does
-   not record it, and its tables are created IF NOT EXISTS, so on a volume that already held them — provisioned
-   before the set, or whose record was lost — every CREATE was a no-op, and a fingerprint written over them vouched
-   for statements that never ran. The row tells the two volumes that hold tables apart: one the set itself began
-   and did not finish carries the set's own row, still building under this code's fingerprint, and the run goes on
-   and finishes it, as a set applied until its last statement succeeds is meant to; one built by anything else
-   carries no such row and is refused, naming the tables it found and the one door that brings the volume here. A
-   record table standing alone and empty is the one step of a run that stopped between creating it and writing the
-   row. The migration lock serializes the processes applying a set, so a second process finds the set recorded and
-   never reaches this read. */
+/* beginSchemaSet opens a set's run on a volume: it refuses to apply the set over tables it did not build, and it writes the set's row as building before the first statement, since over tables that already stand every CREATE ... IF NOT EXISTS is a no-op and a fingerprint would vouch for statements that never ran. A volume carrying the set's own row, still building under this code's fingerprint, is a run the set began, and this run finishes it; one holding tables with no such row is refused, naming the tables and the reset command, and a record table standing alone and empty is a run that stopped between creating it and writing the row. The migration lock serializes the processes applying a set, so a second process finds the set recorded and never reaches this read. */
 func beginSchemaSet(ctx context.Context, database *bun.DB, record schemaSetRecord, tableNameList []string) error {
     setName := record.setName
 

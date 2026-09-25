@@ -39,7 +39,7 @@ func (instance *recordingParameterRegistrar) isMarked(name string) bool {
     return false
 }
 
-/* the two outbound urls can carry a credential in their userinfo — the shape the amqp dsn is marked for — and then debug:parameters printed it in clear, twice: under the key and under the parameter that reads it. Marked as written, the mark propagates to that parameter through its template. */
+/* the two outbound urls can carry a credential in their userinfo, the shape the amqp dsn is marked for, and unmarked, debug:parameters would print it in clear twice: under the key and under the parameter that reads it. Marked as written, the mark propagates to that parameter through its template. */
 func TestRegisterParameters_MarksAnOutboundUrlSecretWhenItCarriesAUserinfo(t *testing.T) {
     registrar := newRecordingParameterRegistrar()
 
@@ -76,7 +76,7 @@ func TestRegisterParameters_LeavesAnOutboundUrlWithoutAUserinfoReadable(t *testi
     }
 }
 
-/* the integration keys are switches the readme says to remove — the line gone, not blank — to boot the in-process fallbacks, and a parameter that read one of them in its template without a default failed the boot's resolution the moment the line was gone: the database dsn did exactly that, over a value nothing in the application consumed. No template may read them. */
+/* the integration keys are switches the readme says to remove, the line gone rather than blank, to boot the in-process fallbacks, and a parameter that read one of them in its template without a default would fail the boot's resolution the moment the line is gone. No template may read them. */
 func TestRegisterParameters_NoTemplateReadsARemovableIntegrationKey(t *testing.T) {
     registrar := newRecordingParameterRegistrar()
 
@@ -113,9 +113,7 @@ func TestRegisterParameters_DefaultsTheRatesBaseToTheSeeds(t *testing.T) {
     }
 }
 
-/* a credential key the environment does not define is not marked: the integration blocks are removed to boot the
-   fallbacks, and a mark that matched no parameter warned at every boot of a mysql-only checkout. A key present —
-   blank included, which melody still registers as a parameter — is marked */
+/* a credential key the environment does not define is not marked: the integration blocks are removed to boot the fallbacks, and a mark that matches no parameter warns at boot. A key present, blank included, which melody still registers as a parameter, is marked */
 func TestRegisterParameters_MarksACredentialOnlyWhereTheEnvironmentDefinesIt(t *testing.T) {
     mysqlOnly := newRecordingParameterRegistrar()
     moduleWithEnvironment(t, map[string]string{"MYSQL_PASSWORD": "melody"}).RegisterParameters(mysqlOnly)

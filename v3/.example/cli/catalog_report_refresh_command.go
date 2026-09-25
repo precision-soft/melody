@@ -34,11 +34,7 @@ func (instance *CatalogReportRefreshCommand) Flags() []melodyclicontract.Flag {
     return nil
 }
 
-/* Run is what the schedule calls. The reading is cheap enough to take inside a request, but the request that finds a cold cache is the one that pays for it, so the catalogue is read on a timer instead and every request finds a warm answer.
-
-   The service is resolved by type: it is one of the constructors melody:wiring:generate found in the reporting package, so it carries no service name of its own.
-
-   The run is one unit under the archive's lock, taken FIRST: a process that cannot take it skips the run whole — no reading, no export, no row — and says so, because another process is taking this reading right now and the archive will hold it either way. The archive is written BEFORE the export: it is the durable half and depends on nothing the sink does, where an export refused first used to return at once and leave no row for a reading the next tick could not retake. The sink's refusal still takes the exit code, after the row is there; an archive that cannot be reached at all takes it after the reading and the export, which need nothing from postgres. */
+/* Run is what the schedule calls, so every request finds a warm reading rather than paying for it on a cold cache. The run is one unit under the archive's lock, taken first: a process that cannot take it skips the whole run and says so. The archive is written before the export, because it is the durable half and depends on nothing the sink does; the sink's refusal takes the exit code after the row is there, and an unreachable archive takes it after the reading and the export. */
 func (instance *CatalogReportRefreshCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext melodyclicontract.Context) error {
     reportService, resolveErr := melodycontainer.FromResolverByType[*reporting.CatalogReportService](runtimeInstance.Container())
     if nil != resolveErr {
@@ -55,7 +51,7 @@ func (instance *CatalogReportRefreshCommand) Run(runtimeInstance melodyruntimeco
         writer = os.Stdout
     }
 
-    /* an archive that cannot be REACHED — its locker resolves by opening the postgres handle — does not take the reading and the export with it: the run goes on without the archive and its failure takes the exit code at the end, after the two halves that do not depend on postgres have been done. The old form read that failure as "no archive wired" and exited zero over a reading nobody recorded. */
+    /* an archive that cannot be reached (its locker resolves by opening the postgres handle) does not take the reading and the export with it: the run goes on without the archive, and its failure takes the exit code at the end */
     archiveLock, lockErr := archiveLockOf(runtimeInstance)
     archiveFailure := lockErr
 
@@ -77,8 +73,7 @@ func (instance *CatalogReportRefreshCommand) Run(runtimeInstance melodyruntimeco
 
     reading, refreshErr := reportService.Refresh(runtimeInstance.Context())
     if nil != refreshErr {
-        /* a reading that failed after the archive had already refused carries both: the second failure
-           used to hide the first, and the first is the one that names the database */
+        /* a reading that fails after the archive has refused carries both, so the second failure does not hide the first, which is the one that names the database */
         if nil != archiveFailure {
             return exception.NewError(
                 "catalog report refresh: "+refreshErr.Error()+"; "+archiveFailure.Error(),
@@ -129,9 +124,7 @@ func (instance *CatalogReportRefreshCommand) Run(runtimeInstance melodyruntimeco
        returned, so the operator reads that the archive holds the reading the sink did not receive */
     fprintTable(writer, headers, rows)
 
-    /* ARCHIVED false with no failure is the archive already holding a reading taken at this instant — two runs
-       inside one second — which is not a failure and exits zero; the table alone read as an archive that had
-       not recorded the reading, so the console says which of the two it was */
+    /* ARCHIVED false with no failure is the archive already holding a reading taken at this instant, two runs inside one second, which exits zero; the console says so, since the table alone cannot tell it from an archive that did not record the reading */
     if nil == archiveFailure && false == archived {
         fmt.Fprintln(writer, "the archive already holds a reading taken at this instant; nothing new was recorded")
     }
@@ -147,9 +140,7 @@ func (instance *CatalogReportRefreshCommand) Run(runtimeInstance melodyruntimeco
             fmt.Fprintln(writer, "the archive did not record this reading: "+archiveFailure.Error())
             fmt.Fprintln(writer, "the sink did not receive it either: "+exportErr.Error())
 
-            /* one message on one line — the cli engine escapes a newline in a failure's message, so the
-               joined error's own rendering reached the console as a literal \n — with the join as the
-               cause, so errors.Is reaches either half */
+            /* one message on one line, since the cli engine escapes a newline in a failure's message, with the join as the cause, so errors.Is reaches either half */
             return exception.NewError(
                 "catalog report refresh: "+archiveFailure.Error()+"; "+exportErr.Error(),
                 nil,
@@ -173,13 +164,7 @@ func (instance *CatalogReportRefreshCommand) Run(runtimeInstance melodyruntimeco
     return nil
 }
 
-/* archiveOwnRefusalOrWrapped wraps a refusal of the archive with what was being done, and carries the
-   refusal's own words in the message: the cli engine renders a failure from its message alone, so the line
-   the operator reads names the step AND whatever the refusal named — the archive's database with where it
-   is, the migration step that did not complete, the advisory lock the pgsql locker could not take. A form
-   that handed this application's own exceptions back untouched kept the database on the console for those
-   and lost the step for every refusal that was an exception of some module's own, the locker's among them.
-   The refusal stays the cause, so errors.Is still reaches it. */
+/* archiveOwnRefusalOrWrapped wraps a refusal of the archive with what was being done and carries the refusal's own words in the message: the cli engine renders a failure from its message alone, so the operator reads the step and whatever the refusal named, the database, the migration step or the advisory lock. The refusal stays the cause, so errors.Is still reaches it. */
 func archiveOwnRefusalOrWrapped(headline string, cause error) error {
     return exception.NewError(headline+": "+cause.Error(), nil, cause)
 }
@@ -192,11 +177,7 @@ const archiveLockName = "example.catalog.reading.archive"
 /* archiveLockTtl is accepted by CreateLock for interface compatibility and is not honoured as an expiry by the postgres backend: a session advisory lock lives exactly as long as the backend session that took it, so a process that dies mid-refresh releases it when its connection drops. It is written as a real duration all the same, because the locker contract takes one, the in-process locker honours it, and a zero would read as a decision nobody made. */
 const archiveLockTtl = 30 * time.Second
 
-/* archiveLockOf hands back the lock the run is taken under.
-
-   The lock is what makes processes that OVERLAP on one schedule record ONE reading between them rather than one each: it is held around the whole run, so the loser takes no reading at all. Two runs that do not overlap — one host's tick a second after another's — are two readings, keyed on the instant each took, and the archive holds both; the identity of a reading is the second it was taken at, and the lock does not change that. It is taken by name from the container rather than through the framework's general locker, because that one is redis when redis is configured and the archive is not on redis: a lock held in the very database being written is exclusion that cannot disagree with the write it guards. Without postgres the locker under this name is the in-process one, over the in-process archive.
-
-   The locker is registered under this name on EVERY wiring — the archive's advisory lock with postgres, the in-process one without — so there is no "not wired" to ask the container about; resolving it OPENS the postgres handle when there is one, so a refusal of that resolution is the archive being unreachable, which is handed back, where it used to read as "no archive" and exit zero over a reading that was never recorded. */
+/* archiveLockOf hands back the lock the run is taken under, so processes that overlap on one schedule record one reading between them; runs that do not overlap are two readings, keyed on the second each took. It is taken by name rather than through the general locker, which is redis when configured, because a lock held in the database being written cannot disagree with the write it guards; without postgres the locker under this name is the in-process one. It is registered on every wiring, so resolving it opens the postgres handle when there is one, and a refusal of that resolution is the archive being unreachable and is handed back. */
 func archiveLockOf(runtimeInstance melodyruntimecontract.Runtime) (melodylockcontract.Lock, error) {
     locker, lockerErr := melodycontainer.FromResolver[melodylockcontract.Locker](
         runtimeInstance.Container(),

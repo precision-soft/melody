@@ -107,7 +107,7 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
 
 var _ melodyapplicationcontract.ServiceModule = (*Module)(nil)
 
-/* registerServerSentEventHubService registers the hub so the event listeners can reach it. They follow every change to the nomenclature and are where the notification belongs, beside the cache invalidation and the journal entry — but a listener is handed a runtime rather than this module, and the container is what the two have in common. */
+/* registerServerSentEventHubService registers the hub so the event listeners, which are handed a runtime rather than this module, reach it through the container. */
 func (instance *Module) registerServerSentEventHubService(registrar melodyapplicationcontract.ServiceRegistrar) {
     serverSentEventHub := instance.serverSentEventHub
 
@@ -147,9 +147,7 @@ func (instance *Module) registerMessageBusServices(registrar melodyapplicationco
     )
 }
 
-/* registerCatalogStorageService publishes the handle every repository is built on. It is registered whether or not there is a connection behind it, because the generated wiring fills the repository constructors by resolving their arguments from the container by type: a handle that were absent without a database would take the whole nomenclature with it.
-
-   The handle is RESOLVED rather than captured, and that is what puts the database chain on the request path at all. This provider is the one door an ordinary http process passes through, and a provider that hands back an already-built collaborator resolves nothing — so the container records no dependency and neither the registry nor the pool is ever built inside it. Captured, the two services registerDatabaseServices publishes were registered and never instantiated: the registry provider, which is where SetLogger moves the pool's own reporting and bun's diagnostics off the emergency logger, did not run for the life of an http process, and the ordered teardown had nothing to close. Resolving writes the edge that teardown reads — storage, handle, registry, journal, in that order — and runs the logger swap at the first repository resolution. */
+/* registerCatalogStorageService publishes the handle every repository is built on, registered with or without a connection because the generated wiring resolves the repository constructors' arguments by type. The handle is resolved rather than captured, so the container records the edge that teardown reads (storage, handle, registry, journal) and the registry's logger swap runs at the first repository resolution. */
 func (instance *Module) registerCatalogStorageService(registrar melodyapplicationcontract.ServiceRegistrar) {
     hasDatabase := nil != instance.database
 
@@ -170,9 +168,7 @@ func (instance *Module) registerCatalogStorageService(registrar melodyapplicatio
     )
 }
 
-/* registerArchiveStorageService publishes the handle the reading archive is kept on, for the same reason and in the same shape as the catalogue handle above: the generated wiring fills the archive repository's constructor by resolving its argument by type, so the storage is registered whether or not there is a connection behind it and answers for itself.
-
-   The handle it resolves is opened HERE, at this first resolution, because serviceArchiveDatabase's own provider is what opens it — which is what keeps a process that never takes a reading from paying a postgres handshake. */
+/* registerArchiveStorageService publishes the reading archive's handle in the catalogue handle's shape, registered with or without a connection. The handle is opened here, at the first resolution, so a process that never takes a reading pays no postgres handshake. */
 func (instance *Module) registerArchiveStorageService(registrar melodyapplicationcontract.ServiceRegistrar) {
     hasArchive := instance.archiveWired
 
@@ -196,9 +192,7 @@ func (instance *Module) registerArchiveStorageService(registrar melodyapplicatio
     )
 }
 
-/* RegisterScopedServices declares the services that belong to one scope — one http request here. The generator emits them into their own function because the two registrars share no method: this hook receives a scoped registrar, RegisterServices receives a container one, and handing either to the other does not compile.
-
-   What lands here is built on the first resolution through a scope, shared by everything inside that request, and closed when the request ends. Regenerate with the same command the container services use. */
+/* RegisterScopedServices declares the services that belong to one scope, one http request here: built on the first resolution through the scope, shared inside that request and closed when it ends. The generator emits them into their own function because the scoped and the container registrars share no method; regenerate with the command the container services use. */
 func (instance *Module) RegisterScopedServices(registrar melodyapplicationcontract.ScopedServiceRegistrar) {
     generated.RegisterGeneratedServicesScoped(registrar)
 }

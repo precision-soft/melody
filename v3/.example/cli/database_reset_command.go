@@ -19,13 +19,7 @@ import (
 
 const databaseResetFlagForce = "force"
 
-/* DatabaseResetCommand brings this example's database back to the state a fresh volume would be in: the tables its migration set owns are dropped, the bun bookkeeping is dropped and recreated with them, the single schema migration is applied again, the audit trail is emptied and the nomenclature is reseeded.
-
-   It exists because this application has no history. An example is not a project with a past — it has one state, the present one — so it carries no migration that repairs its own history and no changelog that records it. A database left in an older shape is answered HERE, by a command an operator runs deliberately, rather than by code every process pays for at boot.
-
-   It is a command of the APPLICATION rather than of the bunorm/migrate module. Dropping an application's whole schema is not an operator door a published module should grow, and the two frozen majors carry the same command for the same reason: an example is not a published module, so this costs no public surface anywhere.
-
-   The audit trail is emptied even though the migration set does not own its table, and the distinction is the point: the SCHEMA belongs to the module that opens it — the registry creates it through its own door and it survives a rollback of the set — while the ROWS belong to this application, which wrote them. A trail left standing across a reset names entities that no longer exist, over identifiers this application mints as the highest suffix plus one and therefore recycles: the next user-4 would inherit the history of the last one. The outbox is deliberately left alone: its module publishes no purge door, growing one on a published module is not a patch-size change, and its rows are messages waiting to be delivered rather than a picture of a state this command is restoring. */
+/* DatabaseResetCommand brings this example's databases back to the state a fresh volume would be in: the tables its migration sets own are dropped, the bun bookkeeping is recreated, the schema is applied again, the audit trail is emptied and the nomenclature reseeded. An example has one state and no migration that repairs its history, so an older volume is answered here, by a command an operator runs deliberately; it is the application's command because dropping a whole schema is no door a published module should grow. The audit rows are emptied because identifiers are minted as the highest suffix plus one and recycle, so a trail left standing would give the next user-4 the last one's history; the outbox is left alone, its rows being messages still to deliver. */
 type DatabaseResetCommand struct{}
 
 func NewDatabaseResetCommand() *DatabaseResetCommand {
@@ -94,7 +88,7 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
     /* the runtime's context, not a background one: the drops run under the same signal every other command of this application honours, so an operator's interrupt is not the one thing a reset ignores */
     ctx := runtimeInstance.Context()
 
-    /* the catalogue is brought whole — dropped, recreated, its trail emptied and reseeded — BEFORE the archive is touched: the archive is a second, independent database, and a refusal of it that returned between the catalogue's drop and its reseed left an empty catalogue behind a non-zero exit, with nobody able to log in until a second run. Each step reports itself as it completes, so what the operator reads after a failure is what HAPPENED, not only what was planned. */
+    /* the catalogue is brought whole (dropped, recreated, its trail emptied and reseeded) before the archive is touched, so a refusal of the independent archive cannot leave an empty catalogue behind a non-zero exit. Each step reports itself as it completes, so after a failure the operator reads what happened, not only what was planned. */
     if true == storage.IsPersistent() {
         if resetErr := migration.Reset(ctx, storage.Database()); nil != resetErr {
             return databaseResetStepFailure("dropping and recreating the schema", "catalogue", databaseLocationLabel(storage.Location()), resetErr)
@@ -114,10 +108,7 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
 
         fmt.Fprintln(writer, "catalogue reset: the nomenclature was reseeded")
 
-        /* the cache is cleared HERE, as the catalogue's last step, not after the archive: the entities it holds
-           are the catalogue's, and an archive that refuses between the reseed and a clear placed after it left
-           the catalogue reseeded with every stale entry standing — the very account the reset removed still
-           authenticating from the cache, the class the clear exists to close */
+        /* the cache is cleared here, as the catalogue's last step, because the entities it holds are the catalogue's: a clear placed after the archive would leave every stale entry standing when the archive refuses, the removed account still authenticating from the cache */
         if clearErr := clearCache(runtimeInstance, writer, "database reset"); nil != clearErr {
             /* the exit names what the failed clear left undone: the archive after it was not touched, and the
                catalogue before it was */
@@ -149,7 +140,7 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
     return nil
 }
 
-/* databaseResetStepFailure names the step that did not complete and the database it did not complete on. The cli engine echoes the error's message alone, so the message carries both: a dial refusal that read "connection refused" over a host name told the operator neither that the catalogue had already been dropped nor which of the two databases had refused. */
+/* databaseResetStepFailure names the step that did not complete and the database it did not complete on, in the message, because the cli engine echoes the message alone and a bare "connection refused" says neither that the catalogue is already dropped nor which database refused. */
 func databaseResetStepFailure(step string, database string, location string, cause error) error {
     return exception.NewError(
         "database reset: "+step+" did not complete on the "+database+" database at "+location,
@@ -212,9 +203,7 @@ func printDatabaseResetPlan(writer io.Writer, storage *persistence.CatalogStorag
     }
 }
 
-/* clearAuditTrail empties the two tables the audit registry keeps for this application. It deletes rows rather than dropping tables: the schema is the registry's, opened through its own door, and a reset of the application's state has no business taking it away.
-
-   It asks that door to open the schema first. On this major the composition root is eager, so a repository has already created both tables by the time a command runs and the call is a no-op — but a delete that depends on that ordering would fail on the day it changes, over an application whose schema the reset has just restored, and EnsureSchema is the same door the storage itself calls. */
+/* clearAuditTrail empties the two tables the audit registry keeps for this application, deleting rows rather than dropping tables because the schema is the registry's. It asks the registry's door to open the schema first, so the delete does not depend on a repository having created the tables before the command runs. */
 func clearAuditTrail(ctx context.Context, storage *persistence.CatalogStorage) error {
     if schemaErr := storage.EnsureAuditSchema(ctx); nil != schemaErr {
         return schemaErr

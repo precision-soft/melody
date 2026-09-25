@@ -14,13 +14,7 @@ import (
     melodyeventcontract "github.com/precision-soft/melody/v3/event/contract"
 )
 
-/* the command announced a grant it never made. It looked the account up, printed "granted role ... to
-   user ...", and returned — for an account it had just been told did not exist as readily as for one it
-   had found, exiting with success in both cases. Measured on the running stack before the repair, the
-   directory answered the same roles after the command as before it.
-
-   The assertion is on what the DIRECTORY holds afterwards, not on the line the command prints: printing
-   the sentence is precisely what it used to do. */
+/* the grant is a real write: the assertion is on what the directory holds afterwards, not on the line the command prints, since a command that only printed "granted role ... to user ..." would satisfy an assertion on its output while the directory answered the same roles as before. */
 func TestGrantRoleCommandGrantsTheRole(t *testing.T) {
     fixture := newCommandFixture(t)
     command := NewGrantRoleCommand(fixture.lazyUserService())
@@ -108,11 +102,7 @@ func TestGrantRoleCommandRefusesARoleCarryingAComma(t *testing.T) {
     }
 }
 
-/* the roles are read from the REPOSITORY, not through the service. The service memoizes what it read, and
-   the entry is cleared by the invalidation listener the application registers on the update event — which
-   this fixture deliberately does not, since the subject here is the command and not the wiring. Read
-   through the service, every assertion below would be about the memo: the first grant landed in the
-   directory and the next read still answered the roles from before it. */
+/* the roles are read from the repository, not through the service. The service memoizes what it read, and the entry is cleared by the invalidation listener the application registers on the update event, which this fixture deliberately does not, since the subject here is the command and not the wiring; read through the service, every assertion below would be about the memo. */
 func storedRoles(t *testing.T, fixture *commandFixture, username string) []string {
     t.Helper()
 
@@ -215,9 +205,7 @@ func TestGrantRoleCommandRefusesARoleTheApplicationDoesNotKnow(t *testing.T) {
     }
 }
 
-/* the repository is the arbiter, not the read the command made: two grants of different roles on one
-   account, each reading the account before either wrote, both land — a read, an append and a whole-set
-   write used to let the last writer take the other's role with it */
+/* the repository is the arbiter, not the read the command made: two grants of different roles on one account, each reading the account before either wrote, both land, where a read, an append and a whole-set write would let the last writer take the other's role with it */
 func TestGrantRoleCommandGrantsThroughTheRepositorysAtomicDoor(t *testing.T) {
     fixture := newCommandFixture(t)
 
@@ -250,9 +238,7 @@ func TestGrantRoleCommandGrantsThroughTheRepositorysAtomicDoor(t *testing.T) {
     }
 }
 
-/* the other direction of the arbiter: the command's read says the role is held — a memo from before an
-   admin door removed it — and the directory says it is not. The repository grants, because it is the only
-   judge; a short-cut on the cached roles used to answer "already holds" and leave the row unchanged. */
+/* the other direction of the arbiter: the command's read says the role is held, a memo from before an admin door removed it, and the directory says it is not. The repository grants, because it is the only judge; a short-cut on the cached roles would answer "already holds" and leave the row unchanged. */
 func TestGrantRoleCommandGrantsARoleTheCachedReadWronglySaysIsHeld(t *testing.T) {
     fixture := newCommandFixture(t)
     userService := fixture.lazyUserService()
@@ -319,10 +305,7 @@ func TestGrantRoleCommandReportsTheRepositorysAlreadyHeld(t *testing.T) {
     }
 }
 
-/* a grant whose write COMMITTED and whose listeners then refused is not a grant that failed: the role is in the
-   directory, the cache entries of the account were not dropped, and the operator reads both — the output says
-   the role was granted and names the listeners, the exit names the entries that stand, and a re-run would find
-   the role held. A bare failure sent the operator to re-run a grant the re-run would find done. */
+/* a grant whose write committed and whose listeners then refused is not a failed grant: the role is in the directory and the account's cache entries are not dropped, and the operator reads both; the output says the role is granted and names the listeners, the exit names the entries that stand, and a re-run would find the role held. */
 func TestGrantRoleCommandSaysTheRoleWasGrantedWhenTheListenersRefuse(t *testing.T) {
     fixture := newCommandFixtureWithDispatcher(t, func(dispatcher melodyeventcontract.EventDispatcher) melodyeventcontract.EventDispatcher {
         return &refusingDispatcher{EventDispatcher: dispatcher}

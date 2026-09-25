@@ -13,11 +13,7 @@ func init() {
 /* CatalogReadingTableName is the one spelling of the archive's table. The schema owns it, so this step, the repository that reads and writes it and the reset command's plan all read the same constant. */
 const CatalogReadingTableName = "melody_example_v3_catalog_reading"
 
-/* upArchiveSchema creates the one table the archive owns. Like the catalogue set beside it, it is a single migration rather than a history of them, because this application has no history: an example has a single state, the present one, and the schema is the statement of that state. A volume left in an older shape is brought to it by example:db:reset, not by a step that repairs its past.
-
-   Like the catalogue set, it does not adopt a volume that already holds its tables without recording it (see beginSchemaSet); postgres has CREATE TABLE IF NOT EXISTS, so unlike the catalogue's unique key its statement needs no read of the catalog to be idempotent.
-
-   taken_at is the PRIMARY KEY rather than a surrogate, and that is the archive's identity rather than a convenience: a reading is the catalogue as it stood at one instant, so two rows at one instant are the same reading recorded twice. It is what makes a duplicated refresh a conflict the repository can name instead of a second row nobody can tell from the first. */
+/* upArchiveSchema creates the one table the archive owns, a single migration for the reason the catalogue set is one. Like the catalogue set, it does not adopt a volume that already holds its tables without recording it (see beginSchemaSet), and postgres's CREATE TABLE IF NOT EXISTS makes its statement idempotent. taken_at is the primary key because a reading is the catalogue at one instant, so a duplicated refresh is a conflict the repository can name rather than a second row. */
 func upArchiveSchema(ctx context.Context, database *bun.DB) error {
     if beginErr := beginSchemaSet(ctx, database, archiveSchemaSetRecord, archiveTableNameList); nil != beginErr {
         return beginErr

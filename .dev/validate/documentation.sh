@@ -1348,7 +1348,7 @@ TEMPORARY_PATH_STRING_LIST+=("${COMMENT_CONTROL_DIRECTORY_STRING}")
 printf '%s\n' \
     'package control' \
     '' \
-    '/* Run answers the result. This used to panic. */' \
+    '/* Run answers the result. This used to panic and used to hang. */' \
     'func Run() {' \
     '    value := 1 // measured on the probe' \
     '    _ = value' \
@@ -1364,6 +1364,7 @@ printf '%s\n' \
     '/* Handle answers the page. The request was' \
     'routed before the check. */' \
     '// Previously the guard hung, inverted with the pre-repair parse the repair replaced' \
+    '// the repairs replaced the parse' \
     '/* Mount answers the page. The page was*//*recorded before the check. */' \
     $'/* Route answers the page. The request was\r' \
     $'served before the check. */\r' \
@@ -1397,8 +1398,8 @@ printf '%s\n' \
     'type Handler struct{}' > "${COMMENT_CONTROL_DIRECTORY_STRING}/negative.go"
 
 COMMENT_CONTROL_OUTPUT_STRING="$(list_history_comment_count "${COMMENT_CONTROL_DIRECTORY_STRING}/positive.go" "${COMMENT_CONTROL_DIRECTORY_STRING}/unterminated.go" "${COMMENT_CONTROL_DIRECTORY_STRING}/negative.go")"
-if [[ "${COMMENT_CONTROL_DIRECTORY_STRING}/positive.go"$'\t'"20" != "${COMMENT_CONTROL_OUTPUT_STRING}" ]]; then
-    fail "the history comment control failed: expected the planted file alone with 20, read [${COMMENT_CONTROL_OUTPUT_STRING}] — no verdict over the tree is possible"
+if [[ "${COMMENT_CONTROL_DIRECTORY_STRING}/positive.go"$'\t'"22" != "${COMMENT_CONTROL_OUTPUT_STRING}" ]]; then
+    fail "the history comment control failed: expected the planted file alone with 22, read [${COMMENT_CONTROL_OUTPUT_STRING}] — no verdict over the tree is possible"
 fi
 
 declare -A COMMENT_BASELINE_COUNT_INTEGER_MAP=()

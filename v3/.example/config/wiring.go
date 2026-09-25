@@ -8,9 +8,7 @@ const (
     wiringImportPathPrefix = "github.com/precision-soft/melody/v3/.example/"
 )
 
-/* NewWiringBindSet declares which packages melody:wiring:generate scans and how the scalar arguments of the constructors it finds are filled. Everything else a constructor asks for is resolved from the container by type, so only the values that cannot come from there are named here.
-
-   The repository package needs no binds at all: every argument of its constructors is a service. The service package needs two, for the endpoint of the rate provider and for the base its quotes must share with the catalogue, and each is a PARAMETER rather than the .env key of the same value because a bound argument is read with MustGet: an auto-registered key disappears with its line in .env and takes the boot with it, while the parameter is declared with an empty-string fallback and answers "" — which is what "this door is unwired" means everywhere else here. Both packages are scanned so that adding a service is a matter of writing the constructor and regenerating, instead of also remembering to register it. */
+/* NewWiringBindSet declares which packages melody:wiring:generate scans and binds the constructor scalars that cannot come from the container, which resolves every other argument by type. The service package binds the rate provider's endpoint and the catalogue's base currency to parameters rather than .env keys, because a bound argument is read with MustGet and a parameter declared with an empty-string fallback survives its .env line being removed. */
 func NewWiringBindSet() *melodywiring.BindSet {
     bindSet := melodywiring.NewBindSet()
 

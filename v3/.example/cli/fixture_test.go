@@ -109,10 +109,7 @@ func newCommandFixtureWithDispatcher(t *testing.T, dispatcherOf func(melodyevent
 
     containerInstance := melodycontainer.NewContainer()
 
-    /* the backend is registered under the framework's own name, the way the composition root registers it:
-       the scope helper of the writing commands reads the TYPE of the backend there, and without the
-       registration it answered "this process's own" through its resolution-failure branch — a wiring the
-       application never produces, and one under which the shared-cache sentence could never be tested */
+    /* the backend is registered under the framework's own name, the way the composition root registers it: the scope helper of the writing commands reads the type of the backend there, and without the registration it would answer "this process's own" through its resolution-failure branch, a wiring the application never produces and one under which the shared-cache sentence could not be tested */
     melodycontainer.MustRegister(
         containerInstance,
         melodycache.ServiceCacheBackend,

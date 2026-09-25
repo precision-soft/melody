@@ -13,11 +13,7 @@ func init() {
 /* UserUsernameIndexName is the one spelling of the index. The schema owns it, so this step and the repository that maps the driver's duplicate-key refusal onto the public message read the same constant: a name written in two places is a constraint and a refusal that can drift apart. */
 const UserUsernameIndexName = "melody_example_v3_user_username_folded"
 
-/* upSchema creates the six tables this example owns and declares the one constraint it needs, in one step. The set is one migration rather than a history of them because this application has no history: an example has a single state, the present one, and its schema is the statement of that state. A volume left in an older shape is brought to it by example:db:reset, not by a step that repairs its past.
-
-   The set does not adopt a volume that already holds its tables without recording it (see beginSchemaSet): its row is written as building before the first statement and sealed as built after the last, so it vouches only for tables this code built, and a run the set itself began and did not finish is finished by the next. Its statements stay tolerant of a second run all the same — the tables are created IF NOT EXISTS, and the constraint, MySQL having no ADD KEY IF NOT EXISTS, is added only after the catalogue is asked whether it is already there — because the refusal reads the volume once, ahead of them.
-
-   The constraint comes last because it is declared on a table this step has just created. */
+/* upSchema creates the six tables this example owns and declares the one constraint it needs, in one step: an example has a single state, and a volume in an older shape is brought to it by example:db:reset. The set does not adopt a volume that already holds its tables without recording it (see beginSchemaSet); its statements still tolerate a second run, since the tables are created IF NOT EXISTS and the constraint, MySQL having no ADD KEY IF NOT EXISTS, is added only after the catalogue is asked whether it is there. The constraint comes last because it stands on a table this step creates. */
 func upSchema(ctx context.Context, database *bun.DB) error {
     if beginErr := beginSchemaSet(ctx, database, catalogueSchemaSetRecord, schemaTableNameList); nil != beginErr {
         return beginErr
@@ -56,7 +52,7 @@ func downSchema(ctx context.Context, database *bun.DB) error {
     return nil
 }
 
-/* the column definitions mirror the tables the bun create-table builder used to produce, captured from a live SHOW CREATE TABLE, so a volume provisioned before the migration set and one provisioned by it hold the same schema — with one departure: every column that holds an entity identifier is compared under utf8mb4_bin. The identity of an id is EXACT everywhere else in this application: the in-memory repositories compare it byte for byte and the cache keys carry it as spelled; under the table's default utf8mb4_0900_ai_ci a lookup by id folded case and accents, so `CUR-EUR` found the `cur-eur` row and was cached under a key nothing invalidates, and a product could be stored pointing at a spelling the read door then reported as a currency the catalogue does not carry. A volume provisioned before this collation keeps its own — the tables are created IF NOT EXISTS — and example:db:reset is the door that brings it here. */
+/* every column that holds an entity identifier is compared under utf8mb4_bin, because the identity of an id is exact everywhere else in this application: the in-memory repositories compare it byte for byte and the cache keys carry it as spelled, and under the table's default utf8mb4_0900_ai_ci a lookup by id would fold case and accents, find `CUR-EUR` as `cur-eur` and cache it under a key nothing invalidates. */
 const createCategoryTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v3_category` (" +
     "`id` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
     "`name` VARCHAR(255) NOT NULL, " +
@@ -109,9 +105,7 @@ const createCatalogJournalTableSql = "CREATE TABLE IF NOT EXISTS `melody_example
     "`recorded_at` DATETIME(6) NOT NULL, " +
     "PRIMARY KEY (`id`))"
 
-/* the two secret columns are VARBINARY because bunorm's EncryptedString writes a sealed byte string, not text: a character set would try to interpret ciphertext and a collation would compare it. The widths are the ones the model declares, and they hold the sealed spelling rather than the plaintext — the marker, key identifier, nonce and tag travel with it. This table is the one neither frozen major carries.
-
-   The enrollment is tied to its account by the schema: the identifier references the user table and the row goes with the account it was enrolled for. The example mints identifiers as the highest suffix plus one, so a row that outlived its account started the next holder of the identifier enrolled with the previous holder's secret; the subscriber that releases the row on the deletion event still runs, but it runs behind a dispatch that stops at the first listener that fails, and the database releases whether or not any listener ran. Both columns compare under utf8mb4_bin, which is what lets the key be declared; a volume provisioned before the constraint keeps its table as it was, and example:db:reset is the door that brings it here. */
+/* the two secret columns are VARBINARY because bunorm's EncryptedString writes a sealed byte string, not text, and the widths hold the sealed spelling. The identifier references the user table, so the row goes with its account: identifiers are minted as the highest suffix plus one, a surviving row would enroll the next holder of the identifier with the former holder's secret, and the database releases it whether or not the deletion subscriber runs. Both columns compare under utf8mb4_bin, which is what lets the key be declared. */
 const createTwoFactorTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v3_two_factor` (" +
     "`user_identifier` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
     "`secret` VARBINARY(512) NOT NULL, " +
@@ -120,13 +114,7 @@ const createTwoFactorTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v3_t
     "PRIMARY KEY (`user_identifier`), " +
     "CONSTRAINT `melody_example_v3_two_factor_user` FOREIGN KEY (`user_identifier`) REFERENCES `melody_example_v3_user` (`id`) ON DELETE CASCADE)"
 
-/* the index is on LOWER(username) cast to the binary collation because that expression, and only that
-   expression, is the identity this application gives a username: NormalizedUsername folds case and
-   nothing else, and the lookup door compares on utf8mb4_bin for the same reason. Indexed on the column
-   as it stands, the constraint would follow the column's own utf8mb4_0900_ai_ci and refuse two names the
-   application considers different — 'ana' and 'ána' — while admitting 'Ana' beside 'ana', which it
-   considers the same. Measured on the running server: with this expression 'ana' and 'ANA' collide with
-   'Ana', 'Ána' does not, which is exactly what the lookup answers. */
+/* the index is on LOWER(username) cast to the binary collation because that expression is the identity this application gives a username: NormalizedUsername folds case and nothing else, and the lookup door compares on utf8mb4_bin. On the column's own utf8mb4_0900_ai_ci the constraint would refuse 'ana' beside 'ána', which the application considers different, and admit 'Ana' beside 'ana', which it considers the same. */
 const createUserUsernameIndexSql = "ALTER TABLE `melody_example_v3_user` " +
     "ADD UNIQUE KEY `" + UserUsernameIndexName + "` " +
     "((CAST(LOWER(`username`) AS CHAR(255) CHARACTER SET utf8mb4) COLLATE utf8mb4_bin))"
@@ -166,10 +154,7 @@ func dropStatementList(tableNameList []string) []string {
     return statementList
 }
 
-/* the set's own discipline is that a step tolerates a second run of the set — the run it began and did not
-   finish — so every table is created IF NOT EXISTS. MySQL has no ADD KEY IF NOT EXISTS, so the same tolerance is spelled by asking
-   the catalogue first; without it a volume whose table was created by a build that already carries the
-   key would fail the step on a duplicate index name. */
+/* every step tolerates a second run of the set, the run it began and did not finish; MySQL has no ADD KEY IF NOT EXISTS, so the tolerance is spelled by asking the catalogue first, or a second run would fail on a duplicate index name. */
 func addUserUsernameIndex(ctx context.Context, database *bun.DB) error {
     present, presentErr := userUsernameIndexIsPresent(ctx, database)
     if nil != presentErr {
