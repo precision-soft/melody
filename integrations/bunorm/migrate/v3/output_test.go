@@ -538,7 +538,7 @@ func TestCommandOutput_FinishSurvivesATypedNilContextProviderInTheChain(t *testi
     }
 }
 
-/* the error text came off the wire and the identity fields are the server's own answers, so the terminal rendering must escape control characters — visibly, before the cell widths are measured — while the json branch is left to its encoder. */
+/* the error text came off the wire and the identity fields are the server's own answers, so the terminal rendering escapes control characters visibly, before the cell widths are computed, while the json branch is left to its encoder. */
 func TestCommandOutput_PrintErrorEscapesControlCharacters(t *testing.T) {
     plain, plainBuffer := newBufferedOutput(true)
     plain.printError(errors.New("boom\x1b[2J\rforged"))
@@ -712,18 +712,7 @@ func TestCommandOutput_FinishRunLeavesTheOrdinaryPathsUnchanged(t *testing.T) {
     }
 }
 
-/* recover() answers only when it is called directly by the deferred function itself, so the door
-   takes the recovered value as a parameter. A command that read it one frame deeper would see nil
-   and believe every run ended well — which is the defect, spelled differently.
-
-   The six commands used to spell that defer each for itself, and this pinned the spelling in each of
-   the six files. There is one frame now, and the property it has to keep is the same one: the frame
-   defers, calls recover() DIRECTLY in its own deferred function, and hands the value to the door.
-   What is left to pin is therefore the wiring, and it is pinned in both directions — the frame makes
-   the call, and no command renders its own document beside it — which is strictly more than the six
-   greps said: they could not have seen a seventh command added without a frame at all.
-
-   The door's own behaviour on a panic is pinned separately, a few tests above, on finishRun itself. */
+/* recover() answers only when it is called directly by the deferred function itself, so the door takes the recovered value as a parameter; a command reading it one frame deeper would see nil and believe every run ended well. The one frame defers, calls recover() DIRECTLY in its own deferred function and hands the value to the door, and the wiring is pinned in both directions: the frame makes the call, and no command renders its own document beside it, so a command added without the frame is seen too. The door's own behaviour on a panic is pinned on finishRun itself, a few tests above. */
 func TestMigrateCommands_EveryCommandRunsInsideTheFrameThatPassesItsOwnRecover(t *testing.T) {
     frame, frameReadErr := os.ReadFile("base_command.go")
     if nil != frameReadErr {

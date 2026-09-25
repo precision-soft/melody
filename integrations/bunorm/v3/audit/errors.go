@@ -12,13 +12,13 @@ var ErrAsyncStorageQueueFull = errors.New("async audit storage queue is full")
 
 var ErrAsyncStorageClosed = errors.New("async audit storage is closed")
 
-/* journaledRefusal is a refusal the async storage has already dead-lettered, carrying the logger it did so through. It is what lets the recorder decide whether its own dead-letter would be a second record in the same journal or the only record in the application's: skipped on the sentinel alone, the recorder's record was lost whenever the storage journaled through the emergency default and the recorder through the application's logger — the wiring the readme describes. It unwraps to the refusal it carries, so errors.Is against the sentinels and errors.As against the exception keep their answers. */
+/* journaledRefusal is a refusal the async storage has already dead-lettered, carrying the logger it went through, so the recorder journals the entry itself only when that logger is not its own. It unwraps to the refusal, so errors.Is against the sentinels and errors.As against the exception keep their answers. */
 type journaledRefusal struct {
     sentinel error
     journal  loggingcontract.Logger
 }
 
-/* Error renders the sentinel and nothing more, and Is answers for it in place of an Unwrap: the refusal sits under the storage's exception as its cause, so a journal that renders the cause chain reads the sentinel once, where an extra link — the same text twice, or the message where the sentinel stood — was a change in every dead-letter record and in every caller's log of Save. errors.Is still matches the sentinel through Is, and errors.As still finds the refusal through the exception's own unwrap. */
+/* Error renders the sentinel alone, and Is answers for it in place of an Unwrap, so a journal that renders the cause chain reads the sentinel once. errors.As still finds the refusal through the exception's own unwrap. */
 func (instance *journaledRefusal) Error() string {
     return instance.sentinel.Error()
 }

@@ -27,9 +27,7 @@ type migrationUnlocker interface {
     Unlock(ctx context.Context) error
 }
 
-/* unlockMigrations reports the failed release through both channels: printed for the operator, returned for the exit code — a lock row that survives refuses every later migration on every replica, and a command that exits 0 over it tells the calling deploy script the opposite of the truth.
-
-   The failure is wrapped before it is reported, and the wrap names what bun's bare error does not: that the lock row STAYS HELD, the table it lives in, and the unlock command that clears it. Under json the report is a warning in the document, one string beside "no pending migrations", and under text the cli engine echoes a failure's message alone — so a driver error rendered as sent ("context deadline exceeded") told the operator neither that a lock survived nor what to do about it. The bun error stays the cause, so errors.Is still reaches it. */
+/* unlockMigrations reports a failed release both printed and returned, since a surviving lock row refuses every later migration and a command exiting 0 over it misleads the deploy script. The wrap names that the lock row stays held, its table and the unlock command that clears it; the bun error stays the cause, so errors.Is still reaches it. */
 func unlockMigrations(ctx context.Context, unlocker migrationUnlocker, outputInstance *commandOutput, unlockCommand string) error {
     unlockContext, cancelUnlock := context.WithTimeout(context.WithoutCancel(ctx), migrationUnlockTimeout)
     defer cancelUnlock()
@@ -57,16 +55,13 @@ type baseCommand struct {
     options    Options
 }
 
-/* migrationRun is the work of one command of this set, run inside the frame below. */
 type migrationRun func(
     runtimeInstance runtimecontract.Runtime,
     commandContext clicontract.Context,
     outputInstance *commandOutput,
 ) error
 
-/* run is the one entry door of every command of this set. The parsed posture, the output the run prints through, the timer and — the part that matters — the RECOVERY were copied into each of the six Run methods seven lines at a time, which is six places for one of them to be written without a recover and turn a panicking migration into the death of the process rather than the failure of a command. Written once, it cannot be omitted.
-
-   db:create used to install its lost-report journal BEFORE the recovery was armed, so a journal that could not be resolved took the process with it; inside the frame that panic is the command's failure like any other. */
+/* run is the one entry door of every command of this set: the parsed posture, the output, the timer and the recovery, so a panicking migration is the failure of its command, never the death of the process. */
 func (instance *baseCommand) run(
     name string,
     runtimeInstance runtimecontract.Runtime,
@@ -87,7 +82,7 @@ func (instance *baseCommand) run(
     return body(runtimeInstance, commandContext, outputInstance)
 }
 
-/* resolveMigrator answers the database this command acts on, the manager it belongs to, the migrator over it, and the release the caller must defer. Five of the six commands opened with the same eleven lines, whose one subtlety is that a migrator which cannot be built must still release the database it was to be built over — spelled out five times, that is five places for the release to be forgotten. */
+/* resolveMigrator answers the database this command acts on, the manager it belongs to, the migrator over it, and the release the caller must defer; a migrator that cannot be built still releases the database. */
 func (instance *baseCommand) resolveMigrator(
     runtimeInstance runtimecontract.Runtime,
     commandContext clicontract.Context,
@@ -108,7 +103,7 @@ func (instance *baseCommand) resolveMigrator(
     return db, managerName, migrator, releaseDatabase, nil
 }
 
-/* printDatabaseIdentity prints the database block the detailed postures carry, for the five commands that carry it. The context stays the caller's: the two commands that install a runner option hand the derived one, the other three hand the runtime's, and that difference is the whole of what the five sites had left to say. */
+/* printDatabaseIdentity prints the database block the detailed postures carry, under the context the caller hands. */
 func (instance *baseCommand) printDatabaseIdentity(
     ctx context.Context,
     db *bun.DB,
@@ -160,13 +155,7 @@ func (instance *baseCommand) resolveRegistry(resolver containercontract.Resolver
     return container.FromResolver[*bunorm.ManagerRegistry](resolver, instance.options.ManagerRegistryServiceId)
 }
 
-/* resolveDatabase answers the connection this command runs on, the label the output names it by, and the RELEASE its caller must defer.
-
-   The release ends the dedicated migration connection. That connection is not a request pool and must not live like one: it deliberately lifts the driver's read and write deadlines and recycles nothing, which is right for a DDL statement that runs for minutes and wrong for anything that then sits idle. The registry memoizes it until the registry itself closes, so a single migration run inside a process that goes on to serve requests left a deadline-less connection open against the database for the life of that process.
-
-   It is handed back as a value rather than left to each command to remember, because a forgotten call compiles and a changed signature does not: every command had to be visited to keep building. It is safe on every path — a command whose provider offers no migration capability ran on the ordinary pool, which this never touches, and one that failed before opening has nothing to end.
-
-   The command's output is taken so the release has somewhere to REPORT. The registry forgets the handle before it closes it, so its own teardown no longer covers what the close leaves behind, and a release with nowhere to speak dropped that failure entirely. It is a warning and not the command's verdict: the close is a COM_QUIT on a connection whose work is already done and it is not retryable, so the value is the record. The release runs before the json document is rendered: the frame one call up defers finish FIRST and the command defers this SECOND, and defers are last-in-first-out — so the warning reaches the document rather than corrupting it. That order was measured once on a rendered document carrying the release warning in its warnings; no test drives a failing release, so a change to the defer shape has nothing that goes red. */
+/* resolveDatabase answers the connection this command runs on, the label the output names it by, and the release its caller must defer, which ends the dedicated migration connection: that connection lifts the driver deadlines and recycles nothing, so it must not outlive the run. The release reports a failed close through the command's output as a warning, not as the verdict, and it runs before the json document is rendered, since the command defers it after the frame defers finish. */
 func (instance *baseCommand) resolveDatabase(
     runtimeInstance runtimecontract.Runtime,
     commandContext clicontract.Context,
@@ -258,7 +247,7 @@ func (instance *baseCommand) journal(runtimeInstance runtimecontract.Runtime) lo
     return logger
 }
 
-/* newFileMigrator is the migrator of a command that only writes a migration FILE: bun's generator reads the collection's directory and writes the template with os.WriteFile, and never touches the database it was handed, so none is opened for it — opening one cost a dial, the handshake, the authentication and the boot ping, some sixteen seconds of retries on a host that was down, to write a file that is written offline. */
+/* newFileMigrator is the migrator of a command that only writes a migration file: bun's generator never touches the database it is handed, so none is opened. */
 func (instance *baseCommand) newFileMigrator() (*migrate.Migrator, error) {
     if nil == instance.migrations {
         return nil, errors.New("migrations collection is nil")

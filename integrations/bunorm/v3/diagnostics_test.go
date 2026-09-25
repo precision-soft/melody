@@ -44,9 +44,7 @@ func TestRouteDiagnostics_SendsBunsOwnChannelToTheJournal(t *testing.T) {
     }
 }
 
-/* TestRouteDiagnostics_ASecondRoutingTakesTheChannelBack is the guard the whole retargeting exists for. A process that builds, closes and rebuilds its application routes twice; under the old shape the first routing owned bun's channel for the life of the process, so the SECOND lifecycle's diagnostics were dropped into the first lifecycle's logger — closed by then, or the emergency fallback of a registry wired before its application had a logger at all.
-
-   The assertion is two-sided on purpose: the second logger must receive the record AND the first must not. A one-sided check passes on a forwarder that writes to both. */
+/* TestRouteDiagnostics_ASecondRoutingTakesTheChannelBack is the guard the retargeting exists for: a process that builds, closes and rebuilds its application routes twice, and the SECOND lifecycle's diagnostics must reach the second logger, not the first lifecycle's, closed by then. The assertion is two-sided on purpose: the second logger must receive the record AND the first must not, since a one-sided check passes on a forwarder that writes to both. */
 func TestRouteDiagnostics_ASecondRoutingTakesTheChannelBack(t *testing.T) {
     firstLifecycle := &capturingDiagnosticLogger{}
     secondLifecycle := &capturingDiagnosticLogger{}

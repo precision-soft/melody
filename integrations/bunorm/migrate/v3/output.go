@@ -21,7 +21,7 @@ type commandOutput struct {
     arguments []string
     option    output.Option
 
-    /* the json accumulation: under --format=json every print records instead of writing, and finish renders the one machine-readable document the cli runner's silenced banner promises — the flag was accepted and validated long before this package honoured it */
+    /* under --format=json every print records instead of writing, and finish renders the one machine-readable document */
     messages   []string
     warnings   []string
     database   *databaseIdentity
@@ -29,7 +29,7 @@ type commandOutput struct {
     migrations map[string][]string
     files      []string
 
-    /* lostReportJournal is set by a command whose RESULT is not its report — db:create, whose result is the file it wrote — and it is where finish records a report the writer lost instead of refusing the run: the file is in place, and an exit of one sent the operator to a re-run that created a second migration under a new timestamp beside it. The loss cannot be told on the writer that lost it, so it goes to the journal; every other command keeps the refusal, because its report is what the run was for. */
+    /* lostReportJournal is set by a command whose result is not its report, db:create, whose result is the file it wrote: finish records a report the writer lost there instead of failing the run, since a re-run would create a second migration. Every other command keeps the refusal. */
     lostReportJournal loggingcontract.Logger
 
     /* resultPath is where that command's result went — the migration file — named in the warning beside the loss, since a cut document on stdout is the one place the operator cannot read it from */
@@ -63,7 +63,7 @@ func (instance *commandOutput) lostReport(command string, lostWrite error) error
     return nil
 }
 
-/* newCommandOutput takes the command's positional arguments beside its writer and flags: the machine document declares an arguments field, and built without them it answered an empty list for every command, db:create included, whose one argument names the migration the document reports on. */
+/* newCommandOutput takes the command's positional arguments beside its writer and flags, since the machine document carries them. */
 func newCommandOutput(writer io.Writer, arguments []string, option output.Option) *commandOutput {
     return &commandOutput{
         writer:    &errorTrackingWriter{writer: writer},
@@ -72,7 +72,7 @@ func newCommandOutput(writer io.Writer, arguments []string, option output.Option
     }
 }
 
-/* errorTrackingWriter remembers the first write failure and swallows the rest, the shape the framework's table printer carries for the same reason: the text report is printed through dozens of small writes whose results nothing read, so a report cut short by a full disk, or by a writer that is not the process's own standard output, ended with its success banner and exit zero — a standard output whose pipe has closed is not among those cases, since a process that has not asked to be notified of SIGPIPE is ended by the runtime at that write, before any result could be read. The remembered failure is what lets finish refuse instead, and the per-query lines of a run print through the same writer so a truncation there is remembered too. The writer is shared: it is the command's per-query printer and, for the run's duration, the process-wide fallback, so a migration emitting queries from several goroutines writes through it concurrently — the lock keeps the remembered failure one value. */
+/* errorTrackingWriter remembers the first write failure and swallows the rest, so finish can refuse a report cut short by a full disk or a failing writer instead of exiting zero. It is shared by the per-query printer and, during the run, the process-wide fallback, so a lock keeps the remembered failure one value. */
 type errorTrackingWriter struct {
     writer   io.Writer
     mutex    sync.Mutex
@@ -116,7 +116,7 @@ func (instance *commandOutput) isJson() bool {
     return output.IsJsonFormat(instance.option.Format)
 }
 
-/* wantsDetail decides whether the detail blocks are collected at all, and it is deliberately not the same question as --verbose. Verbosity is a rendering decision about TEXT — the README says so in as many words — while the json document is the machine contract, and shaping it with a display flag left `db:migrate --format=json` answering {"data":{}} for a run that applied five migrations: a pipeline recording what it deployed learned nothing, and the flag its author would have needed is documented as affecting the plain-text output alone. Under json the blocks are always collected; under text --verbose still decides. The cost is one extra query per run — the database identity block — paid only by a run that asked for the machine document. */
+/* wantsDetail decides whether the detail blocks are collected, apart from --verbose: verbosity shapes the text, while the json document is the machine contract and always carries them. The cost is one query per json run, the database identity block. */
 func (instance *commandOutput) wantsDetail() bool {
     if true == instance.isJson() {
         return true
@@ -125,11 +125,7 @@ func (instance *commandOutput) wantsDetail() bool {
     return instance.option.Verbose
 }
 
-/* finishRun renders the command's document from the outcome the run ACTUALLY had, a panic included, and is the single door every command in this family defers to.
-
-   The document is the machine contract a deploy pipeline reads, and rendered from the named return alone it reported SUCCESS for a run that died: a panic leaves the linear path that assigns runErr, so the deferred render saw nil, skipped the error branch, and wrote a complete envelope carrying `"error":null` together with every message the run had accumulated before it fell over — indistinguishable, to anything parsing stdout, from a clean run that applied them. The framework's own cli boundary makes exactly this repair for exactly this reason, and says so in as many words, but it sits OUTSIDE this defer: by the time it recovers, the success document has already been written.
-
-   recovered is passed in rather than read here, because recover() answers only when it is called directly by the deferred function itself — a call one frame deeper answers nil and would leave this door believing every run ended well. The panic is re-raised unchanged once the document says what happened, so the exit path, the status code and the journal record are all exactly what they were. */
+/* finishRun renders the command's document from the outcome the run had, a panic included, and is the door every command of this family defers to, so a run that died is never rendered as a success. recovered is passed in because recover answers only when called directly by the deferred function; the panic is re-raised unchanged once the document says what happened. */
 func (instance *commandOutput) finishRun(commandName string, startedAt time.Time, runErr error, recovered any) error {
     if nil == recovered {
         return instance.finish(commandName, startedAt, runErr)
@@ -139,7 +135,7 @@ func (instance *commandOutput) finishRun(commandName string, startedAt time.Time
     if nil == runErr {
         runErr = exception.NewError(
             commandName+" panicked",
-            /* the recovered VALUE travels beside its type: an error-shaped panic reaches the cause slot below with its own context and chain intact, but a string or any other value has no cause to give, and without this it reached the document as a type name and nothing else — the operator learning that something panicked and never what */
+            /* the recovered value travels beside its type, since a panic that is not an error has no cause to carry */
             map[string]any{
                 "command":        commandName,
                 "recoveredType":  fmt.Sprintf("%T", recovered),
@@ -154,7 +150,7 @@ func (instance *commandOutput) finishRun(commandName string, startedAt time.Time
     panic(recovered)
 }
 
-/* finish is the command's one exit door: under --format=json it renders the accumulated document — the failure included — and in every mode it answers the error the command should return. The command's own failure stays the verdict; a rendering failure becomes one only when the command itself succeeded — in text mode the first write the report lost, which used to be swallowed line by line so a truncated report exited zero — and only for a command whose report is its result; one that told finish otherwise, through reportLostWritesTo, has the loss journaled and its run answered nil. */
+/* finish is the command's one exit door: under --format=json it renders the document, the failure included, and in every mode it answers the command's error. The command's own failure stays the verdict; a lost report becomes one only when the command succeeded and its report is its result, and a command that called reportLostWritesTo has the loss journaled and its run answered nil. */
 func (instance *commandOutput) finish(command string, startedAt time.Time, runErr error) error {
     if false == instance.isJson() {
         if nil != runErr {
@@ -176,7 +172,7 @@ func (instance *commandOutput) finish(command string, startedAt time.Time, runEr
         data["messages"] = instance.messages
     }
     if nil != instance.database {
-        /* the absent database is json null, not the placeholder the text block renders: as a string, "no current database" was indistinguishable from a database named literally <null>, and a consumer had to know melody's own placeholder to read the field at all */
+        /* the absent database is json null, so a consumer never confuses it with a database named literally <null> */
         currentDatabaseValue := (any)(nil)
         if nil != instance.database.CurrentDatabase {
             currentDatabaseValue = *instance.database.CurrentDatabase
@@ -227,14 +223,12 @@ func (instance *commandOutput) finish(command string, startedAt time.Time, runEr
     return renderErr
 }
 
-/* errorDetailsOf and errorCauseOf fill the two fields the json envelope always declared and always answered null. The machine document is the contract a pipeline reads, and it was the one rendering that threw away what the error already carried: at the same instant, over the same value, the journal filed the connection, the pool sizing, the deadlines and the whole cause chain, while stdout answered `"details":null,"cause":null` beside a single sentence.
-
-   The details object is empty rather than null when the error carries no context, so the field keeps its json type on every failure — the rule the machine contracts of this family were put on. */
+/* errorDetailsOf and errorCauseOf fill the envelope's details and cause from what the error carries, its context and its cause chain. The details object is empty rather than null when the error carries no context, so the field keeps its json type. */
 func errorDetailsOf(runErr error) map[string]any {
     details := map[string]any{}
 
     var provider exceptioncontract.ContextProvider
-    /* the As target is read through the typed-nil door, not through a plain nil comparison: a typed-nil link satisfies As, passes that comparison and then takes a read lock on a nil receiver inside Context(), panicking in the very rendering that was reporting the failure — and the panic unwinds finish, so the document the pipeline reads is never written and the failure is lost. bun's migrator produces exactly that link: it wraps the application's migration-function error with %w after a plain nil test, and fmt records the operand before formatting it. errorCauseOf below reaches the same conclusion through BuildCauseChain, which skips typed-nil links of its own accord. */
+    /* the As target is read through the typed-nil door: bun's migrator wraps a migration error with %w after a plain nil test, so a typed-nil link can satisfy As and would panic in Context(), unwinding finish before the document is written */
     if true == errors.As(runErr, &provider) && false == isNilInterface(provider) {
         for key, value := range provider.Context() {
             details[key] = value
@@ -244,7 +238,7 @@ func errorDetailsOf(runErr error) map[string]any {
     return details
 }
 
-/* errorCauseOf answers the first link under the failure together with the whole chain beneath it, and nothing at all when the failure has no cause — a null there is the honest answer, unlike the null the field used to carry on every failure alike. */
+/* errorCauseOf answers the first link under the failure with the whole chain beneath it, and nothing when the failure has no cause. */
 func errorCauseOf(runErr error) *output.ErrorCause {
     causeChain := exception.BuildCauseChain(errors.Unwrap(runErr), 8)
     if 0 == len(causeChain) {
@@ -288,7 +282,7 @@ func (instance *commandOutput) printTextSuccess(message string) {
     instance.printSuccess(message)
 }
 
-/* every text door of the output escapes what it did not write itself before the terminal sees it — the applied line names the manager, the files block names the paths bun answered, the warning carries the close error off the wire — while the json branch hands the value to the document, whose printer escapes the C1 block itself. The warning was the one door that let its message through as sent, and its one caller with foreign text is the close failure of the migration connection. */
+/* every text door of the output escapes what it did not write itself, the warning included, while the json branch hands the value to the document, whose printer escapes the C1 block */
 func (instance *commandOutput) printSuccess(message string) {
     if true == instance.isJson() {
         instance.messages = append(instance.messages, message)
@@ -385,7 +379,7 @@ func (instance *commandOutput) printDetailsBlock(fields map[string]string) {
     }
 }
 
-/* printMigrationsBlock takes the document key apart from the display title: the two used to be one string, so the json document was keyed on the heading a person reads — data.migrations.APPLIED from db:status against data.migrations["APPLIED MIGRATIONS"] from db:migrate, for the same thing — with no enumerable set of keys and a rename for readability breaking every consumer silently. The key is the contract; the title is rendering. */
+/* printMigrationsBlock keys the json document apart from the display title: the key is the contract and the title is rendering, so a heading renamed for readability breaks no consumer. */
 func (instance *commandOutput) printMigrationsBlock(key string, title string, names []string) {
     if 0 == len(names) {
         return

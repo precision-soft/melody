@@ -297,7 +297,7 @@ func TestMigrationPrinter_PrintFailedEscapesForeignTextButKeepsTheQueryLines(t *
     }
 }
 
-/* the empty and the success lines of a run carry the migration name, which the runner did not write; they escape it in both colour modes, and the per-query lines — which carry it inside the prefix — are measured on a run of their own below */
+/* the empty and the success lines of a run carry the migration name, which the runner did not write; they escape it in both colour modes, and the per-query lines, which carry it inside the prefix, are checked on a run of their own below */
 func TestMigrationPrinter_EscapesTheMigrationNameOnTheEmptyAndSuccessLines(t *testing.T) {
     for _, noColor := range []bool{true, false} {
         buffer := &bytes.Buffer{}
@@ -442,7 +442,7 @@ func TestRestoreDefaultRunnerOption_ThreeOverlappingCommandsLeavingOutOfOrderSti
     }
 }
 
-/* the prefix of every per-query line carries the migration name, the author's own text, and the executing, completed and failed lines printed it as sent while escaping the query name beside it: a name carrying an escape sequence repainted the terminal three times per query. Measured on a run whose second query fails, so all three lines print, in both colour modes: the name is escaped on every line and no raw escape byte reaches the writer. */
+/* the prefix of every per-query line carries the migration name, the author's own text, so the executing, completed and failed lines escape it as they escape the query name beside it. The run's second query fails, so all three lines print, in both colour modes: the name is escaped on every line and no raw escape byte reaches the writer. */
 func TestRunQueriesWithOption_EscapesTheMigrationNameInsideThePrefixOfEveryPerQueryLine(t *testing.T) {
     for _, noColor := range []bool{true, false} {
         database, recorder := newFakeBunDatabase()

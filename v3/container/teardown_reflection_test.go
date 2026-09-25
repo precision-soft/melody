@@ -939,7 +939,7 @@ func TestContainer_Close_ArmedAHeldEdgeBesideAMutualPairIsStillWritten(t *testin
         return -1
     }
 
-    /* b closes first either way, since it resolved the holder; what the repair changes is the holder against the member it holds */
+    /* b closes first either way, since it resolved the holder; what this pins is the holder against the member it holds */
     if 3 != len(closeSequence) || indexOf("c") > indexOf("a") {
         t.Fatalf("expected the holder closed before the member it holds, got %v", closeSequence)
     }

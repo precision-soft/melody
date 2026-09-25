@@ -147,7 +147,7 @@ func TestEncryptedStringFor_RotationInsideTheCompartmentKeepsDecrypting(t *testi
         t.Fatalf("value: %v", valueErr)
     }
 
-    /* rotate: a new current key, the old key still active for decryption */
+    /* rotate: a new current key, the retired key still active for decryption */
     rotatedProvider := NewStaticKeyProvider("crm-v2", map[string][]byte{
         "crm-v1": oldKey,
         "crm-v2": newKey(37),

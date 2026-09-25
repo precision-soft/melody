@@ -825,7 +825,7 @@ func TestMysqlLock_FailuresNameTheFoldedLockNameBesideTheName(t *testing.T) {
         t.Fatal("control: the probe name must be long enough to be folded")
     }
 
-    /* the refresh of a lock no longer held was the one refusal of the family still naming the caller's spelling alone */
+    /* the refresh of a lock that is not held names the folded spelling beside the caller's, like every refusal of the family */
     refreshErr := lock.Refresh(newLockRuntime(), time.Second)
     if false == errors.As(refreshErr, &typed) || name != typed.Context()["name"] || boundedLockName(name) != typed.Context()["lockName"] {
         t.Fatalf("expected the refresh refusal to carry the name and its folded form, got %v", refreshErr)

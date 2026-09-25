@@ -881,7 +881,7 @@ func runOnceContained(t *testing.T, relay *Relay, runtimeInstance runtimecontrac
     return relay.RunOnce(runtimeInstance)
 }
 
-/* a codec that panics on one row used to kill the relay process at that row on every claim; the panic is charged to the row as a decode failure — dead-lettered, with the panic in last_error — and the batch goes on. */
+/* a codec that panics on one row is charged to that row as a decode failure, dead-lettered with the panic in last_error, and the batch goes on instead of the relay dying at that row on every claim. */
 func TestRelay_APanickingDecodeIsDeadLetteredAndTheBatchContinues(t *testing.T) {
     logger := &recordingLogger{}
     repository := &fakeRepository{due: []Pending{

@@ -130,7 +130,7 @@ func (instance *RelayCommand) Run(
 
         if nil != runErr {
             if nil != runContext.Err() {
-                /* a cancellation — signal or parent context — interrupted the batch mid-drain; the visibility timeout re-surfaces whatever stayed claimed, so exit cleanly rather than report the cancellation as a failure. Only an error the cancellation EXPLAINS is swallowed though: a genuine repository failure that merely coincided with a lapsing parent deadline used to ride this branch into exit 0, and a supervisor read the failed drain as success. */
+                /* a cancellation interrupted the batch mid-drain and the visibility timeout re-surfaces what stayed claimed, so the command exits cleanly; only an error the cancellation explains is swallowed, so a repository failure that coincides with a lapsing deadline is still reported */
                 if true == errors.Is(runErr, context.Canceled) || true == errors.Is(runErr, context.DeadlineExceeded) {
                     return nil
                 }

@@ -662,7 +662,7 @@ func TestAsyncStorage_CloseGracesWithin_SplitsTheCallersDeadlineInTwo(t *testing
     }
 }
 
-/* neither half exceeds the package grace: a declared budget bounds the TOTAL a teardown spends, and reading it per stretch inverted the declaration — an operator who raised the budget to an hour so a slow component could finish made this storage wait thirty minutes for a drain it used to abandon after five seconds. */
+/* neither half exceeds the package grace: a declared budget bounds the TOTAL a teardown spends, so an operator who raises the budget to an hour for a slow component does not make this storage wait thirty minutes for a drain it abandons after five seconds. */
 func TestAsyncStorage_CloseGracesWithin_ClampsEachHalfToThePackageGrace(t *testing.T) {
     storage := NewAsyncStorage(newRecordingStorage(), 4)
     defer func() { _ = storage.Close() }()
@@ -871,7 +871,7 @@ func (instance *slowRecordingStorage) Save(ctx context.Context, table string, en
     return nil
 }
 
-/* a second closer arriving with its budget spent — the ordinary state under a shared teardown deadline, when the application and the container both reach the storage — used to cancel the worker out from under the first closer's drain and dead-letter the entries the first was still being given time to store; it answers nil at once now and leaves the drain to the closer that owns it */
+/* a second closer arriving with its budget spent, the ordinary state under a shared teardown deadline, answers nil at once and leaves the drain to the closer that owns it, rather than cancelling the worker under that drain and dead-lettering the entries the first closer is still given time to store */
 func TestAsyncStorage_CloseWithContext_ASecondCloserLeavesTheFirstClosersDrainAlone(t *testing.T) {
     delegate := &slowRecordingStorage{delay: 20 * time.Millisecond}
     storage := NewAsyncStorage(delegate, 8)
@@ -955,8 +955,8 @@ func TestAsyncStorage_CloseGraces_ABudgetBelowTheFloorIsNoGrace(t *testing.T) {
         t.Fatalf("expected a remainder above the floor to keep its graces, got %v and %v", drainGrace, cancellationGrace)
     }
 
-    /* a remainder between the floor and twice the floor keeps its DRAIN half — a save of half a millisecond that was finishing inside such a remainder was answered "budget already spent" when the floor was asked of the halves — and gives up its CANCELLATION half, which under a millisecond measures no reaction: given as a grace, a delegate that honoured its cancellation seven hundred microseconds later was reported to have ignored it, three hundred closes out of three hundred */
-    /* the remainder is re-read inside closeGracesWithin, and a scheduling stall between this deadline and that read moves it — measured four times in twenty thousand, worst three milliseconds, nineteen in twenty thousand under an oversubscribed machine — so the assertion is judged on the remainder as it stood AFTER the call, and only when that remainder still sat inside the window the case is about: a stall that pushed it below the floor is not this case, and the call is asked again */
+    /* a remainder between the floor and twice the floor keeps its DRAIN half, so a save of half a millisecond finishing inside it is not answered "budget already spent", and gives up its CANCELLATION half, in which no reaction can be observed: given as a grace, a delegate honouring its cancellation seven hundred microseconds later would read as having ignored it */
+    /* the remainder is read again inside closeGracesWithin, and a scheduling stall between this deadline and that read moves it, so the assertion is judged on the remainder as it stood AFTER the call, and only while it still sits inside the window the case is about: a stall that pushed it below the floor is not this case, and the call is asked again */
     for attempt := 0; ; attempt = attempt + 1 {
         narrowContext, cancelNarrow := context.WithTimeout(context.Background(), 1900*time.Microsecond)
 
@@ -1206,7 +1206,7 @@ func TestAsyncStorage_CloseWithContext_ACancellationDuringTheCancellationGraceEn
     }
 }
 
-/* the third verdict used to say "the remaining entries were dead-lettered" on the clock alone: a delegate that never read its cancellation and stored every entry after it was reported as having dead-lettered them */
+/* the third verdict is read off the worker's counters, not the clock: a delegate that never reads its cancellation and stores every entry after it is reported as having stored them, not as having dead-lettered them */
 func TestAsyncStorage_CloseCountsWhatTheDelegateStoredAfterTheCancellation(t *testing.T) {
     installDefaultAsyncStorageLogger(t)
 
@@ -1307,7 +1307,7 @@ func TestAsyncStorage_CloseCountsTheDeadLetteredAndTheStoredApart(t *testing.T) 
     }
 }
 
-/* two entries of one call can carry the same entity, id and operation — two updates of one row in one batch — and a caller retrying "the refused ones" could not tell which of the twins was refused: the index is the entry's position in the call */
+/* two entries of one call can carry the same entity, id and operation, two updates of one row in one batch, so the refusal carries each entry's position in the call for a caller retrying "the refused ones" to tell the twins apart */
 func TestAsyncStorage_TheRefusalCarriesTheIndexOfEachTwinItRefused(t *testing.T) {
     installDefaultAsyncStorageLogger(t)
 
@@ -1516,7 +1516,7 @@ func (instance *lockedJournal) Write(payload []byte) (int, error) {
     return instance.builder.Write(payload)
 }
 
-/* the same error RETURNED by the delegate is dead-lettered under its own message: the reader that files it no longer panics, so the failure is not re-filed by the recovery as a panic of the storage */
+/* the same error RETURNED by the delegate is dead-lettered under its own message: the reader that files it does not panic, so the failure is not filed again by the recovery as a panic of the storage */
 func TestAsyncStorage_DeadLettersAReturnedErrorWhoseUnwrapPanicsUnderItsOwnMessage(t *testing.T) {
     delegate := &panicOnceStorage{returnErr: unwrapPanickingSaveError{}}
     logger := &capturingLogger{}

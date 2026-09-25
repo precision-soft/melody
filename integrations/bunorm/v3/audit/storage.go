@@ -71,7 +71,7 @@ func (instance *BunStorage) Save(ctx context.Context, table string, entries ...E
         return nil
     }
 
-    /* Save is a public door and the table flows unquoted through ModelTableExpr as raw SQL: the Registry validates the names IT hands out, but a direct caller bypasses the Registry entirely, so the same grammar is enforced here — as an error rather than a panic, because this is the request path. The empty table is refused with the rest: silently substituting the default hid the caller that forgot which table it was writing. */
+    /* the table flows unquoted through ModelTableExpr as raw SQL and a direct caller bypasses the Registry, so its grammar is enforced here as an error, the empty table included */
     if false == auditTableNamePattern.MatchString(table) {
         return exception.NewError("audit table name is not a valid identifier", map[string]any{"table": table}, nil)
     }
@@ -107,7 +107,7 @@ type fileRecord struct {
     Entry Entry  `json:"entry"`
 }
 
-/* Save appends the entries as json lines and syncs the file once per batch. A context already cancelled is refused before the file is opened, the reading the database storage gets from its driver: an AsyncStorage that cancels its worker after the drain grace relies on the delegate to give the remaining entries back as dead-letters, and this one used to write every one of them regardless. An open or write already parked in the kernel — a fifo with no reader, a hung network mount — is not interrupted by this; nothing in the process can do that. */
+/* Save appends the entries as json lines and syncs the file once per batch. A context already cancelled is refused before the file is opened, so an AsyncStorage that cancels its worker gets the remaining entries back as dead-letters; an open or write already parked in the kernel is not interrupted. */
 func (instance *FileStorage) Save(ctx context.Context, table string, entries ...Entry) error {
     if 0 == len(entries) {
         return nil

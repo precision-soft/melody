@@ -198,7 +198,7 @@ func TestRollbackCommand_FailedUnlockFailsTheCommand(t *testing.T) {
     }
 }
 
-/* the same remedy-naming refusal the migrate sibling proves: bun's bare lock error names neither the database nor db:unlock, and rollback used to return it as it came */
+/* the same remedy-naming refusal the migrate sibling proves: bun's bare lock error names neither the database nor db:unlock, so rollback wraps it */
 func TestRollbackCommand_LockFailureNamesTheRemedy(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.execHook = func(query string) error {

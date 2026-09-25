@@ -501,8 +501,7 @@ func TestRegisterModule_AValueModuleCarryingAnUnhashableFieldIsRegisteredInstead
     assertModuleNames(t, instance.modules, []string{"carrier"})
 }
 
-/* the comparable half of the same shape stays on the identity path, so the repair is a narrowing of the
-skip and not a removal of it: one instance reached twice still boots once. */
+/* the comparable half of the same shape stays on the identity path, so the skip is narrowed, not removed: one instance reached twice still boots once. */
 func TestRegisterModule_AValueModuleCarryingAHashableFieldKeepsItsIdentity(t *testing.T) {
     instance := &Application{}
 

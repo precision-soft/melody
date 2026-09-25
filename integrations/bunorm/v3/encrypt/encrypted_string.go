@@ -12,7 +12,7 @@ import (
 
 const redactedPlaceholder = "<redacted>"
 
-/* EncryptedColumn marks every encrypted column type — the two default-cipher forms and every instantiation of the two compartment-bound generic forms. A consumer that must recognise "a value of an encrypted column type" (the audit trail's auto-redaction) matches this interface rather than comparing types by identity, because each generic instantiation is a distinct reflect.Type and an identity list could never enumerate them. */
+/* EncryptedColumn marks every encrypted column type, the generic instantiations included. A consumer such as the audit trail's auto-redaction matches this interface, since each generic instantiation is a distinct reflect.Type. */
 type EncryptedColumn interface {
     encryptedColumn()
 }
@@ -30,7 +30,7 @@ func (instance EncryptedString) GoString() string {
     return redactedPlaceholder
 }
 
-/* Format redacts under the numeric verbs (%d %o %b %c %U) that fmt routes through neither Stringer nor GoStringer — it consults those only for %v %s %q %x %X and %#v — so a numeric verb would otherwise print the underlying string through the badverb form (`%!d(encrypt.EncryptedString=<plaintext>)`), carrying the secret. Every verb that reaches Format is answered with the same redacted rendering, the way the encrypt key provider closes the same gap. Two verbs never reach it: %p and %w take fmt's badverb path before any method is consulted and print the underlying string by reflection (`%!p(encrypt.EncryptedString=<plaintext>)`), a misuse go vet refuses in a literal format and a dynamic format slips past. And a value held in an UNEXPORTED field of a struct rendered with %v or %+v is walked by reflection too, with no method called on it — the redaction is a property of this value's own rendering, not of every rendering that can contain it. */
+/* Format answers every verb that reaches it, the numeric ones included, with the redacted rendering. %p and %w never reach it, since fmt prints the operand by reflection first, and a value in an unexported field of a struct rendered with %v is walked by reflection with no method called. */
 func (instance EncryptedString) Format(state fmt.State, verb rune) {
     _, _ = state.Write([]byte(redactedPlaceholder))
 }
@@ -43,7 +43,7 @@ func (instance EncryptedString) MarshalJSON() ([]byte, error) {
     return json.Marshal(redactedPlaceholder)
 }
 
-/* UnmarshalJSON is the read side of the redaction: a document MarshalJSON produced carries the placeholder where the plaintext was, and decoding it back into the column used to store the placeholder as the value, so the next Value() sealed "<redacted>" in place of the secret with no error anywhere on the way. The placeholder is refused by name; any other string is the plaintext the application typed, and a json null leaves the value untouched. */
+/* UnmarshalJSON refuses the redaction placeholder MarshalJSON writes, so a round-tripped document cannot seal the placeholder over the secret. Any other string is the plaintext, and a json null leaves the value untouched. */
 func (instance *EncryptedString) UnmarshalJSON(data []byte) error {
     return unmarshalEncryptedJson(instance, data)
 }
@@ -103,9 +103,6 @@ func scanRaw(source any) (string, bool, error) {
     }
 }
 
-/* unmarshalEncryptedJson is the whole of the four column types' UnmarshalJSON. The four differed in one identifier — the conversion back to the receiver's own type — and in nothing else, and every one of them is a string underneath, so the type parameter carries that one difference and the twelve lines that surrounded it are written once.
-
-   The receiver is handed to the decoder rather than its type name, so the name is taken in the refusal branches alone; see columnTypeOf. */
 func unmarshalEncryptedJson[T ~string](instance *T, data []byte) error {
     decoded, present, decodeErr := decodeEncryptedJson(data, instance)
     if nil != decodeErr {
@@ -119,12 +116,12 @@ func unmarshalEncryptedJson[T ~string](instance *T, data []byte) error {
     return nil
 }
 
-/* columnTypeOf names the column type of a pointer receiver, for a refusal to carry. It is asked in the refusal branches alone: taken on the way in, as fmt.Sprintf("%T", *instance), it boxed the value and formatted it on EVERY decode — including the four cases out of five that answer no error at all, which is every decode a document actually performs — and measured at two of the four allocations of one. The receiver is already a pointer, so handing it over allocates nothing, and Elem() puts back the spelling %T gave: the type, not a pointer to it, which is what the three refusal pins read. */
+/* columnTypeOf names the column type of a pointer receiver for a refusal; it is asked in the refusal branches alone, so a successful decode pays nothing for it. */
 func columnTypeOf(column any) string {
     return reflect.TypeOf(column).Elem().String()
 }
 
-/* decodeEncryptedJson is the shared read side of the four column types' MarshalJSON. It answers the decoded plaintext and whether one was present: a json null is the no-op encoding/json asks of every Unmarshaler, so nothing is present and nothing is an error. The redaction placeholder is refused rather than stored, because a value equal to it can only have come from a document this package redacted — an application that round-trips such a document would otherwise seal the placeholder over its own secret in silence. The refusal names the column type so the wiring that decoded the document is the one reported. */
+/* decodeEncryptedJson answers the decoded plaintext and whether one was present, a json null carrying none. The redaction placeholder is refused, naming the column type. */
 func decodeEncryptedJson(data []byte, column any) (string, bool, error) {
     if "null" == string(data) {
         return "", false, nil

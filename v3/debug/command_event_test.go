@@ -770,7 +770,7 @@ func TestEventCommand_DeclaresTheServingProcessListenersAtEveryVerbosity(t *test
         t.Fatalf("failed to decode the rendered envelope: %v, rendered %q", decodeErr, rendered)
     }
 
-    /* the listing stays where it was: without this half the repair could have reparented the payload and still declared */
+    /* the listing stays where it is: without this half the payload could be reparented and still declared */
     if 2 != len(decoded.Data.Items) || 2 != decoded.Data.Total {
         t.Fatalf("expected the listing to keep data.items, got %q", rendered)
     }

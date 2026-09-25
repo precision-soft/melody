@@ -131,7 +131,7 @@ func TestMigrateCommand_LockFailureAbortsWithoutMigratingOrUnlocking(t *testing.
         t.Fatalf("a never-acquired lock was released: %v", recorder.recordedQueries())
     }
 
-    /* the command no longer pre-prints the failure it returns: the cli runner's [error] line and the full log record already report it, and the third copy on the same console said nothing new */
+    /* the command does not pre-print the failure it returns: the cli runner's [error] line and the full log record report it */
     if true == strings.Contains(rendered, "ERROR:") {
         t.Fatalf("the returned failure must not be pre-printed by the command, got: %q", rendered)
     }
@@ -237,7 +237,7 @@ func TestMigrateCommand_FailedMigrationKeepsItsErrorOverAFailedUnlock(t *testing
     }
 }
 
-/* a pipeline reading .data.migrations to record what it deployed used to receive {"data":{}} for a run that applied migrations, and the readme told its author that --verbose affects the plain-text output — so the one flag that would have filled the document was documented as irrelevant to it */
+/* a pipeline reading .data.migrations to record what it deployed receives the migrations at the default verbosity: --verbose shapes the plain text, not the machine document */
 func TestMigrateCommand_JsonCarriesTheDetailAtTheDefaultVerbosity(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = appliedMigrationRowsHook()
@@ -364,7 +364,7 @@ func TestMigrateCommand_TheSuccessLineDoesNotEnterTheMachineDocument(t *testing.
     }
 }
 
-/* a group that fails part way through names what it already applied, on both renderings. Bun returns the landed migrations beside the failure and the command used to throw them away, so the operator was told which migration broke and nothing about which had been applied and recorded — leaving the choice between re-running (safe) and rolling back (which would take the landed ones with it) impossible to make without reading the database by hand. */
+/* a group that fails part way through names what it already applied, on both renderings, so the operator can choose between re-running (safe) and rolling back (which would take the landed ones with it) without reading the database by hand. */
 func TestMigrateCommand_AFailedGroupNamesTheMigrationsThatLanded(t *testing.T) {
     applied := make([]string, 0)
 
@@ -492,7 +492,7 @@ func TestMigrateCommand_AGroupThatLandedNothingReportsNoAppliedBlock(t *testing.
     }
 }
 
-/* the per-query progress of a migration that runs its own statements must not reach the command writer under json: the document is the only byte the command may emit there, and a single "[migration:up] ... executing:" line ahead of it turns the run's whole output into something no decoder accepts. The runner reads its writer from the process default the command installs from its parsed flags — a generated migration's signature is fixed by bun and cannot receive them — so this asserts the one thing the installation exists for. Neither frozen major carries this pin: measured on `io.Discard` and `runnerOptionForCommand` across the three test suites, no test observes the discarded writer at all, which left the json posture of the runner option unproven everywhere. It is added on the major still in development. */
+/* the per-query progress of a migration that runs its own statements must not reach the command writer under json: the document is the only byte the command may emit there, and a single "[migration:up] ... executing:" line ahead of it makes the output undecodable. The runner reads its writer from the process default the command installs from its parsed flags, since a generated migration's signature is fixed by bun, so this asserts the one thing the installation exists for. */
 func TestMigrateCommand_TheRunnersOwnProgressStaysOutOfTheMachineDocument(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = appliedMigrationRowsHook()

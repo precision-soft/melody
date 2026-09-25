@@ -190,7 +190,7 @@ func TestStore_RecordDeliveryAttemptIncrementsPerRowNotClaim(t *testing.T) {
     }
 }
 
-/* a row that is no longer in-flight (already resolved, or its claim lapsed and another instance owns it) must report claimed=false so the relay skips it instead of publishing alongside the new owner. */
+/* a row that is not in-flight (already resolved, or its claim lapsed and another instance owns it) must report claimed=false so the relay skips it instead of publishing alongside the new owner. */
 func TestStore_RecordDeliveryAttemptReportsUnclaimedWhenNotInFlight(t *testing.T) {
     store := outboxTestStore(t)
     ctx := context.Background()

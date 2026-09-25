@@ -98,7 +98,7 @@ func NewRelay(config RelayConfig) *Relay {
     if 0 >= resolved.BatchSize {
         resolved.BatchSize = defaultBatchSize
     }
-    /* the upper clamp is the twin of the zero clamp: the batch size flows into a slice pre-allocation, and a fat-fingered configuration (an env var pasted with too many zeroes) would ask the runtime for terabytes of capacity and panic the relay process before any query ran — a panic the command's error-driven backoff loop cannot catch. */
+    /* the upper clamp is the twin of the zero clamp: the batch size flows into a slice pre-allocation, so an oversized configuration would panic the relay before any query, beyond the reach of the command's error-driven loop */
     if maximumBatchSize < resolved.BatchSize {
         resolved.BatchSize = maximumBatchSize
     }
@@ -131,7 +131,7 @@ type Relay struct {
     config RelayConfig
 }
 
-/* RunOnce drains one batch of due messages and returns how many were published successfully. When a Locker is configured and the lease is held by another instance, it returns 0 without doing work. The lease is an optimisation, not what keeps two instances apart: every claimed row carries this run's claim token and stays invisible to every other claimer until it is resolved or its VisibilityTimeout lapses, so a lease lost mid-batch — a refresh that fails — hands none of the claimed rows to whoever holds the lease now. The batch is therefore drained to its end under its claim tokens, the refresh is not attempted again, and the failure is reported once the batch is done, for the command's loop to log and back off on; returning at the failed refresh, as this used to, left every unreached row claimed and invisible for the whole visibility timeout. A repository failure mid-batch still ends the run where it happened: the store is what failed, so there is nowhere to hand the unreached rows back, and the visibility timeout is what re-surfaces them. */
+/* RunOnce drains one batch of due messages and returns how many were published; when a Locker is configured and another instance holds the lease, it returns 0. The lease is an optimisation: every claimed row carries this run's claim token, so a lease lost mid-batch hands no claimed row to the new holder, and the batch is drained to its end with the refresh failure reported after it. A repository failure mid-batch ends the run where it happened, and the visibility timeout re-surfaces the unreached rows. */
 func (instance *Relay) RunOnce(runtimeInstance runtimecontract.Runtime) (int, error) {
     release, refresh, acquired, lockErr := instance.acquireLease(runtimeInstance)
     if nil != lockErr {
@@ -144,7 +144,7 @@ func (instance *Relay) RunOnce(runtimeInstance runtimecontract.Runtime) (int, er
 
     defer release()
 
-    /* a large batch can outlive the lock ttl while sending; refresh the lease as work progresses so another instance does not take the lock mid-run and double-publish. Refresh twice per ttl so a single missed beat still leaves margin. The cadence is anchored at ACQUISITION, before the claim below: the lease's own clock started there, and a claim that blocks on a contended database consumes lease lifetime a later anchor would never account for — the first refresh would then land after the lease had already lapsed. */
+    /* a large batch can outlive the lock ttl, so the lease is refreshed twice per ttl as work progresses. The cadence is anchored at acquisition, before the claim, since the lease's clock started there and a blocked claim consumes its lifetime */
     refreshInterval := instance.config.LockTtl / 2
     lastRefresh := time.Now()
 
@@ -190,7 +190,7 @@ func (instance *Relay) RunOnce(runtimeInstance runtimecontract.Runtime) (int, er
     return published, nil
 }
 
-/* batchFailureOutcome reports the repository failure that ended a batch; when the lease had been lost before it, the refresh failure travels in the context so neither is dropped, while the repository failure stays the cause — it is the one the command's loop classifies, and a cancellation that explains it has to stay reachable through errors.Is. */
+/* batchFailureOutcome reports the repository failure that ended a batch; when the lease was lost earlier in the batch, the refresh failure travels in the context so neither is dropped, while the repository failure stays the cause — it is the one the command's loop classifies, and a cancellation that explains it has to stay reachable through errors.Is. */
 func (instance *Relay) batchFailureOutcome(deliverErr error, refreshErr error) error {
     if nil == refreshErr {
         return deliverErr
@@ -206,7 +206,7 @@ func (instance *Relay) batchFailureOutcome(deliverErr error, refreshErr error) e
     )
 }
 
-/* runContained runs one step of a delivery — the codec's decode, the transport's send, the logger's record of a contained panic — and hands back the panic it raised as an error, so the relay charges the row for what its collaborator did instead of dying with it: the command's loop recovers nothing and the cli barrier above it re-raises, so a codec or transport that panicked on one row killed the relay at that row on every claim, until the crash-poison cap dead-lettered it hours later. A panic value that is not an error is rendered into the error's message, since last_error and the log record carry the message. */
+/* runContained runs one step of a delivery, the codec's decode, the transport's send or the logger's record of a contained panic, and hands back the panic it raised as an error, so the row is charged for what its collaborator did instead of the relay dying on it at every claim. A panic value that is not an error is rendered into the message, which last_error and the log record carry. */
 func runContained(step func()) (recoveredErr error) {
     defer func() {
         recovered := recover()
@@ -333,7 +333,7 @@ func (instance *Relay) deliver(runtimeInstance runtimecontract.Runtime, pending 
 /* maximumStoredErrorLength bounds what goes into the row's last_error column. The narrowest schema the store's own EnsureSchema can produce maps the field to a VARCHAR whose default length is 255, and a resolution write refused for an over-long diagnostic would lose the resolution itself — the row would silently re-surface after the visibility timeout with nothing recorded. */
 const maximumStoredErrorLength = 250
 
-/* storedLastError renders a delivery failure for the row's last_error column with its CAUSE CHAIN, not the message alone: the error string of a melody error is its message, so a dead-lettered row used to record "amqp publish failed" with no broker verdict, no reply code, nothing — and the one place an operator looks to diagnose a dead letter was undiagnosable. */
+/* storedLastError renders a delivery failure for the row's last_error column with its cause chain, since a melody error's string is its message alone and the broker's verdict would be lost. */
 func storedLastError(prefix string, err error) string {
     parts := append([]string{prefix + err.Error()}, exception.BuildCauseChain(errors.Unwrap(err), 8)...)
 
@@ -351,7 +351,7 @@ func storedLastError(prefix string, err error) string {
     return rendered
 }
 
-/* resolutionWriteOutcome reports a failed resolution write WITH the delivery failure it was recording: returning the write error alone dropped the decode/send cause entirely, so the operator learned the UPDATE hiccuped and never that the publish was failing — and the row re-surfaced after the visibility timeout with nothing recorded anywhere. */
+/* resolutionWriteOutcome reports a failed resolution write together with the delivery failure it was recording, so the operator learns why the publish failed as well as that the UPDATE did. */
 func resolutionWriteOutcome(writeErr error, deliveryError string) error {
     if nil == writeErr {
         return nil

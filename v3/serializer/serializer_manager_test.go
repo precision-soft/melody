@@ -317,7 +317,7 @@ func TestResolveByAcceptHeader_ARefusedTypeLeavesTheUnrefusedOneServable(t *test
         t.Fatalf("unexpected manager error: %v", managerErr)
     }
 
-    /* the second spelling refuses json through a wildcard rather than by name, so the repair cannot depend on the refusal being exact */
+    /* the second spelling refuses json through a wildcard rather than by name, so the answer cannot depend on the refusal being exact */
     for _, acceptHeader := range []string{"application/json;q=0", "application/*;q=0"} {
         resolved, resolveErr := manager.ResolveByAcceptHeader(acceptHeader)
         if nil != resolveErr {
@@ -329,7 +329,7 @@ func TestResolveByAcceptHeader_ARefusedTypeLeavesTheUnrefusedOneServable(t *test
         }
     }
 
-    /* the refusal of every registered type stays a refusal: without this half the repair could simply have deleted the not-acceptable branch */
+    /* the refusal of every registered type stays a refusal: without this half the not-acceptable branch could simply be deleted */
     _, everyTypeRefusedErr := manager.ResolveByAcceptHeader("*/*;q=0")
     if false == errors.Is(everyTypeRefusedErr, ErrNotAcceptable) {
         t.Fatalf("expected a header refusing every registered type to stay not acceptable, got %v", everyTypeRefusedErr)

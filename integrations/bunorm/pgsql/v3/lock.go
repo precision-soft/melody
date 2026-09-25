@@ -63,7 +63,7 @@ func (instance *Locker) CreateLock(name string, ttl time.Duration) lockcontract.
     }
 }
 
-/* pgsqlLock carries both spellings of its name: the one the caller gave, which every error context names, and the two halves of the advisory key the server was actually asked for, which the contexts name beside it — a diagnostic that showed only the caller's spelling left the operator with nothing to match against pg_locks. */
+/* pgsqlLock carries the name the caller gave and the two halves of the advisory key the server was asked for, and every error context names both, so a diagnostic can be matched against pg_locks. */
 type pgsqlLock struct {
     database       *bun.DB
     name           string
@@ -141,7 +141,7 @@ func (instance *pgsqlLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl 
         return exception.NewError("pgsql lock is no longer held", map[string]any{"name": instance.name, "keyHigh": instance.keyHigh, "keyLow": instance.keyLow}, nil)
     }
 
-    /* a PostgreSQL session advisory lock has no ttl to extend: it is held for as long as its backend session lives. "Refresh" is therefore a liveness probe — if the pinned connection still answers, the lock is still held and there is nothing to renew. The probe runs on a fresh, bounded context so a transient cause (a canceled or expired request context) is never mistaken for a lost lock — unlike a ttl-based lease there is nothing here to lose on a transient error, so we must not release on it. Only a genuinely dead connection (its session, and so the lock, already gone) fails the refresh. */
+    /* a session advisory lock has no ttl: it lives as long as its backend session, so Refresh is a liveness probe on a fresh bounded context and only a dead connection fails it; nothing is released on a transient error */
     if false == instance.pinnedConnectionAlive() {
         instance.discardPinnedConnection()
 
@@ -173,7 +173,7 @@ func (instance *pgsqlLock) discardPinnedConnection() {
     instance.connection = nil
 }
 
-/* releaseLockedConnection releases the advisory lock held by connection and returns the connection to the pool. If pg_advisory_unlock cannot be issued (a failed or timed-out unlock), the lock may still be held, so the physical session is ended instead — which releases every session advisory lock server-side — guaranteeing a still-held lock never rides a pooled connection back into reuse. The unlock runs on a fresh context so a canceled request context cannot strand the lock. Returns the unlock error, or otherwise the pool-return (Close) error, if any. */
+/* releaseLockedConnection releases the advisory lock on a fresh context and returns the connection to the pool; when pg_advisory_unlock cannot be issued the session is ended instead, which releases every advisory lock server-side. It returns the unlock error, or else the pool-return error. */
 func releaseLockedConnection(connection *sql.Conn, keyHigh int32, keyLow int32, releaseTimeout time.Duration) error {
     releaseCtx, cancel := context.WithTimeout(context.Background(), releaseTimeout)
     defer cancel()

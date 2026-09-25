@@ -7,7 +7,7 @@ import (
     "github.com/precision-soft/melody/v3/exception"
 )
 
-/* CipherRef binds a column type to a named cipher through the type system: a zero-size marker type implements CipherName() and parameterizes EncryptedStringFor / EncryptedDeterministicStringFor, so the binding travels with the Go type — the only channel available, since database/sql gives Value() and Scan() no context. */
+/* CipherRef binds a column type to a named cipher through the type system: a zero-size marker type implementing CipherName parameterizes EncryptedStringFor and EncryptedDeterministicStringFor, since database/sql gives Value and Scan no context. */
 type CipherRef interface {
     CipherName() string
 }
@@ -32,7 +32,7 @@ func UseCipherNamed(name string, cipherInstance Cipher) {
     storeCipher(name, cipherInstance)
 }
 
-/* storeCipher installs, replaces or — for a bare nil — uninstalls a registry entry; the bare nil is the documented deinstall door test binaries reset compartments with. A TYPED nil is a different thing entirely: it is a wiring error (a resolution that failed and was installed anyway), it is not a deinstall request, and stored it would be handed out by cipherByName with a nil error and dereferenced inside database/sql at the first column write. It is refused here, at the boot-time door whose caller can be named. */
+/* storeCipher installs, replaces or, for a bare nil, uninstalls a registry entry. A typed nil is a wiring error and is refused here, since cipherByName would hand it out and database/sql would dereference it at the first column write. */
 func storeCipher(name string, cipherInstance Cipher) {
     if nil != cipherInstance {
         reflected := reflect.ValueOf(cipherInstance)

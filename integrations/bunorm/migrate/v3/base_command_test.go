@@ -392,9 +392,7 @@ func (instance *migrationCapableTestProvider) OpenForMigration(params bunorm.Con
 
 var _ bunorm.MigrationProvider = (*migrationCapableTestProvider)(nil)
 
-/* TestResolveDatabase_TheReleaseEndsTheDedicatedMigrationConnection pins the half of the door a command defers. The dedicated connection deliberately lifts the driver's read and write deadlines and recycles nothing, which is right for a DDL statement that runs for minutes and wrong for anything that then sits idle; the registry memoizes it until the registry itself closes, so a migration run at the boot of a process that goes on to serve requests used to leave a deadline-less connection open for the life of that process.
-
-   The proof is that the NEXT resolution dials again: the memo is really gone, not merely marked. Counting the provider's migration opens says that where checking the connection's own state could not — the same pointer answers both times. */
+/* TestResolveDatabase_TheReleaseEndsTheDedicatedMigrationConnection pins the half of the door a command defers: the dedicated connection lifts the driver deadlines and recycles nothing, so it must not outlive the run in a process that goes on to serve requests. The proof is that the NEXT resolution dials again: counting the provider's migration opens shows the memo is gone, where the connection's own state could not, since the same pointer answers both times. */
 func TestResolveDatabase_TheReleaseEndsTheDedicatedMigrationConnection(t *testing.T) {
     ordinaryDatabase, _ := newFakeBunDatabase()
     migrationDatabase, _ := newFakeBunDatabase()

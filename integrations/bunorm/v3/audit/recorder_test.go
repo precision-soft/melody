@@ -136,7 +136,7 @@ func TestRecorder_DeadLettersOnStorageFailure(t *testing.T) {
     }
 }
 
-/* an entry the async storage refused — its queue full — is dead-lettered by the storage itself, with the change-set, before the refusal is returned; the recorder used to dead-letter it a second time on the same logger, so every dropped entry was journaled twice, exactly under the queue-full storm the dead-letter exists for. One record per dropped entry, and the refusal still reaches the caller */
+/* an entry the async storage refused, its queue full, is dead-lettered by the storage itself, with the change-set, before the refusal is returned, so the recorder does not dead-letter it a second time on the same logger: one record per dropped entry, and the refusal still reaches the caller */
 func TestRecorder_DoesNotDeadLetterAgainAnEntryTheAsyncStorageAlreadyDeadLettered(t *testing.T) {
     delegate := &recordingStorage{entered: make(chan struct{}), release: make(chan struct{})}
     storage := NewAsyncStorage(delegate, 1)

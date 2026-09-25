@@ -13,7 +13,7 @@ import (
 
 const redactedValue = "<redacted>"
 
-/* the encrypted column types are recognised through the marker interface rather than by type identity: the compartment-bound generic forms (EncryptedStringFor[R], EncryptedDeterministicStringFor[R]) instantiate a distinct reflect.Type per marker, so an identity list matched the two default-cipher types and silently left every compartment column unredacted */
+/* the encrypted column types are recognised through the marker interface, since each compartment-bound generic instantiation is a distinct reflect.Type an identity list cannot enumerate */
 var encryptedColumnType = reflect.TypeOf((*encrypt.EncryptedColumn)(nil)).Elem()
 var baseModelType = reflect.TypeOf(bun.BaseModel{})
 
@@ -36,7 +36,7 @@ type changeEnvelope struct {
     New   *any   `json:"new,omitempty"`
 }
 
-/* MarshalJSON emits each side by PRESENCE rather than by emptiness: under plain omitempty a genuine transition to a zero value — active true→false, a counter to 0, a string emptied — marshalled byte-identical to the one-sided shape of an insert or a delete, and a consumer of the trail could not tell "changed to false" from "no new value recorded". The walk records which sides exist, so a present zero renders (as false, 0, "" or null) and an absent side stays out. A Change built by hand keeps the old reading: with no presence recorded, a side is emitted when it is non-nil. */
+/* MarshalJSON emits each side by presence rather than emptiness, so a transition to a zero value renders the zero and is told apart from the one-sided shape of an insert or a delete. A Change built by hand records no presence, and a side is then emitted when it is non-nil. */
 func (instance Change) MarshalJSON() ([]byte, error) {
     envelope := changeEnvelope{Field: instance.Field}
 
@@ -60,7 +60,7 @@ func ChangeSet(before any, after any) []Change {
 func changeSetWithIgnore(before any, after any, ignore map[string]struct{}) []Change {
     var changes []Change
 
-    /* the embed walk carries a visit record from the root down because Go rejects `type Node struct { Node }` but permits `type Node struct { *Node }`: such an embed can point back at a struct the walk is already inside, and that loop has no nil for the pointer chase to stop on. Seeding the record with the two root pointers means the first embed leading back to the model itself is recognised as the cycle it is, instead of replaying the model's own fields one level down before the guard catches it. */
+    /* the visit record starts with the two root pointers, since Go permits `type Node struct { *Node }` and such an embed can lead back to the model itself */
     seen := map[embedVisitKey]struct{}{}
 
     collectChanges(&changes, structValue(before, seen, false), structValue(after, seen, true), ignore, false, seen)
@@ -192,7 +192,7 @@ func isAuditableEmbed(field reflect.StructField) bool {
     return baseModelType != embedded && false == isEncryptedColumnType(embedded) && reflect.TypeOf(time.Time{}) != embedded
 }
 
-/* structValueOf resolves a value to the struct behind it and records every pointer it walks through, reporting as its second result whether the chase met a pointer this walk had already been through. Go permits `type Node struct { *Node }` where it rejects the non-pointer form, so an embedded pointer can lead back to a struct the walk is already inside; that loop carries no nil to end the chase and, unrecorded, the embed recursion runs until the stack is gone — a fatal error, not a panic, so nothing downstream can recover it. */
+/* structValueOf resolves a value to the struct behind it, recording every pointer it walks through, and reports whether it met one twice: an embedded pointer can lead back to a struct the walk is inside, and the unbounded recursion would be a fatal stack overflow no recover catches. */
 func structValueOf(value reflect.Value, seen map[embedVisitKey]struct{}, after bool) (reflect.Value, bool) {
     for reflect.Pointer == value.Kind() {
         if true == value.IsNil() {
@@ -249,7 +249,7 @@ func structValue(value any, seen map[embedVisitKey]struct{}, after bool) reflect
     return resolved
 }
 
-/* dereferencePointerType follows a pointer type down to what it ultimately points at. The chase is not guaranteed to reach a non-pointer: `type Pointer *Pointer` is legal Go and its element is itself, so an unrecorded loop spins at full processor forever, which is a hang no recover and no request timeout can undo. The first type met twice ends the chase and is returned as-is; it is a pointer type, so every caller reads it as "not one of the encrypted string types" and "not a struct", which is the same answer the chase would have produced had it been able to finish. */
+/* dereferencePointerType follows a pointer type to what it points at, ending at the first type met twice, since `type Pointer *Pointer` is legal Go and would otherwise spin forever. The type it ends on is a pointer, which every caller reads as neither an encrypted string type nor a struct. */
 func dereferencePointerType(pointerType reflect.Type) reflect.Type {
     visited := map[reflect.Type]struct{}{}
 
@@ -287,7 +287,7 @@ func valueContainsRedactTag(value any) bool {
     return valueContainsRedactTagReflect(reflect.ValueOf(value), map[redactVisitKey]struct{}{})
 }
 
-/* the visit key combines the pointer with a length discriminator so two distinct re-slices that share a backing-array start (full and full[:1]) are not collapsed into the same already-visited value — that false dedup would skip a redact-tagged element living past the shorter slice's length and leak it as plaintext. A *T or map header is identified by its pointer alone (length stays 0); a slice adds its length + 1, so a self-referential slice (same pointer, same length) is still caught as a cycle while a different-length view of the same array is traversed, and a slice key never collides with a length-0 pointer/map key. */
+/* the visit key pairs the pointer with the slice length plus one, so two re-slices sharing a backing-array start are both walked and a redact-tagged element past the shorter one is not skipped, while a self-referential slice is still a cycle; a pointer or a map keeps length 0 */
 type redactVisitKey struct {
     pointer uintptr
     length  uintptr
@@ -322,7 +322,6 @@ func valueContainsRedactTagReflect(value reflect.Value, seen map[redactVisitKey]
         /* guard self-referential slices reached through an interface element (slice -> any -> same slice), which carry no pointer node for the deref loop to catch and would otherwise recurse until the stack overflows. */
         pointer := value.Pointer()
         if 0 != pointer {
-            /* key on pointer AND length so a re-slice sharing the backing-array start but with a different length (full vs full[:1]) is not mistaken for an already-visited value, which would skip a redact-tagged element past the shorter view and leak it */
             key := redactVisitKey{pointer: pointer, length: uintptr(value.Len()) + 1}
             if _, visited := seen[key]; true == visited {
                 return false
@@ -386,9 +385,7 @@ func valueContainsRedactTagReflect(value reflect.Value, seen map[redactVisitKey]
     }
 }
 
-/* typeContainsRedactTag answers whether a redact tag is reachable from fieldType. The type graph it walks is finite but freely cyclic — `type Attributes map[string]Attributes`, `type Node []Node` and `type Pointer *Pointer` are all legal Go, as are the same shapes spread across two named types — so every type is recorded before it is taken apart, both in the element chase and in the recursion, and a type met a second time ends that branch.
-
-   Ending it with false is the exact answer rather than a concession. The walk is a reachability question whose result is an OR over the fields, and the first true returns straight out through every frame; a type already under examination can therefore only be reached from a frame that is still exploring it and will report any tag it finds on its own. False here means no redact tag is reachable by any path, and the alternative — answering true for a back-edge — would redact every self-referential shape, `type Category struct { Children []Category }` included, turning the audit trail into a column of placeholders. */
+/* typeContainsRedactTag answers whether a redact tag is reachable from fieldType over a type graph that may be cyclic, recording each type before taking it apart. A type met a second time answers false, which is exact: the frame still exploring it reports any tag it finds, and answering true would redact every self-referential shape. */
 func typeContainsRedactTag(fieldType reflect.Type, seen map[reflect.Type]struct{}) bool {
     for reflect.Pointer == fieldType.Kind() || reflect.Slice == fieldType.Kind() || reflect.Array == fieldType.Kind() {
         if _, visited := seen[fieldType]; true == visited {
@@ -425,7 +422,7 @@ func typeContainsRedactTag(fieldType reflect.Type, seen map[reflect.Type]struct{
             return true
         }
 
-        /* the value walk treats an encrypted column type as redactable; this type walk answers the same question and used to disagree with it — a struct whose only sensitive member was an EncryptedString field read as tag-free through this branch */
+        /* an encrypted column type is redactable here as on the value walk, so a struct whose only sensitive member is an EncryptedString field is not read as tag-free */
         if true == isEncryptedColumnType(dereferencePointerType(subField.Type)) {
             return true
         }

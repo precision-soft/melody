@@ -795,7 +795,7 @@ func (instance changeTestCompartmentRef) CipherName() string {
     return "change-test-compartment"
 }
 
-/* the compartment-bound generic forms instantiate a distinct reflect.Type per marker, so the identity list the redaction used to match could never enumerate them: an Iban typed EncryptedStringFor[ref] reached the change-set as live plaintext */
+/* the compartment-bound generic forms instantiate a distinct reflect.Type per marker, so an identity list could never enumerate them: an Iban typed EncryptedStringFor[ref] must reach the change-set redacted */
 func TestChangeSet_RedactsTheCompartmentBoundEncryptedTypes(t *testing.T) {
     type compartmentAccount struct {
         Id            int64                                                     `bun:"id,pk"`
@@ -818,7 +818,7 @@ func TestChangeSet_RedactsTheCompartmentBoundEncryptedTypes(t *testing.T) {
     }
 }
 
-/* a struct field whose TYPE holds an encrypted column one level down used to read as tag-free through the type walk while the value walk disagreed; both walks must answer redacted */
+/* a struct field whose TYPE holds an encrypted column one level down must read as redacted on the type walk as on the value walk */
 func TestChangeSet_RedactsAStructWhoseTypeNestsAnEncryptedColumn(t *testing.T) {
     type paymentDetails struct {
         Iban encrypt.EncryptedString
@@ -893,7 +893,7 @@ func TestChange_MarshalsAPresentZeroValue(t *testing.T) {
     }
 }
 
-/* the one shape where the TYPE walk answers alone: an empty slice against a nil slice records a change whose values hold no element for the value walk to inspect, so only the field type can say the element carries an encrypted column — under the pre-repair type walk this change-set carried the (empty) containers unredacted while every populated shape was saved by the value walk */
+/* the one shape where the TYPE walk answers alone: an empty slice against a nil slice records a change whose values hold no element for the value walk to inspect, so only the field type can say the element carries an encrypted column, and the empty containers must be redacted like every populated shape */
 func TestChangeSet_RedactsAnEmptyContainerOfAnEncryptedCarryingType(t *testing.T) {
     type paymentDetails struct {
         Iban encrypt.EncryptedString

@@ -9,7 +9,7 @@ type sqlStateCarrier interface {
     Field(field byte) string
 }
 
-/* sqlStateReporter is the same protocol error as the other PostgreSQL drivers spell it: pgx's pgconn.PgError and lib/pq's Error both answer the SQLSTATE through SQLState(), and neither carries Field. A consumer running bun over one of those drivers reached this door with a typed error this package could not see, so an insert that collided answered false and rendered as a server failure instead of a conflict. */
+/* sqlStateReporter is the protocol error as pgx's pgconn.PgError and lib/pq's Error spell it, answering the SQLSTATE through SQLState() with no Field, so bun over those drivers gets the same answers. */
 type sqlStateReporter interface {
     SQLState() string
 }

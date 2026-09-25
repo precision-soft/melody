@@ -13,10 +13,10 @@ import (
 
 const defaultAsyncBufferSize = 1024
 
-/* asyncStorageCloseGrace bounds each stretch of a close whose caller declared no deadline: the drain first, then the wait for the cancelled save. Under a declared one the two stretches are halves of what it leaves, and this figure is what stands in for it when there is none. A backend wedged on a deadline-less write would otherwise hold the whole ordered teardown hostage — the container closes services one at a time, so one full queue over a dead database was the entire process refusing to exit. After the first grace the worker's context is cancelled: a delegate that reads it aborts the in-flight save and the entries still queued are dead-lettered one by one; a delegate that does not read it — a write parked in a syscall, a custom Storage that ignores its context — cannot be interrupted from here, so after a second grace the worker is abandoned with whatever it still holds and Close returns saying so. Losing those entries to a backend that stopped answering is the trade this storage already made when it chose not to block the request path. A variable rather than a constant so its test can build the wedged state without holding the suite for the real grace. */
+/* asyncStorageCloseGrace bounds each of the two stretches of a close whose caller declared no deadline: the drain, then the wait for the cancelled save. A delegate that ignores its context cannot be interrupted, so past the second grace the worker is abandoned with what it holds, the trade this storage makes by keeping the request path unblocked. A variable so its test can build the wedged state without the real grace. */
 var asyncStorageCloseGrace = 5 * time.Second
 
-/* defaultAsyncStorageLogger is where a dead-letter goes when nothing installed a logger through WithLogger. The queue swallows the outcome of every write it takes — a failed save, a panicking delegate, an entry the worker never saw — so a nil default made each of those exits silent in every assembly that did not know to wire a logger, which measured as all of them: the counters were the only signal, and nothing read them. The emergency logger is the process's journal of last resort, the same fallback the rate limiter and the database providers take. A variable so the test can capture what would otherwise go to standard error. */
+/* defaultAsyncStorageLogger is the emergency logger a dead-letter goes through until WithLogger installs one, so no failed save is silent in an assembly that wired no logger. A variable so the test can capture it. */
 var defaultAsyncStorageLogger = logging.EmergencyLogger
 
 type AsyncStorage struct {
@@ -32,9 +32,7 @@ type AsyncStorage struct {
 
     loggerMutex sync.RWMutex
 
-    /* outstanding counts what the queue ACCEPTED and the worker has not finished storing. It is not the queue's length: an entry the worker has taken in hand is out of the channel and not yet stored, and a close that read the length alone would call that entry drained. It exists so a close can answer "is there anything at all to abandon" without waiting for a goroutine to be scheduled — the one thing a close whose budget is already spent cannot do. Raised on the accepted send, under the read lock the close excludes, so once the queue is closed it can only fall.
-
-       outstanding and failed are ONE state under counterMutex, not two atomics: the worker settles an entry by taking it out of outstanding and, when its save failed, putting it into failed in the same step, and a close reads the pair as one snapshot. Read as two atomics, a save that failed between the two reads was counted in neither — outstanding already down, failed not yet up — so the close's verdict credited the delegate with storing an entry it had dead-lettered. */
+    /* outstanding counts what the queue accepted and the worker has not finished storing, the entry in hand included, so a close can tell whether anything is left to abandon without waiting on a goroutine. outstanding and failed are one state under counterMutex, read as one snapshot, so a save that fails between two reads is never counted in neither. */
     counterMutex sync.Mutex
     outstanding  int64
     failed       uint64
@@ -42,7 +40,6 @@ type AsyncStorage struct {
     dropped atomic.Uint64
 }
 
-/* admitEntry counts an entry the queue accepted, under the counter lock the worker settles under. */
 func (instance *AsyncStorage) admitEntry() {
     instance.counterMutex.Lock()
     defer instance.counterMutex.Unlock()
@@ -50,7 +47,7 @@ func (instance *AsyncStorage) admitEntry() {
     instance.outstanding = instance.outstanding + 1
 }
 
-/* settleEntry is the worker's one step for an entry it has finished with: out of outstanding, and into failed when the save did not succeed — one step, so no snapshot can see the entry in neither count. */
+/* settleEntry moves a finished entry out of outstanding and, when its save failed, into failed, in one step so no snapshot sees it in neither count. */
 func (instance *AsyncStorage) settleEntry(failed bool) {
     instance.counterMutex.Lock()
     defer instance.counterMutex.Unlock()
@@ -61,7 +58,6 @@ func (instance *AsyncStorage) settleEntry(failed bool) {
     }
 }
 
-/* counterSnapshot reads outstanding and failed as they stood in one instant. */
 func (instance *AsyncStorage) counterSnapshot() (outstanding int64, failed uint64) {
     instance.counterMutex.Lock()
     defer instance.counterMutex.Unlock()
@@ -113,9 +109,9 @@ func (instance *AsyncStorage) WithLogger(logger loggingcontract.Logger) *AsyncSt
     return instance
 }
 
-/* Save queues the entries for the worker and returns without waiting for the delegate. An entry the queue cannot take — the buffer is full, or the storage is closed — is dead-lettered and reported to the caller as ErrAsyncStorageQueueFull or ErrAsyncStorageClosed, because the caller is the one party still present when that entry is lost: the request path is protected from the delegate's latency, not from knowing that its audit record was dropped. Every entry of the call is attempted and the first refusal is what comes back, naming each entry it dropped under "refused", with its position in the call beside its identity, so a caller retries those alone; it names the logger the entry was dead-lettered through, so a Recorder journals the loss itself unless that logger is its own. */
+/* Save queues the entries for the worker and returns without waiting for the delegate. An entry the queue cannot take is dead-lettered and reported as ErrAsyncStorageQueueFull or ErrAsyncStorageClosed; every entry is attempted, and the first refusal names each dropped entry under "refused" with its position in the call, and the logger it was dead-lettered through, so a caller retries those alone and a Recorder journals the loss unless that logger is its own. */
 func (instance *AsyncStorage) Save(ctx context.Context, table string, entries ...Entry) error {
-    /* a context carrying a database binding is a caller's statement that the audit rows must ride that transaction — a Tracker's unit of work, or a WithDatabase caller. Queued, the entry would be written by the worker outside and possibly AFTER the transaction, so a rollback left a row in the trail for a change that never happened. Those saves go through the delegate synchronously, on the caller's context; the queue serves the unbound path, which is the one with a request latency to protect. */
+    /* a context carrying a database binding asks for the audit rows to ride that transaction, so the save goes through the delegate synchronously on the caller's context; queued, it could be written after a rollback */
     if bound, isBound := ctx.Value(databaseContextKey{}).(*boundDatabase); true == isBound && nil != bound && nil != bound.handle {
         return instance.delegate.Save(ctx, table, entries...)
     }
@@ -123,7 +119,7 @@ func (instance *AsyncStorage) Save(ctx context.Context, table string, entries ..
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
 
-    /* read once for the whole call: the dead-letter and the refusal that names the journal must agree, and a WithLogger landing between two reads would have the refusal name a logger that never received the record */
+    /* read once for the whole call, so the dead-letter and the refusal name the same logger */
     logger := instance.deadLetterLogger()
 
     if true == instance.closed {
@@ -141,7 +137,7 @@ func (instance *AsyncStorage) Save(ctx context.Context, table string, entries ..
         return exception.NewError("async audit storage is closed, dropped the entries", map[string]any{"table": table, "dropped": len(refused), "refused": refused}, &journaledRefusal{sentinel: ErrAsyncStorageClosed, journal: logger})
     }
 
-    /* the refusal names each entry it dropped, not only how many: the entries of one call are admitted one by one, so a call of several can be split between the queue and the journal, and a caller that retried the whole batch on the count alone stored the admitted ones twice through a delegate whose own save is all-or-nothing */
+    /* the refusal names each dropped entry, not a count: one call can be split between the queue and the journal, and a retry of the whole batch would store the admitted entries twice */
     var refused []map[string]any
     for index, entry := range entries {
         select {
@@ -161,7 +157,7 @@ func (instance *AsyncStorage) Save(ctx context.Context, table string, entries ..
     return exception.NewError("async audit queue is full, dropped the entries", map[string]any{"table": table, "dropped": len(refused), "refused": refused}, &journaledRefusal{sentinel: ErrAsyncStorageQueueFull, journal: logger})
 }
 
-/* entryIdentity is what a refusal carries for an entry it names: enough for the caller to retry that entry alone, without the change-set the dead-letter already journaled. The index is the entry's position in the call, because two entries of one call can carry the same entity, id and operation — two updates of one row in one batch — and a caller retrying "the refused ones" could not tell which of the twins was refused. */
+/* entryIdentity is what a refusal carries for an entry it names, enough to retry it alone. The index is the entry's position in the call, since two entries of one call can carry the same entity, id and operation. */
 func entryIdentity(index int, entry Entry) map[string]any {
     return map[string]any{"index": index, "entity": entry.Entity, "entityId": entry.EntityId, "operation": entry.Operation}
 }
@@ -176,18 +172,12 @@ func (instance *AsyncStorage) Failed() uint64 {
     return failed
 }
 
-/* Close drains the queue and joins the worker under the package grace on each stretch, which is what CloseWithContext spends when its caller declared no deadline: past the first grace the worker's context is cancelled, so a delegate that reads it aborts the in-flight save and the remaining entries are dead-lettered instead of holding the teardown — the answer then counts, off the worker's own counters, how many were dead-lettered and how many a delegate that did not read the cancellation stored anyway; past a second grace a delegate that ignored the cancellation is abandoned together with the entries still queued behind it, and Close returns naming how many, since nothing in this process can end a write the delegate will not give up. Both forced forms are reported as errors so the teardown's record names what was cut short. The abandoned entries are not counted as dropped: the worker still holds them and writes them if the delegate ever answers. The delegate itself is not closed, on either door: it belongs to whoever built it — the rule NewRecorderWithStorage keeps for the storage it is handed — so a delegate holding a resource of its own is closed by its owner once this Close has returned.
-
-   A close with nothing outstanding answers nil whatever its deadline says, and spends neither grace. A second close arriving while the first is still draining answers nil at once as well, and leaves the drain to the closer that owns it: it neither joins that drain nor cuts it short, so its nil says only that somebody else is closing, not that the trail is written — the closer that closed the storage is the one told what became of the queue. The graces are zero on every teardown whose budget an earlier component already spent, and the two answers above were then given over a queue that was empty and a worker that held nothing — which named entries that did not exist and cancelled a worker that had nothing to cancel. */
+/* Close drains the queue and joins the worker under the package grace on each of two stretches, as CloseWithContext does with no deadline. Past the first grace the worker's context is cancelled and the answer counts the entries dead-lettered and those a delegate that ignored the cancellation stored; past the second the worker is abandoned with the entries it still holds, and Close names how many. The delegate is never closed, since it belongs to whoever built it, and a close with nothing outstanding, or a second close while the first drains, answers nil at once. */
 func (instance *AsyncStorage) Close() error {
     return instance.CloseWithContext(context.Background())
 }
 
-/* closeGracesWithin splits the time the caller's deadline leaves into the two stretches Close spends: one draining the queue, one waiting for the delegate to react to the cancellation it is then sent. It is read once, at entry; a cancellation of the caller's context that lands DURING a stretch is read by the waits themselves, which end that stretch the way a spent deadline would. Each is half of what is left, because neither can be sized without the other — a drain given the whole budget leaves the cancellation nothing to be noticed in, and the entries behind a wedged save are lost with no word about them — and the halves part where the remainder is between one and two milliseconds: the drain keeps a half under the floor, since a save that was finishing inside it finishes, and the cancellation gives its half up, since a reaction cannot be observed in it. A caller with no deadline gets the package grace on both, which is what this storage did before anybody could declare one.
-
-   Neither half exceeds that package grace. A declared budget bounds the TOTAL a teardown may spend, and reading it as a per-stretch figure inverted the declaration: an operator who raised the budget to an hour so a slow component could finish made THIS storage wait thirty minutes for a drain it used to abandon after five seconds. A remainder too small to halve answers zero, which is the same "do not wait" an already spent deadline gets and the right answer for it.
-
-   A context already cancelled is read like a spent deadline, because the delegate below is handed the worker's cancellation either way and the registry this storage writes through abandons on the same signal. */
+/* closeGracesWithin splits what the caller's deadline leaves, read once at entry, into the drain and the cancellation stretch: each is half the remainder and neither exceeds the package grace, since a declared budget bounds the whole teardown. Between one and two floors the drain keeps its half and the cancellation gives its half up, since no reaction can be observed in it; below the floor, or on a cancelled context, both are zero, and no deadline gives both the package grace. */
 func (instance *AsyncStorage) closeGracesWithin(closeContext context.Context) (drainGrace time.Duration, cancellationGrace time.Duration) {
     if nil != closeContext.Err() {
         return 0, 0
@@ -200,7 +190,6 @@ func (instance *AsyncStorage) closeGracesWithin(closeContext context.Context) (d
 
     remaining := time.Until(deadline)
 
-    /* a remainder too short for a delegate to react in is no grace: the answer "the save ignored its cancellation" is a measurement only where something waited long enough to see a reaction, and a remainder of a few microseconds — the ordinary leftover once an earlier component has spent the budget — gave that verdict over a delegate that honoured its cancellation in 289 closes out of 300. Below the floor both stretches are none. Above it the two halves are not the same kind of wait, and the floor is asked of each for what it measures: the drain half is a chance for the save in hand to finish, which half a millisecond is — a remainder of two milliseconds less a hair, read against a floor on the halves, was answered "budget already spent" over a save that then finished in the dark — while the cancellation half is a measurement of the delegate's REACTION, which half a millisecond is not: given as a grace, a delegate that honoured its cancellation seven hundred microseconds later was reported to have ignored it, three hundred closes out of three hundred. So a remainder between the floor and twice the floor keeps its drain half and gives up the cancellation half, and the close then says what it can say without waiting for a reaction it had no room to see */
     if asyncStorageCloseGraceFloor > remaining {
         return 0, 0
     }
@@ -229,14 +218,12 @@ func (instance *AsyncStorage) CloseWithContext(closeContext context.Context) err
     }
     instance.mutex.Unlock()
 
-    /* a second closer owns nothing here: the first is draining under its own graces, and a second one arriving with a spent budget — the ordinary state under a shared teardown deadline, when the application and the container both reach the storage — used to cancel the worker out from under that drain, dead-lettering the entries the first closer was still being given time to store, and then answer nil. It answers nil at once instead; what the storage did belongs to the closer that closed it. */
+    /* a second closer owns nothing here: the first is draining under its own graces, so this one answers nil at once rather than cancelling the worker under that drain */
     if true == alreadyClosed {
         return nil
     }
 
-    /* nothing outstanding is nothing to abandon and nothing to cancel, so neither a grace nor a goroutine to watch it is reached. Both graces are zero on every teardown whose budget an earlier component already spent, and the answers below then cancelled a worker that had nothing in hand and named entries that were not there — measured 300 times out of 300, against 0 out of 300 on the same call with no deadline at all.
-
-       The question is answered from what the producers COUNT, and the form it replaces is why: a non-blocking read of a channel whose watching goroutine has not been scheduled yet answers "not drained" however drained the queue is, and that read saved 0 times out of 2000 at GOMAXPROCS=1 — a guard that could not fire. The count falls to zero only once every accepted entry has been stored or dead-lettered, and it cannot rise again, because the queue was closed above under the lock a save holds. */
+    /* nothing outstanding means nothing to abandon or cancel, so neither grace is reached. The answer comes from the producers' count, which falls to zero only once every accepted entry is settled and cannot rise once the queue is closed under the lock a save holds. */
     if outstanding, _ := instance.counterSnapshot(); 0 == outstanding {
         return nil
     }
@@ -247,18 +234,18 @@ func (instance *AsyncStorage) CloseWithContext(closeContext context.Context) err
         close(drained)
     }()
 
-    /* the caller's context is read by the wait itself, not only at entry: a cancellation that lands during the drain — a teardown whose parent was cancelled, a caller closing under WithCancel rather than under a deadline — used to be noticed by nobody, and the close spent both package graces over a wedged delegate where the registry beside it, on the same context, returned at once. It ends the drain the way a spent deadline would, with no grace left for a reaction. */
+    /* the wait reads the caller's context too, so a cancellation during the drain ends it the way a spent deadline does, with no grace left for a reaction */
     budgetWithdrawn := false
 
     switch awaitDrain(drained, closeContext.Done(), drainGrace) {
     case drainedInTime:
         return nil
     case drainBudgetWithdrawn:
-        /* a deadline already passed at entry left the drain no grace at all, and its Done is ready together with the zero timer: that is the spent budget the answer below names, not a withdrawal */
+        /* a deadline passed at entry leaves the drain no grace and makes Done ready together with the zero timer: that is the spent budget named below, not a withdrawal */
         budgetWithdrawn = 0 < drainGrace
     }
 
-    /* what the worker held at the instant of the cancellation is the figure every answer below is measured against: the entries then outstanding are the ones the delegate either dead-letters — a save that reads the cancellation — or goes on storing — one that does not — and the counters the worker keeps say which happened to how many. The two are read as one snapshot, since a failure settling between two separate reads was counted in neither. */
+    /* what the worker held at the cancellation is the figure every answer below counts against, read as one snapshot with the failures */
     outstandingAtCancellation, failedAtCancellation := instance.counterSnapshot()
 
     instance.workerCancel()
@@ -267,7 +254,7 @@ func (instance *AsyncStorage) CloseWithContext(closeContext context.Context) err
         return instance.cancelledWithoutAGraceVerdict("async audit storage had its close cancelled by its caller during the drain; the save in hand was cancelled without a grace to observe its reaction, and the entries still outstanding were not confirmed stored")
     }
 
-    /* a zero grace is no measurement: whether the save in hand honoured its cancellation cannot be known when nothing waited for it to react, so the answer says what it can — the budget was spent before this storage was reached, and this many entries were not confirmed stored. It is decided here, before any timer: a timer of zero is not "now", and a delegate that reacted in the same instant used to be reported, one close in thirty thousand, as a wedged save cancelled after a drain grace of zero. "Ignored" is said only where a grace was given and ran out. */
+    /* with a zero grace no reaction can be observed, so the answer names the spent budget and the entries not confirmed stored; this is decided before any timer, since a timer of zero is not "now" */
     if 0 >= cancellationGrace {
         return instance.cancelledWithoutAGraceVerdict("async audit storage was closed with its budget already spent, or with less of it left than a grace is measured against; the save in hand was cancelled without a grace to observe its reaction, and the entries still outstanding were not confirmed stored")
     }
@@ -290,7 +277,7 @@ func (instance *AsyncStorage) CloseWithContext(closeContext context.Context) err
         )
     }
 
-    /* the worker drained after the cancellation, and what it did with the entries it held is read off its counters, not off the clock: a delegate that reads its context dead-letters every one of them, a delegate that does not stores them all after the cancellation, and a delegate that reacts only to the save in hand does some of each. The verdict used to say "dead-lettered" for all three, over a delegate that had stored everything. */
+    /* what the worker did with the entries it held is read off its counters, not the clock: a delegate that reads its context dead-letters them, one that does not stores them, and one that reacts only to the save in hand does some of each */
     _, failedAfterDrain := instance.counterSnapshot()
     deadLettered := int64(failedAfterDrain - failedAtCancellation)
     stored := max(outstandingAtCancellation-deadLettered, 0)
@@ -307,7 +294,6 @@ func (instance *AsyncStorage) CloseWithContext(closeContext context.Context) err
     }
 }
 
-/* drainOutcome is what a wait for the worker's drain ended on. */
 type drainOutcome int
 
 const (
@@ -316,7 +302,7 @@ const (
     drainGraceRanOut
 )
 
-/* awaitDrain waits for the drain under a grace, watching the caller's Done beside the clock, and it is the one place the wait is written: both stretches of a close used to spell it inline, and the rule that makes the answer honest was then owed twice. The rule is the same-instant re-read — the drain and the cancellation, or the drain and the grace, can end in the same instant, and a select between two ready cases picks at random: a queue that emptied is not cancelled out from under the save that emptied it, and a worker that reacted as the caller withdrew is not reported as unobserved, so a drain that is done is answered as done whichever case the select chose. */
+/* awaitDrain waits for the drain under a grace, watching the caller's Done beside the clock. When the drain and another case are ready in the same instant the select picks at random, so the drain is read again and a drain that is done is answered as done. */
 func awaitDrain(drained <-chan struct{}, done <-chan struct{}, grace time.Duration) drainOutcome {
     select {
     case <-drained:
@@ -345,7 +331,6 @@ func (instance *AsyncStorage) cancelledWithoutAGraceVerdict(message string) erro
     return exception.NewError(message, map[string]any{"outstanding": instance.outstandingEntries(), "queued": len(instance.queue)}, nil)
 }
 
-/* outstandingEntries is the outstanding half of the snapshot, for the answers that name it alone. */
 func (instance *AsyncStorage) outstandingEntries() int64 {
     outstanding, _ := instance.counterSnapshot()
 
@@ -360,7 +345,7 @@ func (instance *AsyncStorage) run() {
     }
 }
 
-/* saveItem is one delegate write under a recovery boundary, answering whether the save FAILED: the worker is a bare goroutine, so a panicking delegate — a closed pool, a custom Storage's defect — was a process crash raised from the audit trail, the one component whose failure the design explicitly demotes to a dead-letter. The panic is dead-lettered like any other failed save, and the worker settles the entry on the answer and moves to the next. */
+/* saveItem is one delegate write under a recovery boundary, answering whether the save failed: the worker is a bare goroutine, so a panicking delegate is dead-lettered like any failed save instead of crashing the process. */
 func (instance *AsyncStorage) saveItem(item asyncEntry) (failed bool) {
     defer func() {
         recovered := recover()

@@ -2023,9 +2023,7 @@ func TestManagerRegistry_APanicInThePublishIsNotBlamedOnTheProvider(t *testing.T
     }
 }
 
-/* TestManagerRegistry_CloseWaitsForAnInFlightOpen is the guard for the window Close used to return over. The refusal is published under the lock before any pool is torn down, and that used to be the whole of it: a dial started before it was still in the air when Close answered nil, so a caller that exited on that answer left the connection outstanding, its server-side session to be reaped by a timeout rather than ended.
-
-   The assertion is NEGATIVE and given a real window: Close must still not have returned while the open is parked. A bare non-blocking probe would pass against a Close that simply had not been scheduled yet, which is the tie-break making a guard's mutant flaky rather than dead. */
+/* TestManagerRegistry_CloseWaitsForAnInFlightOpen guards the window after the refusal is published: a dial started before it is still in the air, and Close must wait for it, so a caller that exits on its answer leaves no connection outstanding. The assertion is NEGATIVE and given a real window: Close must still not have returned while the open is parked, since a bare non-blocking probe would pass against a Close that simply had not been scheduled yet. */
 func TestManagerRegistry_CloseWaitsForAnInFlightOpen(t *testing.T) {
     database, _ := newCloseRaceDatabase()
 
@@ -2472,7 +2470,7 @@ func TestManagerRegistry_CloseHandsBunsDiagnosticChannelBack(t *testing.T) {
     }
 }
 
-/* two registries in one process, each routed to its own logger: the first to close hands back only what is its own, and the second keeps its channel through that teardown — closing the first used to reset the channel for the whole process, and the second's diagnostics went to standard error until its next open */
+/* two registries in one process, each routed to its own logger: the first to close hands back only what is its own, and the second keeps its channel through that teardown */
 func TestManagerRegistry_CloseLeavesAnotherRegistrysDiagnosticChannelAlone(t *testing.T) {
     firstLogger := &capturingDiagnosticLogger{}
     secondLogger := &capturingDiagnosticLogger{}
@@ -2552,7 +2550,7 @@ func TestManagerRegistry_CloseWithContext_StopsWaitingForOpensStillInFlight(t *t
     close(pendingOpen.done)
 }
 
-/* an open that FINISHED is never counted abandoned, whatever the deadline says: under a budget already spent — the ordinary state under a shared teardown deadline — both channels of the wait were ready and a select picked at random, so the finished open was reported as still in flight every other close, an error the container filed as a failed close and the application turned into exit 1 on a shutdown that had released everything. A thousand closes over an open that ended before them report nothing */
+/* an open that FINISHED is never counted abandoned, whatever the deadline says: under a budget already spent both channels of the wait are ready and a select picks at random, so the finished open must not be reported as still in flight, an error the container would file as a failed close. A thousand closes over an open that ended before them report nothing */
 func TestManagerRegistry_CloseWithContext_AnOpenThatEndedIsNotCountedAbandonedUnderASpentDeadline(t *testing.T) {
     for round := 0; round < 1000; round = round + 1 {
         registry, registryErr := NewManagerRegistry(

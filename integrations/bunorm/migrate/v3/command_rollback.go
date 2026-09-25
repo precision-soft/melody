@@ -46,7 +46,7 @@ func (instance *RollbackCommand) runRollback(
     /* the per-query lines print through the command output's writer, so a write the report lost there is remembered by finish too */
     runnerOption := runnerOptionForCommand(outputInstance.writer, outputInstance.option)
     ctx := withRunnerOption(runtimeInstance.Context(), runnerOption)
-    /* the parsed posture reaches the migrations through the context the migrator hands them, so this run's writer and colour choice belong to this run alone; the process-wide fallback is installed only for the length of the run, for a migration that drops the context it was handed, and put back on the way out */
+    /* the parsed posture reaches the migrations through the context the migrator hands them, so this run's writer and colour choice belong to this run alone; the process-wide fallback is installed only for the length of the run, for a migration that drops the context it receives, and put back on the way out */
     defer restoreDefaultRunnerOption(swapDefaultRunnerOption(runnerOption))
 
     db, managerName, migrator, releaseDatabase, resolveErr := instance.base.resolveMigrator(runtimeInstance, commandContext, outputInstance)
@@ -82,7 +82,7 @@ func (instance *RollbackCommand) runRollback(
 
     group, rollbackErr := migrator.Rollback(ctx)
     if nil != rollbackErr {
-        /* a rollback walks its group backwards, unapplying each migration once its Down returned, and bun hands the group back beside the failure: everything BEHIND the one that broke is already rolled back and recorded as such. The group comes back whole, so which of them landed cannot be read from it — what can be said, and used to go unsaid, is WHICH group the partial rollback was walking, so the operator inspecting the migrations table checks these names instead of reconstructing the set by hand. The migrate sibling reports its landed half the same way. */
+        /* bun hands the walked group back whole beside the failure, so which migrations were rolled back cannot be read from it; the group is reported so the operator checks those names in the migrations table */
         printRollbackGroupOnFailure(outputInstance, managerName, group)
 
         return rollbackErr
@@ -128,9 +128,7 @@ func (instance *RollbackCommand) runRollback(
 
 var _ clicontract.Command = (*RollbackCommand)(nil)
 
-/* printRollbackGroupOnFailure reports the group a failed rollback was walking, on both renderings — the text block and the machine document finish assembles beside the error. It is silent for a failure that named no group, so a refusal before the walk does not print an empty block.
-
-   The count travels under "status", which is the details renderer's own free-form slot — the sibling commands fill it with "initialized" and "3 pending". The text renderer draws a fixed, ordered set of keys and drops every other one silently, and its key column is seven characters wide: a key of its own naming would have rendered in the machine document alone while the block a person reads showed the manager and the group and no count at all, and widening the table for one key would move every row every other command prints. */
+/* printRollbackGroupOnFailure reports the group a failed rollback was walking, in the text block and in the machine document, and is silent for a failure that named no group. The count travels under "status", the details renderer's free-form slot, since the text renderer drops every key outside its fixed set. */
 func printRollbackGroupOnFailure(outputInstance *commandOutput, managerName string, group *migrate.MigrationGroup) {
     names := migrationNamesOf(group)
     if 0 == len(names) {

@@ -43,7 +43,7 @@ func TestEncryptTransform_DeterministicProducesSearchableCiphertext(t *testing.T
     }
 }
 
-/* a column already bulk-encrypted with random nonces authenticates under a live key, so the deterministic seal used to pass every value through unchanged: the command reported success and rows processed while the column stayed randomized and every CiphertextCandidates equality lookup on it returned nothing. */
+/* a column bulk-encrypted with random nonces authenticates under a live key, so the deterministic mode must convert every value rather than pass it through; left randomized, every CiphertextCandidates equality lookup on the column would return nothing. */
 func TestEncryptTransform_DeterministicConvertsAnAlreadyRandomizedValue(t *testing.T) {
     provider := NewStaticKeyProvider("v2", map[string][]byte{"v1": newKey(1), "v2": newKey(2)})
     cipher := NewCipher(provider)
@@ -490,7 +490,7 @@ func TestSealedProbeLength_MeasuresUnderTheKeyIdTheRunWillSealWith(t *testing.T)
     }
 }
 
-/* an already-sealed value is handed back unchanged and is already stored in the column, so it must never be measured as a plaintext that still has to grow — otherwise a second run over a migrated column would demand a column wide enough to seal the ciphertext. */
+/* an already-sealed value is handed back unchanged and is already stored in the column, so it is never sized as a plaintext that still has to grow; otherwise a second run over a migrated column would demand a column wide enough to seal the ciphertext. */
 func TestLongestUnsealedLength_ExcludesValuesThatAreAlreadySealed(t *testing.T) {
     migrator, stub := newRecordingStubMigrator(t, "zzMigrateUnsealedProbeStub", 1)
 
@@ -519,7 +519,7 @@ func TestLongestUnsealedLength_ExcludesValuesThatAreAlreadySealed(t *testing.T) 
     }
 }
 
-/* The width is computed from a probe of at most two bytes plus arithmetic, and it has to agree with what the cipher actually emits for every plaintext length — not on average, exactly, since the number decides whether a column is declared wide enough. Sealing the full length to find out was the old way and is unusable at the widths this is asked about: `longest` comes from SELECT MAX(LENGTH(col)), so a 64 MiB row cost hundreds of megabytes resident, and LONGTEXT reaches 4 GiB. Every residue class mod three is covered, together with the boundaries where base64 rounds. */
+/* The width is computed from a probe of at most two bytes plus arithmetic, and it has to agree exactly with what the cipher emits for every plaintext length, since the number decides whether a column is declared wide enough. Every residue class mod three is covered, together with the boundaries where base64 rounds. */
 func TestSealedProbeLength_AgreesWithASealOfTheFullPlaintext(t *testing.T) {
     provider := NewStaticKeyProvider("v2", map[string][]byte{"v1": newKey(1), "v2": newKey(2)})
     cipher := NewCipher(provider)
@@ -558,7 +558,7 @@ func TestSealedProbeLength_AgreesWithASealOfTheFullPlaintext(t *testing.T) {
     }
 }
 
-/* the point of the rewrite: a width that a column could actually hold must be answerable without allocating it. LONGTEXT reaches 4 GiB, and the old measurement sealed the whole thing. */
+/* a width that a column could actually hold must be answerable without allocating it: LONGTEXT reaches 4 GiB. */
 func TestSealedProbeLength_AnswersAHugeWidthWithoutAllocatingIt(t *testing.T) {
     provider := NewStaticKeyProvider("v2", map[string][]byte{"v2": newKey(2)})
     migrator := &Migrator{cipher: NewCipher(provider)}
@@ -612,7 +612,7 @@ func TestColumnWidth_ReadsAVarcharInCharacters(t *testing.T) {
     }
 }
 
-/* the capacity check used to live only in the CLI command, so the programmatic caller ran with none at all */
+/* the capacity check runs inside the migration, so the programmatic caller gets it too */
 func TestMigrateEncrypt_RefusesANarrowColumnBeforeWritingARow(t *testing.T) {
     migrator, stub := newScriptedMigrator(t, []scriptedSqlResponse{
         {
@@ -738,7 +738,7 @@ func TestTypedPrimaryKeyArgument_ConvertsByTheColumnType(t *testing.T) {
     }
 }
 
-/* a SIGTERM mid-bulk used to surface as "migrate select failed", indistinguishable from a broken column */
+/* a SIGTERM mid-bulk names itself as an interruption, distinguishable from a broken column */
 func TestClassifyRunError_NamesAnInterruptedRun(t *testing.T) {
     migrator := &Migrator{}
 
@@ -1075,7 +1075,7 @@ func TestEncryptMigrate_RefusesARotationToALongerKeyId(t *testing.T) {
         t.Fatalf("create %s: %v", table, createErr)
     }
 
-    /* the driver handle rather than bun: bun renders a string argument into the statement itself and drops the nul bytes the marker is glued with, which would store a value that no longer reads as sealed at all */
+    /* the driver handle rather than bun: bun renders a string argument into the statement itself and drops the nul bytes the marker is glued with, which would store a value that does not read as sealed at all */
     if _, insertErr := sqlDb.ExecContext(ctx, "INSERT INTO "+table+" (id, secret) VALUES (1, ?)", sealed); nil != insertErr {
         t.Fatalf("insert the sealed row: %v", insertErr)
     }

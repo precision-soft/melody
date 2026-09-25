@@ -734,7 +734,7 @@ func TestResolvedPoolConfigKeepsTheMigrationLifetimesLifted(t *testing.T) {
     }
 }
 
-/* the mysql mirror of the same rule, measured on the cancellation arriving MID-dial: the ping derives its budget from the caller's context, so a cancellation at two hundred milliseconds ends a ten-second dial right there — through a Background-derived ping it waited the whole connect budget out. The already-cancelled entry refusal is the other layer of the same rule; on this driver the derived ping shadows it for every at-entry input, which is why the in-flight cancellation is the input that proves the derivation. */
+/* the mysql mirror of the same rule, on a cancellation arriving MID-dial: the ping derives its budget from the caller's context, so a cancellation at two hundred milliseconds ends a ten-second dial right there. The already-cancelled entry refusal is the other layer of the same rule; on this driver the derived ping shadows it for every at-entry input, which is why the in-flight cancellation is the input that proves the derivation. */
 func TestOpenContext_ACancellationMidDialReachesTheAttemptInFlight(t *testing.T) {
     provider := NewProvider(
         WithTimeoutConfig(NewTimeoutConfig(10*time.Second, 10*time.Second, 10*time.Second)),
@@ -1132,11 +1132,7 @@ func TestComputeBackoffDelayFloorsASubMillisecondCeiling(t *testing.T) {
     }
 }
 
-/* TestComputeBackoffDelayAnswersAConstantMultiplierInBoundedTime is the guard on the cost, and it is written as a DEADLINE because that is the only way the cost is observable. A multiplier of exactly 1 is a valid constant backoff, and it is the one value a growth walked attempt by attempt never leaves early: the delay does not move, so the walk runs once per attempt already made and a run costs its own square. At the largest attempt the counter can reach that walk is billions of float multiplications; the closed form is a single one.
-
-   The window is MEASURED, not guessed: the walk it must not fit inside costs 1.02s on the development container at the largest attempt, so 250ms separates the two by four times in the failing direction while leaving the closed form — one math.Pow — a quarter of a second of scheduling slack it can never need. A window picked by eye at two seconds would have let the walk finish comfortably inside it, which is a probe that certifies nothing.
-
-   The value is asserted beside the deadline so the probe cannot pass by answering quickly and wrongly. */
+/* TestComputeBackoffDelayAnswersAConstantMultiplierInBoundedTime guards the cost, written as a DEADLINE because that is the only way the cost is observable: a multiplier of exactly 1 is a valid constant backoff, and a growth walked attempt by attempt would cost its own square at the largest attempt, where the closed form is one math.Pow. The 250ms window is four times shorter than such a walk on the development container while leaving the closed form ample slack, and the value is asserted beside the deadline so the probe cannot pass by answering quickly and wrongly. */
 func TestComputeBackoffDelayAnswersAConstantMultiplierInBoundedTime(t *testing.T) {
     provider := NewProvider(
         WithRetryConfig(NewRetryConfig(0, 10*time.Millisecond, 5*time.Second, 1.0)),
@@ -1273,7 +1269,7 @@ func TestOpenContext_AnOutageIsFiledAsUnreachableAndARefusalIsNot(t *testing.T) 
     }
 }
 
-/* serverRefusal plays a PostgreSQL protocol error whose MESSAGE quotes the operand, the way the server does: the classifier used to read the message, and a database named "timeout" or a user named "eof" made a permanent refusal an outage. */
+/* serverRefusal plays a PostgreSQL protocol error whose MESSAGE quotes the operand, the way the server does, so a database named "timeout" or a user named "eof" must still read as a permanent refusal. */
 type serverRefusal struct {
     sqlState string
     message  string

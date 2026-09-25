@@ -36,7 +36,7 @@ func (instance EncryptedStringFor[R]) GoString() string {
     return redactedPlaceholder
 }
 
-/* Format redacts under the numeric verbs (%d %o %b %c %U) that fmt routes through neither Stringer nor GoStringer, which would otherwise print the underlying string through the badverb form and carry the plaintext; every verb that reaches Format is answered with the same redacted rendering, for the reason on EncryptedString.Format — which also names the two verbs that never reach it and the unexported-field rendering no method redacts. */
+/* Format answers every verb that reaches it, the numeric ones included, with the redacted rendering; its limits are on EncryptedString.Format. */
 func (instance EncryptedStringFor[R]) Format(state fmt.State, verb rune) {
     _, _ = state.Write([]byte(redactedPlaceholder))
 }
@@ -94,11 +94,11 @@ func (instance *EncryptedStringFor[R]) Scan(source any) error {
     return nil
 }
 
-/* refCipher resolves the named cipher a marker type selects; the marker is instantiated as its zero value, which is why CipherRef implementations should be zero-size value-receiver types. A marker whose CipherName() is empty is rejected rather than resolved: the empty name is the default cipher's reserved entry, so accepting it would quietly hand a compartment-bound column the default key — the exact cross-compartment read the marker exists to prevent. */
+/* refCipher resolves the cipher a marker type selects, instantiating the marker as its zero value. An empty CipherName is refused, since the empty name is the default cipher's entry and would hand a compartment-bound column the default key. */
 func refCipher[R CipherRef]() (Cipher, error) {
     var ref R
 
-    /* a pointer-form marker (EncryptedStringFor[*CrmCipher]) compiles whenever the value form does, and its zero value is a nil pointer whose CipherName() call dereferences nil — a panic raised from inside database/sql on the first column read or write. It is answered as an error naming the marker instead. */
+    /* a pointer-form marker's zero value is nil, so its CipherName call would panic inside database/sql; it is answered as an error naming the marker */
     if reflected := reflect.ValueOf(any(ref)); reflect.Pointer == reflected.Kind() && true == reflected.IsNil() {
         return nil, exception.NewError(
             "cipher reference is a pointer type; a CipherRef must be a zero-size value type",

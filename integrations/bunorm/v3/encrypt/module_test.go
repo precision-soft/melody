@@ -423,7 +423,7 @@ func (instance *factoryError) Error() string {
     return "factory failed"
 }
 
-/* a kernel answering no service container used to be captured silently into the closure and explode at the first command run, far from the registration that produced it */
+/* a kernel answering no service container is refused at registration, rather than captured into the closure to fail at the first command run, far from the registration that produced it */
 func TestModule_RefusesAKernelWithoutAServiceContainer(t *testing.T) {
     defer func() {
         recovered := recover()

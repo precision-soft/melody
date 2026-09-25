@@ -321,7 +321,7 @@ func TestReencryptSkipAvoidsNonceRewrite(t *testing.T) {
     }
 }
 
-/* truncateSealed cuts a sealed value the way a column too narrow for it does under a non-strict sql_mode: the marker and the key id survive, the base64 payload keeps only its first characters. The retained payload length is chosen so the remainder no longer decodes to a whole sealed body — which is exactly the shape that used to be mistaken for plaintext. */
+/* truncateSealed cuts a sealed value the way a column too narrow for it does under a non-strict sql_mode: the marker and the key id survive, and the base64 payload keeps only its first characters, chosen so the remainder does not decode to a whole sealed body. */
 func truncateSealed(t *testing.T, sealed string, retainedPayloadCharacters int) string {
     t.Helper()
 
@@ -344,7 +344,7 @@ func truncateSealed(t *testing.T, sealed string, retainedPayloadCharacters int) 
     return sealed[:len(markerPrefix)+separator+1] + payload[:retainedPayloadCharacters]
 }
 
-/* a value that carries the framework's marker was written by this cipher, so a payload that no longer decodes is damage — a column truncated under sql_mode='' — and must be reported. Returning it verbatim with a nil error is how a truncated ciphertext used to read back as garbage that the application then stored on. */
+/* a value that carries the framework's marker was written by this cipher, so a payload that does not decode is damage, a column truncated under sql_mode='', and must be reported rather than returned verbatim with a nil error for the application to store on. */
 func TestCipher_DecryptReportsATruncatedCiphertextInsteadOfPassingItThrough(t *testing.T) {
     provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
     cipher := NewCipher(provider)
@@ -498,7 +498,7 @@ func TestCipher_DecryptRefusesANonCanonicalBase64Spelling(t *testing.T) {
     }
 }
 
-/* a payload shorter than nonce plus tag cannot be a seal of even the empty string: it used to pass the nonce-only floor and fail inside gcm.Open as "could not decrypt value", blaming an authentication failure on a key for what is structural damage */
+/* a payload shorter than nonce plus tag cannot be a seal of even the empty string, so it is reported as structural damage, not as an authentication failure blamed on a key */
 func TestCipher_DecryptReportsAStructurallyShortPayloadAsDamage(t *testing.T) {
     provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
     cipher := NewCipher(provider)

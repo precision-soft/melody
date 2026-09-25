@@ -26,7 +26,7 @@ type EntityOptions struct {
     CaptureDeleteBeforeImage bool
 }
 
-/* Registry is safe for concurrent use: Register is ordinarily a boot-time call, but it is public, returns the registry for chaining and is reachable through Recorder.Registry() for the life of the process, while every recorded write reads the same map from a request goroutine — an unguarded late Register was a fatal concurrent map read and write, not an error any recovery could catch. */
+/* Registry is safe for concurrent use: Register is public and reachable through Recorder.Registry for the life of the process, while every recorded write reads the same map. */
 type Registry struct {
     mutex               sync.RWMutex
     defaultTable        string
