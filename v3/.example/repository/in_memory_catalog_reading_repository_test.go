@@ -128,9 +128,7 @@ func TestInMemoryCatalogReadingRepositoryDoesNotHandBackItsOwnRecords(t *testing
     }
 }
 
-/* the archive keeps a COPY of what it was handed: a caller that mutates the record it appended must not
-   be rewriting the archive behind it. It is the write-side sister of the read-side copy above, and both
-   are needed — one keeps the caller out of the archive, the other keeps the archive out of the caller. */
+/* the archive keeps a copy of what it receives: a caller that mutates the record it appended must not be rewriting the archive behind it. It is the write-side sister of the read-side copy above, and both are needed: one keeps the caller out of the archive, the other keeps the archive out of the caller. */
 func TestInMemoryCatalogReadingRepositoryDoesNotKeepTheCallersRecord(t *testing.T) {
     repositoryInstance := newInMemoryCatalogReadingRepository()
     takenAt := time.Date(2026, time.September, 7, 10, 0, 0, 0, time.UTC)

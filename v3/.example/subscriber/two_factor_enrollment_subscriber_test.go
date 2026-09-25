@@ -43,7 +43,7 @@ func deleteEnrollmentStatementsAfter(t *testing.T, eventName string, payload any
     return recorder.recordedQueries()
 }
 
-/* the enrollment is keyed on the account identifier and the example mints identifiers as the highest suffix plus one, so a row that outlived its account started the next holder of the identifier enrolled with the previous holder's secret and recovery codes: the deletion the account publishes releases the factor, keyed on the identifier the event carries and on nothing wider. */
+/* the enrollment is keyed on the account identifier and the example mints identifiers as the highest suffix plus one, so a row that outlives its account would start the next holder of the identifier enrolled with the previous holder's secret and recovery codes: the deletion the account publishes releases the factor, keyed on the identifier the event carries and on nothing wider. */
 func TestTwoFactorEnrollmentSubscriber_ADeletedAccountReleasesItsEnrollment(t *testing.T) {
     statements := deleteEnrollmentStatementsAfter(t, event.UserDeletedEventName, event.NewUserDeletedEvent("user-4", "dave"))
 
@@ -78,7 +78,7 @@ func (instance *refusingCache) Delete(key string) error {
     return errors.New("redis: connection refused")
 }
 
-/* the dispatcher ends a dispatch at the first listener that fails, and the composition root registers the cache subscriber before this one: at the cache listener's own priority a redis outage at the moment of the deletion meant the account was deleted, the door answered 500, the event was never published again for that identifier, and the enrollment stayed for the next holder of it. The release outranks the cache listener on the deletion event, read off the two real subscribers, and with the cache refusing its first delete the enrollment is still released: the dispatch fails on the cache, after the row is gone. */
+/* the dispatcher ends a dispatch at the first listener that fails, and the composition root registers the cache subscriber before this one, so at the cache listener's own priority a redis outage at the deletion would leave the enrollment for the next holder of the identifier. The release outranks the cache listener on the deletion event, read off the two real subscribers, and with the cache refusing its first delete the enrollment is still released: the dispatch fails on the cache, after the row is gone. */
 func TestTwoFactorEnrollmentSubscriber_ReleasesTheEnrollmentBeforeTheCacheListenerRuns(t *testing.T) {
     database, recorder := newRecordingDatabase()
     enrollmentSubscriber := NewTwoFactorEnrollmentSubscriber(fixedTwoFactorStore(twofactor.NewStore(database)))
@@ -131,10 +131,7 @@ func TestTwoFactorEnrollmentSubscriber_ReleasesTheEnrollmentBeforeTheCacheListen
     }
 }
 
-/* the release resolves the store at each deletion, and a store that cannot be resolved FAILS the deletion
-   rather than passing it with the enrollment standing: the listener hands the refusal back, so the dispatch —
-   and the door that deleted the account — answers it. Built at boot, the
-   same refusal left the release unsubscribed for the life of the process and every deletion passed. */
+/* the release resolves the store at each deletion, and a store that cannot be resolved fails the deletion rather than passing it with the enrollment standing: the listener hands the refusal back, so the dispatch, and the door that deleted the account, answers it. */
 func TestTwoFactorEnrollmentSubscriber_AStoreThatCannotBeResolvedFailsTheDeletion(t *testing.T) {
     refusal := errors.New("the catalogue database refused the migration")
     asked := 0

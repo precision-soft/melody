@@ -56,7 +56,7 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
 
         normalizedUsername := strings.TrimSpace(dto.Username)
         if "" != normalizedUsername {
-            /* the username becomes a cache key component and a 255-byte column, so a spelling longer than either holds is turned away before the row lands */
+            /* the username becomes a cache key component and a 255-byte column, so a longer spelling is turned away before the row lands */
             if false == service.CacheSafeIdentifier(repository.NormalizedUsername(normalizedUsername)) {
                 return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "username must stay within 255 bytes"), nil
             }
@@ -81,7 +81,7 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
 
         normalizedPassword := strings.TrimSpace(dto.Password)
         if "" != normalizedPassword {
-            /* bcrypt reads at most 72 bytes of the plaintext, so a longer password is refused as the caller's mistake instead of surfacing as a hashing failure */
+            /* bcrypt reads at most 72 bytes of the plaintext, so a longer password is refused as the caller's mistake */
             if security.PasswordMaximumBytes < len(normalizedPassword) {
                 return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, security.PasswordTooLongMessage), nil
             }
@@ -112,8 +112,7 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
             targetUser.Roles,
         )
         if nil != updateErr {
-            /* the read above is a check, the unique index is the guard: a rename the index refused after
-               the check had passed is the caller's 400, not a failure of the write */
+            /* the read above is a check and the unique index is the guard: a rename the index refuses is the caller's 400 */
             if true == errors.Is(updateErr, repository.ErrUsernameAlreadyExists) {
                 return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "username already exists"), nil
             }
@@ -148,7 +147,7 @@ type adminUserUpdateRequest struct {
     Roles    []string `json:"roles"`
 }
 
-/* rolesForUpdate answers the roles an update should store: the ones the body named, normalised, or the ones the target already holds when the body named none. An omitted username and an omitted password are kept a few lines above, and roles were the one field an omission REMOVED — the target came back holding the base role alone, an administrator editing their own account included. A list sent EXPLICITLY empty is an opinion and still falls back to the base role, which is the rule normalizeRoles carries; the decoder separates the two, leaving the field nil only when the caller never named it. */
+/* rolesForUpdate answers the roles an update stores: the ones the body named, normalised, or the target's own when the body named none, as an omitted username or password is kept. An explicitly empty list falls back to the base role, the rule normalizeRoles carries; the decoder leaves the field nil only when the caller never named it. */
 func rolesForUpdate(requested []string, current []string) []string {
     if nil == requested {
         return current
@@ -157,7 +156,7 @@ func rolesForUpdate(requested []string, current []string) []string {
     return normalizeRoles(requested)
 }
 
-/* protectsAnotherAdmin answers whether the change the actor is asking for would touch an administrator who is not the actor. An administrator may edit and delete their own account and everyone below them, and may not reach a peer: an account that can grant roles is the one account whose holder must not be able to lock a colleague out or take their place quietly. Both the update and the delete door ask the same question, so the two cannot drift apart on who is protected — only on the words they refuse with. */
+/* protectsAnotherAdmin answers whether the change would touch an administrator who is not the actor. An administrator may edit and delete their own account and everyone below, never a peer; the update and the delete door both ask it. */
 func protectsAnotherAdmin(actorUserId string, targetUser *entity.User) bool {
     if nil == targetUser {
         return false

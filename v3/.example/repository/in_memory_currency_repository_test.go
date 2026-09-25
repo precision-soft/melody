@@ -117,9 +117,7 @@ func TestInMemoryCurrencyRepositoryUpdateQuoteWritesOnlyOverARowThatIsNotNewer(t
     }
 }
 
-/* the reading is judged on this clock, except against the reading the row already names: the provider may
-   re-quote that reading at another rate, measured onto this clock a little earlier than the first arrival, and
-   the re-quote is written; the reading itself, measured again, is not written a second time */
+/* the reading is judged on this clock, except against the reading the row already names: the provider may re-quote that reading at another rate, landing on this clock a little earlier than the first arrival, and the re-quote is written; the reading itself, arriving again, is not written a second time */
 func TestInMemoryCurrencyRepositoryUpdateQuoteJudgesTheReadingOnThisClockAndByItsStamp(t *testing.T) {
     repository := newInMemoryCurrencyRepository()
     ctx := context.Background()

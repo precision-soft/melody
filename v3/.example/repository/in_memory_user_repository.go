@@ -18,7 +18,7 @@ type inMemoryUserRepository struct {
     users []*entity.User
 }
 
-/* the returned slice is a copy, but a shallow one: the entity pointers stay shared with the repository, so a caller that mutates an entity in place bypasses the lock */
+/* the slice is a shallow copy: the entity pointers stay shared with the repository, so a caller that mutates an entity in place bypasses the lock */
 func (instance *inMemoryUserRepository) All(ctx context.Context) ([]*entity.User, error) {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
@@ -44,9 +44,7 @@ func (instance *inMemoryUserRepository) Create(ctx context.Context, user *entity
         user.Id = nextUserId(instance.identifierListLocked())
     }
 
-    /* the same guard the three sibling repositories carry: without it an occupied id is appended as a
-       second row, FindById and DeleteById reach only the first, and the account behind it can be neither
-       read nor removed by id. */
+    /* an occupied id is refused, as in the sibling repositories, since a second row under it could be neither read nor removed by id */
     if _, occupied := instance.findByIdLocked(user.Id); true == occupied {
         return fmt.Errorf("id already exists")
     }
@@ -90,8 +88,7 @@ func (instance *inMemoryUserRepository) Update(ctx context.Context, user *entity
     return false, nil
 }
 
-/* GrantRole appends under the repository's own mutex, onto a COPY of the stored account: the stored value is
-   handed out to every reader, so the roles are not appended in place. */
+/* GrantRole appends under the repository's mutex onto a copy of the stored account, since the stored value is shared with every reader. */
 func (instance *inMemoryUserRepository) GrantRole(ctx context.Context, id string, role string) (*entity.User, GrantRoleOutcome, error) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -117,7 +114,7 @@ func (instance *inMemoryUserRepository) GrantRole(ctx context.Context, id string
         granted.Roles = append(append([]string{}, existing.Roles...), role)
         instance.users[index] = &granted
 
-        /* the caller gets a copy: the stored value is shared with every reader */
+        /* the caller receives a copy: the stored value is shared with every reader */
         answered := granted
         answered.Roles = append([]string{}, granted.Roles...)
 

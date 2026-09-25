@@ -16,16 +16,13 @@ import (
 const (
     ServiceCatalogJournalService = "service.example.catalog.journal.service"
 
-    /* the parts of the nomenclature a journal entry can be about */
     CatalogJournalSubjectProduct  = "product"
     CatalogJournalSubjectCategory = "category"
     CatalogJournalSubjectCurrency = "currency"
     CatalogJournalSubjectUser     = "user"
 )
 
-/* CatalogJournalService records what happened to the nomenclature and who did it.
-
-   The repository is always there: with a database it writes rows, and without one it keeps the record inside the process. Recording is therefore not something the application does only when it can, and no caller has to ask whether it worked. */
+/* CatalogJournalService records what happened to the nomenclature and who did it. Its repository always records, in rows with a database and inside the process without one, so no caller asks whether recording worked. */
 type CatalogJournalService struct {
     journalRepository repository.CatalogJournalRepository
     clock             melodyclockcontract.Clock
@@ -63,7 +60,7 @@ func (instance *CatalogJournalService) Record(
     return appendErr
 }
 
-/* ActorFromRuntime names whoever is behind the change. A scheduled command and a console run carry no security context at all, and an unauthenticated request carries one with nothing in it; both are the system rather than a person, and the journal says so instead of leaving the column empty. */
+/* ActorFromRuntime names whoever is behind the change. A scheduled command, a console run and an unauthenticated request are recorded as the system rather than as an empty actor. */
 func ActorFromRuntime(runtimeInstance melodyruntimecontract.Runtime) string {
     token, found := examplesecurity.TokenFromRuntime(runtimeInstance)
     if false == found {
@@ -86,9 +83,7 @@ func MustGetCatalogJournalService(resolver melodycontainercontract.Resolver) *Ca
     return melodycontainer.MustFromResolver[*CatalogJournalService](resolver, ServiceCatalogJournalService)
 }
 
-/* WriteContext is the context a change to the nomenclature is made under. It carries who is making it, because a repository is handed a context rather than a runtime and the audit trail still has to name a person.
-
-   This is the last layer that knows which request it is serving, so it is where the answer is put on the context. The value travels as a plain string under a key the persistence package owns, which is what keeps the ORM's own actor helper out of the service layer. */
+/* WriteContext is the context a change to the nomenclature is made under, carrying who makes it, so a repository that receives a context rather than a runtime can still name a person in the audit trail. The actor travels as a plain string under a key the persistence package owns, which keeps the ORM's actor helper out of the service layer. */
 func WriteContext(runtimeInstance melodyruntimecontract.Runtime) context.Context {
     return persistence.WithActor(runtimeInstance.Context(), ActorFromRuntime(runtimeInstance))
 }

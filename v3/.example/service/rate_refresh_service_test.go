@@ -349,9 +349,7 @@ func TestRateRefreshServiceRefresh_RefusesADocumentWithoutAnInstant(t *testing.T
     }
 }
 
-/* a reading cannot have been taken after the provider answered with it: both instants are on the provider's
-   clock, so the refusal needs no guess at how far that clock is from this one, and a stamp one minute past the
-   answer is refused where the skew used to admit five */
+/* a reading cannot have been taken after the provider answered with it: both instants are on the provider's clock, so the refusal needs no guess at how far that clock is from this one, and a stamp one minute past the answer is refused although it lies within the five minutes the skew allows */
 func TestRateRefreshServiceRefresh_RefusesADocumentStampedInTheFuture(t *testing.T) {
     refresh, _, runtimeInstance, recordingRepository := rateRefreshUnderTest(t, `{"base":"EUR","asOf":"2026-09-08T09:01:00Z","rates":{"USD":1.2}}`)
 
@@ -394,9 +392,7 @@ func TestRateRefreshServiceRefresh_AdmitsAProviderWhoseClockRunsAhead(t *testing
     }
 }
 
-/* the provider's clock ran five minutes ahead and was then set back: judged stamp against stamp, the reading
-   stamped before the correction was newer than every honest reading of the five minutes after it, and each was
-   kept out as stale. On this clock the two land in the order they were taken */
+/* the provider's clock runs five minutes ahead and is then set back: judged stamp against stamp, the reading stamped before the correction would be newer than every honest reading of the five minutes after it and keep each out as stale. On this clock the two land in the order they were taken */
 func TestRateRefreshServiceRefresh_AProviderClockSetBackDoesNotPinTheCatalogue(t *testing.T) {
     refresh, currencyService, runtimeInstance, _ := rateRefreshAnswering(
         t,
@@ -419,9 +415,7 @@ func TestRateRefreshServiceRefresh_AProviderClockSetBackDoesNotPinTheCatalogue(t
     }
 }
 
-/* a replay keeps its old stamp under a clock that answers now, so on this clock it is older than the reading it
-   replays, whatever the provider's clock is off by: stored at the clock's own instant, as the clamp used to store a
-   reading ahead of it, a replay of the minutes before was written over the newer reading */
+/* a replay keeps its old stamp under a clock that answers now, so on this clock it is older than the reading it replays, whatever the provider's clock is off by, and it is kept out; stored at the clock's own instant, a replay of the minutes before would be written over the newer reading */
 func TestRateRefreshServiceRefresh_KeepsOutAReplayFromAProviderWhoseClockRunsAhead(t *testing.T) {
     refresh, currencyService, runtimeInstance, _ := rateRefreshAnswering(
         t,
@@ -444,10 +438,7 @@ func TestRateRefreshServiceRefresh_KeepsOutAReplayFromAProviderWhoseClockRunsAhe
     }
 }
 
-/* the same document read on two runs is the same reading, named by the provider's stamp: the instant this
-   clock gives it is measured again on each arrival — here the second answer's date falls one second later, the
-   resolution the date is read to — and stored at the clock's instant, as the clamp used to store it, it was never
-   the reading already held: every run wrote it again, dispatched, and dropped the cache */
+/* the same document read on two runs is the same reading, named by the provider's stamp: the instant this clock gives it is taken again on each arrival, here the second answer's date falls one second later, the resolution the date is read to, so a reading stored at the clock's instant would never be the reading already held, and every run would write it again, dispatch, and drop the cache */
 func TestRateRefreshServiceRefresh_TheSameDocumentFromAClockAheadIsUnchangedOnTheNextRun(t *testing.T) {
     refresh, _, runtimeInstance, recordingRepository := rateRefreshAnswering(
         t,
@@ -471,9 +462,7 @@ func TestRateRefreshServiceRefresh_TheSameDocumentFromAClockAheadIsUnchangedOnTh
     }
 }
 
-/* a cache in front of the provider keeps the origin's Date on an answer it hands out again and says how long
-   it kept it in Age: read without the Age, an hour-old document from a cache was a provider whose clock runs an
-   hour late, and its old stamp, moved forward by that hour, was written over the newer reading */
+/* a cache in front of the provider keeps the origin's Date on an answer it hands out again and says how long it kept it in Age: read without the Age, an hour-old document from a cache would be a provider whose clock runs an hour late, and its old stamp, moved forward by that hour, would land over the newer reading */
 func TestRateRefreshServiceRefresh_ReadsTheAgeOfACachedAnswer(t *testing.T) {
     refresh, currencyService, runtimeInstance, _ := rateRefreshAnswering(
         t,
@@ -519,9 +508,7 @@ func TestRateRefreshServiceRefresh_AnAnswerWithoutADateIsJudgedUnderTheSkew(t *t
     }
 }
 
-/* a verbatim replay of an hour-old answer that kept its Date and dropped its Age reads as a provider whose clock
-   runs an hour late; moved by that hour, its old stamp landed at the moment it was replayed and was written over
-   the newer reading. The clock is trusted within the skew, and an answer that far off is refused by name */
+/* a verbatim replay of an hour-old answer that kept its Date and dropped its Age reads as a provider whose clock runs an hour late; moved by that hour, its old stamp would land at the moment it is replayed, over the newer reading. The clock is trusted within the skew, and an answer that far off is refused by name */
 func TestRateRefreshServiceRefresh_RefusesAReplayThatKeptItsDateAndDroppedItsAge(t *testing.T) {
     refresh, currencyService, runtimeInstance, _ := rateRefreshAnswering(
         t,
@@ -577,8 +564,7 @@ func TestRateRefreshServiceRefresh_BoundsTheProviderClockInBothDirections(t *tes
     }
 }
 
-/* an answer without a date that is stamped ahead of this clock is taken at the moment it arrived: stored ahead,
-   it made the honest reading of the next run older than it, and kept it out as stale */
+/* an answer without a date that is stamped ahead of this clock is taken at the moment it arrived: stored ahead, it would make the honest reading of the next run older than it and keep it out as stale */
 func TestRateRefreshServiceRefresh_ADatelessReadingAheadDoesNotPinTheCatalogue(t *testing.T) {
     refresh, currencyService, runtimeInstance, _ := rateRefreshAnswering(
         t,
@@ -726,8 +712,7 @@ func TestRateRefreshServiceRefresh_NamesBothSpellingsOfACurrencyQuotedTwice(t *t
     }
 }
 
-/* every spelling of a currency quoted more than twice is named, and the refusal reads the same on every run:
-   judged while the document's map was walked, three spellings read three different ways over as many runs */
+/* every spelling of a currency quoted more than twice is named, and the refusal reads the same on every run, which a judgement made while walking the document's map would not */
 func TestRateRefreshServiceRefresh_NamesEverySpellingOfACurrencyTheSameOnEveryRun(t *testing.T) {
     messageSet := map[string]bool{}
 
@@ -838,8 +823,7 @@ func TestRateRefreshServiceRefresh_RefusesAQuoteThatIsNotAUsablePrice(t *testing
     }
 }
 
-/* the same document twice: the second run writes nothing and says so, where the previous form issued a
-   full-row UPDATE per currency and, on mysql, read its zero affected rows as three vanished currencies */
+/* the same document twice: the second run writes nothing and says so, rather than a full-row UPDATE per currency whose zero affected rows mysql would report as three vanished currencies */
 func TestRateRefreshServiceRefresh_ReportsAnUnmovedDocumentAsUnchangedWithoutWriting(t *testing.T) {
     refresh, _, runtimeInstance, recordingRepository := rateRefreshUnderTest(t, `{"base":"EUR","asOf":"2026-09-08T09:00:00Z","rates":{"EUR":1,"USD":1.0842,"RON":4.9761}}`)
 
@@ -881,11 +865,7 @@ func (instance *microsecondCurrencyRepository) UpdateQuote(ctx context.Context, 
     return instance.CurrencyRepository.UpdateQuote(ctx, id, entity.NewRateQuote(quote.Rate, quote.AsOf.Truncate(time.Microsecond), quote.ProviderAsOf.Truncate(time.Microsecond)))
 }
 
-/* a provider stamping time.Now() serialises nine decimals, and the column holds six: the second run of the
-   same document has to read as unchanged against the row the first run wrote, not as a full-row update the
-   driver reports as no row — which the sweep counted as the currency having vanished, and which skipped the
-   cache drop the unchanged branch exists for. The document is stamped a second BEFORE the frozen clock: one
-   ahead of it is stored at the clock's instant, which has no sub-microsecond digits to truncate. */
+/* a provider stamping time.Now() serialises nine decimals, and the column holds six: the second run of the same document has to read as unchanged against the row the first run wrote, not as a full-row update the driver reports as no row, which the sweep would count as a vanished currency while skipping the cache drop the unchanged branch exists for. The document is stamped a second before the frozen clock: one ahead of it is stored at the clock's instant, which has no sub-microsecond digits to truncate. */
 func TestRateRefreshServiceRefresh_JudgesTheInstantAtTheResolutionTheColumnHolds(t *testing.T) {
     refresh, currencyService, runtimeInstance, _ := rateRefreshUnderTest(t, `{"base":"EUR","asOf":"2026-09-08T08:59:59.123456789Z","rates":{"EUR":1,"USD":1.0842,"RON":4.9761}}`)
     currencyService.currencyRepository = &microsecondCurrencyRepository{CurrencyRepository: currencyService.currencyRepository}
@@ -934,11 +914,7 @@ func (instance *refusingDispatcher) DispatchName(runtimeInstance melodyruntimeco
     return nil, errors.New("redis: connection refused")
 }
 
-/* a backend that fails is not a quote the catalogue refused: the sweep stops and hands the failure back as
-   itself, with the quote written before its dispatch failed counted as written — where the previous form
-   counted every currency refused and told the cron log that every other quote was written. The message says
-   what the door did: the quote WAS written and its listeners were not told, where the line under a table
-   counting it UPDATED used to read "could not be written" */
+/* a backend that fails is not a quote the catalogue refused: the sweep stops and hands the failure back as itself, with the quote written before its dispatch failed counted as written, and no other currency counted refused. The message says what the door did: the quote is written and its listeners are not told */
 func TestRateRefreshServiceRefresh_StopsOnABackendFailureInsteadOfBlamingTheProvider(t *testing.T) {
     refresh, currencyService, runtimeInstance, recordingRepository := rateRefreshUnderTest(t, `{"base":"EUR","asOf":"2026-09-08T09:00:00Z","rates":{"EUR":1,"USD":1.0842,"RON":4.9761}}`)
     currencyService.eventDispatcher = &refusingDispatcher{EventDispatcher: currencyService.eventDispatcher}
@@ -965,8 +941,7 @@ func TestRateRefreshServiceRefresh_StopsOnABackendFailureInsteadOfBlamingTheProv
     }
 }
 
-/* a document that names no base is refused as such — the previous line read "(document , catalogue EUR)", a
-   hole where the provider's spelling should be */
+/* a document that names no base is refused as such, so the message carries no empty hole where the provider's spelling of the base belongs */
 func TestRateRefreshServiceRefresh_RefusesADocumentThatNamesNoBaseAsSuch(t *testing.T) {
     refresh, _, runtimeInstance, recordingRepository := rateRefreshUnderTest(t, `{"asOf":"2026-09-08T09:00:00Z","rates":{"EUR":1,"USD":1.0842}}`)
 
@@ -990,9 +965,7 @@ func (instance *refusingCache) Delete(key string) error {
     return errors.New("redis: connection refused")
 }
 
-/* an unchanged quote is never written: the sweep stops on the cache drop the unchanged branch performs, and the
-   message names the drop — the line used to say the quote could not be written, over a quote the door had
-   compared and left as it was — and the quote is counted unchanged, which it is */
+/* an unchanged quote is never written: the sweep stops on the cache drop the unchanged branch performs, the message names the drop rather than a write, and the quote is counted unchanged, which it is */
 func TestRateRefreshServiceRefresh_NamesTheCacheDropThatFailedOverAnUnchangedQuote(t *testing.T) {
     refresh, currencyService, runtimeInstance, recordingRepository := rateRefreshUnderTest(t, `{"base":"EUR","asOf":"2026-09-08T09:00:00Z","rates":{"EUR":1,"USD":1.0842,"RON":4.9761}}`)
 
@@ -1021,9 +994,7 @@ func TestRateRefreshServiceRefresh_NamesTheCacheDropThatFailedOverAnUnchangedQuo
     }
 }
 
-/* a refresh whose run is cancelled between two attempts stops there: the wait between attempts slept through
-   the cancellation and the next attempt went out anyway, so a SIGTERM landing on a refused reading waited up
-   to two backoffs and two more exchanges before the process could leave */
+/* a refresh whose run is cancelled between two attempts stops there: the wait between attempts hears the cancellation, so a SIGTERM landing on a refused reading sends no further exchange before the process can leave */
 func TestRateRefreshServiceRefresh_StopsRetryingOnceTheRunIsCancelled(t *testing.T) {
     runContext, cancelRun := context.WithCancel(context.Background())
     defer cancelRun()

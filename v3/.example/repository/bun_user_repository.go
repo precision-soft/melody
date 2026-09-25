@@ -16,13 +16,13 @@ import (
     "github.com/uptrace/bun"
 )
 
-/* userRow is the directory as the database holds it. Roles are stored as one comma-separated column rather than a second table: they are a short fixed vocabulary with no commas in it, and the example is a nomenclature rather than a lesson in normalisation. */
+/* userRow is the directory as the database holds it. Roles are one comma-separated column: a short fixed vocabulary with no commas in it. */
 type userRow struct {
     bun.BaseModel `bun:"table:melody_example_v3_user,alias:example_user"`
 
     Id       string `bun:"id,pk"`
     Username string `bun:"username,notnull"`
-    /* the trail records THAT the password changed and never what it changed to or from: a history of credentials is the one thing an audit trail must not become, and a reader of the trail has no business the plaintext would serve */
+    /* the trail records that the password changed and never its values: a history of credentials is what an audit trail must not become */
     Password string `bun:"password,notnull" audit:"redact"`
     Roles    string `bun:"roles,notnull"`
 }
@@ -55,7 +55,7 @@ func newBunUserRepository(storage *persistence.CatalogStorage) *bunUserRepositor
     return &bunUserRepository{database: storage.Database(), tracker: storage.Tracker(), recorder: storage.Recorder()}
 }
 
-/* bunUserRepository keeps the directory in the database and its history beside it. Every write goes through the audit tracker, so who was granted which role, and when, is answerable after the fact — and the password column is recorded as changed without its value ever entering the trail. The one write that runs its own transaction, GrantRole, records through the recorder inside that transaction, which is the tracker's own contract for a caller that holds a unit of work. */
+/* bunUserRepository keeps the directory in the database and its history beside it. Every write goes through the audit tracker, the password recorded as changed without its value; GrantRole, which runs its own transaction, records through the recorder inside it. */
 type bunUserRepository struct {
     database *bun.DB
     tracker  *melodyaudit.Tracker
@@ -127,7 +127,7 @@ func (instance *bunUserRepository) FindByUsername(ctx context.Context, username 
     return row.toEntity(), true, nil
 }
 
-/* findRowById separates a row that is not there from a query that could not run: only sql.ErrNoRows is an answer, and every other failure is reported. */
+/* findRowById separates a row that is not there from a query that could not run: only sql.ErrNoRows is an answer. */
 func (instance *bunUserRepository) findRowById(ctx context.Context, id string) (*userRow, bool, error) {
     row := &userRow{}
 
@@ -172,11 +172,7 @@ func (instance *bunUserRepository) Create(ctx context.Context, user *entity.User
         user.Id = nextUserId(identifierList)
     }
 
-    /* the same guard the product, category and currency repositories carry, and the one the identifier
-       ceiling's own rationale promises: without it an occupied id reaches the insert, where the primary
-       key answers the driver's raw duplicate-key text through a 500, and two callers that mint the same
-       id concurrently — the ordinary case, since the mint reads a list that neither has committed to
-       yet — see that instead of "id already exists". */
+    /* an occupied id is answered "id already exists" before the insert, as in the sibling repositories, rather than as the primary key's raw duplicate-key text */
     _, occupied, occupiedErr := instance.findRowById(ctx, user.Id)
     if nil != occupiedErr {
         return occupiedErr
@@ -228,9 +224,7 @@ func (instance *bunUserRepository) Update(ctx context.Context, user *entity.User
     return true, nil
 }
 
-/* GrantRole reads the row locked FOR UPDATE and writes the widened set in the same transaction, so a grant
-   and an admin update of the same account serialise on the row instead of the last whole-set write winning;
-   the audit entry is recorded through the same transaction, the way the tracker records its own. */
+/* GrantRole reads the row locked FOR UPDATE and writes the widened set in the same transaction, so a grant and an admin update of the same account serialise on the row; the audit entry is recorded through the same transaction. */
 func (instance *bunUserRepository) GrantRole(ctx context.Context, id string, role string) (*entity.User, GrantRoleOutcome, error) {
     trimmedId := strings.TrimSpace(id)
     if "" == trimmedId {
@@ -281,19 +275,14 @@ func (instance *bunUserRepository) GrantRole(ctx context.Context, id string, rol
             return recordErr
         }
 
-        /* the account the transaction wrote is the account handed back: a read after the commit, outside
-           the transaction, answered whatever an admin door had written in between — and "not found" for
-           an account that was granted and then deleted, reported as a grant that had not happened */
+        /* the account answered is the one the transaction wrote, not a read after the commit that an admin door may have changed or deleted in between */
         outcome = GrantRoleGranted
         account = after.toEntity()
 
         return nil
     })
     if nil != txErr {
-        /* the transaction's margins and every statement inside it answer the driver's bare text — "dial tcp …:
-           connection refused" — which the tracker's own transaction door titles with the entity and the
-           operation; a grant that ran its own transaction lost that title, and the console line named neither
-           the account nor the write. The driver error stays the cause. */
+        /* the driver answers bare text inside the transaction, so the failure is titled with the account and the write, with the driver error as its cause */
         return nil, GrantRoleAccountAbsent, exception.NewError(
             "granting a role did not complete on the "+persistence.AuditEntityUser+" "+trimmedId,
             exceptioncontract.Context{"entity": persistence.AuditEntityUser, "operation": "grant role", "id": trimmedId, "role": role},
@@ -310,7 +299,7 @@ func (instance *bunUserRepository) DeleteById(ctx context.Context, id string) (b
         return false, fmt.Errorf("id is required")
     }
 
-    /* the account is opted into a captured before-image, so the tracker loads and locks the row before removing it and the trail keeps which roles it held; an account that is not there is not an error, it is an answer the caller asked for */
+    /* the account is opted into a captured before-image, so the tracker locks the row before removing it and the trail keeps the roles it held; a missing account is an answer, not an error */
     _, found, findErr := instance.findRowById(ctx, trimmedId)
     if nil != findErr {
         return false, findErr
@@ -333,23 +322,10 @@ func (instance *bunUserRepository) DeleteById(ctx context.Context, id string) (b
     return true, nil
 }
 
-/* ErrUsernameAlreadyExists is the refusal both write doors answer for a name another account holds, whether
-   the read that precedes the write caught it or the unique index did; a sentinel so the http doors can tell
-   it from a failure of the write itself and answer the caller's 400 rather than a 500. */
+/* ErrUsernameAlreadyExists is the refusal both write doors answer for a name another account holds, whether the preceding read or the unique index caught it, so the http doors answer 400 rather than 500. */
 var ErrUsernameAlreadyExists = errors.New("username already exists")
 
-/* the check that precedes the write is a read, so two callers can both pass it before either has written;
-   the unique index the migration set adds is what actually holds the name, and this is where its refusal
-   is given the message the door already answers when the check catches the name in time. The match is on
-   the index's own name — this application's identifier, not the driver's wording — because the driver
-   spells the refusal as `Duplicate entry '<value>' for key '<table>.<index>'`, measured on the running
-   server; any other failure is handed back untouched, so a duplicate on the primary key stays the
-   diagnosis it is rather than being reported as a name that is taken.
-
-   The name is looked for down the whole chain of causes, not in the text of the error handed in: every
-   write goes through the audit tracker, which hands back its own exception — "audited insert failed" —
-   with the driver's refusal as its cause, and an exception renders its message alone. Read at the top, the
-   index's name was never there, and the refusal the index was added for reached the admin doors as a 500. */
+/* asUsernameAlreadyExists maps the unique index's refusal onto ErrUsernameAlreadyExists: the read before the write cannot stop two concurrent callers, and the index is what holds the name. The refusal is matched on the index's own name, looked for down the whole chain of causes because the audit tracker wraps the driver's error; any other failure is answered untouched. */
 func asUsernameAlreadyExists(writeErr error) error {
     if nil == writeErr {
         return nil
@@ -362,16 +338,7 @@ func asUsernameAlreadyExists(writeErr error) error {
     return ErrUsernameAlreadyExists
 }
 
-/* errorChainNamesKey answers whether any link of the chain — the error, its cause, the cause's cause, and
-   every branch of a joined error — is the driver's duplicate refusal FOR the index named: the key is read
-   out of the message's own "for key '<table>.<index>'" clause, not searched for anywhere in the text, so a
-   duplicate on another key whose VALUE happened to spell the index's name stays the diagnosis it is.
-
-   The walk visits at most errorChainLinkLimit links, counted across every branch. It reads whatever error a
-   write returned, and a chain that closes on itself — through Unwrap, or through a join whose branch is the
-   join — recursed until the goroutine stack was gone: a fatal error, not a panic, so no recover on the
-   request path turned it into a response. A budget across branches rather than a depth per path, because a
-   join that repeats itself doubles the paths at every level while its depth grows by one. */
+/* errorChainNamesKey answers whether any link of the chain, every branch of a joined error included, is the driver's duplicate refusal for the named index, read from the refusal's key clause rather than searched for in the text. The walk visits at most errorChainLinkLimit links across all branches, so a chain that closes on itself ends instead of exhausting the stack. */
 func errorChainNamesKey(err error, indexName string) bool {
     remainingLinks := errorChainLinkLimit
 
@@ -402,17 +369,10 @@ func errorChainNamesKey(err error, indexName string) bool {
     return walk(err)
 }
 
-/* errorChainLinkLimit is far past any chain a write produces — the audit tracker's exception over the driver's
-   refusal is two links, a joined teardown a handful — and small enough that a cyclic one ends at once. */
+/* errorChainLinkLimit is far past any chain a write produces and small enough that a cyclic one ends at once. */
 const errorChainLinkLimit = 64
 
-/* duplicateRefusalNamesKey reads the key clause of a MySQL duplicate refusal — "for key '<table>.<index>'" — and
-   answers whether the key it names is the index given, bare or qualified by its table. The clause is the LAST
-   one in the message: the duplicated value is rendered before the clause, unescaped, and may spell the clause
-   itself — a username carrying "for key '" moved a first-clause reader onto the value, the refusal stayed a
-   bare driver error and the admin doors answered 500 over a collision the check answers 400. Searching the
-   whole text for the index name has the opposite false: a value that spells the index's name over a PRIMARY
-   key collision is a duplicate identifier, which the test pins. */
+/* duplicateRefusalNamesKey reads the key clause of a MySQL duplicate refusal, "for key '<table>.<index>'", and answers whether it names the index given, bare or qualified. The clause read is the last one, because the duplicated value is rendered unescaped before it and may spell a clause itself. */
 func duplicateRefusalNamesKey(text string, indexName string) bool {
     const keyClause = "for key '"
 
@@ -445,9 +405,7 @@ func (instance *bunUserRepository) usernameTakenByAnother(ctx context.Context, u
     return 0 < count, nil
 }
 
-/* the comparison is forced onto the binary collation because the column's own (utf8mb4_0900_ai_ci) folds accents — 'café' = 'cafe' is true under it — while NormalizedUsername, the one spelling the cache keys and the invalidation listeners agree on, folds case alone; left to the column, this door matched users the invalidation could never address, and a deleted user kept authenticating from the ttl-less cache under the collation-only spelling.
-
-   Both doors are kept as queries so the clause that decides which rows they may match is readable — and provable — on its own. */
+/* the comparison is forced onto the binary collation because the column's own folds accents while NormalizedUsername, the spelling the cache keys and the invalidation listeners share, folds case alone; under the column's collation this door would match users the invalidation cannot address */
 func (instance *bunUserRepository) userByUsernameQuery(row *userRow, wanted string) *bun.SelectQuery {
     return instance.database.
         NewSelect().
@@ -456,7 +414,7 @@ func (instance *bunUserRepository) userByUsernameQuery(row *userRow, wanted stri
         Limit(1)
 }
 
-/* the same binary collation as userByUsernameQuery, so the uniqueness door and the lookup door refuse and admit the exact same spellings */
+/* the same binary collation as userByUsernameQuery, so the uniqueness door and the lookup door admit the same spellings */
 func (instance *bunUserRepository) usernameTakenByAnotherQuery(wanted string, excludedId string) *bun.SelectQuery {
     return instance.database.
         NewSelect().

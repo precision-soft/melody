@@ -60,7 +60,7 @@ func TestReadProviderClock_MeasuresAClockBehind(t *testing.T) {
     }
 }
 
-/* the Age a cache adds is part of the provider's clock at the moment the answer was handed out */
+/* the Age a cache adds is part of the provider's clock at the moment the answer is handed out */
 func TestReadProviderClock_AddsTheAgeOfACachedAnswer(t *testing.T) {
     reading := readProviderClock(providerClockHeaders("Tue, 08 Sep 2026 08:00:00 GMT", "3600"), providerClockSentAt, providerClockSentAt)
 
@@ -100,8 +100,7 @@ func TestReadProviderClock_ARoundTripReadBackwardsCountsAsNone(t *testing.T) {
     }
 }
 
-/* an Age is read to the second like the Date it is added to, so the two span two seconds: a provider that agrees
-   with this clock, answering from a cache, read as an offset of a whole second when the pair was read as one */
+/* an Age is read to the second like the Date it is added to, so the two span two seconds: a provider that agrees with this clock, answering from a cache, has no offset, where a span of one second would read an offset of a whole second */
 func TestReadProviderClock_AnAgeWidensTheResolutionToTwoSeconds(t *testing.T) {
     arrived := providerClockSentAt.Add(2*time.Second + 500*time.Millisecond)
     reading := readProviderClock(providerClockHeaders("Tue, 08 Sep 2026 09:00:00 GMT", "1"), arrived, arrived)

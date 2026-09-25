@@ -33,7 +33,7 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "username is required"), nil
         }
 
-        /* the username becomes a cache key component and a 255-byte column, so a spelling longer than either holds is turned away before the row lands */
+        /* the username becomes a cache key component and a 255-byte column, so a longer spelling is turned away before the row lands */
         if false == service.CacheSafeIdentifier(repository.NormalizedUsername(normalizedUsername)) {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "username must stay within 255 bytes"), nil
         }
@@ -43,7 +43,7 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "password is required"), nil
         }
 
-        /* bcrypt reads at most 72 bytes of the plaintext, so a longer password is refused as the caller's mistake instead of surfacing as a hashing failure */
+        /* bcrypt reads at most 72 bytes of the plaintext, so a longer password is refused as the caller's mistake */
         if security.PasswordMaximumBytes < len(normalizedPassword) {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, security.PasswordTooLongMessage), nil
         }
@@ -79,9 +79,7 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
             normalizeRoles(dto.Roles),
         )
         if nil != createErr {
-            /* the read above is a check, the unique index is the guard: two callers that both passed the
-               check are told apart here, and the one the index refused is answered the same 400 the check
-               answers, not the 500 of a write that failed */
+            /* the read above is a check and the unique index is the guard: a name the index refuses is answered the same 400 the check answers */
             if true == errors.Is(createErr, repository.ErrUsernameAlreadyExists) {
                 return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "username already exists"), nil
             }

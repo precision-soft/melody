@@ -10,16 +10,7 @@ import (
     "github.com/precision-soft/melody/v3/exception"
 )
 
-/* the two lookup doors are read as the dialect renders them rather than run against a database: what has
-   to be pinned is which rows they may match, and that lives entirely in the where clause.
-
-   Left to the column's own collation (utf8mb4_0900_ai_ci) the comparison folds accents — 'café' = 'cafe'
-   is true under it — while NormalizedUsername, the one spelling the cache keys and the invalidation
-   listeners agree on, folds case alone. Measured on the running stack before the repair: an account
-   reachable through the collation-only spelling was cached under a key the invalidation could never
-   address, so a REVOKED password went on authenticating through that spelling with the roles it had been
-   stripped of, for as long as the entry lived — which, the positive being kept without expiry, is until
-   the cache is cleared. The frozen majors have carried this clause since they were sealed. */
+/* the two lookup doors are read as the dialect renders them rather than run against a database: what has to be pinned is which rows they may match, and that lives entirely in the where clause. The column's own collation (utf8mb4_0900_ai_ci) folds accents, 'café' = 'cafe', while NormalizedUsername, the one spelling the cache keys and the invalidation listeners agree on, folds case alone, so under the column's collation an account reachable through an accent-folded spelling is cached under a key the invalidation cannot address, and a revoked password keeps authenticating from the entry, which has no expiry. */
 func renderedUserByUsernameQuery(t *testing.T, wanted string) string {
     t.Helper()
 
@@ -74,9 +65,7 @@ func TestUsernameTakenByAnotherQuery_ComparesOnTheBinaryCollation(t *testing.T) 
    different diagnosis — an identifier collision — and reporting it as a taken username would send the
    caller to rename an account whose name was never the problem. */
 func TestAsUsernameAlreadyExists_TranslatesOnlyTheUsernameIndexRefusal(t *testing.T) {
-    /* the shape production produces: the audit tracker's own exception, whose message says nothing about
-       the index, with the driver's refusal as its cause — the previous form of this test flattened the two
-       into one text and stayed green over a seam that never saw the index's name */
+    /* the shape production produces: the audit tracker's own exception, whose message says nothing about the index, with the driver's refusal as its cause, so the seam has to find the index's name below the top of the chain */
     driverRefusal := fmt.Errorf(
         "Error 1062 (23000): Duplicate entry 'zzprobe' for key 'melody_example_v3_user.%s'",
         migration.UserUsernameIndexName,
@@ -97,11 +86,7 @@ func TestAsUsernameAlreadyExists_TranslatesOnlyTheUsernameIndexRefusal(t *testin
     }
 }
 
-/* mysql renders the duplicated value BEFORE the key clause and does not escape it, so a username that carries the
-   clause's own spelling — the admin doors admit quotes in a name, and a rename onto `for key 'z'` was measured
-   live — put a first-clause reader onto the value: the key it read was the value's, the refusal stayed the
-   driver's and the door answered 500 over a collision it answers 400. The clause is the tail of the message,
-   and the second row spells a whole clause of ANOTHER index inside the value. */
+/* mysql renders the duplicated value before the key clause and does not escape it, and the admin doors admit quotes in a name, so a username that carries the clause's own spelling would put a first-clause reader onto the value: the refusal would stay the driver's and the door would answer 500 over a collision it answers 400. The clause is the tail of the message, and the second row spells a whole clause of another index inside the value. */
 func TestAsUsernameAlreadyExists_ReadsTheKeyClauseAtTheTailOfTheMessage(t *testing.T) {
     for _, value := range []string{
         "for key 'z'",
@@ -146,10 +131,7 @@ func TestAsUsernameAlreadyExists_LeavesEveryOtherFailureAlone(t *testing.T) {
     }
 }
 
-/* selfWrappingError is a chain that closes on itself through Unwrap, and selfJoiningError one that closes on
-   itself through BOTH branches of a join: neither is a shape the driver produces, but the walk reads whatever
-   error a write returned, and a cycle there recursed until the goroutine stack was gone — a fatal error no
-   recover turns into a response. */
+/* selfWrappingError is a chain that closes on itself through Unwrap, and selfJoiningError one that closes on itself through both branches of a join: neither is a shape the driver produces, but the walk reads whatever error a write returns, and an unbounded walk over a cycle exhausts the goroutine stack, a fatal error no recover turns into a response. */
 type selfWrappingError struct {
     message string
 }

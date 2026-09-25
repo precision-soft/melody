@@ -12,14 +12,7 @@ import (
     melodyruntime "github.com/precision-soft/melody/v3/runtime"
 )
 
-/* the write is read as the dialect renders it: what has to be pinned is the clause that decides what a
-   SECOND enrollment does, and that lives entirely in the statement.
-
-   A plain insert made the enrollment permanent. The primary key is the user identifier, so an account
-   whose authenticator was lost stayed bound to its first secret for good and the second attempt surfaced
-   the key as an opaque 500 — no door at all for the person holding the lost device. Replacing is only safe
-   because the caller no longer names the account: the handler takes the identifier from the authenticated
-   token, so the row this overwrites is always the caller's own. */
+/* the write is read as the dialect renders it: what has to be pinned is the clause that decides what a second enrollment does, and that lives entirely in the statement. The primary key is the user identifier, so a plain insert would bind an account whose authenticator is lost to its first secret for good. Replacing is safe because the handler takes the identifier from the authenticated token, so the row this overwrites is always the caller's own. */
 func renderedEnrollmentUpsert(t *testing.T) string {
     t.Helper()
 
@@ -49,9 +42,7 @@ func TestEnrollmentUpsertReplacesAnEnrollmentThatIsAlreadyThere(t *testing.T) {
     }
 }
 
-/* the secret alone is not the enrollment. The recovery codes are minted beside it and open the account on
-   their own, so a set left from the previous enrollment would keep letting whoever holds the old device in
-   after the factor it belongs to was replaced — which is the whole reason for replacing it. */
+/* the secret alone is not the enrollment. The recovery codes are minted beside it and open the account on their own, so a set left from the previous enrollment would keep letting whoever holds the lost device in after the factor it belongs to is replaced. */
 func TestEnrollmentUpsertReplacesTheRecoveryCodesWithTheSecret(t *testing.T) {
     rendered := renderedEnrollmentUpsert(t)
 

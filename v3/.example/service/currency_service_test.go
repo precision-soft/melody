@@ -81,8 +81,7 @@ func TestCurrencyServiceUpdateRate_WritesTheQuoteAndTellsTheListeners(t *testing
         t.Errorf("cur-usd is stamped %s, wanted the instant the quote was taken at", updated.RateAsOf.UTC())
     }
 
-    /* the listener is what drops the cached list and the cached currency, so a write that skipped the
-       dispatch would leave every reader on the old rate */
+    /* the listener is what drops the cached list and the cached currency, so a write that skipped the dispatch would leave every reader on the rate it replaced */
     dispatched := dispatcher.names()
     if 1 != len(dispatched) || event.CurrencyUpdatedEventName != dispatched[0] {
         t.Errorf("the update dispatched %v, wanted one %s", dispatched, event.CurrencyUpdatedEventName)
@@ -162,10 +161,7 @@ func TestCurrencyServiceUpdateRate_KeepsTheNewerReadingOverAStaleQuote(t *testin
     }
 }
 
-/* the quote the catalogue already holds, at the instant it already holds it, is not written again and
-   dispatches nothing — on mysql the full-row UPDATE it used to issue affected zero rows, which the door read
-   as the currency having vanished — but a cache that kept the PREVIOUS rate after a failed invalidation has
-   its two entries of the currency dropped, so it is healed by the tick that finds nothing to write */
+/* the quote the catalogue already holds, at the instant it already holds it, is not written again and dispatches nothing, since on mysql a full-row UPDATE that changes nothing affects zero rows and reads as a vanished currency; a cache that kept an earlier rate after a failed invalidation has its two entries of the currency dropped, so it is healed by the tick that finds nothing to write */
 func TestCurrencyServiceUpdateRate_AnswersUnchangedWithoutWritingAndDropsTheCachedCurrency(t *testing.T) {
     currencyService, dispatcher, runtimeInstance := currencyServiceUnderTest(t)
 
@@ -220,9 +216,7 @@ func TestCurrencyServiceUpdateRate_AnswersUnchangedWithoutWritingAndDropsTheCach
     }
 }
 
-/* a cache that already serves the quote the row holds is left as it is: dropping it on every unchanged tick
-   made the server read the currency and the list back from the database and write them into the cache again,
-   four reads and four writes per tick for a catalogue that had not moved, twenty-four times a day */
+/* a cache that already serves the quote the row holds is left as it is, so an unchanged tick costs the server no read from the database and no write into the cache */
 func TestCurrencyServiceUpdateRate_KeepsACacheThatAlreadyServesTheQuote(t *testing.T) {
     currencyService, _, runtimeInstance := currencyServiceUnderTest(t)
 
@@ -251,9 +245,7 @@ func TestCurrencyServiceUpdateRate_KeepsACacheThatAlreadyServesTheQuote(t *testi
     }
 }
 
-/* the heal stands in for every invalidation that may have failed before it, the rename's included: an entry at
-   the row's quote under a name the row no longer carries was kept by a heal that compared the quote alone, and
-   served as it was, the entries of a currency carrying no expiry */
+/* the heal stands in for every invalidation that may have failed before it, the rename's included: an entry at the row's quote under a name the row does not carry is dropped, since a heal that compared the quote alone would keep it, and the entries of a currency carry no expiry */
 func TestCurrencyServiceUpdateRate_DropsACachedEntryAtTheQuoteThatIsNotTheRow(t *testing.T) {
     currencyService, _, runtimeInstance := currencyServiceUnderTest(t)
 
@@ -280,9 +272,7 @@ func TestCurrencyServiceUpdateRate_DropsACachedEntryAtTheQuoteThatIsNotTheRow(t 
     }
 }
 
-/* the provider may re-quote the reading the catalogue holds at another rate; its instant on this clock is measured
-   again on the arrival, to the second the provider's date is read to, and may land a little before the first
-   arrival's — the re-quote is the same reading and is written, not kept out as older */
+/* the provider may re-quote the reading the catalogue holds at another rate; its instant on this clock is taken again on the arrival, to the second the provider's date is read to, and may land a little before the first arrival's; the re-quote is the same reading and is written, not kept out as older */
 func TestCurrencyServiceUpdateRate_WritesAReQuoteOfTheHeldReadingMeasuredALittleEarlier(t *testing.T) {
     currencyService, _, runtimeInstance := currencyServiceUnderTest(t)
 
@@ -369,10 +359,7 @@ func (instance *staleReadCurrencyRepository) FindById(ctx context.Context, id st
     return instance.CurrencyRepository.FindById(ctx, id)
 }
 
-/* two processes on one schedule, no lock between them: both read the row, both judge their document newer
-   than it, and the one holding the OLDER document writes last. The write is conditional on the row at the
-   moment of the write, so the older document is refused and answered as stale, and the row keeps the newer
-   quote — where a whole-row write let the older document land */
+/* two processes on one schedule, no lock between them: both read the row, both judge their document newer than it, and the one holding the older document writes last. The write is conditional on the row at the moment of the write, so the older document is refused and answered as stale, and the row keeps the newer quote */
 func TestCurrencyServiceUpdateRate_RefusesAnOlderDocumentThatReadTheRowBeforeANewerOneWroteIt(t *testing.T) {
     currencyService, dispatcher, runtimeInstance := currencyServiceUnderTest(t)
 
@@ -406,10 +393,7 @@ func TestCurrencyServiceUpdateRate_RefusesAnOlderDocumentThatReadTheRowBeforeANe
     }
 }
 
-/* the refusal of a rate that is not a finite number carries that rate in its context, and encoding/json
-   refuses NaN and both infinities: the json journal then fell back to one text rendering of the WHOLE
-   context, so the currency and the bounds beside the rate lost their structure in exactly the record that
-   described the refusal. A non-finite rate travels as its text. */
+/* the refusal of a rate that is not a finite number carries that rate in its context, and encoding/json refuses NaN and both infinities, so the json journal would render the whole context as one text and the currency and the bounds beside the rate would lose their structure. A non-finite rate travels as its text. */
 func TestRefuseUnusableRate_CarriesANonFiniteRateAsText(t *testing.T) {
     for rate, spelled := range map[float64]string{math.Inf(1): "+Inf", math.Inf(-1): "-Inf"} {
         assertRefusalContextEncodes(t, refuseUnusableRate("cur-usd", rate), spelled)
@@ -469,8 +453,7 @@ func TestCachedCurrencyIsRow_ComparesEveryFieldOfTheEntity(t *testing.T) {
     }
 }
 
-/* quoteBeforeRenameRepository lands a refresh's quote between the rename's read and its write, the window the
-   rename had to survive */
+/* quoteBeforeRenameRepository lands a refresh's quote between the rename's read and its write */
 type quoteBeforeRenameRepository struct {
     repository.CurrencyRepository
     quote entity.RateQuote
@@ -484,10 +467,7 @@ func (instance *quoteBeforeRenameRepository) Update(ctx context.Context, currenc
     return instance.CurrencyRepository.Update(ctx, currency)
 }
 
-/* the rename writes the code and the name alone, so a refresh landing between its read and its write keeps
-   its quote in the row — and the currency the door answers and publishes is that row, read back: built from
-   the copy read before the write, it carried the quote the refresh had just replaced to the caller and to
-   every listener */
+/* the rename writes the code and the name alone, so a refresh landing between its read and its write keeps its quote in the row, and the currency the door answers and publishes is that row, read back, not the copy read before the write, which carries the quote the refresh replaced */
 func TestCurrencyServiceUpdate_AnswersAndPublishesTheRowAsWrittenAfterAConcurrentQuote(t *testing.T) {
     currencyService, dispatcher, runtimeInstance := currencyServiceUnderTest(t)
 
@@ -539,7 +519,7 @@ func (instance *rereadRefusingCurrencyRepository) FindById(ctx context.Context, 
     return instance.CurrencyRepository.FindById(ctx, id)
 }
 
-/* the rename is written, and the caches that serve the old code and name never expire: a read-back that fails still dispatches the event, carrying the fields as written, and answers the failure */
+/* the rename is written, and the caches that serve its earlier code and name never expire: a read-back that fails still dispatches the event, carrying the fields as written, and answers the failure */
 func TestCurrencyServiceUpdate_AFailedReadBackAfterTheWriteStillDispatchesTheEvent(t *testing.T) {
     _, dispatcher, runtimeInstance := currencyServiceUnderTest(t)
 

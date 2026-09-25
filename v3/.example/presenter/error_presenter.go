@@ -68,13 +68,7 @@ func ApiError(
     )
 }
 
-/* ApiErrorWithErr renders a refusal whose cause the handler holds. The cause travels in the body only under
-   the development environment; for a status of the server's own class it is JOURNALED here as well, at
-   error, because a Response is the one thing the kernel never journals: it journals a handler's failure
-   when the failure is RETURNED, and a handler that answered the failure as a 500 reached the terminate
-   listener alone — one info line, "request completed 500", no cause — so outside development the reason a
-   door answered 500 existed nowhere. A client's own refusal, below 500, is not journaled: the request was
-   wrong, and the body says so. */
+/* ApiErrorWithErr renders a refusal whose cause the handler holds. The cause travels in the body only under the development environment. A status of the server's own class is journaled here at error, because the kernel journals a returned failure and never a Response; a client's refusal below 500 is not journaled. */
 func ApiErrorWithErr(
     runtimeInstance melodyruntimecontract.Runtime,
     request melodyhttpcontract.Request,
@@ -101,9 +95,7 @@ func ApiErrorWithErr(
     )
 }
 
-/* journalServerError writes the one record a 500 answered as a Response leaves: the public message the
-   client read, the route and the cause, through the runtime's logger. The cause is marked logged so a
-   reader further up that files marked errors once does not file it again. */
+/* journalServerError writes the one record a 500 answered as a Response leaves: the public message, the route and the cause. The cause is marked logged, so a reader that files marked errors once does not file it again. */
 func journalServerError(
     runtimeInstance melodyruntimecontract.Runtime,
     request melodyhttpcontract.Request,
@@ -125,10 +117,7 @@ func journalServerError(
         logContext["path"] = melodyhttp.RequestPathAsRouted(request.HttpRequest().URL.EscapedPath())
     }
 
-    /* a client that left mid-request is not a failure of the server: the kernel files a returned
-       context.Canceled as "request cancelled by client" at warning, and a 500 answered as a Response for
-       the same cause — the outbox, storage and two-factor doors run under the request's context — is
-       filed the same way, rather than as an error nobody received */
+    /* a client that left mid-request is not a server failure: the kernel files a returned context.Canceled as "request cancelled by client" at warning, and a 500 answered for the same cause is filed the same way */
     if true == errors.Is(causeErr, context.Canceled) && true == requestContextIsDone(request) {
         examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Warning("handler answered a server error to a client that left", logContext)
     } else {
@@ -138,8 +127,7 @@ func journalServerError(
     _ = melodyexception.MarkLogged(causeErr)
 }
 
-/* requestContextIsDone answers whether the request's own context has ended, which is how a client that
-   went away is told apart from a context.Canceled raised by something else. */
+/* requestContextIsDone answers whether the request's own context has ended, telling a client that left from a context.Canceled raised by something else. */
 func requestContextIsDone(request melodyhttpcontract.Request) bool {
     if nil == request || nil == request.HttpRequest() || nil == request.HttpRequest().Context() {
         return false
@@ -148,9 +136,7 @@ func requestContextIsDone(request melodyhttpcontract.Request) bool {
     return nil != request.HttpRequest().Context().Err()
 }
 
-/* ApiRefusal renders a refusal a json-binding door made before the handler ran — the decoder's and the validator's alike, since JsonHandler hands both to the same responder.
-
-   A validation failure is rendered field by field, one errors entry per violated field, so an api client can attach each message to the input that earned it instead of splitting a joined string: that collection is public by contract, and the framework's own exception listener projects the very same key into the body for every door that does not install a responder. Every other refusal keeps its generic public message, with the cause in the debug-gated context, because the decoder's diagnosis names internals — a byte offset into a body, a Go type — and this door is reachable by anyone the route lets through. */
+/* ApiRefusal renders a refusal a json-binding door made before the handler ran, the decoder's or the validator's. A validation failure is rendered field by field, one errors entry per violated field, the same public collection the framework's exception listener projects. Every other refusal keeps its generic public message with the cause in the debug-gated context, because the decoder's diagnosis names internals. */
 func ApiRefusal(
     runtimeInstance melodyruntimecontract.Runtime,
     request melodyhttpcontract.Request,
@@ -166,9 +152,7 @@ func ApiRefusal(
     return ApiErrorWithErr(runtimeInstance, request, statusCode, publicMessage, causeErr)
 }
 
-/* validationErrorMessages answers one message per violation, and whether the refusal carried a collection at all — the second answer is what keeps a refusal that carries none on the generic-message path instead of publishing its cause.
-
-   Each message carries only the field and its sentence: a violation's context, which may name the declaration rather than the input, never reaches the client on this path. The collection travels in the http exception's context under validationErrors, the key BindJsonAndValidate attaches it to and the kernel's exception listener reads; a collection handed directly as the error is read too, so a door that validates by hand renders the same way. An empty collection is not a validation failure: it would render an errors list with nothing in it, where the generic message at least names what was refused. */
+/* validationErrorMessages answers one message per violation, and whether the refusal carried a collection at all, which keeps a refusal without one on the generic-message path. Each message carries only the field and its sentence. The collection is read from the http exception's context under validationErrors, or directly as the error for a door that validates by hand; an empty collection is not a validation failure. */
 func validationErrorMessages(refusalErr error) ([]string, bool) {
     validationErrors, carriesValidation := validationErrorsOf(refusalErr)
     if false == carriesValidation {
@@ -267,7 +251,7 @@ func buildApiResponse(
 
     acceptHeader := ""
     if nil != request && nil != request.HttpRequest() && nil != request.HttpRequest().Header {
-        /* every Accept line is joined before parsing: Get answers only the first line of a repeated field, and the accept header is list-typed, so a refusal the client sent on a second line would otherwise vanish */
+        /* every Accept line is joined before parsing: Get answers only the first line of a repeated field, and the accept header is list-typed */
         acceptHeader = strings.Join(request.HttpRequest().Header.Values("Accept"), ", ")
     }
 
@@ -275,7 +259,7 @@ func buildApiResponse(
     if nil != serializerManager {
         serializerInstance, err := serializerManager.ResolveByAcceptHeader(acceptHeader)
 
-        /* a header that refuses every available media type is answered as not acceptable on the SUCCESS path, exactly as the result handler answers it; a REFUSAL keeps the status it earned instead, which is the asymmetry the framework's own error renderer states and the reason it falls back for every resolution failure alike: a 401 or a 404 rendered as an empty 406 tells the client nothing about why it was turned away, and the only thing negotiation could have withheld is a representation it had already rejected. The flag is read off the envelope being rendered rather than passed beside it, so the two can never disagree about which path this is. */
+        /* a header that refuses every media type is answered 406 on the success path, as the result handler answers it, while a refusal keeps the status it earned, as the framework's error renderer does: a 401 or 404 rendered as an empty 406 tells the client nothing. The flag is read off the envelope being rendered, so the two cannot disagree. */
         if true == payload.Success && true == errors.Is(err, melodyserializer.ErrNotAcceptable) {
             return melodyhttp.EmptyResponse(nethttp.StatusNotAcceptable)
         }
@@ -326,7 +310,7 @@ func fallbackJsonResponse(statusCode int, payload any) melodyhttpcontract.Respon
     return response
 }
 
-/* the debug decision is the kernel environment, exactly as the framework exception listener reads it; when it cannot be determined the presenter stays closed and emits no cause material */
+/* the debug decision is the kernel environment, as the framework exception listener reads it; when it cannot be determined the presenter emits no cause material */
 func debugMode(runtimeInstance melodyruntimecontract.Runtime) bool {
     if nil == runtimeInstance {
         return false

@@ -41,9 +41,7 @@ func NewCurrencyService(
     }
 }
 
-/* CurrencyService stamps the instant a rate was quoted with the injected clock rather than the wall, the
-   rule ProductService states for its own timestamps: a frozen clock lets a test name the exact instant a
-   currency carries, which cannot be written against time.Now. */
+/* CurrencyService stamps the instant a rate is quoted with the injected clock rather than the wall, so a frozen clock names the exact instant a currency carries. */
 type CurrencyService struct {
     currencyRepository repository.CurrencyRepository
     cache              melodycachecontract.Cache
@@ -51,25 +49,16 @@ type CurrencyService struct {
     clock              melodyclockcontract.Clock
 }
 
-/* the range a rate is admitted in. The lower bound is below the smallest real quote by three orders of
-   magnitude and the upper one above the largest by the same, so no currency is refused for being cheap or
-   dear; what they refuse is a number that is valid JSON and not a price — 1e308, which a conversion turns
-   into an infinity the serializer cannot render, or a denormal that does the same from below. */
+/* the range a rate is admitted in, three orders of magnitude past the smallest and the largest real quote: it refuses a number that is valid JSON and not a price, which a conversion would turn into an infinity from above or below */
 const (
     minUsableRate = 1e-6
     maxUsableRate = 1e9
 )
 
-/* ErrUnusableRate is the sentinel beneath every refusal of a rate: a caller sweeping a whole document reads
-   it with errors.Is to tell a quote the catalogue refused — which it counts and goes past — from a backend
-   that failed, which is not the provider's fault and stops the sweep. */
+/* ErrUnusableRate is the sentinel beneath every refusal of a rate, so a caller sweeping a document tells a refused quote, which it counts and goes past, from a backend failure, which stops the sweep. */
 var ErrUnusableRate = errors.New("the exchange rate must be a positive, finite number within the range a quote can take")
 
-/* refuseUnusableRate is the one spelling of the rule, read by both write doors. A conversion divides by the
-   source rate, so a zero divides by zero and a negative flips the price's sign; an infinity or a value the
-   range above excludes produces a converted price that is not a finite number, which the read door then
-   cannot answer; and the column is NOT NULL, so there is no "not quoted yet" to fall back on — a currency
-   enters the catalogue with a quote or it does not enter it. */
+/* refuseUnusableRate is the one spelling of the rule both write doors read: a rate that is zero, negative, infinite or outside the admitted range makes a conversion that is not a finite price, and the column is NOT NULL, so a currency enters the catalogue with a usable quote or not at all. */
 func refuseUnusableRate(currencyId string, rate float64) error {
     if true == isUsableRate(rate) {
         return nil
@@ -87,10 +76,7 @@ func refuseUnusableRate(currencyId string, rate float64) error {
     )
 }
 
-/* contextNumber is a float as an error context can carry it. encoding/json refuses NaN and both infinities,
-   and a json journal handed one falls back to a single text rendering of the WHOLE context — every other
-   key of the record loses its structure, in exactly the record that describes a number that was not one.
-   A finite value is left a number; one that is not travels as its text, "NaN", "+Inf" or "-Inf". */
+/* contextNumber is a float as an error context can carry it: encoding/json refuses NaN and both infinities, and a json journal would then render the whole context as text, so such a value travels as "NaN", "+Inf" or "-Inf". */
 func contextNumber(value float64) any {
     if true == math.IsNaN(value) || true == math.IsInf(value, 0) {
         return strconv.FormatFloat(value, 'g', -1, 64)
@@ -99,18 +85,12 @@ func contextNumber(value float64) any {
     return value
 }
 
-/* quoteInstantOf is the resolution a quote's instant is held at: the column is DATETIME(6), so the row
-   comes back truncated to the microsecond, and an instant compared at the nanosecond against it was
-   never Equal — a provider stamping time.Now() with nine decimals made every unchanged quote read as a
-   full-row update that changed nothing, which the driver reports as no row and the sweep counted as the
-   currency having vanished, with the cache entries the unchanged branch drops left standing. Both write
-   doors hold the instant at this resolution, so the in-memory repository and the database agree. */
+/* quoteInstantOf holds a quote's instant at the microsecond the DATETIME(6) column keeps, so an instant compared against a row read back is Equal when it names the same instant, and the in-memory repository and the database agree. */
 func quoteInstantOf(instant time.Time) time.Time {
     return instant.UTC().Truncate(time.Microsecond)
 }
 
-/* isUsableRate is the two comparisons alone: an infinity fails the upper one and a NaN fails both, so
-   neither needs a check of its own that the comparisons would shadow */
+/* isUsableRate is the two comparisons alone: an infinity fails the upper one and a NaN fails both */
 func isUsableRate(rate float64) bool {
     return minUsableRate <= rate && rate <= maxUsableRate
 }
@@ -138,7 +118,7 @@ func (instance *CurrencyService) List() ([]*entity.Currency, error) {
 }
 
 func (instance *CurrencyService) FindById(id string) (*entity.Currency, bool, error) {
-    /* an identifier the cache-key grammar refuses names a row no write door admits, so it is answered as absent instead of asked of a cache that would refuse the question with a 500 */
+    /* an identifier no cache key can carry names no row, so it is answered as absent without asking the cache */
     if false == CacheSafeIdentifier(id) {
         return nil, false, nil
     }
@@ -177,9 +157,7 @@ func (instance *CurrencyService) FindById(id string) (*entity.Currency, bool, er
     return currency, true, nil
 }
 
-/* Create takes the rate because the schema holds one and a currency with no quote cannot be converted to or
-   from. The instant stamped is the clock's, not a provider's: the caller supplying the number IS the
-   reading, and the refresh overwrites both halves the moment it reaches this currency. */
+/* Create takes the rate because the schema holds one and a currency with no quote cannot be converted. The instant is the clock's: the caller supplying the number is the reading, and the refresh overwrites both when it reaches this currency. */
 func (instance *CurrencyService) Create(
     runtimeInstance melodyruntimecontract.Runtime,
     currencyId string,
@@ -228,7 +206,7 @@ func (instance *CurrencyService) Update(
         return nil, false, nil
     }
 
-    /* the loaded entity is the repository's own stored value under the in-memory configuration, shared with every concurrent reader, so the changes land on a copy: a refused update leaves the stored entity exactly as it was */
+    /* under the in-memory configuration the loaded entity is the repository's stored value, shared with concurrent readers, so the changes land on a copy and a refused update leaves the stored entity untouched */
     modified := *currency
     modified.Code = code
     modified.Name = name
@@ -241,14 +219,10 @@ func (instance *CurrencyService) Update(
         return nil, false, nil
     }
 
-    /* the rename writes the code and the name alone, and a refresh may have written the quote between the read
-       above and the write: the entity answered and published is the row as it now stands, read back, not the
-       copy of what was read before the write — which carried the quote the refresh had just replaced */
+    /* the rename writes the code and the name alone while a refresh may write the quote between the read and the write, so the entity answered and published is the row read back */
     written, stillFound, rereadErr := instance.currencyRepository.FindById(ctx, currencyId)
     if nil != rereadErr {
-        /* the row is written, and the caches that serve its old code and name expire never: the event goes out
-           with the fields as written — the quote as it was read before the write — so they are dropped even
-           though the row cannot be read back, and the read-back failure is what the caller is answered */
+        /* the row is written and the entries serving its old code and name never expire, so the event goes out with the fields as written even though the row cannot be read back, and the read-back failure is what the caller is answered */
         _, dispatchErr := instance.eventDispatcher.DispatchName(
             runtimeInstance,
             event.CurrencyUpdatedEventName,
@@ -274,13 +248,7 @@ func (instance *CurrencyService) Update(
     return written, true, nil
 }
 
-/* RateUpdateOutcome is what UpdateRate did with a quote, in a word the caller can count under the right
-   heading: written, or not written for one of three reasons that are not failures and are not the same —
-   the currency stopped existing between the listing and its update, the quote is older than the one the
-   catalogue already holds, or the quote is the one it already holds. The bool this replaced folded the last
-   two into "absent" — on mysql a full-row UPDATE that changes nothing affects zero rows, which the door read
-   as the row having vanished, so a provider whose quotes had not moved was reported as three deleted
-   currencies every tick. */
+/* RateUpdateOutcome is what UpdateRate did with a quote: written, or not written because the currency is gone, the quote is older than the one held, or it is the one held. None of the three is a failure, and each is counted under its own heading. */
 type RateUpdateOutcome int
 
 const (
@@ -290,8 +258,7 @@ const (
     RateUpdateWritten
 )
 
-/* rateUpdateOutcomeName spells an outcome the way the refresh reports it, for the context of a failure that
-   stopped the sweep: the word is the heading the same quote is counted under in the table. */
+/* rateUpdateOutcomeName spells an outcome as the refresh reports it, the heading the quote is counted under in the table. */
 func rateUpdateOutcomeName(outcome RateUpdateOutcome) string {
     switch outcome {
     case RateUpdateWritten:
@@ -305,25 +272,7 @@ func rateUpdateOutcomeName(outcome RateUpdateOutcome) string {
     }
 }
 
-/* UpdateRate is the door the rate refresh writes through, and it goes through the service rather than
-   straight to the repository for one reason: the currency list and every currency by id are cached, and
-   the listeners that drop those entries are subscribed to the updated event this dispatches. A rate written
-   behind the cache is a rate no reader ever sees — in the process that dispatched, which is the refresh's
-   own; the http server sees the drop through the shared cache alone, and on the in-process fallback it
-   serves what it cached until it restarts.
-
-   The rate is judged by refuseUnusableRate, the spelling Create reads too, and the refusal names the
-   currency so a caller sweeping a whole document can say which quote was bad and go on to the next.
-
-   The quote carries its instant in both reference frames — see entity.RateQuote. The reading the catalogue
-   already holds — the same provider stamp at the same rate — is not written again, however this clock measured
-   its arrival, and the cache entries of the currency that do not serve the row are dropped without an event:
-   the write would change nothing and the event would journal a change that did not happen, while the drop is
-   what heals a cache that kept a previous state after the invalidation of an earlier write failed. A reading
-   older than the one stored, on THIS clock, is not written: a replay, or a stale cache in front of the
-   provider, is older here even when the provider's clock was set back between the two, and never a newer
-   price. The instants are judged at the microsecond the columns hold, so "the same instant" means what the
-   row can say. An entry that already serves the row is kept — see healCachedCurrency. */
+/* UpdateRate is the door the rate refresh writes through. It goes through the service because the currency list and every currency by id are cached, and the listeners that drop those entries subscribe to the updated event it dispatches in the process that dispatched; the http server sees the drop through the shared cache alone. The rate is judged by refuseUnusableRate. The reading already held, the same provider stamp at the same rate, is not written again: the entries that do not serve the row are dropped without an event (see healCachedCurrency). A reading older than the one held on this clock is not written, and instants are compared at the microsecond the columns hold. */
 func (instance *CurrencyService) UpdateRate(
     runtimeInstance melodyruntimecontract.Runtime,
     currencyId string,
@@ -357,11 +306,7 @@ func (instance *CurrencyService) UpdateRate(
         return currency, RateUpdateStale, nil
     }
 
-    /* the write is CONDITIONAL on the row's reading, in one statement: the read above judged a row as it was,
-       and two processes on one schedule — the refresh takes no lock — each judged their document newer than
-       that row and wrote whole, so the older document landed last. The repository writes only over a row
-       that does not hold a newer reading; a refusal is read back to tell a row that moved from one that
-       vanished. */
+    /* the write is conditional on the row's reading, in one statement: the refresh takes no lock, so two processes on one schedule may each judge their document newer, and the repository writes only over a row that holds no newer reading; a refusal is read back to tell a row that moved from one that vanished */
     written, updateErr := instance.currencyRepository.UpdateQuote(ctx, currencyId, quote)
     if nil != updateErr {
         return nil, RateUpdateAbsent, updateErr
@@ -406,9 +351,7 @@ func (instance *CurrencyService) UpdateRate(
     return &modified, RateUpdateWritten, nil
 }
 
-/* isOlderReading answers whether a quote is a reading older than the one held, judged on this application's
-   clock. A quote carrying the held reading's own stamp is never older: it is the provider re-quoting that
-   reading, and the instant this clock gave it moves with every measurement of the offset. */
+/* isOlderReading answers whether a quote is older than the reading held, judged on this application's clock. A quote carrying the held reading's own stamp is never older: it is the provider re-quoting that reading. */
 func isOlderReading(quote entity.RateQuote, held entity.RateQuote) bool {
     if true == quote.ProviderAsOf.Equal(held.ProviderAsOf) {
         return false
@@ -417,17 +360,7 @@ func isOlderReading(quote entity.RateQuote, held entity.RateQuote) bool {
     return true == quote.AsOf.Before(held.AsOf)
 }
 
-/* healCachedCurrency makes the two entries a currency is served from — the same two the updated listener
-   drops — agree with a row that did not move, by the keys and without the event. Each entry is READ first and
-   dropped only when it is not the row: an entry holding another rate, another instant, another code or name,
-   an absence cached for a row that exists, a list that lacks the currency, or a payload the cache cannot hand
-   back. The whole row is compared, not the quote alone, because the heal stands in for EVERY invalidation that
-   may have failed before it — the rename's included, whose listener drops the same two keys — and an entry
-   no key expires is otherwise served as it is until the next write. Dropped unconditionally, as it used to be,
-   a catalogue that had not moved cost the server four reads from the database and four writes into the cache
-   on every tick, twenty-four times a day, to heal a cache that was almost never wrong; the two reads here are
-   what the heal costs now. An entry that is absent is left absent, since the next reader fills it from the
-   row. */
+/* healCachedCurrency makes the two entries a currency is served from, the same two the updated listener drops, agree with a row that did not move, without the event. Each entry is read first and dropped only when it is not the row, compared field for field, because the heal stands in for any invalidation that failed before it, the rename's included. An absent entry is left absent: the next reader fills it from the row. */
 func (instance *CurrencyService) healCachedCurrency(currency *entity.Currency) error {
     byIdKey := CacheKeyCurrencyById(currency.Id)
 

@@ -16,7 +16,7 @@ func NewUserEventSubscriber() *UserEventSubscriber {
     return &UserEventSubscriber{}
 }
 
-/* userUsernameCacheKey answers the cache key a username is served under, empty for a username that folds to nothing — which every caller below skips. The fold itself lives in the key constructor; this asks only whether there is a name left to key on, so no listener spells the fold out beside its own call and none of them can drift from the write door. */
+/* userUsernameCacheKey answers the cache key a username is served under, empty for a username that folds to nothing, which every caller skips. The fold lives in the key constructor, so no listener can drift from the write door. */
 func userUsernameCacheKey(username string) string {
     if "" == repository.NormalizedUsername(username) {
         return ""
@@ -105,7 +105,7 @@ func (instance *UserEventSubscriber) onUserUpdated() melodyeventcontract.EventLi
             }
         }
 
-        /* a rename leaves the by-username entry keyed on the OLD spelling: cleared only under the new one, the old key kept authenticating the pre-rename credentials for as long as the entry lived, and the old name could never be re-registered — the deleted event carries its username for exactly this reason */
+        /* a rename leaves the by-username entry keyed on the spelling before the rename, so it is cleared under that name too: otherwise the pre-rename credentials would keep authenticating and that name could not be registered again */
         previousUsernameCacheKey := userUsernameCacheKey(payloadInstance.PreviousUsername())
         if "" != previousUsernameCacheKey && previousUsernameCacheKey != usernameCacheKey {
             previousUsernameDeleteErr := cacheInstance.Delete(previousUsernameCacheKey)

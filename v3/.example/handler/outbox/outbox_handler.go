@@ -14,7 +14,7 @@ import (
     bun "github.com/uptrace/bun"
 )
 
-/* EnqueueHandler writes a notice to the outbox inside a transaction — in real use the same transaction also carries the business change, so the message is published if and only if the business write commits. It does NOT publish; the relay does that later. The store arrives as a container.Lazy handle: the first request resolves the registered store (which ensures the outbox schema), later requests reuse the memoized instance. */
+/* EnqueueHandler writes a notice to the outbox inside a transaction that in real use also carries the business change, so the message is published if and only if that write commits; the relay publishes it later. The store is a container.Lazy handle resolved at the first request. */
 func EnqueueHandler(database *bun.DB, store *melodycontainer.LazyService[*outboxintegration.Store]) melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         reference := melodybag.StringOrDefault(request.Query(), "reference", "")
@@ -33,7 +33,7 @@ func EnqueueHandler(database *bun.DB, store *melodycontainer.LazyService[*outbox
         }
 
         enqueueErr := database.RunInTx(runtimeInstance.Context(), nil, func(ctx context.Context, tx bun.Tx) error {
-            /* a real handler performs its business write on tx here; the outbox write shares the same transaction so the two commit atomically */
+            /* the business write belongs on tx here, so it and the outbox write commit atomically */
             return storeInstance.Enqueue(ctx, tx, message.OutboxNotice{Reference: reference, Text: text})
         })
         if nil != enqueueErr {
@@ -47,7 +47,7 @@ func EnqueueHandler(database *bun.DB, store *melodycontainer.LazyService[*outbox
     }
 }
 
-/* RelayHandler drains one batch of due outbox rows to the transport and reports how many were published, standing in for the relay loop a scheduler (cron) or the outbox:relay command would run continuously. The relay arrives as a container.Lazy handle: the transport is opened at the first request, not at boot. */
+/* RelayHandler drains one batch of due outbox rows to the transport and reports how many were published, standing in for the relay a scheduler or the outbox:relay command runs. The relay is a container.Lazy handle, so the transport opens at the first request. */
 func RelayHandler(relay *melodycontainer.LazyService[*outboxintegration.Relay]) melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         relayInstance, resolveErr := relay.Resolve()
@@ -66,7 +66,7 @@ func RelayHandler(relay *melodycontainer.LazyService[*outboxintegration.Relay]) 
     }
 }
 
-/* StatusHandler reports the outbox row counts by status so the pending → sent (or dead) transition the relay drives is observable. It resolves the lazy store first so the outbox schema exists before the count query even when no message was enqueued yet. */
+/* StatusHandler reports the outbox row counts by status. It resolves the lazy store first, so the outbox schema exists before the count query. */
 func StatusHandler(database *bun.DB, store *melodycontainer.LazyService[*outboxintegration.Store]) melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         if _, resolveErr := store.Resolve(); nil != resolveErr {
@@ -90,7 +90,7 @@ func StatusHandler(database *bun.DB, store *melodycontainer.LazyService[*outboxi
             counts[status] = count
         }
 
-        /* an iteration error ends the loop exactly like exhaustion does, with the failure parked on the rows: unread, a connection dropped after the first row served a truncated counts map as a 200 — an existing dead count silently reading as no dead rows */
+        /* an iteration error ends the loop like exhaustion, parked on the rows, so it is read here: a connection dropped mid-read is a failure, not a truncated counts map served as a 200 */
         if rowsErr := rows.Err(); nil != rowsErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not read the outbox status", rowsErr), nil
         }

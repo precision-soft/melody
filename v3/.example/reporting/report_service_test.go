@@ -352,10 +352,7 @@ func newArchiveRuntime(readingRepository repository.CatalogReadingRepository) me
     return melodyruntime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 }
 
-/* recordingReadingRepository is the archive as a test can inspect it: what it was handed, in order, and a
-   refusal it can be told to answer. It keeps the identity rule the two real implementations keep — one
-   reading per instant — because a double that accepted what they refuse would let the service's handling
-   of that refusal go unproven. */
+/* recordingReadingRepository is the archive as a test can inspect it: what it receives, in order, and a refusal it can be told to answer. It keeps the identity rule the two real implementations keep, one reading per instant, because a double that accepted what they refuse would leave the service's handling of that refusal unproven. */
 func newRecordingReadingRepository() *recordingReadingRepository {
     return &recordingReadingRepository{}
 }
@@ -410,7 +407,7 @@ func (instance *recordingReadingRepository) Count(ctx context.Context) (int, err
 
 var _ repository.CatalogReadingRepository = (*recordingReadingRepository)(nil)
 
-/* the stamp is what a caller reads to find out how old the answer is, so a cached reading must carry the instant the reading was TAKEN — stamping the moment of service made a reading a whole refresh interval old say "now". */
+/* the stamp is what a caller reads to find out how old the answer is, so a cached reading carries the instant the reading was taken, not the moment it is served. */
 func TestCatalogReadingFromTheCacheKeepsTheInstantItWasTakenAt(t *testing.T) {
     takenAt := time.Date(2026, time.September, 6, 10, 0, 0, 0, time.UTC)
     clockInstance := melodyclock.NewFrozenClock(takenAt)
@@ -438,7 +435,7 @@ func TestCatalogReadingFromTheCacheKeepsTheInstantItWasTakenAt(t *testing.T) {
     }
 }
 
-/* a payload this service cannot read the stamp back from is not served as a reading at all: it would have to be given an instant nobody measured. */
+/* a payload this service cannot read the stamp back from is not served as a reading at all: it would have to be given an instant nobody took. */
 func TestCatalogReadingTakesAFreshReadingWhenTheCachedPayloadCarriesNoInstant(t *testing.T) {
     servedAt := time.Date(2026, time.September, 6, 11, 0, 0, 0, time.UTC)
     clockInstance := melodyclock.NewFrozenClock(servedAt)
@@ -603,7 +600,7 @@ func TestRecentReadingsAnswersTheArchive(t *testing.T) {
     }
 }
 
-/* the counts the row carries are the reading's own, read out of its payload: a product created and its cached list dropped between Refresh and Archive — what the http process's listener does on the shared cache — used to make the row count one more product than the payload it carries, and put the catalogue's database on an archive write that needs nothing from it. */
+/* the counts the row carries are the reading's own, read out of its payload: a product created and its cached list dropped between Refresh and Archive, as the http process's listener does on the shared cache, leaves the row's counts equal to the payload's, and the catalogue's database stays off an archive write that needs nothing from it. */
 func TestArchiveCarriesTheCountsTheReadingStatesRatherThanASecondObservation(t *testing.T) {
     takenAt := time.Date(2026, time.September, 7, 10, 0, 0, 0, time.UTC)
     clockInstance := melodyclock.NewFrozenClock(takenAt)
@@ -631,7 +628,7 @@ func TestArchiveCarriesTheCountsTheReadingStatesRatherThanASecondObservation(t *
     }
 }
 
-/* a payload without counts is a reading this service did not write, and a row with counts nobody measured would be a second observation by another name */
+/* a payload without counts is a reading this service did not write, and a row with counts taken elsewhere would be a second observation by another name */
 func TestArchiveRefusesAPayloadThatCarriesNoCounts(t *testing.T) {
     clockInstance := melodyclock.NewFrozenClock(time.Date(2026, time.September, 7, 10, 0, 0, 0, time.UTC))
     archive := newRecordingReadingRepository()
@@ -669,8 +666,7 @@ func TestArchiveResolvesTheRepositoryAtTheCallAndNotAtConstruction(t *testing.T)
     }
 }
 
-/* a stamp that is there and does not parse is no more an instant than an absent one: served, the reading claimed
-   FromCache with a zero instant, the one thing a caller reads to know how old the answer is */
+/* a stamp that is there and does not parse is no more an instant than an absent one: served, the reading would claim FromCache with a zero instant, the one thing a caller reads to know how old the answer is */
 func TestCatalogReadingTakesAFreshReadingWhenTheCachedInstantDoesNotParse(t *testing.T) {
     servedAt := time.Date(2026, time.September, 6, 11, 0, 0, 0, time.UTC)
     clockInstance := melodyclock.NewFrozenClock(servedAt)
@@ -688,8 +684,7 @@ func TestCatalogReadingTakesAFreshReadingWhenTheCachedInstantDoesNotParse(t *tes
     }
 }
 
-/* the cached reading expires with the refresh interval: kept longer, a reading older than the schedule that
-   replaces it was served as the current one */
+/* the cached reading expires with the refresh interval, so a reading older than the schedule that replaces it is never served as the current one */
 func TestCatalogRefreshCachesTheReadingForTheRefreshInterval(t *testing.T) {
     clockInstance := melodyclock.NewFrozenClock(time.Date(2026, time.September, 6, 10, 0, 0, 0, time.UTC))
     cacheInstance := &readingCache{values: map[string]any{}}

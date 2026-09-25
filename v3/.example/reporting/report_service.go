@@ -16,19 +16,19 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/* catalogReadingCacheKey is where a reading is left for whoever asks next. The scheduled refresh writes it and every request reads it, which is the whole point: the request that finds a cold cache is the one that pays for the reading. */
+/* catalogReadingCacheKey is where a reading is left for whoever asks next: the scheduled refresh writes it and every request reads it. */
 const catalogReadingCacheKey = "catalog.reading"
 
-/* the two counts inside the payload, named once for the writer and the reader alike */
+/* the two counts inside the payload, named once for the writer and the reader */
 const (
     catalogReadingProductCountField = "products="
     catalogReadingJournalCountField = "journal="
 )
 
-/* catalogReadingRecordedAtField names the stamp inside the payload. The reading is one cached value, so the instant it was taken at travels inside that value rather than beside it: a second key would expire on its own schedule, and a reading whose stamp had lapsed would be served with the wrong age or with none. */
+/* catalogReadingRecordedAtField names the stamp inside the payload: the instant travels inside the one cached value, so it cannot lapse apart from the reading. */
 const catalogReadingRecordedAtField = "recorded_at="
 
-/* the services in this package are never registered by hand: melody:wiring:generate scans the package and renders their registrations into generated/wiring_gen.go, which is what config.Module registers. They are here to exercise the generated wiring against a real container — a dependency resolved by type, two scalars bound to configuration parameters and one bound through a directive. */
+/* the services in this package are registered by melody:wiring:generate, which renders them into generated/wiring_gen.go for config.Module; they exercise a dependency resolved by type, two scalars bound to configuration parameters and one bound through a directive */
 
 func NewReportFormatter() *ReportFormatter {
     return &ReportFormatter{}
@@ -41,7 +41,7 @@ func (instance *ReportFormatter) Format(title string, count int) string {
     return fmt.Sprintf("%s: %d entries", title, count)
 }
 
-/* NewCatalogReportService takes everything a reading needs and NOT the archive. The archive is the second database, opened lazily at the first resolution of the repository that publishes it, and a constructor argument is resolved at construction: every consumer of this service — the daily app:info, the hourly refresh, the history door — paid the postgres open and the archive's migration set before it did anything, and with postgres down each paid the whole retry budget for a connection nothing on its path needed. Archive and RecentReadings resolve the repository when they are called, the way the exporter resolves its client, so a process that never touches the archive never dials it. */
+/* NewCatalogReportService takes everything a reading needs and not the archive, the second database, which opens lazily: Archive and RecentReadings resolve its repository when called, so a process that never touches the archive never dials it. */
 //melody:bind refreshInterval=app.reporting.refresh_interval
 func NewCatalogReportService(
     formatter *ReportFormatter,
@@ -84,7 +84,7 @@ type CatalogReading struct {
     FromCache  bool
 }
 
-/* Reading yields the current reading, from the cache when the scheduled refresh left one there. A cached reading keeps the instant it was taken at, which is the point of stamping it: the caller can tell how old the answer is. */
+/* Reading yields the current reading, from the cache when the scheduled refresh left one there; a cached reading keeps the instant it was taken at, so the caller can tell how old the answer is. */
 func (instance *CatalogReportService) Reading(ctx context.Context) (*CatalogReading, error) {
     cached, existsErr := instance.cache.Has(catalogReadingCacheKey)
     if nil != existsErr {
@@ -99,7 +99,7 @@ func (instance *CatalogReportService) Reading(ctx context.Context) (*CatalogRead
 
         payload, ok := stored.(string)
         if true == ok {
-            /* the stamp comes out of the payload, not off the clock: stamping the moment of service would have made RecordedAt say "now" for a reading taken a whole refresh interval ago, which is the one thing a caller reads it to find out. A payload this application cannot read the stamp back from is not served as a fresh reading at all — it falls through to Refresh below, which takes one. */
+            /* the stamp comes out of the payload, not off the clock, so RecordedAt is the age of the reading; a payload whose stamp cannot be read back falls through to Refresh */
             recordedAt, readable := recordedAtOf(payload)
             if true == readable {
                 return &CatalogReading{
@@ -115,7 +115,7 @@ func (instance *CatalogReportService) Reading(ctx context.Context) (*CatalogRead
     return instance.Refresh(ctx)
 }
 
-/* Refresh takes a new reading and leaves it in the cache whatever was there before, which is what the scheduled command calls: a reading nobody asked for in the last window is the one that would otherwise be computed inside a request. */
+/* Refresh takes a new reading and leaves it in the cache whatever was there before; the scheduled command calls it, so a request rarely computes one. */
 func (instance *CatalogReportService) Refresh(ctx context.Context) (*CatalogReading, error) {
     recordedAt := instance.clock.Now()
 
@@ -146,13 +146,7 @@ func (instance *CatalogReportService) Refresh(ctx context.Context) (*CatalogRead
     }, nil
 }
 
-/* Archive records a reading in the archive and answers whether this call is the one that wrote it.
-
-   It is a door of its own rather than a step inside Refresh, and the split is the decision: a reading is taken on the REQUEST path too, whenever a caller finds a cold cache, and archiving there would put a write to a second database on a read, make a read door fail when postgres is down, and fill the archive with rows nobody scheduled. What belongs in the archive is the reading the SCHEDULE took, so the command is what calls this — under the archive's advisory lock, taken around the whole run, so processes that overlap on one schedule record one reading between them.
-
-   The counts the row carries are the reading's own, read back out of its payload: a second look at the catalogue here was a second observation, taken after the export window, and a write landing between the two left a row disagreeing with itself — and put the catalogue's database on the path of an archive write that needs nothing from it.
-
-   A reading already recorded at that instant is not a failure: the instant is the identity of a reading, so the archive already holds exactly what this call would have written. The caller is told it did not write, and that is the whole difference. Every other failure is handed back. */
+/* Archive records a reading in the archive and answers whether this call wrote it. It is not a step of Refresh, because a request with a cold cache takes a reading too, and a read must not write to a second database; the scheduled command calls it under the archive's advisory lock, so overlapping processes record one reading. The row's counts are read back out of the reading's payload. A reading already recorded at that instant is not a failure: the caller is told it did not write, and every other failure is answered. */
 func (instance *CatalogReportService) Archive(runtimeInstance melodyruntimecontract.Runtime, reading *CatalogReading) (bool, error) {
     if nil == reading {
         return false, fmt.Errorf("reading is required")
@@ -187,7 +181,7 @@ func (instance *CatalogReportService) Archive(runtimeInstance melodyruntimecontr
     return false, appendErr
 }
 
-/* readingRepositoryOf resolves the archive at the moment it is needed, from the container the runtime carries — a resolution, not a capture, so the container records what this service holds of the archive at the moment it holds it. */
+/* readingRepositoryOf resolves the archive when it is needed, from the container the runtime carries: a resolution, not a capture, so the container records what this service holds of the archive when it holds it. */
 func (instance *CatalogReportService) readingRepositoryOf(runtimeInstance melodyruntimecontract.Runtime) (repository.CatalogReadingRepository, error) {
     return melodycontainer.FromResolver[repository.CatalogReadingRepository](
         runtimeInstance.Container(),
@@ -195,19 +189,15 @@ func (instance *CatalogReportService) readingRepositoryOf(runtimeInstance melody
     )
 }
 
-/* ArchivedInstantOf is the instant a reading is archived under: the instant it was taken at, in UTC, truncated to the second.
-
-   The truncation is the archive's IDENTITY rather than a rounding convenience, and it has to be stated because the alternative is silently broken in two ways. The reading already carries its instant to the second — the payload writes recorded_at as RFC3339, which has no fractional part — so a key kept to the microsecond would disagree with the very value it keys: one row saying 13:13:10.79995 and carrying a payload that says 13:13:10. And a microsecond key has no duplicate a real caller can reach, which would make the primary key a constraint with no producer and the refusal below unreachable code.
-
-   To the second, the identity is the one the reading states about itself: the catalogue as it stood at that second. Two refreshes inside one second are the same reading, which is exactly what the second one is told. */
+/* ArchivedInstantOf is the instant a reading is archived under: taken at, in UTC, truncated to the second. The truncation is the archive's identity: the payload writes recorded_at in RFC 3339 without a fraction, so the key agrees with the value it keys, and two refreshes inside one second are the same reading. */
 func ArchivedInstantOf(recordedAt time.Time) time.Time {
     return recordedAt.UTC().Truncate(time.Second)
 }
 
-/* readingAlreadyRecordedMessage is the sentence both archive implementations answer a duplicate instant with. It is compared rather than wrapped because the two implementations reach it through different mechanisms — a postgres SQLSTATE on one side, a map lookup on the other — and the message is the contract they share. */
+/* readingAlreadyRecordedMessage is the sentence both archive implementations answer a duplicate instant with, compared rather than wrapped because one reaches it through a postgres SQLSTATE and the other through a map lookup. */
 const readingAlreadyRecordedMessage = "reading already recorded"
 
-/* RecentReadings lists the archive, newest first, resolving the archive when it is asked for: the history door is the one request of this application that touches the second database, and it is the only request that pays for it. */
+/* RecentReadings lists the archive, newest first, resolving it when asked, so the history door is the one request that touches the second database. */
 func (instance *CatalogReportService) RecentReadings(runtimeInstance melodyruntimecontract.Runtime, limit int) ([]*repository.CatalogReadingRecord, error) {
     readingRepository, resolveErr := instance.readingRepositoryOf(runtimeInstance)
     if nil != resolveErr {
@@ -217,7 +207,7 @@ func (instance *CatalogReportService) RecentReadings(runtimeInstance melodyrunti
     return readingRepository.Recent(runtimeInstance.Context(), limit)
 }
 
-/* payloadFieldOf reads one field back out of the payload Refresh wrote, and says whether it found one. Every field carries no spaces, so it is read to the end of the value or to the next field, whichever comes first — a payload written by an older shape of this service, or by nothing at all, simply answers false. */
+/* payloadFieldOf reads one field back out of the payload Refresh wrote, and says whether it found one. No field carries spaces, so it is read to the end of the value or the next field; a payload of another shape answers false. */
 func payloadFieldOf(payload string, field string) (string, bool) {
     fieldIndex := strings.Index(payload, field)
     if 0 > fieldIndex {
@@ -232,7 +222,7 @@ func payloadFieldOf(payload string, field string) (string, bool) {
     return value, true
 }
 
-/* payloadCountOf reads a count back out of the payload, as Archive does for the row it writes: the counts a row carries are the reading's, not a second look at the catalogue. */
+/* payloadCountOf reads a count back out of the payload, so the counts an archived row carries are the reading's own. */
 func payloadCountOf(payload string, field string) (int, bool) {
     value, found := payloadFieldOf(payload, field)
     if false == found {
@@ -270,10 +260,10 @@ func (instance *CatalogReportService) RefreshInterval() time.Duration {
     return instance.refreshInterval
 }
 
-/* the name deliberately stays out of the "service." namespace, which the framework reserves for its own: a scoped registration there is refused at boot, because a scoped service silently shadowing a protected container singleton inside every request is exactly what the protection exists to prevent. The container-lifetime services of this application keep the dotted "service.example." spelling, which registration does admit. */
+/* the name stays out of the "service." namespace the framework reserves: a scoped registration there is refused at boot, so a scoped service never shadows a protected singleton. The container-lifetime services keep the "service.example." spelling, which registration admits. */
 const ServiceRequestReportTrail = "service-example-reporting-request-trail"
 
-/* the trail belongs to one request: it is built from the request context the kernel installs into every scope, and a service that holds one request's identity must not be a process singleton. The directive is what says so, and the generator emits it into the scoped registration function rather than the container one. It takes container singletons beside the request context on purpose — a scoped service may read both levels. */
+/* the trail belongs to one request: it is built from the request context the kernel installs into every scope, and the directive makes the generator emit it into the scoped registration. A scoped service may take container singletons beside the request context. */
 //melody:scoped
 //melody:service ServiceRequestReportTrail
 func NewRequestReportTrail(
@@ -291,11 +281,7 @@ func NewRequestReportTrail(
     }, nil
 }
 
-/* RequestReportTrail is where one request's changes to the nomenclature are collected before they are written.
-
-   It is what makes the scope-owned registration mean something rather than demonstrate itself. The event listeners record into it while the request is being served, and the flush middleware writes what it holds once the handler chain has returned; both reach it through the scope, and if those two resolutions ever yielded different objects the middleware would flush an empty trail and nothing would be journalled at all. The journal row existing is therefore the proof that a scope holds one instance of what it owns — a claim no single response can make about itself.
-
-   Collecting first also buys the journal something real: every entry carries the request that caused it, and a request that changed several records costs one round trip instead of one per change. */
+/* RequestReportTrail collects one request's changes to the nomenclature before they are written. The event listeners record into it and the flush middleware writes it once the handler chain returns, both through the scope, so a journal row proves the scope holds one instance. Every entry carries the request that caused it, and a request that changed several records costs one round trip. */
 type RequestReportTrail struct {
     requestContext    *melodyhttp.RequestContext
     formatter         *ReportFormatter
@@ -320,11 +306,7 @@ func (instance *RequestReportTrail) Record(actor string, action string, subject 
     })
 }
 
-/* Flush writes what the request accumulated and empties the trail.
-
-   The trail is emptied only once the write has succeeded, so a failed flush leaves the entries staged for Close to try again rather than dropping the record of a change that did happen. That is safe to retry because a batch is written in one statement and fails as a whole: a failure means no row was written, so the second attempt cannot duplicate the first.
-
-   Calling Flush on an empty trail touches nothing, so a request that read rather than wrote pays no query — and a second call after a successful one is a no-op rather than a duplicate. */
+/* Flush writes what the request accumulated and empties the trail. The trail is emptied only after the write succeeds, so a failed flush leaves the entries for Close to retry; a batch is one statement that fails whole, so a retry cannot duplicate. An empty trail touches nothing, so a second call after a successful one is a no-op. */
 func (instance *RequestReportTrail) Flush(ctx context.Context) error {
     if 0 == len(instance.entries) {
         return nil
@@ -340,7 +322,7 @@ func (instance *RequestReportTrail) Flush(ctx context.Context) error {
     return nil
 }
 
-/* Close is the scope's own last word on the trail. The flush middleware is what normally empties it, before the response is written and while the caller can still be told the write failed; this runs when that never happened — a panic on the way out of the handler chain — and is the difference between losing the record of a change and keeping it. */
+/* Close is the scope's last word on the trail: it flushes what the flush middleware did not, as after a panic on the way out of the handler chain, so the record of a change is kept. */
 func (instance *RequestReportTrail) Close() error {
     return instance.Flush(context.Background())
 }

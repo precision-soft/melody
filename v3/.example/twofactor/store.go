@@ -17,7 +17,7 @@ import (
     bun "github.com/uptrace/bun"
 )
 
-/* Enrollment shows how to persist a user's TOTP second factor with the secret and recovery codes encrypted at rest through bunorm's EncryptedString. The recovery codes are stored as an encrypted JSON array. */
+/* Enrollment is a user's TOTP second factor, its secret and its recovery codes, an encrypted JSON array, encrypted at rest through bunorm's EncryptedString. */
 type Enrollment struct {
     bun.BaseModel `bun:"table:melody_example_v3_two_factor"`
 
@@ -34,17 +34,10 @@ func NewStore(database *bun.DB) *Store {
 /* ServiceStore is the container name of the store the two doors and the enrollment release read. */
 const ServiceStore = "service-example-two-factor-store"
 
-/* StoreSource answers the store a door acts on, at the moment it acts: the doors are handed the door below
-   in production and a fixed store in their tests. */
+/* StoreSource answers the store a door acts on, at the moment it acts: StoreFromRuntime in production, a fixed store in tests. */
 type StoreSource func(runtimeInstance melodyruntimecontract.Runtime) (*Store, error)
 
-/* StoreFromRuntime resolves the store through the container, and it is the single door that does so. The
-   store is resolved at the moment a request or a deletion needs it rather than built once at boot, because
-   building it applies the example's migration set to the catalogue's database: built at boot, a refusal — a
-   database briefly down, a volume the reset has yet to bring here — left the two doors unwired and the
-   enrollment unreleased for the life of the process, while every repository beside it healed at its next
-   resolution. The container keeps a successful resolution only, so a refusal is answered to the caller who
-   met it and the next one asks again. */
+/* StoreFromRuntime resolves the store through the container, the single door that does so, when a request or a deletion needs it. Building the store applies the migration set to the catalogue's database, and the container keeps only a successful resolution, so a refusal is answered to the caller who met it and the next one asks again. */
 func StoreFromRuntime(runtimeInstance melodyruntimecontract.Runtime) (*Store, error) {
     store, storeErr := melodycontainer.FromResolver[*Store](runtimeInstance.Container(), ServiceStore)
     if nil != storeErr {
@@ -62,9 +55,7 @@ type Store struct {
     database *bun.DB
 }
 
-/* Enroll generates a fresh secret and recovery codes for a user, persists them encrypted, and returns the secret, the otpauth URI to render as a QR code, and the plaintext recovery codes to show the user once.
-
-   It REPLACES an enrollment that is already there rather than colliding with it, because an authenticator that is lost is the ordinary reason to enroll again: a plain insert left such an account bound to its first secret for good, with the second attempt surfacing the primary key as an opaque 500, and left no door at all for the person who had lost the device. Replacing is only safe because the caller no longer names the account — the handler takes the identifier from the authenticated token — so the row this overwrites is always the caller's own. The previous secret and the unused recovery codes are gone the moment this returns, which is the point: what is re-enrolled must not still be verifiable by whoever held the old device. */
+/* Enroll generates a fresh secret and recovery codes for a user, persists them encrypted, and answers the secret, the otpauth URI to render as a QR code and the plaintext recovery codes to show once. It replaces an existing enrollment, since a lost authenticator is the ordinary reason to enroll again; that is safe because the handler takes the identifier from the authenticated token, so the row replaced is the caller's own, and the previous secret and unused codes stop verifying at once. */
 func (instance *Store) Enroll(
     ctx context.Context,
     userIdentifier string,
@@ -101,10 +92,7 @@ func (instance *Store) Enroll(
     return secret, uri, recoveryCodes, nil
 }
 
-/* enrollmentUpsert is the write kept as a query, so the clause that makes a second enrollment a REPLACEMENT
-   rather than a collision is readable on its own. All three columns are written, not merely the secret: the
-   recovery codes belong to the secret they were minted beside, and a set left from the previous enrollment
-   would keep opening an account whose second factor was just replaced. */
+/* enrollmentUpsert is the write kept as a query, so the clause that makes a second enrollment a replacement is readable on its own. All three columns are written: the recovery codes belong to the secret they were minted beside. */
 func (instance *Store) enrollmentUpsert(enrollment *Enrollment) *bun.InsertQuery {
     return instance.database.
         NewInsert().
@@ -115,7 +103,7 @@ func (instance *Store) enrollmentUpsert(enrollment *Enrollment) *bun.InsertQuery
         Set("created_at = VALUES(created_at)")
 }
 
-/* DeleteEnrollment removes the second factor an account was enrolled with — the secret and the recovery codes together, since both answer for the same account. The example mints identifiers as the highest suffix plus one, so a deleted account's identifier is the next account's: an enrollment left behind would have started that account enrolled, with the secret and the recovery codes of whoever held the previous one. Deleting nothing is not a failure — an account without a second factor has no row. */
+/* DeleteEnrollment removes an account's second factor, secret and recovery codes together. Identifiers are minted as the highest suffix plus one, so a deleted account's identifier becomes the next account's, which must not start enrolled. Deleting nothing is not a failure. */
 func (instance *Store) DeleteEnrollment(
     runtimeInstance melodyruntimecontract.Runtime,
     userIdentifier string,
@@ -140,7 +128,7 @@ func (instance *Store) enrollmentDelete(userIdentifier string) *bun.DeleteQuery 
         Where("user_identifier = ?", userIdentifier)
 }
 
-/* FindTotpSecret implements securitycontract.TwoFactorEnrollmentStore, decrypting the stored secret transparently through EncryptedString. */
+/* FindTotpSecret implements securitycontract.TwoFactorEnrollmentStore, decrypting the stored secret through EncryptedString. */
 func (instance *Store) FindTotpSecret(
     runtimeInstance melodyruntimecontract.Runtime,
     userIdentifier string,
@@ -153,7 +141,7 @@ func (instance *Store) FindTotpSecret(
         Limit(1).
         Scan(runtimeInstance.Context())
     if nil != selectErr {
-        /* a missing row means the user has no second factor; any other error must fail closed (be returned) rather than be mistaken for "not enrolled", which would silently let primary authentication stand on its own */
+        /* a missing row means no second factor; any other error fails closed rather than reading as "not enrolled", which would let primary authentication stand alone */
         if true == errors.Is(selectErr, sql.ErrNoRows) {
             return "", false, nil
         }
@@ -164,7 +152,7 @@ func (instance *Store) FindTotpSecret(
     return string(enrollment.Secret), true, nil
 }
 
-/* RedeemRecoveryCode implements securitycontract.TwoFactorRecoveryStore. It atomically consumes a single-use recovery code: inside a transaction it loads the enrollment row FOR UPDATE, decrypts and unmarshals the stored codes, and — on a constant-time match — removes the code, re-encrypts the remaining set and writes it back, so the same code can never be redeemed twice even under concurrent requests. It reports redeemed=false (with a nil error) when the user has no enrollment or the code is not one of the currently-unused codes. */
+/* RedeemRecoveryCode implements securitycontract.TwoFactorRecoveryStore. Inside a transaction it loads the enrollment FOR UPDATE and, on a constant-time match, removes the code and writes the re-encrypted remainder back, so a code is never redeemed twice even under concurrent requests. It reports false with a nil error when there is no enrollment or the code is not an unused one. */
 func (instance *Store) RedeemRecoveryCode(
     runtimeInstance melodyruntimecontract.Runtime,
     userIdentifier string,
@@ -189,7 +177,7 @@ func (instance *Store) RedeemRecoveryCode(
                 Limit(1).
                 Scan(ctx)
             if nil != selectErr {
-                /* a missing row means the user has no second factor; treat it as nothing-to-redeem rather than an error, matching FindTotpSecret */
+                /* a missing row means no second factor: nothing to redeem, as in FindTotpSecret */
                 if true == errors.Is(selectErr, sql.ErrNoRows) {
                     return nil
                 }
@@ -204,7 +192,7 @@ func (instance *Store) RedeemRecoveryCode(
 
             remaining := make([]string, 0, len(codes))
             for _, candidate := range codes {
-                /* constant-time compare so a redemption attempt does not leak, through timing, how much of a recovery code matched */
+                /* constant-time compare, so timing does not reveal how much of a recovery code matched */
                 if 1 == subtle.ConstantTimeCompare([]byte(candidate), []byte(code)) {
                     redeemed = true
 

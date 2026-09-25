@@ -20,7 +20,7 @@ func TestCatalogReadingRowNamesTheTableTheMigrationCreates(t *testing.T) {
     }
 }
 
-/* sqlStateError is the shape pgx and lib/pq errors carry: the SQLSTATE through a SQLState() method. It is the door pgsql.IsDuplicateKey was widened to read, so mapping through the door rather than through the text of the message is what this pins. */
+/* sqlStateError is the shape pgx and lib/pq errors carry: the SQLSTATE through a SQLState() method, which pgsql.IsDuplicateKey reads, so the mapping is pinned on that door rather than on the text of the message. */
 type sqlStateError struct {
     state string
 }

@@ -14,9 +14,7 @@ import (
     "github.com/precision-soft/melody/v3/security/totp"
 )
 
-/* enrolledIdentifier answers the account both doors act on: the identifier of the authenticated token, never a name the request chose.
-
-   The two doors used to read a `user` query parameter, and the route was public. That pair let anyone bind a second factor they held to any identifier they liked and read back whether a code satisfied it, and — the insert being a plain one — left the named account unable to enroll ever after. Taken from the token, the enrollment door writes the caller's own row and the verification door reads it, so replacing an enrollment is the account's own doing. */
+/* enrolledIdentifier answers the account both doors act on: the authenticated token's identifier, never a name the request chose, so the enrollment door writes the caller's own row and the verification door reads it. */
 func enrolledIdentifier(runtimeInstance melodyruntimecontract.Runtime) (string, bool) {
     token, exists := examplesecurity.TokenFromRuntime(runtimeInstance)
     if false == exists {
@@ -38,7 +36,7 @@ type enrollPayload struct {
     RecoveryCodes  []string `json:"recoveryCodes"`
 }
 
-/* EnrollHandler enrolls the CALLER's TOTP second factor: it generates a secret and single-use recovery codes, persists them encrypted, and returns the secret + otpauth URI (the QR payload) and the recovery codes to show once. The secret is returned only here, and only to the account it belongs to — which is what the authenticated route buys. Enrolling again replaces the previous secret and its unused recovery codes, so an account whose authenticator is lost has a way back. */
+/* EnrollHandler enrolls the caller's TOTP second factor: it generates a secret and single-use recovery codes, persists them encrypted, and answers the secret, the otpauth URI and the recovery codes once, to the account they belong to. Enrolling again replaces the secret and its unused recovery codes, so an account whose authenticator is lost has a way back. */
 func EnrollHandler(storeSource store2fa.StoreSource) melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         user, authenticated := enrolledIdentifier(runtimeInstance)
@@ -65,9 +63,7 @@ func EnrollHandler(storeSource store2fa.StoreSource) melodyhttpcontract.Handler 
     }
 }
 
-/* VerifyHandler verifies a second factor submitted for the CALLER's own enrollment: a TOTP code on the X-2FA-Code header is checked against the stored secret, or a single-use recovery code on X-2FA-Recovery-Code is atomically redeemed. It reports 200 on success and 401 on a wrong/replayed factor, over the same store the framework's TOTP authenticator would read if this example registered one — it does not; the two routes are how the store is exercised here.
-
-   An accepted TOTP code stays valid for its whole window, so — exactly as the framework's authenticator does — it is burned in a replay guard the moment it is accepted. The nonce is keyed on the NORMALIZED code, because Verify normalizes before comparing: keying on the raw code would let "409 643" replay a code already spent as "409643". */
+/* VerifyHandler verifies a second factor for the caller's own enrollment: a TOTP code on X-2FA-Code against the stored secret, or a single-use recovery code on X-2FA-Recovery-Code redeemed atomically; 200 on success, 401 on a wrong or replayed factor. An accepted code is burned in a replay guard keyed on the normalized code, since Verify normalizes before comparing. */
 func VerifyHandler(storeSource store2fa.StoreSource) melodyhttpcontract.Handler {
     replayGuard := melodysecurity.NewMemoryNonceGuard()
 
@@ -131,14 +127,12 @@ func VerifyHandler(storeSource store2fa.StoreSource) melodyhttpcontract.Handler 
     }
 }
 
-/* unavailableStore answers a door whose store could not be resolved — its migration refused, its database
-   down — with 503 and the cause journaled: the condition is the dependency's and passes with it, and the next
-   request resolves the store again. */
+/* unavailableStore answers a door whose store could not be resolved with 503 and the cause journaled; the next request resolves the store again. */
 func unavailableStore(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, storeErr error) melodyhttpcontract.Response {
     return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusServiceUnavailable, "the second factor is unavailable", storeErr)
 }
 
-/* totpCodeValidityWindow is the span an accepted code stays verifiable — (2*skew+1) periods — and therefore how long a spent code must stay burned. It resolves through the totp package so it can never drift from what Verify honours. */
+/* totpCodeValidityWindow is how long an accepted code stays verifiable, (2*skew+1) periods, and so how long a spent code stays burned; it resolves through the totp package, so it matches what Verify honours. */
 func totpCodeValidityWindow() time.Duration {
     resolved := totp.Config{}.Resolve()
 

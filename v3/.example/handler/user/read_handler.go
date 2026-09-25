@@ -80,7 +80,7 @@ func ApiReadHandler() melodyhttpcontract.Handler {
     }
 }
 
-/* normalizeRoles answers the roles in the order they were given, deduplicated. The order is part of the answer rather than an accident of it: the repository stores the list comma-joined into one column, so a set built by ranging a map is written back in a different spelling on roughly a quarter of the saves — measured at 131 of 1 000 for two roles and 226 of 1 000 for three — and the audit trail, which compares the stored values, then records a "roles changed" entry naming a change nobody asked for, with the same roles on both sides of it. */
+/* normalizeRoles answers the roles in the order given, deduplicated. The order matters: the repository stores the list comma-joined, and the audit trail compares stored values, so a reordered set would record a change nobody asked for. */
 func normalizeRoles(roles []string) []string {
     seen := map[string]struct{}{}
     result := make([]string, 0, len(roles))
@@ -106,9 +106,7 @@ func normalizeRoles(roles []string) []string {
     return result
 }
 
-/* roleOutsideTheVocabulary answers the first role the application does not know, trimmed: the voter compares a
-   role's spelling exactly, so a spelling outside the closed vocabulary would be stored, reported and grant
-   nothing — the refusal the console grant makes, at the two doors that write roles from a request */
+/* roleOutsideTheVocabulary answers the first role the application does not know, trimmed: the voter compares spellings exactly, so an unknown spelling would be stored and grant nothing. */
 func roleOutsideTheVocabulary(roles []string) (string, bool) {
     for _, role := range roles {
         normalized := strings.TrimSpace(role)
@@ -124,7 +122,7 @@ func roleOutsideTheVocabulary(roles []string) (string, bool) {
     return "", false
 }
 
-/* roleContainingComma reports the first role carrying a comma: the repository stores the role list comma-joined, so a role with one inside would come back as several roles on the next read — among them, possibly, an administrator nobody granted. */
+/* roleContainingComma reports the first role carrying a comma: the repository stores the list comma-joined, so such a role would come back as several roles, possibly one nobody granted. */
 func roleContainingComma(roles []string) (string, bool) {
     for _, role := range roles {
         if true == strings.Contains(role, ",") {

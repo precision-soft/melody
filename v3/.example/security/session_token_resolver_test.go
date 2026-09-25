@@ -111,7 +111,7 @@ func TestSessionTokenResolverAcceptsARestoredRoleList(t *testing.T) {
     }
 }
 
-/* Every guard below answers the SAME anonymous token, so each is driven on its own: a table that fused them would let one guard cover for a sibling that had been disarmed. Together they are the whole fail-closed surface between a request and an identity — anything the session cannot supply exactly leaves the request anonymous rather than partly authenticated. */
+/* Every guard below answers the same anonymous token, so each is driven on its own: a table that fused them would let one guard cover for a disarmed sibling. Together they are the whole fail-closed surface between a request and an identity: anything the session cannot supply exactly leaves the request anonymous rather than partly authenticated. */
 func TestSessionTokenResolverFailsClosed(t *testing.T) {
     for name, resolve := range map[string]func(*testing.T) melodysecuritycontract.Token{
         "no request at all": func(t *testing.T) melodysecuritycontract.Token {

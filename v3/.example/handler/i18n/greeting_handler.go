@@ -42,10 +42,7 @@ func GreetingHandler() melodyhttpcontract.Handler {
     }
 }
 
-/* queryInt reads the count through StringOrDefault rather than through bag.Int:
-bag.Int refuses a repeated key, which arrives as a []string and falls to its
-default branch, while StringOrDefault answers the first value the way the rest
-of the example reads a query parameter. */
+/* queryInt reads the count through StringOrDefault, which answers the first value of a repeated key, where bag.Int refuses a repeated key. */
 func queryInt(request melodyhttpcontract.Request, name string) int {
     parsed, parseErr := strconv.Atoi(melodybag.StringOrDefault(request.Query(), name, ""))
     if nil != parseErr {

@@ -151,8 +151,7 @@ func TestConvertAmount_RefusesAConvertedAmountThatIsNotFinite(t *testing.T) {
     }
 }
 
-/* the guard judges the rounded value: the rounding multiplies by a hundred first, so a finite product within
-   a hundredth of the float ceiling became an infinity one line after a guard on the product let it through */
+/* the guard judges the rounded value: the rounding multiplies by a hundred first, so a finite product within a hundredth of the float ceiling becomes an infinity after a guard on the product would let it through */
 func TestConvertAmount_RefusesAConvertedAmountThatOnlyTheRoundingOverflows(t *testing.T) {
     from := entity.NewCurrency("cur-one", "ONE", "One", 1, time.Time{})
     to := entity.NewCurrency("cur-huge", "HGE", "Huge", 1e9, time.Time{})
@@ -185,9 +184,7 @@ func TestConvertAmount_ARefusalOfANonFiniteAmountEncodes(t *testing.T) {
     }
 }
 
-/* a code is three ASCII letters, so the fold upper-cases ASCII alone: the standard library's ToUpper maps
-   U+017F LATIN SMALL LETTER LONG S onto S and a provider's "uſd" named the catalogue's USD. A code carrying a
-   control byte keeps it and so matches nothing the catalogue holds. */
+/* a code is three ASCII letters, so the fold upper-cases ASCII alone: the standard library's ToUpper maps U+017F LATIN SMALL LETTER LONG S onto S, which would make a provider's "uſd" name the catalogue's USD. A code carrying a control byte keeps it and so matches nothing the catalogue holds. */
 func TestFoldCurrencyCode_FoldsAsciiAlone(t *testing.T) {
     for code, expected := range map[string]string{
         " usd ":   "USD",

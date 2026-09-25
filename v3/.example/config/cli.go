@@ -35,6 +35,7 @@ func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.
         cli.NewGrantRoleCommand(
             melodycontainer.Lazy[*service.UserService](kernelInstance.ServiceContainer(), service.ServiceUserService),
         ),
+        /* the generator runs inside the application, so every bind is checked against the parameters this configuration declares */
         melodywiring.NewGenerateCommand(NewWiringBindSet()),
     }
 

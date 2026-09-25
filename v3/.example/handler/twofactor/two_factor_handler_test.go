@@ -17,17 +17,7 @@ import (
     "github.com/precision-soft/melody/v3/security/totp"
 )
 
-/* both doors used to take the account from a `user` query parameter, on a route that carried
-   PUBLIC_ACCESS. Measured on the running stack, that pair answered 200 to an anonymous
-   `POST /twofactor/enroll?user=admin` and wrote the administrator's row, handing the caller the secret
-   that satisfies the factor — and the administrator could never enroll after that, the insert being a
-   plain one. The identifier is the token's now, so a caller without one has nothing to name and is
-   refused before anything is written.
-
-   The query parameter is still sent here, because the assertion that matters is that it is NOT read: a
-   handler that fell back to it would answer something other than 401 for this request. The store is nil on
-   purpose: the refusal has to be decided before either door touches it, so a nil handle that would panic if it
-   were reached is the assertion that the guard stands first. */
+/* the account is the token's, so a caller without a token has nothing to name and is refused before anything is written. The `user` query parameter is sent anyway, because the assertion that matters is that it is not read: a handler that fell back to it would answer something other than 401. The store is nil on purpose: a nil handle that would panic if reached asserts that the guard stands first. */
 func TestEnrollHandlerRefusesACallerWithoutAToken(t *testing.T) {
     request, runtimeInstance := twoFactorRequest(t, "/twofactor/enroll?user=admin")
 
@@ -163,10 +153,7 @@ func healingStore(store *store2fa.Store, refusal error) (store2fa.StoreSource, *
     }, &calls
 }
 
-/* the store is resolved at each request, so a refusal is the request's and not the process's: the door that
-   met it answers 503 without a statement reaching the database, and the next request in the same process,
-   the cause gone, enrolls. Built once at boot, the same refusal left the route unregistered — 404 until the
-   process restarted. */
+/* the store is resolved at each request, so a refusal is the request's and not the process's: the door that met it answers 503 without a statement reaching the database, and the next request in the same process, the cause gone, enrolls. */
 func TestEnrollHandlerAnswersAStoreRefusalWith503AndEnrollsOnceItHeals(t *testing.T) {
     store, connector := enrolledStore(t, "", "")
     storeSource, calls := healingStore(store, errors.New("the catalogue database refused the migration"))

@@ -8,9 +8,7 @@ import (
     "github.com/precision-soft/melody/v3/.example/entity"
 )
 
-/* the mysql dialect renders a time.Time in the value's own location and the driver reads the column back as
-   UTC, so a provider's instant stamped with an offset went into the column as its wall clock and came back
-   shifted by the offset: the row is built in UTC, the one place an entity becomes a row */
+/* the mysql dialect renders a time.Time in the value's own location and the driver reads the column back as UTC, so an instant stamped with an offset would come back shifted by it: the row is built in UTC, the one place an entity becomes a row */
 func TestNewCurrencyRow_CarriesTheInstantInUtc(t *testing.T) {
     quotedAt := time.Date(2026, time.September, 7, 12, 0, 0, 0, time.FixedZone("EEST", 3*60*60))
 
@@ -43,8 +41,7 @@ func TestUpdateQuoteQuery_WritesOverTheRowOnlyUnderTheContract(t *testing.T) {
     }
 }
 
-/* a rename reads the row before it writes; written whole, it put back the quote it had read over one the refresh
-   wrote in between. The statement sets the code and the name and nothing else */
+/* a rename reads the row before it writes, and a whole-row write would put back the quote it read over one the refresh wrote in between; the statement sets the code and the name and nothing else */
 func TestRenameQuery_WritesTheCodeAndTheNameAlone(t *testing.T) {
     repositoryInstance := &bunCurrencyRepository{database: newRenderingDatabase()}
 

@@ -12,7 +12,7 @@ import (
     "github.com/uptrace/bun"
 )
 
-/* currencyRow is the nomenclature as the database holds it; the domain entity stays free of storage concerns because it is cached through a gob serializer. */
+/* currencyRow is the nomenclature as the database holds it; the entity stays free of storage concerns because it is cached through a gob serializer. */
 type currencyRow struct {
     bun.BaseModel `bun:"table:melody_example_v3_currency,alias:currency"`
 
@@ -24,11 +24,7 @@ type currencyRow struct {
     ProviderRateAsOf time.Time `bun:"provider_rate_as_of,notnull"`
 }
 
-/* newCurrencyRow is the one place an entity becomes a row, and the instant is moved to UTC here: the mysql
-   dialect renders a time.Time in the value's OWN location when no location is configured, and the driver
-   reads the column back as UTC, so an instant a provider stamped with an offset was stored as its wall clock
-   and read back shifted by that offset. The in-memory repository keeps the value as given, which is right
-   there — an instant compares equal across locations — and the two agree once the row carries UTC. */
+/* newCurrencyRow is the one place an entity becomes a row, and it moves the instant to UTC: the mysql dialect renders a time.Time in its own location when none is configured while the driver reads the column back as UTC, so an instant with an offset would come back shifted by it. */
 func newCurrencyRow(currency *entity.Currency) *currencyRow {
     return &currencyRow{
         Id:               currency.Id,
@@ -97,7 +93,7 @@ func (instance *bunCurrencyRepository) FindById(ctx context.Context, id string) 
     return row.toEntity(), true, nil
 }
 
-/* findRowById separates a row that is not there from a query that could not run: only sql.ErrNoRows is an answer, and every other failure is reported. */
+/* findRowById separates a row that is not there from a query that could not run: only sql.ErrNoRows is an answer. */
 func (instance *bunCurrencyRepository) findRowById(ctx context.Context, id string) (*currencyRow, bool, error) {
     row := &currencyRow{}
 
@@ -178,8 +174,7 @@ func (instance *bunCurrencyRepository) Update(ctx context.Context, currency *ent
     return affectedAtLeastOneRow(result), nil
 }
 
-/* renameQuery writes the code and the name alone: the quote the caller read with the row may be older than the
-   one on it by now, and only the conditional write of UpdateQuote judges that. */
+/* renameQuery writes the code and the name alone: the quote the caller read may be older than the row's by now, and only the conditional write of UpdateQuote judges that. */
 func (instance *bunCurrencyRepository) renameQuery(currency *entity.Currency) *bun.UpdateQuery {
     return instance.database.
         NewUpdate().
@@ -202,11 +197,7 @@ func (instance *bunCurrencyRepository) UpdateQuote(ctx context.Context, id strin
     return affectedAtLeastOneRow(result), nil
 }
 
-/* updateQuoteQuery is the conditional write of UpdateQuote, the repository contract in one statement. The instants
-   are written and compared in UTC, the spelling the row holds, and the condition is what makes two concurrent
-   documents land in reading order whichever process writes last: the row is written when it does not hold a
-   newer reading on this clock, or when it names the same reading the provider re-quotes, and never when it
-   already holds the quote. */
+/* updateQuoteQuery is the conditional write of UpdateQuote in one statement, instants written and compared in UTC. The row is written when it holds no newer reading on this clock, or when it names the same reading the provider re-quotes, and never when it already holds the quote, so two concurrent documents land in reading order whichever process writes last. */
 func (instance *bunCurrencyRepository) updateQuoteQuery(id string, quote entity.RateQuote) *bun.UpdateQuery {
     asOf := quote.AsOf.UTC()
     providerAsOf := quote.ProviderAsOf.UTC()

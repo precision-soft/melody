@@ -1250,16 +1250,19 @@ list_history_comment_count() {
             }
             return total
         }
-        function count_history(text,    lowered, remaining, position, prefix, total) {
+        function count_history(text,    lowered, remaining, position, prefix, total, consumed) {
             lowered = tolower(text)
             gsub(/[ \t]+/, " ", lowered)
             total = 0
             remaining = lowered
+            # the prefix is read from the whole text, so a "used to" glued to the one before it follows a letter
+            consumed = 0
             while (0 < (position = index(remaining, "used to"))) {
-                prefix = substr(remaining, 1, position - 1)
+                prefix = substr(lowered, 1, consumed + position - 1)
                 if (prefix !~ /[a-z]$/ && prefix !~ /(^|[^a-z])(is|are|be|been|being) $/) {
                     total++
                 }
+                consumed += position + 6
                 remaining = substr(remaining, position + 7)
             }
             total += occurrences(lowered, "(^|[^a-z])measured([^a-z]|$)")
@@ -1341,7 +1344,11 @@ trap remove_temporary_path EXIT
 # one line, a block continued across a CRLF line end, the repair vocabulary, every phrase without a boundary and a
 # history comment after a raw string on the same line each count once, a word that only carries a phrase inside it,
 # on either side, counts nothing, and a file that ends inside a comment is read ahead of the negative one, so a state
-# carried from one file into the next counts the negative file's raw string as history.
+# carried from one file into the next counts the negative file's raw string as history. Every bounded phrase opens a
+# line comment and closes one, and two sit side by side, so each boundary's start and end alternatives count; every
+# member of an alternation is planted once; a block continues on a tab-indented line; a line comment carrying an
+# apostrophe precedes a counted one, and a string and a block each close ahead of a counted comment on their line;
+# a "used to" glued to the one before it counts once; and every form of "is used to" counts nothing.
 COMMENT_CONTROL_DIRECTORY_STRING="$(mktemp -d)"
 TEMPORARY_PATH_STRING_LIST+=("${COMMENT_CONTROL_DIRECTORY_STRING}")
 
@@ -1370,6 +1377,22 @@ printf '%s\n' \
     $'served before the check. */\r' \
     '// the old guard until now read this change as the previous form before the fix' \
     'const raw = `x` // the guard previously hung' \
+    'const plain = "x" // the guard was recorded' \
+    '//measured once, then previously' \
+    '//previously hung and no longer' \
+    '//no longer the guard was answered' \
+    '//was handed back, had been' \
+    '//had been slow before pre-repair' \
+    '//pre-repair code, the repairs' \
+    '//the repair then measured' \
+    '// the request was refused was handed back' \
+    '// before the change the previous tree, the previous code, the previous version, the previous shape, the previous behaviour, the previous behavior, the previous implementation, it was answered, was handed, was called, was reported' \
+    '/* Probe answers the page. The request was' \
+    $'\thanded before the check. */' \
+    "// the guard doesn't panic" \
+    '// the guard was called once' \
+    '/* the guard had been slow */ // the present answer' \
+    '// this used toused to hang' \
     'func Serve() {}' > "${COMMENT_CONTROL_DIRECTORY_STRING}/positive.go"
 
 printf '%s\n' \
@@ -1395,11 +1418,12 @@ printf '%s\n' \
     '// bathe repairmen before the unmeasured runs' \
     '// apreviously, previouslyx, ano longer, no longers, awas answered, was answeredx, ahad been, had beens' \
     '// apre-repair, pre-repairs, the older, inverted with thesis, athe repair, the repairman, measuredly' \
+    '// handles are used to, be used to, been used to, being used to serve' \
     'type Handler struct{}' > "${COMMENT_CONTROL_DIRECTORY_STRING}/negative.go"
 
 COMMENT_CONTROL_OUTPUT_STRING="$(list_history_comment_count "${COMMENT_CONTROL_DIRECTORY_STRING}/positive.go" "${COMMENT_CONTROL_DIRECTORY_STRING}/unterminated.go" "${COMMENT_CONTROL_DIRECTORY_STRING}/negative.go")"
-if [[ "${COMMENT_CONTROL_DIRECTORY_STRING}/positive.go"$'\t'"22" != "${COMMENT_CONTROL_OUTPUT_STRING}" ]]; then
-    fail "the history comment control failed: expected the planted file alone with 22, read [${COMMENT_CONTROL_OUTPUT_STRING}] — no verdict over the tree is possible"
+if [[ "${COMMENT_CONTROL_DIRECTORY_STRING}/positive.go"$'\t'"55" != "${COMMENT_CONTROL_OUTPUT_STRING}" ]]; then
+    fail "the history comment control failed: expected the planted file alone with 55, read [${COMMENT_CONTROL_OUTPUT_STRING}] — no verdict over the tree is possible"
 fi
 
 declare -A COMMENT_BASELINE_COUNT_INTEGER_MAP=()

@@ -115,11 +115,7 @@ func TestRememberEntityOrAbsenceLeavesAFoundEntityUnbounded(t *testing.T) {
     }
 }
 
-/* the probe is on a hit that FOUND something, because that is the only hit the early return changes:
-   a remembered absence is answered the same way with or without it — Remember reads the store itself and
-   writes nothing on a hit, and a nil computed value is returned before the second write — while a found
-   entity would be re-stored by every reader, one cache write per request served from memory. Measured:
-   with the early return disarmed, this is the assertion that moves. */
+/* the probe is on a hit that found something, because that is the only hit the early return changes: a remembered absence is answered the same way with or without it, since Remember reads the store itself and writes nothing on a hit and a nil computed value is returned before the second write, while a found entity would be re-stored by every reader, one cache write per request served from memory. */
 func TestRememberEntityOrAbsenceAnswersAFoundHitWithoutWritingItBack(t *testing.T) {
     cacheInstance := newTtlRecordingCache()
     if setErr := cacheInstance.Set("hit-key", "entity", entityCacheTtl); nil != setErr {
@@ -220,7 +216,7 @@ func TestFindByUsernameBoundsTheAbsenceItRemembers(t *testing.T) {
     }
 }
 
-/* a loader that parks until it is released puts twenty readers of one key in flight together, so Remember coalesces them onto one loader; what is then counted is who writes the found value unbounded: the reader that loaded it once, and no waiter — a waiter's write landed after the leader's and re-installed, unbounded, whatever a listener had cleared in between, so the absence of every waiter's write is the whole repair. */
+/* a loader that parks until it is released puts twenty readers of one key in flight together, so Remember coalesces them onto one loader; what is counted is who writes the found value unbounded: the reader that loaded it, once, and no waiter, since a waiter's write lands after the leader's and would re-install, unbounded, whatever a listener cleared in between. */
 func TestRememberEntityOrAbsenceWritesAFoundValueOnceForEveryWaiterOfOneLoad(t *testing.T) {
     cacheInstance := newTtlRecordingCache()
 

@@ -29,7 +29,7 @@ func TestProtectsAnotherAdminAllowsAnAccountBelow(t *testing.T) {
     }
 }
 
-/* An update names the fields it changes: an omitted username and an omitted password are kept a few lines above the roles, and roles are the one field an omission used to REMOVE — the target came back holding the base role alone, an administrator editing their own account included. */
+/* An update names the fields it changes: an omitted username and an omitted password are kept, and omitted roles are kept too rather than falling back to the base role, an administrator editing their own account included. */
 func TestApiUpdateHandlerKeepsTheRolesABodyDoesNotName(t *testing.T) {
     userRepository := newRecordingUserRepository(administrator("admin-1"), editor("editor-1"))
     runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})

@@ -187,11 +187,7 @@ func TestStreamHandler_OpensTheCatalogueTopicForAnEditor(t *testing.T) {
     }
 }
 
-/* the refusal has to be decided while the response is still writable. NewServerSentEventWriter commits it —
-   event-stream headers, 200, flush — and the kernel discards whatever a handler returns once the headers are
-   committed, so a gate placed after it answers a successful empty stream that a browser reconnects to
-   forever, and the access log records the 200. The assertion is therefore on the writer being UNTOUCHED,
-   not on the 403 alone: the status was already right while the defect was live. */
+/* the refusal has to be decided while the response is still writable. NewServerSentEventWriter commits it (event-stream headers, 200, flush) and the kernel discards whatever a handler returns once the headers are committed, so a gate placed after it answers a successful empty stream that a browser reconnects to forever. The assertion is therefore on the writer being untouched, not on the 403 alone, which a gate placed after the writer also returns. */
 func TestStreamHandler_RefusesAPrivilegedTopicWithoutCommittingTheResponse(t *testing.T) {
     request, runtimeInstance := streamRequest(t, "/events/stream/", false)
     writer := &recordingResponseWriter{}
@@ -251,14 +247,7 @@ func TestStreamHandler_OpensTheStreamForATopicThatNeedsNoRole(t *testing.T) {
     }
 }
 
-/* the hub is RESOLVED here rather than handed in at registration, and the refusal that comes with resolving
-   has to be decided while the response is still writable, for the same reason the topic gate is: past
-   NewServerSentEventWriter the kernel discards whatever the handler returns.
-
-   Handed in, this door — the one an http process serving nothing but reads passes through, and the one that
-   most needs the hub to be reporting — resolved the service ZERO times. Measured on a running process:
-   after a login, a product read and an event stream that answered 200 with a live subscriber, the provider
-   had not run, so the logger swap it performs had not happened and the container had no instance to close. */
+/* the hub is resolved per request, and the refusal that comes with resolving is decided while the response is still writable, for the same reason the topic gate is: past NewServerSentEventWriter the kernel discards whatever the handler returns. */
 func TestStreamHandler_RefusesWithoutCommittingWhenTheHubIsNotRegistered(t *testing.T) {
     request, runtimeInstance := streamRequestWithoutHub(t, "/events/stream/?topic=visitor")
     writer := &recordingResponseWriter{}
@@ -344,10 +333,7 @@ func streamServer(t *testing.T, writeTimeout time.Duration) (*httptest.Server, *
     return server, hub, logger
 }
 
-/* the server's write deadline is armed once, from the request line; an event published after it used to be
-   the one lost, on a connection cut under a client that still believed it open. Re-armed per frame by the
-   writer, with the keepalive filling the idle stretch, an event published past the server's timeout is
-   delivered. */
+/* the server's write deadline is armed once, from the request line; the writer re-arms it per frame and the keepalive fills the idle stretch, so an event published past the server's timeout is delivered on a connection that is still open. */
 func TestStreamHandler_DeliversAnEventPublishedPastTheServersWriteTimeout(t *testing.T) {
     server, hub, _ := streamServer(t, time.Second)
 
@@ -424,8 +410,7 @@ func TestJournalServerSideCut_WarnsOnTheDeadlineAloneWhoeverHoldsTheContext(t *t
     }
 }
 
-/* a runtime without a logger answered nil through LoggerFromRuntime, and the warning of a server cut was written
-   onto it; it now goes to the fallback journal */
+/* a runtime without a logger answers nil through LoggerFromRuntime, so the warning of a server cut goes to the fallback journal */
 func TestJournalServerSideCut_ARuntimeWithoutALoggerDoesNotPanic(t *testing.T) {
     containerInstance := melodycontainer.NewContainer()
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
@@ -448,10 +433,7 @@ func (instance *timeoutError) Temporary() bool {
     return false
 }
 
-/* the real cut: a client that stops reading, frames the socket cannot buffer, the re-armed deadline expires
-   with a frame in flight — one warning. The previous guard read the request context, which net/http had
-   already cancelled on that very write error, so it could never fire on a real connection; a client that
-   closes is the ordinary end and files nothing */
+/* the real cut: a client that stops reading, frames the socket cannot buffer, the re-armed deadline expires with a frame in flight, one warning. A guard on the request context could never fire here, since net/http cancels it on that very write error; a client that closes is the ordinary end and files nothing */
 func TestStreamHandler_JournalsARealServerCutAndNotAClientThatLeft(t *testing.T) {
     server, hub, logger := streamServer(t, 500*time.Millisecond)
 

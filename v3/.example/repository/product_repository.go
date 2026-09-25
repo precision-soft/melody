@@ -16,7 +16,7 @@ const (
     ServiceProductRepository = "service.example.product.repository"
 )
 
-/* ProductRepository carries a context and an error on every method because one of its implementations talks to a database: a listing that cannot reach mysql has to say so rather than answer with an empty catalogue, and a request that was cancelled has to stop the query it started. */
+/* ProductRepository carries a context and an error on every method, so a listing that cannot reach mysql says so rather than answering an empty catalogue, and a cancelled request stops its query. */
 type ProductRepository interface {
     All(ctx context.Context) ([]*entity.Product, error)
 
@@ -33,9 +33,7 @@ func MustGetProductRepository(resolver melodycontainercontract.Resolver) Product
     return melodycontainer.MustFromResolver[ProductRepository](resolver, ServiceProductRepository)
 }
 
-/* NewProductRepository hands back the nomenclature the environment can actually support: the database-backed one when a connection was configured, and the in-memory one otherwise. The choice is made here rather than in the configuration because the generated wiring fills this constructor from the container, and the storage handle is what carries the answer.
-
-   The migration set is applied and the table seeded on the way out, so the first caller finds a nomenclature rather than an empty one. The trail's own tables are created beside it: an audited write is one transaction over both, so a missing trail table would turn every write into a failure rather than into an unaudited success. */
+/* NewProductRepository answers the database-backed repository when a connection is configured and the in-memory one otherwise; the generated wiring fills it from the container, and the storage handle carries the choice. The migration set is applied and the table seeded on the way out, with the trail's own tables beside it, since an audited write is one transaction over both. */
 //melody:service ServiceProductRepository
 func NewProductRepository(storage *persistence.CatalogStorage) (ProductRepository, error) {
     if false == storage.IsPersistent() {
@@ -62,7 +60,7 @@ func NewProductRepository(storage *persistence.CatalogStorage) (ProductRepositor
     return repositoryInstance, nil
 }
 
-/* validateProduct reports the first field the product fails on. Both implementations share it so the in-memory catalogue and the database refuse the same writes with the same words, which is what lets the end-to-end assertions hold whichever one the environment picked. */
+/* validateProduct reports the first field the product fails on, shared by both implementations so they refuse with the same words. */
 func validateProduct(product *entity.Product) error {
     if nil == product {
         return fmt.Errorf("product is required")
@@ -95,7 +93,7 @@ func validateProduct(product *entity.Product) error {
     return nil
 }
 
-/* nextProductId continues the seeded numbering rather than inventing a scheme of its own, so an identifier the caller left empty reads like the ones already in the catalogue. */
+/* nextProductId continues the seeded numbering, so an identifier the caller left empty reads like the ones already in the catalogue. */
 func nextProductId(existingIdList []string) string {
     return fmt.Sprintf("prod-%d", highestIdSuffix(existingIdList, "prod-")+1)
 }

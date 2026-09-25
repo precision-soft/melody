@@ -63,7 +63,7 @@ func (instance *UserService) List() ([]*entity.User, error) {
 }
 
 func (instance *UserService) FindById(id string) (*entity.User, bool, error) {
-    /* an identifier the cache-key grammar refuses names a row no write door admits, so it is answered as absent instead of asked of a cache that would refuse the question with a 500 */
+    /* an identifier no cache key can carry names no row, so it is answered as absent without asking the cache */
     if false == CacheSafeIdentifier(id) {
         return nil, false, nil
     }
@@ -103,7 +103,7 @@ func (instance *UserService) FindById(id string) (*entity.User, bool, error) {
 }
 
 func (instance *UserService) FindByUsername(username string) (*entity.User, bool, error) {
-    /* CacheSafeIdentifier also refuses the empty spelling, so the blank-username answer travels through the same door; a name longer than the user table holds is a name this application does not have, answered as absent on the anonymous login door instead of as a 500 from a cache key over its ceiling */
+    /* CacheSafeIdentifier also refuses the empty spelling, and a name longer than the user table holds is answered as absent on the anonymous login door */
     normalizedUsername := repository.NormalizedUsername(username)
     if false == CacheSafeIdentifier(normalizedUsername) {
         return nil, false, nil
@@ -170,16 +170,7 @@ func (instance *UserService) Create(
     return user, nil
 }
 
-/* GrantRole adds one role to an account through the repository's atomic door, so the console grant and the
-   admin update door serialise on the account instead of the last whole-set write winning; the account the
-   door wrote is what the event carries, so the listeners drop the entries the account is served from.
-
-   A role the directory already holds is answered as held, without an event — and the account's cache
-   entries are dropped all the same: a grant whose write committed and whose dispatch then failed left the
-   entries from before the grant standing, with no expiry, and the re-run that found the role held dispatched
-   nothing either, so the old roles were served for the life of the cache. The drop is what heals that,
-   the way an unchanged quote heals the currency's entries. A dispatch that fails after the write is handed
-   back with the account it did not announce, so a caller can say that the grant IS in the directory. */
+/* GrantRole adds one role to an account through the repository's atomic door, so the console grant and the admin update door serialise on the account; the event carries the account the door wrote. A role already held is answered as held without an event, and the account's cache entries are dropped anyway, which heals entries a grant whose dispatch failed left standing. A dispatch that fails after the write is answered with the account, so a caller can say the grant is in the directory. */
 func (instance *UserService) GrantRole(
     runtimeInstance melodyruntimecontract.Runtime,
     userId string,
@@ -256,7 +247,7 @@ func (instance *UserService) Update(
         return nil, false, nil
     }
 
-    /* the loaded entity is the repository's own stored value under the in-memory configuration, shared with every concurrent reader, so the changes land on a copy: written in place, a rename the repository then REFUSED ("username already exists") had already renamed the stored account — the directory held two accounts folding onto one username while the caller was told the update failed */
+    /* under the in-memory configuration the loaded entity is the repository's stored value, shared with concurrent readers, so the changes land on a copy and a rename the repository refuses leaves the stored account untouched */
     previousUsername := user.Username
 
     modified := *user
@@ -339,7 +330,7 @@ func (instance *UserService) AuthenticateByUsernameAndPassword(
         return nil, false, findErr
     }
     if false == found {
-        /* spend a bcrypt comparison on an absent username too: the found path below runs one, and returning here without it would answer an unknown username faster than a wrong password, an existence oracle an attacker times to enumerate usernames */
+        /* an absent username spends a bcrypt comparison too, so it is not answered faster than a wrong password: the timing would reveal which usernames exist */
         security.DummyPasswordMatch(password)
 
         return nil, false, nil

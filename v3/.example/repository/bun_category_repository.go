@@ -11,7 +11,7 @@ import (
     "github.com/uptrace/bun"
 )
 
-/* categoryRow is the nomenclature as the database holds it; the domain entity stays free of storage concerns because it is cached through a gob serializer. */
+/* categoryRow is the nomenclature as the database holds it; the entity stays free of storage concerns because it is cached through a gob serializer. */
 type categoryRow struct {
     bun.BaseModel `bun:"table:melody_example_v3_category,alias:category"`
 
@@ -83,7 +83,7 @@ func (instance *bunCategoryRepository) FindById(ctx context.Context, id string) 
     return row.toEntity(), true, nil
 }
 
-/* findRowById separates a row that is not there from a query that could not run: only sql.ErrNoRows is an answer, and every other failure is reported. */
+/* findRowById separates a row that is not there from a query that could not run: only sql.ErrNoRows is an answer. */
 func (instance *bunCategoryRepository) findRowById(ctx context.Context, id string) (*categoryRow, bool, error) {
     row := &categoryRow{}
 

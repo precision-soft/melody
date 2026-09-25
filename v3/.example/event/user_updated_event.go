@@ -12,7 +12,7 @@ func NewUserUpdatedEvent(user *entity.User, previousUsername string) *UserUpdate
 
 type UserUpdatedEvent struct {
     user *entity.User
-    /* the username the account answered to before this update, carried for the same reason the deleted event carries one: the by-username cache is keyed on the OLD spelling, and an invalidation that only knows the new one leaves the old key serving the pre-rename account — its credentials and roles — for as long as the entry lives. */
+    /* the username the account answered to before this update: the by-username cache is keyed on that spelling, and an invalidation that knows only the new one leaves the previous key serving the pre-rename account */
     previousUsername string
 }
 

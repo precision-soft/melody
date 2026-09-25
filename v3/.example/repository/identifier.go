@@ -6,7 +6,7 @@ import (
     "strings"
 )
 
-/* highestIdSuffix reads the numeric tail of every identifier that carries the given prefix and reports the largest one it could parse, or zero when none of them was a number. The four repositories number their rows the same way and both implementations of each need the answer, so the walk lives here once. */
+/* highestIdSuffix answers the largest numeric tail among the identifiers that carry the prefix, or zero when none parses. */
 func highestIdSuffix(identifierList []string, prefix string) int64 {
     highest := int64(0)
 
@@ -26,7 +26,7 @@ func highestIdSuffix(identifierList []string, prefix string) int64 {
         }
     }
 
-    /* the answer is capped one below the int64 ceiling: every caller mints the NEXT id as this plus one, and a stored suffix at the very ceiling would wrap that addition into a negative id — stored once, the wrapped id collides with itself on every later mint and empty-id creation is refused forever. Capped, the mint lands on the ceiling and collides with the existing row, which the caller reports as the ordinary "id already exists". */
+    /* capped one below the int64 ceiling because every caller mints this plus one: a mint at the ceiling collides with the existing row and is refused as "id already exists" rather than wrapping into a negative id */
     if math.MaxInt64-1 < highest {
         return math.MaxInt64 - 1
     }

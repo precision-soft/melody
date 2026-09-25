@@ -120,14 +120,11 @@ type readResponse struct {
     Categories []category.CategoryResponse `json:"categories"`
     Currencies []currency.CurrencyResponse `json:"currencies"`
 
-    /* a POINTER with omitempty, so a read that did not ask for a conversion carries no key at all rather
-       than an object of zeroes a client would have to know to ignore */
+    /* a pointer with omitempty, so a read that asked for no conversion carries no key */
     Converted *ConvertedPriceResponse `json:"converted,omitempty"`
 }
 
-/* ConvertedPriceResponse is the product's price restated in the currency the caller named. It carries the
-   instant of the quote it was computed from, because a converted price is only as current as the rate
-   behind it and a client cannot tell that from the number. */
+/* ConvertedPriceResponse is the product's price restated in the currency the caller named, with the instant of the quote it was computed from. */
 type ConvertedPriceResponse struct {
     CurrencyId string  `json:"currencyId"`
     Code       string  `json:"code"`
@@ -135,17 +132,7 @@ type ConvertedPriceResponse struct {
     RateAsOf   string  `json:"rateAsOf"`
 }
 
-/* convertedPriceFor answers the conversion the caller asked for, or nothing at all when they asked for none.
-
-   The parameter is read with StringAt rather than with the String accessor beside it, and the reason is that
-   the SHAPE of a query parameter is chosen by the client: the request bags keep a single key and a repeated
-   one apart by type, and the string accessor refuses a slice by panicking — correct where the key is the
-   programmer's, a five-hundred at a distance here, since anyone may send ?currency=USD&currency=RON. Reading
-   the first value is the answer the framework's own Input door settled on for the same reason.
-
-   An unknown code is a four-hundred and not an empty conversion: a caller who asked for a currency this
-   catalogue does not carry has made a request that cannot be satisfied, and answering the unconverted
-   document would look like the conversion succeeded. */
+/* convertedPriceFor answers the conversion the caller asked for, or nothing when they asked for none. The parameter is read with StringAt, the first value, because the client chooses its shape and the String accessor panics on a repeated key. An unknown code is a 400, since the unconverted document would look like a successful conversion. */
 func convertedPriceFor(
     request melodyhttpcontract.Request,
     product *entity.Product,
@@ -165,10 +152,7 @@ func convertedPriceFor(
         return nil, fmt.Errorf("unknown currency code %q", requestedCode)
     }
 
-    /* the two refusals below are the SERVER's, not the caller's: the caller sent a code the catalogue
-       carries, and what cannot be converted is the product's own row — quoted in a currency the catalogue
-       does not hold, or against a rate that is not a usable price. They are wrapped so the door answers
-       them as a 500 with the cause journaled, where the unknown code above stays the caller's 400. */
+    /* the two refusals below are the server's: the caller sent a code the catalogue carries, and the product's own row is quoted in a currency the catalogue lacks or against an unusable rate, so they are answered as a 500 with the cause journaled */
     source, sourceFound := currencyById(currencies, product.CurrencyId)
     if false == sourceFound {
         return nil, &conversionRefusal{cause: fmt.Errorf("the product is quoted in a currency the catalogue does not carry (%q)", product.CurrencyId)}
@@ -187,8 +171,7 @@ func convertedPriceFor(
     }, nil
 }
 
-/* conversionRefusal marks a refusal of the conversion that is the catalogue's fault rather than the
-   caller's, so the door can answer it as a 500 and keep the caller's mistakes at 400. */
+/* conversionRefusal marks a refusal of the conversion that is the catalogue's fault, answered as a 500, while the caller's mistakes stay 400. */
 type conversionRefusal struct {
     cause error
 }
@@ -226,7 +209,7 @@ func mapProduct(product *entity.Product) ProductResponse {
         Price:       priceRounded,
         CurrencyId:  product.CurrencyId,
         Stock:       product.Stock,
-        /* http.TimeFormat spells a literal GMT suffix, so the instant is converted first: formatted as the local wall time it was stamped in, the rendered string misstated the instant by the process zone's whole offset and a client parsing it read a moment hours away */
+        /* http.TimeFormat spells a literal GMT suffix, so the instant is converted to UTC first */
         CreatedAt:   product.CreatedAt.UTC().Format(nethttp.TimeFormat),
         UpdatedAt:   product.UpdatedAt.UTC().Format(nethttp.TimeFormat),
     }

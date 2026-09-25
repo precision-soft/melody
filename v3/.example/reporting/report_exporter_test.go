@@ -152,7 +152,7 @@ func TestCatalogReportExporterExport_SendsNothingWithNoEndpointConfigured(t *tes
     }
 }
 
-/* a sink that moved, or a proxy in front of it that sends the caller to a login page, answers the POST with a redirect. Followed, net/http re-sends the POST as a GET without its body, and the 200 of the page it lands on used to read as "the sink received the reading" — exported=true over a sink that stored nothing. The export refuses the redirect by name, and the page is never asked. */
+/* a sink that moved, or a proxy in front of it that sends the caller to a login page, answers the POST with a redirect. Followed, net/http re-sends the POST as a GET without its body, and the 200 of the page it lands on would read as the sink having received the reading. The export refuses the redirect by name, and the page is never asked. */
 func TestCatalogReportExporterExport_RefusesASinkThatRedirectsInsteadOfReceiving(t *testing.T) {
     sinkPosts := atomic.Int64{}
     pageGets := atomic.Int64{}
@@ -189,8 +189,7 @@ func TestCatalogReportExporterExport_RefusesASinkThatRedirectsInsteadOfReceiving
     }
 }
 
-/* the sink that is DOWN is the common failure, not one that answers 503: the transport's refusal is the export's
-   failure, and a quiet false there reported a report nobody received as one there was nothing to send */
+/* the sink that is down is the common failure, not one that answers 503: the transport's refusal is the export's failure, not a quiet false that would report a report nobody received as nothing to send */
 func TestCatalogReportExporterExport_FailsWhenTheSinkCannotBeReached(t *testing.T) {
     server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {}))
     endpoint := server.URL + "/v1/report-sink"

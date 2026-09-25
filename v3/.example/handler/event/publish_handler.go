@@ -28,9 +28,7 @@ func PublishHandler(bus melodymessagebuscontract.Bus) melodyhttpcontract.Handler
     }
 }
 
-/* queryStringOr differs from StringOrDefault in one place, which is why it
-stays: a present but EMPTY value falls back here, where the door answers the
-empty string it was given. */
+/* queryStringOr falls back on a present but empty value too, where StringOrDefault answers the empty string. */
 func queryStringOr(request melodyhttpcontract.Request, name string, fallback string) string {
     value := melodybag.StringOrDefault(request.Query(), name, fallback)
     if "" == value {

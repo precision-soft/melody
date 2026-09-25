@@ -8,7 +8,6 @@ import (
     "github.com/uptrace/bun"
 )
 
-/* catalogJournalRow is the journal as the database holds it. */
 type catalogJournalRow struct {
     bun.BaseModel `bun:"table:melody_example_v3_catalog_journal,alias:journal"`
 
@@ -70,7 +69,7 @@ func (instance *bunCatalogJournalRepository) Append(ctx context.Context, entry *
     return row.toEntry(), nil
 }
 
-/* AppendBatch writes the whole batch in one statement, so a request that changed several records pays one round trip. Every entry is validated before anything is written: a batch that is half refused would leave the journal disagreeing with the changes it is supposed to describe. */
+/* AppendBatch writes the whole batch in one statement. Every entry is validated before anything is written, so a batch is never half refused and the journal agrees with the changes it describes. */
 func (instance *bunCatalogJournalRepository) AppendBatch(ctx context.Context, entryList []*CatalogJournalEntry) error {
     if 0 == len(entryList) {
         return nil
@@ -127,7 +126,7 @@ func (instance *bunCatalogJournalRepository) Count(ctx context.Context) (int, er
         Count(ctx)
 }
 
-/* prepareCatalogJournalRow validates one entry and fills in what the writer left to the journal. It is shared by the single and the batch write so both refuse the same entries: a batch that accepted what a single write rejects would be a way around the check rather than a faster path through it. */
+/* prepareCatalogJournalRow validates one entry and fills in what the writer left to the journal, shared by the single and the batch write so both refuse the same entries. */
 func prepareCatalogJournalRow(entry *CatalogJournalEntry) (*catalogJournalRow, error) {
     validationErr := validateCatalogJournalEntry(entry)
     if nil != validationErr {

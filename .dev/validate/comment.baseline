@@ -1,47 +1,8 @@
-# The history clauses each file of the third major still carries in its comments, one line per file.
+# The history clauses a file of the third major may still carry in its comments, one line per file.
 #
 #   path ~ count
 #
 # Read by .dev/validate/documentation.sh. The count is a ratchet, not an allowance: a file above its line
 # fails, a file below it fails until the line is lowered, and a line for a file that carries none fails until
-# it is deleted. The comment reduction of the third major lowers these lines slice by slice; the list is empty
-# when it is done.
-v3/.example/event/user_updated_event.go                      ~ 2
-v3/.example/handler/event/stream_handler.go                  ~ 2
-v3/.example/handler/event/stream_handler_test.go             ~ 2
-v3/.example/handler/event/topic.go                           ~ 2
-v3/.example/handler/product/create_handler.go                ~ 1
-v3/.example/handler/twofactor/two_factor_handler.go          ~ 1
-v3/.example/handler/twofactor/two_factor_handler_test.go     ~ 2
-v3/.example/handler/user/read_handler.go                     ~ 1
-v3/.example/handler/user/read_handler_test.go                ~ 1
-v3/.example/handler/user/update_handler_test.go              ~ 1
-v3/.example/presenter/error_presenter.go                     ~ 1
-v3/.example/presenter/error_presenter_test.go                ~ 2
-v3/.example/reporting/report_exporter_test.go                ~ 1
-v3/.example/reporting/report_service_test.go                 ~ 5
-v3/.example/repository/bun_user_repository.go                ~ 1
-v3/.example/repository/bun_user_repository_test.go           ~ 5
-v3/.example/repository/catalog_reading_repository.go         ~ 1
-v3/.example/repository/currency_repository.go                ~ 1
-v3/.example/repository/in_memory_catalog_reading_repository_test.go ~ 1
-v3/.example/repository/in_memory_currency_repository_test.go ~ 2
-v3/.example/repository/in_memory_user_repository_test.go     ~ 1
-v3/.example/security/password_hasher.go                      ~ 1
-v3/.example/security/password_hasher_test.go                 ~ 2
-v3/.example/security/session_token_resolver_test.go          ~ 1
-v3/.example/service/cache_key.go                             ~ 2
-v3/.example/service/cache_lookup.go                          ~ 2
-v3/.example/service/cache_lookup_test.go                     ~ 1
-v3/.example/service/currency_service.go                      ~ 3
-v3/.example/service/currency_service_test.go                 ~ 5
-v3/.example/service/provider_clock.go                        ~ 5
-v3/.example/service/provider_clock_test.go                   ~ 1
-v3/.example/service/rate_refresh_service.go                  ~ 2
-v3/.example/service/rate_refresh_service_test.go             ~ 8
-v3/.example/service/user_service.go                          ~ 1
-v3/.example/service/user_service_test.go                     ~ 5
-v3/.example/subscriber/catalog_notification.go               ~ 1
-v3/.example/subscriber/user_event_subscriber.go              ~ 3
-v3/.example/twofactor/store.go                               ~ 2
-v3/.example/twofactor/store_test.go                          ~ 2
+# it is deleted. The list is empty, so a history clause in any comment of the third major fails; a line is
+# added only for a clause a review has read and kept.

@@ -7,7 +7,7 @@ import (
     "github.com/precision-soft/melody/v3/.example/entity"
 )
 
-/* The order is part of the answer: the repository joins the list into one comma-separated column, so an answer built by ranging a map writes a different spelling of the same set on a share of the saves — and the audit trail, which compares the stored values, then records a change nobody asked for. A thousand runs is the sample the rate needs: at the measured 13 per cent for two roles, ten runs miss it a quarter of the time. */
+/* The order is part of the answer: the repository joins the list into one comma-separated column, so an answer built by ranging a map writes a different spelling of the same set on a share of the saves, and the audit trail, which compares the stored values, records a change nobody asked for. A thousand runs make a reordering that happens on a share of the saves certain to show. */
 func TestNormalizeRolesAnswersTheOrderItWasGiven(t *testing.T) {
     given := []string{entity.RoleEditor, entity.RoleAdmin, entity.RoleUser}
     wanted := strings.Join(given, ",")

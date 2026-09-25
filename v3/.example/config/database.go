@@ -80,7 +80,7 @@ func (instance *Module) buildDatabase() {
     instance.database = database
 }
 
-/* catalogWired answers whether the catalogue definition was declared, read off the handle because a definition that failed to open never becomes one. */
+/* catalogWired answers whether the environment declares the catalogue's host; a declared catalogue that fails to open panics at boot, so the switch and the handle agree. */
 func (instance *Module) catalogWired() bool {
     return "" != instance.environmentValue(environmentKeyMysqlHost)
 }
