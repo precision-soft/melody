@@ -2,10 +2,10 @@ package internal
 
 import "reflect"
 
-/* maxCopyDepth bounds the deep-copy recursion as a safety net for genuinely deep (non-shared) data: a value that legitimately nests past this bound is returned as-is from there on rather than overflowing the goroutine stack — a fatal error that no deferred recover() can catch and which takes down the whole process. Cycles and shared substructure no longer reach this bound at all: the visited map closes a cycle onto its own copy and reuses the copy of a node reached through a second edge under the same static type — a node viewed under two defined types is two nodes in the copy, since the memo's copy carries one static type; what they hold beneath stays one node —, so the traversal is linear in the number of distinct nodes where the depth-only form was exponential — a 28-level value whose every node was reachable through two edges never finished copying, with the caller's lock held the whole time. */
+/* maxCopyDepth bounds the recursion for genuinely deep data: past it a value is returned as-is rather than overflowing the goroutine stack. Cycles and shared substructure never reach it, because the visited map resolves them. */
 const maxCopyDepth = 10000
 
-/* visitedKey identifies a container node across the two edges that may reach it: maps are identified by their pointer, slices by their backing array pointer AND length, because two slices of one array with different lengths are two different nodes — memoizing on the pointer alone would hand the copy of one to a reader of the other. The static TYPE is part of the identity as well: a defined type over map[string]any or []any (a Meta, a claims map) shares its header with the plain value it was converted from, so the two spell the same pointer while being copied on different paths — the plain one on the typed fast path, the defined one through reflection — and the fast path's assertion on a memo the other path had written fell over, intermittently, on whichever key the map iteration reached second. */
+/* visitedKey identifies a container node: a map by its pointer, a slice by its backing array and length, and both by static type, since a defined type over map[string]any shares its header with the plain value yet is copied on another path. */
 type visitedKey struct {
     pointer   uintptr
     length    int
@@ -39,7 +39,7 @@ func CopyAnySlice(source []any) []any {
     return copyAnySliceAtDepth(source, 0, map[visitedKey]any{})
 }
 
-/* CopyAnyValue copies one value at the same depth CopyAnyMap copies a whole map: maps and slices are descended into, everything else — a pointer, a struct, a channel — is returned as-is, which is the documented boundary of what a copied container may safely carry. */
+/* CopyAnyValue copies one value the way CopyAnyMap copies a map: maps and slices are descended into, everything else is returned as-is. */
 func CopyAnyValue(value any) any {
     return copyAnyValueAtDepth(value, 0, map[visitedKey]any{})
 }
@@ -55,7 +55,7 @@ func copyAnyMapAtDepth(source map[string]any, depth int, visited map[visitedKey]
     }
 
     copied := make(map[string]any, len(source))
-    /* registered before the descent: a cycle that returns to this node closes onto the copy, not onto the live original */
+    /* registered before the descent, so a cycle closes onto the copy */
     visited[key] = copied
 
     for sourceKey, value := range source {
@@ -90,7 +90,7 @@ func copyAnySliceAtDepth(source []any, depth int, visited map[visitedKey]any) []
     return make([]any, 0)
 }
 
-/* at maxCopyDepth the value is returned as-is (a shallow alias) rather than copied further; realistic data (JSON-derived) is far shallower, and the shapes that used to ride the recursion to this bound — cycles, shared substructure — are resolved by the visited map before depth ever matters. */
+/* at maxCopyDepth the value is returned as-is, a shallow alias, rather than copied further; realistic data is far shallower, and cycles and shared substructure are resolved by the visited map before depth matters. */
 func copyAnyValueAtDepth(value any, depth int, visited map[visitedKey]any) any {
     if depth >= maxCopyDepth {
         return value

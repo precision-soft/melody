@@ -185,7 +185,7 @@ func (instance *UserService) Update(
         return nil, false, nil
     }
 
-    /* the loaded entity is the repository's own stored value under the in-memory configuration, shared with every concurrent reader, so the changes land on a copy: written in place, a rename the repository then REFUSED ("username already exists") had already renamed the stored account — the directory held two accounts folding onto one username while the caller was told the update failed */
+    /* under the in-memory configuration the loaded entity is the repository's stored value, shared with concurrent readers, so the changes land on a copy and a rename the repository refuses leaves the stored account untouched */
     previousUsername := user.Username
 
     modified := *user
@@ -268,7 +268,7 @@ func (instance *UserService) AuthenticateByUsernameAndPassword(
         return nil, false, findErr
     }
     if false == found {
-        /* spend a bcrypt comparison on an absent username too: the found path below runs one, and returning here without it would answer an unknown username faster than a wrong password, an existence oracle an attacker times to enumerate usernames */
+        /* an absent username spends a bcrypt comparison too, so it is not answered faster than a wrong password: the timing would reveal which usernames exist */
         security.DummyPasswordMatch(password)
 
         return nil, false, nil

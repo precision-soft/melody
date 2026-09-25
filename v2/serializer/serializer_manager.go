@@ -35,7 +35,7 @@ func NewSerializerManager(serializersByMime map[string]serializercontract.Serial
             )
         }
 
-        /* a typed nil is refused alongside the untyped one: it passes the plain comparison, gets stored as a live serializer and dereferences its nil receiver on the first request the negotiation routes to it — the construction-time refusal exists precisely to keep that panic off the request path */
+        /* a typed nil is refused with the untyped one, at construction rather than on the request path */
         if nil == serializerInstance || true == internal.IsNilInterface(serializerInstance) {
             return nil, exception.NewError(
                 "serializer instance is nil",
@@ -46,7 +46,7 @@ func NewSerializerManager(serializersByMime map[string]serializercontract.Serial
             )
         }
 
-        /* two spellings collapsing into one normalized key are refused instead of overwritten: map iteration order would decide the surviving serializer, so the winner would change from one boot to the next with the loser dropped silently */
+        /* two spellings normalizing to one key are refused, since map order would pick the survivor */
         occupiedRawKey, occupied := rawKeysByNormalizedMime[normalizedMimeKey]
         if true == occupied {
             conflictingKeys := []string{occupiedRawKey, mimeKey}
@@ -90,12 +90,12 @@ func (instance *SerializerManager) Get(mime string) (serializercontract.Serializ
     return serializerInstance, true
 }
 
-/* defaultSerializer answers the representation served when the header expresses no usable preference: the json serializer when one is registered, otherwise the first configured serializer in lexical mime order — an empty accept header means the client takes anything, so a manager deliberately configured without json serves what it has instead of refusing every request. */
+/* defaultSerializer answers the representation served when the header expresses no usable preference: json when registered, otherwise the first serializer in lexical mime order. */
 func (instance *SerializerManager) defaultSerializer() (serializercontract.Serializer, bool) {
     return instance.defaultSerializerExcluding(nil)
 }
 
-/* defaultSerializerExcluding is the same fallback with the types the header refused taken out of the running: a q of 0 names a representation the client will not accept, so it may not be served as the default either — the empty-header rule and the refusal have to hold at once, and answering json to a header that spelled application/json;q=0 would serve the very type it rejected. Everything else is the plain default: json first, then lexical mime order. */
+/* defaultSerializerExcluding is defaultSerializer with the types the header refused with q=0 left out. */
 func (instance *SerializerManager) defaultSerializerExcluding(refusedMimes map[string]struct{}) (serializercontract.Serializer, bool) {
     if _, refused := refusedMimes[MimeApplicationJson]; false == refused {
         serializerInstance, exists := instance.serializersByMime[MimeApplicationJson]
@@ -157,7 +157,7 @@ func (instance *SerializerManager) ResolveByAcceptHeader(acceptHeader string) (s
 
     sort.Strings(candidateMimes)
 
-    /* each available type takes the quality of the MOST SPECIFIC range that covers it, so an exact range overrides a wildcard regardless of header order; a covered type whose range carries q=0 is REFUSED and can never be served, not by the negotiation and not by the fallback below, and not acceptable is answered only when the header refuses every type this manager has — a refusal that leaves another registered type merely unmatched is a preference, and answering it 406 denied a client the representation it never rejected */
+    /* each type takes the quality of the most specific range covering it, so an exact range overrides a wildcard; a type refused with q=0 is never served, and not acceptable is answered only when every type is refused */
     selectedMime := ""
     selectedQuality := 0.0
     selectedSpecificity := 0
@@ -190,7 +190,7 @@ func (instance *SerializerManager) ResolveByAcceptHeader(acceptHeader string) (s
             continue
         }
 
-        /* a full tie — the header weighs the candidates identically — resolves through the same json-first convention defaultSerializer states for the empty header: the catch-all range is the RFC spelling of the same "I take anything", and without this preference it answered the lexically first candidate while the empty header answered json. Ties that do not involve json keep the lexically first candidate the sorted iteration already produced. */
+        /* a full tie resolves json first, as the empty header does; other ties keep the lexically first candidate */
         if quality == selectedQuality && specificity == selectedSpecificity && MimeApplicationJson == candidateMime {
             selectedMime = candidateMime
         }

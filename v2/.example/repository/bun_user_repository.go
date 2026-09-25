@@ -123,7 +123,7 @@ func (instance *bunUserRepository) FindByUsername(ctx context.Context, username 
 
     row := &userRow{}
 
-    /* the comparison is forced onto the binary collation because the column's own (utf8mb4_0900_ai_ci) folds accents — 'café' = 'cafe' is true under it — while NormalizedUsername, the one spelling the cache keys and the invalidation listeners agree on, folds case alone; left to the column, this door matched users the invalidation could never address, and a deleted user kept authenticating from the ttl-less cache under the collation-only spelling */
+    /* the comparison is forced onto the binary collation because the column's own folds accents, while NormalizedUsername, the one spelling the cache keys and the invalidation listeners agree on, folds case alone, so this door matches exactly the users the invalidation can address */
     selectErr := instance.database.
         NewSelect().
         Model(row).
@@ -141,7 +141,7 @@ func (instance *bunUserRepository) FindByUsername(ctx context.Context, username 
     return row.toEntity(), true, nil
 }
 
-/* findRowById separates a row that is not there from a query that could not run: only sql.ErrNoRows is an answer, and every other failure is reported. */
+/* findRowById separates a row that is not there from a query that could not run: only sql.ErrNoRows is an answer. */
 func (instance *bunUserRepository) findRowById(ctx context.Context, id string) (*userRow, bool, error) {
     row := &userRow{}
 
@@ -186,11 +186,7 @@ func (instance *bunUserRepository) Create(ctx context.Context, user *entity.User
         user.Id = nextUserId(identifierList)
     }
 
-    /* the same guard the product, category and currency repositories carry, and the one the identifier
-       ceiling's own rationale promises: without it an occupied id reaches the insert, where the primary
-       key answers the driver's raw duplicate-key text through a 500, and two callers that mint the same
-       id concurrently — the ordinary case, since the mint reads a list that neither has committed to
-       yet — see that instead of "id already exists". */
+    /* an occupied id is answered "id already exists" before the insert, as in the sibling repositories, rather than as the primary key's raw duplicate-key text */
     _, occupied, occupiedErr := instance.findRowById(ctx, user.Id)
     if nil != occupiedErr {
         return occupiedErr

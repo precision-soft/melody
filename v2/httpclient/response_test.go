@@ -36,7 +36,7 @@ func TestResponseHelpers_StatusClassificationAndString(t *testing.T) {
     }
 }
 
-/* the three accessors that carry everything about a response except its body and its status code had never been executed. Status is the reason phrase a caller logs, Headers is what a caller reads a content type or a rate-limit budget out of, and Request is the only way back to the url the exchange actually reached after the base url and the query were folded in — a redirect chain ends somewhere the caller never spelled, and this is where it says so. */
+/* Status is the reason phrase a caller logs, Headers is what a caller reads a content type or a rate-limit budget out of, and Request is the only way back to the url the exchange reached after the base url and the query were folded in, which a redirect chain can move somewhere the caller never spelled. */
 func TestResponse_StatusHeadersAndRequestCarryWhatTheExchangeProduced(t *testing.T) {
     requestedUrl := ""
 
@@ -78,7 +78,7 @@ func TestResponse_StatusHeadersAndRequestCarryWhatTheExchangeProduced(t *testing
     }
 }
 
-/* Headers hands back the map it was constructed with, without a copy, and the buffered path constructs it with the transport's own header map while the STREAMING path clones. This test records the behaviour as it stands today, not as it ought to be: a caller that mutates what Headers returns changes what every later reader of the same response sees, where the sibling API does not. Carried to the backlog as a decision to take, alongside the plural request options. */
+/* Headers hands back the map it was constructed with, without a copy: the buffered path constructs it with the transport's own header map while the STREAMING path clones, so a caller that mutates what Headers returns changes what every later reader of the same response sees. */
 func TestResponse_HeadersHandsBackTheLiveMapWhereTheStreamingSiblingClones(t *testing.T) {
     headers := http.Header{}
     headers.Set("X-Budget", "17")

@@ -86,7 +86,7 @@ func (instance *HttpTestRequest) Attributes() bagcontract.ParameterBag {
     return instance.attributesBagValue
 }
 
-/* Header mirrors the production request, which dereferences its underlying http.Request unguarded: a zero-value HttpTestRequest assembled around the constructor used to get "" here — the one accessor that masked the misuse — so a middleware under test read an absent Authorization header and the test proved the wrong branch. */
+/* Header dereferences the underlying http.Request unguarded, as the production request does, so a misassembled test request fails instead of reading an absent header. */
 func (instance *HttpTestRequest) Header(name string) string {
     return instance.httpRequestValue.Header.Get(name)
 }

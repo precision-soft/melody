@@ -16,7 +16,7 @@ const (
     ServiceCurrencyRepository = "service.example.currency.repository"
 )
 
-/* CurrencyRepository carries a context and an error on every method because one of its implementations talks to a database: a listing that cannot reach mysql has to say so rather than answer with an empty nomenclature, and a request that was cancelled has to stop the query it started. */
+/* CurrencyRepository carries a context and an error on every method, so a listing that cannot reach mysql says so rather than answering an empty nomenclature, and a cancelled request stops its query. */
 type CurrencyRepository interface {
     All(ctx context.Context) ([]*entity.Currency, error)
 
@@ -59,7 +59,7 @@ func CurrencyRepositoryProvider(databaseServiceName string) melodycontainercontr
     }
 }
 
-/* validateCurrency reports the first field the currency fails on, shared by both implementations so a bad write is refused with the same words whichever one the environment picked. */
+/* validateCurrency reports the first field the currency fails on, shared by both implementations so they refuse with the same words. */
 func validateCurrency(currency *entity.Currency) error {
     if nil == currency {
         return fmt.Errorf("currency is required")

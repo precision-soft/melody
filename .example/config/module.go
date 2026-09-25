@@ -34,7 +34,7 @@ const (
 )
 
 type Module struct {
-    /* the databases are held as one registry rather than as *bun.DB handles: the registry opens each connection on first use — after the framework's own services exist — and its Close reaches every pool, which bare handles on module fields would never get. The wiring beside it remembers which of the two connections the environment armed, because the registry alone cannot say whether its default is the catalog or a lone journal. */
+    /* the databases are held as one registry rather than as *bun.DB handles: it opens each connection on first use, after the framework's own services exist, and its Close reaches every pool. The wiring beside it records which connections the environment armed, which the registry alone cannot say. */
     databaseRegistry *melodybunorm.ManagerRegistry
     databaseWiring   databaseWiring
 

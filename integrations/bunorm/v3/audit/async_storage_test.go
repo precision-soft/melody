@@ -955,8 +955,7 @@ func TestAsyncStorage_CloseGraces_ABudgetBelowTheFloorIsNoGrace(t *testing.T) {
         t.Fatalf("expected a remainder above the floor to keep its graces, got %v and %v", drainGrace, cancellationGrace)
     }
 
-    /* a remainder between the floor and twice the floor keeps its DRAIN half, so a save of half a millisecond finishing inside it is not answered "budget already spent", and gives up its CANCELLATION half, in which no reaction can be observed: given as a grace, a delegate honouring its cancellation seven hundred microseconds later would read as having ignored it */
-    /* the remainder is read again inside closeGracesWithin, and a scheduling stall between this deadline and that read moves it, so the assertion is judged on the remainder as it stood AFTER the call, and only while it still sits inside the window the case is about: a stall that pushed it below the floor is not this case, and the call is asked again */
+    /* a remainder between the floor and twice the floor keeps its DRAIN half, so a save of half a millisecond finishing inside it is not answered "budget already spent", and gives up its CANCELLATION half, in which no reaction can be observed: given as a grace, a delegate honouring its cancellation seven hundred microseconds later would read as having ignored it. The remainder is read again inside closeGracesWithin, and a scheduling stall between this deadline and that read moves it, so the assertion is judged on the remainder as it stood AFTER the call, and only while it still sits inside the window the case is about: a stall that pushed it below the floor is not this case, and the call is asked again. */
     for attempt := 0; ; attempt = attempt + 1 {
         narrowContext, cancelNarrow := context.WithTimeout(context.Background(), 1900*time.Microsecond)
 

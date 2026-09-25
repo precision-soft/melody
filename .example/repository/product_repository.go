@@ -16,7 +16,7 @@ const (
     ServiceProductRepository = "service.example.product.repository"
 )
 
-/* ProductRepository carries a context and an error on every method because one of its implementations talks to a database: a listing that cannot reach mysql has to say so rather than answer with an empty catalogue, and a request that was cancelled has to stop the query it started. */
+/* ProductRepository carries a context and an error on every method, so a listing that cannot reach mysql says so rather than answering an empty catalogue, and a cancelled request stops its query. */
 type ProductRepository interface {
     All(ctx context.Context) ([]*entity.Product, error)
 
@@ -33,7 +33,7 @@ func MustGetProductRepository(resolver melodycontainercontract.Resolver) Product
     return melodycontainer.MustFromResolver[ProductRepository](resolver, ServiceProductRepository)
 }
 
-/* ProductRepositoryProvider hands back the catalogue the environment can actually support: the database-backed one when the configuration published a connection, and the in-memory one otherwise. The name of the database service is passed in rather than looked up, because the configuration package that names it is the one that decides whether it exists at all, and an empty name is that decision. */
+/* ProductRepositoryProvider hands back the catalogue the environment can support: the database-backed one when the configuration published a connection, the in-memory one otherwise. The database service name is passed in, since the configuration package decides whether the connection exists, and an empty name is that decision. */
 func ProductRepositoryProvider(databaseServiceName string) melodycontainercontract.Provider[ProductRepository] {
     return func(resolver melodycontainercontract.Resolver) (ProductRepository, error) {
         if "" == databaseServiceName {
@@ -59,7 +59,7 @@ func ProductRepositoryProvider(databaseServiceName string) melodycontainercontra
     }
 }
 
-/* validateProduct reports the first field the product fails on. Both implementations share it so the in-memory catalogue and the database refuse the same writes with the same words, which is what lets the end-to-end assertions hold whichever one the environment picked. */
+/* validateProduct reports the first field the product fails on, shared by both implementations so they refuse with the same words. */
 func validateProduct(product *entity.Product) error {
     if nil == product {
         return fmt.Errorf("product is required")
@@ -92,7 +92,7 @@ func validateProduct(product *entity.Product) error {
     return nil
 }
 
-/* nextProductId continues the seeded numbering rather than inventing a scheme of its own, so an identifier the caller left empty reads like the ones already in the catalogue. */
+/* nextProductId continues the seeded numbering, so an identifier the caller left empty reads like the ones already in the catalogue. */
 func nextProductId(existingIdList []string) string {
     return fmt.Sprintf("prod-%d", highestIdSuffix(existingIdList, "prod-")+1)
 }

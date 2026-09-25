@@ -12,11 +12,11 @@ type Format string
 const (
     FormatTable Format = "table"
     FormatJson  Format = "json"
-    /* FormatJsonPretty is the same document indented for a person reading it by hand. It exists because json is the machine format and a machine reads a stream: one document per line, so a consumer can follow a long-running command live with a line reader and hand each line to a parser whole. Indenting by default made every document many lines, which every line-framed consumer — a log collector's json stage, a `while read line`, a `grep '"failed": true'` — receives as fragments that each fail to parse. */
+    /* FormatJsonPretty is the same document indented for a person reading it by hand; FormatJson writes one document per line, so a line reader can follow a long-running command live. */
     FormatJsonPretty Format = "json-pretty"
 )
 
-/* IsJsonFormat answers for both json spellings, and every place that used to compare against FormatJson asks through it: the two differ in whitespace alone, so a site that recognises one and not the other would color a banner into a document, or print a table where a document was asked for. */
+/* IsJsonFormat answers for both json spellings, which differ in whitespace alone; every site that decides on json asks through it. */
 func IsJsonFormat(format Format) bool {
     return FormatJson == format || FormatJsonPretty == format
 }

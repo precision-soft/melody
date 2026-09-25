@@ -42,7 +42,7 @@ func TestRequiredListenerSkippedError_AnOrdinaryFailureDoesNotAssertToIt(t *test
     }
 }
 
-/* the zero value is constructible outside the constructors that always set the field, and the http kernel reaches this type by assertion and then renders it: dereferencing there replaced a refused request with a dead process. The sibling this type is shaped after answers both questions the same way. */
+/* the zero value is constructible outside the constructors that always set the field, and the http kernel reaches this type by assertion and then renders it, so the zero value answers instead of dereferencing and a refused request never becomes a dead process. */
 func TestRequiredListenerSkippedError_TheZeroValueAnswersInsteadOfDereferencing(t *testing.T) {
     zeroValue := &RequiredListenerSkippedError{}
 

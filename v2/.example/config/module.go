@@ -27,7 +27,7 @@ const (
 )
 
 type Module struct {
-    /* the database is held as its registry rather than as a *bun.DB: the registry opens on first use — after the framework's own services exist — and its Close reaches the pool, which a bare handle on a module field would never get. */
+    /* the database is held as its registry rather than as a *bun.DB: the registry opens on first use, after the framework's own services exist, and its Close reaches the pool. */
     databaseRegistry *melodybunorm.ManagerRegistry
 
     /* redis is opened while the modules are wired, because the rate-limit middleware needs a live limiter at the moment a route is declared. The asymmetry with the database is the point: each integration is wired the way its own API allows. */

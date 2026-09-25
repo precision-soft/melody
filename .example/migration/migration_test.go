@@ -6,10 +6,7 @@ import (
     "testing"
 )
 
-/* the two sets are ONE migration each because the example has one state, so what is pinned here is the
-   CONTENT of each migration — which statements it emits, and in what order — rather than how many steps
-   the schema is spread over. The counts this replaced could not see either: a set of four steps emitted
-   backwards would have satisfied them. */
+/* the two sets are ONE migration each because the example has one state, so what is pinned here is the CONTENT of each migration, which statements it emits and in what order, rather than how many steps the schema is spread over; a count could not see a set emitted backwards. */
 func TestMigrationsHoldOneSchemaMigrationPerDatabase(t *testing.T) {
     sorted := Migrations.Sorted()
     if 1 != len(sorted) {
@@ -98,7 +95,7 @@ func TestDownJournalSchemaDropsTheJournalTableTolerantly(t *testing.T) {
     })
 }
 
-/* every column that holds an entity identifier is compared under utf8mb4_bin: the identity of an id is exact everywhere else — the in-memory repositories and the cache keys — and under the table's default collation a lookup by id folded case and accents, so an alias spelling found the row and was cached under a key nothing invalidates */
+/* every column that holds an entity identifier is compared under utf8mb4_bin: the identity of an id is exact everywhere else, in the in-memory repositories and the cache keys, and under the table's default collation a lookup by id would fold case and accents, so an alias spelling would find the row and be cached under a key nothing invalidates */
 func TestUpSchemaComparesEveryIdentifierColumnByteForByte(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 

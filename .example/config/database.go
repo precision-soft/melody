@@ -21,7 +21,7 @@ const (
     ServiceExampleJournalDatabase  = "service.example.journal.database"
 )
 
-/* the registry names carry the function of each connection, not its engine: the catalog keeps the name the single-database wiring always had, and the journal name is what the db:journal:* command family is pinned to */
+/* the registry names carry the function of each connection, not its engine; the journal name is what the db:journal:* command family is pinned to */
 const (
     databaseProviderNameDefault = "default"
     databaseProviderNameJournal = "journal"
@@ -40,14 +40,12 @@ func databaseWiringFromHosts(catalogHost string, journalHost string) databaseWir
     }
 }
 
-/* dialIsInsecure reads a transport switch. Both providers negotiate a verified TLS handshake by default; the development compose mysql and postgres both speak plain TCP, so the shipped .env arms the insecure dial explicitly for each — the decision is visible in configuration rather than buried in the wiring. The spelling is exact: any value but "true" keeps the verified handshake, because a credential-bearing dial downgrades only on an unambiguous instruction. */
+/* dialIsInsecure reads a transport switch. Both providers negotiate a verified TLS handshake by default, and only the exact value "true" arms the plain dial the development compose databases need, so a credential-bearing dial downgrades only on an unambiguous instruction. */
 func dialIsInsecure(insecureValue string) bool {
     return "true" == insecureValue
 }
 
-/* buildDatabase declares the connections without opening them. bunorm's registry validates the definitions here and dials each one on the first Manager call, which lands after the framework has registered its own services — so the providers find the configuration and the logger they read while connecting, and the retry backoff is reported through the real logger instead of the emergency one.
-
-   An unset host leaves its definition out; with both hosts unset the registry stays nil and nothing is wired: no services, no dial. */
+/* buildDatabase declares the connections without opening them: bunorm's registry validates the definitions here and dials each on the first Manager call, after the framework's own services exist, so the providers find the configuration and the logger. An unset host leaves its definition out; with both unset the registry stays nil and nothing is wired. */
 func (instance *Module) buildDatabase(kernelInstance melodykernelcontract.Kernel) {
     wiring := databaseWiringFromHosts(
         parameterValue(kernelInstance, ParameterDatabaseHost),
@@ -119,7 +117,7 @@ func (instance *Module) buildDatabase(kernelInstance melodykernelcontract.Kernel
     instance.databaseRegistry = registry
 }
 
-/* databaseServiceName names the catalog connection when the environment gave the example one, and answers with the empty string when it did not. The catalog repositories read that answer to decide which of their two implementations they are, so the decision is made once, here, by the code that knows whether the dial was even attempted. The journal is not part of this answer: its presence is a switch of its own. */
+/* databaseServiceName names the catalog connection when the environment configured one, and answers the empty string otherwise; the catalog repositories read it to pick their implementation. The journal is a switch of its own. */
 func (instance *Module) databaseServiceName() string {
     if false == instance.databaseWiring.catalog {
         return ""
@@ -128,7 +126,7 @@ func (instance *Module) databaseServiceName() string {
     return ServiceExampleDatabase
 }
 
-/* journalDatabaseServiceName is the same answer for the journal connection, which is a switch of its own: the catalog can be wired without it, and the reset command then leaves that set alone rather than failing over a database this environment never asked for. */
+/* journalDatabaseServiceName is the same answer for the journal connection: the catalog can be wired without it, and the reset command then leaves that set alone. */
 func (instance *Module) journalDatabaseServiceName() string {
     if false == instance.databaseWiring.journal {
         return ""
@@ -137,7 +135,7 @@ func (instance *Module) journalDatabaseServiceName() string {
     return ServiceExampleJournalDatabase
 }
 
-/* databaseLocation spells the catalog connection as host:port/schema, the one line that separates a reset of this example's volume from a reset of whatever the host happens to point at; the credentials stay out of it, because it is printed. It is read from the parameters the provider reads, so the plan names the database the drops will reach. */
+/* databaseLocation spells the catalog connection as host:port/schema from the parameters the provider reads, without the credentials, since it is printed. */
 func (instance *Module) databaseLocation(kernelInstance melodykernelcontract.Kernel) string {
     return databaseLocationOf(
         parameterValue(kernelInstance, ParameterDatabaseHost),
@@ -184,7 +182,7 @@ func (instance *Module) registerDatabaseServices(registrar melodyapplicationcont
     }
 
     if true == instance.databaseWiring.journal {
-        /* the journal handle is addressed by name alone: the catalog registration above already claims the *bun.DB type index, and a second claim is a boot collision — which is correct, because "the" database of the application is the catalog, and the journal is a connection with a function of its own */
+        /* the journal handle is addressed by name alone: the catalog registration already claims the *bun.DB type index, and "the" database of the application is the catalog */
         registrar.RegisterService(
             ServiceExampleJournalDatabase,
             func(resolver melodycontainercontract.Resolver) (*bun.DB, error) {

@@ -48,7 +48,7 @@ func TestRequestOptions_SetHeaderStoresTheCanonicalKeyDeterministically(t *testi
     }
 }
 
-/* The client's own setter is the other door into a header map that is applied with Set: a rotation spelled differently from the configured key used to leave both entries live, and which credential travelled was decided by map iteration order. */
+/* The client's own setter is the other door into a header map applied with Set: a rotation spelled differently from the configured key overwrites that entry, so no map iteration order picks the credential that travels. */
 func TestHttpClient_SetHeaderRotatesTheCredentialUnderItsCanonicalSpelling(t *testing.T) {
     client := NewHttpClient(NewHttpClientConfig("", 0, map[string]string{"X-Api-Key": "rotated-out"}))
 

@@ -12,14 +12,14 @@ import (
 type HttpException struct {
     statusCode int
     message    string
-    /* stateMutex guards context and alreadyLogged: a memoized failure is shared across request goroutines. The immutable fields need no lock. */
+    /* stateMutex guards context and alreadyLogged: a memoized failure is shared across request goroutines. */
     stateMutex    sync.RWMutex
     context       exceptioncontract.Context
     causeErr      error
     alreadyLogged bool
 }
 
-/* Error keeps the guard Error.Error keeps, for the same reason: a typed-nil *HttpException joined or stored as a cause is rendered through this method before any caller's guard. */
+/* Error answers a nil receiver with a placeholder, as Error.Error does. */
 func (instance *HttpException) Error() string {
     if nil == instance {
         return "http exception carries no value"
@@ -32,7 +32,7 @@ func (instance *HttpException) Error() string {
     return instance.message
 }
 
-/* Unwrap keeps the guard Error.Unwrap keeps, for the same reason: errors.Is walks through this link on a nil receiver whenever a typed-nil *HttpException sits in a chain as another error's cause. */
+/* Unwrap answers nil on a nil receiver, as Error.Unwrap does. */
 func (instance *HttpException) Unwrap() error {
     if nil == instance {
         return nil
@@ -41,7 +41,7 @@ func (instance *HttpException) Unwrap() error {
     return instance.causeErr
 }
 
-/* the accessors answer the nil receiver as Error and Unwrap above do, and as every accessor of ExitError does: the typed nil FromError(nil) produces is a link errors.As matches, and a caller that read it through the interface reached these before any guard. Message answers the empty string where Error answers a placeholder, because Message is the text the producer set and the nil set none, while Error is the rendering a chain shows; StatusCode answers zero, no status at all, since a status a reader would map to a response is exactly what the nil does not carry. */
+/* the accessors answer a nil receiver: Message the empty string, StatusCode zero */
 func (instance *HttpException) Message() string {
     if nil == instance {
         return ""
@@ -80,7 +80,7 @@ func (instance *HttpException) SetContextValue(key string, value any) {
     instance.stateMutex.Lock()
     defer instance.stateMutex.Unlock()
 
-    /* the zero value is constructible outside the constructors and carries a nil map */
+    /* the zero value carries a nil map */
     if nil == instance.context {
         instance.context = make(exceptioncontract.Context)
     }
@@ -129,13 +129,13 @@ func (instance *HttpException) MarkAsLogged() {
 var _ exceptioncontract.ContextProvider = (*HttpException)(nil)
 var _ exceptioncontract.AlreadyLogged = (*HttpException)(nil)
 
-/* IsHttpException answers whether AsHttpException would find a usable exception, so a caller that trusts it and then dereferences cannot meet a disagreement. */
+/* IsHttpException answers whether AsHttpException would find a usable exception. */
 func IsHttpException(err error) bool {
     return nil != AsHttpException(err)
 }
 
 func AsHttpException(err error) *HttpException {
-    /* the typed nil is refused with the plain one before the walk: errors.As walks the chain through Unwrap, and the Unwrap doors of this package answer nil on a nil receiver, so a typed nil deeper in the chain ends the walk rather than the process */
+    /* a typed nil at the top is refused like a plain nil; deeper in the chain the nil-receiver Unwrap ends the walk */
     if nil == err || true == isNilInterfaceValue(err) {
         return nil
     }
@@ -151,7 +151,7 @@ func AsHttpException(err error) *HttpException {
 func ValidationFailed(validationErrors any) *HttpException {
     httpException := NewHttpException(nethttp.StatusUnprocessableEntity, "validation failed")
 
-    /* the errors key is the one the kernel exception listener serves to the client */
+    /* the kernel exception listener serves this key to the client */
     httpException.SetContextValue("errors", validationErrors)
 
     return httpException

@@ -154,7 +154,7 @@ func TestEscapeControlCharactersKeepingNewlines_KeepsOnlyTheNewline(t *testing.T
     }
 }
 
-/* the C1 introducer reaches the escaping as a raw byte at least as readily as in its two-byte encoding — a header value admits 0x9b, and a percent-encoded path segment is decoded to it before it enters a log context — and a walk over runes read that byte as U+FFFD, outside every range the guard checks, so the promise the GoDoc makes for \x9b was kept for the encoded spelling alone. Every byte that starts no valid sequence is spelled \xNN, and what comes out is valid UTF-8. */
+/* the C1 introducer reaches the escaping as a raw byte at least as readily as in its two-byte encoding: a header value admits 0x9b, and a percent-encoded path segment is decoded to it before it enters a log context. A walk over runes would read that byte as U+FFFD, outside every range the guard checks, so every byte that starts no valid sequence is spelled \xNN and what comes out is valid UTF-8. */
 func TestEscapeControlCharacters_EscapesARawByteThatIsNotValidUtf8(t *testing.T) {
     for _, currentCase := range []struct {
         name     string
@@ -178,7 +178,7 @@ func TestEscapeControlCharacters_EscapesARawByteThatIsNotValidUtf8(t *testing.T)
     }
 }
 
-/* once another control character forced the rewrite, the raw byte was written out as U+FFFD: the same input was kept as sent when the byte stood alone and corrupted when a newline stood beside it, and what the client sent was destroyed instead of shown. Neither form may carry the replacement rune. */
+/* a raw byte is spelled \xNN whether it stands alone or beside another control character that forces the rewrite, so the same input is never kept in one case and replaced in the other; neither form carries the replacement rune. */
 func TestEscapeControlCharacters_ARawByteIsNotReplacedWhenAnotherCharacterForcesTheRewrite(t *testing.T) {
     escaped := EscapeControlCharacters("a\x9bb\n")
 
@@ -220,7 +220,7 @@ func TestEscapeControlCharactersKeepingNewlines_EscapesARawByteAndKeepsTheLineBr
     }
 }
 
-/* encoding/json escapes the C0 block and the two Unicode line separators and emits the C1 block raw, so a document carrying U+009B repainted the terminal it was printed to. The rewrite spells the rune as the escape the encoder uses for its own set — in a value, in a key and at both ends of the block — and the decoded document is the one the encoder was given. */
+/* encoding/json escapes the C0 block and the two Unicode line separators and emits the C1 block raw, so a document carrying U+009B would repaint the terminal it is printed to. The rewrite spells the rune as the escape the encoder uses for its own set, in a value, in a key and at both ends of the block, and the decoded document is the one the encoder was given. */
 func TestEscapeJsonC1Block_SpellsEveryC1RuneAsAJsonEscape(t *testing.T) {
     original := map[string]string{
         "k\xc2\x9dey": "a\xc2\x9bb",

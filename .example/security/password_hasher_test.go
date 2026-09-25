@@ -8,7 +8,7 @@ import (
     "time"
 )
 
-/* Two hashes of one password differing is the property the whole change was made for: the seeded rows carry salted hashes, so equality lives in PasswordMatches and nowhere else. */
+/* Two hashes of one password differ, so the seeded rows carry salted hashes and equality lives in PasswordMatches and nowhere else. */
 func TestHashPasswordSaltsEveryCall(t *testing.T) {
     first, firstErr := HashPassword("editor")
     if nil != firstErr {
@@ -92,10 +92,10 @@ func storedValueBcryptCannotRead(plaintextPassword string) string {
     return hex.EncodeToString(digest[:])
 }
 
-/* the window is measured against the cost it separates rather than estimated. bcrypt at the default cost spends about 50ms on a comparison it actually performs; a stored value it cannot read at all was refused in 228ns, five orders of magnitude below that. A floor of five milliseconds sits far above the refusal that does no work and far below the one that does, so neither a loaded machine nor a fast one moves the verdict. */
+/* the floor sits between the two costs it separates: bcrypt at the default cost spends tens of milliseconds on a comparison it performs, and a stored value it cannot read is refused orders of magnitude faster, so five milliseconds is far from both and neither a loaded machine nor a fast one moves the verdict. */
 const equalizedRefusalFloor = 5 * time.Millisecond
 
-/* a refusal bcrypt reaches without deriving a key — a stored value that is not one of its digests — must still cost what a real comparison costs. Unequalized it answered 227.477 times faster than the dummy comparison an absent username pays, so response time told an attacker which accounts hold a value this door cannot use: not merely that a username exists, but that its credential is one this application will refuse whatever is typed. The assertion is on the TIME, because the returned value was already correct while the oracle was open. */
+/* a refusal bcrypt reaches without deriving a key, a stored value that is not one of its digests, must still cost what a real comparison costs, or response time would tell an attacker which accounts hold a credential this door refuses whatever is typed. The assertion is on the TIME, because the returned value is correct either way. */
 func TestPasswordMatches_SpendsTheComparisonOnAStoredValueBcryptCannotRead(t *testing.T) {
     startedAt := time.Now()
     matched := PasswordMatches(storedValueBcryptCannotRead("admin"), "admin")

@@ -44,7 +44,7 @@ func catalogServicesUnderTest(t *testing.T) (*ProductService, *CategoryService, 
     return productService, categoryService, currencyService
 }
 
-/* an identifier the cache-key grammar refuses names a row no write door admits, so it is answered as absent rather than asked of a cache that would refuse the question — which surfaced as a 500 on the read of an id that simply does not exist, where an ordinary absent id answers 404. The sister door on users has carried this pin since it was written; these three had the guard on one major and no pin on either. */
+/* an identifier the cache-key grammar refuses names a row no write door admits, so each of the three readers answers it as absent, a 404 like any absent id, rather than asking a cache that would refuse the question with a 500. */
 func TestCatalogueReadersAnswerAbsentForACacheUnsafeIdentifier(t *testing.T) {
     productService, categoryService, currencyService := catalogServicesUnderTest(t)
 

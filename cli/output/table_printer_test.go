@@ -277,7 +277,7 @@ func TestTablePrinter_ShrinksTheWidestColumnAndWrapsTheSurplus(t *testing.T) {
         }
     }
 
-    /* the header, the separator and a row that no longer fits on one line */
+    /* the header, the separator and a row that does not fit on one line */
     if 4 > renderedLineCount {
         t.Fatalf("expected the oversized row to wrap onto more than one line, got %d rendered lines in %q", renderedLineCount, written)
     }
@@ -420,7 +420,7 @@ func (instance *failingTableWriter) Write(payload []byte) (int, error) {
     return len(payload), nil
 }
 
-/* a writer that answers fewer bytes than it was handed, with no error, has truncated the report exactly as a full disk does; the sink is the application's, so the wrapper cannot trust it to say so */
+/* a writer that answers fewer bytes than it is handed, with no error, has truncated the report as a full disk does */
 type shortTableWriter struct {
     dropped int
 }
@@ -505,7 +505,7 @@ func TestTablePrinter_EscapesControlCharactersInTheTextChannels(t *testing.T) {
     }
 }
 
-/* the escaping runs before the widths are measured, so the escaped spelling is what the alignment counts — escaped at print time instead, the cell renders wider than it measured and the row breaks out of its column. */
+/* the escaping runs before the widths are computed, so the escaped spelling is what the alignment counts */
 func TestTablePrinter_EscapedCellsStayAligned(t *testing.T) {
     envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
     envelope.Table = &TableData{

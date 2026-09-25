@@ -38,7 +38,7 @@ func TestRedactQueryValuesForDiagnostics_LeavesAnEmptyQueryEmpty(t *testing.T) {
     }
 }
 
-/* the internal-auth refusal renders the signed and the request query side by side and fires only when they differ byte for byte, so a redaction that re-encodes through url.Values — sorted names, a repeated name collapsed — rendered the reordered, the duplicated and the differently repeated query as two identical strings */
+/* the internal-auth refusal renders the signed and the request query side by side and fires only when they differ byte for byte, so the redaction keeps order and multiplicity: re-encoded through url.Values, with sorted names and a repeated name collapsed, the reordered, the duplicated and the differently repeated query would render as two identical strings */
 func TestRedactQueryValuesForDiagnostics_KeepsOrderAndMultiplicity(t *testing.T) {
     cases := []struct {
         signed  string
@@ -82,7 +82,7 @@ func TestRedactQueryValuesForDiagnostics_KeepsOrderAndMultiplicity(t *testing.T)
     }
 }
 
-/* an empty segment carries nothing to redact and nothing to diagnose: rendered as the marker it read as a value withheld where nothing was sent */
+/* an empty segment carries nothing to redact and nothing to diagnose, so it stays empty rather than reading as a value withheld where nothing was sent */
 func TestRedactQueryValuesForDiagnostics_LeavesAnEmptySegmentEmpty(t *testing.T) {
     if "a=xxxxx&" != RedactQueryValuesForDiagnostics("a=1&") {
         t.Fatalf("expected the trailing empty segment to stay empty, got %q", RedactQueryValuesForDiagnostics("a=1&"))

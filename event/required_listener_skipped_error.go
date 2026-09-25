@@ -5,9 +5,7 @@ import (
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
 )
 
-/* NewRequiredListenerSkippedError reports that a listener stopped event propagation while a listener marked required through RequiredListenerRegistrar was still behind it, so that listener never ran. The type matters more than the message: it is what lets a caller separate this class from an ordinary listener failure and refuse the dispatch outright, which is what the http kernel does for kernel.request — a stopping listener that also produced a response would otherwise have that response served with access control never consulted.
-
-   Type-assert the error a dispatch returns directly rather than reaching through the cause chain with errors.As: a listener is free to dispatch further events, and one of those nested dispatches skipping a required listener of its own travels up as the cause of an ordinary listener error. Failing the outer dispatch closed for that is a different, wider policy than refusing the dispatch that actually skipped the listener. */
+/* NewRequiredListenerSkippedError reports that a listener stopped propagation while a listener marked required through RequiredListenerRegistrar was still behind it. Its type lets a caller refuse the dispatch outright, as the http kernel does for kernel.request. Type-assert the error a dispatch returns directly rather than through errors.As: a nested dispatch's refusal travels up as the cause of an ordinary listener error. */
 func NewRequiredListenerSkippedError(eventName string, stoppedByListenerName string) *RequiredListenerSkippedError {
     return &RequiredListenerSkippedError{
         exceptionErr: exception.NewError(
@@ -21,7 +19,7 @@ func NewRequiredListenerSkippedError(eventName string, stoppedByListenerName str
     }
 }
 
-/* NewRequiredListenerSkippedErrorWithStoppedListenerFailure reports the stop's own refusal for a listener that FAILED while also stopping propagation with a required listener behind it. The refusal keeps the stop's message and context — the stop is the decision the caller reacts to — and the listener's failure travels as the cause: the failure was deliberately returned unlogged by the dispatch on the promise that the caller's record names it, and without the cause this was the one path on which it reached no log at all. */
+/* NewRequiredListenerSkippedErrorWithStoppedListenerFailure reports the stop's refusal for a listener that failed while also stopping propagation with a required listener behind it. The refusal keeps the stop's message and context, and the listener's failure travels as the cause. */
 func NewRequiredListenerSkippedErrorWithStoppedListenerFailure(eventName string, stoppedByListenerName string, cause error) *RequiredListenerSkippedError {
     return &RequiredListenerSkippedError{
         exceptionErr: exception.NewError(
@@ -35,7 +33,7 @@ func NewRequiredListenerSkippedErrorWithStoppedListenerFailure(eventName string,
     }
 }
 
-/* NewRequiredListenerSkippedErrorWithCause reports the same refusal for a dispatch that ABORTED on a failing listener while a listener marked required was still behind it: a listener that fails ends the dispatch exactly as decisively as one that stops propagation, so the required listener never ran. The failure that ended the dispatch travels as the cause, so the diagnostic of the listener that actually broke is not lost behind the refusal. */
+/* NewRequiredListenerSkippedErrorWithCause reports the same refusal for a dispatch that aborted on a failing listener with a required listener still behind it; the failure travels as the cause. */
 func NewRequiredListenerSkippedErrorWithCause(eventName string, failedListenerName string, cause error) *RequiredListenerSkippedError {
     return &RequiredListenerSkippedError{
         exceptionErr: exception.NewError(
@@ -54,7 +52,7 @@ type RequiredListenerSkippedError struct {
 }
 
 func (instance *RequiredListenerSkippedError) Error() string {
-    /* the zero value is constructible outside the constructors, which always set the field; the sibling this type is shaped after answers the same way rather than dereferencing it */
+    /* the zero value is constructible outside the constructors, which always set the field */
     if nil == instance.exceptionErr {
         return "required listener skipped error carries no error value"
     }

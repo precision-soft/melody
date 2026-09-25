@@ -52,9 +52,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     router.HandleNamed(route.UsersApiDeleteName, "DELETE", route.UsersApiDeletePattern, instance.throttledWrite(handleruser.ApiDeleteHandler()))
 }
 
-/* throttledWrite puts an endpoint behind the shared per-address budget. The catalogue writes go behind it because it is the writes that a runaway script turns into damage; the login submit goes behind it too, because an unthrottled credential door is a password-guessing and username-timing surface a browsed read is not. The reads are left alone deliberately: a catalogue is meant to be browsed.
-
-   Without redis there is no limiter and the handler is returned untouched, which is the same rule the rest of the example follows — an integration the environment did not give it is absent rather than broken. */
+/* throttledWrite puts an endpoint behind the shared per-address budget: the catalogue writes, which a runaway script turns into damage, and the login submit, an unthrottled credential door; the reads are left alone, since a catalogue is meant to be browsed. Without redis there is no limiter and the handler is returned untouched. */
 func (instance *Module) throttledWrite(next melodyhttpcontract.Handler) melodyhttpcontract.Handler {
     if nil == instance.redisRateLimiter {
         return next
@@ -66,7 +64,7 @@ func (instance *Module) throttledWrite(next melodyhttpcontract.Handler) melodyht
     return melodyhttpmiddleware.RateLimitMiddleware(rateLimitConfig)(next)
 }
 
-/* exampleForwardedHeadersPolicy is the ONE trust list of the example, read by the kernel for the scheme and by the limiter for the client address, so the two cannot disagree about which peer is an edge. Loopback is on it because the development stack and the live harness reach the application directly; a forwarded proto from those peers becomes believable too, which is the price of one list and is fine for a showcase that never terminates tls. */
+/* exampleForwardedHeadersPolicy is the ONE trust list of the example, read by the kernel for the scheme and by the limiter for the client address, so the two cannot disagree. Loopback is on it for the development stack and the live harness, so a forwarded proto from those peers is believed too, which a showcase that never terminates tls accepts. */
 func exampleForwardedHeadersPolicy() melodyhttpcontract.ForwardedHeadersPolicy {
     return melodyhttpcontract.ForwardedHeadersPolicy{
         TrustForwardedHeaders: true,

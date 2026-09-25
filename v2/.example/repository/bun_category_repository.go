@@ -100,7 +100,7 @@ func (instance *bunCategoryRepository) FindById(ctx context.Context, id string) 
     return row.toEntity(), true, nil
 }
 
-/* findRowById separates a row that is not there from a query that could not run: only sql.ErrNoRows is an answer, and every other failure is reported. */
+/* findRowById separates a row that is not there from a query that could not run: only sql.ErrNoRows is an answer. */
 func (instance *bunCategoryRepository) findRowById(ctx context.Context, id string) (*categoryRow, bool, error) {
     row := &categoryRow{}
 

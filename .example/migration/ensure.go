@@ -26,7 +26,7 @@ var (
     migrationLockRetryInterval = 250 * time.Millisecond
 )
 
-/* the memoization is keyed by handle and set together: the catalog and the journal database are distinct handles, but nothing in the funnel forbids one handle carrying both sets, and a shared key would let the first set answer for the second */
+/* the memoization is keyed by handle AND set: the catalog and the journal database are distinct handles, but nothing in the funnel forbids one handle carrying both sets, and a key of the handle alone would let the first set answer for the second */
 type migratedSetKey struct {
     database     *bun.DB
     migrationSet *migrate.Migrations
@@ -37,9 +37,7 @@ var (
     migratedDatabaseList = map[migratedSetKey]struct{}{}
 )
 
-/* EnsureMigrated applies the Migrations set to the catalog database, once per handle and per process. The catalog repository providers call it at first resolution, which is what keeps a freshly recreated volume usable without an operator step: the tables appear when the first request reaches a repository, exactly as they did when each repository owned its own create statement.
-
-   Only a success is recorded; a failed attempt is retried at the next resolution. The mutex serializes the providers of one process, and the bun migration lock serializes processes sharing the database — several example applications race here whenever a volume starts empty. */
+/* EnsureMigrated applies the Migrations set to the catalog database, once per handle and per process; the catalog repository providers call it at first resolution, so a freshly recreated volume needs no operator step. Only a success is recorded. The mutex serializes the providers of one process, and the bun migration lock serializes processes sharing the database. */
 func EnsureMigrated(ctx context.Context, database *bun.DB) error {
     return ensureMigratedSet(ctx, database, Migrations, migrationUnlockCommand)
 }
@@ -105,7 +103,7 @@ func acquireMigrationLock(ctx context.Context, migrator *migrate.Migrator, unloc
         }
 
         if migrationLockRetryWindow <= time.Since(startedAt) {
-            /* the refusal names the resource and the remedy: on its own bun's error states that a lock exists and nothing else — not that the db:unlock command exists to clear a lock a crashed process left behind. The bun error stays the cause, so errors.Is still reaches it. */
+            /* the refusal names the resource and the remedy, the unlock command that clears a lock a crashed process left, which bun's error does not; the bun error stays the cause, so errors.Is still reaches it */
             return false, melodyexception.NewError(
                 "migration: the migration lock is held; another migration is running, or a crashed one left it behind",
                 melodyexceptioncontract.Context{
@@ -160,20 +158,7 @@ func migrateWhileLocked(ctx context.Context, migrator *migrate.Migrator, unlockC
     return migrateErr
 }
 
-/* Reset brings a database back to the schema this application declares, whatever shape it was left in:
-   the tables the set owns are dropped, the bookkeeping is dropped and recreated with them, the single
-   migration is applied again, and the memo this package keeps for the handle is cleared so a resolution
-   later in the same process does not answer from a state that no longer exists.
-
-   It is the answer this example gives to a volume provisioned by an older build. An example is not a
-   project with a past: it has one state, the present one, so it carries no migration that repairs its
-   history — the reset is where a database in an older shape is brought to the present one, and dropping
-   the bookkeeping is the half that matters there, because a volume migrated by an older set still holds
-   the rows of steps this schema no longer has.
-
-   No migration lock is taken, and that is not an omission: the reset drops the very table the lock lives
-   in, so no lock could span it. It is an operator command over a development volume, run deliberately,
-   and the caller is what serializes it. */
+/* Reset brings a database back to the schema this application declares, whatever shape it was left in: the tables the set owns are dropped, the bookkeeping is dropped and recreated with them, the single migration is applied again, and this package's memo for the handle is cleared. It is how a volume in an older shape reaches the present one, the bookkeeping drop removing the rows of steps this schema does not have. No migration lock is taken: the reset drops the very table the lock lives in, so it is an operator command over a development volume, serialized by its caller. */
 func Reset(ctx context.Context, database *bun.DB) error {
     return resetSet(ctx, database, Migrations)
 }
@@ -197,10 +182,7 @@ func resetSet(ctx context.Context, database *bun.DB, migrationSet *migrate.Migra
         return initErr
     }
 
-    /* the down of the set is run before the bookkeeping goes, rather than through the migrator's own
-       rollback: a rollback reverts the last GROUP, so a volume whose rows name steps this schema no
-       longer has would leave its tables standing. The set is one migration, so its down is the whole
-       schema. */
+    /* the down of the set is run before the bookkeeping goes, rather than through the migrator's rollback: a rollback reverts the last group, so a volume whose rows name steps this schema does not have would keep its tables. The set is one migration, so its down is the whole schema. */
     for _, migrationInstance := range migrationSet.Sorted() {
         if nil == migrationInstance.Down {
             continue

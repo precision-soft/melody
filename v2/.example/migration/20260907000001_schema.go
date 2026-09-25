@@ -10,9 +10,7 @@ func init() {
     Migrations.MustRegister(upSchema, downSchema)
 }
 
-/* upSchema creates the five tables this example owns in one step. The set is one migration rather than a history of them because this application has no history: an example has a single state, the present one, and its schema is the statement of that state. A volume left in an older shape is brought to it by example:db:reset, not by a step that repairs its past.
-
-   Every statement is tolerant of a volume provisioned before the set, and of several processes of this example applying the set at the same time. */
+/* upSchema creates the five tables this example owns in one step: the example has a single state, the present one, and its schema is the statement of that state; a volume in an older shape is brought to it by example:db:reset. Every statement tolerates a volume provisioned before the set and several processes applying it at once. */
 func upSchema(ctx context.Context, database *bun.DB) error {
     for _, statement := range schemaUpStatementList {
         if _, execErr := database.ExecContext(ctx, statement); nil != execErr {
@@ -23,7 +21,7 @@ func upSchema(ctx context.Context, database *bun.DB) error {
     return nil
 }
 
-/* downSchema drops what upSchema created, in the reverse order: the schema carries no foreign keys today, and reversing the order anyway is what keeps the step correct the day one is added. */
+/* downSchema drops what upSchema created, in reverse order, so the step stays correct once a foreign key is added. */
 func downSchema(ctx context.Context, database *bun.DB) error {
     for _, statement := range schemaDownStatementList {
         if _, execErr := database.ExecContext(ctx, statement); nil != execErr {
@@ -34,7 +32,7 @@ func downSchema(ctx context.Context, database *bun.DB) error {
     return nil
 }
 
-/* the column definitions mirror the tables the bun create-table builder used to produce, captured from a live SHOW CREATE TABLE, so a volume provisioned before the migration set and one provisioned by it hold the same schema — with one departure: every column that holds an entity identifier is compared under utf8mb4_bin. The identity of an id is EXACT everywhere else in this application: the in-memory repositories compare it byte for byte and the cache keys carry it as spelled; under the table's default utf8mb4_0900_ai_ci a lookup by id folded case and accents, so `CUR-EUR` found the `cur-eur` row and was cached under a key nothing invalidates, and a product could be stored pointing at a spelling the read door then reported as a currency the catalogue does not carry. A volume provisioned before this collation keeps its own — the tables are created IF NOT EXISTS — and example:db:reset is the door that brings it here. */
+/* the column definitions are those of a live SHOW CREATE TABLE of the bun-built tables, so a volume provisioned before the set and one provisioned by it hold the same schema, with one departure: every column holding an entity identifier is compared under utf8mb4_bin, because an id's identity is exact everywhere else in this application, in the in-memory repositories and in the cache keys, while the default collation folds case and accents. A volume provisioned before this collation keeps its own, since the tables are created IF NOT EXISTS; example:db:reset brings it here. */
 const createCategoryTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v2_category` (" +
     "`id` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
     "`name` VARCHAR(255) NOT NULL, " +

@@ -51,8 +51,7 @@ func acceptQuality(acceptHeader string, mediaType string) (float64, int) {
     slashIndex := strings.IndexByte(mediaType, '/')
     typeWildcard := mediaType[:slashIndex+1] + "*"
 
-    /* members and parameters split outside quoted sections, the serializer reader's grammar: a bare split would cut through a quoted parameter value and lose the refusal a q=0 after it carries */
-    /* a header the member cap cut is read as unparsable, so nothing matches: the members past the cap can carry a refusal (text/html;q=0) that a wildcard before it does not */
+    /* members and parameters split outside quoted sections, the serializer reader's grammar: a bare split would cut through a quoted parameter value and lose the refusal a q=0 after it carries. A header the member cap cut is read as unparsable, so nothing matches, since the members past the cap can carry a refusal (text/html;q=0) that a wildcard before it does not. */
     entries, cut := internal.SplitOutsideQuotes(acceptHeader, ',')
     if true == cut {
         return quality, position

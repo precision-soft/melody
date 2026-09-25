@@ -37,7 +37,7 @@ func TestLoginRedirectEntryPointRefusesAnApiClientWithoutRedirecting(t *testing.
     }
 }
 
-/* A client that ranks html BELOW json is asking for json. Reading the header by substring found "text/html" anywhere in it and answered a redirect, so an api client that merely tolerates html was sent to a login page it cannot render — and the 302 arrived where the caller was waiting for a status it could branch on. */
+/* A client that ranks html BELOW json is asking for json, so the entry point reads the weight rather than finding "text/html" anywhere in the header: an api client that merely tolerates html gets a status it can branch on, not a redirect to a login page it cannot render. */
 func TestLoginRedirectEntryPointHonoursTheWeightTheClientGaveHtml(t *testing.T) {
     entryPoint := NewLoginRedirectEntryPoint(route.LoginPagePattern)
 
@@ -65,7 +65,7 @@ func TestLoginRedirectEntryPointHonoursAnExplicitHtmlRefusal(t *testing.T) {
     }
 }
 
-/* The Accept field is list-typed, so a client may send it as several lines. Reading only the first line answered a browser with json whenever it put html on the second one. */
+/* The Accept field is list-typed, so a client may send it as several lines, and a browser that puts html on the second one is still redirected. */
 func TestLoginRedirectEntryPointReadsEveryAcceptLine(t *testing.T) {
     entryPoint := NewLoginRedirectEntryPoint(route.LoginPagePattern)
 

@@ -8,7 +8,7 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
 )
 
-/* canonicalHeaderMap normalizes every key to its canonical header spelling and refuses two spellings that collapse onto one: the maps are applied to the request with Set, which canonicalizes, so x-api-key and X-Api-Key in one map stayed two entries whose survivor was chosen by map iteration order — a different value per request, in what is often a credential header. The serializer refuses colliding mime spellings at construction for the same reason. This is the constructor's door, so the refusal is a panic: a colliding map handed to the wiring is refused where the mistake is made. The request-time door, SetHeaders, reads canonicalizeHeaderMap instead and keeps the refusal for the request. */
+/* canonicalHeaderMap normalizes every key to its canonical header spelling and refuses two spellings that collapse onto one, which would otherwise leave the value sent, often a credential, to map iteration order. It is the constructor's door, so the refusal is a panic at the wiring; SetHeaders reads canonicalizeHeaderMap instead. */
 func canonicalHeaderMap(headers map[string]string) map[string]string {
     canonical, err := canonicalizeHeaderMap(headers)
     if nil != err {
@@ -53,7 +53,7 @@ func canonicalizeHeaderMap(headers map[string]string) (map[string]string, *excep
     return canonical, nil
 }
 
-/* canonicalHeaderKey is the one reader of the spelling rule: every door that writes into a header map goes through it, so a key stored by the constructor and the same key stored by a setter land on the same entry. */
+/* canonicalHeaderKey is the one reader of the spelling rule, so a key stored by the constructor and by a setter land on the same entry. */
 func canonicalHeaderKey(key string) string {
     return textproto.CanonicalMIMEHeaderKey(key)
 }

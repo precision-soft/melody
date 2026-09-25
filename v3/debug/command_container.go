@@ -852,6 +852,7 @@ type errorContextVisitKey struct {
 var plainContextMapType = reflect.TypeOf(map[string]any(nil))
 var plainContextSliceType = reflect.TypeOf([]any(nil))
 
+/* sanitizeErrorContextValueTracked runs before json.Marshal sees the context, so it carries its own cycle guard over the containers on the current path. */
 func sanitizeErrorContextValueTracked(value any, seen map[errorContextVisitKey]struct{}, depth int, keepNoiseKeys bool) any {
     if nil == value {
         return nil

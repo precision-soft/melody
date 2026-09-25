@@ -15,7 +15,7 @@ func Render(
 
     printErr := printer.Print(writer, envelope, option)
     if nil != printErr {
-        /* the envelope's own failure must survive a printing that did not: the print error alone would replace the reason the command failed with the reason the report could not be written, and the failure the envelope carried exists nowhere else */
+        /* the envelope's own failure survives a printing failure, which would otherwise replace the reason the command failed */
         reportedErr := envelopeExitError(envelope)
         if nil == reportedErr {
             return printErr
@@ -33,7 +33,7 @@ func Render(
     return envelopeExitError(envelope)
 }
 
-/* the rendered envelope is the command result, so an envelope reporting a failure has to leave the process with a non-zero status: a deployment gate such as `app debug:container app.repository.order || exit 1` is otherwise passed by a service that does not resolve. The error is returned unmarked so the exit path writes it to the application log: the rendered report lives only on the output streams, and a run that failed used to be invisible to anything reading the log file. */
+/* the rendered envelope is the command result, so an envelope reporting a failure leaves the process with a non-zero status, which a deployment gate such as `app debug:container app.repository.order || exit 1` relies on. It is returned unmarked so the exit path writes it to the application log. */
 func envelopeExitError(envelope Envelope) error {
     if nil == envelope.Error {
         return nil

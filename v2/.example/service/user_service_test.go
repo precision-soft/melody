@@ -196,9 +196,7 @@ func TestAuthenticateByUsernameAndPasswordRefusesAUserWithoutRoles(t *testing.T)
     }
 }
 
-/* an identifier the cache-key grammar refuses names a row no write door admits; before the guard, the finder handed the spelling to the cache and the refusal surfaced as a 500 on the read of an id that simply does not exist.
-
-   The cache under the assertion REFUSES such a key, the way the redis backend does. An in-memory backend accepts anything a Go map accepts, so over one the guard has no observable effect at all and the assertion agrees with itself — the same test written over the in-memory manager passes whether or not the guard is there. */
+/* an identifier the cache-key grammar refuses names a row no write door admits, so the finder answers it as absent rather than handing it to a cache that would refuse it with a 500. The cache under the assertion REFUSES such a key, the way the redis backend does, since over an in-memory backend the guard has no observable effect. */
 func TestFindByIdAnswersAbsentForACacheUnsafeIdentifier(t *testing.T) {
     refusingCache := &keyGrammarCache{}
 
@@ -235,7 +233,7 @@ func TestAuthenticateRefusesACacheUnsafeUsernameQuietly(t *testing.T) {
     }
 }
 
-/* the previous spelling travels in the event precisely so the listener can drop the cache entry a rename leaves behind — the updated entity no longer knows it */
+/* the previous spelling travels in the event so the listener can drop the cache entry a rename leaves behind, which the updated entity cannot name */
 func TestUpdateCarriesThePreviousUsernameOnTheEvent(t *testing.T) {
     frozenClock := melodyclock.NewFrozenClock(userServiceFixtureTime)
 
@@ -299,7 +297,7 @@ func TestUpdateCarriesThePreviousUsernameOnTheEvent(t *testing.T) {
     }
 }
 
-/* the changes land on a copy, so a rename the repository refuses leaves the STORED account as it was: written onto the loaded entity — the in-memory repository's own value — the refusal came after the rename had already happened in the directory, and two accounts folded onto one username while the caller read a failure */
+/* the changes land on a copy, so a rename the repository refuses leaves the STORED account as it was, rather than two accounts folding onto one username while the caller reads a failure */
 func TestUpdateRefusedByTheRepositoryLeavesTheStoredAccountUntouched(t *testing.T) {
     userService := newUserServiceUnderTest(t)
 
@@ -318,7 +316,7 @@ func TestUpdateRefusedByTheRepositoryLeavesTheStoredAccountUntouched(t *testing.
         t.Fatalf("expected the rename onto a taken username to be refused, got updated=%v err=%v", updated, updateErr)
     }
 
-    /* read the REPOSITORY, not the service: the service serves what it memoised (§5.300) */
+    /* read the REPOSITORY, not the service: the service serves what it memoised */
     stored, found, findErr := userService.userRepository.FindById(context.Background(), renamed.Id)
     if nil != findErr || false == found {
         t.Fatalf("expected the renamed account to still exist, got found=%v err=%v", found, findErr)

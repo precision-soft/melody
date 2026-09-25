@@ -467,8 +467,7 @@ func addFieldProperty(
         markFieldUnsatisfiable(propertySchema)
     }
 
-    /* the required and validation decisions read the bare scalar schema, since the validator sees the decoded value; the quoted form only changes the spelling */
-    /* a rule set that rejects every value rejects the absent field too, since it decodes to the zero value, so the field is listed required; so is a non-pointer field of an unsatisfiable component, while a pointer field stays optional */
+    /* the required and validation decisions read the bare scalar schema, since the validator sees the decoded value and the quoted form only changes the spelling. A rule set that rejects every value rejects the absent field too, since it decodes to the zero value, so the field is listed required; so is a non-pointer field of an unsatisfiable component, while a pointer field stays optional. */
     fieldRequired := true == isRequired(field, propertySchema) ||
         true == pointerBoundRequiresPresence(field) ||
         true == zeroValueRejectsAbsentProperty(field, propertySchema) ||

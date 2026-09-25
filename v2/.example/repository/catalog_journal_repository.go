@@ -11,18 +11,16 @@ import (
 const (
     ServiceCatalogJournalRepository = "service.example.catalog.journal.repository"
 
-    /* the actions a journal entry can carry. They are the three things that happen to a nomenclature record, named once so the writers and the readers agree. */
+    /* the actions a journal entry can carry, the three things that happen to a nomenclature record */
     CatalogJournalActionCreated = "created"
     CatalogJournalActionUpdated = "updated"
     CatalogJournalActionDeleted = "deleted"
 
-    /* the actor a write carries when nobody was signed in — a scheduled command or a console run changes the nomenclature just as a person does, and the journal says which. */
+    /* the actor of a write made with nobody signed in, a scheduled command or a console run */
     CatalogJournalActorSystem = "system"
 )
 
-/* CatalogJournalEntry is one change to the nomenclature: who made it, what they did, and to which record.
-
-   It lives here rather than in the entity package on purpose: the domain entities are cached through a gob serializer and carry no storage concerns, so the one type that does carry them stays beside the repository that maps it. */
+/* CatalogJournalEntry is one change to the nomenclature: who made it, what they did, and to which record. It lives beside the repository that maps it rather than in the entity package, whose entities are cached through a gob serializer and carry no storage concerns. */
 type CatalogJournalEntry struct {
     Id         int64
     Actor      string

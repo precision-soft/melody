@@ -116,7 +116,7 @@ func requestAcceptingLines(t *testing.T, runtimeInstance melodyruntimecontract.R
     return melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("test", time.Now()))
 }
 
-/* the Accept field is list-typed and a client may spell it over several lines; Header.Get answers only the first, so a blanket refusal sent on line one used to hide an available type named on line two. The probe drives the SUCCESS path deliberately: it is the only path where a refused negotiation still shows, because a refusal keeps the status it earned whatever the header says, and therefore cannot tell the two readings apart. The first line has to REFUSE rather than merely miss — an unmatched type falls back to the default serializer, so a pair like "application/xml" then "application/json" would pass under either reading. */
+/* the Accept field is list-typed and a client may spell it over several lines; Header.Get answers only the first, so a blanket refusal sent on line one would hide an available type named on line two. The probe drives the SUCCESS path deliberately: it is the only path where a refused negotiation still shows, because a refusal keeps the status it earned whatever the header says. The first line has to REFUSE rather than merely miss, since an unmatched type falls back to the default serializer and a pair like "application/xml" then "application/json" would pass under either reading. */
 func TestBuildApiResponseReadsEveryAcceptLine(t *testing.T) {
     runtimeInstance, _ := runtimeRefusingEveryMediaType(t)
 
@@ -413,9 +413,7 @@ func runtimeWithJournal(t *testing.T) (melodyruntimecontract.Runtime, melodyhttp
     return runtimeInstance, request, logger
 }
 
-/* the kernel journals a handler's failure only when it is RETURNED; a 500 answered as a Response reached the
-   terminate listener alone, so outside development the cause existed nowhere — the presenter writes the one
-   record, at error, with the cause and the route, and only for the server's own class */
+/* the kernel journals a handler's failure only when it is RETURNED, so for a 500 answered as a Response the presenter writes the one record, at error, with the cause and the route, and only for the server's own class */
 func TestApiErrorWithErrJournalsTheCauseOfAServerError(t *testing.T) {
     runtimeInstance, request, logger := runtimeWithJournal(t)
 
@@ -481,9 +479,7 @@ func TestApiErrorJournalsNothingWithoutACause(t *testing.T) {
     }
 }
 
-/* the kernel installs a logger on the request's SCOPE that stamps every record with the request identifier;
-   the presenter resolves through the runtime, so the record lands there — on the root container's logger
-   it carried no identifier, and nothing tied it to the "request completed 500" line of the same request */
+/* the kernel installs a logger on the request's SCOPE that stamps every record with the request identifier; the presenter resolves through the runtime, so the record lands there and is tied to the "request completed 500" line of the same request */
 func TestApiErrorWithErrJournalsThroughTheRequestsScopedLogger(t *testing.T) {
     runtimeInstance, request, rootLogger := runtimeWithJournal(t)
 

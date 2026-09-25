@@ -141,7 +141,7 @@ type adminUserUpdateRequest struct {
     Roles    []string `json:"roles"`
 }
 
-/* rolesForUpdate answers the roles an update should store: the ones the body named, normalised, or the ones the target already holds when the body named none. An omitted roles field keeps the target's roles, as an omitted username and password keep theirs, so an administrator editing their own account keeps its roles; a list sent explicitly empty is an opinion and still falls back to the base role, which is the rule normalizeRoles carries; the decoder separates the two, leaving the field nil only when the caller never named it. */
+/* rolesForUpdate answers the roles an update stores: the ones the body named, normalised, or the target's own when the body named none, as an omitted username or password is kept. An explicitly empty list falls back to the base role, the rule normalizeRoles carries; the decoder leaves the field nil only when the caller never named it. */
 func rolesForUpdate(requested []string, current []string) []string {
     if nil == requested {
         return current
@@ -150,7 +150,7 @@ func rolesForUpdate(requested []string, current []string) []string {
     return normalizeRoles(requested)
 }
 
-/* protectsAnotherAdmin answers whether the change the actor is asking for would touch an administrator who is not the actor. An administrator may edit and delete their own account and everyone below them, and may not reach a peer: an account that can grant roles is the one account whose holder must not be able to lock a colleague out or take their place quietly. Both the update and the delete door ask the same question, so the two cannot drift apart on who is protected — only on the words they refuse with. */
+/* protectsAnotherAdmin answers whether the change would touch an administrator who is not the actor. An administrator may edit and delete their own account and everyone below, never a peer; the update and the delete door both ask it. */
 func protectsAnotherAdmin(actorUserId string, targetUser *entity.User) bool {
     if nil == targetUser {
         return false

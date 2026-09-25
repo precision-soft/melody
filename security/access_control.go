@@ -158,7 +158,7 @@ func NewAccessControlRegexRule(pattern string, attributes ...string) AccessContr
     return rule
 }
 
-/* Deprecated: use NewAccessControlRule, which now builds the segment-prefix rule this constructor always built. Kept as an alias so existing callers continue to compile. */
+/* Deprecated: use NewAccessControlRule, which builds the same segment-prefix rule. Kept as an alias so existing callers continue to compile. */
 func NewAccessControlRuleWithSegmentPrefix(pathPrefix string, attributes ...string) AccessControlRule {
     return NewAccessControlRule(pathPrefix, attributes...)
 }

@@ -140,7 +140,7 @@ func TestError_UnwrapOnANilReceiverAnswersNil(t *testing.T) {
     }
 }
 
-/* FromError(nil) answers a typed nil, and errors.Join skips only a nil INTERFACE, so a join holding it called Error on the nil receiver and panicked when rendered; Error answers for the receiver as Unwrap already did. */
+/* FromError(nil) answers a typed nil, and errors.Join skips only a nil INTERFACE, so a join holding it calls Error on the nil receiver when rendered; Error answers for the receiver as Unwrap does. */
 func TestError_ErrorOnANilReceiverAnswersInsteadOfDereferencing(t *testing.T) {
     var typedNil *Error
 

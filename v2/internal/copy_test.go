@@ -506,7 +506,7 @@ func TestCopyAnyMap_SubslicesOfOneArrayStayDistinct(t *testing.T) {
 type copyProbeMeta map[string]any
 type copyProbeList []any
 
-/* a defined type over map[string]any shares its header with the plain map it was converted from, so the memo saw one pointer under two static types and the typed fast path asserted the reflect path's copy; both orders of the two keys are constructed explicitly, because the map iteration order that made it intermittent is not something a test can control */
+/* a defined type over map[string]any shares its header with the plain map it was converted from, so the memo sees one pointer under two static types and keys them apart; both orders of the two keys are constructed explicitly, because the map iteration order a failure would depend on is not something a test can control */
 func TestCopyAnyMap_ANamedMapTypeSharingABackingArrayDoesNotPoisonTheMemo(t *testing.T) {
     shared := map[string]any{"k": 1}
     plainThenNamed := map[string]any{"a": shared, "b": copyProbeMeta(shared)}

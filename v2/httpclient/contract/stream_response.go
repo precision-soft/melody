@@ -5,7 +5,7 @@ import (
     nethttp "net/http"
 )
 
-/* StreamResponse is a response whose body is still on the wire. The caller owns it: Close it on every path, including the ones that never read the body, because the connection behind it is released by nothing else. */
+/* StreamResponse is a response whose body is still on the wire. The caller owns it and closes it on every path, including those that never read the body, since nothing else releases the connection. */
 type StreamResponse interface {
     StatusCode() int
 

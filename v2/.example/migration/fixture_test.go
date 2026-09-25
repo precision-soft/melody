@@ -262,10 +262,7 @@ var (
     _ schema.Dialect        = (*fakeDialect)(nil)
 )
 
-/* assertQueryOrder pins the SEQUENCE a migration emits, not just its membership: the recorded list must
-   hold exactly as many statements as the expectation, each containing the fragment at the same position.
-   A schema folded into one migration has no step boundaries left to carry the order, so the order is what
-   the test has to say — and the count it replaced could not have seen a set emitted backwards. */
+/* assertQueryOrder pins the SEQUENCE a migration emits, not just its membership: the recorded list must hold exactly as many statements as the expectation, each containing the fragment at the same position. A schema folded into one migration has no step boundaries left to carry the order, so the order is what the test states, and a count alone could not see a set emitted backwards. */
 func assertQueryOrder(t *testing.T, recorded []string, expectedFragmentList []string) {
     t.Helper()
 
@@ -285,9 +282,7 @@ func assertQueryOrder(t *testing.T, recorded []string, expectedFragmentList []st
     }
 }
 
-/* indexOfQueryContaining answers where a statement carrying the fragment was recorded, or -1. The order of
-   the recorded statements is the property the reset tests assert, so they need positions rather than
-   presence. */
+/* indexOfQueryContaining answers the position of the recorded statement carrying the fragment, or -1: the reset tests assert the order of the statements, so they need positions rather than presence. */
 func indexOfQueryContaining(recorded []string, fragment string) int {
     for index, query := range recorded {
         if true == strings.Contains(query, fragment) {

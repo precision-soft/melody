@@ -39,7 +39,7 @@ type EventDispatcher struct {
     subscriberRegistrations map[subscriberIdentity][]subscriberRegistration
     clock                   clockcontract.Clock
     nextListenerId          uint64
-    /* subscriberMutex serializes whole subscriber installations and removals against each other; it is always taken before mutex and never inside it. The per-listener mutex keeps each individual step consistent, but a subscriber spans several of them: without this outer section, two concurrent AddSubscriber calls for one identity both pass the duplicate refusal and install every listener twice, and a RemoveSubscriber interleaved with an AddSubscriber removes the half already installed while the rest keeps arriving under a record the remover was just told is gone. */
+    /* subscriberMutex serializes whole subscriber installations and removals against each other; it is always taken before mutex and never inside it, so a removal never interleaves with the installation it undoes. */
     subscriberMutex sync.Mutex
 }
 
@@ -98,9 +98,7 @@ func (instance *EventDispatcher) AddListener(
     }
 }
 
-/* MarkListenerRequired flags the registered listener so that if another listener stops event propagation before it runs, dispatch returns a RequiredListenerSkippedError and the caller can fail closed. An unknown registration is refused rather than ignored: a mark that lands nowhere leaves the guarantee unarmed while reporting that it was applied, and the caller has no way to tell.
-
-   The mark necessarily follows the registration it takes as its argument, so a dispatch running between the two steps sees the listener unmarked and a stop in that window skips it without the error. Registration at boot — before anything dispatches — closes the window; a runtime registrar that needs the guarantee armed atomically must not dispatch the event until the mark is applied. */
+/* MarkListenerRequired flags the registered listener so that, if another listener stops propagation before it runs, dispatch returns a RequiredListenerSkippedError and the caller can fail closed. An unknown registration is refused. The mark follows the registration, so a dispatch between the two sees the listener unmarked; register at boot, or do not dispatch the event until the mark is applied. */
 func (instance *EventDispatcher) MarkListenerRequired(registration eventcontract.ListenerRegistration) {
     instance.markListenerFlag(registration, func(entry *listenerWithPriority) {
         entry.required = true
@@ -220,7 +218,7 @@ func (instance *EventDispatcher) AddSubscriber(subscriber eventcontract.EventSub
         "add a subscriber",
     )
 
-    /* every subscribed event is validated before a single listener is registered: validating while registering left a subscriber whose second event was malformed half-installed, with the listeners of the first one live and firing under a subscriber the caller was told had been refused */
+    /* every subscribed event is validated before a single listener is registered, so a malformed subscriber is never half-installed */
     plannedList := planSubscriberRegistrations(subscriber)
 
     instance.subscriberMutex.Lock()
@@ -230,7 +228,7 @@ func (instance *EventDispatcher) AddSubscriber(subscriber eventcontract.EventSub
     _, alreadyRegistered := instance.subscriberRegistrations[subscriberIdentityValue]
     instance.mutex.Unlock()
 
-    /* a subscriber that carries no fields occupies no memory, and every zero-size allocation in Go answers one address, so two instances of such a type are one identity here and nothing in the value can ever tell them apart. Refusing the second registration is what keeps the ambiguity out of the dispatcher: left in, a later RemoveSubscriber for either instance takes both instances' listeners down and reports a plausible count for it. */
+    /* a subscriber that carries no fields occupies no memory and every zero-size allocation answers one address, so two instances of such a type are one identity here; the second registration is refused, or a later RemoveSubscriber for either instance would take both instances' listeners down */
     if true == alreadyRegistered {
         exception.Panic(
             exception.NewError(
@@ -308,7 +306,7 @@ func (instance *EventDispatcher) DispatchName(runtimeInstance runtimecontract.Ru
     )
 }
 
-/* RegisteredEvents reports a point-in-time view: a subscriber installation running concurrently is observed mid-step — a listener already live whose owning registration is not recorded yet answers with no owner until the installation finishes. Dispatch correctness never depends on this view. */
+/* RegisteredEvents reports a point-in-time view: a listener of a subscriber installation still running is live with no owner recorded until the installation finishes. Dispatch never depends on this view. */
 func (instance *EventDispatcher) RegisteredEvents() []eventcontract.RegisteredEvent {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
@@ -405,7 +403,7 @@ func (instance *EventDispatcher) dispatchSafely(runtimeInstance runtimecontract.
         eventName := "-"
         eventType := "-"
 
-        /* the test reads through the interface: the typed nil this handler exists to describe passes a plain comparison and dereferences on Name() below — a second panic raised inside the recovery, which discards the diagnostic being built and leaves the caller with a bare memory address */
+        /* the test reads through the interface, since a typed nil would dereference on Name() below, a second panic inside the recovery */
         if false == internal.IsNilInterface(eventValue) {
             eventName = eventValue.Name()
 
@@ -458,7 +456,7 @@ func (instance *EventDispatcher) dispatch(runtimeInstance runtimecontract.Runtim
 
     logger := logging.LoggerMustFromRuntime(runtimeInstance)
 
-    /* asked once per dispatch rather than per record: the kernel dispatches at least three events per request, and each of the debug records below assembles a context map at the call site that a journal above debug throws away unread. The listener name behind the second one costs a reflect.Value and a runtime.FuncForPC per listener per dispatch on top of that, which is why it is resolved through listenerNameOf where it is used rather than ahead of every branch. A logger that cannot answer the question reports enabled, so a dispatch logs exactly what it always did. */
+    /* asked once per dispatch: the debug records below assemble a context map a journal above debug discards, and the listener name is resolved through listenerNameOf only where used. A logger that cannot answer reports enabled. */
     debugEnabled := logging.LevelEnabled(logger, loggingcontract.LevelDebug)
 
     dispatchStartedAt := time.Now()
@@ -478,7 +476,7 @@ func (instance *EventDispatcher) dispatch(runtimeInstance runtimecontract.Runtim
     stoppedByListenerMaySkip := false
 
     for listenerIndex = 0; listenerIndex < len(listenerList); listenerIndex++ {
-        /* the propagation test opens the iteration rather than closing it: tested only after a listener ran, an event that arrived already stopped — the object a previous dispatch returned — still ran the first listener and then had that listener named as the one that stopped it, while the required listeners behind it were skipped under a stopper that had stopped nothing */
+        /* propagation is tested before each listener runs, so an event that arrives already stopped runs none of them */
         if true == eventValue.IsPropagationStopped() {
             break
         }
@@ -510,8 +508,7 @@ func (instance *EventDispatcher) dispatch(runtimeInstance runtimecontract.Runtim
         if nil != err {
             listenerName := listenerNameOf(entry.listener)
 
-            /* a listener that fails ends the dispatch exactly as decisively as one that stops propagation: the listeners behind it — a required access-control listener among them — never ran. Returning the listener's own failure first would hide that, so the skip is reported ahead of it, and the failure travels as the cause on both branches: with the stop's own refusal where the listener also stopped propagation, with the abort refusal where the failure alone ended the dispatch — a listener that failed while also producing a response would otherwise have that response served with access control never consulted, and the failure returned unlogged would reach no log at all behind a causeless refusal. */
-            /* the opt-out is not read here: MarkListenerMaySkipRequiredListeners licenses a listener that knowingly short-circuits, which is what stopping propagation is, and a failure is not a short-circuit anyone chose. Read on this branch it granted the marked listener MORE than the stop it was written for — a listener that failed after setting a response had that response served with the required access-control listener never consulted, because the kernel tells the two cases apart by the TYPE of the error the dispatch returns. */
+            /* a failing listener ends the dispatch as decisively as a stop, so a required listener behind it is reported skipped ahead of the failure, which travels as the cause on both branches. The opt-out is not read here: MarkListenerMaySkipRequiredListeners licenses a chosen short-circuit, a failure is not one, and the kernel tells the two apart by the type of the error. */
             requiredErr := refuseSkippedRequiredListeners(
                 eventName,
                 listenerList[listenerIndex+1:],
@@ -529,7 +526,7 @@ func (instance *EventDispatcher) dispatch(runtimeInstance runtimecontract.Runtim
             return eventValue, err
         }
 
-        /* the listener travels rather than its name: which one stopped propagation is read only by the refusal below, on the dispatches that stop, so resolving the name on every iteration paid the reflection for an answer almost nobody asks for */
+        /* the listener travels rather than its name, which only the refusal below reads */
         stoppedByListener = entry.listener
         stoppedByListenerMaySkip = entry.maySkipRequiredListeners
     }
@@ -568,7 +565,7 @@ func (instance *EventDispatcher) dispatch(runtimeInstance runtimecontract.Runtim
     return eventValue, nil
 }
 
-/* listenerNameOf answers the qualified function name of a listener, and the dash for one the runtime cannot name — a method value, a closure the compiler inlined away. It is called where the name is USED rather than ahead of the branches that might use it: on the ordinary dispatch, where nothing fails and nothing stops and the journal sits above debug, the answer is needed nowhere and the reflect.Value plus runtime.FuncForPC behind it were pure waste, once per listener per dispatch on the hottest path the framework has. A nil listener answers the dash too, which is what an empty dispatch's stopper reads as. */
+/* listenerNameOf answers the qualified function name of a listener, and the dash for one the runtime cannot name or for nil. It is called only where the name is used, since the reflection behind it runs per listener per dispatch. */
 func listenerNameOf(listener eventcontract.EventListener) string {
     if nil == listener {
         return "-"
@@ -582,7 +579,7 @@ func listenerNameOf(listener eventcontract.EventListener) string {
     return function.Name()
 }
 
-/* refuseSkippedRequiredListeners answers the error an early end of the dispatch owes when a listener marked required sits among the listeners it skipped — the end being a propagation stop or a listener failure alike. Either would silently skip that listener — the security access-control listener, for instance — and the caller would proceed as if it had run; the dispatch fails closed instead, unless the listener that ended it is explicitly allowed to skip required listeners. Both marks default off, so an unmarked dispatch behaves exactly as before. */
+/* refuseSkippedRequiredListeners answers the error an early end of the dispatch owes, by a stop or a failure alike, when a required listener sits among those it skipped, so the dispatch fails closed; the listener that ended it may be explicitly allowed to skip them. */
 func refuseSkippedRequiredListeners(
     eventName string,
     skippedListenerList []listenerWithPriority,
@@ -647,7 +644,7 @@ func (instance *EventDispatcher) callListenerSafely(
             string(debug.Stack()),
         )
 
-        /* an error-shaped panic value travels as the cause: kept only in the context slot it collapsed to its bare message at the render boundary — the json logger stringifies an error found in a context — so the context map and the cause chain of the very error the listener panicked with reached no record at all, and the reason a cache write failed was gone while its stack survived. A typed nil reads as the no-cause it means. */
+        /* an error-shaped panic value travels as the cause, so its context and chain reach the record; a typed nil reads as no cause */
         var panicCause error
         recoveredErr, isRecoveredError := recoveredValue.(error)
         if true == isRecoveredError && false == internal.IsNilInterface(recoveredErr) {
@@ -660,7 +657,7 @@ func (instance *EventDispatcher) callListenerSafely(
             panicCause,
         )
 
-        /* a panic value that reports itself already logged was written by whoever raised it; logging it a second time here reports one failure as two. The record is written through LogError, which renders the cause chain the raw logger call dropped, and the wrapper is marked only after it is written — LogError honours the mark. */
+        /* a panic value already logged by whoever raised it is not logged twice; the record goes through LogError, and the wrapper is marked only after it is written */
         if false == recoveredValueIsAlreadyLogged(recoveredValue) {
             logging.LogError(logger, exceptionErr)
         }
@@ -671,7 +668,7 @@ func (instance *EventDispatcher) callListenerSafely(
 
     listenerErr := listener(runtimeInstance, eventValue)
 
-    /* the test reads through the interface: a listener returning a nil pointer of its own error type hands back a non-nil interface, and reading that as a failure aborts the dispatch, skips every listener behind it and fails the request closed for a listener that reported success */
+    /* the test reads through the interface, since a typed-nil error from a listener reports success, and reading it as a failure would fail the request closed */
     if true == internal.IsNilInterface(listenerErr) {
         return nil
     }
@@ -687,7 +684,7 @@ func (instance *EventDispatcher) callListenerSafely(
         durationMs,
     )
 
-    /* the failure travels unlogged and unmarked by this site. The record written here carried the listener's identity and duration but never the error, and marking the wrapper as logged then suppressed the caller's own record — the http kernel's, which renders the cause chain — so the reason a request failed closed existed on the returned value and in no log at all. The context rides on the error, so the caller's single record still names the listener. A failure whose PRODUCER already logged and marked it is different: the mark is read at the nearest implementer, so the wrapper inherits it — a fresh unmarked wrapper would shadow the mark and the caller would file a second record for the one failure. */
+    /* the failure travels unlogged and unmarked by this site, so the caller's single record, which renders the cause chain, names it; the context rides on the error. A failure its producer already logged passes the mark to the wrapper. */
     wrapperErr := exception.NewError(
         "event listener returned error",
         exceptionContext,
@@ -701,7 +698,7 @@ func (instance *EventDispatcher) callListenerSafely(
     return wrapperErr
 }
 
-/* the mark is read at the depth MarkLogged writes it, the way the same file reads it of a returned error and the way the recover helpers of the logging package read it of a panic payload. Asked of the recovered value alone, the question was answered only by a payload that carries the mark ITSELF: a listener that panicked with an error wrapping one whose producer had already logged it got a second record for the one failure. */
+/* recoveredValueIsAlreadyLogged reads the mark at the depth MarkLogged writes it, as the returned-error path and the logging package's recover helpers do. */
 func recoveredValueIsAlreadyLogged(recoveredValue any) bool {
     recoveredErr, isError := recoveredValue.(error)
     if true == isError && false == internal.IsNilInterface(recoveredErr) {
@@ -770,7 +767,7 @@ var _ eventcontract.EventDispatcher = (*EventDispatcher)(nil)
 var _ eventcontract.EventDispatcherInspector = (*EventDispatcher)(nil)
 var _ eventcontract.RequiredListenerRegistrar = (*EventDispatcher)(nil)
 
-/* requireEventSubscriberIdentity answers the identity a subscriber is filed under, refusing everything that cannot be filed. The nil test reads through the interface: a typed nil passes a plain comparison, and the identity guard that would have named the mistake sits behind the SubscribedEvents call, so the caller used to receive a bare nil dereference raised inside its own subscriber instead of the framework error. */
+/* requireEventSubscriberIdentity answers the identity a subscriber is filed under, refusing everything that cannot be filed. The nil test reads through the interface, since a typed nil passes a plain comparison and would dereference inside its own SubscribedEvents call before the identity guard names the mistake. */
 func requireEventSubscriberIdentity(
     subscriber eventcontract.EventSubscriber,
     action string,
@@ -855,7 +852,7 @@ func planSubscriberRegistrations(subscriber eventcontract.EventSubscriber) []pla
             )
         }
 
-        /* an event name mapped to no subscribed events registers nothing while reporting success, which is how a subscriber assembled from configuration ends up silently inert */
+        /* an event name mapped to no subscribed events would register nothing while reporting success */
         if 0 == len(subscribedEventList) {
             exception.Panic(
                 exception.NewError(

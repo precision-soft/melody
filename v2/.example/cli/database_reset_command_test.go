@@ -329,7 +329,7 @@ func TestDatabaseResetCommandClearsTheCacheOnceAfterTheReseed(t *testing.T) {
     }
 }
 
-/* the drops run under the runtime's context: cancelled, the first statement is refused and nothing is recorded, where a background context let a reset ignore the one signal every other command honours. */
+/* the drops run under the runtime's context: cancelled, the first statement is refused and nothing is recorded, so a reset honours the signal every other command honours. */
 func TestDatabaseResetCommandHonoursTheRuntimeContext(t *testing.T) {
     catalogRecorder := &recordingResetConnector{}
     serviceContainer, _ := newRecordingResetContainer(t, catalogRecorder)

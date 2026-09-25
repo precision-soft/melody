@@ -6,7 +6,7 @@ import (
     "testing"
 )
 
-/* the fake driver records the exact SQL bun emits, so the binary-collation guard is proven on the statement itself: left to the column's accent-insensitive collation ('café' = 'cafe' is true under utf8mb4_0900_ai_ci), the lookup admitted spellings the cache keys and the invalidation listeners — which fold with NormalizedUsername alone — could never address, and a deleted user kept authenticating from the ttl-less cache under the collation-only spelling. */
+/* the fake driver records the exact SQL bun emits, so the binary-collation guard is proven on the statement itself: under the column's accent-insensitive collation ('café' = 'cafe' is true under utf8mb4_0900_ai_ci) the lookup would admit spellings the cache keys and the invalidation listeners, which fold with NormalizedUsername alone, could never address, and a deleted user would keep authenticating from the ttl-less cache. */
 func isUserSelectOnTheBinaryCollation(query string) bool {
     return strings.HasPrefix(query, "SELECT") &&
         strings.Contains(query, "melody_example_v2_user") &&

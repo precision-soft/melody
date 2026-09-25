@@ -105,13 +105,7 @@ func errorMessage(errorValue error) string {
     return errorValue.Error()
 }
 
-/* ApiErrorWithErr renders a refusal whose cause the handler holds. The cause travels in the body only under
-   the development environment; for a status of the server's own class it is JOURNALED here as well, at
-   error, because a Response is the one thing the kernel never journals: it journals a handler's failure
-   when the failure is RETURNED, and a handler that answered the failure as a 500 reached the terminate
-   listener alone — one info line, "request completed 500", no cause — so outside development the reason a
-   door answered 500 existed nowhere. A client's own refusal, below 500, is not journaled: the request was
-   wrong, and the body says so. */
+/* ApiErrorWithErr renders a refusal whose cause the handler holds. The cause travels in the body only under the development environment; for a status of the server's own class it is also journaled here, at error, because the kernel journals a handler's failure only when it is returned, never a Response. A client's own refusal, below 500, is not journaled. */
 func ApiErrorWithErr(
     runtimeInstance melodyruntimecontract.Runtime,
     request melodyhttpcontract.Request,
@@ -138,10 +132,7 @@ func ApiErrorWithErr(
     )
 }
 
-/* journalServerError writes the one record a 500 answered as a Response leaves: the public message the
-   client read, the route and the cause, through the runtime's logger. The cause is marked logged so a
-   reader further up that files marked errors once does not file it again. The path is URL.Path: on this
-   major the router matches the decoded path, so that is the spelling the request was routed on. */
+/* journalServerError writes the one record a 500 answered as a Response leaves: the public message the client read, the route and the cause, through the runtime's logger. The cause is marked logged so a reader further up that files marked errors once does not file it again. The path is URL.Path, since on this major the router matches the decoded path. */
 func journalServerError(
     runtimeInstance melodyruntimecontract.Runtime,
     request melodyhttpcontract.Request,
@@ -186,14 +177,7 @@ func requestContextIsDone(request melodyhttpcontract.Request) bool {
     return nil != request.HttpRequest().Context().Err()
 }
 
-/* serverErrorLoggerOf is the logger of the REQUEST — resolved through the runtime, whose scope the kernel
-   gave a logger that stamps every record with the request identifier — and the emergency logger when the
-   runtime holds none: the reason a door answered 500 has to reach SOME journal, and a process whose logger
-   is not registered is exactly the process whose operator is reading standard error. Resolved from the
-   root container instead, the record landed on the application's logger without the identifier that ties
-   it to the "request completed 500" line and to the rest of the request's journal. The resolution is
-   asked here rather than through LoggerFromRuntime, which files an emergency record and answers nil when
-   the logger is absent: the fallback is this door's decision. */
+/* serverErrorLoggerOf is the logger of the REQUEST, resolved through the runtime, whose scope stamps every record with the request identifier, and the emergency logger when the runtime holds none, since the reason a door answered 500 has to reach some journal. It is resolved here rather than through LoggerFromRuntime, which files an emergency record and answers nil: the fallback is this door's decision. */
 func serverErrorLoggerOf(runtimeInstance melodyruntimecontract.Runtime) melodyloggingcontract.Logger {
     logger, resolveErr := melodyruntime.FromRuntime[melodyloggingcontract.Logger](runtimeInstance, melodylogging.ServiceLogger)
     if nil != resolveErr || nil == logger {
@@ -263,7 +247,7 @@ func buildApiResponse(
     if nil != serializerManager {
         serializerInstance, err := serializerManager.ResolveByAcceptHeader(acceptHeader)
 
-        /* a header that refuses every available media type is answered as not acceptable on the SUCCESS path, exactly as the result handler answers it; a REFUSAL keeps the status it earned instead, which is the asymmetry the framework's own error renderer states and the reason it falls back for every resolution failure alike: a 401 or a 404 rendered as an empty 406 tells the client nothing about why it was turned away, and the only thing negotiation could have withheld is a representation it had already rejected. The flag is read off the envelope being rendered rather than passed beside it, so the two can never disagree about which path this is. */
+        /* a header that refuses every available media type is answered as not acceptable on the SUCCESS path, as the result handler answers it; a REFUSAL keeps the status it earned, as the framework's error renderer does, since a 401 or a 404 rendered as an empty 406 tells the client nothing. The flag is read off the envelope being rendered, so the two cannot disagree about the path. */
         if true == payload.Success && true == errors.Is(err, melodyserializer.ErrNotAcceptable) {
             return melodyhttp.EmptyResponse(nethttp.StatusNotAcceptable)
         }
@@ -314,7 +298,7 @@ func fallbackJsonResponse(statusCode int, payload any) melodyhttpcontract.Respon
     return response
 }
 
-/* the debug decision is the kernel environment, exactly as the framework exception listener reads it; when it cannot be determined the presenter stays closed and emits no cause material */
+/* the debug decision is the kernel environment, as the framework exception listener reads it; when it cannot be determined the presenter emits no cause material */
 func debugMode(runtimeInstance melodyruntimecontract.Runtime) bool {
     if nil == runtimeInstance {
         return false

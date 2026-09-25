@@ -19,7 +19,7 @@ import (
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
-/* the scope is closed when the TEST ends, not when this constructor returns: a defer here handed every test a scope already closed at its first line, so each assertion about scope reporting and the action's teardown half passed vacuously — the two runtimes the package writes by hand omit that defer on purpose */
+/* the scope is closed when the TEST ends, not when this constructor returns, so every assertion about scope reporting and the action's teardown half runs against an open scope; the two runtimes the package writes by hand omit that defer on purpose */
 func newTestRuntime(t *testing.T) *testRuntime {
     t.Helper()
 
@@ -259,7 +259,7 @@ func TestRegister_SkipsANilEntryWhenScanningForADuplicateName(t *testing.T) {
     }
 }
 
-/* the scope close is weighed beside the container close: its failure reached nothing before, so a scoped service whose teardown failed — a transaction left unfinished, a file left unflushed — ended a command that reported success */
+/* the scope close is weighed beside the container close, so a scoped service whose teardown failed, a transaction left unfinished or a file left unflushed, never ends a command that reports success */
 type closeCountingScope struct {
     containercontract.Scope
     closeCalls int
@@ -271,7 +271,7 @@ func (instance *closeCountingScope) Close() error {
     return instance.Scope.Close()
 }
 
-/* the positive half of the action's teardown: the failing double proves the failure is reported, this one proves the close is made — on a fixture that hands the action an open scope, where the shared double used to hand it one closed in its constructor */
+/* the positive half of the action's teardown: on a fixture that hands the action an open scope, the close is made */
 func TestRegister_ActionClosesTheScopeOnce(t *testing.T) {
     serviceContainer := container.NewContainer()
     scope := &closeCountingScope{Scope: serviceContainer.NewScope()}
@@ -761,7 +761,7 @@ func TestRegister_ActionLeavesTheContainerOpenWhenTheCommandSucceeds(t *testing.
     }
 }
 
-/* the finish banner reads commandErr, and a panic in the command leaves the linear path that assigns it: the unwinding used to run the banner defer over a nil commandErr and print [finished] [success] for a command that died. The panic is re-raised unchanged so the recover handler that owns the process boundary still sees it. */
+/* a panic in the command prints the failed banner and is re-raised unchanged, so the recover handler that owns the process boundary still sees it */
 func TestRegister_ActionPrintsTheFailedBannerAndRepanicsWhenTheCommandPanics(t *testing.T) {
     runtimeInstance := newTestRuntime(t)
 
@@ -853,7 +853,7 @@ func (instance *typedNilErrorCommandFailure) Error() string {
     return instance.message
 }
 
-/* a command that returns its error through a concrete typed pointer hands over a non-nil interface around a nil value: read as a failure it reached Error() on a nil receiver on the printing line and killed the request with a masked panic in place of the success it meant */
+/* a command that returns its error through a concrete typed pointer hands over a non-nil interface around a nil value, which reads as the success it means rather than reaching Error() on a nil receiver while the status is printed */
 func TestRegister_ActionReadsATypedNilCommandErrorAsSuccess(t *testing.T) {
     runtimeInstance := newTestRuntime(t)
 
@@ -939,7 +939,7 @@ func TestRegister_ActionDoesNotReportTheCloseFailureOfAContainerTheCommandAlread
     }
 }
 
-/* the flag promises the absence of ansi sequences, and the banner is written to the same stream the command's own output goes to: a --no-color run redirected into a file used to carry escape codes around an output that honoured the flag */
+/* a --no-color run redirected into a file carries no escape codes in its banner */
 func TestRegister_ActionPrintsThePlainBannerUnderNoColor(t *testing.T) {
     written := runRegisteredCommand(t, []string{"--no-color"})
 
@@ -1078,7 +1078,7 @@ func TestRegister_ActionEscapesTheCommandNameInTheStartedBanner(t *testing.T) {
     }
 }
 
-/* the finish banner colours the verdict red on failure, and it built the coloured verdict before the escaping that keeps client-derived text from repainting the line — so every failed run with colour on, the default, printed the banner's own escape sequence as the literal text \x1b[31m around [failed], while --no-color, which never coloured the verdict, printed it right. The verdict is coloured after the escaping: its sequence reaches the terminal raw, and a control character in the data around it — here the command's own name — is still spelled visibly. */
+/* the finish banner colours the verdict red on failure after the escaping that keeps client-derived text from repainting the line, so its sequence reaches the terminal raw rather than as the literal text \x1b[31m, and a control character in the data around it, here the command's own name, is still spelled visibly. */
 func TestRegister_ActionColoursTheFailedVerdictAfterEscapingTheBanner(t *testing.T) {
     command := &testCommand{
         nameValue:        "bo\rom",
@@ -1107,7 +1107,7 @@ func TestRegister_ActionColoursTheFailedVerdictAfterEscapingTheBanner(t *testing
     }
 }
 
-/* the no-color banner never coloured the verdict and always printed it right; the split keeps that line byte for byte */
+/* the no-color banner prints the plain verdict, byte for byte */
 func TestRegister_ActionPrintsThePlainFailedVerdictUnderNoColor(t *testing.T) {
     command := &testCommand{
         nameValue:        "boom",

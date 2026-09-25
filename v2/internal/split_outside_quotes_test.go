@@ -5,7 +5,7 @@ import (
     "testing"
 )
 
-/* a separator inside a quoted parameter value belongs to that value: without quote awareness the media range text/plain;version="1,2";q=0 split into two members and the refusal it carried travelled with the junk half */
+/* a separator inside a quoted parameter value belongs to that value, so the media range text/plain;version="1,2";q=0 stays one member and keeps the refusal it carries */
 func TestSplitOutsideQuotes_HonoursQuotedSections(t *testing.T) {
     parts, _ := SplitOutsideQuotes(`text/plain;version="1,2";q=0, application/json`, ',')
     if 2 != len(parts) {

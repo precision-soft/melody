@@ -89,7 +89,7 @@ func TestExitError_CarriesItsErrorThroughUnwrapAndErrorValue(t *testing.T) {
     }
 }
 
-/* Unwrap is the one door errors.Is calls on every link, so a typed-nil *ExitError stored as a cause reached it before any guard */
+/* Unwrap is the one door errors.Is calls on every link, so a typed-nil *ExitError stored as a cause reaches it before any guard */
 func TestExitError_UnwrapOnANilReceiverAnswersNil(t *testing.T) {
     var typedNil *ExitError
 

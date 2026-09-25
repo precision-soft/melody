@@ -238,11 +238,7 @@ func TestRememberEntityOrAbsenceLeavesAFoundEntityUnbounded(t *testing.T) {
     }
 }
 
-/* the probe is on a hit that FOUND something, because that is the only hit the early return changes:
-   a remembered absence is answered the same way with or without it — Remember reads the store itself and
-   writes nothing on a hit, and a nil computed value is returned before the second write — while a found
-   entity would be re-stored by every reader, one cache write per request served from memory. Measured:
-   with the early return disarmed, this is the assertion that moves. */
+/* the probe is on a hit that FOUND something, because that is the only hit the early return changes: a remembered absence is answered the same way with or without it, since Remember reads the store itself and writes nothing on a hit, while a found entity would be re-stored by every reader, one cache write per request served from memory. */
 func TestRememberEntityOrAbsenceAnswersAFoundHitWithoutWritingItBack(t *testing.T) {
     cacheInstance := newTtlRecordingCache()
     if setErr := cacheInstance.Set("hit-key", "entity", entityCacheTtl); nil != setErr {

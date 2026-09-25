@@ -20,7 +20,7 @@ const (
     ServiceExampleRedisCache      = "service.example.redis.cache"
     ServiceExampleRedisConnection = "service.example.redis.connection"
 
-    /* every key this application writes carries its major in the prefix. The three example applications share one redis in development, the cache holds gob-encoded entities whose wire format is keyed on the fully qualified type name — which carries the major — and the rate-limit counter is asserted on exactly by the end-to-end harness. A prefix shared between majors would have one application read entries it cannot decode and spend another's budget. */
+    /* every key carries the major in its prefix: the three example applications share one redis in development, and the gob-encoded entities key their wire format on the fully qualified type name, which carries the major, so a shared prefix would have one application read entries it cannot decode and spend another's rate-limit budget */
     redisCacheKeyPrefix     = "melody-example-v2:cache:"
     redisRateLimitKeyPrefix = "melody-example-v2:rate_limit:"
 
@@ -29,9 +29,7 @@ const (
     redisRateLimitWindow    = time.Minute
 )
 
-/* buildRedis opens the client while the modules are wired, because the rate-limit middleware is handed a live limiter at the moment a route is declared and refuses a nil one.
-
-   An unreachable endpoint is a warning rather than a boot failure. The shipped .env points at the docker-compose service names, which do not resolve outside that network, so panicking here would make `go run .` on a laptop — and every command-line invocation on a machine without the stack — die at boot. The nomenclature simply runs uncached and unthrottled, and the end-to-end harness turns the soft failure back into a hard one where it knows redis is up. */
+/* buildRedis opens the client while the modules are wired, because the rate-limit middleware is handed a live limiter when a route is declared. An unreachable endpoint is a warning rather than a boot failure, since the shipped .env names docker-compose services that do not resolve outside that network; the nomenclature then runs uncached and unthrottled. */
 func (instance *Module) buildRedis(kernelInstance melodykernelcontract.Kernel) {
     address := parameterValue(kernelInstance, ParameterRedisAddress)
     if "" == address {
@@ -122,9 +120,7 @@ func (instance *Module) registerRedisServices(registrar melodyapplicationcontrac
         },
     )
 
-    /* the same backend also becomes the framework's, so the nomenclature itself is cached in redis rather than only inside this process — which is what lets the catalogue survive a restart warm, and what lets the end-to-end harness read the listing key out of band instead of taking the application's word for it.
-
-       The application caches domain entities through a gob serializer, and gob keys its wire format on the fully qualified type name, which carries the major. Three example applications sharing one redis would therefore write entries none of the others can decode — the per-major key prefix above is what keeps them apart, and it is the reason this registration is safe. */
+    /* the same backend becomes the framework's cache, so the nomenclature survives a restart warm and the end-to-end harness can read the listing key out of band. The gob serializer keys its wire format on the type name, which carries the major, so the per-major prefix above is what keeps the three applications apart. */
     registrar.RegisterService(
         melodycache.ServiceCacheBackend,
         func(resolver melodycontainercontract.Resolver) (melodycachecontract.Backend, error) {

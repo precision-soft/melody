@@ -11,7 +11,7 @@ import (
 type JsonPrinter struct {
 }
 
-/* the document is written on ONE line, terminated by the encoder's own newline, so a stream of them is a stream of records a line reader can hand to a parser whole — which is what a long-running command under --format=json is for, and what its own documentation promised while the indentation made every document a block of twenty. FormatJsonPretty is the same document with the indentation back, for the person reading it by hand; `| jq` does the same for a pipeline that already has it. */
+/* the document is written on one line terminated by the encoder's newline, so a stream of them is a stream of records a line reader hands to a parser whole; FormatJsonPretty indents it for a person */
 func (instance *JsonPrinter) Print(
     writer io.Writer,
     envelope Envelope,
@@ -29,7 +29,7 @@ func (instance *JsonPrinter) Print(
         return encodeErr
     }
 
-    /* the encoder escapes the C0 block and the two Unicode line separators and leaves the C1 block raw, so a document carrying U+009B repainted the terminal it was printed to; the document is rewritten whole before it reaches the writer — the escape decodes to the same rune, so a consumer reads the value the command gave — and written once, so a write failure is still the writer's and still reported */
+    /* the encoder leaves the C1 block raw, so U+009B could repaint a terminal: the document is rewritten whole with those escaped, each escape decoding to the same rune, and written once, so a write failure is still reported */
     escaped := internal.EscapeJsonC1Block(document.Bytes())
 
     written, writeErr := writer.Write(escaped)
@@ -37,7 +37,7 @@ func (instance *JsonPrinter) Print(
         return writeErr
     }
 
-    /* a sink that accepted fewer bytes than the document without an error — the application's own writer, the cron runner's capture buffer — truncated the one document a machine consumer parses, under exit zero; the count is read the way the table printer's tracking writer reads it, and the shortfall is the printing failure it is */
+    /* a sink that accepts fewer bytes than the document without an error has truncated it, so the shortfall is a printing failure, as in the table printer */
     if written < len(escaped) {
         return io.ErrShortWrite
     }

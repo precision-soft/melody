@@ -7,7 +7,7 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/v2/runtime/contract"
 )
 
-/* cacheIsProcessLocal answers whether the cache this process writes is its own or the one every process of the deployment shares. The entities are cached with no expiry and cleared by name, by listeners subscribed to the write events — and those listeners run in the process that DISPATCHED. With redis the cache is shared and a write made here reaches the running server; on the in-process fallback the listeners clear this process's map, and a server started beside it keeps serving what it cached until it restarts. A console command that writes has to say which of the two it did, and it reads the answer off the wiring rather than off the configuration, because the wiring is what decides. */
+/* cacheIsProcessLocal answers whether the cache this process writes is its own or the one every process shares. The listeners that clear cached entities run in the process that dispatched the write, so with redis a write made here reaches the running server, and on the in-process fallback a server started beside it keeps serving what it cached until it restarts. It reads the answer off the wiring, because the wiring is what decides. */
 func cacheIsProcessLocal(runtimeInstance melodyruntimecontract.Runtime) bool {
     backend, resolveErr := melodycontainer.FromResolver[melodycachecontract.Backend](
         runtimeInstance.Container(),

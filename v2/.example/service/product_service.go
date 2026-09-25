@@ -38,7 +38,7 @@ func NewProductService(
     }
 }
 
-/* ProductService stamps every write with the injected clock rather than the wall, which is what makes the stamp assertable: a frozen clock lets a test state the exact instant a product carries, which cannot be written against time.Now. */
+/* ProductService stamps every write with the injected clock rather than the wall, so a frozen clock names the exact instant a product carries. */
 type ProductService struct {
     productRepository repository.ProductRepository
     categoryService   *CategoryService
@@ -71,7 +71,7 @@ func (instance *ProductService) List() ([]*entity.Product, error) {
 }
 
 func (instance *ProductService) FindById(id string) (*entity.Product, bool, error) {
-    /* an identifier the cache-key grammar refuses names a row no write door admits, so it is answered as absent instead of asked of a cache that would refuse the question with a 500 */
+    /* an identifier no cache key can carry names no row, so it is answered as absent without asking the cache */
     if false == CacheSafeIdentifier(id) {
         return nil, false, nil
     }

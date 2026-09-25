@@ -407,7 +407,7 @@ func TestFromError_TypedNil_ReturnsNil(t *testing.T) {
         t.Fatalf("expected nil for a typed-nil *Error")
     }
 
-    /* the http exception variant is the one that used to panic: the assertion to *Error fails, so the walk reached err.Error() through the nil receiver */
+    /* the http exception variant fails the assertion to *Error, so the walk reaches err.Error() through the nil receiver */
     typedNilHttpException := (*HttpException)(nil)
 
     if nil != FromError(typedNilHttpException) {
@@ -837,7 +837,7 @@ func TestLogContext_ContainsAPanickingErrorMessage(t *testing.T) {
     }
 }
 
-/* the cause chain renders every link's text under the same containment: a panicking cause buried in the chain took the whole record down from inside the recovery that was writing it. */
+/* the cause chain renders every link's text under the same containment, so a panicking cause buried in the chain costs its text, never the record the recovery is writing. */
 func TestBuildCauseChain_ContainsAPanickingLink(t *testing.T) {
     chain := BuildCauseChain(&panickingTextError{}, 8)
 
@@ -962,7 +962,7 @@ func TestPanicCause_ANonErrorPanicAnswersNoCause(t *testing.T) {
     }
 }
 
-/* TestLogContext_AJoinedCauseReachesTheRecord pins the readers against the second unwrap shape the standard library defines. Every walk here anchored on the single-valued errors.Unwrap, which answers nothing at all for an errors.Join: a failure that gathered what several replicas had to say arrived as one flattened line of text, with the context of every branch — the host that refused, the destination that timed out — reaching no record. The writers this framework repaired are one producer of the shape; a join can arrive from any dependency and from any application. */
+/* TestLogContext_AJoinedCauseReachesTheRecord pins the readers against the second unwrap shape the standard library defines: errors.Unwrap answers nothing for an errors.Join, so a reader anchored on it would render a failure that gathered what several replicas had to say as one flattened line, with the context of every branch, the host that refused and the destination that timed out, reaching no record. A join can arrive from any dependency and from any application. */
 func TestLogContext_AJoinedCauseReachesTheRecord(t *testing.T) {
     firstCause := NewError(
         "the primary replica refused the write",
@@ -1048,7 +1048,7 @@ func TestBuildCauseChain_TheDepthBudgetBoundsAWideJoin(t *testing.T) {
     }
 }
 
-/* a single-wrap chain keeps exactly the sequence it always produced: the walk changed shape, and nothing that was already right may move */
+/* a single-wrap chain reads link by link, the same sequence the breadth-first walk gives it */
 func TestBuildCauseChain_ASingleWrapChainIsUnchanged(t *testing.T) {
     deepest := NewError("deepest", nil, nil)
     middle := NewError("middle", nil, deepest)
@@ -1071,7 +1071,7 @@ func (instance *contextPanicProviderError) Context() exceptioncontract.Context {
     panic("context rendering gave up")
 }
 
-/* renderErrorText already keeps a panicking Error() from unwinding through the recovery defer LogContext runs inside of, but a foreign Context() ran bare — at the top provider, in the cause-context walk, and in the From* constructors that run on the same recovery paths. The record survives with the panic value in the context's place instead of the process unwinding on a second panic. */
+/* a foreign Context() is read under the same containment renderErrorText gives a panicking Error(), at the top provider, in the cause-context walk and in the From* constructors that run on the same recovery paths, so the record survives with the panic value in the context's place instead of the process unwinding on a second panic. */
 func TestLogContext_AProviderWhoseContextPanicsIsContained(t *testing.T) {
     foreignErr := &contextPanicProviderError{}
 
@@ -1110,7 +1110,7 @@ func (panickingMessageError) Error() string {
     panic("Error() panics")
 }
 
-/* FromError runs inside the kernel's recovery defers; an Error() that panics there raised a second panic through the defer that was reporting the first, so the message is rendered the way LogContext renders it */
+/* FromError runs inside the kernel's recovery defers, where an Error() that panics would raise a second panic through the defer reporting the first, so the message is rendered the way LogContext renders it */
 func TestFromError_AnErrorWhoseMessagePanicsIsStillWrapped(t *testing.T) {
     wrapped := FromError(panickingMessageError{})
 

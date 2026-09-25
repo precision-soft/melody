@@ -3335,7 +3335,7 @@ func TestKernel_ServesWhileAConfigurationDoorIsRefused(t *testing.T) {
     <-finished
 }
 
-/* the abort sentinel suppresses the response, not the ownership of what it holds: the branch re-raised it ten lines before the in-flight response was captured and seventy before either close, so a deliberate abort over a file-backed response leaked the descriptor. invokeErrorHandlerSafely already refuses to honour the sentinel for exactly this reason, which is the contradiction this closes. */
+/* the abort sentinel suppresses the response, not the ownership of what it holds, so a deliberate abort over a file-backed response still closes the response in flight; invokeErrorHandlerSafely refuses to honour the sentinel for the same reason. */
 func TestKernel_AbortHandlerPanicStillClosesTheResponseInFlight(t *testing.T) {
     bodyReader := &closeTrackingReader{}
 

@@ -914,7 +914,7 @@ func TestEventDispatcher_StoppingListenerThatAlsoFails_StillReportsTheSkippedReq
         t.Fatalf("expected a RequiredListenerSkippedError, got: %T (%v)", err, err)
     }
 
-    /* the stop's refusal carries the listener's own failure as its cause: returned unlogged on the promise that the caller's record names it, the failure otherwise reached no log at all on exactly this path */
+    /* the stop's refusal carries the listener's own failure as its cause, since the dispatch returns the failure unlogged on the promise that the caller's record names it */
     chain := ""
     for current := err; nil != current; current = errors.Unwrap(current) {
         chain = chain + current.Error() + "\n"
@@ -1357,7 +1357,7 @@ func TestEventDispatcher_ListenerPanic_IsNotLoggedTwiceWhenTheValueReportsItself
     }
 }
 
-/* the mark is read at the depth MarkLogged writes it, which is what the sibling above cannot show: there the payload carries the mark itself. A listener that panics with an error WRAPPING one its producer already logged asked the same question one link down, and a shallow type test answered no — one failure, two records. */
+/* the mark is read at the depth MarkLogged writes it, which the sibling test cannot show since its payload carries the mark itself: a listener that panics with an error WRAPPING one its producer already logged gets one record, not two. */
 func TestEventDispatcher_ListenerPanic_IsNotLoggedTwiceWhenTheMarkIsOneLinkDown(t *testing.T) {
     dispatcher, clockInstance := testNewEventDispatcher()
 
@@ -1786,7 +1786,7 @@ func TestEventDispatcher_FailingListenerBeforeRequiredListener_FailsClosed(t *te
     }
 }
 
-/* the may-skip mark licenses the stop, not the failure: its own GoDoc scopes it to a listener that stops propagation, and the registrar contract says without exception that a failure with a required listener behind it reports the skip and carries the failure as its cause. Read on the failure branch the mark granted more than it was written for — the marked listener's response was served with access control never consulted. */
+/* the may-skip mark licenses the stop, not the failure, so a failure with a required listener behind it reports the skip and carries the failure as its cause */
 func TestEventDispatcher_FailingListenerWithMaySkip_StillReportsTheSkippedRequiredListener(t *testing.T) {
     dispatcher, clockInstance := testNewEventDispatcher()
 
@@ -1977,7 +1977,7 @@ func (instance *debugGateLogger) Enabled(level loggingcontract.Level) bool {
 
 var _ loggingcontract.LevelReporter = (*debugGateLogger)(nil)
 
-/* the dispatch asks the journal once and builds nothing it would throw away: at least three events travel per request, and every debug record below assembles a context map at the call site — plus, for one of them, a listener name resolved through reflect and runtime.FuncForPC per listener per dispatch. A logger that says the level is off must receive nothing at all; the same dispatch under a logger that says it is on must receive every record it always did, which is what tells the gate apart from a deletion. */
+/* the dispatch asks the journal once and builds nothing it would throw away: at least three events travel per request, and every debug record below assembles a context map at the call site, plus, for one of them, a listener name resolved through reflect and runtime.FuncForPC. A logger that says the level is off receives nothing at all; the same dispatch under a logger that says it is on receives every record, which tells the gate apart from a deletion. */
 func TestEventDispatcher_DoesNotBuildDebugRecordsTheJournalWouldDiscard(t *testing.T) {
     for _, testCase := range []struct {
         name            string
@@ -2058,7 +2058,7 @@ func failingGateListener(runtimeInstance runtimecontract.Runtime, eventValue eve
     return errors.New("the listener refused")
 }
 
-/* which listener stopped propagation travels as the LISTENER and is named only when the refusal is built, so the required-listener refusal must still say who stopped it. Resolving the name per iteration paid the reflection for an answer almost no dispatch asks for; resolving it nowhere would leave this message blaming "-". */
+/* which listener stopped propagation travels as the LISTENER and is named only when the refusal is built, so the required-listener refusal still says who stopped it rather than "-". */
 func TestEventDispatcher_NamesTheStoppingListenerInTheRequiredRefusalWithDebugOff(t *testing.T) {
     logger := &debugGateLogger{minLevel: loggingcontract.LevelError}
 

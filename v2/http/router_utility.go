@@ -633,8 +633,7 @@ func markResponsePrivateForSessionCookie(response httpcontract.Response) {
     hasNoStore := false
 
     for _, existing := range existingLines {
-        /* a directive may carry a quoted field-name list, no-cache="X-One, Public, X-Two", which a bare comma split would cut, dropping a field name spelled like a directive out of the middle of the list. */
-        /* the cut past the member cap is not read here: the value merged is the application's own Cache-Control, not a client's negotiation */
+        /* a directive may carry a quoted field-name list, no-cache="X-One, Public, X-Two", which a bare comma split would cut, dropping a field name spelled like a directive out of the middle of the list. The cut past the member cap is not read here: the value merged is the application's own Cache-Control, not a client's negotiation. */
         tokens, _ := internal.SplitOutsideQuotes(existing, ',')
         for _, token := range tokens {
             trimmed := strings.TrimSpace(token)

@@ -96,12 +96,7 @@ func TestInMemoryUserRepositoryFindByUsernameIgnoresCase(t *testing.T) {
     }
 }
 
-/* the three sibling repositories — products, categories and currencies — refuse an identifier that is
-   already taken, in both of their implementations; users refused it in neither. Measured, an occupied id
-   was appended as a SECOND row: FindById answered the first, DeleteById removed the first, and the account
-   behind the second could be reached by no door that goes through the id. On the bun implementation the
-   same create surfaced the driver's raw duplicate-key text through a 500 instead of this message — which
-   is also what the identifier ceiling's own written rationale promises the caller is told. */
+/* an identifier that is already taken is refused, as the three sibling repositories refuse it in both implementations: appended as a SECOND row it would be unreachable, since FindById and DeleteById reach the first, and on the bun implementation the primary key would answer the driver's raw duplicate-key text through a 500 instead of this message. */
 func TestInMemoryUserRepositoryRefusesAnIdentifierThatIsAlreadyTaken(t *testing.T) {
     ctx := context.Background()
     repositoryInstance := NewInMemoryUserRepository()

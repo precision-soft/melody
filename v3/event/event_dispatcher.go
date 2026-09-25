@@ -498,8 +498,7 @@ func (instance *EventDispatcher) dispatch(runtimeInstance runtimecontract.Runtim
         if nil != err {
             listenerName := listenerNameOf(entry.listener)
 
-            /* a failing listener ends the dispatch as decisively as a stop, so a required listener behind it is reported skipped ahead of the failure, which travels as the cause on both branches; otherwise a response set by the failing listener would be served with access control never consulted */
-            /* the opt-out is not read here: MarkListenerMaySkipRequiredListeners licenses a chosen short-circuit, and a failure is not one; the kernel tells the two apart by the type of the error */
+            /* a failing listener ends the dispatch as decisively as a stop, so a required listener behind it is reported skipped ahead of the failure, which travels as the cause on both branches, or a response set by the failing listener would be served with access control never consulted. The opt-out is not read here: MarkListenerMaySkipRequiredListeners licenses a chosen short-circuit, a failure is not one, and the kernel tells the two apart by the type of the error. */
             requiredErr := refuseSkippedRequiredListeners(
                 eventName,
                 listenerList[listenerIndex+1:],
