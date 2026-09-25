@@ -24,11 +24,11 @@ type HandlerDecoratorConfig struct {
 
     Propagator propagation.TextMapPropagator
 
-    /* Meter is optional: when set, every request — including short-circuited ones — is counted and timed under the lifecycle instrument names (distinct from the middleware's handled-request instruments, so routed requests are not double-counted under one name). */
+    /* Meter is optional: when set, every request, short-circuited ones included, is counted and timed under the lifecycle instrument names, distinct from the middleware's handled-request instruments so routed requests are not double-counted. */
     Meter metric.Meter
 }
 
-/* NewHandlerDecorator builds the outermost observability seam: it wraps the full nethttp.Handler the http kernel produces (register it through Application.RegisterHttpHandlerDecorator or the module), so requests the middlewares never see — security denials and other kernel.request short-circuits, listener-written responses, the panic-recovery path — still produce a span and a metric. The tracing middleware keeps instrumenting the routed slice; its span becomes a child of the lifecycle span through the context this decorator injects, giving denied requests one span and routed requests a parent/child pair. */
+/* NewHandlerDecorator builds the outermost observability seam: it wraps the full nethttp.Handler the http kernel produces (register it through Application.RegisterHttpHandlerDecorator or the module), so requests the middlewares never see, security denials and other kernel.request short-circuits, listener-written responses and the panic-recovery path, still produce a span and a metric. The tracing middleware's span becomes a child of the lifecycle span through the context this decorator injects. */
 func NewHandlerDecorator(config HandlerDecoratorConfig) (applicationcontract.HttpHandlerDecorator, error) {
     if nil == config.Tracer {
         return nil, exception.NewError("handler decorator tracer is nil", nil, nil)
@@ -68,7 +68,7 @@ func NewHandlerDecorator(config HandlerDecoratorConfig) (applicationcontract.Htt
         return nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
             parentContext := propagator.Extract(request.Context(), propagation.HeaderCarrier(request.Header))
 
-            /* the route is not resolved yet at this seam, so the span name follows the OTel semantic convention for an unmatched route: the method alone; the path travels as an attribute instead of the name to keep cardinality bounded */
+            /* the route is not resolved yet at this seam, so the span is named by the method alone, the OTel convention for an unmatched route, and the path travels as an attribute to keep cardinality bounded */
             spanContext, span := config.Tracer.Start(
                 parentContext,
                 normalizedMethod(request.Method),
@@ -118,7 +118,7 @@ func NewHandlerDecorator(config HandlerDecoratorConfig) (applicationcontract.Htt
     }, nil
 }
 
-/* statusRecordingResponseWriter captures the committed status code while optimistically forwarding the streaming/upgrade capabilities, mirroring the http kernel's recording writer: the kernel probes its raw writer for Flusher/Hijacker, so this wrapper must keep satisfying them and delegate with a runtime probe of its own. */
+/* statusRecordingResponseWriter captures the committed status code while forwarding the streaming and upgrade capabilities, as the http kernel's recording writer does, since the kernel probes its raw writer for Flusher and Hijacker. */
 type statusRecordingResponseWriter struct {
     nethttp.ResponseWriter
     statusCode  int
@@ -141,7 +141,7 @@ func (instance *statusRecordingResponseWriter) Write(payload []byte) (int, error
     return instance.ResponseWriter.Write(payload)
 }
 
-/* Flush goes through http.ResponseController, which follows Unwrap down the chain: an assertion on the direct writer found no Flusher behind a middleware wrapper that forwards Unwrap alone, and the flush the wrapper claims to offer did nothing while the stream sat in the buffers. A flush that reached a flusher committed the header even when it failed — the server's writer answers the write error of a client that has gone, with the status already fixed — so only a writer with no flusher at all leaves the header unwritten, and a status the handler tries after a failed flush is not the one the connection carried. */
+/* Flush goes through http.ResponseController, which follows Unwrap down the chain, so it reaches a flusher behind a middleware wrapper that forwards Unwrap alone. A flush that reached a flusher commits the header even when it fails, so only a writer with no flusher leaves the header unwritten, and a status set after a failed flush is not the one the connection carried. */
 func (instance *statusRecordingResponseWriter) Flush() {
     flushErr := nethttp.NewResponseController(instance.ResponseWriter).Flush()
     if false == errors.Is(flushErr, nethttp.ErrNotSupported) {
@@ -170,7 +170,7 @@ func (instance *statusRecordingResponseWriter) ReadFrom(reader io.Reader) (int64
     return io.Copy(instance.ResponseWriter, reader)
 }
 
-/* observedStatusCode is the status the connection carried as far as the writer saw it. A hijacked connection left the request/response model at the upgrade, so recording it as the constructor's default 200 puts a connection that lives for hours in the same duration series as an ordinary request and destroys the latency distribution. */
+/* observedStatusCode is the status the connection carried as far as the writer saw it. A hijacked connection left the request/response model at the upgrade, so it is not recorded as the default 200, which would put an hours-long connection in the request duration series. */
 func (instance *statusRecordingResponseWriter) observedStatusCode() int {
     if true == instance.hijacked {
         return nethttp.StatusSwitchingProtocols

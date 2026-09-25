@@ -47,9 +47,7 @@ func WithRetryConfig(retryConfig *RetryConfig) ProviderOption {
     }
 }
 
-/* Provider opens the redis client a set of connection values names. It holds only client, timeout and retry tuning: the address, user and password reach it through ConnectionParameters at open time.
-
-   Because it is handed the values rather than the configuration keys they came from, this provider knows no configuration key and names no credential of its own — so it carries no marking door, and neither does this package. Arming the framework's credential redaction is the application's call, through the parameter registrar's own RegisterSecretParameter for a parameter the application declares, or MarkParameterSecret for one melody registered from the .env artifacts. The party that resolved the values is the party that knows the keys, and the mark propagates to every parameter whose template reads the secret, so a template assembled from the credential is redacted with it and debug:parameters masks the password in a process that never dials. The frozen majors carry Provider.SecretParameterNames and a package-level MarkSecretParameters instead, because there the provider is told the parameter names and is therefore the component that knows them; on this major that door would only say a second time what the framework already says. */
+/* Provider opens the redis client a set of connection values names. It holds only client, timeout and retry tuning; the address, user and password reach it through ConnectionParameters at open time. Handed the values rather than the configuration keys, it knows no key and names no credential, so it carries no marking door. Arming the framework's credential redaction is the application's call, through the registrar's RegisterSecretParameter for a parameter it declares or MarkParameterSecret for one melody registered from the .env artifacts; the mark propagates to every parameter whose template reads the secret. */
 type Provider struct {
     clientConfig  *ClientConfig
     timeoutConfig *TimeoutConfig
@@ -178,7 +176,7 @@ func (instance *Provider) isTransientError(inputErr error) bool {
 func (instance *Provider) computeBackoffDelay(attempt uint32) time.Duration {
     defaults := DefaultRetryConfig()
 
-    /* non-positive delays and a multiplier below 1 fall back to the defaults: a negative delay makes time.Sleep return immediately and a sub-1 multiplier decays the delay toward zero, both collapsing the backoff into a re-dial storm; a multiplier of exactly 1 stays a valid constant backoff. */
+    /* non-positive delays and a multiplier below 1 fall back to the defaults: a negative delay makes time.Sleep return at once and a sub-1 multiplier decays the delay toward zero, both a re-dial storm; a multiplier of exactly 1 is a valid constant backoff. */
     initialDelay := instance.retryConfig.InitialDelay
     if 0 >= initialDelay {
         initialDelay = defaults.InitialDelay
@@ -189,13 +187,13 @@ func (instance *Provider) computeBackoffDelay(attempt uint32) time.Duration {
         maxDelay = defaults.MaxDelay
     }
 
-    /* the not-at-least-1 form is deliberate: NaN fails every comparison, so `1 > NaN` would let a NaN multiplier through, poison the float-space growth below and collapse the backoff into an immediate re-dial storm once the NaN converts to a negative duration. */
+    /* the not-at-least-1 form is deliberate: NaN fails every comparison, so `1 > NaN` would let a NaN multiplier through and collapse the backoff into a re-dial storm once it converts to a negative duration. */
     backoffMultiplier := instance.retryConfig.BackoffMultiplier
     if false == (backoffMultiplier >= 1) {
         backoffMultiplier = defaults.BackoffMultiplier
     }
 
-    /* grow the delay in float space and cap at maxDelay as soon as it is reached, before converting to time.Duration — otherwise a large attempt count overflows the float64->int64 conversion to a negative duration, which slips past the `> maxDelay` cap and collapses the backoff to zero (a re-dial storm). */
+    /* grow the delay in float space and cap it at maxDelay before converting to time.Duration, or a large attempt count overflows the conversion to a negative duration that slips past the cap */
     maxDelayFloat := float64(maxDelay)
     delay := float64(initialDelay)
 
@@ -283,9 +281,7 @@ func (instance *Provider) open(params ConnectionParameters) (rueidis.Client, err
     )
 }
 
-/* connectionContext is the diagnostic shape of every refusal this provider writes, and it is assembled here rather than inside ConnectionParameters.SafeContext because only the provider knows what the safe context cannot: the deadlines that actually governed the attempt, which live in the client and timeout configurations the connection values know nothing about. It is the shape the bunorm siblings' toConnectionContext already writes for a failed dial. The password is never part of it: the safe context decides what may be rendered.
-
-   Unlike the frozen majors, this one names no configuration parameter in the context. Those majors read the address and the user from parameters they were told the names of, and named them here so the operator had a key to go and set; this major is handed the values, so there is no key to name and inventing one would be a guess. */
+/* connectionContext is the diagnostic shape of every refusal this provider writes, assembled here because only the provider knows the deadlines that governed the attempt, which live in the client and timeout configurations; it is the shape the bunorm siblings' toConnectionContext writes. The password is never part of it, and it names no configuration parameter, since this provider is handed values, not keys. */
 func (instance *Provider) connectionContext(
     params ConnectionParameters,
     clientConfig *ClientConfig,
@@ -306,7 +302,7 @@ func (instance *Provider) connectionContext(
 /* libraryDefaultDialTimeout is rueidis's own, applied whenever this provider installs no dialer of its own. */
 const libraryDefaultDialTimeout = 5 * time.Second
 
-/* resolveDialTimeoutDescription reports the deadline that GOVERNED the dial, not the one that was configured, which is what the rest of this context already does one line above for the connect timeout. The custom dialer is installed only for a positive value, so a zero or negative DialTimeout — the footgun of a partial ClientConfig literal — ran under the library's own five seconds while the record said "0s". An operator reads that as no dial bound at all and goes looking for a deadline that never existed; measured, the dial failed after five seconds under it. */
+/* resolveDialTimeoutDescription reports the deadline that governed the dial, not the configured one: the custom dialer is installed only for a positive value, so a zero or negative DialTimeout runs under the library's own five seconds, and the record says so. */
 func resolveDialTimeoutDescription(clientConfig *ClientConfig) string {
     if 0 < clientConfig.DialTimeout {
         return clientConfig.DialTimeout.String()
@@ -315,7 +311,7 @@ func resolveDialTimeoutDescription(clientConfig *ClientConfig) string {
     return libraryDefaultDialTimeout.String() + " (library default)"
 }
 
-/* resolveConnectTimeout bounds the boot ping. A non-positive value takes the default rather than removing the bound, the way Ping reads its own zero and the way this package's options read theirs: a TimeoutConfig that names only the command timeout would otherwise run the ping on a context with no deadline, and a store that accepts the connection without answering would hang boot forever holding a client no one can close yet. */
+/* resolveConnectTimeout bounds the boot ping. A non-positive value takes the default rather than removing the bound, as Ping and this package's options read theirs, since an unbounded ping against a store that never answers would hang boot holding a client no one can close yet. */
 func resolveConnectTimeout(timeoutConfig *TimeoutConfig) time.Duration {
     if nil == timeoutConfig || 0 >= timeoutConfig.ConnectTimeout {
         return DefaultTimeoutConfig().ConnectTimeout

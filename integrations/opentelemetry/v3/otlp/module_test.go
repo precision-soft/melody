@@ -125,7 +125,7 @@ func TestProviderHandle_ASpentDeadlineIsRefusedRatherThanLockingTheProviderShut(
         t.Fatalf("the span processor was shut down %d times under a spent deadline, wanted none", processor.shutdownCalls)
     }
 
-    /* the load-bearing assertion, and it is asked BEFORE the wording of the refusal: the old form refused too — with the vendor's own "context deadline exceeded" — so a probe that reads the message first is killed by every mutant without the latch ever being exercised */
+    /* the load-bearing assertion, asked before the wording of the refusal: a form that let the vendor refuse with its own "context deadline exceeded" would refuse too, so a probe reading the message first could not tell whether the latch was exercised */
     if closeErr := handle.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("the provider was left unclosable by the refused close: %v", closeErr)
     }
@@ -139,7 +139,7 @@ func TestProviderHandle_ASpentDeadlineIsRefusedRatherThanLockingTheProviderShut(
     }
 }
 
-/* the container reaches this handle through CloseWithContext, so a teardown that declares no deadline is where the package reserve has to be applied. Applied on Close() alone it was a reserve the teardown never spent, and the flush the reserve exists for ran with no bound of any kind. */
+/* the container reaches this handle through CloseWithContext, so a teardown that declares no deadline is where the package reserve has to be applied; applied on Close() alone, the flush the reserve exists for would run with no bound. */
 func TestProviderHandle_ACloseWithoutADeadlineDerivesThePackageReserve(t *testing.T) {
     processor := &recordingSpanProcessor{}
     handle := &providerHandle{provider: sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(processor))}
@@ -154,7 +154,7 @@ func TestProviderHandle_ACloseWithoutADeadlineDerivesThePackageReserve(t *testin
         t.Fatalf("a close with no deadline handed the span processor a context with none either")
     }
 
-    /* measured from an instant taken BEFORE the call, so the reserve reads a shade longer than the constant; the window only has to separate the package grace from any other figure, and from the absence checked above */
+    /* timed from an instant taken before the call, so the reserve reads a shade longer than the constant; the window only has to separate the package grace from any other figure, and from the absence checked above */
     reserve := processor.shutdownDeadline.Sub(before)
     if reserve > unbudgetedShutdownGrace+time.Second || reserve < unbudgetedShutdownGrace/2 {
         t.Fatalf("the derived reserve was %s, wanted about the package grace %s", reserve, unbudgetedShutdownGrace)

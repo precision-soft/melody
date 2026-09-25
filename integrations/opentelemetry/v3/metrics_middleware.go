@@ -15,7 +15,7 @@ import (
 )
 
 func NewMetricsMiddleware(meter metric.Meter) (httpcontract.Middleware, error) {
-    /* fail fast on a nil meter at construction rather than nil-panicking on the first meter.Int64Counter call, matching NewHandlerDecorator which requires a non-nil Meter for its lifecycle instruments. */
+    /* a nil meter is refused at construction rather than panicking on the first meter.Int64Counter call, as NewHandlerDecorator requires a non-nil Meter */
     if nil == meter {
         return nil, exception.NewError("metrics middleware meter is nil", nil, nil)
     }
@@ -41,7 +41,7 @@ func NewMetricsMiddleware(meter metric.Meter) (httpcontract.Middleware, error) {
         return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             startedAt := time.Now()
 
-            /* the wrapped writer captures the status a handler commits DIRECTLY — the nil-response streaming/proxy shape, which this package's own MetricsRouteHandler and the websocket bridge both use. Without it that shape recorded the constructor's 200 whatever the handler wrote, so a route failing 100% of the time could graph as 100% success on the per-route instruments. */
+            /* the wrapped writer captures the status a handler commits directly, the nil-response streaming or proxy shape MetricsRouteHandler and the websocket bridge use, so the per-route instruments record what the handler wrote rather than a default 200 */
             recorder := &statusRecordingResponseWriter{ResponseWriter: writer, statusCode: nethttp.StatusOK}
 
             var response httpcontract.Response
@@ -87,7 +87,7 @@ func completedStatusCode(handlerErr error, response httpcontract.Response, recor
     return recorder.observedStatusCode()
 }
 
-/* statusCodeForError maps a handler error to the status the client will actually receive, the same mapping the kernel's exception listener makes: a deliberate sub-500 an HttpException carries is graphed at its own status rather than folded into the 5xx series, so a route whose normal contract is 404 does not read as 100% server errors on the per-route instruments. Anything that is not a sub-500 http exception is a server error. */
+/* statusCodeForError maps a handler error to the status the client receives, as the kernel's exception listener does: a deliberate sub-500 an HttpException carries is graphed at its own status rather than as a 5xx, and anything else is a server error. */
 func statusCodeForError(handlerErr error) int {
     httpException := exception.AsHttpException(handlerErr)
     if nil != httpException && nethttp.StatusInternalServerError > httpException.StatusCode() {
@@ -97,7 +97,7 @@ func statusCodeForError(handlerErr error) int {
     return nethttp.StatusInternalServerError
 }
 
-/* isNilResponse answers true for a nil interface AND for a typed-nil concrete response: `nil != response` alone lets a handler's `var resp *SomeResponse; return resp, nil` through, and the middleware's own StatusCode() dereference then panics — a panic charged to the observability layer while the defect sits in the handler. */
+/* isNilResponse answers true for a nil interface and for a typed-nil concrete response, since `nil != response` alone lets `var resp *SomeResponse; return resp, nil` through and the StatusCode() dereference would panic, charging the handler's defect to the observability layer. */
 func isNilResponse(response httpcontract.Response) bool {
     if nil == response {
         return true

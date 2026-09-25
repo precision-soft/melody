@@ -16,7 +16,7 @@ import (
 )
 
 func NewTracingMiddleware(tracer trace.Tracer, propagator propagation.TextMapPropagator) httpcontract.Middleware {
-    /* fail fast on a nil tracer at construction rather than nil-panicking on the first request deep inside the middleware chain, matching NewHandlerDecorator's nil-Tracer guard. A no-error constructor cannot report this, so it panics with a clear cause like the other constructors of required dependencies (for example NewInMemoryTokenStoreWithClock on a nil clock). */
+    /* a nil tracer is refused at construction rather than panicking on the first request, as NewHandlerDecorator's nil-Tracer guard does; a no-error constructor cannot report it, so it panics with a clear cause like other constructors of required dependencies */
     if nil == tracer {
         exception.Panic(exception.NewError("tracing middleware tracer is nil", nil, nil))
     }
@@ -63,7 +63,7 @@ func NewTracingMiddleware(tracer trace.Tracer, propagator propagation.TextMapPro
                     span.SetStatus(codes.Error, nethttp.StatusText(response.StatusCode()))
                 }
             } else if nil != handlerErr {
-                /* no response to read the status from, so record the client-facing status the kernel will derive from this error — otherwise a span for a handled 404 carries codes.Error and no status_code at all, and a dashboard that filters spans by http.response.status_code loses every errored request */
+                /* with no response to read, the span records the client-facing status the kernel derives from this error, so an errored request still carries http.response.status_code */
                 span.SetAttributes(attribute.Int("http.response.status_code", statusCodeForError(handlerErr)))
             }
 

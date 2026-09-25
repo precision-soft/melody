@@ -618,7 +618,7 @@ func TestStreamHandler_InFlightCallbackDoesNotRaceScopeTeardown(t *testing.T) {
         time.Sleep(time.Millisecond)
     }
 
-    /* keep answering control frames so an unfixed graceful close completes fast and the handler returns (and closes the scope) well before the callback resolves */
+    /* keep answering control frames so a graceful close that did not wait for the read loop would complete fast and the handler would return, and close the scope, well before the callback resolves */
     go func() {
         _, _, _ = connection.Read(ctx)
     }()
@@ -768,7 +768,7 @@ func TestConnectionLiveness_LeaveCallbackRefreshesActivityBeforeClearingCallback
     close(stop)
 }
 
-/* The liveness windows must be measured against a monotonic base captured at accept time, not the wall clock. A wall-clock timestamp (time.Since(time.Unix(0, n))) lets a backward clock step excuse a wedged callback past the grace and leak the connection, or a forward step reap a healthy one. */
+/* The liveness windows are kept against a monotonic base captured at accept time, not the wall clock. A wall-clock timestamp (time.Since(time.Unix(0, n))) lets a backward clock step excuse a wedged callback past the grace and leak the connection, or a forward step reap a healthy one. */
 func TestConnectionLiveness_GraceUsesMonotonicBase(t *testing.T) {
     liveness := newConnectionLiveness()
 
@@ -786,7 +786,7 @@ func TestConnectionLiveness_GraceUsesMonotonicBase(t *testing.T) {
         t.Fatalf("a callback within the grace must be excused")
     }
 
-    /* a callback whose start is older than the grace, measured from the monotonic base, must no longer be excused */
+    /* a callback whose start is older than the grace, counted from the monotonic base, is not excused */
     liveness.callbackStartedOffset.Store(int64(liveness.elapsed()) - int64(2*grace))
     if true == liveness.cannotAnswer(false, window, grace, grace) {
         t.Fatalf("a callback that outran the grace must no longer be excused")
@@ -1055,7 +1055,7 @@ func TestStreamHandler_ANegativeReadLimitDisablesTheDefaultCap(t *testing.T) {
     }
     defer connection.CloseNow()
 
-    /* larger than coder/websocket's 32 KiB default read limit: the old positive-only guard discarded the -1 and this frame killed the connection with 1009 instead of reaching the callback */
+    /* larger than coder/websocket's 32 KiB default read limit: a guard that passed only positive limits would drop the -1, and this frame would kill the connection with 1009 instead of reaching the callback */
     oversized := make([]byte, 40*1024)
     if writeErr := connection.Write(ctx, coderwebsocket.MessageBinary, oversized); nil != writeErr {
         t.Fatalf("write: %v", writeErr)

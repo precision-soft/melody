@@ -539,7 +539,7 @@ func TestScheduleMatcher_AcceptedFieldsAreAlwaysGeneratable(t *testing.T) {
     }
 }
 
-/* a step on a single value ("5/15") is the one shape no two target schedulers agree on — measured: vixie crond rejects it as a bad field and refuses the WHOLE crontab (every entry in the file dies), busybox crond accepts it, robfig reads it as the range from that value up — so neither half picks a meaning: the matcher rejects it and the generator rejects it too, naming the rewrite all three read alike. */
+/* a step on a single value ("5/15") is the one shape no two target schedulers agree on: vixie crond refuses it as a bad field and with it the whole crontab, busybox crond accepts it, robfig reads it as the range from that value up. So neither half picks a meaning: the matcher and the generator refuse it, naming the rewrite all three read alike. */
 func TestScheduleMatcher_SteppedSingleValueIsRejectedByBothHalves(t *testing.T) {
     cases := []struct {
         name     string
@@ -597,7 +597,7 @@ func TestScheduleMatcher_TheSuggestedExplicitRangeIsAccepted(t *testing.T) {
     }
 }
 
-/* the whitespace rule is one rule at one width across both halves. Embedded whitespace is the correctness half — measured against vixie crond, an ascii space, a vertical tab and a no-break space inside a field each fail the WHOLE crontab with "bad minute", dropping every entry in the file. Leading and trailing whitespace crond itself tolerates; both halves still refuse it, because the generator always has, and a matcher that repaired it would admit a schedule that cannot be generated. */
+/* the whitespace rule is one rule at one width across both halves. Embedded whitespace is the correctness half: an ascii space, a vertical tab and a no-break space inside a field each make vixie crond fail the whole crontab with "bad minute". Leading and trailing whitespace crond tolerates, but the generator refuses it, so a matcher that repaired it would admit a schedule that cannot be generated. */
 func TestScheduleMatcher_WhitespaceIsRejectedByBothHalves(t *testing.T) {
     fields := []string{" 5", "5 ", "1, 5", "1,\u00a05", "1\v-5", "1,\f5", "5\t", "1\u20285"}
 
@@ -725,7 +725,7 @@ func TestScheduleMatcher_QuestionMarkDayFieldIsUnrestricted(t *testing.T) {
     }
 }
 
-/* the kubernetes mirror of TestScheduleMatcher_AcceptedFieldsAreAlwaysGeneratable, in the direction that broke: every day-field shape the generator validates for a CronJob manifest must also parse in the in-process matcher, or NewRunnerCommand panics at boot on a Configuration the cluster runs happily. */
+/* the kubernetes mirror of TestScheduleMatcher_AcceptedFieldsAreAlwaysGeneratable, in the other direction: every day-field shape the generator validates for a CronJob manifest also parses in the in-process matcher, or NewRunnerCommand panics at boot on a Configuration the cluster runs. */
 func TestScheduleMatcher_KubernetesGeneratableDayFieldsAlwaysParse(t *testing.T) {
     for _, schedule := range []*Schedule{
         {DayOfMonth: "?"},

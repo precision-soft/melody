@@ -11,7 +11,7 @@ const defaultStreamRouteName = "melody.websocket"
 
 type ModuleConfig struct {
     Hub *melodyhttp.ServerSentEventHub
-    /* Options is handed to NewStreamHandler untouched, so its IdleTimeout requirement is the module's too: a zero fails the route registration at boot. The module deliberately supplies no default of its own — the only thing that reaps a peer which vanished without a fin should be chosen by the application, not inherited silently. */
+    /* Options is handed to NewStreamHandler untouched, so its IdleTimeout requirement is the module's too: a zero fails the route registration at boot. The module supplies no default, since the only thing that reaps a peer which vanished without a fin should be the application's choice. */
     Options   Options
     RouteName string
     Path      string
@@ -33,7 +33,7 @@ func (instance *Module) Description() string {
     return "registers the websocket stream route bridged onto a server-sent-event hub"
 }
 
-/* a missing hub or path is refused at boot rather than skipped: an unregistered route has no later consumer to fail loudly — the endpoint simply does not exist, clients get 404 and every boot-time check reads healthy — while the same module already panics one field over on a zero IdleTimeout. A module registered at all is a decision to serve the stream. Only the PATH carries its own guard: a nil hub is already refused by name inside NewStreamHandler, which HandleNamed below reaches at this same boot moment, so a second check in front of it would be a shadowed sister no test could pin. */
+/* a missing path is refused at boot rather than skipped, since an unregistered route has no later consumer to fail loudly; a nil hub is already refused by name inside NewStreamHandler, which HandleNamed reaches at the same boot moment */
 func (instance *Module) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel) {
     if "" == instance.config.Path {
         exception.Panic(exception.NewError("websocket module path is empty - typically a missing configuration key; the stream route cannot be registered without one", nil, nil))

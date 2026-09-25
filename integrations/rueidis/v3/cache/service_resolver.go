@@ -13,7 +13,7 @@ type ServiceRegistrar interface {
     RegisterService(serviceName string, provider any, options ...containercontract.RegisterOption)
 }
 
-/* RegisterBackendService registers the backend with no options, which leaves every operation dispatched without a caller context unbounded — the subpackage's documented default. A composition root that wants the request-path reads bounded registers through RegisterBackendServiceWithOptions with WithCommandTimeout; without one a store that accepts connections but stops answering holds a Get for good, since the client retries a read-only command for as long as a context without deadline allows. */
+/* RegisterBackendService registers the backend with no options, so every operation dispatched without a caller context is unbounded. Register through RegisterBackendServiceWithOptions with WithCommandTimeout to bound the request-path reads: the client retries a read-only command for as long as a context without deadline allows, so a store that stops answering holds a Get. */
 func RegisterBackendService(registrar ServiceRegistrar, client rueidis.Client, prefix string) {
     RegisterBackendServiceWithOptions(registrar, client, prefix)
 }
@@ -23,7 +23,7 @@ func RegisterBackendServiceWithOptions(registrar ServiceRegistrar, client rueidi
     registrar.RegisterService(
         melodycache.ServiceCacheBackend,
         func(resolver containercontract.Resolver) (cachecontract.Backend, error) {
-            /* the backend borrows the client and declines to close it; resolving the owning Connection — when one is registered — records the dependency edge that closes the client AFTER this backend at teardown */
+            /* the backend borrows the client and does not close it; resolving the owning Connection, when one is registered, records the dependency edge that closes the client after this backend at teardown */
             if true == resolver.Has(melodyrueidis.ServiceConnection) {
                 container.MustFromResolver[*melodyrueidis.Connection](resolver, melodyrueidis.ServiceConnection)
             }

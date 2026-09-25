@@ -20,7 +20,7 @@ const ServiceTracerProvider = "opentelemetry.otlp.tracer_provider"
 
 const defaultTracerName = "melody"
 
-/* ModuleConfig is the plug-and-play wiring for OTLP tracing: hand it the exporter Config and register the Module; it builds the TracerProvider, adds the tracing middleware, and flushes on shutdown. Mirrors the NewModule facade the other integrations expose. */
+/* ModuleConfig is the plug-and-play wiring for OTLP tracing: given the exporter Config, the Module builds the TracerProvider, adds the tracing middleware and flushes on shutdown. */
 type ModuleConfig struct {
     Config     Config
     TracerName string
@@ -43,7 +43,7 @@ func (instance *Module) Description() string {
     return "exports traces to an OTLP collector and registers the tracing middleware"
 }
 
-/* RegisterServices registers the tracer provider as a container service so that (a) it is built once and (b) the container's shutdown closes it — the flush of the batch span processor is what that close performs. The container reaches the handle through CloseWithContext, not through Close, so the teardown's own deadline is what the flush runs under; the plain door is what a caller outside a container gets. */
+/* RegisterServices registers the tracer provider as a container service, built once and closed by the container's shutdown, which flushes the batch span processor. The container reaches the handle through CloseWithContext, so the flush runs under the teardown's deadline; Close is the door for a caller outside a container. */
 func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRegistrar) {
     registrar.RegisterService(
         ServiceTracerProvider,
@@ -58,7 +58,7 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
     )
 }
 
-/* RegisterHttpMiddlewares resolves the tracer provider (which instantiates it, so the container tracks it for shutdown) and installs the tracing middleware around the request pipeline. bootContainer runs before bootHttp, so the service registered above is available here. */
+/* RegisterHttpMiddlewares resolves the tracer provider, which instantiates it so the container tracks it for shutdown, and installs the tracing middleware; bootContainer runs before bootHttp, so the service is available here. */
 func (instance *Module) RegisterHttpMiddlewares(kernelInstance kernelcontract.Kernel, registrar applicationcontract.HttpMiddlewareRegistrar) {
     handle := container.MustFromResolver[*providerHandle](kernelInstance.ServiceContainer(), ServiceTracerProvider)
 
@@ -75,14 +75,10 @@ type providerHandle struct {
     provider *sdktrace.TracerProvider
 }
 
-/* unbudgetedShutdownGrace bounds the shutdown of a handle closed with no deadline at all, where nobody said how long the flush of the pending spans may take. It is the fallback, not the figure: a caller that declares a budget is honoured whole, and an operator who needs the export finished raises the teardown budget rather than this. It is applied on whichever door is reached without a deadline, not on the plain one alone — the container calls CloseWithContext, so a reserve that lived on Close() was a reserve the teardown never spent. */
+/* unbudgetedShutdownGrace bounds the shutdown of a handle closed with no deadline at all. It is the fallback: a caller that declares a budget is honoured whole, an operator who needs the export finished raises the teardown budget, and it applies on whichever door is reached without a deadline. */
 const unbudgetedShutdownGrace = 5 * time.Second
 
-/* CloseWithContext hands the teardown's own deadline to the provider's Shutdown, which has taken a context since it was written — erasing that context is the only thing this handle ever did, and it did it because the container's teardown used to ask for Close() error and nothing else.
-
-   A context that is already spent is NOT handed on, and that is the whole of this door's own judgement. Measured in the vendor (go.opentelemetry.io/otel/sdk trace/provider.go): Shutdown latches isShutdown through a compare-and-swap BEFORE its loop, the loop then reads ctx.Done() at the head of its first iteration and returns, the list of span processors is never emptied, and every later Shutdown answers nil on the strength of that latch. So an expired deadline does not merely drop the spans it could not export — it leaves the provider permanently unclosable, with its batch goroutine, its ticker and its exporter connection still running and no door left that can end them. Refusing to make the call keeps the provider closable by whatever comes next, and the container's failure map names this service either way, which is what an operator reads.
-
-   What this does not close is the deadline that is nearly spent: a remainder too small for one processor to shut down inside still latches, because bounding that would mean spending time the caller's budget no longer has. The figure that would buy is a decision about every component of the teardown at once, not about this one. */
+/* CloseWithContext hands the teardown's own deadline to the provider's Shutdown. A context already spent is not handed on: the sdk's Shutdown (go.opentelemetry.io/otel/sdk trace/provider.go) latches isShutdown by compare-and-swap before its loop, returns at the loop's first ctx.Done() read with the span processors still registered, and answers nil to every later Shutdown, which would leave the provider unclosable with its batch goroutine, ticker and exporter connection running. Refusing the call keeps it closable by whatever comes next, and the container's failure map names this service either way. A remainder too small for one processor to shut down inside still latches. */
 func (instance *providerHandle) CloseWithContext(closeContext context.Context) error {
     if nil != closeContext.Err() {
         return exception.NewError(

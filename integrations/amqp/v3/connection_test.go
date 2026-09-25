@@ -172,7 +172,7 @@ func TestRedactDsn_KeepsWellFormedDsnWithoutThePassword(t *testing.T) {
     }
 }
 
-/* the close is asserted on the deadline it arms on the socket, not on its return: the return is bounded by closeJoinTimeout, thirty seconds, while the plain close it replaced arms nothing and never returns over a wedged socket */
+/* the close is asserted on the deadline it arms on the socket, not on its return: the return is bounded by closeJoinTimeout, thirty seconds, while a plain close arms nothing and never returns over a wedged socket */
 func TestProvider_CloseArmsADeadlineOnAWedgedConnection(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     connection, gated := dialGated(t, dsn)

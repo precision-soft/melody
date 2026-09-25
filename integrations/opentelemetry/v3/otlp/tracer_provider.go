@@ -24,7 +24,7 @@ const (
     defaultBatchTimeout = 5 * time.Second
 )
 
-/* Config describes how to export spans to an OTLP collector. Endpoint is host:port without a scheme (for example "otel-collector:4317"); the deployment owns these values, so an app typically fills them from a parameter / .env. SampleRatio in (0,1) keeps that fraction of traces; 0 or >=1 samples everything; a negative or NaN ratio is refused at construction, because both used to fall through to AlwaysSample. */
+/* Config describes how to export spans to an OTLP collector. Endpoint is host:port without a scheme, for example "otel-collector:4317", filled by the deployment from a parameter or .env. SampleRatio in (0,1) keeps that fraction of traces and 0 or >=1 samples everything; a negative or NaN ratio is refused at construction. */
 type Config struct {
     Endpoint       string
     Protocol       string
@@ -36,7 +36,7 @@ type Config struct {
     BatchTimeout   time.Duration
 }
 
-/* String and Format keep Headers out of every rendering fmt routes through this value's methods. Headers is an EXPORTED field, so a plain %v walks it and prints the collector auth token an app puts there in the clear. Format is what makes this complete: fmt consults a Formatter before Stringer and GoStringer and for every verb it consults any method for, so Format answers %#v and the numeric verbs (%d, %o, …) that would otherwise reflection-walk the struct, and it delegates to String for the one rendering. A separate GoString would be dead — Format shadows it. The receivers are values so that both a Config and a pointer to it redact, and Headers is reduced to its count — enough to see whether any were set without naming one. This mirrors the redaction the encrypt key provider carries for the same reason, with the same edge: %p and %w never reach Format (fmt prints the operand by reflection on its badverb path before consulting any method — a misuse go vet refuses in a literal format), and a Config held in an unexported field of another struct is walked by reflection under that struct's %v with no method called, so the redaction is a property of this value's own rendering, not of every rendering that can contain it. */
+/* String and Format keep Headers out of every rendering fmt routes through this value's methods, Headers reduced to its count, since it is an exported field that carries the collector auth token. Format answers %#v and the numeric verbs too, and value receivers make a Config and a pointer to it redact alike. %p and %w never reach Format, and a Config held in an unexported field of another struct is walked by reflection with no method called. */
 func (instance Config) String() string {
     return fmt.Sprintf(
         "otlp.Config{Endpoint:%q, Protocol:%q, ServiceName:%q, ServiceVersion:%q, SampleRatio:%v, Insecure:%v, BatchTimeout:%v, Headers:[redacted %d]}",
@@ -55,13 +55,13 @@ func (instance Config) Format(state fmt.State, verb rune) {
     _, _ = state.Write([]byte(instance.String()))
 }
 
-/* NewTracerProvider builds a batching TracerProvider wired to an OTLP exporter. The caller owns the returned provider's lifecycle — Shutdown must run on application exit to flush pending spans; the plug-and- play Module in this package does that for you by registering it as a container-managed service. */
+/* NewTracerProvider builds a batching TracerProvider wired to an OTLP exporter. The caller owns its lifecycle and runs Shutdown on exit to flush pending spans; the Module in this package does so by registering it as a container-managed service. */
 func NewTracerProvider(ctx context.Context, config Config) (*sdktrace.TracerProvider, error) {
     if "" == config.Endpoint {
         return nil, exception.NewError("otlp tracer provider endpoint is required", nil, nil)
     }
 
-    /* the documented contract covers 0 (sample everything) and the open interval; a negative ratio — the natural "tracing off" sentinel — and a NaN from a failed parse both fell through samplerFor's window check to AlwaysSample, inverting "minimum tracing" into 100% export exactly when the operator asked for none. Both are refused at construction instead. */
+    /* a negative ratio, the natural "tracing off" sentinel, and a NaN from a failed parse would fall through samplerFor's window check to AlwaysSample, exporting everything when the operator asked for none, so both are refused */
     if 0 > config.SampleRatio || config.SampleRatio != config.SampleRatio {
         return nil, exception.NewError(
             "otlp tracer provider sample ratio must not be negative or NaN: use a ratio in (0,1) to sample that fraction, or 0 / >=1 to sample everything",
@@ -116,7 +116,7 @@ func newExporter(ctx context.Context, config Config) (*otlptrace.Exporter, error
             options = append(options, otlptracegrpc.WithHeaders(config.Headers))
         }
 
-        /* the channel is dialled with the service config lookup disabled: grpc's dns resolver otherwise asks for a TXT record (_grpc_config.<host>) beside the address records of every new channel, and melody publishes no service config that way, so the lookup is cost alone. The channel opens lazily, on the first export; on a resolver that answers the address at once and the TXT record never — docker's embedded dns for a container name is one — that first export waits the resolver's whole timeout with the channel still connecting, and a shutdown flush that is the one to open it spends the entire close budget on a record it does not need, reporting a collector it could have reached as unreachable. */
+        /* the channel is dialled with the service config lookup disabled: grpc's dns resolver otherwise asks for a TXT record (_grpc_config.<host>) beside the address records, which melody never publishes. The channel opens on the first export, and on a resolver that never answers the TXT record, docker's embedded dns for a container name being one, that export, possibly the shutdown flush, would wait the resolver's whole timeout */
         options = append(options, otlptracegrpc.WithDialOption(grpc.WithDisableServiceConfig()))
 
         return otlptracegrpc.New(ctx, options...)

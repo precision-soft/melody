@@ -10,7 +10,7 @@ type ModuleConfig struct {
     Client rueidis.Client
     Prefix string
 
-    /* BackendOptions are handed to the registered backend as NewBackendService takes them. The one most compositions want is WithCommandTimeout: without it the backend's context-less doors run unbounded, and a store that stops answering holds a request-path read for good. */
+    /* BackendOptions are handed to the registered backend as NewBackendService takes them. WithCommandTimeout is the one most compositions want: without it the context-less doors run unbounded, and a store that stops answering holds a request-path read. */
     BackendOptions []BackendOption
 }
 

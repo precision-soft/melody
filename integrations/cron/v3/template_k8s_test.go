@@ -374,7 +374,7 @@ func TestK8sRenderWithoutEntriesCarriesTheMarkerAndNeedsNoImage(t *testing.T) {
     }
 }
 
-/* the namespace used to be the one k8s value checked only for line terminators, so an uppercase letter or a dot rendered a manifest kubectl apply then refused, after generation had reported success */
+/* the namespace is held to the RFC 1123 label grammar, so an uppercase letter or a dot fails generation instead of rendering a manifest kubectl apply refuses */
 func TestK8sRenderRefusesANamespaceThatIsNotAnRfc1123Label(t *testing.T) {
     entries := []Entry{k8sSampleEntry("product:list")}
 
@@ -411,7 +411,7 @@ func TestK8sRenderRefusesEmptyInvocationTokens(t *testing.T) {
     }
 }
 
-/* yamlQuote iterates runes, so an invalid UTF-8 byte was silently rewritten to U+FFFD — for the image reference that is a DIFFERENT image pulled than the one configured */
+/* yamlQuote iterates runes, so an invalid UTF-8 byte would be rewritten to U+FFFD, and for the image reference another image would be pulled than the one configured */
 func TestK8sRenderRefusesInvalidUtf8(t *testing.T) {
     entries := []Entry{k8sSampleEntry("product:list")}
 

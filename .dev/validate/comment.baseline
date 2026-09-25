@@ -6,46 +6,6 @@
 # fails, a file below it fails until the line is lowered, and a line for a file that carries none fails until
 # it is deleted. The comment reduction of the third major lowers these lines slice by slice; the list is empty
 # when it is done.
-integrations/amqp/v3/publish_half.go                         ~ 2
-integrations/amqp/v3/publish_turn.go                         ~ 2
-integrations/amqp/v3/server_sent_event_backplane.go          ~ 8
-integrations/amqp/v3/server_sent_event_backplane_test.go     ~ 6
-integrations/amqp/v3/transport.go                            ~ 14
-integrations/amqp/v3/transport_test.go                       ~ 11
-integrations/cron/v3/configuration.go                        ~ 1
-integrations/cron/v3/configuration_test.go                   ~ 2
-integrations/cron/v3/errors.go                               ~ 1
-integrations/cron/v3/.example/template_ansible_cron.go       ~ 1
-integrations/cron/v3/generate_command.go                     ~ 5
-integrations/cron/v3/generate_command_test.go                ~ 2
-integrations/cron/v3/runner_command.go                       ~ 8
-integrations/cron/v3/runner_command_test.go                  ~ 6
-integrations/cron/v3/schedule_matcher.go                     ~ 1
-integrations/cron/v3/schedule_matcher_test.go                ~ 2
-integrations/cron/v3/template_k8s.go                         ~ 2
-integrations/cron/v3/template_k8s_test.go                    ~ 1
-integrations/cron/v3/template_test.go                        ~ 1
-integrations/cron/v3/validation.go                           ~ 2
-integrations/opentelemetry/v3/module.go                      ~ 1
-integrations/opentelemetry/v3/module_test.go                 ~ 1
-integrations/opentelemetry/v3/otlp/module.go                 ~ 3
-integrations/opentelemetry/v3/otlp/module_test.go            ~ 2
-integrations/opentelemetry/v3/otlp/tracer_provider.go        ~ 1
-integrations/rueidis/v3/cache/backend.go                     ~ 1
-integrations/rueidis/v3/cache/backend_test.go                ~ 1
-integrations/rueidis/v3/client_config.go                     ~ 1
-integrations/rueidis/v3/fixture_test.go                      ~ 2
-integrations/rueidis/v3/lock.go                              ~ 3
-integrations/rueidis/v3/lock_test.go                         ~ 9
-integrations/rueidis/v3/module.go                            ~ 1
-integrations/rueidis/v3/nonce_guard_test.go                  ~ 1
-integrations/rueidis/v3/provider.go                          ~ 1
-integrations/rueidis/v3/provider_test.go                     ~ 2
-integrations/rueidis/v3/rate_limit.go                        ~ 1
-integrations/rueidis/v3/token_store_test.go                  ~ 2
-integrations/websocket/v3/handler.go                         ~ 2
-integrations/websocket/v3/handler_test.go                    ~ 4
-integrations/websocket/v3/module_test.go                     ~ 1
 v3/container/container_close_test.go                         ~ 4
 v3/container/container_register_test.go                      ~ 1
 v3/container/container_test.go                               ~ 1

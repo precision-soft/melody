@@ -35,7 +35,7 @@ func TestNewGenerateCommandIdentity(t *testing.T) {
         t.Fatalf("Description() should not be empty")
     }
 
-    /* the command carries its 12 own flags plus the standard set every melody command accepts — without the standard set, the framework's -v/-vv rewrite into --verbosity killed exactly this command with "flag provided but not defined" */
+    /* the command carries its 12 own flags plus the standard set every melody command accepts, which the framework's -v/-vv rewrite into --verbosity requires */
     flags := command.Flags()
     expectedFlagCount := 12 + len(output.StandardFlags())
     if expectedFlagCount != len(flags) {
@@ -2556,7 +2556,7 @@ func TestAtomicWriteFileRollsBackTemporaryOnRenameFailure(t *testing.T) {
     }
 }
 
-/* a destination already in place keeps the mode it carries across the atomic rewrite — a crontab narrowed to 0600 stayed 0600 on the framework's and the migrate module's atomic writers and was widened back to 0644 by this one on every regeneration and every --prune; a destination that does not exist yet is created with the mode the caller chose */
+/* a destination already in place keeps the mode it carries across the atomic rewrite, as the framework's and the migrate module's atomic writers do, so a crontab narrowed to 0600 stays 0600; a destination that does not exist yet is created with the mode the caller chose */
 func TestAtomicWriteFileKeepsTheModeOfAnExistingDestination(t *testing.T) {
     tempDir := t.TempDir()
 
@@ -2599,7 +2599,7 @@ func TestAtomicWriteFileKeepsTheModeOfAnExistingDestination(t *testing.T) {
     }
 }
 
-/* The crontab-no-user dialect renders no user column at all, so the heartbeat line needs no user to place. Demanding --user turned a valid busybox-crond configuration into a hard error. */
+/* The crontab-no-user dialect renders no user column, so the heartbeat line needs no user and a valid busybox-crond configuration succeeds without --user. */
 func TestRunCrontabNoUserTemplateWithHeartbeatAndNoUserSucceeds(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")
@@ -3120,7 +3120,7 @@ func TestGenerateCommand_JsonReportsTheFailureAndWhatWasAlreadyWritten(t *testin
         t.Fatalf("expected the cause to name the missing logs-dir, got %q", document.Error.Cause.Message)
     }
 
-    /* the document used to flatten every failure to that one sentence — details and cause.details were nil on every run alike — while the journal, over the same value at the same instant, carried the context and the whole chain under it */
+    /* the document carries the failure's details and cause.details, the context and chain the journal carries for the same value */
     if nil == document.Error.Details {
         t.Fatalf("expected the failure details to be an object, got %q", stdout)
     }
@@ -3620,7 +3620,7 @@ func (instance *noUserColumnTemplate) RendersUserColumn() bool {
     return false
 }
 
-/* the frozen majors have no builtin k8s dialect, so neither pins this: on this major the k8s template is owned, its manifests open with the marker, and a manifest the configuration no longer produces is emptied by the same sweep that reconciles a crontab directory */
+/* the frozen majors have no builtin k8s dialect, so only this major pins it: the k8s template is owned, its manifests open with the marker, and a manifest the configuration does not produce is emptied by the same sweep that reconciles a crontab directory */
 func TestRunPruneSweepsAK8sManifestDirectory(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "cronjobs.yaml")
@@ -3794,7 +3794,7 @@ func TestRunK8sTemplateDoesNotAutoDeriveAHeartbeat(t *testing.T) {
     }
 }
 
-/* the emptying is irreversible, so ownership must not be a substring question: a file that QUOTES the marker inside a longer line, or past the leading lines, is not one this generator wrote — and a custom dialect that suffixes the builtin marker (the ansible example) declares files of its own, which a substring match claimed for the builtin run */
+/* emptying is irreversible, so ownership is not a substring question: a file that quotes the marker inside a longer line, or past the leading lines, is not one this generator wrote, and a custom dialect that suffixes the builtin marker (the ansible example) declares files of its own that a builtin run must not claim */
 func TestFileCarriesOwnershipMarker_MatchesOnlyAnExactLeadingLine(t *testing.T) {
     tempDir := t.TempDir()
 
@@ -4224,7 +4224,7 @@ func (instance *decoratingCrontabTemplate) Render(entries []Entry, options Rende
     return "# decorated by the application\n" + rendered, renderErr
 }
 
-/* the wrapper is used as it is, and so is the line it answers: the bare prefix, promoted from the builtin it embeds, which is the line an earlier release or another application's wrapper wrote as well. A named application's --prune swept on it and emptied those destinations, the cross-release and cross-application emptying the named line exists to prevent; the sweep is refused, the destination is written. */
+/* the wrapper is used as it is, and so is the line it answers: the bare prefix promoted from the builtin it embeds, which another application's wrapper writes as well. A sweep on it would empty those destinations, so the sweep is refused and the destination is written. */
 func TestRunPruneIsRefusedOnADialectWhoseLineDoesNotNameTheApplication(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")

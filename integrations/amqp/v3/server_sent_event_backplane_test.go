@@ -670,7 +670,7 @@ func TestServerSentEventBackplane_RefusalKeepsTheChannelForATimedOutWriteAndForA
     }
 }
 
-/* the sister of the transport's guard: the Close doc promises that no amqp call runs under instance.mutex so isClosing and the publish path stay answerable while teardown waits, and a channel close held under it made that false for as long as the socket was blocked. */
+/* the sister of the transport's guard: the Close doc promises that no amqp call runs under instance.mutex, so isClosing and the publish path stay answerable while a channel close is on a blocked socket. */
 func TestServerSentEventBackplane_IsClosingAnswersWhileAChannelCloseIsOnAWedgedSocket(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     connection, gated := dialGated(t, dsn)
@@ -704,7 +704,6 @@ func TestServerSentEventBackplane_IsClosingAnswersWhileAChannelCloseIsOnAWedgedS
         t.Fatalf("isClosing did not answer while a channel close was on the wedged socket")
     }
 }
-
 
 /* backplaneWatchQueueDeliveries is the watcher for a claim about ORDER rather than count: it consumes the queue it binds, so a test can say which events reached the exchange and in what sequence, which a count cannot. */
 func backplaneWatchQueueDeliveries(t *testing.T, connection *amqp091.Connection, exchange string) <-chan amqp091.Delivery {
@@ -858,7 +857,7 @@ func TestServerSentEventBackplane_ABroadcastAbandonedWhileQueuedIsNeverWritten(t
         t.Fatalf("expected the queued broadcast to be refused")
     }
 
-    /* the goroutine now gets its turn: it must find the caller gone and write nothing. That it wrote nothing is proved by ORDER rather than by waiting: once the goroutine has EXITED, a fence broadcast is published, and anything the goroutine wrote stands on the same channel before the fence, which the queue watching the exchange delivers in wire order. Its exit is the one event both the correct code and the defect produce, and the runtime's goroutine dump is the only door that publishes it. A fixed sleep proved only that the write had not landed yet — measured, the same assertion passed over a goroutine that did write once the sleep was zero — and a fence published after a mutex handshake did no better: the woken goroutine is not the one running, so the test kept re-taking the mutex ahead of it and the fence went out first, thirty runs out of thirty */
+    /* the goroutine now gets its turn: it must find the caller gone and write nothing. That it wrote nothing is proved by order rather than by waiting: once the goroutine has exited, a fence broadcast is published, and anything the goroutine wrote stands on the same channel before the fence, which the queue watching the exchange delivers in wire order. Its exit is the one event both the correct code and the defect produce, and the runtime's goroutine dump is the only door that publishes it. A fixed sleep proves only that the write has not landed yet, and a fence published after a mutex handshake can go out first, since the woken goroutine is not the one running */
     releaseBackplanePublish()
 
     awaitNoPublishGoroutine(t, "(*ServerSentEventBackplane).publishOnce.func", 3*time.Second)
@@ -867,7 +866,7 @@ func TestServerSentEventBackplane_ABroadcastAbandonedWhileQueuedIsNeverWritten(t
         t.Fatalf("fence publish: %v", publishErr)
     }
 
-    /* one term for the whole wait, and the closed channel named: a delivery channel the library closes answers a zero delivery at once and forever, and a timer re-armed per iteration never fired over it — measured, a quarter of a million turns in two hundred milliseconds */
+    /* one term for the whole wait, and the closed channel named: a delivery channel the library closes answers a zero delivery at once and forever, and a timer re-armed per iteration would never fire over it */
     fenceTerm := time.After(3 * time.Second)
 
     for {
@@ -892,7 +891,7 @@ func TestServerSentEventBackplane_ABroadcastAbandonedWhileQueuedIsNeverWritten(t
     }
 }
 
-/* the channel closes of a caller-owned connection are bounded by the join timeout, as the transport bounds the same operation over the same kind of socket, and not by the call timeout: a broker that answers the close RPC late — under a resource alarm it answers a publish just as late — is not a broker that did not answer. Measured before the fix: a close the broker answered in two seconds was reported as one that did not return, while the transport beside it closed clean on the same connection. */
+/* the channel closes of a caller-owned connection are bounded by the join timeout, as the transport bounds the same operation over the same kind of socket, and not by the call timeout: a broker that answers the close RPC late, as under a resource alarm it answers a publish late, is not a broker that did not answer, so a close answered in two seconds is not reported. */
 func TestServerSentEventBackplane_CloseWaitsForACallerOwnedChannelCloseBeyondTheCallTimeout(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     connection, gated := dialGated(t, dsn)
@@ -994,7 +993,7 @@ func TestServerSentEventBackplane_CloseGivesAnOwnedConnectionItsHandshakeWhenNot
     }
 }
 
-/* the same close reached with a cancellation and no deadline at all, which is the state a caller produces by asserting its way to CloseWithContext while holding one. The stretch is then zero, and a zero stretch used to become CloseDeadline(now): the client cut the closing handshake at a deadline already behind it and answered an i/o timeout over a live connection the broker was reading, so the teardown named this backplane for a budget somebody else had spent. Read with the transport's sibling test — the two doors carry one mechanism. */
+/* the same close reached with a cancellation and no deadline at all, which is the state a caller produces by asserting its way to CloseWithContext while holding one. The stretch is then zero, and CloseDeadline(now) would cut the closing handshake at a deadline already behind it, answering an i/o timeout over a live connection and naming this backplane for a budget somebody else spent. Read with the transport's sibling test: the two doors carry one mechanism. */
 func TestServerSentEventBackplane_CloseWithContextClosesAnOwnedConnectionUnderACancelledContext(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     dialer := newGatedDialer(t, dsn)

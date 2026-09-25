@@ -391,7 +391,7 @@ func sscanCallCount(t *testing.T, client redisclient.Client) int64 {
     return 0
 }
 
-/* Redis runs a script with every other client blocked, so reading a whole index set inside one script makes a revocation stall the entire server for as long as that user's token history is: measured at ~4.9ms over 1k tokens, ~224ms over 100k and around two seconds over a million. The walk has to be incremental, and the batch handed to any one script has to be bounded by this side, because SSCAN treats its count as a hint and can return more. */
+/* Redis runs a script with every other client blocked, so reading a whole index set inside one script would stall the entire server in proportion to that user's token history, around two seconds over a million tokens. The walk has to be incremental, and the batch handed to any one script has to be bounded by this side, because SSCAN treats its count as a hint and can return more. */
 func TestRedisTokenStore_DeleteByUserRevokesInBoundedBatches(t *testing.T) {
     client := newTokenStoreClient(t)
     store := NewTokenStore(
@@ -437,7 +437,7 @@ func TestRedisTokenStore_DeleteByUserRevokesInBoundedBatches(t *testing.T) {
     }
 }
 
-/* the purge reads the same sets a revocation does and has to hold the server for no longer, so it walks them the same way. It is in fact the operation that meets the biggest ones: it exists because dead members accumulate inside an index that is still alive, so the set it is handed is the whole history of an account that never stopped logging in — read into a single script, that is a multi-second freeze of every other client of that Redis. */
+/* the purge reads the same sets a revocation does and has to hold the server for no more time, so it walks them the same way. It is in fact the operation that meets the biggest ones: it exists because dead members accumulate inside an index that is still alive, so the set it is handed is the whole history of an account that never stopped logging in — read into a single script, that is a multi-second freeze of every other client of that Redis. */
 func TestRedisTokenStore_PurgeExpiredPrunesInBoundedBatches(t *testing.T) {
     client := newTokenStoreClient(t)
     store := NewTokenStore(

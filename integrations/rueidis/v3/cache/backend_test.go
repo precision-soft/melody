@@ -1027,7 +1027,7 @@ func TestDeleteKeysInBatches_AMultiBatchFailureReportsTheOperationsExtent(t *tes
     }
 }
 
-/* the caller's own mistakes are named the way the in-memory backend names them, because the shared contract makes the grammar of a refusal part of the promise. Three distinct mistakes used to arrive under one message that is also the message of a store outage, so neither the operator nor the application could tell a bug in the call from redis being down. Redis refuses all three itself — what was missing was never the refusal but its name. */
+/* the caller's own mistakes are named the way the in-memory backend names them, because the shared contract makes the grammar of a refusal part of the promise: three distinct mistakes each get their own message, distinct from a store outage, so a bug in the call is told apart from redis being down. Redis refuses all three itself; this backend names the refusal. */
 func TestBackend_CounterRefusalsAreNamedTheWayTheInMemorySiblingNamesThem(t *testing.T) {
     for _, testCase := range []struct {
         name    string

@@ -73,7 +73,7 @@ func (instance *Provider) Dialer(dsn string) func() (*amqp091.Connection, error)
     }
 }
 
-/* Close is bounded by a deadline on the socket, because the client's plain Close is an RPC that shares the send locks with every publish: on a connection whose peer stopped reading, a write in flight holds those locks for good and the close would join it, so the one door the composition root has to end a shared connection would itself never return. */
+/* Close is bounded by a deadline on the socket, because the client's plain Close is an RPC sharing the send locks with every publish: on a connection whose peer stopped reading, a write in flight holds those locks and an unbounded close would never return. */
 func (instance *Provider) Close(connection *amqp091.Connection) error {
     if nil == connection {
         return nil
@@ -85,7 +85,7 @@ func (instance *Provider) Close(connection *amqp091.Connection) error {
 /* redactedDsnPlaceholder stands in for any dsn this function cannot prove it has stripped credentials from. */
 const redactedDsnPlaceholder = "(redacted)"
 
-/* redactDsn strips the password from a dsn for logging. It fails CLOSED: a string that does not parse as a proper url with a scheme and a host is returned as a placeholder rather than verbatim, because net/url happily parses "guest:guest@host" into a scheme of "guest" with no userinfo at all — and returning that unchanged would put the password straight into the connection-failure log line. */
+/* redactDsn strips the password from a dsn for logging. It fails closed: a string that does not parse as a url with a scheme and a host becomes the placeholder, because net/url parses "guest:guest@host" into a scheme of "guest" with no userinfo, which would leak the password verbatim. */
 func redactDsn(dsn string) string {
     parsed, parseErr := neturl.Parse(dsn)
     if nil != parseErr {
@@ -103,7 +103,7 @@ func redactDsn(dsn string) string {
     return parsed.String()
 }
 
-/* redactDialError strips any raw dsn embedded in a dial error before it is wrapped as a cause and logged. amqp091.DialConfig surfaces a net/url parse failure (an unescaped '%' in the password, an unexpanded template, a control character) as a *url.Error whose Error() quotes the entire raw dsn — password included — so the exception cause chain would otherwise print the secret on every connection and reconnect failure. The offending url is replaced with the same fail-closed redaction redactDsn applies to the context field; a dsn malformed enough to reach here cannot re-parse, so redactDsn yields the placeholder rather than a leak. */
+/* redactDialError strips any raw dsn embedded in a dial error before it is wrapped as a cause and logged: amqp091.DialConfig surfaces a net/url parse failure as a *url.Error whose Error() quotes the entire dsn, password included. The url is replaced with redactDsn's fail-closed redaction, which yields the placeholder for a dsn that cannot parse. */
 func redactDialError(dialErr error) error {
     var urlErr *neturl.Error
     if true == errors.As(dialErr, &urlErr) {
@@ -117,7 +117,7 @@ func redactDialError(dialErr error) error {
     return dialErr
 }
 
-/* redactUrlCause strips the dsn fragments net/url embeds in its parse-error values: url.EscapeError carries the offending percent-escape triple (e.g. "%ss", the two password characters after a literal '%'), and url.InvalidHostError carries the offending host byte. url.Error.Error() renders that value verbatim, so it would reach the log even after the URL field itself is redacted. */
+/* redactUrlCause strips the dsn fragments net/url embeds in its parse-error values: url.EscapeError carries the offending percent-escape triple, which may be two password characters, and url.InvalidHostError the offending host byte, both rendered verbatim by url.Error.Error(). */
 func redactUrlCause(cause error) error {
     var escapeErr neturl.EscapeError
     if true == errors.As(cause, &escapeErr) {

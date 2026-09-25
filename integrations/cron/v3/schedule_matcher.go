@@ -26,7 +26,7 @@ const (
     dayOfWeekSunday            = 0
 )
 
-/* RunnerDialect selects how the in-process runner combines a schedule's day-of-month and day-of-week fields. Two genuinely restricted day fields always combine with or — the rule both target schedulers share — and the dialect decides only how a star-based day field (the plain or the stepped wildcard) is classified. The crontab dialect follows vixie crond, whose day-star flag reads just the field's first character: a star-based day field counts as unrestricted, so the day fields combine with and and only the restricted one constrains the day. The kubernetes dialect follows the robfig scheduler behind the k8s template, whose star bit survives only the unit step: the plain and the unit-stepped wildcard (alone or inside a list) are unrestricted, while a stepped wildcard with a step above one stays restricted and combines with or. The kubernetes dialect also bounds day of week at 6, as robfig does — a 7 would render a CronJob manifest the cluster rejects. The two real schedulers genuinely diverge on those shapes, so the dialect should name the scheduler the generated manifests target; every other matching rule is dialect-independent. The zero value selects the crontab dialect. */
+/* RunnerDialect selects how the in-process runner combines a schedule's day-of-month and day-of-week fields; the zero value is the crontab dialect. Two restricted day fields always combine with or. The crontab dialect follows vixie crond, where a star-based day field, plain or stepped, is unrestricted and the day fields combine with and; the kubernetes dialect follows the robfig scheduler behind the k8s template, where only the plain and unit-stepped wildcard, alone or in a list, are unrestricted, a wildcard stepped above one combines with or, and day of week is bounded at 6. Name the scheduler the generated manifests target. */
 type RunnerDialect string
 
 const (
@@ -52,7 +52,7 @@ func resolveRunnerDialect(dialect RunnerDialect) (RunnerDialect, *exception.Erro
     )
 }
 
-/* scheduleMatcher evaluates a five-field cron schedule against a wall-clock time to the minute. It parses the same Schedule the generator renders, so one Configuration drives both the emitted manifests and the in-process runner; sub-minute cadences are not cron-expressible and are out of scope. dayFieldsCombineWithOr carries the RunnerDialect's day rule, resolved once at parse time. */
+/* scheduleMatcher evaluates a five-field cron schedule against a wall-clock time to the minute. It parses the same Schedule the generator renders, so one Configuration drives both the manifests and the in-process runner; dayFieldsCombineWithOr carries the dialect's day rule, resolved at parse time. */
 type scheduleMatcher struct {
     minute                 cronFieldMatcher
     hour                   cronFieldMatcher
@@ -62,7 +62,7 @@ type scheduleMatcher struct {
     dayFieldsCombineWithOr bool
 }
 
-/* cronFieldMatcher is the set of values one field admits. starUnrestricted records whether any list item is the wildcard with the unit step, alone or inside a list — exactly the shapes on which the robfig scheduler keeps its star bit, which the kubernetes day rule reads: a stepped wildcard with a step above one loses the bit and stays restricted. starBased records whether the expression begins with the wildcard, plain or stepped — the flag vixie cron reads both for the crontab day rule and when it classifies an entry for wall-clock reconciliation. */
+/* cronFieldMatcher is the set of values one field admits. starUnrestricted records whether any list item is the wildcard with the unit step, the shapes on which the robfig scheduler keeps its star bit; starBased records whether the expression begins with the wildcard, plain or stepped, which vixie cron reads for the crontab day rule and the wall-clock entry class. */
 type cronFieldMatcher struct {
     allowed          map[int]bool
     starUnrestricted bool
@@ -95,7 +95,7 @@ func newScheduleMatcher(schedule *Schedule, dialect RunnerDialect) (*scheduleMat
         dayOfWeekExpression = normalizeCronNameTokens(fieldOrWildcard(schedule.DayOfWeek), cronDayOfWeekNameValues)
     }
 
-    /* the robfig scheduler reads a whole-field "?" in a day field as the wildcard with its star bit intact (the Quartz convention the kubernetes template renders), so that dialect matches it as "*"; the crontab dialect keeps refusing it through the numeric parse, as crond has no "?". */
+    /* the robfig scheduler reads a whole-field "?" in a day field as the wildcard with its star bit, so that dialect matches it as "*"; crond has no "?", so the crontab dialect refuses it */
     if RunnerDialectKubernetes == resolvedDialect {
         if "?" == dayOfMonthExpression {
             dayOfMonthExpression = "*"
@@ -126,7 +126,7 @@ func newScheduleMatcher(schedule *Schedule, dialect RunnerDialect) (*scheduleMat
         return nil, monthErr
     }
 
-    /* the robfig scheduler bounds day of week at 6, so under the kubernetes dialect a schedule naming Sunday as 7 must fail here rather than render a CronJob manifest the cluster rejects. */
+    /* the robfig scheduler bounds day of week at 6, so under the kubernetes dialect a Sunday written as 7 fails here rather than render a manifest the cluster rejects */
     dayOfWeekFieldMaximum := dayOfWeekMaximum
     if RunnerDialectKubernetes == resolvedDialect {
         dayOfWeekFieldMaximum = dayOfWeekMaximumKubernetes
@@ -142,7 +142,7 @@ func newScheduleMatcher(schedule *Schedule, dialect RunnerDialect) (*scheduleMat
         dayOfWeek.allowed[dayOfWeekSunday] = true
     }
 
-    /* two genuinely restricted day fields combine with or in every dialect; the dialect decides only whether any star-based day field counts as unrestricted (crontab) or just the star-bit shapes the robfig scheduler keeps do (the plain and the unit-stepped wildcard, alone or inside a list — kubernetes). */
+    /* two restricted day fields combine with or in every dialect; the dialect decides only which star-based shapes count as unrestricted */
     dayFieldsCombineWithOr := false == dayOfMonth.starBased && false == dayOfWeek.starBased
     if RunnerDialectKubernetes == resolvedDialect {
         dayFieldsCombineWithOr = false == dayOfMonth.starUnrestricted && false == dayOfWeek.starUnrestricted
@@ -158,7 +158,7 @@ func newScheduleMatcher(schedule *Schedule, dialect RunnerDialect) (*scheduleMat
     }, nil
 }
 
-/* Matches reports whether the schedule fires at the given minute. Two restricted day-of-month / day-of-week fields fire when either matches — the classic Vixie-cron or, shared by both dialects; when either day field is unrestricted under the configured RunnerDialect (any star-based field in the crontab dialect, only the robfig star-bit shapes — the plain or the unit-stepped wildcard, alone or inside a list — in the kubernetes dialect) the two day fields combine with and, like the rest of the fields. */
+/* Matches reports whether the schedule fires at the given minute. Two restricted day-of-month / day-of-week fields fire when either matches; when either is unrestricted under the configured RunnerDialect the two combine with and, like the other fields. */
 func (instance *scheduleMatcher) Matches(at time.Time) bool {
     if false == instance.minute.matches(at.Minute()) {
         return false
@@ -182,12 +182,12 @@ func (instance *scheduleMatcher) Matches(at time.Time) bool {
     return dayOfMonthMatches && dayOfWeekMatches
 }
 
-/* fixedTime reports whether the schedule pins both the minute and the hour — neither is a plain or stepped wildcard. This is the vixie-cron entry classification the runner's wall-clock reconciliation reads: fixed-time entries are caught up or suppressed across a clock jump, wildcard entries simply follow the current minute. */
+/* fixedTime reports whether the schedule pins both the minute and the hour, the vixie-cron entry class the wall-clock reconciliation reads: fixed-time entries are caught up or suppressed across a clock jump, wildcard entries follow the current minute. */
 func (instance *scheduleMatcher) fixedTime() bool {
     return false == instance.minute.starBased && false == instance.hour.starBased
 }
 
-/* cronFieldBounds names the field being parsed and the limits it is judged against, so that a refusal can say which of the five positions failed and what it was measured with. The dialect belongs here because it is what chose the limits on the day-of-week field: "7" is a perfectly legal Sunday under the crontab dialect and out of range under kubernetes, and a refusal that names neither the field nor the dialect leaves the operator reading "value is out of range" about an expression that is not wrong anywhere else. It is left empty where no dialect chose the bounds — the busybox divergence check reads the crontab limits directly — rather than filled with a default that would name a chooser that never chose. */
+/* cronFieldBounds names the field being parsed, the limits it is judged against and the dialect that chose them, so a refusal says which position failed under which rule: "7" is a legal Sunday under crontab and out of range under kubernetes. The dialect is empty where none chose the bounds, as in the busybox divergence check. */
 type cronFieldBounds struct {
     name    string
     minimum int
@@ -204,7 +204,7 @@ func parseCronField(expression string, bounds cronFieldBounds) (cronFieldMatcher
         return cronFieldMatcher{}, invalidScheduleError(expression, "field is empty", bounds)
     }
 
-    /* whitespace anywhere in a field — leading, trailing or embedded — is rejected rather than trimmed away, for two different reasons. Embedded whitespace is a correctness matter: the generated crontab line splits on it, so the field crond reads is not the field that was written, and it refuses the whole file with a parse error — every entry in it stops, not just this one. Any unicode space counts there, a vertical tab and a no-break space failing crond exactly as a plain space does. Leading and trailing whitespace crond would itself tolerate, but the generator refuses the field, and the two halves are one rule: repairing it here would admit a schedule that runs in-process yet cannot be generated. */
+    /* whitespace anywhere in a field is refused rather than trimmed: embedded whitespace, any unicode space, splits the generated crontab line and makes crond refuse the whole file, and the generator refuses leading and trailing whitespace too, so trimming here would admit a schedule that runs in-process but cannot be generated */
     if -1 != strings.IndexFunc(expression, unicode.IsSpace) {
         return cronFieldMatcher{}, invalidScheduleError(expression, "field contains whitespace", bounds)
     }
@@ -230,7 +230,7 @@ func parseCronField(expression string, bounds cronFieldBounds) (cronFieldMatcher
                 return cronFieldMatcher{}, invalidScheduleError(expression, "step must be a positive integer", bounds)
             }
 
-            /* a step wider than the field is clamped to the field's cardinality rather than rejected: crond accepts such a step and simply admits the range's low value alone (its expansion strides past the high bound on the first hop), so rejecting it would refuse a schedule the generator renders and crond runs. The clamp keeps the expansion loop below the overflow a step near the integer maximum would otherwise cause. */
+            /* a step wider than the field is clamped to the field's cardinality rather than refused, since crond accepts it and admits the low value alone; the clamp also keeps the expansion loop clear of integer overflow */
             step = stepValue
             if step > maximum-minimum+1 {
                 step = maximum - minimum + 1
@@ -256,7 +256,7 @@ func parseCronField(expression string, bounds cronFieldBounds) (cronFieldMatcher
                 low = lowValue
                 high = highValue
             } else {
-                /* a step only makes sense over a range or the wildcard; classic cron rejects a step on a single value, so accepting one here would admit a schedule the generated crontab cannot run. */
+                /* classic cron refuses a step on a single value, so accepting one would admit a schedule the generated crontab cannot run */
                 if true == stepped {
                     return cronFieldMatcher{}, invalidScheduleError(expression, "step requires a range or the wildcard as its base", bounds)
                 }
@@ -282,7 +282,7 @@ func parseCronField(expression string, bounds cronFieldBounds) (cronFieldMatcher
     return matcher, nil
 }
 
-/* parseCronNumber parses one field number as plain digits: strconv accepts a sign prefix ("+5"), which neither vixie crond nor the robfig scheduler does, so admitting one here would run a schedule the generated manifests cannot. */
+/* parseCronNumber parses a field number as plain digits, since strconv accepts a sign prefix that neither vixie crond nor the robfig scheduler does. */
 func parseCronNumber(text string) (int, bool) {
     if "" == text {
         return 0, false
@@ -302,7 +302,7 @@ func parseCronNumber(text string) (int, bool) {
     return value, true
 }
 
-/* invalidScheduleError names the field, the limits it was judged against and — where a dialect chose those limits — which dialect, beside the expression and the reason. The expression alone leaves an operator holding "value is out of range" about a schedule that is out of range in one position, under one dialect, for a reason none of the five words says: DayOfWeek "7" is a legal Sunday under the crontab dialect and refused under kubernetes, and only the record can tell the two apart. */
+/* invalidScheduleError names the field, the limits it was judged against and, where a dialect chose them, the dialect, beside the expression and the reason, since one expression can be valid under one dialect and refused under another. */
 func invalidScheduleError(expression string, reason string, bounds cronFieldBounds) error {
     context := exceptioncontract.Context{
         "expression": expression,

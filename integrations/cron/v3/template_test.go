@@ -84,7 +84,7 @@ func (instance *silentTemplate) Render(entries []Entry, options RenderOptions) (
     return "", nil
 }
 
-/* a template that answers for itself is believed whatever it is called, and one that does not is judged by the builtin name — the only thing the generator can read about a dialect it was handed. Deciding on the name alone made every registered dialect that renders no user column, the readme's own kubernetes example among them, demand a crontab user it would never render. */
+/* a template that answers for itself is believed whatever it is called, and one that does not is judged by the builtin name, the only thing the generator can read about a dialect handed to it; the name alone would make a registered dialect without a user column, the readme's kubernetes example among them, demand a crontab user. */
 func TestTemplateRendersUserColumn_AsksTheTemplateBeforeTheName(t *testing.T) {
     for _, testCase := range []struct {
         name     string

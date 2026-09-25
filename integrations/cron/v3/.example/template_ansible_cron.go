@@ -11,7 +11,7 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
 )
 
-/* ansibleCronOwnershipMarker opens this template's own ownership line, distinct from the builtin one: --prune empties only files whose leading lines carry the line of the template generating now, so a dialect of the integrator's own declares a line of its own — and, like the builtin line, names the application after it, because two applications sharing a playbook directory would otherwise have each other's files emptied by the other's sweep. */
+/* ansibleCronOwnershipMarker opens this template's own ownership line: --prune empties only files whose leading lines carry the line of the template generating now, and the line names the application so two applications sharing a playbook directory never empty each other's files. */
 const ansibleCronOwnershipMarker = "# owned by melody:cron:generate (ansible-cron)"
 
 /* ansibleCronHeartbeatName is the cron name of the heartbeat task, the identity ansible.builtin.cron keeps for the crontab line it writes for it. */
@@ -20,20 +20,16 @@ const ansibleCronHeartbeatName = "melody heartbeat"
 /* ErrAnsibleCronDuplicateName is returned when two entries of one destination render the same cron name: ansible.builtin.cron keeps ONE crontab line per name, so the second task would silently replace the first. */
 var ErrAnsibleCronDuplicateName = errors.New("ansible-cron: two entries render the same cron name")
 
-/* ErrAnsibleCronInvalidUtf8 is returned for a value that is not valid UTF-8: the YAML scalar escapes such a byte as \xNN, which a YAML reader decodes as the code point U+00NN — a different byte sequence than the one configured, handed to the shell in silence. */
+/* ErrAnsibleCronInvalidUtf8 is returned for a value that is not valid UTF-8: the YAML scalar escapes such a byte as \xNN, which a YAML reader decodes as the code point U+00NN, so the shell would receive other bytes than the ones configured. */
 var ErrAnsibleCronInvalidUtf8 = errors.New("ansible-cron: value is not valid UTF-8")
 
-/* the cron name becomes the "#Ansible: <name>" comment line the module writes above the crontab line it manages; a line terminator inside it ends the comment and starts a crontab line of the name's own choosing. Nothing else is refused in it: % is inert in a crontab comment, and the name never reaches a shell. */
+/* the cron name becomes the "#Ansible: <name>" comment line above the crontab line, so a line terminator inside it would start a crontab line of the name's own choosing; nothing else is refused, since % is inert in a comment and the name never reaches a shell */
 var ansibleCronNameForbiddenCharacters = []melodycron.ForbiddenCharacter{
     {Char: '\n', Reason: "a literal newline ends the #Ansible: comment line and starts a crontab line of its own; remove it at the source"},
     {Char: '\r', Reason: "a carriage return ends the #Ansible: comment line on many cron daemons; remove it at the source"},
 }
 
-/* AnsibleCronTemplate renders every entry as one ansible.builtin.cron task, so the same registry that drives the in-process runner can also feed a playbook. The five schedule fields map one to one onto the module's minute/hour/day/month/weekday arguments, which is what keeps this dialect a faithful rendering rather than an expression conversion — and what makes it a genuinely userland dialect: the binding ships no ansible template of its own.
-
-   The dialect lives under crontab semantics, because that is where the module puts the values: ansible.builtin.cron writes the crontab line itself as the seven arguments joined on a space — minute, hour, day, month, weekday, user, job — with no validation of the schedule fields, no escaping of the job (a % is the crontab line continuation there as anywhere else; the module's documentation asks the caller to escape it), and the name as the "#Ansible: <name>" comment line by which it finds the entry again. So the template holds the schedule fields, the user and the job to exactly what the builtin crontab dialect holds them to, through the binding's exported validators, and renders the job through the binding's shell quoting: a field carrying a space would otherwise render a second crontab line, an argument carrying a space would arrive at the process as two, and a % would end the command where it stands.
-
-   TaskNamePrefix and ApplicationName are the template's own configuration, injected at construction the way every custom template carries its knobs. The prefix reaches only the play's task name, which ansible prints and never writes anywhere, so it is not validated. The application name — the cli name the composition root reads off the configuration — completes the ownership line, the way the generator completes the builtin dialects' line: a custom dialect is handed no name by the generator, so it carries the one it was built with. */
+/* AnsibleCronTemplate renders every entry as one ansible.builtin.cron task, the five schedule fields mapped one to one onto the module's minute/hour/day/month/weekday arguments. The module writes the crontab line as its arguments joined on a space with no validation and no escaping, so the template holds the schedule fields, the user and the job to the builtin crontab dialect's rules through the binding's validators and shell quoting. TaskNamePrefix reaches only the play's task name and is not validated; ApplicationName completes the ownership line, since a custom dialect is handed no name by the generator. */
 type AnsibleCronTemplate struct {
     TaskNamePrefix  string
     ApplicationName string
@@ -43,7 +39,7 @@ func (instance *AnsibleCronTemplate) Name() string {
     return "ansible-cron"
 }
 
-/* OwnershipMarker opts this dialect into --prune: a playbook file this generator wrote earlier for this application and no longer produces is emptied down to the marker comment instead of running its retired tasks forever, while a file another application wrote under the same dialect, carrying its own name, is left alone. */
+/* OwnershipMarker opts this dialect into --prune: a playbook file this generator wrote for this application and does not produce in this run is emptied down to the marker, while a file carrying another application's name is left alone. */
 func (instance *AnsibleCronTemplate) OwnershipMarker() string {
     if "" == instance.ApplicationName {
         return ansibleCronOwnershipMarker
@@ -61,7 +57,7 @@ func (instance *AnsibleCronTemplate) Render(entries []melodycron.Entry, options 
     var builder strings.Builder
     builder.WriteString(instance.OwnershipMarker() + "\n---\n")
 
-    /* ansible.builtin.cron keeps one crontab line per name, and find_job answers the first "#Ansible: <name>" comment it meets — so two tasks sharing a name are one line, the last one written, and the entry that lost is gone in silence */
+    /* ansible.builtin.cron keeps one crontab line per name, so two tasks sharing a name would silently leave only the last one written */
     namesSeen := make(map[string]string, len(entries))
 
     for _, entry := range entries {
@@ -97,7 +93,7 @@ func (instance *AnsibleCronTemplate) Render(entries []melodycron.Entry, options 
     return builder.String(), nil
 }
 
-/* buildTask renders one entry as one task and returns the cron name it rendered under, the identity ansible.builtin.cron keeps for the line. A command expanded into several parallel instances yields one entry per instance under the same command name, so the cron name carries the instance when there is more than one — the way the k8s dialect suffixes its resource name — or every instance past the first would replace the one before it. */
+/* buildTask renders one entry as one task and returns the cron name it rendered under. A command expanded into several instances carries the instance in the cron name, as the k8s dialect suffixes its resource name, or each instance would replace the one before it. */
 func (instance *AnsibleCronTemplate) buildTask(entry melodycron.Entry) (string, string, error) {
     if "" == entry.User {
         return "", "", exception.NewError(
@@ -243,7 +239,7 @@ func refuseInvalidUtf8(entryName string, values []string) error {
     return nil
 }
 
-/* yamlScalar emits value as a double-quoted YAML scalar through Go's %q: the escapes Go writes — \" \\ \n \r \t \a \b \f \v, \xNN for a control byte, \uNNNN and \UNNNNNNNN for a code point the terminal would not show — are all read by a YAML double-quoted scalar with the same meaning, and every printable rune passes through verbatim. */
+/* yamlScalar emits value as a double-quoted YAML scalar through Go's %q, whose escapes a YAML double-quoted scalar reads with the same meaning; every printable rune passes through verbatim. */
 func yamlScalar(value string) string {
     return fmt.Sprintf("%q", value)
 }

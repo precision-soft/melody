@@ -41,7 +41,7 @@ type BackendService struct {
     backend *Backend
 }
 
-/* WithContext binds a fresh handle to the given context over the same client and configuration. The handle shares the service's closed state: it is minted per call — the runtime door mints one per request — and a handle that ignored the service's Close would quietly keep serving through a client whose owner already ended this backend, on exactly the path everything goes through. */
+/* WithContext binds a fresh handle to the given context over the same client and configuration. The handle shares the service's closed state, since the runtime door mints one per request and a handle ignoring Close would keep serving after its owner ended. */
 func (instance *BackendService) WithContext(ctx context.Context) *Backend {
     if nil == ctx {
         return instance.backend
@@ -120,7 +120,7 @@ func (instance *BackendService) Close() error {
 
 var _ cachecontract.Backend = (*BackendService)(nil)
 
-/* BackendFromRuntime PANICS when the service is absent, despite carrying no Must in its name: it wraps the framework's MustFromRuntime, and the signature has no error slot to answer through. The naming stays for compatibility; treat it as the Must door it is. */
+/* BackendFromRuntime panics when the service is absent, despite carrying no Must in its name: it wraps the framework's MustFromRuntime and has no error slot. The name stays for compatibility. */
 func BackendFromRuntime(runtimeInstance runtimecontract.Runtime, serviceName string) *Backend {
     return runtime.MustFromRuntime[*BackendService](runtimeInstance, serviceName).WithContext(runtimeInstance.Context())
 }

@@ -27,7 +27,7 @@ func TestNewConfiguration_StartsEmptyAndNonNil(t *testing.T) {
     }
 }
 
-/* Schedule keeps the order it was called in: the generator renders the entries in that order and the runner parses them in it, so a registry that reordered them would emit a crontab the caller cannot predict. */
+/* Schedule keeps the order of its calls: the generator renders the entries in that order and the runner parses them in it, so a registry that reordered them would emit a crontab the caller cannot predict. */
 func TestSchedule_KeepsEveryEntryInRegistrationOrder(t *testing.T) {
     configuration := NewConfiguration().
         Schedule("first:command", &EntryConfig{Schedule: &Schedule{Minute: "0"}}).
@@ -120,7 +120,7 @@ func TestConfiguration_EntriesHandsOutACopyOfTheList(t *testing.T) {
     }
 }
 
-/* the copy reaches past the list: ScheduledCommand and EntryConfig are exported structs with exported fields, so a caller writing through the pointer it was handed rewrote the registration itself — the very mutation Schedule takes a copy to prevent, arriving through the other door. */
+/* the copy reaches past the list: ScheduledCommand and EntryConfig are exported structs with exported fields, so writing through a handed-out pointer must not reach the registration Schedule copied. */
 func TestConfiguration_EntriesHandsOutACopyOfEachRegistration(t *testing.T) {
     configuration := NewConfiguration().Schedule(
         "job:one",

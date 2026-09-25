@@ -79,7 +79,7 @@ func TestRedisNonceGuard_RememberIsBoundedByTheCallTimeout(t *testing.T) {
     }))
 }
 
-/* the existence check behind a non-positive ttl is an EXISTS, a read-only command the client retries on a fresh connection for as long as the context allows — measured, on a request without deadline it had not returned after fifteen seconds where the Lua record was ended by the client's own ceiling at five. It is called directly: the authenticators refuse a non-positive ttl before they reach the guard, so this door is the contract's own */
+/* the existence check behind a non-positive ttl is an EXISTS, a read-only command the client retries on a fresh connection for as long as the context allows, so on a request without deadline only the call timeout ends it, where the Lua record is ended by the client's own ceiling at five seconds. It is called directly: the authenticators refuse a non-positive ttl before they reach the guard, so this door is the contract's own */
 func TestRedisNonceGuard_ExistenceCheckIsBoundedByTheCallTimeout(t *testing.T) {
     guard, _ := newWedgedNonceGuard(t)
 

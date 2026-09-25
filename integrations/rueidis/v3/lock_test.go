@@ -360,8 +360,7 @@ func TestRedisLock_AnAcquireThatLostItsReplyDoesNotStrandTheLease(t *testing.T) 
     t.Fatalf("the lease was stranded")
 }
 
-
-/* an acquire that ends ambiguously while this handle ALREADY holds the lease must not give the lease back: re-acquiring with the same Lock is reentrant by published contract, and the lease the give-back would reclaim is the one the caller is still inside. Measured on a live store before anything guarded it, the key was gone. What keeps it now is that a re-acquisition never writes its own token — the script extends the stored value instead of replacing it — so the give-back of that attempt matches nothing. */
+/* an acquire that ends ambiguously while this handle already holds the lease must not give the lease back: re-acquiring with the same Lock is reentrant by published contract, and the lease the give-back would reclaim is the one the caller is still inside. A re-acquisition never writes its own token, the script extending the stored value instead, so the give-back of that attempt matches nothing. */
 func TestRedisLock_AnAmbiguousReacquireKeepsTheLeaseItAlreadyHolds(t *testing.T) {
     outOfBand := newTokenStoreClient(t)
     name := lockTestName(t, "reentrant-ambiguous")
@@ -403,7 +402,7 @@ func TestRedisLock_AnAmbiguousReacquireKeepsTheLeaseItAlreadyHolds(t *testing.T)
     }
 }
 
-/* after Release the handle no longer claims the lease, so the give-back of a LATER ambiguous acquire is free to run — without that, the claim left standing would silence the door that exists to keep an ambiguous acquire from stranding a lease nobody holds. */
+/* after Release the handle claims no lease, so the give-back of a later ambiguous acquire is free to run; a claim left standing would silence the door that keeps an ambiguous acquire from stranding a lease nobody holds. */
 func TestRedisLock_AReleasedHandleGivesBackAnAmbiguousAcquireAgain(t *testing.T) {
     outOfBand := newTokenStoreClient(t)
     name := lockTestName(t, "released-then-ambiguous")
@@ -453,7 +452,7 @@ func TestRedisLock_AReleasedHandleGivesBackAnAmbiguousAcquireAgain(t *testing.T)
     t.Fatalf("the lease was stranded")
 }
 
-/* a Refresh the store answers with "no longer held" is the one reading that settles what this handle cannot settle on its own, so the claim is dropped there too — otherwise a handle whose lease was taken by another client keeps silencing its own give-back. */
+/* a Refresh the store answers with a lost lease is the one reading that settles what this handle cannot settle on its own, so the claim is dropped there too; otherwise a handle whose lease another client took would keep silencing its own give-back. */
 func TestRedisLock_ARefreshThatLostTheLeaseDropsTheClaim(t *testing.T) {
     outOfBand := newTokenStoreClient(t)
     name := lockTestName(t, "lost-then-ambiguous")
@@ -479,8 +478,7 @@ func TestRedisLock_ARefreshThatLostTheLeaseDropsTheClaim(t *testing.T) {
         t.Fatalf("expected the refresh to report the lease lost")
     }
 
-    /* the drop is the write this test exists for, asserted where it happens rather than through a door
-       that no longer consults it */
+    /* the drop is the write this test exists for, asserted where it happens rather than through a door that does not consult it */
     if "" != lock.(*redisLock).heldToken() {
         t.Fatalf("expected a handle told its lease was lost to hold none, it holds %q", lock.(*redisLock).heldToken())
     }
@@ -512,7 +510,7 @@ func TestRedisLock_ARefreshThatLostTheLeaseDropsTheClaim(t *testing.T) {
     t.Fatalf("the lease was stranded")
 }
 
-/* the input that separates the per-acquisition token from the flag it replaced: a lease that ENDED without Release. The flag was set by the acquire that took the lease and cleared only by Release or by a Refresh the store answered with a lost lease — never by the lease simply ending — so it stayed true over a handle that held nothing, and the next ambiguous acquire read it and skipped the give-back, stranding exactly the lease that door exists to reclaim. Measured against the previous form: the key still held the acquisition's token two seconds on. With the token minted per acquisition there is no flag to go stale — the give-back names the attempt, and the attempt's token is what is on the key. */
+/* the input that separates a per-acquisition token from a held flag: a lease that ended without Release. A flag cleared only by Release or by a Refresh that lost the lease would stay set over a handle that holds nothing, and the next ambiguous acquire would skip the give-back and strand the lease; with the token minted per acquisition the give-back names the attempt, and the attempt's token is what is on the key. */
 func TestRedisLock_AnAmbiguousAcquireAfterTheLeaseEndedStillGivesItBack(t *testing.T) {
     outOfBand := newTokenStoreClient(t)
     name := lockTestName(t, "lapsed-then-ambiguous")
@@ -558,7 +556,7 @@ func TestRedisLock_AnAmbiguousAcquireAfterTheLeaseEndedStillGivesItBack(t *testi
     t.Fatalf("the lease was stranded over a handle whose own lease had lapsed")
 }
 
-/* a Release whose round trip never reached the store leaves the lease standing, so the claim that names it must survive: dropped there, the second Release reports success over a lease still held and every later acquire is refused until the ttl lapses. The value that separates the two forms is what the STORE holds after the second Release — empty here, the acquisition's token under the previous form. */
+/* a Release whose round trip never reached the store leaves the lease standing, so the claim that names it must survive: dropped there, the second Release would report success over a lease still held and every later acquire would be refused until the ttl lapses. What separates the two forms is what the store holds after the second Release: empty here, the acquisition's token otherwise. */
 func TestRedisLock_AReleaseThatNeverReachedTheStoreKeepsTheLeaseNameable(t *testing.T) {
     client := newTokenStoreClient(t)
     name := lockTestName(t, "release-never-sent")
@@ -588,7 +586,6 @@ func TestRedisLock_AReleaseThatNeverReachedTheStoreKeepsTheLeaseNameable(t *test
         t.Fatalf("expected the lease to be acquirable again: %v %v", acquired, acquireErr)
     }
 }
-
 
 /* two acquires racing on ONE handle are both callers of a reentrant door, and the in-memory backend answers both yes. A token minted per acquisition makes the loser carry a token the store cannot match, so without the retry it is refused with the published meaning "someone else holds it" — while the someone else is its own handle. */
 func TestRedisLock_ConcurrentAcquiresOnOneHandleAreBothGranted(t *testing.T) {
@@ -661,7 +658,7 @@ func TestRedisLock_ConcurrentAcquiresOnOneHandleAreBothGranted(t *testing.T) {
     }
 }
 
-/* an acquire whose context was already done never reached the socket, so no lease can have been taken and the give-back would be a round trip against a store this call never spoke to. The value that separates the two forms is the number of script executions the store records for it: zero here, one under the previous form. */
+/* an acquire whose context was already done never reached the socket, so no lease can have been taken and the give-back would be a round trip against a store this call never spoke to. What separates the two forms is the number of script executions the store records for it: zero here, one otherwise. */
 func TestRedisLock_AnAcquireThatNeverReachedTheStoreCostsNoGiveBack(t *testing.T) {
     client := newTokenStoreClient(t)
     name := lockTestName(t, "no-give-back")
@@ -677,9 +674,7 @@ func TestRedisLock_AnAcquireThatNeverReachedTheStoreCostsNoGiveBack(t *testing.T
         t.Fatalf("expected the warm-up acquire to succeed: %v %v", acquired, acquireErr)
     }
 
-    /* the tally is process-global and this store is shared with the supervised example applications, which
-       run Lua of their own, so the measured window is compared against a CONTROL window of the same length
-       rather than against zero: a quiet store makes both nought, and a busy one moves both alike. */
+    /* the tally is process-global and this store is shared with the supervised example applications, which run Lua of their own, so the observed window is compared against a control window of the same length rather than against zero: a quiet store makes both nought, and a busy one moves both alike. */
     controlMark := commandCallCount(t, client, "cmdstat_evalsha:", "cmdstat_eval:")
     time.Sleep(300 * time.Millisecond)
     background := commandCallCount(t, client, "cmdstat_evalsha:", "cmdstat_eval:") - controlMark
@@ -699,9 +694,6 @@ func TestRedisLock_AnAcquireThatNeverReachedTheStoreCostsNoGiveBack(t *testing.T
         t.Fatalf("expected an acquire that never reached the store to cost no round trip of its own; the measured window ran %d scripts against a control window of %d", measured, background)
     }
 }
-
-
-
 
 /* a refusal is the store's own reading that the key carries a token this handle does not own, which settles what the handle could not settle alone. Dropping the claim there is what keeps Release the round-trip-free no-op its contract promises: a handle that kept a dead claim would send a token that can never match and could answer an error for a lock the caller never held. */
 func TestRedisLock_ARefusedAcquireDropsTheClaimItCouldNotKeep(t *testing.T) {

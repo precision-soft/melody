@@ -29,7 +29,7 @@ func (instance *Module) RegisterParameters(registrar melodyapplicationcontract.P
 func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.Kernel) []melodyclicontract.Command {
     generateCommand := melodycron.NewGenerateCommand(newCronConfiguration())
 
-    /* the custom dialect carries the application's name itself, read off the configuration the kernel already holds, so its ownership line names this application the way the builtin dialects' line does */
+    /* the custom dialect carries the application's name read off the configuration the kernel holds, so its ownership line names this application as the builtin dialects' line does */
     generateCommand.RegisterTemplate(&AnsibleCronTemplate{
         TaskNamePrefix:  "billing cron: ",
         ApplicationName: melodyconfig.ConfigMustFromContainer(kernelInstance.ServiceContainer()).Cli().Name(),

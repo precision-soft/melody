@@ -1127,7 +1127,7 @@ func TestComputeBackoffDelayFloorsASubMillisecondCeiling(t *testing.T) {
     }
 }
 
-/* TestComputeBackoffDelayAnswersAConstantMultiplierInBoundedTime guards the cost, written as a DEADLINE because that is the only way the cost is observable: a multiplier of exactly 1 is a valid constant backoff, and a growth walked attempt by attempt would cost its own square at the largest attempt, where the closed form is one math.Pow. The 250ms window is four times shorter than such a walk on the development container while leaving the closed form ample slack, and the value is asserted beside the deadline so the probe cannot pass by answering quickly and wrongly. */
+/* TestComputeBackoffDelayAnswersAConstantMultiplierInBoundedTime guards the cost, written as a DEADLINE because that is the only way the cost is observable: a multiplier of exactly 1 is a valid constant backoff, and a growth walked attempt by attempt would cost its own square at the largest attempt, where the closed form is one math.Pow. The 250ms window is shorter than such a walk while leaving the closed form ample slack, and the value is asserted beside the deadline so the probe cannot pass by answering quickly and wrongly. */
 func TestComputeBackoffDelayAnswersAConstantMultiplierInBoundedTime(t *testing.T) {
     provider := newTestProvider(
         WithRetryConfig(NewRetryConfig(0, 10*time.Millisecond, 5*time.Second, 1.0)),

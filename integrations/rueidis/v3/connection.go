@@ -6,7 +6,7 @@ import (
     "github.com/redis/rueidis"
 )
 
-/* NewConnection wraps a client in the closer shape the container's teardown recognizes: rueidis.Client.Close returns nothing, so the raw client can never join the ordered shutdown — the container closes what answers Close() error and nothing else — and every value in this package that could join it, the cache backend and the rate limiter, deliberately declines to close a client it merely borrows. Register the Connection as the service that owns the client and resolve the client through it; the container then closes the one owner, once, in dependency order. */
+/* NewConnection wraps a client in the closer shape the container's teardown recognises: rueidis.Client.Close returns nothing, so the raw client cannot join the ordered shutdown, and the cache backend and the rate limiter decline to close a client they borrow. Register the Connection as the service that owns the client and resolve the client through it, so the container closes the one owner, once, in dependency order. */
 func NewConnection(client rueidis.Client) *Connection {
     return &Connection{client: client}
 }

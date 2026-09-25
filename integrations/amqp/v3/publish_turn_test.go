@@ -2,7 +2,7 @@ package amqp
 
 import "testing"
 
-/* The two doors of a turn are a protocol whose whole content is which of them wins, and the instant they decide in cannot be produced from outside: a caller's timer firing against a write that has just begun is a tie between two goroutines. So each transition is handed the state directly instead of being raced into (§5.34) — the same manoeuvre this package already uses for the branch a write budget expires into. */
+/* The two doors of a turn are a protocol whose whole content is which of them wins, and the instant they decide in cannot be produced from outside: a caller's timer firing against a write that has just begun is a tie between two goroutines. So each transition is handed the state directly instead of being raced into, as this package does for the branch a write budget expires into. */
 
 func TestPublishTurn_ACallerThatGivesUpAfterTheWriteBeganIsToldItMayNot(t *testing.T) {
     turn := newPublishTurn()

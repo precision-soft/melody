@@ -42,7 +42,7 @@ type closeJoinMessage struct {
     Id int
 }
 
-/* blockingDeserializer parks the consume goroutine inside decode until the test releases it, holding open the window in which Close used to return while the loop was still running. */
+/* blockingDeserializer parks the consume goroutine inside decode until the test releases it, holding open the window in which a Close that did not join the loop would return while the loop still runs. */
 type blockingDeserializer struct {
     inner   serializercontract.Serializer
     once    sync.Once
@@ -876,7 +876,7 @@ func TestConsumeLoop_StaticLiveConnectionRecoversFromChannelOnlyLoss(t *testing.
         close(done)
     }()
 
-    /* on the old code a nil dialer made consumeLoop return immediately and close out; on a live static connection it must instead park on the reconnect backoff, keeping the subscription open for recovery. */
+    /* with a nil dialer on a live static connection the loop parks on the reconnect backoff rather than returning and closing out, keeping the subscription open for recovery. */
     select {
     case _, open := <-out:
         if false == open {
@@ -947,7 +947,7 @@ func TestTransport_RequeuePersistsDeadLetterAttemptCount(t *testing.T) {
         t.Fatalf("build publishing: %v", buildErr)
     }
 
-    /* a requeued exhausted message must carry its dead-letter attempt count across the broker round-trip; MaxDeadLetterAttempts re-reads the count on every consume, so dropping it resets the counter to 0 on each requeue and the bound is never reached for a value >= 2, looping forever — the very loop the feature was added to break */
+    /* a requeued exhausted message must carry its dead-letter attempt count across the broker round-trip; MaxDeadLetterAttempts re-reads the count on every consume, so dropping it would reset the counter to 0 on each requeue and a bound of 2 or more would never be reached */
     delivery := amqp091.Delivery{Headers: publishing.Headers, Body: publishing.Body}
     decoded, decodeErr := instance.decode(delivery, 1)
     if nil != decodeErr {
@@ -1172,7 +1172,7 @@ func TestReopenConsume_CloseUnblocksGoroutineParkedOnBackoff(t *testing.T) {
     }
 }
 
-/* Close must join the consume goroutine, not merely signal it. While it returned early the loop was still inside decode and went on to hand an envelope to the application AFTER Close returned — an envelope that can never be acked, because consumeChannelForAck reports the torn-down channel as gone, so the broker redelivers it; a decode failure racing the same window nacks on the channel Close has already closed. */
+/* Close must join the consume goroutine, not merely signal it: a loop still inside decode would hand an envelope to the application after Close returned, an envelope that can never be acked because consumeChannelForAck reports the torn-down channel as gone, and a decode failure racing the same window would nack on the channel Close already closed. */
 func TestClose_WaitsForTheConsumeGoroutine(t *testing.T) {
     registry := NewMessageRegistry()
     RegisterMessage[closeJoinMessage](registry, "amqp.test.close-join")
@@ -1242,7 +1242,7 @@ func TestClose_WaitsForTheConsumeGoroutine(t *testing.T) {
     }
 }
 
-/* inverted from the old "Close waits out the dial" pin: the dial now runs under the close signal, so Close returns promptly however long a caller-supplied dialer blocks, and a connection the dial yields afterwards is closed by the drain goroutine instead of leaking. */
+/* the dial runs under the close signal, so Close returns promptly however long a caller-supplied dialer blocks, and a connection the dial yields afterwards is closed by the drain goroutine instead of leaking. */
 func TestClose_ReturnsPromptlyWhileALoopIsStuckInTheDialer(t *testing.T) {
     dialing := make(chan struct{})
     release := make(chan struct{})
@@ -1866,7 +1866,7 @@ func TestStartConsumeLoop_RefusesOnceCloseHasBegun(t *testing.T) {
     }
 }
 
-/* the incremented RedeliveryStamp / DeadLetterAttemptStamp only ever reach the broker on the re-publish, so a requeue that abandons it and hands the original delivery back returns the message with the counts it arrived with. MaxRetries and MaxDeadLetterAttempts are then measured against the same numbers on every delivery and the message never dead-letters; a transient publish failure is therefore attempted again, and only a bounded number of times so a permanent one still reaches a verdict. */
+/* the incremented RedeliveryStamp / DeadLetterAttemptStamp only ever reach the broker on the re-publish, so a requeue that abandons it and hands the original delivery back returns the message with the counts it arrived with. MaxRetries and MaxDeadLetterAttempts then compare against the same numbers on every delivery and the message never dead-letters; a transient publish failure is therefore attempted again, and only a bounded number of times so a permanent one still reaches a verdict. */
 func TestPublishRequeue_RetriesABoundedNumberOfTimesBeforeGivingUp(t *testing.T) {
     dialCount := 0
 
@@ -2528,7 +2528,7 @@ func TestTransport_CloseReturnsWhenTheSocketWedgedWhileIdle(t *testing.T) {
     awaitOutcome(t, "close on a socket that wedged while idle", closeOutcome, 3*time.Second)
 }
 
-/* the confirmation is the third stretch a publish spends time in, and the caller's context bounds none of it on the paths melody publishes from: a broker that accepts the write and never acks used to park Send for good, holding the publish mutex with it. */
+/* the confirmation is the third stretch a publish spends time in, and the caller's context bounds none of it on the paths melody publishes from: a broker that accepts the write and never acks must not park Send, and the publish mutex with it. */
 func TestTransport_SendIsBoundedWhenTheBrokerNeverConfirms(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     connection, gated := dialGated(t, dsn)
@@ -2552,7 +2552,7 @@ func TestTransport_SendIsBoundedWhenTheBrokerNeverConfirms(t *testing.T) {
     }
 }
 
-/* a send that ran out of time waiting for its TURN never touched the socket, so it may not report a blocked write and may not mark the transport wedged — which took every later send out of service for as long as another send's confirmation ran. */
+/* a send that ran out of time waiting for its turn never touched the socket, so it may not report a blocked write and may not mark the transport wedged, which would take every later send out of service while another send's confirmation runs. */
 func TestTransport_ASendQueuedBehindAnotherIsNotReportedAsAWedgedWrite(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     connection, _ := dialGated(t, dsn)
@@ -2607,7 +2607,7 @@ func TestTransport_APublishAbandonedWhileQueuedIsNeverWritten(t *testing.T) {
 
     releaseTransportPublish()
 
-    /* the goroutine now takes its turn: it must find the caller gone and write nothing. That it wrote nothing is proved by ORDER rather than by waiting: once the goroutine has EXITED, a fence is sent and confirmed, and anything the goroutine wrote stands in the queue before the fence — so the queue grew by exactly the fence. A fixed sleep proved only that the write had not landed yet; the sibling test on the backplane measured the same assertion passing over a goroutine that did write once the sleep was zero. */
+    /* the goroutine now takes its turn: it must find the caller gone and write nothing. That it wrote nothing is proved by order rather than by waiting: once the goroutine has exited, a fence is sent and confirmed, and anything the goroutine wrote stands in the queue before the fence, so the queue grew by exactly the fence. A fixed sleep proves only that the write has not landed yet. */
     awaitNoPublishGoroutine(t, "(*Transport).publishOnce.func", 3*time.Second)
 
     if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 3, Name: "fence"})); nil != sendErr {
@@ -2724,8 +2724,7 @@ func TestTransport_CloseClosesTheChannelsWhenNoWriteIsInFlight(t *testing.T) {
     }
 }
 
-
-/* a send that ran out of budget waiting for its TURN is worth a further attempt: it never touched the socket, so there is nothing to blame and nothing to tear down, while the queue it waited behind is the one condition a later attempt can find gone. Under the single retryable bool it answered no to both questions, and publishRequeue spent one of its three attempts and dead-lettered a message nothing was wrong with. */
+/* a send that ran out of budget waiting for its turn is worth a further attempt: it never touched the socket, so there is nothing to blame and nothing to tear down, while the queue it waited behind is the one condition a later attempt can find gone. A single answer to both questions would make publishRequeue spend its attempts and dead-letter a message nothing was wrong with. */
 func TestTransport_ATurnTimeoutIsWorthAFurtherAttemptWithoutFaultingTheChannel(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     connection, _ := dialGated(t, dsn)
@@ -2853,7 +2852,7 @@ func TestTeardownStretchWithin_AnswersTheRemainderOrThePackageBound(t *testing.T
     }
 }
 
-/* the package bound is the ceiling of one stretch and the caller's deadline the ceiling of the TOTAL: an operator who declares an hour is asking for an hour of teardown, not an hour of the first stretch that wedges. Read unclamped, a MORE generous budget made every stretch longer than the constant that used to bound it. */
+/* the package bound is the ceiling of one stretch and the caller's deadline the ceiling of the total: an operator who declares an hour is asking for an hour of teardown, not an hour of the first stretch that wedges, so a generous budget never makes a stretch longer than its constant. */
 func TestTeardownStretchWithin_ClampsAGenerousDeadlineToThePackageBound(t *testing.T) {
     generousContext, cancelGenerous := context.WithTimeout(context.Background(), time.Hour)
     defer cancelGenerous()
@@ -2877,7 +2876,7 @@ func TestTeardownStretchWithin_ACancelledContextWithoutADeadlineDoesNotWait(t *t
     }
 }
 
-/* a mutex nobody holds is taken whatever the bound says. The bound reaches zero on every teardown whose budget an earlier component already spent, and a zero bound arms a timer ready at once — so the join of a publish half NOBODY was holding was answered false, and the caller read that as a wedged write. The pair is what separates the fix from one that simply always answers true. */
+/* a mutex nobody holds is taken whatever the bound says. The bound reaches zero on every teardown whose budget an earlier component already spent, and a zero bound arms a timer ready at once, which must not answer false for a free publish half that the caller would read as a wedged write. The pair separates this from a form that always answers true. */
 func TestTransport_LockWithinTakesAFreeMutexAtAZeroBound(t *testing.T) {
     var mutex sync.Mutex
 
@@ -2900,7 +2899,7 @@ func TestTransport_LockWithinStillRefusesAHeldMutexAtAZeroBound(t *testing.T) {
     }
 }
 
-/* a close with nothing to close cannot fail to return. closeChannels skips a nil channel, so a transport whose channels were never opened asks for no socket work at all — and at a zero bound it was answered with a fabricated "did not return within the bound" over a close that had nothing to do. */
+/* a close with nothing to close cannot fail to return. closeChannels skips a nil channel, so a transport whose channels were never opened asks for no socket work at all, and at a zero bound it must not be answered with "did not return within the bound". */
 func TestTransport_CloseChannelsWithinAnswersNothingToCloseAtAZeroBound(t *testing.T) {
     if closeErrs := closeChannelsWithin(0); 0 != len(closeErrs) {
         t.Fatalf("closing no channels at all reported %d failures: %v", len(closeErrs), closeErrs)
@@ -2911,7 +2910,7 @@ func TestTransport_CloseChannelsWithinAnswersNothingToCloseAtAZeroBound(t *testi
     }
 }
 
-/* the teardown of a connection this transport dialled itself, reached with a cancellation and no deadline at all — the state a caller produces by asserting its way to CloseWithContext while holding one. The stretch is then zero, and a zero stretch used to become CloseDeadline(now), which cuts the closing handshake at a deadline already behind it: the client answered an i/o timeout over a live connection the broker was reading, and the teardown named this transport for a budget somebody else had spent. */
+/* the teardown of a connection this transport dialled itself, reached with a cancellation and no deadline at all, the state a caller produces by asserting its way to CloseWithContext while holding one. The stretch is then zero, and CloseDeadline(now) would cut the closing handshake at a deadline already behind it, answering an i/o timeout over a live connection and naming this transport for a budget somebody else spent. */
 func TestTransport_CloseWithContextClosesAnOwnedConnectionUnderACancelledContext(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
 
@@ -3004,7 +3003,7 @@ func TestTransport_CloseWithContextStillReportsACutWedgedWrite(t *testing.T) {
     }
 }
 
-/* the channels of a connection the CALLER owns, closed under a budget an earlier component already spent: the close is left to end when the socket does — which it does, on its own, a moment later — and nothing is reported, because a close given no time is not a close that failed. Measured before, the zero bound armed a timer that was ready before the closing goroutine had run and reported the close as one that did not return, ten times out of ten, over a channel that was closed within a hundred milliseconds. */
+/* the channels of a connection the caller owns, closed under a budget an earlier component already spent: the close is left to end when the socket does, which it does a moment later, and nothing is reported, because a close given no time is not a close that failed; a zero bound arms a timer that is ready before the closing goroutine runs. */
 func TestTransport_CloseWithContextLeavesTheChannelsOfACallerOwnedConnectionToCloseUnderASpentDeadline(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     connection, _ := dialGated(t, dsn)

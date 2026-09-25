@@ -72,7 +72,6 @@ func (instance *gate) Wedge() {
     instance.mutex.Unlock()
 }
 
-
 /* WedgeIntegerReplies swallows only the replies that open with ':', the shape of a Lua script answering a count, and lets every array — a SCAN or SSCAN step — through. */
 func (instance *gate) WedgeIntegerReplies() {
     instance.mutex.Lock()
@@ -250,7 +249,7 @@ func awaitOutcome(t *testing.T, budget time.Duration, call func() error) error {
     }
 }
 
-/* requireDeadlineExceeded asserts that a refusal carries a deadline in its chain. Measured, that separates a bounded call from one the client's retry policy ended — which never returns — but NOT from one the client's own connection timeout ended: the ceiling refuses through context.DeadlineExceeded as well, five seconds in. What separates the bound from the ceiling is the budget every probe runs under, two seconds, below the ceiling. */
+/* requireDeadlineExceeded asserts that a refusal carries a deadline in its chain. That separates a bounded call from one the client's retry policy ended, which never returns, but not from one the client's own connection timeout ended, which refuses through context.DeadlineExceeded too, five seconds in; what separates the bound from that ceiling is the budget every probe runs under, two seconds. */
 func requireDeadlineExceeded(t *testing.T, err error) {
     t.Helper()
 
@@ -263,9 +262,7 @@ func requireDeadlineExceeded(t *testing.T, err error) {
     }
 }
 
-/* commandCallCount reads the store's own tally for one command family. It is process-global: every client
-   of this redis counts into it, so an assertion built on it compares a MEASURED window against a control
-   window rather than against zero. */
+/* commandCallCount reads the store's own tally for one command family. It is process-global: every client of this redis counts into it, so an assertion built on it compares an observed window against a control window rather than against zero. */
 func commandCallCount(t *testing.T, client redisclient.Client, prefixes ...string) int64 {
     t.Helper()
 
