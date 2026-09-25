@@ -555,7 +555,7 @@ func TestLevelEnabled_AnswersTrueForALoggerThatCannotBeAsked(t *testing.T) {
     }
 }
 
-/* an errors.Join answers nothing at all to errors.Unwrap, so a record assembled from the single wrap link carried no cause, no chain, and the context of only whichever branch errors.As reached first — exactly where the failure had gathered what several replicas, several destinations or several rules had to say. */
+/* an errors.Join answers nothing at all to errors.Unwrap, so a record assembled from the single wrap link would carry no cause, no chain, and the context of only whichever branch errors.As reached first — exactly where the failure gathered what several replicas, destinations or rules had to say. */
 func TestLogError_AJoinedErrorCarriesEveryBranchIntoTheRecord(t *testing.T) {
     buffer := &bytes.Buffer{}
     logger := NewJsonLogger(buffer, loggingcontract.LevelDebug)

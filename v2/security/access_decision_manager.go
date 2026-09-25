@@ -7,7 +7,7 @@ import (
     securitycontract "github.com/precision-soft/melody/v2/security/contract"
 )
 
-/* The refusal reasons name which branch produced a 403. Every branch answers the same status and the same client-facing message, so without a reason the journal could not tell a real denial from a firewall whose attribute no configured voter looks at — a wiring fault answered fail-closed. The access control listener reads these to pick the level it files the refusal at. */
+/* The refusal reasons name which branch produced a 403. Every branch answers the same status and message, so the reason is what tells a denial from a wiring fault; the access control listener reads it to pick the level. */
 const (
     RefusalReasonEmptyAttributeList       = "empty_attribute_list"
     RefusalReasonNoAttributeGranted       = "no_attribute_granted"
@@ -20,11 +20,7 @@ const (
     RefusalReasonUnanimousNoGrant         = "unanimous_no_grant"
 )
 
-/* RoleHierarchyAware is the optional capability an AccessDecisionManager implements to receive the declared role hierarchy at compilation, answering the manager that applies it.
-
-   The compilation asks for it and nothing else: it used to assert on the concrete *AccessDecisionManager, so a manager of the integrator's own — even a wrapper that only delegated, to log or cache decisions — skipped the whole hierarchy upgrade. ROLE_ADMIN: [ROLE_USER] then had no effect on the enforcement path while security.IsGranted, which expands the hierarchy straight from the compiled firewall, kept answering true for the same request: one door granted and the other answered 403, with no record on either.
-
-   A manager that does not implement it and is handed a hierarchy is refused at compilation by name, because the alternative is that silence. */
+/* RoleHierarchyAware is the optional capability an AccessDecisionManager implements to receive the declared role hierarchy at compilation, answering the manager that applies it. The compilation asks for it rather than for the concrete type, so a manager of the integrator's own, a delegating wrapper included, receives the hierarchy; one that does not implement it and is handed a hierarchy is refused at compilation by name. */
 type RoleHierarchyAware interface {
     WithRoleHierarchy(roleHierarchy *RoleHierarchy) securitycontract.AccessDecisionManager
 }
@@ -79,7 +75,7 @@ func (instance *AccessDecisionManager) Strategy() securitycontract.DecisionStrat
     return instance.strategy
 }
 
-/* WithRoleHierarchy answers a manager whose built-in role voters read the expanded roles, leaving every other voter as it was: melody knows what a RoleVoter does with a role and cannot know what a foreign voter would do with an expanded set, so wrapping one would be a decision taken on the integrator's behalf. An integrator who does want it wraps the voter with NewRoleHierarchyVoter, which takes any Voter. A nil hierarchy answers the manager unchanged, so the caller need not branch. */
+/* WithRoleHierarchy answers a manager whose built-in role voters read the expanded roles, leaving every other voter as it was, since melody cannot know what a foreign voter does with an expanded set; such a voter is wrapped with NewRoleHierarchyVoter by its owner. A nil hierarchy answers the manager unchanged. */
 func (instance *AccessDecisionManager) WithRoleHierarchy(roleHierarchy *RoleHierarchy) securitycontract.AccessDecisionManager {
     if nil == roleHierarchy {
         return instance
@@ -106,7 +102,7 @@ func (instance *AccessDecisionManager) WithRoleHierarchy(roleHierarchy *RoleHier
     return NewAccessDecisionManagerWithVoters(instance.strategy, upgradedVoters)
 }
 
-/* refuse answers the 403 every branch answers, carrying the branch that produced it. The message stays the one the client is served; the reason, the strategy and the attribute travel in the exception context, which the response never renders and the log record always carries. */
+/* refuse answers the 403 every branch answers, carrying the branch that produced it: the message is the one the client is served, and the reason, the strategy and the attribute travel in the exception context, which the log record carries and the response never renders. */
 func (instance *AccessDecisionManager) refuse(reason string, attribute string) *exception.HttpException {
     forbidden := exception.Forbidden("forbidden")
 
@@ -121,7 +117,7 @@ func (instance *AccessDecisionManager) refuse(reason string, attribute string) *
 }
 
 func (instance *AccessDecisionManager) DecideAll(token securitycontract.Token, attributes []string, subject any) error {
-    /* an empty attribute list is a refusal, not a vacuous grant. Read as "every one of nothing is granted" it opens the decision to a caller that asked for nothing — an attribute list a configuration value resolved away, or a variadic call with no attribute — and DecideAny refuses the same input. The compiled access control cannot produce an empty list, so the refusal is reached only through a direct caller, which is exactly the caller nothing else guards. */
+    /* an empty attribute list is a refusal, not a vacuous grant, as in DecideAny; the compiled access control never produces one, so only a direct caller reaches it */
     if 0 == len(attributes) {
         return instance.refuse(RefusalReasonEmptyAttributeList, "")
     }
@@ -175,7 +171,7 @@ func (instance *AccessDecisionManager) decideSingleAttribute(token securitycontr
         return instance.refuse(RefusalReasonAllVotersAbstained, attribute)
     }
 
-    /* no voter looked at this attribute at all: a firewall naming an attribute nothing is registered to answer is a wiring fault, answered fail-closed with the same 403 and filed at error by the listener, where every other refusal is filed at warning */
+    /* no voter looked at this attribute: a wiring fault, answered fail-closed with the same 403 and filed at error by the listener */
     if 0 == grantedCount && 0 == deniedCount && 0 == abstainCount {
         return instance.refuse(RefusalReasonNoVoterSupportsAttribute, attribute)
     }
@@ -208,7 +204,7 @@ func (instance *AccessDecisionManager) decideSingleAttribute(token securitycontr
         return nil
     }
 
-    /* unreachable: the counts that reach here were already answered above. It stays fail-closed rather than falling through to a grant. */
+    /* unreachable, since every count is answered above; it stays fail-closed rather than falling through to a grant */
     return instance.refuse(RefusalReasonUnanimousNoGrant, attribute)
 }
 

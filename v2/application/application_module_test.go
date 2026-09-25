@@ -68,7 +68,7 @@ func (instance mintingModuleProvider) Modules() []applicationcontract.Module {
     return []applicationcontract.Module{mintingModuleProvider{fakeModule{name: instance.name + "+"}}}
 }
 
-/* uncomparableModule cannot be a map key, so it exercises the branch that keeps the pre-deduplication behavior instead of letting the identity set panic at insertion */
+/* uncomparableModule cannot be a map key, so it exercises the branch that registers without deduplication instead of letting the identity set panic at insertion */
 type uncomparableModule struct {
     fakeModule
     tags []string
@@ -156,7 +156,7 @@ func TestRegisterModuleProvider_RegistersChildrenWithoutProvider(t *testing.T) {
     assertModuleNames(t, instance.modules, []string{"child-a", "child-b"})
 }
 
-/* a provider that is itself a module boots as that module: this door used to keep only the children and silently drop the provider's own hooks, so the two registration doors registered different applications from the same value */
+/* a provider that is itself a module boots as that module, its own hooks included, so the two registration doors register the same application from the same value */
 func TestRegisterModuleProvider_AProviderThatIsAModuleBootsAsThatModule(t *testing.T) {
     instance := &Application{}
 
@@ -170,7 +170,7 @@ func TestRegisterModuleProvider_AProviderThatIsAModuleBootsAsThatModule(t *testi
     assertModuleNames(t, instance.modules, []string{"provider", "child-a", "child-b"})
 }
 
-/* one instance reached through two providers used to boot twice — the loud half was a duplicate service name, the silent half its listeners and middlewares attached twice */
+/* one instance reached through two providers boots once: neither a duplicate service name nor its listeners and middlewares attached twice */
 func TestRegisterModule_TheSameInstanceThroughTwoProvidersBootsOnce(t *testing.T) {
     instance := &Application{}
 
@@ -192,7 +192,7 @@ func TestRegisterModule_TwoDistinctInstancesSharingANameStayTwoModules(t *testin
     assertModuleNames(t, instance.modules, []string{"twin", "twin"})
 }
 
-/* an instance of an uncomparable type cannot enter the identity set; the guard keeps it on the pre-deduplication path instead of letting the map insertion panic */
+/* an instance of an uncomparable type cannot enter the identity set; the guard registers it without deduplication instead of letting the map insertion panic */
 func TestRegisterModule_AnUncomparableModuleKeepsThePreDeduplicationBehavior(t *testing.T) {
     instance := &Application{}
 
@@ -558,12 +558,7 @@ func TestApplicationRegisterModuleProvider_RefusesATypedNilProvider(t *testing.T
     )
 }
 
-/* A module carrying an `any` field is comparable as a TYPE — an interface field counts as comparable at
-that level whatever it ends up holding — while the value is only comparable if what the field holds is.
-Asking the type therefore admitted a module to the identity map and then panicked hashing it, with exactly
-the "hash of unhashable type" the guard was written to avoid, for any module registered as a struct value
-whose field holds a map, a slice or a func. Such a module keeps the uncomparable path: registered, named,
-never a map key. */
+/* A module carrying an `any` field is comparable as a TYPE — an interface field counts as comparable at that level whatever it ends up holding — while the value is only comparable if what the field holds is. Asking the type would admit a module to the identity map and then panic hashing it, for any module registered as a struct value whose field holds a map, a slice or a func. Such a module takes the uncomparable path: registered, named, never a map key. */
 func TestRegisterModule_AValueModuleCarryingAnUnhashableFieldIsRegisteredInsteadOfPanicking(t *testing.T) {
     instance := &Application{}
 
@@ -575,8 +570,7 @@ func TestRegisterModule_AValueModuleCarryingAnUnhashableFieldIsRegisteredInstead
     assertModuleNames(t, instance.modules, []string{"carrier"})
 }
 
-/* the comparable half of the same shape stays on the identity path, so the repair is a narrowing of the
-skip and not a removal of it: one instance reached twice still boots once. */
+/* the comparable half of the same shape stays on the identity path: one instance reached twice still boots once. */
 func TestRegisterModule_AValueModuleCarryingAHashableFieldKeepsItsIdentity(t *testing.T) {
     instance := &Application{}
 

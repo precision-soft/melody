@@ -59,7 +59,7 @@ func TestDeleteCookie_SetsDefaultPath(t *testing.T) {
     }
 }
 
-/* the sibling door refuses the same empty name three lines above with a message of its own, so an unqualified recover reads that refusal as this one; the name of the door that refused is what separates them. */
+/* SetCookie, the sibling door, refuses an empty name with a message of its own, so an unqualified recover would read that refusal as this one; the name of the door that refused is what separates them. */
 func TestDeleteCookie_PanicsWhenNameIsEmpty(t *testing.T) {
     response := EmptyResponse(200)
 

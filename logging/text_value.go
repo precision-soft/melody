@@ -5,7 +5,7 @@ import (
     "reflect"
 )
 
-/* textValueCycleMarker stands where a text rendering would have entered a container that is its own ancestor; it is the marker the json logger writes for the same shape, so one cycle reads the same in both journals */
+/* textValueCycleMarker stands where a text rendering would enter a container that is its own ancestor; it is the marker the json logger writes for the same shape. */
 const textValueCycleMarker = normalizeJsonContextCycleMarker
 
 /* textVisitKey identifies a container on the current path of the walk: a map by its header, a slice by its backing pointer and length, each under its type, so two views of one array are two containers and a defined type over the same backing is its own */
@@ -15,7 +15,7 @@ type textVisitKey struct {
     elementType reflect.Type
 }
 
-/* renderTextValue renders a value the way fmt's %v does, and renders a cycle as the marker instead of recursing into it: fmt has no cycle detection, so a map that holds itself — directly, through a slice, or through a struct field — recursed until the goroutine stack was gone, a fatal error no recover turns into a record. A value without a cycle is handed to fmt as it is, so every rendering this logger already produced stays the same. */
+/* renderTextValue renders a value as fmt's %v does, with a cycle rendered as the marker: fmt has no cycle detection, and a map that holds itself would overflow the goroutine stack. A value without a cycle is handed to fmt unchanged. */
 func renderTextValue(value any) string {
     if false == textValueHoldsACycle(reflect.ValueOf(value), 0, map[textVisitKey]struct{}{}) {
         return fmt.Sprintf("%v", value)
@@ -24,7 +24,7 @@ func renderTextValue(value any) string {
     return fmt.Sprintf("%v", textSafeValue(reflect.ValueOf(value), 0, map[textVisitKey]struct{}{}))
 }
 
-/* textRendersThroughAMethod answers whether fmt's %v renders the value by calling a method of its own rather than by walking its shape — the Formatter, error and Stringer doors fmt consults at every depth for a value it can hand out — so the walk does not descend where fmt does not */
+/* textRendersThroughAMethod answers whether %v renders the value through its Formatter, error or Stringer method rather than its shape, so the walk does not descend where fmt does not. */
 func textRendersThroughAMethod(value reflect.Value) bool {
     if false == value.CanInterface() {
         return false
@@ -58,7 +58,7 @@ func textContainerKey(value reflect.Value) (textVisitKey, bool) {
     return textVisitKey{}, false
 }
 
-/* textValueHoldsACycle walks the value the way fmt prints it: maps, slices, arrays, structs and interfaces at every depth, and a pointer only at the top, where fmt prints &{…} — below it fmt prints the address and stops. The path holds the containers of the current branch only, so a map two keys share is not a cycle; it is one only when it is its own ancestor. */
+/* textValueHoldsACycle walks the value as fmt prints it: maps, slices, arrays, structs and interfaces at every depth, and a pointer only at the top. The path holds the current branch only, so a map two keys share is not a cycle. */
 func textValueHoldsACycle(value reflect.Value, depth int, path map[textVisitKey]struct{}) bool {
     if false == value.IsValid() {
         return false
@@ -142,7 +142,7 @@ func textElementsHoldACycle(value reflect.Value, depth int, path map[textVisitKe
     return false
 }
 
-/* textKindCanHoldACycle skips the elements of a scalar slice, which fmt prints one by one and which hold no reference to walk — a []byte of a megabyte is not a megabyte of calls */
+/* textKindCanHoldACycle skips the elements of a scalar slice, which hold no reference to walk. */
 func textKindCanHoldACycle(kind reflect.Kind) bool {
     switch kind {
     case reflect.Interface, reflect.Map, reflect.Slice, reflect.Array, reflect.Struct:
@@ -152,7 +152,7 @@ func textKindCanHoldACycle(kind reflect.Kind) bool {
     return false
 }
 
-/* textSafeValue rebuilds the part of a value that holds a cycle: a map as a map and a slice or an array as a slice, since %v prints them in the same shape whatever their element type, with the container that closes the cycle replaced by the marker. A struct that holds one cannot be rebuilt around a string, so it is rendered as the marker whole. Everything that holds no cycle is handed back as it is. */
+/* textSafeValue rebuilds the part of a value that holds a cycle, a map as a map and a slice or array as a slice, with the closing container replaced by the marker. A struct holding one is rendered as the marker whole. */
 func textSafeValue(value reflect.Value, depth int, path map[textVisitKey]struct{}) any {
     if false == value.IsValid() {
         return nil
@@ -171,7 +171,7 @@ func textSafeValue(value reflect.Value, depth int, path map[textVisitKey]struct{
         return textSafeValue(value.Elem(), depth+1, path)
     case reflect.Pointer:
         rebuilt := textSafeValue(value.Elem(), depth+1, path)
-        /* fmt prints the & of a top-level pointer only in front of a map, a slice, an array or a struct; the marker a cyclic struct became is a string, which behind a pointer would print as an address */
+        /* fmt prints the & of a top-level pointer only before a map, a slice, an array or a struct, and the marker is a string */
         if rebuiltKind := reflect.ValueOf(rebuilt).Kind(); reflect.Map != rebuiltKind && reflect.Slice != rebuiltKind {
             return rebuilt
         }

@@ -132,7 +132,7 @@ func (instance *Manager) Clear() error {
     return normalizeThirdPartyError(instance.backend.Clear())
 }
 
-/* an entry whose payload does not deserialize is left out of the result as an absent key is, and its keys come back in a DeserializationError beside the values that decoded */
+/* Many answers the values of the keys that are present. An entry whose payload does not deserialize is left out as an absent key is, and its keys come back in a DeserializationError beside the values that decoded. */
 func (instance *Manager) Many(keys []string) (map[string]any, error) {
     payloadsByKey, manyErr := instance.backend.Many(keys)
     manyErr = normalizeThirdPartyError(manyErr)
@@ -233,7 +233,7 @@ func (instance *Manager) DeleteMultiple(keys []string) error {
     return normalizeThirdPartyError(instance.backend.DeleteMultiple(keys))
 }
 
-/* the counter operations are backend-native, so a distributed backend keeps them atomic; they bypass the serializer and store the count as decimal text, so a counter key is read with GetCounter and never mixed with Set */
+/* Increment adds delta to a counter through the backend's native operation, so a distributed backend keeps it atomic. The count bypasses the serializer and is stored as decimal text, so a counter key is read with GetCounter and never mixed with Set. */
 func (instance *Manager) Increment(key string, delta int64) (int64, error) {
     newValue, incrementErr := instance.backend.Increment(key, delta)
 

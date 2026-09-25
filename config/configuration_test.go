@@ -205,7 +205,7 @@ func TestConfigurationRegisterRuntime_PreBootTemplateIsDeferredThenResolves(t *t
     }
 }
 
-/* a percent the scan treats as data carries no template, so the value is its own resolved form and a module may read it before boot — the deferral used to be decided on the presence of a percent */
+/* a percent the scan treats as data carries no template, so the value is its own resolved form and a module may read it before boot: the deferral is decided by the resolution's grammar, not by the presence of a percent */
 func TestConfigurationRegisterRuntime_PreBootLiteralPercentIsReadable(t *testing.T) {
     for _, literal := range []string{"Coverage 95%", "a%2Fb", "50% off"} {
         environment, err := NewEnvironment(&testEnvironmentSource{values: map[string]string{}})
@@ -426,7 +426,7 @@ func TestParameterPlaceholderPattern_AcceptsDottedIdentifiers(t *testing.T) {
     }
 }
 
-/* A value that escapes a literal percent with %% resolves to text of the shape %NAME%, which the post-resolution scan then rejected as an "unresolved placeholder" — failing the whole boot for a correctly escaped literal. */
+/* A value that escapes a literal percent with %% resolves to text of the shape %NAME%, and the post-resolution check must not reject it as an unresolved placeholder: a correctly escaped literal passes the boot. */
 func TestConfiguration_EscapedPercentLiteralDoesNotFailValidation(t *testing.T) {
     source := &testEnvironmentSource{values: map[string]string{
         CliDescriptionKey: "%%APP_NAME%% stays literal",
@@ -583,7 +583,7 @@ func TestRegisterRuntime_LeavesAnOrdinaryParameterUnmarked(t *testing.T) {
     }
 }
 
-/* a MarkSecret arriving after the boot resolve travels to the parameters whose templates read the key, exactly as the early marking does: without the retroactive scan the key was redacted while the dsn assembled from it printed in full */
+/* a MarkSecret arriving after the boot resolve travels to the parameters whose templates read the key, exactly as the early marking does, so the dsn assembled from the key is redacted beside it */
 func TestMarkSecret_PropagatesRetroactivelyToDirectReaders(t *testing.T) {
     environment := &Environment{values: map[string]string{
         "DB_PASSWORD": "hunter2",
@@ -617,7 +617,7 @@ func TestMarkSecret_PropagatesRetroactivelyToDirectReaders(t *testing.T) {
     }
 }
 
-/* a late mark covers the whole derivation chain, not the direct readers alone: the second hop used to keep printing the assembled value while the first was redacted, because the retroactive scan stopped after one step */
+/* a late mark covers the whole derivation chain, not the direct readers alone: the retroactive scan follows the marking to a fixpoint, so the second hop is redacted with the first */
 func TestMarkSecret_PropagatesRetroactivelyThroughDerivationChains(t *testing.T) {
     environment := &Environment{values: map[string]string{
         "G6_SECRET": "hunter2",
@@ -651,7 +651,7 @@ func TestMarkSecret_PropagatesRetroactivelyThroughDerivationChains(t *testing.T)
     }
 }
 
-/* the late mark reaches a reader spelled with the kernel.* alias of the marked MELODY_* key: the aliased pair is one parameter under two names, so the propagation seeds every spelling — a scan over the marked spelling alone left the alias-spelled reader printing the derived value in full */
+/* the late mark reaches a reader spelled with the kernel.* alias of the marked MELODY_* key: the aliased pair is one parameter under two names, so the propagation seeds every spelling, and a scan over the marked spelling alone would leave the alias-spelled reader printing the derived value in full */
 func TestMarkSecret_ReachesAReaderSpelledWithTheKernelAlias(t *testing.T) {
     environment := &Environment{values: map[string]string{
         LogPathKey: "/var/log/app.log",
@@ -685,7 +685,7 @@ func TestMarkSecret_ReachesAReaderSpelledWithTheKernelAlias(t *testing.T) {
     }
 }
 
-/* a runtime registration that fails to resolve leaves nothing behind: publishing before resolving served the raw template to every reader that outlived the recovered panic and burnt the name for the corrected retry */
+/* a runtime registration that fails to resolve leaves nothing behind: a parameter published and not rolled back would serve its raw template to every reader that outlived the recovered panic and burn the name for the corrected retry */
 func TestRegisterRuntime_FailedResolutionLeavesNoHalfMadeParameter(t *testing.T) {
     environment := &Environment{values: map[string]string{}}
 
@@ -755,7 +755,7 @@ func TestRegisterRuntime_RefusesWhitespaceNames(t *testing.T) {
     }()
 }
 
-/* a runtime parameter is named in its conversion errors: identified only by its empty environmentKey it was anonymous, and "cannot convert" named nothing an operator could find */
+/* a runtime parameter is named in its conversion errors: identified only by its empty environmentKey it would be anonymous, and "cannot convert" would name nothing an operator could find */
 func TestRuntimeParameter_ConversionErrorNamesTheParameter(t *testing.T) {
     environment := &Environment{values: map[string]string{}}
 

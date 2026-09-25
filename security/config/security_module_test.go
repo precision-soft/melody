@@ -227,7 +227,7 @@ func TestBuilder_ZeroValueOverrideInheritsGlobalAccessControl(t *testing.T) {
     }
 }
 
-/* a global access control declared without any firewall must still compile into an enforcing configuration; dropping it left every global rule silently unenforced */
+/* a global access control declared without any firewall must still compile into an enforcing configuration; dropping it would leave every global rule silently unenforced */
 func TestBuilder_GlobalAccessControlWithoutFirewallStillCompiles(t *testing.T) {
     builder := NewBuilder()
 
@@ -452,7 +452,7 @@ func TestBuilder_SetGlobal_RefusesASecondDefinition(t *testing.T) {
     )
 }
 
-/* AddStatefulFirewall forces the stateless flag off, so a firewall added through it demands login configuration even when the override it was handed says stateless */
+/* AddStatefulFirewall forces the stateless flag off, so a firewall added through it demands login configuration even when the override it receives says stateless */
 func TestBuilder_AddStatefulFirewall_ForcesTheStatefulShape(t *testing.T) {
     override := NewFirewallOverrideConfiguration()
     override.stateless = true
@@ -527,7 +527,7 @@ func TestBuilder_BuildAndCompile_PanicsOnACompileError(t *testing.T) {
     )
 }
 
-/* a typed nil is not `nil ==`: handed to the builder it passed validation, passed Compile, and was called on the request path outside any recovery. Each of the four interface-typed pieces is pinned separately, and by message, so a guard that fires for the wrong reason cannot pass for the right one. */
+/* a typed nil is not `nil ==`: handed to the builder it would pass validation and Compile and be called on the request path outside any recovery. Each of the four interface-typed pieces is pinned separately, and by message, so a guard that fires for the wrong reason cannot pass for the right one. */
 func TestBuilder_ValidateFirewall_RefusesATypedNilForEachInterfacePiece(t *testing.T) {
     var typedNilMatcher *security.PathPrefixMatcher
     var typedNilTokenSource *anonymousTokenSource
@@ -696,7 +696,7 @@ func TestBuilder_AddStatelessFirewall_ReadsATypedNilHandlerAsAbsent(t *testing.T
     }
 }
 
-/* the builder owns the rule list it was handed: a caller that keeps the slice and edits it after registering the firewall must not be able to swap a rule the compiled firewall enforces */
+/* the builder owns the rule list it receives: a caller that keeps the slice and edits it after registering the firewall must not be able to swap a rule the compiled firewall enforces */
 func TestBuilder_AddFirewall_CopiesTheCallersRules(t *testing.T) {
     originalRule := security.NewApiKeyHeaderRule(
         security.NewPathPrefixMatcher("/"),

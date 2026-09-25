@@ -6,7 +6,7 @@ import (
     "github.com/precision-soft/melody/internal"
 )
 
-/* IntWithDefault answers the default only for a parameter that is absent: a parameter that exists but does not parse panics instead of silently becoming the default, because a mistyped value that quietly turns into a number nobody wrote is a misconfiguration running in disguise. */
+/* IntWithDefault answers the default only for an absent parameter: one that exists but does not parse panics instead of silently becoming the default. */
 func IntWithDefault(configParameter configcontract.Parameter, defaultValue int) int {
     if true == internal.IsNilInterface(configParameter) {
         return defaultValue

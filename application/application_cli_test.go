@@ -64,7 +64,7 @@ func TestRunCli_ExitCodedErrorLeavesRunInsteadOfExitingInside(t *testing.T) {
     }
 }
 
-/* the control: with no handler the library resolves the exit itself from inside Run, which is exactly the path that skipped the application's teardown */
+/* the control: with no handler the library resolves the exit itself from inside Run, the path on which the application's teardown never runs */
 func TestRunCli_WithoutExitErrHandlerTheLibraryExitsFromInsideRun(t *testing.T) {
     exitedWith := -1
     originalExiter := urfavecli.OsExiter
@@ -163,7 +163,7 @@ func TestRunCli_DoesNotWarnAboutTheUnboundedDefaultCacheBackend(t *testing.T) {
     }
 }
 
-/* three normalization points must agree on a command's name — the boot registration, the cli library's trimmed registration, and the suggestion gate's trimmed input. A padded name judged raw at boot registered under a spelling no argv can produce: the suggestion table blocked every invocation of a command that exists. */
+/* three normalization points must agree on a command's name — the boot registration, the cli library's trimmed registration, and the suggestion gate's trimmed input. A padded name judged raw at boot would register under a spelling no argv can produce, and the suggestion table would block every invocation of a command that exists. */
 func TestRegisterCliCommand_JudgesTheNameTrimmed(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
 
@@ -240,7 +240,7 @@ func (instance *paddedNameProbeCommand) Run(
     return instance.inner.Run(runtimeInstance, commandContext)
 }
 
-/* the suggestion refusal travels unmarked so the exit path writes it to the application log: the rendered table lives only on stderr, and a run refused here used to be invisible to anything reading the log file */
+/* the suggestion refusal travels unmarked so the exit path writes it to the application log: the rendered table lives only on stderr, so a marked refusal would be invisible to anything reading the log file */
 func TestSuggestCliCommand_ReturnsTheRefusalUnmarked(t *testing.T) {
     /* the input is a substring of the available name, so this refusal travels through the matches-found branch, not the zero-match one */
     suggestErr := suggestCliCommand(
@@ -370,7 +370,7 @@ func TestNormalizeCliVerbosityArguments_RewritesOnlyTheRepeatedVerbosityFlag(t *
     }
 }
 
-/* typedNilProbeCommand is handed over as a typed nil, which a plain comparison accepts and command.Name() three lines below dereferences */
+/* typedNilProbeCommand is handed over as a typed nil, which a plain comparison accepts and the command.Name() call after the guard dereferences */
 type typedNilProbeCommand struct{}
 
 func (instance *typedNilProbeCommand) Name() string {
@@ -432,7 +432,7 @@ func (instance *processContextProbeCliCommand) Run(runtimeInstance runtimecontra
     return nil
 }
 
-/* the console counterpart of the request context the http kernel installs: the run's identity is resolvable from the run scope, instead of being computed for the logger and thrown away */
+/* the console counterpart of the request context the http kernel installs: the run's identity is resolvable from the run scope */
 func TestRunCli_InstallsTheProcessContextIntoTheRunScope(t *testing.T) {
     applicationInstance := NewApplication(
         testhelper.NewEmbeddedEnvFs(),
@@ -612,7 +612,7 @@ func TestSecurityDeferredListeners_DeclaresThePairForAConsoleProcessAlone(t *tes
     }
 }
 
-/* the application slot of debug:version stays empty in the wiring: the application's version arrives through output.SetApplicationVersion or not at all, and melody's own version filled in here made the command print the framework version twice */
+/* the application slot of debug:version stays empty in the wiring: the application's version arrives through output.SetApplicationVersion or not at all, so the command never prints the framework version twice */
 func TestBootCli_LeavesTheDebugVersionApplicationSlotEmpty(t *testing.T) {
     applicationInstance := NewApplication(
         testhelper.NewEmbeddedEnvFs(),

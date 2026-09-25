@@ -583,7 +583,7 @@ func TestApplicationRegisterHttpSession_HandsTheConfiguredTombstoneRetentionToTh
     }
 }
 
-/* TestBootContainer_TheSerializerManagerIsSubstitutedNotCollided pins the door a media type is added through. The manager was registered unconditionally while four sibling services were gated, so a module registering the same id to serve xml, msgpack, cbor or application/vnd.api+json did not get a substitution: it got the boot's duplicate-registration exit, code 1. Content negotiation reads this one service and the manager has no registration method, so the gate is the only way to reach it from outside a fork. */
+/* TestBootContainer_TheSerializerManagerIsSubstitutedNotCollided pins the door a media type is added through: a module registering the same id to serve xml, msgpack, cbor or application/vnd.api+json gets a substitution, not the boot's duplicate-registration exit. Content negotiation reads this one service and the manager has no registration method, so the gate is the only way to reach it from outside a fork. */
 func TestBootContainer_TheSerializerManagerIsSubstitutedNotCollided(t *testing.T) {
     applicationInstance := NewApplication(
         testhelper.NewEmbeddedEnvFs(),
@@ -622,7 +622,7 @@ func TestBootContainer_TheSerializerManagerIsSubstitutedNotCollided(t *testing.T
     }
 }
 
-/* TestBootContainer_TheValidatorAndUrlGeneratorAreSubstitutedNotCollided pins the other two the boot used to make unsubstitutable. Both have exported constructors, so a replacement built outside is a whole answer — which is the line that separates them from the router, the dispatcher and the clock, where a gate would promise a substitution the request path would then ignore. */
+/* TestBootContainer_TheValidatorAndUrlGeneratorAreSubstitutedNotCollided pins the gates over the validator and the url generator. Both have exported constructors, so a replacement built outside is a whole answer — which is the line that separates them from the router, the dispatcher and the clock, where a gate would promise a substitution the request path would then ignore. */
 func TestBootContainer_TheValidatorAndUrlGeneratorAreSubstitutedNotCollided(t *testing.T) {
     applicationInstance := NewApplication(
         testhelper.NewEmbeddedEnvFs(),
@@ -673,7 +673,7 @@ func TestBootContainer_TheValidatorAndUrlGeneratorAreSubstitutedNotCollided(t *t
     }
 }
 
-/* TestBootContainer_TheDefaultSerializerAnswersItsDocumentedResolvers pins the id the two published resolvers read. SerializerMustFromRuntime and SerializerFromRuntime were documented with the id nothing registered, so the Must door panicked for every caller and the soft one answered nil — by construction, on every boot the framework has ever performed. */
+/* TestBootContainer_TheDefaultSerializerAnswersItsDocumentedResolvers pins the id the two published resolvers read: SerializerMustFromRuntime answers the default serializer rather than panicking, and SerializerFromRuntime answers it rather than nil. */
 func TestBootContainer_TheDefaultSerializerAnswersItsDocumentedResolvers(t *testing.T) {
     applicationInstance := NewApplication(
         testhelper.NewEmbeddedEnvFs(),
@@ -699,7 +699,7 @@ func TestBootContainer_TheDefaultSerializerAnswersItsDocumentedResolvers(t *test
     }
 }
 
-/* TestBootContainer_TheApplicationsOwnDefaultSerializerIsSubstitutedNotCollided pins the gate over the same id, so registering a default serializer is a substitution rather than the boot collision every ungated framework id answered with. */
+/* TestBootContainer_TheApplicationsOwnDefaultSerializerIsSubstitutedNotCollided pins the gate over the same id, so registering a default serializer is a substitution rather than a boot collision. */
 func TestBootContainer_TheApplicationsOwnDefaultSerializerIsSubstitutedNotCollided(t *testing.T) {
     applicationInstance := NewApplication(
         testhelper.NewEmbeddedEnvFs(),

@@ -40,7 +40,7 @@ func TestCompile_SourceIsNoneWhenDependencyAbsent(t *testing.T) {
     }
 }
 
-/* the three merge strategies decide which rules a firewall enforces and in what ORDER, and order decides which rule the longest-prefix walk reaches first when two rules tie. None of the three had a test. */
+/* the three merge strategies decide which rules a firewall enforces and in what ORDER, and order decides which rule the longest-prefix walk reaches first when two rules tie. */
 func TestMergeAccessControls_OrdersTheRulesByStrategy(t *testing.T) {
     globalAccessControl := security.NewAccessControl(
         security.NewAccessControlRule("/shared", "ROLE_GLOBAL"),
@@ -234,7 +234,7 @@ func TestCompile_WithoutInheritanceKeepsOnlyTheLocalRules(t *testing.T) {
     }
 }
 
-/* TestCompile_ForeignDecisionManagerReceivesTheRoleHierarchy pins the door the hierarchy travels through. The compilation used to assert on the concrete *security.AccessDecisionManager, so a manager of the integrator's own — a wrapper that only delegated, to log or cache decisions — skipped the whole upgrade without a word: ROLE_ADMIN: [ROLE_USER] stopped applying on the enforcement path while security.IsGranted, which expands the hierarchy straight from the compiled firewall, kept answering true for the same request. One door granted and the other answered 403, with no record on either. */
+/* TestCompile_ForeignDecisionManagerReceivesTheRoleHierarchy pins the door the hierarchy travels through: the compilation asks for the capability, not the concrete *security.AccessDecisionManager, so a manager of the integrator's own — a wrapper that only delegates, to log or cache decisions — receives the upgrade. Without it ROLE_ADMIN: [ROLE_USER] would not apply on the enforcement path while security.IsGranted, which expands the hierarchy straight from the compiled firewall, answers true for the same request. */
 func TestCompile_ForeignDecisionManagerReceivesTheRoleHierarchy(t *testing.T) {
     roleHierarchy := security.NewRoleHierarchy(map[string][]string{"ROLE_ADMIN": {"ROLE_USER"}})
     decisionManager := &hierarchyAwareAccessDecisionManager{}
@@ -407,7 +407,7 @@ func (instance *compileTypedNilDeniedHandler) Handle(runtimeInstance runtimecont
     return instance.response, nil
 }
 
-/* TestCompile_RefusesATypedNilOverrideDependency pins the three interfaces the override carries and the loop did not judge. A typed nil reads as declared to the plain comparison beside it, so the fallback to the global one is skipped, the firewall compiles green, the declared role hierarchy is dropped in silence — the capability check reads the typed nil correctly and skips the whole block — and the first request behind the firewall dereferences a nil receiver. The matcher, the token source and the login and logout handlers were already refused by name in this same loop; these three were not, and one of them decides access. */
+/* TestCompile_RefusesATypedNilOverrideDependency pins the three interfaces the override carries: the decision manager, the entry point and the denied handler. A typed nil reads as declared to the plain comparison beside it, so the fallback to the global one would be skipped, the firewall would compile green, the declared role hierarchy would be dropped in silence — the capability check reads the typed nil correctly and skips the whole block — and the first request behind the firewall would dereference a nil receiver. The matcher, the token source and the login and logout handlers are refused by name in the same loop. */
 func TestCompile_RefusesATypedNilOverrideDependency(t *testing.T) {
     var typedNilManager *compileTypedNilDecisionManager
     var typedNilEntryPoint *compileTypedNilEntryPoint

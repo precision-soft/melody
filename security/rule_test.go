@@ -224,8 +224,7 @@ func (instance *alwaysApplyingMatcher) Matches(request httpcontract.Request) boo
 
 var _ securitycontract.Matcher = (*alwaysApplyingMatcher)(nil)
 
-/* A nil pointer of a request type is a non-nil interface, so the bare comparison this replaces carried it
-to the header read, which dereferences it. The rule must refuse a request it cannot read, not crash on it. */
+/* A nil pointer of a request type is a non-nil interface, so a bare comparison would carry it to the header read, which dereferences it. The rule must refuse a request it cannot read, not crash on it. */
 func TestApiKeyHeaderRule_Check_ATypedNilRequestIsForbidden(t *testing.T) {
     rule := NewApiKeyHeaderRule(&alwaysApplyingMatcher{}, "X-Api-Key", "secret")
 

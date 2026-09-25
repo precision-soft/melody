@@ -624,7 +624,7 @@ func TestRemember_CancelableGroupIsSeparatedFromNonCancelableGroup(t *testing.T)
     }
 }
 
-/* the guard reads through the interface: a typed-nil Cache is a non-nil interface that passed the plain comparison and panicked on the first method call, on the request path, in place of the error the refusal promises */
+/* the guard reads through the interface: a typed-nil Cache is a non-nil interface that would pass a plain comparison and panic on the first method call, on the request path, in place of the error the refusal promises */
 func TestRemember_RefusesATypedNilCache(t *testing.T) {
     var typedNilManager *Manager
 
@@ -645,7 +645,7 @@ func TestRemember_RefusesATypedNilCache(t *testing.T) {
     }
 }
 
-/* the zero-value option is constructible from outside the package and silently disarmed the stampede protection it never asked to configure; it reads as the constructor defaults instead, so the leader is joined rather than raced */
+/* the zero-value option is constructible from outside the package; it reads as the constructor defaults, so it keeps the stampede protection it never asked to configure and the leader is joined rather than raced */
 func TestRemember_ZeroValueOptionKeepsStampedeProtection(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -857,7 +857,7 @@ func TestRemember_RecomputesOverACorruptPayload(t *testing.T) {
     }
 }
 
-/* a typed-nil error from the callback reads as the success it means: boxed into a non-nil interface it was memoized as the flight's failure, handed to every waiter, and panicked the first one that rendered it */
+/* a typed-nil error from the callback reads as the success it means: boxed into a non-nil interface it would be memoized as the flight's failure, handed to every waiter, and panic the first one that renders it */
 func TestRemember_CallbackTypedNilErrorIsSuccess(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -1154,7 +1154,7 @@ func (instance *testScriptedCache) Decrement(key string, delta int64) (int64, er
 
 func (instance *testScriptedCache) Close() error { return nil }
 
-/* a cache failure that is NOT a corrupt payload ends Remember there. The healing branch beside it — a payload the serializer cannot decode is a miss and the callback recomputes over it — was pinned; this one, the ordinary "the cache is down" answer, was not, so a Remember that swallowed a dead backend and recomputed on every single request would have looked exactly like a cache that never hits. */
+/* a cache failure that is NOT a corrupt payload ends Remember there. The healing branch beside it — a payload the serializer cannot decode is a miss and the callback recomputes over it — has its own test; this one pins the ordinary "the cache is down" answer, since a Remember that swallowed a dead backend and recomputed on every request would look exactly like a cache that never hits. */
 func TestRemember_ACacheFailureThatIsNotACorruptPayloadEndsThere(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -1217,7 +1217,7 @@ func TestRemember_ACacheFailureThatIsNotACorruptPayloadEndsThere(t *testing.T) {
     }
 }
 
-/* the leader re-reads the key before computing, and a value that appeared meanwhile is served instead of recomputed — that re-read is the whole point of the single flight, and it had no test that made it FIND something. The scripted cache makes the caller miss and the leader hit, which is the real interleaving: another process wrote the key between the two reads. */
+/* the leader re-reads the key before computing, and a value that appeared meanwhile is served instead of recomputed — that re-read is the whole point of the single flight, so this test makes it FIND something. The scripted cache makes the caller miss and the leader hit, which is the real interleaving: another process wrote the key between the two reads. */
 func TestRemember_TheLeaderServesAValueThatAppearedBetweenTheTwoReads(t *testing.T) {
     scriptedCache := &testScriptedCache{
         getResults: []testScriptedGetResult{
@@ -1320,7 +1320,7 @@ func TestRemember_AFailedWriteIsReportedRatherThanSwallowed(t *testing.T) {
     }
 }
 
-/* with stampede protection deliberately off there is no leader and no flight, so both of its error exits belong to the direct path and neither was entered: a callback that failed and a write that failed both have to reach the caller, or the protection-off setting would silently become "always recompute, never report". */
+/* with stampede protection deliberately off there is no leader and no flight, so both of its error exits belong to the direct path: a callback that failed and a write that failed both have to reach the caller, or the protection-off setting would silently become "always recompute, never report". */
 func TestRemember_WithoutStampedeProtectionBothFailuresReachTheCaller(t *testing.T) {
     option := NewDefaultRememberOption().WithStampedeProtectionEnabled(false)
 
@@ -1468,7 +1468,7 @@ func TestRemember_StampedeProtectedMissAnswersTheStoredShape(t *testing.T) {
     }
 }
 
-/* the recovery boundary keeps what the operator needs to act: the panic value travels as the cause so errors.Is still reaches the connection that refused, and the stack is captured on the goroutine that raised it. Stringified into the context alone, the framework's own idiom — a MustGet on a mistyped parameter — reached the record as a message and a cache key, with no file and no line anywhere. */
+/* the recovery boundary keeps what the operator needs to act: the panic value travels as the cause so errors.Is still reaches the connection that refused, and the stack is captured on the goroutine that raised it. Stringified into the context alone, the framework's own idiom — a MustGet on a mistyped parameter — would reach the record as a message and a cache key, with no file and no line anywhere. */
 func TestExecuteRememberCallbackSafely_APanickingCallbackKeepsItsCauseAndItsStack(t *testing.T) {
     rootCause := errors.New("dial tcp 10.0.0.7:5432: connect: connection refused")
 
@@ -1766,7 +1766,7 @@ func deeplyNestedValue(depth int) any {
     return value
 }
 
-/* the round-trip that makes one shape is also where a value the serializer encodes but cannot decode is found out — the JSON serializer has no depth ceiling on the way in and one on the way out; stored first, such a value was read back as a miss on every later call, recomputed, rewritten and refused again, so the refusal has to come before the store on both paths */
+/* the round-trip that makes one shape is also where a value the serializer encodes but cannot decode is found out — the JSON serializer has no depth ceiling on the way in and one on the way out; stored first, such a value would be read back as a miss on every later call, recomputed, rewritten and refused again, so the refusal comes before the store on both paths */
 func TestRemember_AValueTheSerializerCannotReadBackIsNotStored(t *testing.T) {
     for _, option := range []*RememberOption{
         NewDefaultRememberOption(),
@@ -1822,7 +1822,7 @@ func TestRememberOption_ACopyOfTheStructCarriesItsOwnContext(t *testing.T) {
     }
 }
 
-/* the round-trip runs before the store, so a value the serializer cannot ENCODE is refused by the normalizer rather than by the store: the refusal keeps naming the key and the operation, as the store's own serialization refusal did, instead of answering the bare serializer error */
+/* the round-trip runs before the store, so a value the serializer cannot ENCODE is refused by the normalizer rather than by the store: the refusal names the key and the operation, as the store's own serialization refusal does, instead of answering the bare serializer error */
 func TestRemember_AValueTheSerializerCannotEncodeIsRefusedNamingTheKey(t *testing.T) {
     for _, option := range []*RememberOption{
         NewDefaultRememberOption(),

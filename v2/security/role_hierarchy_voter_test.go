@@ -82,7 +82,7 @@ func TestRoleHierarchyVoter_ExpandsRolesBeforeVoting(t *testing.T) {
     }
 }
 
-/* an unauthenticated token is denied before its roles are expanded: the earlier code rebuilt it with an empty identity but kept the roles, which the delegate reads and never checks, so the neutralisation was a no-op */
+/* an unauthenticated token is denied before its roles are expanded: rebuilding it with an empty identity would keep the roles, which the delegate reads and never checks */
 func TestRoleHierarchyVoter_DeniesWhenTokenNotAuthenticated(t *testing.T) {
     hierarchy := NewRoleHierarchy(
         map[string][]string{
@@ -98,7 +98,7 @@ func TestRoleHierarchyVoter_DeniesWhenTokenNotAuthenticated(t *testing.T) {
     }
 }
 
-/* TestNewRoleHierarchyVoter_TakesAnyVoterAsItsDelegate pins the widened parameter. The constructor took *RoleVoter, so an integrator's own voter — multi-tenant, ownership — could not be handed the expanded roles at all and did not even compile against the door; the only way out was copying the wrapper, which meant every foreign voter reimplementing the expansion rule. The wrapper calls nothing but Supports and Vote, so the narrowing bought nothing. */
+/* TestNewRoleHierarchyVoter_TakesAnyVoterAsItsDelegate pins the parameter's width: an integrator's own voter — multi-tenant, ownership — is handed the expanded roles through the same door, since the wrapper calls nothing but Supports and Vote. */
 func TestNewRoleHierarchyVoter_TakesAnyVoterAsItsDelegate(t *testing.T) {
     delegate := &tenantProbeVoter{}
 
@@ -118,7 +118,7 @@ func TestNewRoleHierarchyVoter_TakesAnyVoterAsItsDelegate(t *testing.T) {
     }
 }
 
-/* TestNewRoleHierarchyVoter_RefusesATypedNilDelegate pins the guard the plain comparison cannot perform now that the parameter is an interface: a (*tenantProbeVoter)(nil) reads as non-nil against nil and would dereference its own nil receiver on the first vote of the request path, which is the wrong place to learn about a wiring fault. */
+/* TestNewRoleHierarchyVoter_RefusesATypedNilDelegate pins the guard a plain comparison cannot perform on an interface parameter: a (*tenantProbeVoter)(nil) reads as non-nil against nil and would dereference its own nil receiver on the first vote of the request path, which is the wrong place to learn about a wiring fault. */
 func TestNewRoleHierarchyVoter_RefusesATypedNilDelegate(t *testing.T) {
     defer func() {
         recovered := recover()
@@ -137,7 +137,7 @@ func TestNewRoleHierarchyVoter_RefusesATypedNilDelegate(t *testing.T) {
     )
 }
 
-/* tenantProbeVoter stands in for an integrator's own voter: it grants what it is asked for and records the roles it was handed, so the expansion reaching it is observable */
+/* tenantProbeVoter stands in for an integrator's own voter: it grants what it is asked for and records the roles it receives, so the expansion reaching it is observable */
 type tenantProbeVoter struct {
     observedRoles    []string
     sawExpandedRoles bool
@@ -218,7 +218,7 @@ func (instance *tenantDenyVoter) Vote(token securitycontract.Token, attribute st
     return securitycontract.VoteGranted
 }
 
-/* TestRoleHierarchyVoter_ATokenAnsweringItsOwnTwinKeepsItsType pins what the widened delegate is FOR. The wrapper used to hand the delegate a rebuilt AuthenticatedToken, so an integrator's voter — the multi-tenant one the constructor's own GoDoc invites — asserted its token type against melody's and failed on every request: a voter that would have REFUSED abstained instead, and under the affirmative strategy beside a granting role voter the request was granted. The token answers its own twin now, so the assertion still holds and the delegate still sees the expanded roles. */
+/* TestRoleHierarchyVoter_ATokenAnsweringItsOwnTwinKeepsItsType pins what the widened delegate is FOR: an integrator's voter — the multi-tenant one the constructor's own GoDoc invites — asserts its own token type, and a rebuilt AuthenticatedToken would fail that assertion on every request, so a voter that would REFUSE would abstain, and under the affirmative strategy beside a granting role voter the request would be granted. The token answers its own twin, so the assertion holds and the delegate still sees the expanded roles. */
 func TestRoleHierarchyVoter_ATokenAnsweringItsOwnTwinKeepsItsType(t *testing.T) {
     hierarchy := NewRoleHierarchy(map[string][]string{"ROLE_ADMIN": {"ROLE_USER"}})
 
@@ -245,7 +245,7 @@ func TestRoleHierarchyVoter_ATokenAnsweringItsOwnTwinKeepsItsType(t *testing.T) 
     }
 }
 
-/* TestRoleHierarchyVoter_ATenantRefusalStillDecidesBesideAGrantingRoleVoter is where the rebuild's cost is paid in access rather than in diagnosis. A refusal turned into an abstention is invisible to every strategy that counts denials: under unanimous a single denial refuses, and an abstention beside a granting role voter does not, so the request the tenant rule was written to withhold was granted. The affirmative strategy is the one place this does NOT show — any grant wins there whatever else was voted — so the strategy has to be one that lets a refusal decide for the guard to be proven at all. */
+/* TestRoleHierarchyVoter_ATenantRefusalStillDecidesBesideAGrantingRoleVoter is where a lost type would cost access rather than diagnosis. A refusal turned into an abstention is invisible to every strategy that counts denials: under unanimous a single denial refuses, and an abstention beside a granting role voter does not, so the request the tenant rule is written to withhold would be granted. The affirmative strategy is the one place this does NOT show — any grant wins there whatever else was voted — so the strategy has to be one that lets a refusal decide for the guard to be proven at all. */
 func TestRoleHierarchyVoter_ATenantRefusalStillDecidesBesideAGrantingRoleVoter(t *testing.T) {
     hierarchy := NewRoleHierarchy(map[string][]string{"ROLE_ADMIN": {"ROLE_USER"}})
 
@@ -299,7 +299,7 @@ func TestRoleHierarchyVoter_ATwinAnsweredAsNilFallsBackToTheRebuild(t *testing.T
     }
 }
 
-/* a token that does not carry the capability keeps the rebuild it always got, so nothing the framework ships changes shape */
+/* a token that does not carry the capability is rebuilt, so nothing the framework ships changes shape */
 func TestRoleHierarchyVoter_ATokenWithoutTheCapabilityKeepsTheRebuild(t *testing.T) {
     hierarchy := NewRoleHierarchy(map[string][]string{"ROLE_ADMIN": {"ROLE_USER"}})
 

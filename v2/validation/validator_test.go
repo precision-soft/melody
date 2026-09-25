@@ -269,7 +269,7 @@ func TestValidator_MalformedNumericParameterFailsClosed(t *testing.T) {
         }
     }
 
-    /* a fractional bound is refused whole, not truncated: 3.9 read as 3 silently enforced a bound the tag does not declare, and on lessThan a truncated negative bound accepted values the tag as written refuses */
+    /* a fractional bound is refused whole, not truncated: 3.9 read as 3 would enforce a bound the tag does not declare, and on lessThan a truncated negative bound would accept values the tag as written refuses */
     fractionalErrors := requireValidationErrors(t, validatorInstance.Validate(payloadWithFractionalMaxLength{Name: "abc"}))
 
     fractionalError, ok := fractionalErrors[0].(*ValidationError)
@@ -2243,7 +2243,7 @@ func buildSharedSubtree(levels int) *sharedSubtreeNode {
     return node
 }
 
-/* Every path to a shared subtree reports it, and the subtree is walked once per depth: the path-scoped cycle set alone walked it once per path, which on twenty levels of two pointers each cost 6.6 s and 2^20 walks (measured); with the memo the same value validates in under a millisecond. The bound is 500 ms — over ten thousand times the measured walk and a tenth of the old cost, so a walk that fell back to once per path fails on the clock. */
+/* Every path to a shared subtree reports it, and the subtree is walked once per depth rather than once per path, which on twenty levels of two pointers each is 2^20 walks. The 500 ms bound sits far above a memoized walk and far below a walk once per path, so a walk that fell back to once per path fails on the clock. */
 func TestValidator_ASharedSubtreeIsWalkedOnceAndReportedUnderEveryPath(t *testing.T) {
     validatorInstance := NewValidator()
 
@@ -2319,7 +2319,7 @@ func TestValidator_ASharedPointerReachedAtTwoDepthsIsWalkedAtEach(t *testing.T) 
     }
 }
 
-/* a constraint that answers an error under a field of its own — the door validateRule keeps open by returning such an error verbatim — is answered verbatim under every path that reaches the shared pointer, and a constraint that answers an error TYPE of its own keeps that type under every path: the memo used to re-spell both by gluing the later path onto the field and replacing the type with this package's. */
+/* a constraint that answers an error under a field of its own — the door validateRule keeps open by returning such an error verbatim — is answered verbatim under every path that reaches the shared pointer, and a constraint that answers an error TYPE of its own keeps that type under every path: the memo neither glues the later path onto the field nor replaces the type with this package's. */
 type ownFieldConstraintError struct {
     field string
 }
@@ -2416,7 +2416,7 @@ func (instance *pathPrefixedOwnFieldConstraint) Validate(value any, field string
     return NewValidationError("BillingLine", "own message", "own_code", nil)
 }
 
-/* "under the walked path" is a question of the walk's grammar — a member or an element of the path — not of text: an own field that merely begins with the path's spelling was memoized as its textual remainder and recalled glued onto the sibling path, naming a field that does not exist */
+/* "under the walked path" is a question of the walk's grammar — a member or an element of the path — not of text: an own field that merely begins with the path's spelling, memoized as its textual remainder, would be recalled glued onto the sibling path, naming a field that does not exist */
 func TestValidator_AnOwnFieldThatOnlyBeginsWithThePathTextIsAnsweredVerbatimUnderEveryPath(t *testing.T) {
     type sharedAddress struct {
         Zip string `validate:"pathPrefixedOwnField"`

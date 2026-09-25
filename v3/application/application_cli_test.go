@@ -317,7 +317,7 @@ func TestNormalizeCliVerbosityArguments_RewritesOnlyTheRepeatedVerbosityFlag(t *
     }
 }
 
-/* typedNilProbeCommand is handed over as a typed nil, which a plain comparison accepts and command.Name() three lines below dereferences */
+/* typedNilProbeCommand is handed over as a typed nil, which a plain comparison accepts and the command.Name() call after the guard dereferences */
 type typedNilProbeCommand struct{}
 
 func (instance *typedNilProbeCommand) Name() string {

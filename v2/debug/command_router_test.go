@@ -353,7 +353,7 @@ func TestRouterCommand_OmitsTheShownCountWhenNothingIsWindowedAway(t *testing.T)
     }
 }
 
-/* the dispatch picks the higher priority and breaks ties on the lower registration order; without these two columns two overlapping routes rendered as identical rows and the command could not answer which one answers */
+/* the dispatch picks the higher priority and breaks ties on the lower registration order; without these two columns two overlapping routes would render as identical rows and the command could not answer which one answers */
 func TestRouterCommand_RendersThePriorityAndTheRegistrationOrder(t *testing.T) {
     router := http.NewRouter()
 
@@ -411,7 +411,7 @@ func TestRouterCommand_RendersThePriorityAndTheRegistrationOrder(t *testing.T) {
     }
 }
 
-/* the machine document carries every discriminator the introspection exposes, and the verbose table folds them into columns; a json consumer used to see six fields for a ten-field definition */
+/* the machine document carries every discriminator the introspection exposes, and the verbose table folds them into columns, so a json consumer sees the whole definition */
 func TestRouterCommand_CarriesTheDiscriminatorsInJsonAndVerboseTable(t *testing.T) {
     router := http.NewRouter()
 
@@ -562,7 +562,7 @@ func TestRouterCommand_TiedPatternAndMethodsRowsKeepTheRegistrationOrder(t *test
     }
 }
 
-/* a route attribute is arbitrary any from userland, and one value the encoder cannot represent made the whole envelope fail to marshal: the printer has no fallback, so the command answered ZERO bytes and the caller was left with an empty stream indistinguishable from a missing binary. The value that cannot be represented degrades to the rendering the verbose table already prints; every value that CAN be represented keeps its json type, or the methods attribute would arrive as a string where the consumer keyed a list. */
+/* a route attribute is arbitrary any from userland, and one value the encoder cannot represent would make the whole envelope fail to marshal: the printer has no fallback, so the command would answer ZERO bytes, an empty stream indistinguishable from a missing binary. The value that cannot be represented degrades to the rendering the verbose table already prints; every value that CAN be represented keeps its json type, or the methods attribute would arrive as a string where the consumer keyed a list. */
 func TestRouterCommand_KeepsTheDocumentWhenAnAttributeCannotBeSerialized(t *testing.T) {
     router := http.NewRouter()
     router.HandleWithOptions(
@@ -630,7 +630,7 @@ func TestRouterCommand_KeepsTheDocumentWhenAnAttributeCannotBeSerialized(t *test
         t.Fatalf("expected the unrepresentable attribute to degrade to its rendering, got %#v", attributes["handlerHook"])
     }
 
-    /* the list must stay a list: folding every value to text would have been the cheaper repair and the wrong one */
+    /* the list must stay a list: folding every value to text would be cheaper and wrong */
     roles, rolesAreList := attributes["allowedRoles"].([]any)
     if false == rolesAreList || 2 != len(roles) {
         t.Fatalf("expected the serializable list to keep its type, got %#v", attributes["allowedRoles"])
@@ -641,7 +641,7 @@ func TestRouterCommand_KeepsTheDocumentWhenAnAttributeCannotBeSerialized(t *test
     }
 }
 
-/* a self-referential attribute reaches json.Marshal, which answers a cycle error, which used to route the value into the %v fallback — and fmt has no cycle detection, so the command died of a stack overflow no recover in the command layer turns into a reported failure. The walk that command_container.go already carries replaces the cycle with its marker, and the report survives. */
+/* a self-referential attribute reaches json.Marshal, which answers a cycle error that would route the value into the %v fallback — and fmt has no cycle detection, so the command would die of a stack overflow no recover in the command layer turns into a reported failure. The walk command_container.go carries replaces the cycle with its marker, and the report survives. */
 func TestRouterCommand_ACyclicAttributeIsRenderedAsAMarkerRatherThanKillingTheProcess(t *testing.T) {
     cyclicAttribute := map[string]any{"name": "self-referential"}
     cyclicAttribute["self"] = cyclicAttribute

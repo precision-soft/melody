@@ -711,7 +711,7 @@ func TestRegisterKernelHttpListeners_RegistersTheExceptionListenerWithoutAnError
     }
 }
 
-/* the property the boot-end move was made for, asserted directly instead of through the timing that used to carry it: what a serving process ends up running is exactly what a console process exposes to the introspection command. The exception listener is the one decision an http process defers to runHttp, because a handler may still be installed after Boot returned; the set has to come out the same either way. */
+/* what a serving process ends up running is exactly what a console process exposes to the introspection command. The exception listener is the one decision an http process defers to runHttp, because a handler may still be installed after Boot returned; the set has to come out the same either way. */
 func TestRunHttp_ExposesTheSameListenerSetAConsoleProcessInspects(t *testing.T) {
     servingApplication := newCacheWarningTestApplication(t, config.ModeHttp, logging.NewNopLogger())
     servingApplication.registerKernelHttpListeners()
@@ -759,7 +759,7 @@ func registeredListenerNames(t *testing.T, applicationInstance *Application) []s
     return names
 }
 
-/* the kernel accepts SetErrorHandler after Boot returned, and that handler has to take the framework listener's place exactly as one installed before boot ended does; deciding at boot-end accepted it and never consulted it */
+/* the kernel accepts SetErrorHandler after Boot returned, and that handler has to take the framework listener's place exactly as one installed before boot ended does; a decision taken at boot-end would accept it and never consult it */
 func TestRunHttp_AnErrorHandlerInstalledAfterBootTakesTheListenersPlace(t *testing.T) {
     applicationInstance := newCacheWarningTestApplication(t, config.ModeHttp, logging.NewNopLogger())
 
@@ -771,9 +771,7 @@ func TestRunHttp_AnErrorHandlerInstalledAfterBootTakesTheListenersPlace(t *testi
         },
     )
 
-    /* the decision is driven through runHttp rather than through the door it calls: what has to be
-       proved is that serving makes it at all, and a probe that calls the door itself passes over a
-       runHttp that never does (§5.35) */
+    /* the decision is driven through runHttp rather than through the door it calls: what has to be proved is that serving makes it at all, and a probe that calls the door itself passes over a runHttp that never does */
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
 
@@ -803,11 +801,7 @@ func TestRunHttp_AnErrorHandlerInstalledAfterBootTakesTheListenersPlace(t *testi
     }
 }
 
-/* the sister of the test above, and the one that proves serving makes the decision at all: with no
-   handler installed, an http process registers nothing at boot-end, so the framework listener has to
-   arrive at runHttp or the application serves errors with nothing rendering them. With a handler
-   installed both the correct form and a runHttp that never decides register nothing, so that case
-   cannot tell them apart (§5.26). */
+/* the sister of the test above, and the one that proves serving makes the decision at all: with no handler installed, an http process registers nothing at boot-end, so the framework listener has to arrive at runHttp or the application serves errors with nothing rendering them. With a handler installed both the correct form and a runHttp that never decides register nothing, so that case cannot tell them apart. */
 func TestRunHttp_RegistersTheExceptionListenerWhenNoHandlerWasInstalled(t *testing.T) {
     applicationInstance := newCacheWarningTestApplication(t, config.ModeHttp, logging.NewNopLogger())
 
@@ -854,7 +848,7 @@ func (instance *countingHttpKernel) OpenRequestScopes() int64 {
 
 var _ httpcontract.Kernel = (*countingHttpKernel)(nil)
 
-/* the drain holds the exit until the last request scope closes. Shutdown answers only for the connections the server still owns, so a hijacked one — a websocket — returns it immediately and the process used to announce a clean stop with that handler still running under a container that was closing. */
+/* the drain holds the exit until the last request scope closes. Shutdown answers only for the connections the server still owns, so a hijacked one — a websocket — returns it immediately, and without the drain the process would announce a clean stop with that handler still running under a closing container. */
 func TestAwaitOpenRequestScopes_WaitsUntilTheLastScopeCloses(t *testing.T) {
     httpKernel := &countingHttpKernel{}
     httpKernel.openScopes.Store(2)
@@ -922,7 +916,7 @@ func TestAwaitOpenRequestScopes_DoesNotWaitOnAKernelThatCannotBeAsked(t *testing
     }
 }
 
-/* the whole chain, end to end and through runHttp itself: a handler hijacks its connection, the kernel's request scope stays open behind it, and the shutdown must refuse to report a stop it did not obtain. net/http's Shutdown returns immediately for a hijacked connection — it stopped being the server's the moment the handler took it — so before the scope was counted this exact shape answered nil in no time at all while the handler ran on and the container closed under it. */
+/* the whole chain, end to end and through runHttp itself: a handler hijacks its connection, the kernel's request scope stays open behind it, and the shutdown must refuse to report a stop it did not obtain. net/http's Shutdown returns immediately for a hijacked connection — it stopped being the server's the moment the handler took it — so only the counted scope keeps this shape from answering nil while the handler runs on. */
 func TestRunHttp_RefusesToReportACleanStopWhileAHijackedHandlerIsStillServed(t *testing.T) {
     handlerHijacked := make(chan struct{})
     releaseHandler := make(chan struct{})
@@ -1068,9 +1062,7 @@ func TestRunHttp_RefusesToReportACleanStopWhileAHijackedHandlerIsStillServed(t *
 }
 
 
-/* the drain exists for the connection the server's own Shutdown does not drain — a hijacked one — and that connection is exactly what makes Shutdown report a budget overrun, so returning on the overrun skipped the wait in the situation it was written for and closed the application container under a handler still on the wire. Both causes are independently actionable, so both have to survive.
-
-   The error channel is filled by the Serve goroutine rather than ahead of the call: with a value already in it, both arms of the select are ready at once and the branch taken is a coin flip. */
+/* the drain exists for the connection the server's own Shutdown does not drain — a hijacked one — and that connection is exactly what makes Shutdown report a budget overrun, so the wait has to run after an overrun too, or the application container closes under a handler still on the wire. Both causes are independently actionable, so both have to survive. The error channel is filled by the Serve goroutine rather than ahead of the call: with a value already in it, both arms of the select are ready at once and the branch taken is a coin flip. */
 func TestAwaitHttpServerEnd_DrainsOpenScopesEvenWhenTheShutdownOverran(t *testing.T) {
     handlerStarted := make(chan struct{})
     releaseHandler := make(chan struct{})

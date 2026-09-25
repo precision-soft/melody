@@ -1,6 +1,6 @@
 package config
 
-/* RoleAllowsBackgroundWork reports whether a process with the given role should start background services such as outbox relays and message consumers; the default RoleAll preserves the single-process behavior where one binary does everything. Melody itself gates nothing on the role — it is declared intent for application wiring and long-running runners to query. */
+/* RoleAllowsBackgroundWork reports whether a process with the given role should start background services such as outbox relays and message consumers; the default RoleAll runs everything in one process. Melody gates nothing on the role; it is intent for application wiring to query. */
 func RoleAllowsBackgroundWork(role string) bool {
     return RoleWorker == role || RoleAll == role
 }

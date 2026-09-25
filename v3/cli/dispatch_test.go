@@ -172,7 +172,7 @@ func TestDispatchCommand_PanicsOnANilCommand(t *testing.T) {
     }, "cli command may not be nil")
 }
 
-/* read through the interface: a caller handing back a typed nil of its own command type produces a non-nil interface that a plain comparison lets through, and the name read two lines below dereferences it */
+/* read through the interface: a caller handing back a typed nil of its own command type produces a non-nil interface that a plain comparison lets through, and the command.Name() read after the guard dereferences it */
 func TestDispatchCommand_PanicsOnATypedNilCommand(t *testing.T) {
     var typedNilCommand *testCommand
 

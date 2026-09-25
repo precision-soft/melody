@@ -39,7 +39,7 @@ func TestTruncateTableCellValue_KeepsRunesIntactOnMultibyteOverflow(t *testing.T
 
 /* wrapFixedWidth must not split a multibyte UTF-8 rune at the wrap boundary */
 func TestWrapFixedWidth_KeepsRunesIntactAtBoundary(t *testing.T) {
-    /* the leading ASCII byte shifts every 2 byte rune onto an odd offset, so the even width boundary lands mid rune on the unpatched code */
+    /* the leading ASCII byte shifts every 2 byte rune onto an odd offset, so the even width boundary lands mid rune */
     value := "a" + strings.Repeat("ș", 60) /* 121 bytes */
 
     lines := wrapFixedWidth(value, 80)
@@ -453,9 +453,7 @@ func TestSanitizeErrorContextValue_SharedSiblingContainerIsNotACycle(t *testing.
     }
 }
 
-/* The cycle guard above answers a context that holds itself. It says nothing about one that is merely very deep, and until this bound nothing else did either: the walk descended until the goroutine stack was gone, which is `fatal error: stack overflow` — not a panic, so no recover in the command layer turns it into a reported failure and the process dies rendering a debug page. Measured with the stack capped at 16 MiB it took some five hundred thousand levels; the production cap of a gigabyte scales that up rather than removing it.
-
-   The depth used here is one past the bound rather than half a million, because what has to be pinned is the refusal, not the machine's stack size — a test that needs a real overflow to fail can only fail by killing the test binary. */
+/* The cycle guard above answers a context that holds itself; this bound answers one that is merely very deep, which would otherwise walk until the goroutine stack is gone — `fatal error: stack overflow`, not a panic, so no recover in the command layer turns it into a reported failure. The depth used here is one past the bound, because what has to be pinned is the refusal, not the machine's stack size: a test that needs a real overflow to fail can only fail by killing the test binary. */
 func TestSanitizeErrorContextValue_RefusesToDescendPastTheDepthBound(t *testing.T) {
     deepest := map[string]any{"leaf": "value"}
 
@@ -512,7 +510,7 @@ func TestSanitizeErrorContextValue_LeavesAnOrdinaryContextIntact(t *testing.T) {
     }
 }
 
-/* newCyclicNamedMapErrorContext parks the self-reference inside a value typed as the framework's own defined context type, the shape that used to slip past the tracked walk entirely: the cycle survived into json.Marshal, whose cycle error routed it to the fmt fallback that has no cycle detection at all */
+/* newCyclicNamedMapErrorContext parks the self-reference inside a value typed as the framework's own defined context type, which the tracked walk must convert: unconverted, the cycle would reach json.Marshal, whose cycle error routes it to the fmt fallback that has no cycle detection at all */
 func newCyclicNamedMapErrorContext() exceptioncontract.Context {
     inner := exceptioncontract.Context{
         "serviceName": "broken.service",
@@ -524,7 +522,7 @@ func newCyclicNamedMapErrorContext() exceptioncontract.Context {
     }
 }
 
-/* a cycle carried by a nested defined-type map must terminate exactly like one carried by a plain map: pre-guard it was a fatal stack overflow inside the fmt fallback, which no recover reaches */
+/* a cycle carried by a nested defined-type map must terminate exactly like one carried by a plain map: unguarded it is a fatal stack overflow inside the fmt fallback, which no recover reaches */
 func TestResolveErrorContextJson_SelfReferentialNamedMapContextTerminates(t *testing.T) {
     assertErrorContextProbeExitsCleanly(t, "cyclicNamedMapContext", 30*time.Second)
 }
@@ -545,7 +543,7 @@ func TestResolveErrorContextJson_RendersTheNamedMapCycleAsAMarker(t *testing.T) 
     }
 }
 
-/* the redaction must reach inside a nested defined-type map before the fmt fallback prints it: the assertion on the plain map type failed for the named type, so a marshal failure printed the nested stack in the clear */
+/* the redaction must reach inside a nested defined-type map before the fmt fallback prints it: an assertion on the plain map type alone misses the named type, and a marshal failure would print the nested stack in the clear */
 func TestResolveErrorContextJson_RedactsInsideANamedNestedMapOnMarshalFailure(t *testing.T) {
     contextValue := exceptioncontract.Context{
         "detail": exceptioncontract.Context{
@@ -567,7 +565,7 @@ func TestResolveErrorContextJson_RedactsInsideANamedNestedMapOnMarshalFailure(t 
     }
 }
 
-/* the table-cell truncation must not reach the json document: a machine consumer received a cut, unparseable fragment with no sign anything was dropped */
+/* the table-cell truncation must not reach the json document: a machine consumer would receive a cut, unparseable fragment with no sign anything was dropped */
 func TestResolveErrorContextJson_DoesNotTruncateTheJsonFormat(t *testing.T) {
     longValue := strings.Repeat("a", 500)
     resolveErr := exception.NewError(
@@ -606,7 +604,7 @@ func TestResolveErrorContextJson_DoesNotTruncateTheJsonFormat(t *testing.T) {
     }
 }
 
-/* the report names why the build failed, not only that it did: the message of a melody error is its message alone, and the causes below it used to reach neither the table nor the json */
+/* the report names why the build failed, not only that it did: the message of a melody error is its message alone, so the causes below it must reach both the table and the json */
 func TestContainerCommand_ReportsTheCauseChainOfAFailedBuild(t *testing.T) {
     serviceContainer := container.NewContainer()
     serviceContainer.MustRegister(
@@ -660,7 +658,7 @@ func TestContainerCommand_ReportsTheCauseChainOfAFailedBuild(t *testing.T) {
         t.Fatalf("expected the cause line in the table, got %q", tableRendered)
     }
 
-    /* the list view cuts the message and the context by verbosity, never the causes: the sweep is run to learn why a service failed, and at the default verbosity it used to say only that one did; the sweep itself is opt-in, since a bare listing no longer builds */
+    /* the list view cuts the message and the context by verbosity, never the causes: the sweep is run to learn why a service failed; the sweep itself is opt-in, since a bare listing builds nothing */
     listTableRendered, _ := runDebugCommand(
         &ContainerCommand{},
         newTestRuntime(serviceContainer),
@@ -705,7 +703,7 @@ func TestLimitErrorLinesByVerbosity_CutsTheMessageAndTheContextAndKeepsEveryCaus
     }
 }
 
-/* the context is read through the ContextProvider contract: an HttpException in the resolution chain used to contribute nothing */
+/* the context is read through the ContextProvider contract, so an HttpException in the resolution chain contributes its own */
 func TestResolveErrorContextJson_ReadsAnHttpExceptionContext(t *testing.T) {
     httpException := exception.NewHttpException(503, "backend down")
     httpException.SetContextValue("backend", "redis")
@@ -717,7 +715,7 @@ func TestResolveErrorContextJson_ReadsAnHttpExceptionContext(t *testing.T) {
     }
 }
 
-/* a provider without a context answers an empty map, not nil, so a search that stopped at the nearest provider rendered {} for an HttpException wrapping the very error that carried the host: the context is read from the first link of the chain that has one, and a link above it that has one of its own still wins */
+/* a provider without a context answers an empty map, not nil, so a search that stopped at the nearest provider would render {} for an HttpException wrapping the very error that carries the host: the context is read from the first link of the chain that has one, and a link above it that has one of its own still wins */
 func TestResolveErrorContextJson_ReadsTheFirstContextBelowAnEmptyProvider(t *testing.T) {
     inner := exception.NewError("dial", exceptioncontract.Context{"host": "redis"}, nil)
 
@@ -784,7 +782,7 @@ func TestResolveErrorContextJson_RendersTheNamedSliceCycleAsAMarker(t *testing.T
     }
 }
 
-/* the row builder is what turns one failing service into the lines an operator reads, and no test had entered it. A service that built fine occupies exactly one row; a failing one spreads its error over as many rows as the verbosity allows, with the name and the type printed once so the block reads as one service rather than as several */
+/* the row builder is what turns one failing service into the lines an operator reads. A service that built fine occupies exactly one row; a failing one spreads its error over as many rows as the verbosity allows, with the name and the type printed once so the block reads as one service rather than as several */
 func TestBuildContainerServiceTableRows_HealthyService_OccupiesOneRow(t *testing.T) {
     rows := buildContainerServiceTableRows(
         containerServiceListItem{
@@ -1028,7 +1026,7 @@ func TestContainerCommand_DefaultListingGroupsTheLifetimes(t *testing.T) {
     }
 }
 
-/* a scoped name asked for by argument builds through the run's own scope — the scope a console command's services live in — and reports its lifetime; it used to answer debug.notFound, the exact failure the diagnosis comment promises to prevent */
+/* a scoped name asked for by argument builds through the run's own scope — the scope a console command's services live in — and reports its lifetime rather than debug.notFound, the failure the diagnosis promises to prevent */
 func TestContainerCommand_SingleScopedServiceResolvesThroughTheRunScope(t *testing.T) {
     serviceContainer := container.NewContainer()
 
@@ -1157,7 +1155,7 @@ func TestContainerCommand_DefaultListingRunsNoProvider(t *testing.T) {
     }
 }
 
-/* the sweep's failures have to reach the exit code, not only the data. Render answers a non-zero exit for an envelope carrying an error, which is what makes `app debug:container --build --format=json || exit 1` a deployment gate; the sweep — the one command whose declared purpose is to build everything and report the failures — used to answer "error": null and exit 0 over every one of them. The single-name door beside it has always reported its own. */
+/* the sweep's failures have to reach the exit code, not only the data. Render answers a non-zero exit for an envelope carrying an error, which is what makes `app debug:container --build --format=json || exit 1` a deployment gate, so the sweep carries its failures on the envelope rather than answering "error": null and exit 0. The single-name door beside it reports its own the same way. */
 func TestContainerCommand_BuildSweepReportsItsFailuresInTheEnvelope(t *testing.T) {
     serviceContainer := container.NewContainer()
     serviceContainer.MustRegister(
@@ -1240,7 +1238,7 @@ type sweepHealthyService struct{}
 
 type sweepBrokenService struct{}
 
-/* one json document cannot carry two types under one key: errorCauseChain was null on a service that resolved and a list on one that did not, and errorContextJson was the empty string beside a json object, so `jq '.data.items[].errorCauseChain[]'` died at the first healthy service and `.errorContextJson | fromjson` died with "Cannot parse ''". The table keeps its empty cell — a literal {} in a column read by a person is noise. */
+/* one json document cannot carry two types under one key: errorCauseChain is a list on every row, empty on a service that resolved, and errorContextJson is a json object on every row, so `jq '.data.items[].errorCauseChain[]'` and `.errorContextJson | fromjson` read every row. The table keeps its empty cell — a literal {} in a column read by a person is noise. */
 func TestContainerCommand_JsonItemFieldsKeepOneTypeAcrossRows(t *testing.T) {
     serviceContainer := container.NewContainer()
     serviceContainer.MustRegister(
@@ -1356,7 +1354,7 @@ func TestContainerCommand_JsonItemFieldsKeepOneTypeAcrossRows(t *testing.T) {
     }
 }
 
-/* the sanitizing walk passes an unrecognised scalar through untouched, so a context carrying a chan, a func or a complex reaches json.Marshal and is refused there. The field is documented as parseable json on every row — `.errorContextJson | fromjson` — and the %v rendering it used to answer is Go syntax, which parses nowhere. */
+/* the sanitizing walk passes an unrecognised scalar through untouched, so a context carrying a chan, a func or a complex reaches json.Marshal and is refused there. The field is documented as parseable json on every row — `.errorContextJson | fromjson` — and a %v rendering is Go syntax, which parses nowhere. */
 func TestResolveErrorContextJson_AContextTheEncoderRefusesStaysParseableJson(t *testing.T) {
     resolveErr := exception.NewError(
         "boot failed",

@@ -149,7 +149,7 @@ func TestNewAuthenticatorManager_NilAuthenticatorPanics(t *testing.T) {
     )
 }
 
-/* a typed-nil authenticator passed the plain nil comparison and was called on the request path; the reflective guard moves the failure to the definition site */
+/* a typed-nil authenticator passes a plain nil comparison and would be called on the request path; the reflective guard moves the failure to the definition site */
 func TestNewAuthenticatorManager_TypedNilAuthenticatorPanics(t *testing.T) {
     var typedNilAuthenticator *ApiKeyHeaderAuthenticator
 

@@ -3514,7 +3514,7 @@ func TestFileServer_Embedded_RefusesAnEntryThatIsNotARegularFile(t *testing.T) {
         t.Fatalf("expected a named pipe to be refused, got status %d and %d bytes", statusCode, len(body))
     }
 
-    /* the directory guard three lines above answers the same "not served", so the record is what says which of the two refused */
+    /* the directory guard ahead of the regular-file guard answers the same "not served", so the record is what says which of the two refused */
     found := false
     for _, message := range logger.infoMessages {
         if "static serve target is not a regular file" == message {

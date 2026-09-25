@@ -1359,8 +1359,12 @@ trap remove_temporary_path EXIT
 # also planted between punctuation, and a "used to" after a digit; a phrase beside "go:" or "Code generated" inside
 # a comment is counted; a string and a rune ending in an escaped backslash precede a counted comment on their line;
 # every bounded phrase is planted between digits, which bound it as punctuation does; the file that ends inside a
-# comment carries one counted clause of its own, so the count is kept per file; and every form of "is used to", one
-# opening a comment included, and a phrase split by a carriage return inside a line count nothing.
+# comment carries one counted clause of its own, so the count is kept per file; every form of "is used to", one
+# opening a comment included, and a phrase split by a carriage return inside a line count nothing; a "used to" whose
+# comment carries "is " earlier is counted, so the is-guard is read at the end of the prefix only; a line comment
+# opening with "go" and no colon is counted; every bounded phrase glued to a "z" or an "a" on one side only, and a
+# "used to" glued to either, counts nothing, while an "is" glued to either ahead of a "used to" leaves it counted,
+# so each character class is read to both its endpoints on each side.
 COMMENT_CONTROL_DIRECTORY_STRING="$(mktemp -d)"
 TEMPORARY_PATH_STRING_LIST+=("${COMMENT_CONTROL_DIRECTORY_STRING}")
 
@@ -1413,6 +1417,9 @@ printf '%s\n' \
     '// 1measured1 2previously2 3no longer3 4was answered4 5had been5 6pre-repair6 7the repairs7' \
     'const tail = "a\\" // the guard previously hung' \
     "const slash = '\\\\' // the guard had been slow" \
+    '// the handler is fast, so this used to hang' \
+    '// the guard zis used to hang and ais used to leak' \
+    '//go the guard previously hung' \
     'func Serve() {}' > "${COMMENT_CONTROL_DIRECTORY_STRING}/positive.go"
 
 printf '%s\n' \
@@ -1443,11 +1450,16 @@ printf '%s\n' \
     '//is used to serve the page' \
     '//be used to serve the page' \
     $'// the guard measu\rred once' \
+    '// zused to hang, aused to leak' \
+    '// zmeasured measuredz zpreviously previouslyz zno longer no longerz zwas answered was answeredz' \
+    '// zhad been had beenz zpre-repair pre-repairz zthe repairs the repairsz' \
+    '// ameasured measureda apreviously previouslya ano longer no longera awas answered was answereda' \
+    '// ahad been had beena apre-repair pre-repaira athe repairs the repairsa' \
     'type Handler struct{}' > "${COMMENT_CONTROL_DIRECTORY_STRING}/negative.go"
 
 COMMENT_CONTROL_OUTPUT_STRING="$(list_history_comment_count "${COMMENT_CONTROL_DIRECTORY_STRING}/positive.go" "${COMMENT_CONTROL_DIRECTORY_STRING}/unterminated.go" "${COMMENT_CONTROL_DIRECTORY_STRING}/negative.go")"
-if [[ "${COMMENT_CONTROL_DIRECTORY_STRING}/positive.go"$'\t'"77"$'\n'"${COMMENT_CONTROL_DIRECTORY_STRING}/unterminated.go"$'\t'"1" != "${COMMENT_CONTROL_OUTPUT_STRING}" ]]; then
-    fail "the history comment control failed: expected the planted file with 77 and the unterminated one with 1, read [${COMMENT_CONTROL_OUTPUT_STRING}] — no verdict over the tree is possible"
+if [[ "${COMMENT_CONTROL_DIRECTORY_STRING}/positive.go"$'\t'"81"$'\n'"${COMMENT_CONTROL_DIRECTORY_STRING}/unterminated.go"$'\t'"1" != "${COMMENT_CONTROL_OUTPUT_STRING}" ]]; then
+    fail "the history comment control failed: expected the planted file with 81 and the unterminated one with 1, read [${COMMENT_CONTROL_OUTPUT_STRING}] — no verdict over the tree is possible"
 fi
 
 # reads one baseline and holds the files it covers to it: a file above its line fails, a line above its file

@@ -99,7 +99,7 @@ func TestRegex_AnUncompilablePatternRefusesEveryValueItIsAsked(t *testing.T) {
     }
 }
 
-/* NewRegex("") used to compile and match every string, so a constraint built with it validated everything; it fails closed now, the way a pattern that does not compile already did, and the optionality exits still come first. */
+/* NewRegex("") fails closed, the way a pattern that does not compile does, rather than compiling a pattern that matches every string; the optionality exits still come first. */
 func TestRegex_TheConstructorRefusesAnEmptyPattern(t *testing.T) {
     constraint := NewRegex("")
 

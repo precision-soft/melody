@@ -504,7 +504,7 @@ func TestJsonLogger_ClosedReportsOnlyAReallyClosedWriter(t *testing.T) {
     }
 }
 
-/* a typed nil stored under a context key matched the error assertion and Error() dereferenced the nil receiver inside Log — a panic on the logging path, reachable from the exit handler; it renders as null, the nil its producer meant */
+/* a typed nil stored under a context key matches the error assertion, and its Error() would dereference the nil receiver inside Log, a panic on the logging path reachable from the exit handler; it renders as null, the nil its producer meant */
 func TestJsonLogger_NormalizesTypedNilErrorToNull(t *testing.T) {
     logger, buffer := testNewJsonLogger()
 
@@ -528,7 +528,7 @@ func TestJsonLogger_NormalizesTypedNilErrorToNull(t *testing.T) {
     }
 }
 
-/* an error one level down used to reach the encoder unnormalized and marshal as an empty object — every field unexported, no marshaler — so the diagnostic survived at the top level and vanished one level below it */
+/* an error one level down is normalized too: left to the encoder it marshals as an empty object — every field unexported, no marshaler — so the diagnostic would survive at the top level and vanish one level below it */
 func TestJsonLogger_NormalizesNestedErrors(t *testing.T) {
     logger, buffer := testNewJsonLogger()
 
@@ -563,7 +563,7 @@ func TestJsonLogger_NormalizesNestedErrors(t *testing.T) {
     }
 }
 
-/* one unmarshalable value used to cost every other key of the record: the fallback now carries the whole context as text, so the service name and the cause survive next to the marshal error */
+/* one unmarshalable value costs that value alone: the fallback carries the whole context as text, so the service name and the cause survive next to the marshal error */
 func TestJsonLogger_FallbackKeepsTheContextAsText(t *testing.T) {
     logger, buffer := testNewJsonLoggerWithMinLevel(loggingcontract.LevelInfo)
 
@@ -599,7 +599,7 @@ func (instance *gatedProbeWriter) Write(payload []byte) (int, error) {
     return len(payload), nil
 }
 
-/* Closed is asked by the process-boundary exit handler; an answer serialized behind an in-flight Write into a stalled pipe used to hang the one handler that must reach os.Exit — the probe is held open inside Write while Closed is required to answer */
+/* Closed is asked by the process-boundary exit handler, so it must answer while a Write into a stalled pipe is in flight, or it would hang the one handler that must reach os.Exit — the probe is held open inside Write while Closed is required to answer */
 func TestJsonLogger_ClosedAnswersWhileAWriteIsInFlight(t *testing.T) {
     writer := &gatedProbeWriter{
         entered: make(chan struct{}),
@@ -633,7 +633,7 @@ func TestJsonLogger_ClosedAnswersWhileAWriteIsInFlight(t *testing.T) {
     close(writer.release)
 }
 
-/* the console is recognized by identity — the os.Stdout and os.Stderr values themselves — not by name: a file the caller opened on the "/dev/stdout" path is a descriptor this logger owns, and the name check skipped the close it owed and leaked it once per boot */
+/* the console is recognized by identity — the os.Stdout and os.Stderr values themselves — not by name: a file the caller opened on the "/dev/stdout" path is a descriptor this logger owns, and a name check would skip the close it owes and leak it once per boot */
 func TestJsonLogger_CloseClosesAFileOpenedOnTheConsolePath(t *testing.T) {
     file, openErr := os.OpenFile("/dev/stdout", os.O_WRONLY|os.O_APPEND, 0644)
     if nil != openErr {
@@ -653,7 +653,7 @@ func TestJsonLogger_CloseClosesAFileOpenedOnTheConsolePath(t *testing.T) {
     }
 }
 
-/* the labels are read lock-free on every Log call while the caller keeps its reference: without the copy, a later write into that map raced the reads fatally; with it, the logger keeps rendering the labels it was built with */
+/* the labels are read lock-free on every Log call while the caller keeps its reference: without the copy, a later write into that map would race the reads fatally; with it, the logger keeps rendering the labels it was built with */
 func TestNewJsonLoggerWithLabels_CopiesTheLabels(t *testing.T) {
     labels := loggingcontract.LevelLabels{
         loggingcontract.LevelError: loggingcontract.LevelLabelFromString("custom-error"),
@@ -712,7 +712,7 @@ func TestJsonLogger_ErrorImplementingMarshalerRendersStructurally(t *testing.T) 
     }
 }
 
-/* a level outside the five known ones weighs as error instead of debug — the unknown level is the case that least deserves silence, and the zero-value exception carries an empty one; the label keeps the raw level so the record says what it was handed */
+/* a level outside the five known ones weighs as error instead of debug — the unknown level is the case that least deserves silence, and the zero-value exception carries an empty one; the label keeps the raw level so the record says what it received */
 func TestJsonLogger_UnknownLevelIsWeighedAsError(t *testing.T) {
     logger, buffer := testNewJsonLoggerWithMinLevel(loggingcontract.LevelInfo)
 
@@ -1072,7 +1072,7 @@ func (instance *blockingOrderedWriter) Write(payload []byte) (int, error) {
     return len(payload), nil
 }
 
-/* TestJsonLogger_TheStampOrderIsTheWriteOrder pins a guard against a RACE, so it is proven by construction rather than by a mutant: one write is held open while a second record is asked for, and the second record's stamp cannot precede the first write's completion unless the stamp is taken outside the lock. It was: the stamp said when the record was FORMED and the encoding happened between the stamp and the write, so at eight goroutines 484 records of 1600 reached the file out of stamp order while LOGGING.md promised the write order stays reconstructible from them. */
+/* TestJsonLogger_TheStampOrderIsTheWriteOrder pins a guard against a RACE, so it is proven by construction rather than by a mutant: one write is held open while a second record is asked for, and the second record's stamp cannot precede the first write's completion unless the stamp is taken outside the lock, where it would say when the record was formed rather than when it was written. */
 func TestJsonLogger_TheStampOrderIsTheWriteOrder(t *testing.T) {
     writer := &blockingOrderedWriter{
         firstWriteAt: make(chan struct{}),
@@ -1204,7 +1204,7 @@ func TestJsonLogger_EnabledReportsNothingOnceClosed(t *testing.T) {
     }
 }
 
-/* a context value renders through the caller's own MarshalJSON, and application code may log: under the write lock that value's record deadlocked the journal on itself, and every other writer behind it. The encoding of the caller's context is therefore done above the lock, where re-entering Log is merely a second record. */
+/* a context value renders through the caller's own MarshalJSON, and application code may log: under the write lock that value's record would deadlock the journal on itself, and every other writer behind it. The encoding of the caller's context is therefore done above the lock, where re-entering Log is merely a second record. */
 func TestJsonLogger_AContextValueThatLogsWhileItRendersDoesNotDeadlockTheLogger(t *testing.T) {
     buffer := &bytes.Buffer{}
     logger := NewJsonLogger(buffer, loggingcontract.LevelInfo)
@@ -1243,7 +1243,7 @@ func (instance *loggingReentrantValue) MarshalJSON() ([]byte, error) {
     return []byte(`"rendered"`), nil
 }
 
-/* the echo of a failed write goes to stderr, and a stderr nobody drains blocks: taken under the write lock it parked every goroutine that logs, and Close with them, on the one channel whose whole purpose is to report that the journal has stopped writing. */
+/* the echo of a failed write goes to stderr, and a stderr nobody drains blocks: taken under the write lock it would park every goroutine that logs, and Close with them, on the one channel whose whole purpose is to report that the journal has stopped writing. */
 func TestJsonLogger_AStalledStderrEchoDoesNotHoldTheWriteLock(t *testing.T) {
     readEnd, writeEnd, pipeErr := os.Pipe()
     if nil != pipeErr {
@@ -1314,7 +1314,7 @@ func (instance *refusingWriter) Write(payload []byte) (int, error) {
 }
 
 
-/* the encoder leaves the C1 block raw in every field it writes, so a message carrying U+009B repainted the terminal the file was tailed on and a NEL in a context value ended the record for a reader splitting on Unicode line boundaries; the record spells the block as json escapes in the message and in the context alike, and decodes to the values it was given */
+/* the encoder leaves the C1 block raw in every field it writes, so a message carrying U+009B would repaint the terminal the file is tailed on and a NEL in a context value would end the record for a reader splitting on Unicode line boundaries; the record spells the block as json escapes in the message and in the context alike, and decodes to the values it was given */
 func TestJsonLogger_SpellsTheC1BlockAsJsonEscapes(t *testing.T) {
     logger, buffer := testNewJsonLogger()
 
@@ -1355,7 +1355,7 @@ func (instance panickingJsonMarshaler) MarshalJSON() ([]byte, error) {
     panic("the value's encoding dereferences a nil field")
 }
 
-/* a record is written from the recovery defers that report a failure, where the context carries whatever the panic carried: an error whose own Error() raised a second panic past the recovery, and on a worker's goroutine with nothing above it that ended the process. The message is rendered under a recover, the rest of the record kept. */
+/* a record is written from the recovery defers that report a failure, where the context carries whatever the panic carried: an error whose own Error() raises would send a second panic past the recovery, and on a worker's goroutine with nothing above it that ends the process. The message is rendered under a recover, the rest of the record kept. */
 func TestJsonLogger_ContainsAContextErrorWhoseErrorPanics(t *testing.T) {
     logger, buffer := testNewJsonLogger()
 
@@ -1407,10 +1407,7 @@ type cyclicThroughAField struct {
     Held map[string]any
 }
 
-/* the context the encoder refuses was handed to fmt whole, and fmt has no cycle detection: a map that closes
-   on itself through a struct field recursed until the goroutine stack was gone — a fatal error, not a panic, so
-   no recover anywhere turned it into a record and the process ended. Rendered key by key, the encoder detects
-   the cycle and the one key that carries it says so; the service beside it keeps its value. */
+/* fmt has no cycle detection, so a context the encoder refuses is not handed to it whole: a map that closes on itself through a struct field would recurse until the goroutine stack is gone, a fatal error no recover turns into a record. Rendered key by key, the encoder detects the cycle and the one key that carries it says so; the service beside it keeps its value. */
 func TestJsonLogger_FallbackSurvivesACycleHeldThroughAStructField(t *testing.T) {
     logger, buffer := testNewJsonLogger()
 
@@ -1439,11 +1436,7 @@ func (instance selfPanickingJsonMarshaler) MarshalJSON() ([]byte, error) {
     panic(selfPanickingError{})
 }
 
-/* the containment names what it caught through the caught value's own Error, and fmt contains one panic there
-   but re-raises one raised while it prints the first: a value that panics with itself when named went past
-   the recover that named it, out of the record and out of the recovery that was writing it. Named by its type
-   instead, the record is written — for a context error whose message panics that way, and for an encoding
-   that raises such a value. */
+/* the containment names what it caught through the caught value's own Error, and fmt contains one panic there but re-raises one raised while it prints the first: a value that panics with itself when named would go past the recover that named it, out of the record and out of the recovery that was writing it. Named by its type instead, the record is written — for a context error whose message panics that way, and for an encoding that raises such a value. */
 func TestJsonLogger_NamesAPanicWhoseNamingPanicsByItsType(t *testing.T) {
     for _, context := range []map[string]any{
         {"panic": selfPanickingError{}, "worker": "audit"},

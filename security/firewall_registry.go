@@ -19,15 +19,13 @@ func NewFirewallRegistry(compiledConfiguration *CompiledConfiguration) *Firewall
 }
 
 func (instance *FirewallRegistry) Match(request httpcontract.Request) (*CompiledFirewall, bool) {
-    /* IsNilInterface and not `nil ==`: a nil pointer of a request type is a non-nil interface a bare check
-    carries into the loop below, where the firewall's own matcher dereferences it. The guard exists so a
-    request that cannot be read selects nothing rather than crashing the firewall walk. */
+    /* IsNilInterface: a request that cannot be read selects no firewall rather than crashing the walk */
     if true == internal.IsNilInterface(request) {
         return nil, false
     }
 
     for _, firewall := range instance.compiledConfiguration.Firewalls() {
-        /* IsNilInterface on the matcher and not `nil ==`: the matcher comes through NewCompiledFirewall, which is public and validates nothing, so a nil pointer of an application's own matcher type arrives as a non-nil interface a bare check reads as live — and Matches below dereferences it, taking down the walk that decides which firewall claims the request, on EVERY request. */
+        /* IsNilInterface: the matcher comes through NewCompiledFirewall unvalidated, and Matches below dereferences it on every request */
         if nil == firewall || true == internal.IsNilInterface(firewall.Matcher()) {
             continue
         }

@@ -97,9 +97,7 @@ func (instance unauthenticatedRoledToken) IsAuthenticated() bool {
     return false
 }
 
-/* The token is the application's: a nil pointer of its own token type reaches the voter as a non-nil
-interface, IsAuthenticated answers true without touching the receiver, and Roles() then dereferences the
-nil on the authorization path. The plain comparison this replaces let the typed nil through. */
+/* The token is the application's: a nil pointer of its own token type reaches the voter as a non-nil interface, IsAuthenticated answers true without touching the receiver, and Roles() then dereferences the nil on the authorization path, so a plain comparison is not enough. */
 func TestRoleVoter_DeniesATypedNilToken(t *testing.T) {
     voter := NewRoleVoter()
 

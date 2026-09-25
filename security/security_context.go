@@ -94,7 +94,7 @@ func (instance *SecurityContext) MatchedFirewallMatcher() string {
 func (instance *SecurityContext) IsGranted(role string) bool {
     token := instance.Token()
 
-    /* read the same way the constructor reads the firewall beside it: NewSecurityContext is public and does not refuse a typed-nil token, so one arrives here as a non-nil interface and Roles() below dereferences it */
+    /* read through the interface, as the constructor reads the firewall: NewSecurityContext does not refuse a typed-nil token, and Roles() below would dereference it */
     if true == internal.IsNilInterface(token) {
         return false
     }

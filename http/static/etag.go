@@ -29,7 +29,7 @@ func formatEtag(etag string, weak bool) string {
     return fmt.Sprintf("%q", etag)
 }
 
-/* the header is a comma-separated list and a proxy may weaken a strong tag, so an exact string comparison silently re-sends the whole body; the RFC weak comparison ignores the W/ prefix on either side. The wildcard form is deliberately not honoured — it would turn an attacker-supplied header into an unconditional 304 for no practical gain. */
+/* EtagMatchesIfNoneMatch reports whether the If-None-Match header names the entity tag, reading the header as a comma-separated list under the RFC weak comparison, which ignores the W/ prefix on either side, since a proxy may weaken a strong tag. The wildcard form is not honoured, so an attacker-supplied header cannot force an unconditional 304. */
 func EtagMatchesIfNoneMatch(ifNoneMatch string, etag string) bool {
     if "" == strings.TrimSpace(ifNoneMatch) || "" == etag {
         return false

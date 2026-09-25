@@ -430,7 +430,7 @@ func (instance recoveredMessagePanicsError) Error() string {
     panic("Error() panics")
 }
 
-/* the recovery defers of the process boundary render the recovered error's message themselves, outside the recover the exception package's doors use, so an Error() that panics — on the nil field that made it panic-worthy — raised a second panic there, past the teardown and the exit code */
+/* the recovery defers of the process boundary render the recovered error's message themselves, outside the recover the exception package's doors use, so an Error() that panics — on the nil field that made it panic-worthy — would raise a second panic there, past the teardown and the exit code */
 func TestResolveRecoveredExit_AnErrorWhoseMessagePanicsIsStillResolved(t *testing.T) {
     err, exitCode, needsLogging := resolveRecoveredExit(recoveredMessagePanicsError{}, 5)
 
@@ -1009,7 +1009,7 @@ func TestLogOnRecoverAndExitAfter_WritesTheCertificateForAnAlreadyLoggedError(t 
     }
 }
 
-/* the resolve step runs under its own shield, honouring the comment beside the other steps: a recovered value whose methods panic used to unwind into main and the process died with the Go runtime's exit code 2 — no record, no certificate, no teardown. The shield answers a generic record under the caller's own code. The probe panics in Unwrap, which the already-logged probe calls: an Error() that panics is rendered by the resolve itself now and never reaches the shield */
+/* the resolve step runs under its own shield like the other steps: a recovered value whose methods panic would otherwise unwind into main, and the process would die with the Go runtime's exit code 2 — no record, no certificate, no teardown. The shield answers a generic record under the caller's own code. The probe panics in Unwrap, which the already-logged probe calls; an Error() that panics is rendered by the resolve itself and never reaches the shield */
 func TestResolveRecoveredExitShielded_AnswersTheCallersCodeWhenTheValueItselfPanics(t *testing.T) {
     err, resolvedExitCode, needsLogging := resolveRecoveredExitShielded(&panickingResolveError{}, 3)
 
@@ -1077,7 +1077,7 @@ func TestRunShieldedStep_AnswersFalseForAStepThatPanicked(t *testing.T) {
 /* the marker tells a re-executed test binary that it is the child whose stderr has nowhere left to go */
 const exitEchoStalledProbeMarker = "MELODY_EXIT_ECHO_STALLED_PROBE"
 
-/* the echo is the last thing between the failure and os.Exit, and it writes to stderr: a stderr that is a pipe nobody drains blocks, and the exit the process was owed never happened — the record was written, the code was resolved, and the process hung on the line that says so. It is bounded rather than shielded, because the shield reports an abandoned step on the very channel that is blocked. */
+/* the echo is the last thing between the failure and os.Exit, and it writes to stderr: a stderr that is a pipe nobody drains blocks, and without a bound the process would hang on the line that reports its exit, with the record written and the code resolved. It is bounded rather than shielded, because the shield reports an abandoned step on the very channel that is blocked. */
 func TestLogOnRecoverAndExit_AStalledStderrDoesNotHoldTheExit(t *testing.T) {
     if "1" == os.Getenv(exitEchoStalledProbeMarker) {
         exitStepBudget = 200 * time.Millisecond

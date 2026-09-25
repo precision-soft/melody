@@ -348,7 +348,7 @@ func TestMiddlewareCommand_ZeroValueProvider_ReturnsANamedError(t *testing.T) {
     }
 }
 
-/* the refusal of the zero-value command is written on the envelope before the command fails: returned ahead of Render it left zero bytes where a machine consumer waits for a document, and the exit-coded error is the one the envelope's own failure carries */
+/* the refusal of the zero-value command is written on the envelope before the command fails, so a machine consumer waiting for a document receives one, and the exit-coded error is the one the envelope's own failure carries */
 func TestMiddlewareCommand_ZeroValueProviderRendersTheEnvelopeBeforeItFails(t *testing.T) {
     rendered, runErr := runDebugCommand(
         &MiddlewareCommand{},
@@ -546,7 +546,7 @@ func TestMiddlewareCommand_SameNameInactiveEntriesKeepTheReasonOrder(t *testing.
     }
 }
 
-/* the reason appeared and disappeared with the row: omitempty dropped it from every active middleware, so a consumer keying on it could not tell an active entry from a malformed document, and the three shapes this one struct serves — described-active, described-inactive, built — differed in their key set as well as their values. */
+/* the reason key is present on every row, empty on an active one, so a consumer keying on it can tell an active entry from a malformed document, and the three shapes this one struct serves — described-active, described-inactive, built — share one key set. */
 func TestMiddlewareCommand_TheReasonKeyIsPresentOnEveryRow(t *testing.T) {
     rendered, runErr := runDebugCommand(
         NewMiddlewareCommand(

@@ -149,7 +149,7 @@ func TestPreprocessDotEnvContent_WhitespacePrecededHashIsComment(t *testing.T) {
     }
 }
 
-/* godotenv trims the leading spaces of the value region and its countback skips index zero, so a comment that opens before any value byte is the one cut the countback can never make — "APP_SECRET= # fill this in" used to boot the application with the comment as the secret */
+/* godotenv trims the leading spaces of the value region and its countback skips index zero, so a comment that opens before any value byte is the one cut the countback can never make — without the cut here, "APP_SECRET= # fill this in" would boot the application with the comment as the secret */
 func TestLoad_EmptyValueFollowedByAComment_ReadsEmpty(t *testing.T) {
     cases := []struct {
         line     string
@@ -177,7 +177,7 @@ func TestLoad_EmptyValueFollowedByAComment_ReadsEmpty(t *testing.T) {
     }
 }
 
-/* the dollar handling runs on everything after the separator, so a comment left in the produced line had its "$WORD" turned into a reference marker and the boot failed naming a key that was comment text */
+/* the dollar handling runs on everything after the separator, so a comment left in the produced line would have its "$WORD" turned into a reference marker and fail the boot naming a key that is comment text */
 func TestLoad_DollarInsideTheCommentOfAnEmptyValueIsNotAReference(t *testing.T) {
     source := writeDotEnvFiles(t, map[string]string{
         ".env": "APP_SECRET=   # set to $SECRET_VALUE\n",
@@ -215,7 +215,7 @@ func TestPreprocessDotEnvContent_HashGluedToTheSeparatorIsData(t *testing.T) {
     }
 }
 
-/* godotenv builds the unterminated-value failure from the raw first line of the value, so a credential containing " near " had its head copied into the log by the sanitizer that cut at those two words first */
+/* godotenv builds the unterminated-value failure from the raw first line of the value, so a sanitizer that cut at " near " first would copy the head of a credential containing those two words into the log */
 func TestLoad_UnterminatedQuotedValueContainingNearCarriesNoFileContent(t *testing.T) {
     source := writeDotEnvFiles(t, map[string]string{
         ".env": "PASSWORD=\"hunter2 near the door\n",
@@ -290,7 +290,7 @@ func TestLoad_ParseFailureCarriesNoFileContent(t *testing.T) {
         t.Fatalf("expected the malformed variable name to fail the parse")
     }
 
-    /* the leak traveled through the cause chain the logger renders, never through Error() alone — so the assertion renders exactly what the logger renders */
+    /* a leak would travel through the cause chain the logger renders, not through Error() alone, so the assertion renders exactly what the logger renders */
     renderedLogContext := fmt.Sprintf("%v", exception.LogContext(loadErr, nil))
     if true == strings.Contains(renderedLogContext, "hunter2") {
         t.Fatalf("expected the neighboring credential to stay out of the rendered log context: %s", renderedLogContext)

@@ -1343,7 +1343,7 @@ func TestRateLimitMiddleware_RefusesATypedNilLimiterByName(t *testing.T) {
     _ = RateLimitMiddleware(NewRateLimitConfig((*FixedWindowLimiter)(nil), nil, nil))
 }
 
-/* the listener door shares the middleware door's refusal. The panic is asserted by NAME: with the guard dead the nil dispatcher three lines below panics too, and a recover that accepts any panic would report that second failure as the refusal it is not. */
+/* the listener door shares the middleware door's refusal. The panic is asserted by NAME: with the guard dead, the nil dispatcher passed in the same call panics too, and a recover that accepts any panic would report that second failure as the refusal it is not. */
 func TestRegisterRateLimitRequestListener_RefusesATypedNilLimiterByName(t *testing.T) {
     defer func() {
         recovered := recover()

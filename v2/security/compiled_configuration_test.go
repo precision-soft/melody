@@ -735,7 +735,7 @@ func (instance *compiledFirewallFailingLoginHandler) Login(
 
 var _ securitycontract.LoginHandler = (*compiledFirewallFailingLoginHandler)(nil)
 
-/* the dispatch failure travels as an error rather than as its own rendered text: the dispatcher answers a wrapper whose Error() is the bare "event listener returned error", while the listener's name, the event and the listener's own cause all live in that error's CONTEXT. Flattened into a context slot, the record named neither the broken listener nor why it broke. */
+/* the dispatch failure travels as an error rather than as its own rendered text: the dispatcher answers a wrapper whose Error() is the bare "event listener returned error", while the listener's name, the event and the listener's own cause all live in that error's CONTEXT, which a flattened context slot would drop. */
 func TestCompiledFirewall_Login_ADispatchFailureNamesTheBrokenListener(t *testing.T) {
     firewall := NewCompiledFirewall(
         "main",
@@ -803,7 +803,7 @@ func (instance *compiledFirewallFailingLogoutHandler) Logout(
 
 var _ securitycontract.LogoutHandler = (*compiledFirewallFailingLogoutHandler)(nil)
 
-/* the logout door carries the same repair as its login twin two functions above, and a class repaired at one door and not asserted at the other is a door nobody proved */
+/* the logout door carries the same contract as its login twin two functions above, and is asserted on its own, since a door not asserted is a door nobody proved */
 func TestCompiledFirewall_Logout_ADispatchFailureNamesTheBrokenListener(t *testing.T) {
     firewall := NewCompiledFirewall(
         "main",

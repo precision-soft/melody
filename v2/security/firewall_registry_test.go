@@ -238,11 +238,7 @@ func TestFirewallRegistry_MatchRefusesANilRequestEvenAgainstAClaimingMatcher(t *
     }
 }
 
-/* The registry's nil guard exists so that a request it cannot read selects no firewall. A nil pointer of
-a request type is a non-nil interface, so the bare comparison this replaces carried it into the firewall
-walk. The matcher here answers yes for everything, the shape an application matcher may take: the
-framework's own PathPrefixMatcher refuses such a request itself, so with it the registry's guard cannot be
-observed at all. */
+/* The registry's nil guard exists so that a request it cannot read selects no firewall. A nil pointer of a request type is a non-nil interface, so a bare comparison would carry it into the firewall walk. The matcher here answers yes for everything, the shape an application matcher may take: the framework's own PathPrefixMatcher refuses such a request itself, so with it the registry's guard cannot be observed at all. */
 func TestFirewallRegistry_Match_ATypedNilRequestSelectsNoFirewall(t *testing.T) {
     firewall := NewCompiledFirewall(
         "a",
@@ -280,10 +276,7 @@ func TestFirewallRegistry_Match_ATypedNilRequestSelectsNoFirewall(t *testing.T) 
     }
 }
 
-/* the matcher comes through NewCompiledFirewall, which is public and validates nothing, so a nil pointer of an
-application's own matcher type arrives here as a non-nil interface: `nil ==` reads it as a live matcher and the
-Matches call below dereferences it. This is the walk that decides which firewall claims a request, so the crash
-lands on EVERY request rather than on a rare path. Written before the repair, it panics with SIGSEGV. */
+/* the matcher comes through NewCompiledFirewall, which is public and validates nothing, so a nil pointer of an application's own matcher type arrives here as a non-nil interface: `nil ==` reads it as a live matcher and the Matches call below dereferences it. This is the walk that decides which firewall claims a request, so the crash would land on EVERY request rather than on a rare path. */
 func TestFirewallRegistry_Match_SkipsAFirewallCarryingATypedNilMatcher(t *testing.T) {
     var typedNilMatcher *PathPrefixMatcher
 

@@ -16,12 +16,12 @@ import (
     securitycontract "github.com/precision-soft/melody/security/contract"
 )
 
-/* logAuthorizationRefusal files the one record an authorization refusal leaves, naming the branch that refused. The direct 401 branches answer the request themselves, without the kernel.exception dispatch their 403 sibling travels through; the 403 marks its error as already logged before that dispatch, so both shapes leave exactly one record. */
+/* logAuthorizationRefusal files the one record an authorization refusal leaves, naming the branch that refused. The 401 branches answer the request themselves, and the 403 marks its error as logged before the kernel.exception dispatch, so both leave exactly one record. */
 func logAuthorizationRefusal(runtimeInstance runtimecontract.Runtime, request httpcontract.Request, reason string) {
     logAuthorizationRefusalAtLevel(runtimeInstance, request, reason, loggingcontract.LevelWarning, nil)
 }
 
-/* authorizationRefusalLevel answers the level a refusal is filed at. A refusal is a client outcome and is recorded at warning, the level the exception listener gives every deliberate 4xx. The one branch that is not a client outcome is a firewall whose attribute no configured voter looks at: a wiring fault answered fail-closed with the same 403, which nothing about the request can repair. A reason this package did not write — a decision manager of the application's own — is a refusal until it says otherwise. */
+/* authorizationRefusalLevel answers the level a refusal is filed at: warning, as the exception listener files every deliberate 4xx, except for a firewall whose attribute no configured voter looks at, a wiring fault filed at error. A reason from a decision manager of the application's own is a refusal. */
 func authorizationRefusalLevel(reason string) loggingcontract.Level {
     if RefusalReasonNoVoterSupportsAttribute == reason {
         return loggingcontract.LevelError
@@ -77,7 +77,7 @@ func logAuthorizationRefusalAtLevel(
         logContext[key] = value
     }
 
-    /* the record goes through the named methods rather than the level-taking door: a logger that decorates Warning — the capture loggers the guards use are one shape of it — is bypassed by Log */
+    /* the record goes through the named level methods rather than Log, so a logger that decorates only Warning is not bypassed */
     if loggingcontract.LevelError == level {
         logger.Error("authorization refused", logContext)
 
@@ -87,7 +87,7 @@ func logAuthorizationRefusalAtLevel(
     logger.Warning("authorization refused", logContext)
 }
 
-/* exceptionResponseOrFailClosed returns the response the kernel.exception dispatch produced, or a generic fail-closed response when no listener produced one: a nil response written back to the request event is read by the kernel as "no decision" and the request would reach the handler despite being refused. */
+/* exceptionResponseOrFailClosed returns the response the kernel.exception dispatch produced, or a generic fail-closed response when no listener produced one, since the kernel reads a nil response as "no decision" and would let the refused request through. */
 func exceptionResponseOrFailClosed(exceptionEvent *http.KernelExceptionEvent) httpcontract.Response {
     response := exceptionEvent.Response()
     if nil == response {
@@ -114,8 +114,7 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                 return nil
             }
 
-            /* IsNilInterface on the request and not `nil ==`: a nil pointer of a request type is a non-nil
-            interface a bare check reads as a live request, and the path read below dereferences it. */
+            /* IsNilInterface: a nil pointer of a request type is a non-nil interface, and the path read below dereferences it */
             if nil == requestEvent || true == internal.IsNilInterface(requestEvent.Request()) {
                 return nil
             }
@@ -269,7 +268,7 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
 
                 logAuthorizationRefusal(runtimeInstance, requestEvent.Request(), "token_not_authenticated")
 
-                /* IsNilInterface and not `nil !=`: the entry point comes through NewCompiledFirewall unvalidated, so a typed nil of the application's own type is a non-nil interface this branch takes for a live entry point, and Start below dereferences it on the unauthenticated path */
+                /* IsNilInterface: the entry point comes through NewCompiledFirewall unvalidated, and Start below dereferences it */
                 if false == internal.IsNilInterface(entryPoint) {
                     response, startErr := entryPoint.Start(runtimeInstance, requestEvent.Request())
                     if nil != startErr {
@@ -284,7 +283,7 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                         return nil
                     }
 
-                    /* an entry point that produced no response must not let the request through: fall through to the fail-closed 401 rather than writing a nil response the kernel reads as "no decision". IsNilInterface and not `nil !=`: the entry point is the application's, so a typed nil of its own response type is a non-nil interface a bare check would carry through, and SetResponse normalizes it back to the nil that lets the request past authentication. */
+                    /* an entry point that produced no response falls through to the fail-closed 401, since the kernel reads a nil response as "no decision"; IsNilInterface catches the typed nil SetResponse would normalize to nil */
                     if false == internal.IsNilInterface(response) {
                         requestEvent.SetResponse(response)
                         return nil
@@ -301,7 +300,7 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                 return nil
             }
 
-            /* the typed nil is judged here too, not only refused at compile: NewCompiledFirewall is a public door and a registry assembled through it never passes the compile step, so a plain comparison would let a manager holding nothing through to DecideAll and answer every request behind the firewall with a recovered panic instead of the missing-manager response this branch exists to give */
+            /* IsNilInterface: a registry assembled through the public NewCompiledFirewall never passes the compile step, so a typed-nil manager must be caught here too, answering the missing-manager response rather than a recovered panic */
             if true == internal.IsNilInterface(accessDecisionManager) {
                 exceptionEvent := http.NewKernelExceptionEvent(
                     runtimeInstance,
@@ -333,7 +332,7 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                 return eventSecurityAuthorizationGrantedErr
             }
 
-            /* the refusal leaves exactly one record, filed on whichever exit the path takes, and that record says what the denied handler did with it. It cannot be filed before the handler runs and it cannot be filed only after: a handler that answers the request returns early and dispatches no kernel.exception, so its exit used to complete without a trace of the refusal it had just answered, while a handler that FAILS is a permanently broken refusal page whose failure reached no record at all — the mark set below suppresses the exception listener that used to file the wrap carrying it. Both exits file here, and the one carrying a broken handler is filed at error with the handler's own outcome named, whatever level the decision itself earned. */
+            /* the refusal leaves exactly one record, filed on whichever exit the path takes and naming what the denied handler did: a handler that answers returns early with no kernel.exception dispatch, and a handler that fails is filed at error with its own outcome, whatever level the decision earned, since the mark set below suppresses the exception listener */
             refusalReason := authorizationRefusalReason(decisionErr)
             refusalLevel := authorizationRefusalLevel(refusalReason)
             refusalContext := loggingcontract.Context{
@@ -346,10 +345,10 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                 refusalContext["matchedRule"] = matchedRule.PathPrefix()
             }
 
-            /* IsNilInterface and not `nil !=`: it arrives through NewCompiledFirewall unvalidated, so a typed nil is a non-nil interface this branch takes for a live handler and Handle dereferences it on the REFUSAL path, the least exercised one before production */
+            /* IsNilInterface: the handler comes through NewCompiledFirewall unvalidated, and Handle dereferences it on the refusal path */
             if false == internal.IsNilInterface(accessDeniedHandler) {
                 response, handlerErr := accessDeniedHandler.Handle(runtimeInstance, requestEvent.Request(), decisionErr)
-                /* IsNilInterface and not `nil !=`/`nil ==`: the handler is the application's, so a typed nil of its own response type is a non-nil interface a bare check reads as a live response — SetResponse then normalizes it to nil and the denial is served as a granted request. The nil-response branch below must catch the same typed nil to raise its refusal. */
+                /* IsNilInterface: SetResponse would normalize a typed nil response to nil and serve the denial as a grant; the nil-response branch below catches the same typed nil */
                 if nil == handlerErr && false == internal.IsNilInterface(response) {
                     logAuthorizationRefusalAtLevel(
                         runtimeInstance,
@@ -382,7 +381,7 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                     refusalContext["handlerError"] = handlerErr.Error()
                     refusalLevel = loggingcontract.LevelError
 
-                    /* keep the authorization decision as the cause so the exception listener still resolves the denial status through the cause chain: replacing it with the handler error turns a 403 into whatever the handler failure maps to, usually a 500, and drops the refused attributes */
+                    /* the authorization decision stays the cause, so the exception listener resolves the denial status through the chain; the handler error alone would turn a 403 into a 500 */
                     decisionErr = exception.NewError(
                         "access denied handler failed",
                         exceptioncontract.Context{
@@ -415,7 +414,7 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                 return eventSecurityAuthorizationDeniedErr
             }
 
-            /* the mark rides the value the dispatch carries, after every wrap: MarkLogged marks the nearest AlreadyLogged implementer in the chain and IsAlreadyLogged reads it at that depth, so a wrapper added after the mark is an unmarked link in front of it and the exception listener would file the second record this listener has already taken responsibility for */
+            /* the mark rides the value the dispatch carries, after every wrap: MarkLogged marks the nearest AlreadyLogged implementer and IsAlreadyLogged reads it there, so a wrapper added after the mark would let the exception listener file a second record */
             decisionErr = exception.Logged(decisionErr)
 
             exceptionEvent := http.NewKernelExceptionEvent(runtimeInstance, requestEvent.Request(), decisionErr)
@@ -432,7 +431,7 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
         KernelAccessControlListenerPriority,
     )
 
-    /* mark access control as a required kernel.request listener: if another listener stops propagation before it runs, the dispatch fails closed rather than letting the request reach the handler with access control silently skipped. The capability is optional, so a dispatcher of the application's own still registers the listener — but it is what ARMS the fail-closed guarantee, and a dispatcher that does not carry it disarms the guarantee for the whole process. That is said out loud, naming the dispatcher, the way the framework's own adapter refuses the same condition rather than swallowing it: the record goes to the emergency channel because this runs at boot, before any resolution of the configured logger. */
+    /* access control is a required kernel.request listener: a listener that stops propagation before it makes the dispatch fail closed. A dispatcher without that capability disarms the guarantee for the whole process, which is reported on the emergency channel because this runs before the configured logger is resolved. */
     registrar, ok := eventDispatcher.(eventcontract.RequiredListenerRegistrar)
     if false == ok {
         logging.EmergencyLogger().Warning(

@@ -22,7 +22,7 @@ func (instance *Application) registerModuleAtDepth(moduleInstance applicationcon
 
     instance.refuseModuleRegistrationDuringBoot()
 
-    /* read through the interface: a typed nil passes a plain comparison, is stored, and boots reporting success — the failure then surfaces as a bare dereference inside the module's own hook rather than as the refusal this guard exists to give */
+    /* read through the interface: a typed nil passes a plain comparison and would fail later inside the module's own hook */
     if true == internal.IsNilInterface(moduleInstance) {
         exception.Panic(
             exception.NewError("module instance may not be nil", nil, nil),
@@ -35,9 +35,7 @@ func (instance *Application) registerModuleAtDepth(moduleInstance applicationcon
         )
     }
 
-    /* a module's identity is its instance: the same instance reached through two providers used to boot twice, and the loud half of that — a duplicate service name — hid the silent half, its listeners and middlewares each attached twice. The skip covers the children too: they were expanded when the instance first registered. An instance that cannot be a map key keeps the old behavior rather than a runtime panic; Name stays informative and two distinct instances sharing one name stay two modules.
-
-       The question is asked of the VALUE, not of the type. A type is comparable when every field is, and an interface field counts as comparable at that level whatever it ends up holding — so a module registered as a struct value carrying an `any` field passed this guard and then panicked with "hash of unhashable type" on the very next line, the moment its field held a map, a slice or a func. That is the exact panic the guard is here to avoid. The container asks the same question the same way, in isComparableValue. */
+    /* a module's identity is its instance, so one instance reached through two providers boots once, its children included; an instance that cannot be a map key is not deduplicated, and two distinct instances sharing one name stay two modules. Comparability is asked of the value, not the type, as the container's isComparableValue does: an interface field holding a map would panic as a map key. */
     if false == reflect.ValueOf(moduleInstance).Comparable() {
         instance.appendModule(moduleInstance, depth)
 
@@ -74,14 +72,14 @@ func (instance *Application) RegisterModuleProvider(provider applicationcontract
 
     instance.refuseModuleRegistrationDuringBoot()
 
-    /* read through the interface, like the module door above: a typed nil reaches the type assertion on the next line */
+    /* read through the interface: a typed nil reaches the type assertion on the next line */
     if true == internal.IsNilInterface(provider) {
         exception.Panic(
             exception.NewError("module provider may not be nil", nil, nil),
         )
     }
 
-    /* a provider that is itself a module is delegated whole, so its own hooks boot exactly as they do through RegisterModule — this door used to keep only the children and silently drop the provider's own registrations, which made the two doors register different applications from the same value */
+    /* a provider that is itself a module is delegated whole, so its own hooks boot exactly as through RegisterModule */
     if moduleInstance, isModule := provider.(applicationcontract.Module); true == isModule {
         instance.registerModuleAtDepth(moduleInstance, 0)
 
@@ -93,7 +91,7 @@ func (instance *Application) RegisterModuleProvider(provider applicationcontract
     }
 }
 
-/* refuseModuleRegistrationDuringBoot closes both module doors for the boot window: the phase loops iterate a snapshot of the module list, so a module registered from inside a boot hook would receive only the hooks of the phases still ahead — booted by whatever fraction of the lifecycle had not run yet, reported as a success. */
+/* refuseModuleRegistrationDuringBoot closes both module doors for the boot window: the phase loops iterate a snapshot of the module list, so a module registered from a boot hook would receive only the hooks of the phases still ahead. */
 func (instance *Application) refuseModuleRegistrationDuringBoot() {
     if false == instance.booting {
         return
@@ -129,7 +127,7 @@ func (instance *Application) bootModulesPostConfigurationResolve() {
         }
     }
 
-    /* the scoped registrations come after the process-lifetime ones and before the framework's own, so a module scoping a name the framework registers later meets the refusal from either side and lands in the aggregated boot report beside its siblings */
+    /* the scoped registrations come after the process-lifetime ones and before the framework's own, so a module scoping a name the framework registers later lands in the aggregated boot report */
     for _, moduleInstance := range instance.modules {
         if scopedServiceModule, ok := moduleInstance.(applicationcontract.ScopedServiceModule); true == ok {
             scopedServiceModule.RegisterScopedServices(instance.kernel, instance)
@@ -147,7 +145,7 @@ func (instance *Application) bootModulesPostConfigurationResolve() {
         instance.securityConfiguration = compiledConfiguration
     }
 
-    /* one loop per hook, like every phase above: each hook runs across every module before the next hook begins, which is the granularity the contracts document — a module may rely on every sibling's listeners existing before any middleware registers, and folding hooks into one sweep would silently change that rule for exactly these four */
+    /* one loop per hook: each hook runs across every module before the next begins, the granularity the contracts document, so a module may rely on every sibling's listeners before any middleware registers */
     for _, moduleInstance := range instance.modules {
         if eventsModule, ok := moduleInstance.(applicationcontract.EventModule); true == ok {
             eventsModule.RegisterEventSubscribers(instance.kernel)

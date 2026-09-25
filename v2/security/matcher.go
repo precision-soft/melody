@@ -19,10 +19,7 @@ type PathPrefixMatcher struct {
 }
 
 func (instance *PathPrefixMatcher) Matches(request httpcontract.Request) bool {
-    /* IsNilInterface and not `nil ==`: Matches is public and the request is an application-implementable
-    contract, so a nil pointer of a request type arrives as a non-nil interface a bare check reads as a live
-    request — and the very next line dereferences it, taking the request down on the path that decides
-    which firewall claims it. */
+    /* IsNilInterface: the request is an application-implementable contract, and the next line dereferences it */
     if true == internal.IsNilInterface(request) {
         return false
     }

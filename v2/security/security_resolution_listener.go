@@ -31,8 +31,7 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
                 return nil
             }
 
-            /* IsNilInterface on the request and not `nil ==`: a nil pointer of a request type is a non-nil
-            interface a bare check reads as a live request, and the firewall walk below dereferences it. */
+            /* IsNilInterface: a nil pointer of a request type is a non-nil interface, and the firewall walk below dereferences it */
             if nil == requestEvent || true == internal.IsNilInterface(requestEvent.Request()) {
                 return nil
             }
@@ -70,7 +69,7 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
             if nil != resolveErr {
                 setSecurityContextOnRuntime(runtimeInstance, firewall, NewAnonymousToken())
 
-                /* normalized before the record is written so the logged mark has a link to live on: a token source is free to return a plain error, and a mark that does not stick would have the kernel exception listener file the same failure a second time */
+                /* normalized before the record is written, so the logged mark sticks to the error and the kernel exception listener does not file the same failure again */
                 resolveErr = exception.FromError(resolveErr)
 
                 logger := logging.LoggerFromRuntime(runtimeInstance)
@@ -84,7 +83,7 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
                         }
                     }
 
-                    /* a token the client got wrong — an expired jwt, a malformed Authorization, a bad signature — surfaces as a sub-500 HttpException, and that is a refusal recorded at warning, the classification its api-key sibling already earns by travelling to the exception listener. Depositing it at error, and then marking it so the listener adds nothing, made every client with an expired token page whoever reads the error stream. A token backend that is genuinely down, or any error that is not a deliberate 4xx, keeps the error level. The switch is on the named methods rather than Log, so a capture logger that overrides only one level is not stepped past. */
+                    /* a token the client got wrong surfaces as a sub-500 HttpException and is recorded at warning, like its api-key sibling; a backend that is down, or any error that is not a deliberate 4xx, keeps the error level. The switch calls the named level methods, so a logger that overrides only one of them is honoured. */
                     resolutionMessage := "security token source resolution failed"
                     resolutionContext := exception.LogContext(
                         resolveErr,
@@ -115,7 +114,7 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
                 return nil
             }
 
-            /* the token source is the application's, so the same reading the recovery below already applies to the source applies to what it hands back: a typed nil is the nil it means, and taking it for a live token publishes it into the security context every voter then reads */
+            /* a typed nil token from the application's source is the nil it means, not a live token published into the security context */
             if true == internal.IsNilInterface(token) {
                 token = NewAnonymousToken()
             }
@@ -156,7 +155,7 @@ func resolveTokenSourceSafely(
             recoveredErr = err
         }
 
-        /* the recovered value may itself be a nil token source panicking on Resolve: read its name only when it is present, or the deferred function panics a second time after recover and the original diagnostic escapes unrecovered */
+        /* the recovered value may be a nil token source panicking on Resolve: its name is read only when it is present, or the deferred function would panic again after recover */
         tokenSourceName := ""
         if false == internal.IsNilInterface(tokenSource) {
             tokenSourceName = tokenSource.Name()
