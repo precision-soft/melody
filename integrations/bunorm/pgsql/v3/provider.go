@@ -282,8 +282,7 @@ func (instance *Provider) openWithRetry(ctx context.Context, params bunorm.Conne
         case <-ctx.Done():
             delayTimer.Stop()
 
-            /* the same clean stop as the branch above, reached one step later: the cancellation arrived while this attempt was waiting out its backoff. It is recorded here and marked, because an unmarked cancellation travelling up as a bare resolution failure is filed at error by whichever writer meets it — the very record this classification exists to prevent. */
-            /* the cause stays the cancellation, which the classification upstream reads, and the failure being retried travels structured beside it through LogContext */
+            /* the same clean stop as the cancelled-open branch, reached while this attempt waits out its backoff: it is recorded and marked here, since an unmarked cancellation travelling up is filed at error by whichever writer meets it. The cause stays the cancellation, which the classification upstream reads, and the failure being retried travels structured beside it through LogContext. */
             cancelledErr := exception.NewError(
                 "database connection retry cancelled by the caller's context",
                 exception.LogContext(

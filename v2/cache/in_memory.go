@@ -21,11 +21,11 @@ const (
     minInt64 = -maxInt64 - 1
 )
 
-/* lastPromotedAtNano is when this entry was last moved to the front, not when it was last read, which keeps the read path off the exclusive lock; it is atomic because Get reads it under the read lock */
 type lruEntry struct {
-    key                string
-    item               *Item
-    listElement        *list.Element
+    key         string
+    item        *Item
+    listElement *list.Element
+    /* lastPromotedAtNano is when this entry was last moved to the front, not when it was last read, which keeps the read path off the exclusive lock; it is atomic because Get reads it under the read lock */
     lastPromotedAtNano atomic.Int64
 }
 

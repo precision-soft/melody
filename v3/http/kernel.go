@@ -831,8 +831,7 @@ func (instance *Kernel) invokeErrorHandlerSafely(
     return instance.errorHandler(runtimeInstance, writer, request, handlerErr)
 }
 
-/* dispatchResponseAndWrite is the one exit of every request path through ServeHttp: it publishes kernel.response, writes the response the listeners answered with, and closes the body of the one they swapped out. The response is written back through the pointer at every step, since the caller's variable is what the recovery reads when the write panics. */
-/* discardCandidate is a response the caller is about to lose and which must be closed unless this step writes it; it is closed after the publish, never before, since a listener may answer with it. */
+/* dispatchResponseAndWrite is the one exit of every request path through ServeHttp: it publishes kernel.response, writes the response the listeners answered with, and closes the body of the one they swapped out. The response is written back through the pointer at every step, since the caller's variable is what the recovery reads when the write panics; discardCandidate is a response the caller is about to lose, closed unless this step writes it and only after the publish, since a listener may answer with it. */
 func (instance *Kernel) dispatchResponseAndWrite(
     runtimeInstance runtimecontract.Runtime,
     melodyRequest httpcontract.Request,

@@ -18,7 +18,7 @@ type ContextOpener interface {
     OpenContext(ctx context.Context, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error)
 }
 
-/* SecretParameterProvider is the optional capability of naming the configuration parameters that hold this provider's credentials. This major hands the connection values to the provider rather than the names it would read them under, so the application is ordinarily the party that knows the keys and names them to MarkSecretParameters; a provider that does know its own — one built around parameter names of its own — declares them here and is asked by the same door. A provider without the capability is not asked and is unaffected. */
+/* SecretParameterProvider is the optional capability of naming the configuration parameters that hold this provider's credentials. This major hands the provider connection values rather than parameter names, so the application ordinarily names the keys to MarkSecretParameters; a provider built around parameter names of its own declares them here and is asked by the same door. A provider without the capability is not asked. */
 type SecretParameterProvider interface {
     SecretParameterNames() []string
 }
@@ -28,7 +28,7 @@ type MigrationProvider interface {
     OpenForMigration(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error)
 }
 
-/* MigrationContextOpener is what ContextOpener is to Open: the migration open under the caller's context, so the context the registry was constructed with reaches this door too. Without it the registry's promise held on the Manager path alone — the migration open took no context at all — and a db:migrate that received SIGTERM against a down database slept through the whole retry budget instead of refusing at the first cancellable step, which is the exact window a supervisor's signal lands in. The registry prefers it whenever the provider implements it; a provider carrying only MigrationProvider is unaffected. */
+/* MigrationContextOpener is what ContextOpener is to Open: the migration open under the caller's context, so a db:migrate that receives SIGTERM against a down database refuses at the first cancellable step. The registry prefers it whenever the provider implements it. */
 type MigrationContextOpener interface {
     OpenForMigrationContext(ctx context.Context, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error)
 }

@@ -89,13 +89,13 @@ func TestCreateCommand_MissingNameFails(t *testing.T) {
         t.Fatalf("error = %q, want the missing-name message", runErr.Error())
     }
 
-    /* the command no longer pre-prints the failure it returns: the cli runner's [error] line and the full log record already report it */
+    /* the command does not pre-print the failure it returns: the cli runner's [error] line and the full log record report it */
     if true == strings.Contains(rendered, "ERROR:") {
         t.Fatalf("the returned failure must not be pre-printed by the command, got: %q", rendered)
     }
 }
 
-/* the machine document names the argument the command ran on: built without the arguments it answered an empty list for every command, db:create included, whose one argument is the migration the document reports on */
+/* the machine document names the argument the command ran on, the migration db:create reports on */
 func TestCreateCommand_TheMachineDocumentCarriesTheArguments(t *testing.T) {
     database, _ := newFakeBunDatabase()
     runtimeInstance := newRuntimeWithDatabase(t, database)
@@ -155,7 +155,7 @@ func newRuntimeWithProvider(t *testing.T, provider bunorm.Provider) runtimecontr
     return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 }
 
-/* the file is written from the migrations collection alone: bun's generator never touches the database, so none is opened for it — an open used to cost a dial and, on a host that was down, the whole retry budget, to write a file that is written offline */
+/* the file is written from the migrations collection alone: bun's generator never touches the database, so none is opened and a host that is down costs no retry budget */
 func TestCreateCommand_WritesTheFileWithoutOpeningTheDatabase(t *testing.T) {
     provider := &refusingCountingProvider{}
     runtimeInstance := newRuntimeWithProvider(t, provider)
@@ -182,7 +182,7 @@ func TestCreateCommand_WritesTheFileWithoutOpeningTheDatabase(t *testing.T) {
     }
 }
 
-/* the usage in the missing-name refusal names the command's own family: the archive family of an application printed the other family's usage */
+/* the usage in the missing-name refusal names the command's own family, not another family's */
 func TestCreateCommand_MissingNameNamesTheCommandsOwnFamily(t *testing.T) {
     database, _ := newFakeBunDatabase()
     runtimeInstance := newRuntimeWithDatabase(t, database)
@@ -196,7 +196,7 @@ func TestCreateCommand_MissingNameNamesTheCommandsOwnFamily(t *testing.T) {
     }
 }
 
-/* journalRecorder is the application's logger as the create command resolves it, keeping the warnings it was handed */
+/* journalRecorder is the application's logger as the create command resolves it, keeping the warnings it receives */
 type journalRecorder struct {
     loggingcontract.Logger
     warnings []string
@@ -206,7 +206,7 @@ func (instance *journalRecorder) Warning(message string, context loggingcontract
     instance.warnings = append(instance.warnings, message)
 }
 
-/* the result of db:create is the file it writes, not its report: a report the writer lost used to fail the run with the file already in place, and the re-run an exit of one invites created a second migration under a new timestamp beside the first. The loss goes to the journal — it cannot be told on the writer that lost it — and the run answers nil; db:migrate keeps the refusal, its report being its result. */
+/* the result of db:create is the file it writes, not its report: a report the writer lost goes to the journal and the run answers nil, since a re-run would create a second migration beside the first; db:migrate keeps the refusal, its report being its result. */
 func TestCreateCommand_ALostReportWriteIsAWarningInTheJournalNotAFailure(t *testing.T) {
     journal := &journalRecorder{Logger: logging.NewNopLogger()}
 

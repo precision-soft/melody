@@ -200,7 +200,7 @@ func TestScope_CloseKeepsMustGetPanicking(t *testing.T) {
     scopeInstance := serviceContainer.NewScope()
     _ = scopeInstance.Close()
 
-    /* an unqualified recover accepts any panic at all, including one thrown by a guard three lines away */
+    /* an unqualified recover accepts any panic at all, including one thrown by an unrelated guard in the same call */
     testhelper.AssertPanicsWithError(
         t,
         func() {
@@ -290,7 +290,7 @@ func TestScope_OverrideAfterCloseKeepsMustPanicking(t *testing.T) {
     scopeInstance := serviceContainer.NewScope()
     _ = scopeInstance.Close()
 
-    /* an unqualified recover accepts any panic at all, including one thrown by a guard three lines away */
+    /* an unqualified recover accepts any panic at all, including one thrown by an unrelated guard in the same call */
     testhelper.AssertPanicsWithError(
         t,
         func() {

@@ -38,7 +38,7 @@ func withRunnerOption(ctx context.Context, option RunnerOption) context.Context 
     return context.WithValue(ctx, runnerOptionContextKey{}, option)
 }
 
-/* runnerOptionFromContext answers the option a migrate command put on the context, and false when the context carries none — a migration invoked outside any command, or one that dropped the context it was handed. */
+/* runnerOptionFromContext answers the option a migrate command put on the context, and false when the context carries none — a migration invoked outside any command, or one that dropped the context it receives. */
 func runnerOptionFromContext(ctx context.Context) (RunnerOption, bool) {
     if nil == ctx {
         return RunnerOption{}, false
@@ -49,7 +49,7 @@ func runnerOptionFromContext(ctx context.Context) (RunnerOption, bool) {
     return option, present
 }
 
-/* processRunnerOption is the process-wide fallback RunQueries reads when the context carries no option. It exists for the migration that drops the context it was handed and for a host process that runs migrations outside melody's commands; it is not how a command reaches its own migrations — that is the context — because a process default is one value for the whole process, so two commands dispatched concurrently overwrote each other's writer and a --format=json run sent a text run's per-query lines into its own discarded writer. */
+/* processRunnerOption is the process-wide fallback RunQueries reads when the context carries no option, for a migration that drops its context and for a host that runs migrations outside melody's commands. A command reaches its own migrations through the context, since one process value would be shared by concurrent commands. */
 var processRunnerOption atomic.Pointer[RunnerOption]
 
 /* SetDefaultRunnerOption installs the process-wide fallback RunQueries uses when the context carries no option. It is the door of a host process that runs migrations on its own; the migrate commands do not leave anything behind in it — each installs its posture for the length of its run and puts back what was there, and a posture the host installs through this door while a command runs is left where the host put it. */
@@ -57,7 +57,7 @@ func SetDefaultRunnerOption(option RunnerOption) {
     processRunnerOption.Store(&option)
 }
 
-/* commandRunnerOptions is the bookkeeping of the commands that hold the process-wide fallback at once: how many are running, the host's own value, saved when the first of them installed its posture and put back when the last of them leaves, and every pointer the commands of that group installed. It is what makes the restore exact for commands that OVERLAP — the compare-and-swap it replaces restored correctly only for commands nested last-in first-out, and two commands overlapping the other way round left the FIRST command's finished posture installed for the life of the process: its discarded writer under --format=json, where the host's own value was promised back. The installed set is what keeps the last restore from overwriting a value the HOST installed while the commands ran: the saved value is put back only over a value one of the commands installed, and a SetDefaultRunnerOption made in the meantime is left where the host put it. */
+/* commandRunnerOptions is the bookkeeping of the commands holding the process-wide fallback at once: how many run, the host's value saved by the first and restored by the last, and every pointer the group installed. The installed set lets the last restore leave a value the host installed meanwhile, and keeps the restore exact for commands that overlap in any order. */
 var commandRunnerOptions struct {
     mutex     sync.Mutex
     depth     int
@@ -81,7 +81,7 @@ func swapDefaultRunnerOption(option RunnerOption) (installed *RunnerOption, prev
 
     previous = processRunnerOption.Swap(installed)
 
-    /* a later command that displaces a value no command of the group installed has displaced one the HOST put there while the group ran: that value is the host's newer posture, and it is what the last restore has to put back — the one saved when the group began is older. Without this the host's mid-run value survived only while it was still live at the last restore; displaced by a second command, it was lost to the older saved one. */
+    /* a command that displaces a value no command of the group installed has displaced one the host installed while the group ran; that newer value is what the last restore puts back */
     if _, installedByACommand := commandRunnerOptions.installed[previous]; false == installedByACommand {
         commandRunnerOptions.host = previous
     }
@@ -89,7 +89,7 @@ func swapDefaultRunnerOption(option RunnerOption) (installed *RunnerOption, prev
     return installed, previous
 }
 
-/* restoreDefaultRunnerOption puts back what the command's swap displaced, in whichever order the commands finish: the last command to leave puts the host's own value back over whatever the commands installed in between; a command leaving while others still run puts back the value that was live before it only when its own is the live one, and otherwise leaves the later command's value where it is. A value the HOST installed while the commands ran is neither: the last restore finds it live, sees it was installed by no command, and leaves it — SetDefaultRunnerOption promises to install the host's posture, and putting the older one back over it broke that promise for a host that reconfigures its fallback while a command runs. A compare-and-swap on the last command's own value is not enough for that, because three commands leaving out of order can leave a value of the group live under nobody's name. The put-back itself is a compare-and-swap on the value that was read: SetDefaultRunnerOption takes no lock of this bookkeeping, so a host value that lands between the read and the put-back would otherwise be overwritten by the older saved one — with the swap it stays, and the read value is left where the host put it. Two commands with migrations that drop their context share the one fallback for as long as they overlap — the context is the channel that keeps them apart, and a migration that drops it has opted out of that. */
+/* restoreDefaultRunnerOption puts back what the command's swap displaced, in whichever order the commands finish: the last to leave puts the host's value back, and one leaving while others run restores only when its own value is live. A value the host installed meanwhile is left where it is, and the put-back is a compare-and-swap, since SetDefaultRunnerOption takes no lock of this bookkeeping. */
 func restoreDefaultRunnerOption(installed *RunnerOption, previous *RunnerOption) {
     commandRunnerOptions.mutex.Lock()
     defer commandRunnerOptions.mutex.Unlock()

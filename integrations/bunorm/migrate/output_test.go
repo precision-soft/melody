@@ -292,7 +292,7 @@ func TestTruncateString_SurvivesABudgetSmallerThanTheEllipsis(t *testing.T) {
     }
 }
 
-/* the machine document is not shaped by a display flag: verbosity decides how the TEXT renders — the readme says so in as many words — while json is the contract, and gating the blocks on --verbose left db:migrate --format=json answering an empty data object for a run that applied five migrations. */
+/* the machine document is not shaped by a display flag: verbosity decides how the text renders, while json is the contract, so db:migrate --format=json carries the blocks whatever the verbosity. */
 func TestCommandOutput_WantsDetailFollowsTheFormatNotTheVerbosity(t *testing.T) {
     for _, testCase := range []struct {
         format          output.Format
@@ -314,7 +314,7 @@ func TestCommandOutput_WantsDetailFollowsTheFormatNotTheVerbosity(t *testing.T) 
     }
 }
 
-/* the document key and the display title were one string, so the same set of migrations arrived under APPLIED from db:status and under APPLIED MIGRATIONS from db:migrate, with no enumerable set of keys and a rename for readability breaking every consumer in silence */
+/* the document key is apart from the display title, so the same set of migrations arrives under one key from db:status and from db:migrate, and a rename for readability breaks no consumer */
 func TestCommandOutput_PrintMigrationsBlockKeysTheDocumentApartFromTheTitle(t *testing.T) {
     jsonOption := output.DefaultOption()
     jsonOption.Format = output.FormatJson
@@ -344,7 +344,7 @@ func TestCommandOutput_PrintMigrationsBlockKeysTheDocumentApartFromTheTitle(t *t
     }
 }
 
-/* "no current database" was the string <null>, indistinguishable from a database named literally <null> and readable only by a consumer who knew melody's own placeholder; the text block keeps rendering it, because a person reads an empty cell as a missing value either way */
+/* the absent database is json null, so it never reads as a database named literally <null>; the text block keeps its placeholder, since a person reads an empty cell as a missing value either way */
 func TestCommandOutput_TheAbsentDatabaseIsJsonNull(t *testing.T) {
     jsonOption := output.DefaultOption()
     jsonOption.Format = output.FormatJson
@@ -399,7 +399,7 @@ func TestCommandOutput_TheAbsentDatabaseIsJsonNull(t *testing.T) {
     }
 }
 
-/* TestCommandOutput_FinishCarriesTheFailureDetailsAndCause pins the two fields the json envelope always declared and always answered null. The machine document is the contract a pipeline reads, and it was the one rendering that threw away what the error already carried: at the same instant, over the same value, the journal filed the connection, the pool sizing and the whole cause chain while stdout answered a single sentence beside `"details":null, "cause":null`. */
+/* TestCommandOutput_FinishCarriesTheFailureDetailsAndCause pins the envelope's details and cause: the machine document a pipeline reads carries the connection, the pool sizing and the cause chain the journal files for the same value. */
 func TestCommandOutput_FinishCarriesTheFailureDetailsAndCause(t *testing.T) {
     buffer := &bytes.Buffer{}
     outputInstance := newCommandOutput(buffer, nil, output.Option{Format: output.FormatJson})
@@ -538,7 +538,7 @@ func TestCommandOutput_FinishSurvivesATypedNilContextProviderInTheChain(t *testi
     }
 }
 
-/* the error text came off the wire and the identity fields are the server's own answers, so the terminal rendering must escape control characters — visibly, before the cell widths are measured — while the json branch is left to its encoder. */
+/* the error text came off the wire and the identity fields are the server's own answers, so the terminal rendering escapes control characters visibly, before the cell widths are counted, while the json branch is left to its encoder. */
 func TestCommandOutput_PrintErrorEscapesControlCharacters(t *testing.T) {
     plain, plainBuffer := newBufferedOutput(true)
     plain.printError(errors.New("boom\x1b[2J\rforged"))
@@ -588,10 +588,7 @@ func TestCommandOutput_PrintMigrationsBlockEscapesTheNames(t *testing.T) {
     }
 }
 
-/* The document is the machine contract a deploy pipeline reads, and a run that DIED must not be
-   able to write a success into it. Rendered from the named return alone it could: a panic never
-   reaches the assignment, so the deferred render saw a nil error and wrote `"error":null` beside
-   every message the run had accumulated before it fell over. */
+/* the document is the machine contract a deploy pipeline reads, and a run that died writes a failure into it: a panic never reaches the assignment of the named return, so finishRun renders from the recovered value. */
 func TestCommandOutput_FinishRunRendersAFailureDocumentForAPanickingRun(t *testing.T) {
     buffer := &bytes.Buffer{}
     outputInstance := newCommandOutput(buffer, nil, output.NormalizeOption(output.Option{Format: output.FormatJson}))
@@ -687,7 +684,7 @@ func TestCommandOutput_FinishRunKeepsTheRunsOwnFailureWhenAPanicFollowsIt(t *tes
     }
 }
 
-/* The ordinary paths must be untouched: no panic renders exactly what finish rendered before. */
+/* without a panic, finishRun renders what finish renders. */
 func TestCommandOutput_FinishRunLeavesTheOrdinaryPathsUnchanged(t *testing.T) {
     successBuffer := &bytes.Buffer{}
     successOutput := newCommandOutput(successBuffer, nil, output.NormalizeOption(output.Option{Format: output.FormatJson}))
@@ -712,10 +709,7 @@ func TestCommandOutput_FinishRunLeavesTheOrdinaryPathsUnchanged(t *testing.T) {
     }
 }
 
-/* recover() answers only when it is called directly by the deferred function itself, so the door
-   takes the recovered value as a parameter. A command that read it one frame deeper would see nil
-   and believe every run ended well — which is the defect, spelled differently. This pins that every
-   command in the family passes recover() at its own defer rather than delegating the call. */
+/* recover() answers only when it is called directly by the deferred function itself, so the door takes the recovered value as a parameter, and a command that read it one frame deeper would see nil and believe every run ended well. This pins that every command in the family passes recover() at its own defer rather than delegating the call. */
 func TestMigrateCommands_EveryCommandPassesItsOwnRecoverToTheSharedDoor(t *testing.T) {
     commandFiles := []string{
         "command_migrate.go",
@@ -741,7 +735,7 @@ func TestMigrateCommands_EveryCommandPassesItsOwnRecoverToTheSharedDoor(t *testi
     }
 }
 
-/* the warning is the one text door whose caller carries text off the wire — the close failure of the migration connection — and it let the message through as sent, so a carriage return in it repainted the line and an escape sequence in it was obeyed; every text door escapes what it did not write itself, in both colour modes, and the sequence the DATA carried is what must not survive, the colour's own being the door's to write */
+/* the warning is the text door whose caller carries text off the wire, the close failure of the migration connection, so it escapes it as every text door escapes what it did not write, in both colour modes: the sequence the data carries must not survive, while the colour's own sequence is the door's to write */
 func TestCommandOutput_PrintWarningEscapesControlCharacters(t *testing.T) {
     for _, noColor := range []bool{true, false} {
         instance, buffer := newBufferedOutput(noColor)

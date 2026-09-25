@@ -926,7 +926,7 @@ func TestCrontabTemplateStillRequiresTheUser(t *testing.T) {
     }
 }
 
-/* the day-field pair is the one the live measurement on busybox 1.37 ran as a different schedule (only the 16th) than the crontab-dialect matcher (every day); the name spelling proves the refusal reads the folded day-of-week the emitted line carries */
+/* busybox crond runs this day-field pair as a different schedule (only the 16th) than the crontab-dialect matcher (every day); the name spelling proves the refusal reads the folded day-of-week the emitted line carries */
 func TestCrontabNoUserTemplateRefusesBusyboxDivergentDayFields(t *testing.T) {
     schedules := map[string]*Schedule{
         "numeric full-coverage weekday": {Minute: "0", Hour: "0", DayOfMonth: "16", DayOfWeek: "0-6"},

@@ -483,8 +483,7 @@ func TestScheduleMatcher_RejectsUngeneratableShapes(t *testing.T) {
     }
 }
 
-/* a step of exactly the field's cardinality is every scheduler's degenerate "just the low value" and stays accepted, admitting only the range's low value. */
-/* a step wider than the field is what crond does with it, not an error: busybox crond accepts `* / 90` (spaced here to keep this comment intact) and its expansion strides past the high bound on the first hop, so only the range's low value ever fires. The matcher clamps rather than rejects — rejecting would refuse a schedule the generator renders and crond runs — and the clamp is also what keeps a step near the integer maximum from overflowing the expansion loop into values the range never allowed. */
+/* a step wider than the field is what crond does with it, not an error: busybox crond accepts `* / 90` (spaced to keep this comment intact) and only the range's low value fires, as with a step of exactly the field's cardinality. The matcher clamps rather than refuses, which also keeps a step near the integer maximum from overflowing the expansion loop. */
 func TestScheduleMatcher_StepWiderThanTheFieldAdmitsOnlyTheLowValue(t *testing.T) {
     cases := []struct {
         name        string

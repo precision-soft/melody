@@ -141,7 +141,7 @@ type adminUserUpdateRequest struct {
     Roles    []string `json:"roles"`
 }
 
-/* rolesForUpdate answers the roles an update should store: the ones the body named, normalised, or the ones the target already holds when the body named none. An omitted username and an omitted password are kept a few lines above, and roles were the one field an omission REMOVED — the target came back holding the base role alone, an administrator editing their own account included. A list sent EXPLICITLY empty is an opinion and still falls back to the base role, which is the rule normalizeRoles carries; the decoder separates the two, leaving the field nil only when the caller never named it. */
+/* rolesForUpdate answers the roles an update should store: the ones the body named, normalised, or the ones the target already holds when the body named none. An omitted roles field keeps the target's roles, as an omitted username and password keep theirs, so an administrator editing their own account keeps its roles; a list sent explicitly empty is an opinion and still falls back to the base role, which is the rule normalizeRoles carries; the decoder separates the two, leaving the field nil only when the caller never named it. */
 func rolesForUpdate(requested []string, current []string) []string {
     if nil == requested {
         return current

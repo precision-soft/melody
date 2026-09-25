@@ -700,8 +700,7 @@ func TestHmacNonceGuardKey_ColonExtensionKeyIdsCannotCollide(t *testing.T) {
     }
 }
 
-/* the pre-typ wire format: a header carrying alg and kid alone, signed correctly. The decoder must refuse it — requiring the envelope's own typ is the structural half of the domain separation from every other HS256 credential. */
-/* the same envelope the test below refuses AUTHENTICATES once the deployment opens the migration window, which is the whole point of the window: a verifier already on this version keeps accepting the peers that have not been redeployed yet, so a rolling upgrade does not take the fleet to anonymous in one step. The window is opt-in, so this is the only shape that reaches it. */
+/* the envelope TestHmacTokenSource_RejectsAnEnvelopeWithoutTheInternalAuthType refuses authenticates once the deployment opens the migration window, which is the whole point of the window: a verifier already on this version keeps accepting the peers that have not been redeployed yet, so a rolling upgrade does not take the fleet to anonymous in one step. The window is opt-in, so this is the only shape that reaches it. */
 func TestHmacTokenSource_TheMigrationWindowAuthenticatesAnEnvelopeWithoutTheInternalAuthType(t *testing.T) {
     secret := []byte("current-shared-secret-value-0001")
     now := time.Now()
@@ -740,6 +739,7 @@ func TestHmacTokenSource_TheMigrationWindowAuthenticatesAnEnvelopeWithoutTheInte
     }
 }
 
+/* the pre-typ wire format: a header carrying alg and kid alone, signed correctly. The decoder must refuse it — requiring the envelope's own typ is the structural half of the domain separation from every other HS256 credential. */
 func TestHmacTokenSource_RejectsAnEnvelopeWithoutTheInternalAuthType(t *testing.T) {
     secret := []byte("current-shared-secret-value-0001")
     now := time.Now()

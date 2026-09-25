@@ -309,8 +309,7 @@ func ValidateScheduleFields(entry Entry, forbidden []ForbiddenCharacter, dialect
             continue
         }
 
-        /* the rendered field must parse under the target scheduler's bounds: crond refuses the whole crontab on one bad field and the apiserver refuses a CronJob outside the robfig bounds */
-        /* the bounds carry the dialect the template chose, so the refusal names it */
+        /* the rendered field must parse under the target scheduler's bounds, since crond refuses the whole crontab on one bad field and the apiserver refuses a CronJob outside the robfig bounds; the bounds carry the dialect the template chose, so the refusal names it */
         fieldBounds := cronFieldBounds{name: field.name, minimum: field.minimum, maximum: field.maximum, dialect: dialect}
 
         if _, parseErr := parseCronField(fieldOrWildcard(normalizeCronNameTokens(field.value, field.names)), fieldBounds); nil != parseErr {

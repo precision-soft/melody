@@ -202,7 +202,7 @@ func TestFromRuntime_RefusesATypedNilRuntimeByNameRatherThanByItsMissingResolver
     }
 }
 
-/* typedNilContainerRuntime yields a typed-nil container beside an absent scope: the container door reads through the interface exactly as the scope door one line above it does */
+/* typedNilContainerRuntime yields a typed-nil container beside an absent scope: the container door reads through the interface exactly as the scope door does */
 type typedNilContainerRuntime struct{}
 
 func (instance *typedNilContainerRuntime) Context() context.Context {

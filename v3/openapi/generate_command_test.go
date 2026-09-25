@@ -285,8 +285,7 @@ func TestGenerateCommand_ReplacesAPreviousDocument(t *testing.T) {
     }
 }
 
-/* the auto-registration gate reads the registry service alone, so a container without the info service reaches the command and the tolerant resolver answers an empty Info — required title and version as empty strings; the run still succeeds, but it says what the success would otherwise conceal. */
-/* with --out the writer is free, so the missing info is named there beside the "wrote" line; without it the writer is the document, and the warning goes to the journal (the test below) */
+/* the auto-registration gate reads the registry service alone, so a container without the info service reaches the command and the tolerant resolver answers an empty Info; the run still succeeds, and with --out the writer is free, so the missing title and version are named there beside the "wrote" line, while without it the writer is the document and the warning is journaled, as TestGenerateCommand_TheStdoutDocumentStaysValidJsonWithoutTheInfoService proves */
 func TestGenerateCommand_WarnsOnTheWriterWhenTheInfoServiceIsAbsentAndTheDocumentGoesToAFile(t *testing.T) {
     projectDirectory := t.TempDir()
     out := filepath.Join(projectDirectory, "openapi.json")

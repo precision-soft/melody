@@ -49,7 +49,7 @@ func (instance *CreateCommand) Run(runtimeInstance runtimecontract.Runtime, comm
         return err
     }
 
-    /* no database is opened: the file is written from the migrations collection alone, and the manager name only labels the detail line below */
+    /* no database is opened: the file is written from the migrations collection alone, and the manager name only labels the detail line */
     managerName := instance.base.managerLabel(commandContext)
 
     migrator, migratorErr := instance.base.newFileMigrator()

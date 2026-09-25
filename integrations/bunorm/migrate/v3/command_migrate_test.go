@@ -330,7 +330,7 @@ func TestMigrateCommand_ARunThatChangedTheSchemaSaysSoOnTheText(t *testing.T) {
     }
 }
 
-/* the machine document is deliberately untouched by the line above: under json the same run already carries the applied count, the group and the names as structured fields, so a prose duplicate would be a second and weaker spelling of what the consumer has */
+/* the machine document does not carry the success line: under json the same run already carries the applied count, the group and the names as structured fields, so a prose duplicate would be a second and weaker spelling of what the consumer has */
 func TestMigrateCommand_TheSuccessLineDoesNotEnterTheMachineDocument(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = appliedMigrationRowsHook()

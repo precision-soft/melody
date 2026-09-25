@@ -204,9 +204,7 @@ func TestDatabaseResetCommandWithoutForceNamesWhatItWouldDropAndTouchesNothing(t
     }
 }
 
-/* the sister of the test above: over the same handle, --force reaches the database and fails on the dial.
-   Without it, a fixture that could never fail would let the guard be deleted and leave both green. */
-/* the refusal is the drop step's, on the catalogue, and says where: an error from anywhere else — a --force that touched nothing and fabricated a failure — does not satisfy it */
+/* over the same handle as TestDatabaseResetCommandWithoutForceNamesWhatItWouldDropAndTouchesNothing, --force reaches the database and fails on the dial, so a fixture that could never fail cannot let the guard be deleted with both green; the refusal is the drop step's, on the catalogue, and an error from anywhere else, a --force that touched nothing and fabricated a failure, does not satisfy it */
 func TestDatabaseResetCommandWithForceReachesTheDatabase(t *testing.T) {
     runErr := NewDatabaseResetCommand().Run(
         newResetRuntime(t, persistence.NewCatalogStorageAt(newUndialedResetStorage().Database(), "mysql:3306/melody_example_v3")),

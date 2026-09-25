@@ -2023,7 +2023,6 @@ func TestEventDispatcher_DoesNotBuildDebugRecordsTheJournalWouldDiscard(t *testi
     }
 }
 
-/* the listener name is resolved where it is USED, so the paths that need it must still carry it with the journal at a level that builds no debug record at all: the failure wrapper's context and the required-listener refusal are what an operator reads when a dispatch goes wrong, and a name resolved only inside the debug branch would leave both saying "-" exactly when they matter. */
 /* with debug on, the "event listener started" record names the listener it is about, resolved through listenerNameOf at the call site */
 func TestEventDispatcher_DebugRecordNamesTheListenerItIsAbout(t *testing.T) {
     logger := &debugGateLogger{minLevel: loggingcontract.LevelDebug}
@@ -2065,6 +2064,7 @@ func TestEventDispatcher_DebugRecordNamesTheListenerItIsAbout(t *testing.T) {
     }
 }
 
+/* the listener name is resolved where it is USED, so the paths that need it must still carry it with the journal at a level that builds no debug record at all: the failure wrapper's context and the required-listener refusal are what an operator reads when a dispatch goes wrong, and a name resolved only inside the debug branch would leave both saying "-" exactly when they matter. */
 func TestEventDispatcher_NamesTheListenerOnTheFailurePathWithDebugOff(t *testing.T) {
     logger := &debugGateLogger{minLevel: loggingcontract.LevelError}
 

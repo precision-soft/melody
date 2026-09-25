@@ -592,7 +592,7 @@ func TestRunnerCommand_LoopTicksWhileAJobIsStillRunning(t *testing.T) {
     }
 }
 
-/* the job holds itself inside Run for completionDelay AFTER the cancellation reaches its child context, so the two events are ordered rather than raced: a loop that abandons its in-flight jobs returns while the job is still sleeping, and the assertion below sees completedCount==0 every time. Without that delay both goroutines wake on the same cancel() and the job wins by luck, so the test passed even with inFlight.Wait() removed. */
+/* the job holds itself inside Run for completionDelay after the cancellation reaches its child context, so the two events are ordered rather than raced: a loop that abandons its in-flight jobs returns while the job still sleeps, and the assertion sees completedCount==0. Without the delay both goroutines wake on the same cancel() and the job can win by luck. */
 func TestRunnerCommand_LoopWaitsForInFlightJobsOnCancellation(t *testing.T) {
     started := make(chan struct{}, 1)
     job := &blockingCommand{commandName: "job:blocking", started: started, completionDelay: 250 * time.Millisecond}
@@ -1671,7 +1671,7 @@ func TestRunnerCommand_WedgedCommandIsAbandonedAndItsScopeReleased(t *testing.T)
     <-job.started
 }
 
-/* an entry that opts out of the deadline keeps the pre-deadline behaviour: the runner waits for the command however long it takes. */
+/* an entry that opts out of the deadline is waited for however long the command takes. */
 func TestRunnerCommand_NegativeTimeoutOptsOutOfTheDeadline(t *testing.T) {
     job := &sleepingCommand{commandName: "job:top", duration: 150 * time.Millisecond}
 
@@ -1710,7 +1710,7 @@ func TestRunnerCommand_CommandInsideItsTimeoutIsUntouched(t *testing.T) {
     }
 }
 
-/* The deadline is opt-in. Every entry configured before it existed leaves Timeout at zero, and a default of one hour would have begun cutting a ninety-minute job short at sixty on the upgrade that introduced it — a run the entry never asked to be bounded and whose scope would then be torn down under it. An entry that wants the bound asks for it. */
+/* the deadline is opt-in: zero leaves the run unbounded, so a job that takes ninety minutes is never cut short at a bound its entry did not ask for, with its scope torn down under it. */
 func TestTimeoutOfEntry_ZeroLeavesTheRunUnbounded(t *testing.T) {
     if 0 != timeoutOfEntry(&ScheduledCommand{Config: &EntryConfig{}}) {
         t.Fatalf("expected an entry that sets no timeout to run unbounded, got %v", timeoutOfEntry(&ScheduledCommand{Config: &EntryConfig{}}))
@@ -2228,7 +2228,7 @@ func TestRunnerCommand_InvokeInstallsThePerRunIdentity(t *testing.T) {
     }
 }
 
-/* the runner accepts the standard flags every melody command carries, so the framework's -v rewrite no longer kills it at parse, and it carries its own two beside them. Asserted by name rather than by count: a count passes just as well when a standard flag is swapped for another, which is not what the sentence above claims. */
+/* the runner accepts the standard flags every melody command carries, which the framework's -v rewrite needs at parse, beside its own two. Asserted by name rather than by count, since a count passes when a standard flag is swapped for another. */
 func TestRunnerCommand_CarriesTheStandardFlags(t *testing.T) {
     runner := NewRunnerCommand(NewConfiguration(), RunnerDialectCrontab)
 
@@ -2309,7 +2309,7 @@ func TestInvoke_AnswersTheRunIdBesideTheOutcome(t *testing.T) {
     }
 }
 
-/* the runner's recovery boundary keeps what wakes an operator usefully: the panic value travels as the cause so errors.Is still reaches the failure underneath, and the stack is captured on the goroutine that raised it. Stringified into the context alone, a nightly job that died on the framework's own idiom reached the record as a message and a command name, with no file and no line anywhere. */
+/* the runner's recovery boundary keeps the panic value as the cause, so errors.Is still reaches the failure underneath, and captures the stack on the goroutine that raised it, so the record carries a file and a line. */
 func TestRunnerCommand_APanickingJobKeepsItsCauseAndItsStack(t *testing.T) {
     rootCause := errors.New("dial tcp 10.0.0.7:5432: connect: connection refused")
 
@@ -2495,7 +2495,7 @@ func (instance *outputWritingProbeCommand) Run(runtimeInstance runtimecontract.R
     return writeErr
 }
 
-/* a job's own output belongs in the journal. Due entries run concurrently and every one of them held the same os.Stdout, so several reports arrived interleaved, in colour, and none of them reached the log file the operator reads — the runner's documented promise that it writes nothing to the command output itself was true only of the runner's own lines. */
+/* a job's own output belongs in the journal: due entries run concurrently, and on the shared os.Stdout their reports would interleave and miss the log file the operator reads. */
 func TestRunnerCommand_ScheduledJobOutputIsCapturedIntoTheJournal(t *testing.T) {
     job := &outputWritingProbeCommand{commandName: "job:reporting", output: "SYNCED 42 ROWS\n"}
 
@@ -2601,7 +2601,7 @@ func TestRunnerCommand_ScheduledJobOutputIsBoundedAndSaysWhatItCut(t *testing.T)
     }
 }
 
-/* the writer itself is where two of its rules live, and neither is observable through a job that writes once: the budget is measured against what is already held, so a second write has to see the first, and the full length is always reported because a short write is an io.Writer contract violation the standard library answers with an error the job would then return as its own failure. */
+/* the writer itself is where two of its rules live, and neither is observable through a job that writes once: the budget is counted against what is already held, so a second write has to see the first, and the full length is always reported because a short write breaks the io.Writer contract and the standard library answers it with an error the job would return as its own failure. */
 func TestScheduledOutputCapture_ReportsTheFullLengthAndBoundsWhatItKeeps(t *testing.T) {
     capture := newScheduledOutputCapture()
 
@@ -2639,7 +2639,7 @@ func TestScheduledOutputCapture_ReportsTheFullLengthAndBoundsWhatItKeeps(t *test
     }
 }
 
-/* an entry declares its own posture, because the runner has none to lend it: the dispatch used to hand the child nothing but its command name, so every job ran on the declared defaults of its flags whatever the entry configured, and the manifest generated from the same Configuration ran a different command line. */
+/* an entry declares its own posture, because the runner has none to lend it: the child receives the entry's arguments, so it runs the command line the manifest generated from the same Configuration runs. */
 func TestRunnerCommand_EntryArgumentsReachTheScheduledCommand(t *testing.T) {
     job := &outputWritingProbeCommand{commandName: "job:posture", output: "done\n"}
 
@@ -2680,7 +2680,7 @@ func newCapturingRunnerRuntime(ctx context.Context) (runtimecontract.Runtime, *c
     return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer), captured
 }
 
-/* TestRunnerCommand_OnceRendersTheMachineDocument pins the document a deploy step reads. The command declared and validated --format=json through StandardFlags and then answered zero bytes on every path: `melody:cron:run --once --format=json | jq` received an empty stream, which is indistinguishable, to the step consuming it, from a missing binary. The only observable effect the flag had was that the cli banner disappeared. */
+/* TestRunnerCommand_OnceRendersTheMachineDocument pins the document a deploy step reads: `melody:cron:run --once --format=json | jq` receives one document rather than an empty stream a consumer cannot tell from a missing binary. */
 func TestRunnerCommand_OnceRendersTheMachineDocument(t *testing.T) {
     job := newRecordingCommand("job:top")
 
@@ -2825,7 +2825,7 @@ func TestRunnerCommand_OnceRendersTheFailureInsideTheDocument(t *testing.T) {
     }
 }
 
-/* TestRunnerCommand_DeclaresWhatItDrives pins the other half of the same silence. A scheduler built over a configuration emptied by a refactor, or whose entries an environment gate filtered away, ran forever, exited successfully and wrote not one byte on any channel: nothing distinguished it from a healthy one, and the absence was noticed days later, when the nightly sweep turned out not to have run. */
+/* TestRunnerCommand_DeclaresWhatItDrives pins the declaration that makes a scheduler over an empty or filtered configuration visible: without it such a scheduler runs forever, exits successfully and writes nothing on any channel. */
 func TestRunnerCommand_DeclaresWhatItDrives(t *testing.T) {
     job := newRecordingCommand("job:top")
 
@@ -2879,7 +2879,7 @@ func TestRunnerCommand_DeclaresAnEmptyScheduleAsAWarning(t *testing.T) {
     }
 }
 
-/* TestRunScheduledCommand_APanicKeepsItsCauseChain pins the record a panicking job produces. The recovery boundary joined its rich error onto the (nil) run error, and errors.Join answers an Unwrap of []error while exception.LogContext anchors cause and causeChain on errors.Unwrap — the single-value form — so the record carried the top message and nothing else: not the context naming the parameter, not the chain naming what refused. The same failure RETURNED rather than raised filed a complete record, which is the difference this closes. */
+/* TestRunScheduledCommand_APanicKeepsItsCauseChain pins the record a panicking job produces: errors.Join answers an Unwrap of []error while exception.LogContext anchors cause and causeChain on errors.Unwrap, so the boundary assigns rather than joins, and the record carries the context naming the parameter and the chain naming what refused. */
 func TestRunScheduledCommand_APanicKeepsItsCauseChain(t *testing.T) {
     dialErr := errors.New("dial tcp 10.0.0.9:5432: connect: connection refused")
 
@@ -2926,7 +2926,7 @@ func TestRunScheduledCommand_APanicKeepsItsCauseChain(t *testing.T) {
         t.Fatalf("expected the chain to reach what refused, got %v", causeChain)
     }
 
-    /* the context of the panic error itself travels under causeContextChain, which is where LogContext files the context of every link below the top one: the ledger and the endpoint are exactly what tells an outage from a credential change from a wiring fault, and none of the three reached any record while the boundary joined */
+    /* the context of the panic error itself travels under causeContextChain, where LogContext files the context of every link below the top one: the ledger and the endpoint tell an outage from a credential change from a wiring fault */
     causeContextChain, isContextChain := record.context["causeContextChain"].([]map[string]any)
     if false == isContextChain || 0 == len(causeContextChain) {
         t.Fatalf("expected the cause context chain in the record, got %v", record.context["causeContextChain"])
@@ -3008,7 +3008,7 @@ func TestTimeoutError_WithoutACommandFailureWrapsTheSentinelAlone(t *testing.T) 
     }
 }
 
-/* TestInvoke_ACommandFailureAndAScopeCloseFailureBothSurvive pins the shape that replaced the join at the scope-close boundary. The command's own failure stays the wrapped one, so its context and its whole cause chain still reach the record; the close failure travels beside it in the context, where a join would have emptied both — errors.Join answers an Unwrap of []error and exception.LogContext anchors cause and causeChain on the single-value form. */
+/* TestInvoke_ACommandFailureAndAScopeCloseFailureBothSurvive pins the scope-close boundary: the command's failure stays the wrapped one, so its context and cause chain reach the record, and the close failure travels beside it in the context, since errors.Join answers an Unwrap of []error and exception.LogContext anchors on the single-value form. */
 func TestInvoke_ACommandFailureAndAScopeCloseFailureBothSurvive(t *testing.T) {
     job := newRecordingCommand("job:top")
     job.runErr = exception.NewError(
@@ -3148,7 +3148,7 @@ func driveOneIdleLoopMinute(t *testing.T, reportIdle bool) (*bytes.Buffer, chan 
     return buffer, finished, cancel
 }
 
-/* the arguments field is a list on every row, empty rather than null for the entry that declares none — which is most of them. A field whose json type changes with the outcome cannot be consumed at all: `jq '.data.ran[].arguments | length'` died on the first argument-less job, in the one document of this family that was left unguarded while its siblings — error, ran, failed, pruned — each got a normalizer of their own. */
+/* the arguments field is a list on every row, empty rather than null for the entry that declares none, so `jq '.data.ran[].arguments | length'` reads every row. */
 func TestRunnerCommand_TheArgumentsFieldIsAListOnEveryRow(t *testing.T) {
     withArguments := newRecordingCommand("job:with")
     withoutArguments := newRecordingCommand("job:without")
@@ -3210,7 +3210,7 @@ func TestRunnerCommand_TheArgumentsFieldIsAListOnEveryRow(t *testing.T) {
     }
 }
 
-/* the classification the row is built from is the classification the record is filed under, because reportRunOutcome takes it instead of computing a second one. It is driven here with a LIVE runtime context and a cancellation error: recomputing would answer "not a shutdown" for both calls, so the run reported cancelled would be filed as a failure and counted as one — which is exactly what a SIGTERM landing between the two reads used to produce, a document saying failed over a process exiting 0. */
+/* the classification the row is built from is the classification the record is filed under, because reportRunOutcome takes it instead of computing a second one. It is driven with a live runtime context and a cancellation error: recomputing would answer "not a shutdown" for both calls, so the run reported cancelled would be filed and counted as a failure, a document saying failed over a process exiting 0. */
 func TestRunnerCommand_ReportRunOutcomeTakesTheClassificationItIsGiven(t *testing.T) {
     runner := NewRunnerCommand(NewConfiguration(), RunnerDialectCrontab)
     entry := &scheduledRunEntry{commandName: "job:probe"}
@@ -3276,7 +3276,7 @@ func TestRunnerCommand_ReportRunOutcomeIsSilentForASuccessfulRun(t *testing.T) {
     }
 }
 
-/* the evaluated minute doubles as the document's timestamp, so the ordinary advance must carry the real local instant — offset and all — while only the minutes a forward jump skipped, which have no local representation, stay utc-materialized. The pseudo-utc rendering used to reach the document as a real instant, off by the whole zone offset and disagreeing with the --once mode. */
+/* the evaluated minute doubles as the document's timestamp, so the ordinary advance carries the real local instant, offset and all, while only the minutes a forward jump skipped, which have no local representation, stay utc-materialized. */
 func TestReconcileWallClockReportsTheCurrentMinuteAsRealLocalTime(t *testing.T) {
     zone := time.FixedZone("probe", 3*3600)
     previousTarget := time.Date(2026, time.August, 15, 3, 29, 0, 0, zone)
@@ -3301,7 +3301,7 @@ func TestReconcileWallClockReportsTheCurrentMinuteAsRealLocalTime(t *testing.T) 
     }
 }
 
-/* the fixed zone has no daylight-saving gap, so every minute a three-minute jump skips exists on its calendar and is reported as the real local instant; the pin that expected them utc-materialized was written on this very input, under a rationale — "no local representation to print" — that is true of a spring-forward gap only. The half of it that guards a real rule stays: a skipped minute never runs the wildcard class. */
+/* the fixed zone has no daylight-saving gap, so every minute a three-minute jump skips exists on its calendar and is reported as the real local instant; a skipped minute never runs the wildcard class. */
 func TestReconcileWallClock_CatchUpMinutesTheZoneHasAreRealLocalTime(t *testing.T) {
     zone := time.FixedZone("probe", 3*3600)
     previousTarget := time.Date(2026, time.August, 15, 3, 0, 0, 0, zone)
@@ -3957,7 +3957,7 @@ func TestDispatchDue_AFailureWhoseTextPanicsDoesNotHoldTheMinute(t *testing.T) {
     assertRunnerPanicFiled(t, report, runErr, healthy, "job:one", "rendering itself")
 }
 
-/* an application that registers its logger under the concrete type of its provider refuses the runner's per-run logger override — the cli entry point refuses the same way — and every run used to take the process down with it. */
+/* an application that registers its logger under the concrete type of its provider refuses the runner's per-run logger override, as the cli entry point does, and the run fails rather than the process. */
 func TestDispatchDue_ALoggerRegisteredUnderItsConcreteTypeFailsTheRunNotTheProcess(t *testing.T) {
     serviceContainer := container.NewContainer()
     serviceContainer.MustRegister(

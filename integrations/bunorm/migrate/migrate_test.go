@@ -297,7 +297,7 @@ func TestMigrationPrinter_PrintFailedEscapesForeignTextButKeepsTheQueryLines(t *
     }
 }
 
-/* the empty and the success lines of a run carry the migration name, which the runner did not write; they escape it in both colour modes, and the per-query lines — which carry it inside the prefix — are measured on a run of their own below */
+/* the empty and the success lines of a run carry the migration name, which the runner did not write; they escape it in both colour modes, and the per-query lines, which carry it inside the prefix, are proven on a run of their own */
 func TestMigrationPrinter_EscapesTheMigrationNameOnTheEmptyAndSuccessLines(t *testing.T) {
     for _, noColor := range []bool{true, false} {
         buffer := &bytes.Buffer{}
@@ -318,7 +318,7 @@ func TestMigrationPrinter_EscapesTheMigrationNameOnTheEmptyAndSuccessLines(t *te
     }
 }
 
-/* the option a command puts on the context is the one a run prints under, ahead of the process-wide fallback: the fallback is one value for the whole process, and a run reading it printed under whichever command had installed it last */
+/* the option a command puts on the context is the one a run prints under, ahead of the process-wide fallback: the fallback is one value for the whole process, and a run reading it would print under whichever command installed it last */
 func TestRunQueries_ReadsTheOptionCarriedByTheContextBeforeTheProcessDefault(t *testing.T) {
     t.Cleanup(func() {
         processRunnerOption.Store(nil)
@@ -343,7 +343,7 @@ func TestRunQueries_ReadsTheOptionCarriedByTheContextBeforeTheProcessDefault(t *
     }
 }
 
-/* a command puts its posture back on the way out, whichever order overlapping commands finish in: a command that finished while a later one still runs leaves that one's value where it is, and the LAST command to leave puts the host's own value back — the compare-and-swap this replaced restored correctly only last-in first-out, and two commands overlapping the other way round left the first command's finished posture installed for the life of the process */
+/* a command puts its posture back on the way out, whichever order overlapping commands finish in: a command that finishes while a later one still runs leaves that one's value where it is, and the last command to leave puts the host's own value back */
 func TestRestoreDefaultRunnerOption_PutsTheHostsValueBackWhicheverOrderTheCommandsFinishIn(t *testing.T) {
     t.Cleanup(func() {
         processRunnerOption.Store(nil)
@@ -390,7 +390,7 @@ func TestRestoreDefaultRunnerOption_PutsTheHostsValueBackWhicheverOrderTheComman
     }
 }
 
-/* SetDefaultRunnerOption promises to install the host's posture; the last restore put the value saved before the FIRST command back over it, so a host that reconfigured its fallback while a command ran had that value overwritten on the command's way out. The restore now puts the saved value back only over a value one of the commands installed. */
+/* SetDefaultRunnerOption promises to install the host's posture, so a value the host installs while a command runs survives the command's way out: the restore puts the saved value back only over a value one of the commands installed. */
 func TestRestoreDefaultRunnerOption_KeepsAValueTheHostInstalledWhileACommandRan(t *testing.T) {
     t.Cleanup(func() {
         processRunnerOption.Store(nil)
@@ -442,7 +442,7 @@ func TestRestoreDefaultRunnerOption_ThreeOverlappingCommandsLeavingOutOfOrderSti
     }
 }
 
-/* the prefix of every per-query line carries the migration name, the author's own text, and the executing, completed and failed lines printed it as sent while escaping the query name beside it: a name carrying an escape sequence repainted the terminal three times per query. Measured on a run whose second query fails, so all three lines print, in both colour modes: the name is escaped on every line and no raw escape byte reaches the writer. */
+/* the prefix of every per-query line carries the migration name, the author's own text, so the executing, completed and failed lines escape it as they escape the query name beside it. A run whose second query fails prints all three lines, in both colour modes: the name is escaped on every line and no raw escape byte reaches the writer. */
 func TestRunQueriesWithOption_EscapesTheMigrationNameInsideThePrefixOfEveryPerQueryLine(t *testing.T) {
     for _, noColor := range []bool{true, false} {
         database, recorder := newFakeBunDatabase()

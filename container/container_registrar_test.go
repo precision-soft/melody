@@ -48,7 +48,7 @@ func TestContainer_Register_ReturnsErrorOnInvalidArguments(t *testing.T) {
 func TestContainer_MustRegister_PanicsOnInvalidArguments(t *testing.T) {
     serviceContainer := NewContainer()
 
-    /* an unqualified recover accepts any panic at all, including one thrown by a guard three lines away; the message is what names the refusal under test */
+    /* an unqualified recover accepts any panic at all, including one thrown by an unrelated guard in the same call; the message is what names the refusal under test */
     testhelper.AssertPanicsWithError(
         t,
         func() {

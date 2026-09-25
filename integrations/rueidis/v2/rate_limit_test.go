@@ -240,7 +240,7 @@ func TestRateLimiter_PositiveCallTimeoutIsKept(t *testing.T) {
     }
 }
 
-/* the caller's own cancellation is named apart from a store failure: labelled a store failure it read as a redis outage against a healthy store, and the operator chased an outage that was a client hanging up. */
+/* the caller's own cancellation is named apart from a store failure, so a client hanging up does not read as a redis outage against a healthy store. */
 func TestRateLimiter_TheCallersCancellationIsNotAStoreFailure(t *testing.T) {
     client := rateLimiterTestClient(t)
 
@@ -326,7 +326,7 @@ func (instance *capturingLimiterLogger) Emergency(message string, context loggin
     instance.Log(loggingcontract.LevelEmergency, message, context)
 }
 
-/* with no observer the failure is recorded here, and marked, because two of the three doors return nothing at all: Allow answers a bool and Reset answers nothing, so a store outage refused every call and reached no channel whatsoever. The mark is what lets the record be filed at the one place that knows the key and the failure mode without the http middleware writing a second copy beside it. */
+/* with no observer the failure is recorded here, and marked, because two of the three doors return nothing at all: Allow answers a bool and Reset answers nothing, so a store outage would otherwise reach no channel. The mark lets the record be filed at the one place that knows the key and the failure mode without the http middleware writing a second copy beside it. */
 func TestRateLimiter_WithoutAnObserverTheFailureIsRecordedAndMarked(t *testing.T) {
     for _, testCase := range []struct {
         name    string

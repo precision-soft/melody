@@ -3205,7 +3205,6 @@ func TestContainer_Close_ADeclarationOnAnUnambiguousTypeStillOrdersAndStillRepor
     }
 }
 
-/* concurrentCloser records how many closes were inside their Close at the same moment, over a bounded moment of its own. */
 /* concurrentCloser records how many closes run at once — the peak is what tells a wave from a serial loop — and, where a test hands it a counter, how many closes it answered. */
 type concurrentCloser struct {
     running *atomic.Int64

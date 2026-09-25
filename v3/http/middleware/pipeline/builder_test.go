@@ -231,7 +231,6 @@ func TestBuild_RefusesGatedReferenceExpressedAsAfter(t *testing.T) {
     }
 }
 
-/* Groups gate selection exactly as environments do and fail the same way, so they are compared the same way. */
 /* The group a build is asked for decides what that build carries, and several groups are built in one process, so a reference unsatisfiable in some other group says nothing about this one. The selection has already dropped what this group does not carry; a target missing from it is an ordinary missing reference. */
 func TestBuild_AllowsReferenceAcrossGroupsTheBuildDoesNotAskFor(t *testing.T) {
     audit := NewHttpMiddlewareDefinition("audit", 0, []string{"profiler"}, nil, []string{"http", "admin"}, nil, passthroughFactory(), false, false)

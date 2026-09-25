@@ -1164,8 +1164,7 @@ func TestComputeBackoffDelayReadsAZeroAttemptAsTheFirst(t *testing.T) {
     }
 }
 
-/* pgdriver.WithDatabase and pgdriver.WithUser panic on an empty string, so a parameter left unset by the configuration reached the caller as a panic out of the open rather than as the refusal every other open failure is; the refusal names the field, before the driver sees it */
-/* an empty database or user would panic inside pgdriver; an empty host would not — it dials the local system — so all three are refused by name before any connector is built */
+/* pgdriver.WithDatabase and pgdriver.WithUser panic on an empty string, and an empty host dials the local system, so all three are refused by name before any connector is built */
 func TestProviderOpen_RefusesAnEmptyDatabaseUserOrHostBeforeBuildingTheConnector(t *testing.T) {
     provider := NewProvider(
         WithInsecure(true),

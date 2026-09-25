@@ -69,7 +69,7 @@ func TestStatusCommand_NoMigrationsWarns(t *testing.T) {
     }
 }
 
-/* under --format=json the command writes the one machine-readable document the silenced banner promises — the flag was declared and validated here long before it was honoured. */
+/* under --format=json the command writes the one machine-readable document the silenced banner promises. */
 func TestStatusCommand_JsonFormatRendersOneMachineReadableDocument(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = appliedMigrationRowsHook("20240101000000")

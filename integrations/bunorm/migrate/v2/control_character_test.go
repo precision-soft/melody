@@ -197,7 +197,7 @@ func TestEscapeControlCharactersKeepsOnlyTheNewlineAmongTheRecordBoundaries(t *t
     }
 }
 
-/* the server can answer the single-byte C1 introducer raw, and a walk over runes read that byte as U+FFFD, outside every range the guard checks, so the raw spelling went to the terminal as sent while the encoded one was escaped. Every byte that starts no valid sequence is spelled \xNN, and what comes out is valid UTF-8. */
+/* the server can answer the single-byte C1 introducer raw, which a walk over runes reads as U+FFFD outside every range the guard checks; every byte that starts no valid sequence is spelled \xNN, and what comes out is valid UTF-8. */
 func TestEscapeControlCharactersEscapesARawByteThatIsNotValidUtf8(t *testing.T) {
     for _, currentCase := range []struct {
         name     string
@@ -221,7 +221,7 @@ func TestEscapeControlCharactersEscapesARawByteThatIsNotValidUtf8(t *testing.T) 
     }
 }
 
-/* once another control character forced the rewrite, the raw byte was written out as U+FFFD: the same answer was kept as sent when the byte stood alone and corrupted when a newline stood beside it, and what the server sent was destroyed instead of shown. Neither form may carry the replacement rune. */
+/* when another control character forces the rewrite, the raw byte is still spelled \xNN rather than replaced by U+FFFD, so the byte reads the same alone or beside a newline; neither form carries the replacement rune. */
 func TestEscapeControlCharactersDoesNotReplaceARawByteWhenAnotherCharacterForcesTheRewrite(t *testing.T) {
     escaped := escapeControlCharacters("a\x9bb\n", false)
 

@@ -35,7 +35,7 @@ func TestNewGenerateCommandIdentity(t *testing.T) {
         t.Fatalf("Description() should not be empty")
     }
 
-    /* the command carries its 9 own flags plus the standard set every melody command accepts — without the standard set, the framework's -v/-vv rewrite into --verbosity killed exactly this command with "flag provided but not defined" */
+    /* the command carries its 9 own flags plus the standard set every melody command accepts, which the framework's -v/-vv rewrite into --verbosity needs */
     flags := command.Flags()
     expectedFlagCount := 9 + len(output.StandardFlags())
     if expectedFlagCount != len(flags) {
@@ -2185,7 +2185,7 @@ func TestAtomicWriteFileRollsBackTemporaryOnRenameFailure(t *testing.T) {
     }
 }
 
-/* a destination already in place keeps the mode it carries across the atomic rewrite — a crontab narrowed to 0600 stayed 0600 on the framework's and the migrate module's atomic writers and was widened back to 0644 by this one on every regeneration and every --prune; a destination that does not exist yet is created with the mode the caller chose */
+/* a destination already in place keeps its mode across the atomic rewrite, as on the framework's and the migrate module's atomic writers, so a crontab narrowed to 0600 stays 0600; a destination that does not exist yet is created with the mode the caller chose */
 func TestAtomicWriteFileKeepsTheModeOfAnExistingDestination(t *testing.T) {
     tempDir := t.TempDir()
 
@@ -2431,7 +2431,7 @@ func TestGenerateCommand_JsonFormatRendersOneDocument(t *testing.T) {
     }
 }
 
-/* every failure path used to travel out past the one door that builds the envelope, and the cli silences the command's own error line in json mode, so a deploy script piping this command into jq received an empty stream for a malformed schedule or an unwritable directory — indistinguishable from a missing binary. The report is a defer now, so the document exists whatever stopped the run, and it names what had already been written: the destinations are written one by one with no rollback, so a failure on the third of four leaves two files on disk that the consumer has to be able to learn about. */
+/* the report is a defer, so the document exists whatever stopped the run while the cli silences the command's own error line in json mode; it names what had already been written, because destinations are written one by one with no rollback and a failure on the third of four leaves two files on disk */
 func TestGenerateCommand_JsonReportsTheFailureAndWhatWasAlreadyWritten(t *testing.T) {
     tempDir := t.TempDir()
 
@@ -2486,7 +2486,7 @@ func TestGenerateCommand_JsonReportsTheFailureAndWhatWasAlreadyWritten(t *testin
         t.Fatalf("expected the cause to name the missing logs-dir, got %q", document.Error.Cause.Message)
     }
 
-    /* the document used to flatten every failure to that one sentence — details and cause.details were nil on every run alike — while the journal, over the same value at the same instant, carried the context and the whole chain under it */
+    /* the document carries the failure's details and cause chain, the context the journal carries for the same value */
     if nil == document.Error.Details {
         t.Fatalf("expected the failure details to be an object, got %q", stdout)
     }
@@ -2630,7 +2630,7 @@ func TestGenerateCommand_JsonNamesTheDestinationsWrittenBeforeTheFailure(t *test
     }
 }
 
-/* Render is userland and Schedule.Defaults is documented as mutating in place, so every entry carries its own schedule: a template calling it on the schedule it was handed would otherwise rewrite the one behind every sibling entry of the same command. */
+/* Render is userland and Schedule.Defaults is documented as mutating in place, so every entry carries its own schedule: a template calling it on the schedule it receives would otherwise rewrite the one behind every sibling entry of the same command. */
 func TestExpandEntriesForCommand_EveryEntryCarriesItsOwnSchedule(t *testing.T) {
     schedule := &Schedule{Minute: "0", Hour: "3"}
 
@@ -2745,7 +2745,7 @@ func TestRunPruneEmptiesADestinationThisRunNoLongerProduces(t *testing.T) {
     }
 }
 
-/* without the flag the sweep does not run at all: a deployment that manages the output directory itself keeps exactly the behaviour it had */
+/* without the flag the sweep does not run at all, so a deployment that manages the output directory itself is untouched */
 func TestRunWithoutPruneLeavesAStaleDestinationUntouched(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")
@@ -2832,7 +2832,7 @@ func TestRunPruneLeavesAFileItCannotProveItWrote(t *testing.T) {
     }
 }
 
-/* emptying the configuration is exactly the version in which every destination the previous one wrote is stale, so the sweep runs there too — while the run itself stays the success it always was */
+/* emptying the configuration makes every destination the previous one wrote stale, so the sweep runs there too, while the run itself stays a success */
 func TestRunPruneSweepsWhenTheConfigurationBecomesEmpty(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")
@@ -3083,7 +3083,7 @@ func TestRunKeepsARelativeFlagPathRelativeToTheWorkingDirectory(t *testing.T) {
     }
 }
 
-/* TestErrorDetailsOf_CarriesTheFailuresOwnContext pins the guard where it lives. The envelope's details and cause were nil on every failure alike, so the machine document — the one a deploy pipeline reads — was the single rendering that threw away what the error already carried. The rule is asserted here rather than through the command, because the generate failures reachable from the command carry no context of their own and would leave the rule unobservable: the guard would pass just as well emptied. */
+/* TestErrorDetailsOf_CarriesTheFailuresOwnContext pins the guard where it lives: the generate failures reachable from the command carry no context of their own, so through the command the guard would pass just as well emptied. */
 func TestErrorDetailsOf_CarriesTheFailuresOwnContext(t *testing.T) {
     runErr := exception.NewError(
         "the cron manifest could not be renamed into place",
@@ -3142,7 +3142,7 @@ func TestErrorCauseOf_StartsAtTheFailureAndCarriesTheChain(t *testing.T) {
     }
 }
 
-/* a failure with nothing under it answers no cause at all: a null there is the honest answer, unlike the null the field used to carry on every failure alike */
+/* a failure with nothing under it answers no cause at all, and null is the honest answer there */
 func TestErrorCauseOf_AnswersNothingForAFailureWithoutACause(t *testing.T) {
     if nil != errorCauseOf(nil) {
         t.Fatal("expected no cause for a nil failure")
@@ -3172,7 +3172,7 @@ func (instance *noUserColumnTemplate) RendersUserColumn() bool {
     return false
 }
 
-/* a registered dialect that renders no user column places its heartbeat without one, the way the builtin that renders none always has. Judged by name alone, the readme's own kubernetes example was refused for a crontab user it would never have rendered. */
+/* a registered dialect that renders no user column places its heartbeat without one, as the builtin that renders none does; judged by name alone, the readme's kubernetes example would be refused for a crontab user it never renders. */
 func TestGenerateCommand_ARegisteredNoUserDialectNeedsNoUserForTheHeartbeat(t *testing.T) {
     directory := t.TempDir()
 
@@ -3196,9 +3196,7 @@ func TestGenerateCommand_ARegisteredNoUserDialectNeedsNoUserForTheHeartbeat(t *t
     }
 }
 
-/* a run that fails part way through still names what it already did, on the text rendering as well as the json one. Emptying a destination is irreversible and the sweep hands back what it emptied beside its failure, so returning without printing left the operator of a broken deploy with manifests blanked and not one line saying which — neither a "pruned" line nor the "wrote" lines of the writes that had succeeded.
-
-   It is driven through the report door rather than through a sweep made to fail, because what can still fail a sweep is now filesystem trivia: the candidates it will open are regular files only, and as the process that wrote them it can read them. The state is constructed instead of waited for. */
+/* a run that fails part way through still names what it already did on the text rendering, as on the json one, since emptying a destination is irreversible. It is driven through the report door rather than a sweep made to fail, because the sweep opens only regular files it wrote and can read, so the state is constructed rather than waited for. */
 func TestGenerateCommand_TheTextBranchNamesWhatItProducedBeforeFailing(t *testing.T) {
     var stdout bytes.Buffer
     commandContext := &clicontract.CommandContext{Writer: &stdout}
@@ -3230,7 +3228,7 @@ func TestGenerateCommand_TheTextBranchNamesWhatItProducedBeforeFailing(t *testin
     }
 }
 
-/* the sweep considers only regular files. It used to skip directories and open everything else, and opening a fifo with no writer never returns: one named pipe beside the destinations wedged the generator with no deadline and no diagnostic. */
+/* the sweep considers only regular files: opening a fifo with no writer never returns, so a named pipe beside the destinations would wedge the generator with no deadline and no diagnostic. */
 func TestGenerateCommand_TheSweepDoesNotOpenANamedPipe(t *testing.T) {
     directory := t.TempDir()
 
@@ -3264,7 +3262,7 @@ func TestGenerateCommand_TheSweepDoesNotOpenANamedPipe(t *testing.T) {
     }
 }
 
-/* the escape refusal above draws the outer boundary; this pins the inside of it — a LogFileName carrying a subdirectory stays within the logs dir, and the generator must create that subdirectory, because under system cron the shell aborts the whole command when the >> redirection cannot create its file and the job silently never runs. */
+/* the escape refusal draws the outer boundary and this pins the inside of it: a LogFileName carrying a subdirectory stays within the logs dir, and the generator creates that subdirectory, because under system cron the shell aborts the command when the >> redirection cannot create its file. */
 func TestRunCreatesTheLogSubdirectoryTheLogFileNameNames(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")
@@ -3301,7 +3299,7 @@ func TestRunCreatesTheLogSubdirectoryTheLogFileNameNames(t *testing.T) {
     }
 }
 
-/* the emptying is irreversible, so ownership must not be a substring question: a file that QUOTES the marker inside a longer line, or past the leading lines, is not one this generator wrote — and a custom dialect that suffixes the builtin marker declares files of its own, which a substring match claimed for the builtin run */
+/* the emptying is irreversible, so ownership is not a substring question: a file that quotes the marker inside a longer line, or past the leading lines, is not one this generator wrote, and a custom dialect that suffixes the builtin marker declares files of its own, which a substring match would claim for the builtin run */
 func TestFileCarriesOwnershipMarker_MatchesOnlyAnExactLeadingLine(t *testing.T) {
     tempDir := t.TempDir()
 
@@ -3691,7 +3689,7 @@ func (instance *decoratingCrontabTemplate) Render(entries []Entry, options Rende
     return "# decorated by the application\n" + rendered, renderErr
 }
 
-/* the wrapper is used as it is, and so is the line it answers: the bare prefix, promoted from the builtin it embeds, which is the line an earlier release or another application's wrapper wrote as well. A named application's --prune swept on it and emptied those destinations, the cross-release and cross-application emptying the named line exists to prevent; the sweep is refused, the destination is written. */
+/* the wrapper is used as it is, and so is the line it answers: the bare prefix promoted from the builtin it embeds, which an earlier release or another application's wrapper writes as well. A named application's --prune sweeping on it would empty those destinations, the cross-application emptying the named line prevents, so the sweep is refused and the destination written. */
 func TestRunPruneIsRefusedOnADialectWhoseLineDoesNotNameTheApplication(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")

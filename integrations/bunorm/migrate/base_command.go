@@ -27,9 +27,7 @@ type migrationUnlocker interface {
     Unlock(ctx context.Context) error
 }
 
-/* unlockMigrations reports the failed release through both channels: printed for the operator, returned for the exit code — a lock row that survives refuses every later migration on every replica, and a command that exits 0 over it tells the calling deploy script the opposite of the truth.
-
-   The failure is wrapped before it is reported, and the wrap names what bun's bare error does not: that the lock row STAYS HELD, the table it lives in, and the unlock command that clears it. Under json the report is a warning in the document, one string beside "no pending migrations", and under text the cli engine echoes a failure's message alone — so a driver error rendered as sent ("context deadline exceeded") told the operator neither that a lock survived nor what to do about it. The bun error stays the cause, so errors.Is still reaches it. */
+/* unlockMigrations reports a failed release both printed and returned, since a surviving lock row refuses every later migration and a command exiting 0 over it misleads the deploy script. The wrap names that the lock row stays held, its table and the unlock command that clears it; the bun error stays the cause, so errors.Is still reaches it. */
 func unlockMigrations(ctx context.Context, unlocker migrationUnlocker, outputInstance *commandOutput, unlockCommand string) error {
     unlockContext, cancelUnlock := context.WithTimeout(context.WithoutCancel(ctx), migrationUnlockTimeout)
     defer cancelUnlock()
@@ -136,7 +134,7 @@ func (instance *baseCommand) newMigrator(db *bun.DB) (*migrate.Migrator, error) 
     ), nil
 }
 
-/* managerLabel answers the name the output labels a manager by — the --manager flag, else the pinned manager, else "<default>" — the same label resolveDatabase answers for a run that opens the connection, for a command that does not. On this major the label is not checked against the registry: db:create writes its file without opening the database, the registry of this major has no door that answers a name without opening, and a patch release adds none — so a misspelt --manager labels the detail line with the misspelling and is refused at the first db:migrate, where the registry is asked to open. The third major refuses it at db:create. */
+/* managerLabel answers the name the output labels a manager by, the --manager flag, else the pinned manager, else "<default>", the label resolveDatabase answers for a run that opens the connection. The label is not checked against the registry, which on this major has no door that answers a name without opening, so a misspelt --manager is refused at the first db:migrate. */
 func (instance *baseCommand) managerLabel(commandContext *clicontract.CommandContext) string {
     managerName := commandContext.String(instance.options.ManagerFlagName)
     if "" == managerName {
@@ -160,7 +158,7 @@ func (instance *baseCommand) journal(runtimeInstance runtimecontract.Runtime) lo
     return logger
 }
 
-/* newFileMigrator is the migrator of a command that only writes a migration FILE: bun's generator reads the collection's directory and writes the template with os.WriteFile, and never touches the database it was handed, so none is opened for it — opening one cost a dial, the handshake, the authentication and the boot ping, some sixteen seconds of retries on a host that was down, to write a file that is written offline. */
+/* newFileMigrator is the migrator of a command that only writes a migration file: bun's generator never touches the database it is handed, so none is opened. */
 func (instance *baseCommand) newFileMigrator() (*migrate.Migrator, error) {
     if nil == instance.migrations {
         return nil, errors.New("migrations collection is nil")

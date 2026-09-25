@@ -731,7 +731,7 @@ func TestWriteSessionFileAtomically_RemovesTheTempFileWhenTheReplaceFails(t *tes
     }
 }
 
-/* a storage directory that cannot be created is named as such rather than surfacing as a temp-file failure one line below, because the path an operator has to fix is the directory */
+/* a storage directory that cannot be created is named as such rather than surfacing as the temp-file failure that follows it, because the path an operator has to fix is the directory */
 func TestWriteSessionFileAtomically_RefusesWhenTheDirectoryCannotBeCreated(t *testing.T) {
     directory := t.TempDir()
 

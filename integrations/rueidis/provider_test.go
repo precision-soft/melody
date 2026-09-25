@@ -244,7 +244,7 @@ func TestProvider_Ping_NilClientReturnsError(t *testing.T) {
     }
 }
 
-/* the name of this test used to say the ping ran WITHOUT a deadline at a zero connect timeout, which is the opposite of what the code does: resolveConnectTimeout reads a non-positive value as the default rather than as "unbounded", so the ping is bounded either way. The claim it can make against a live store is that a config naming only the command timeout still opens and pings — the bound itself is proven, without a store, by TestResolveConnectTimeout_ANonPositiveValueTakesTheDefaultRatherThanRemovingTheBound below. */
+/* a config naming only the command timeout still opens and pings against a live store; the bound resolveConnectTimeout keeps at a zero connect timeout is proven without a store by TestResolveConnectTimeout_ANonPositiveValueTakesTheDefaultRatherThanRemovingTheBound. */
 func TestProvider_Open_AZeroConnectTimeoutPingsUnderTheDefaultBound(t *testing.T) {
     address := os.Getenv("REDIS_ADDRESS")
     if "" == address {
@@ -278,7 +278,7 @@ func TestProvider_Open_AZeroConnectTimeoutPingsUnderTheDefaultBound(t *testing.T
     }
 }
 
-/* the boot ping is bounded even where the connect timeout is left at zero: a TimeoutConfig naming only the command timeout would otherwise put the ping on a context with no deadline, and a store that accepts the connection without answering would hang boot forever holding a client no one can close yet. Ping one screen below reads its own zero the same way. */
+/* the boot ping is bounded even where the connect timeout is left at zero: a TimeoutConfig naming only the command timeout would otherwise put the ping on a context with no deadline, and a store that accepts the connection without answering would hang boot holding a client no one can close yet. Ping reads its own zero the same way. */
 func TestResolveConnectTimeout_ANonPositiveValueTakesTheDefaultRatherThanRemovingTheBound(t *testing.T) {
     defaultConnectTimeout := DefaultTimeoutConfig().ConnectTimeout
 
@@ -299,7 +299,7 @@ func TestResolveConnectTimeout_ANonPositiveValueTakesTheDefaultRatherThanRemovin
     }
 }
 
-/* the credentials read through MustString, the bunorm convention: a wrong-typed password panics at boot naming the parameter, where String() folded it to "" and connected with no credential at all. */
+/* the credentials read through MustString, the bunorm convention: a wrong-typed password panics at boot naming the parameter, where String() would fold it to "" and connect with no credential at all. */
 func TestProviderOpen_RefusesAWrongTypedCredentialLoudly(t *testing.T) {
     serviceContainer := container.NewContainer()
 
@@ -371,7 +371,7 @@ func TestProviderOpen_TheRefusalNamesTheParameterAndTheDeadlines(t *testing.T) {
     }
 }
 
-/* the refusal reports the deadline that GOVERNED the dial, not the one that was configured. The custom dialer is installed only for a positive value, so a zero or negative DialTimeout — the footgun of a partial ClientConfig literal — ran under the library's own five seconds while the record said "0s", and an operator reads that as no dial bound at all and goes looking for a deadline that never existed. Measured against an unroutable address: the dial failed after five seconds under it. */
+/* the refusal reports the deadline that governed the dial, not the configured one: the custom dialer is installed only for a positive value, so a zero or negative DialTimeout runs under the library's own five seconds, and the record names those five seconds rather than "0s". */
 func TestProvider_TheReportedDialTimeoutIsTheOneThatGovernedTheDial(t *testing.T) {
     for _, testCase := range []struct {
         name        string

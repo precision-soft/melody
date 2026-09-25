@@ -848,7 +848,6 @@ type errorContextVisitKey struct {
     length  uintptr
 }
 
-/* the walk runs before json.Marshal, so it carries its own cycle guard */
 /* the plain shapes the walk descends into; a defined type over them is converted, which keeps the backing pointer and so the cycle keying */
 var plainContextMapType = reflect.TypeOf(map[string]any(nil))
 var plainContextSliceType = reflect.TypeOf([]any(nil))

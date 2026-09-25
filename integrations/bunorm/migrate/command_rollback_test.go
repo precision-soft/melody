@@ -53,7 +53,7 @@ func TestRollbackCommand_RollsBackLastGroupUnderLock(t *testing.T) {
     }
 }
 
-/* a rollback that fails part way names the group it was walking on the way out: bun hands the group back beside the failure, and reporting nothing left the operator with only the failing migration — which schema changes were already undone could only be reconstructed from the migrations table by hand */
+/* a rollback that fails part way names the group it was walking, since bun hands the group back beside the failure and the operator checks those names in the migrations table */
 func TestRollbackCommand_AFailedRollbackNamesTheGroupItWasWalking(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = appliedMigrationRowsHook("20240101000000")
@@ -143,7 +143,7 @@ func TestRollbackCommand_FailedUnlockFailsTheCommand(t *testing.T) {
     }
 }
 
-/* the same remedy-naming refusal the migrate sibling proves: bun's bare lock error names neither the database nor db:unlock, and rollback used to return it as it came */
+/* the same remedy-naming refusal the migrate sibling proves: bun's bare lock error names neither the database nor db:unlock */
 func TestRollbackCommand_LockFailureNamesTheRemedy(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.execHook = func(query string) error {

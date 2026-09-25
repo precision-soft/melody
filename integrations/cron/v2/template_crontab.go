@@ -10,13 +10,13 @@ import (
 
 const TemplateNameCrontab = "crontab"
 
-/* TemplateNameCrontabNoUser renders the user-less crontab dialect: busybox crond (alpine images) and per-user `crontab` files reject the /etc/cron.d user column, so this variant omits it — no more cutting the column with sed in the image build. */
+/* TemplateNameCrontabNoUser renders the user-less crontab dialect for busybox crond and per-user crontab files, which reject the /etc/cron.d user column. */
 const TemplateNameCrontabNoUser = "crontab-no-user"
 
-/* CrontabOwnershipMarker opens the ownership line every crontab destination carries in its header block, so a later --prune can tell a file this generator wrote from one the operator put in the same directory. It names the command rather than saying "generated", because "GENERATED FILE" is what every generator writes and proves nothing about which one. The line a run writes is this prefix followed by " for " and the name the application runs under — its cli name — because the command alone proves the writing COMMAND and not the writing APPLICATION: two melody applications sharing an output directory rendered identical lines, and the sweep of one emptied the destinations of the other. Only a template the generator has handed the application's name renders the whole line; the builtin singletons and the package-level Render write the bare prefix, which the sweep of a named application never matches, so a file written that way is recognisable and left alone. */
+/* CrontabOwnershipMarker opens the ownership line every crontab destination carries in its header block, so --prune can tell a file this generator wrote from an operator's. The line a run writes is this prefix, " for " and the application's cli name, so it proves the writing application and not only the command. Only a template handed the application's name renders the whole line; the builtin singletons and the package-level Render write the bare prefix, which no named application's sweep matches. */
 const CrontabOwnershipMarker = "# owned by melody:cron:generate"
 
-/* ownershipMarkerLine is the exact line a template owned by the named application renders and answers: the shared prefix, " for " and the name. An empty name — a template nobody handed an application to, the package-level Render — keeps the bare prefix, so what it writes is recognisable as this generator's and belongs to no application's sweep. The separator is a word rather than a bracket so the line can never coincide with a custom dialect's marker suffixed in brackets, the form the readme's own example uses. */
+/* ownershipMarkerLine answers the exact line a template owned by the named application renders: the shared prefix, " for " and the name. An empty name keeps the bare prefix, which belongs to no application's sweep; the separator is a word so the line never coincides with a custom marker suffixed in brackets. */
 func ownershipMarkerLine(applicationName string) string {
     if "" == applicationName {
         return CrontabOwnershipMarker
@@ -96,7 +96,7 @@ func (instance *CrontabTemplate) OwnershipMarker() string {
     return ownershipMarkerLine(instance.applicationName)
 }
 
-/* ownedBy answers a copy of this template that renders and answers the named application's ownership line, leaving the shared singleton unowned: the generator derives one per run, so two applications sharing an output directory write two different lines and each sweep recognises only its own */
+/* ownedBy answers a copy of this template that renders and answers the named application's ownership line, leaving the shared singleton unowned, so two applications sharing an output directory write different lines and each sweep recognises only its own. */
 func (instance *CrontabTemplate) ownedBy(applicationName string) Template {
     owned := *instance
     owned.applicationName = applicationName
@@ -224,7 +224,7 @@ func buildCrontabLine(entry Entry, includeUserColumn bool) (string, error) {
         return "", scheduleValidationErr
     }
 
-    /* the user-less dialect targets busybox crond, which classifies a day field by its expanded values where vixie reads the spelling's first character — so a day-field pair the two daemons read differently is refused at generation, the same way the stepped single value is: emitting it would run one schedule in-process and another on the box. */
+    /* busybox crond classifies a day field by its expanded values where vixie reads the spelling's first character, so a day-field pair the two read differently is refused at generation rather than run one schedule in-process and another on the box */
     if false == includeUserColumn && nil != entry.Schedule {
         dayOfMonthExpression := fieldOrWildcard(entry.Schedule.DayOfMonth)
         dayOfWeekExpression := normalizeCronNameTokens(fieldOrWildcard(entry.Schedule.DayOfWeek), cronDayOfWeekNameValues)

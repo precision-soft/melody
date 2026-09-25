@@ -302,10 +302,10 @@ func pluralBinds(count int) string {
     return "binds"
 }
 
-/* informationReportPrefixes are the report lines that state a fact of a scan that worked: the two counts, and the vendor trees stepped over, which cannot hold a service. The reach of a global bind is not among them: it is the only place an operator learns that one word bound many constructors, so its lines are journaled as one warning whose message carries the count and whose context carries them all. */
 /* globalBindReportPrefix is the one line the journal aggregates rather than repeats; the text is the generator's */
 const globalBindReportPrefix = "global bind "
 
+/* informationReportPrefixes are the report lines that state a fact of a scan that worked: the two counts, and the vendor trees stepped over, which cannot hold a service. The reach of a global bind is not among them: it is the only place an operator learns that one word bound many constructors, so its lines are journaled as one warning whose message carries the count and whose context carries them all. */
 var informationReportPrefixes = []string{
     "registered ",
     "skipped vendor directory: ",

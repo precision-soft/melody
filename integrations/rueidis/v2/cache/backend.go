@@ -20,7 +20,7 @@ const (
     rueidisBackendDefaultMaxKeyLength = 1024
 )
 
-/* NewBackend builds the redis-backed cache over one key prefix, which is the whole of this backend's isolation: every key it writes carries it, and Clear scans and deletes everything under it. An empty prefix takes the shipped default, and the shipped default is the same string in every melody application, so two applications pointed at one redis with it share a namespace — a Get answers whatever the other one wrote under the same name, and because a foreign json document of another shape decodes without error it is served as a hit rather than treated as a miss, while a Clear from either empties the other's entries too. Redis databases do not separate them either: the client's SelectDb defaults to 0. Give each application (and each environment sharing a store) its own prefix. */
+/* NewBackend builds the redis-backed cache over one key prefix, which is the whole of this backend's isolation: every key it writes carries it, and Clear deletes everything under it. An empty prefix takes the shipped default, the same string in every melody application, so two applications on one redis with it share a namespace, a foreign json document decoding as a hit and a Clear from either emptying the other; the client's SelectDb defaults to 0, so databases do not separate them either. Give each application and environment sharing a store its own prefix. */
 func NewBackend(
     client rueidis.Client,
     ctx context.Context,
@@ -31,7 +31,7 @@ func NewBackend(
     return NewBackendWithCommandTimeout(client, ctx, prefix, scanCount, deleteBatch, 0)
 }
 
-/* NewBackendWithCommandTimeout additionally bounds every operation dispatched without a caller context: the ctx-less half of the contract methods otherwise runs unbounded against a store that accepts connections but stops answering — the same case the rate limiter in the parent package bounds with its own call timeout. A non-positive value reads as unbounded, the exact behaviour of NewBackend. */
+/* NewBackendWithCommandTimeout additionally bounds every operation dispatched without a caller context, so the ctx-less contract methods do not hang against a store that accepts connections but stops answering; a non-positive value reads as unbounded, the behaviour of NewBackend. */
 func NewBackendWithCommandTimeout(
     client rueidis.Client,
     ctx context.Context,
@@ -90,7 +90,7 @@ type Backend struct {
     deleteBatch    int
     commandTimeout time.Duration
     closed         atomic.Bool
-    /* ownerClosed is the closed flag of the backend this handle was derived from, nil on a backend built directly: a context-bound handle minted by WithContext lives exactly as long as its owner, so the owner's Close must reach it — otherwise the refuse-after-Close guarantee would hold only for the one stored instance while the runtime door mints a fresh, open handle per request. A sibling backend built over the same client stays independent on purpose; the client belongs to whoever built it. */
+    /* ownerClosed is the closed flag of the backend this handle was derived from, nil on a backend built directly: a handle WithContext mints per request lives exactly as long as its owner, so the owner's Close must reach it. A sibling backend over the same client stays independent; the client belongs to whoever built it. */
     ownerClosed *atomic.Bool
 }
 
@@ -103,7 +103,7 @@ func (instance *Backend) operationContext() (context.Context, context.CancelFunc
     return instance.ctx, func() {}
 }
 
-/* refuseWhenClosed answers the refusal every operation gives after Close, the answer the in-memory backend behind the same contract gives: a teardown-ordering bug surfaces immediately instead of quietly serving through a client whose owner already ended this backend. A derived handle also reads its owner's flag, so the owner's Close reaches every handle WithContext minted from it. */
+/* refuseWhenClosed answers the refusal every operation gives after Close, as the in-memory backend behind the same contract does, so a teardown-ordering bug surfaces at once; a derived handle reads its owner's flag too. */
 func (instance *Backend) refuseWhenClosed() error {
     if true == instance.closed.Load() {
         return exception.NewError(
@@ -281,7 +281,7 @@ func (instance *Backend) Clear() error {
     return instance.ClearCtx(ctx)
 }
 
-/* ClearByPrefixCtx refuses the empty prefix the way every other operation refuses the empty key: a prefix assembled at run time that comes out empty — "tenant:" + an unresolved id — would otherwise select the whole namespace, and wiping everything is the one outcome a prefixed delete exists to prevent. A caller that means the whole namespace has ClearCtx, which says so. */
+/* ClearByPrefixCtx refuses the empty prefix as every other operation refuses the empty key: a run-time prefix that comes out empty, "tenant:" plus an unresolved id, would select the whole namespace. ClearCtx is the door for the whole namespace. */
 func (instance *Backend) ClearByPrefixCtx(ctx context.Context, prefix string) error {
     if closedErr := instance.refuseWhenClosed(); nil != closedErr {
         return closedErr
@@ -379,7 +379,7 @@ func (instance *Backend) SetMultipleCtx(ctx context.Context, items map[string][]
         return closedErr
     }
 
-    /* the ttl is judged before the empty early-return, the order the in-memory backend judges it in: an already-invalid ttl is refused whether or not this particular batch happens to be empty */
+    /* the ttl is judged before the empty early-return, as the in-memory backend judges it, so an invalid ttl is refused whether or not the batch is empty */
     if 0 > ttl {
         return negativeTtlError(ttl)
     }
@@ -388,7 +388,7 @@ func (instance *Backend) SetMultipleCtx(ctx context.Context, items map[string][]
         return nil
     }
 
-    /* the batch is walked over sorted keys, never map order: the validation refusal below names the first key it rejects, and a map-ordered walk named a different key for the same wrong batch on every call — the exact nondeterminism the response reporting further down already refuses. The keys are carried alongside the commands because a failing response is identified by position only. */
+    /* the batch is walked over sorted keys, so the validation refusal names the same first key for the same batch on every call; the keys travel beside the commands because a failing response is identified by position only */
     sortedKeys := make([]string, 0, len(items))
     for key := range items {
         sortedKeys = append(sortedKeys, key)
@@ -416,7 +416,7 @@ func (instance *Backend) SetMultipleCtx(ctx context.Context, items map[string][]
         cmds = append(cmds, command)
     }
 
-    /* every failing response is collected before one is reported, the delete sibling's rule: returning on the first failure of a map-ordered walk named a different key for the same failing batch on every call, and hid that the entries after it also failed */
+    /* every failing response is collected before one is reported, as the delete sibling does, so the report is deterministic and shows how much of the batch failed */
     setErrors := make(map[string]error, len(commandKeys))
     for index, response := range instance.client.DoMulti(ctx, cmds...) {
         if err := response.Error(); nil != err {
@@ -561,16 +561,14 @@ func (instance *Backend) Decrement(key string, delta int64) (int64, error) {
     return instance.DecrementCtx(ctx, key, delta)
 }
 
-/* Close marks the backend closed and refuses every later operation, the answer the in-memory backend behind the same contract gives. The shared client itself belongs to the composition root and is deliberately not closed here — see the Connection wrapper in the parent package for the value the container's teardown closes. */
+/* Close marks the backend closed and refuses every later operation, as the in-memory backend does. The shared client belongs to the composition root and is not closed here; the parent package's Connection wrapper is what the container's teardown closes. */
 func (instance *Backend) Close() error {
     instance.closed.Store(true)
 
     return nil
 }
 
-/* counterError wraps a counter refusal with the key it happened on: the raw store error names neither, and the counter path is the one a caller most often logs verbatim.
-
-   The caller's own mistakes are named the way the in-memory sibling names them, because the shared contract makes the grammar of a refusal part of the promise: on an open backend with a valid key, three distinct mistakes used to arrive here under one message that is also the message of a store outage, so neither the operator nor the application could tell a bug in the call from redis being down. Redis refuses all three natively — the guard exists, it is redis's, and it answers in redis's words — so what was missing was never the refusal but its name. A store error matching none of them keeps the generic message, which from here on really does mean the store failed. The redis error stays the cause in every branch, so nothing that reads through the chain loses anything. */
+/* counterError wraps a counter refusal with the key it happened on, which the raw store error does not name. The caller's own mistakes are named as the in-memory sibling names them, so a bug in the call reads apart from a store outage: redis refuses all three natively and this names its refusal, a store error matching none keeps the generic message, and the redis error stays the cause in every branch. */
 func counterError(key string, causeErr error) error {
     return exception.NewError(
         counterErrorMessage(causeErr),
@@ -581,9 +579,7 @@ func counterError(key string, causeErr error) error {
     )
 }
 
-/* counterRefusalMessages maps redis's own wording onto the message the in-memory backend answers for the same mistake. The match is on a fragment rather than the whole line because a redis error carries a prefix that varies by server version and by whether the command travelled through a script.
-
-   The order is load-bearing and the list is walked in it: redis answers a DECRBY that cannot be negated with "decrement would overflow" and a counter driven past the int64 ceiling with "increment or decrement would overflow", and the first of those two is a substring of the second. Written the other way round every ceiling overflow would be reported as a delta that cannot be negated. */
+/* counterRefusalMessages maps redis's wording onto the message the in-memory backend answers for the same mistake, matched on a fragment because redis prefixes its errors by server version and by whether the command went through a script. The order is load-bearing: "decrement would overflow", a DECRBY that cannot be negated, is a substring of "increment or decrement would overflow", the int64 ceiling, so it is checked second. */
 var counterRefusalMessages = []struct {
     fragment string
     message  string
@@ -610,7 +606,7 @@ func counterErrorMessage(causeErr error) string {
 
 const counterStoreFailureMessage = "cache counter operation failed"
 
-/* negativeTtlError refuses the already-lapsed duration the in-memory backend refuses too. Without it a negative ttl falls into the branch that writes no expiry at all, so the one value the caller meant to be unreadable is the one value stored forever. Zero keeps meaning no expiry, as both backends document. */
+/* negativeTtlError refuses an already-lapsed duration, as the in-memory backend does, since a negative ttl would otherwise fall into the branch that writes no expiry and store forever the value meant to be unreadable. Zero means no expiry on both backends. */
 func negativeTtlError(ttl time.Duration) error {
     return exception.NewError(
         "cache ttl is negative",
@@ -683,7 +679,7 @@ func escapeRedisGlobMeta(value string) string {
     return builder.String()
 }
 
-/* scanKeys walks every node rather than the client as a whole. SCAN names no key, so a cluster client routes it to whichever node it happens to pick first, and a clear that scanned one node would delete that node's share of the matching keys and report success — the caller would read a complete invalidation from a partial one. Nodes() answers with the one client itself when the deployment is not a cluster, so the single-node path is the same walk over one node. */
+/* scanKeys walks every node rather than the client as a whole: SCAN names no key, so a cluster client routes it to one node, and a clear that scanned one node would delete that node's share and report success. Nodes() answers a single-node client with itself, so the single-node path is the same walk. */
 func (instance *Backend) scanKeys(ctx context.Context, pattern string) ([]string, error) {
     keys := make([]string, 0)
 
@@ -777,7 +773,7 @@ func (instance *Backend) deleteKeysInBatches(ctx context.Context, keys []string)
 
         batch := keys[startIndex:endIndex]
         if batchErr := instance.firstDeleteFailure(rueidis.MDel(instance.client, ctx, batch)); nil != batchErr {
-            /* a multi-batch wipe that fails part-way is described at the operation's own extent, not the batch's: the batches before this one are irreversibly gone, and an error whose counts covered only the failing batch could not say whether the wipe destroyed nothing or nearly everything — a cancellation mid-clear left exactly that ambiguity. A single-batch operation keeps the batch report, whose counts already are the operation's. */
+            /* a multi-batch wipe that fails part-way is reported at the operation's own extent, since the earlier batches are irreversibly gone and batch-only counts could not say how much was destroyed; a single-batch operation keeps the batch report, which already is the operation's */
             if len(keys) <= instance.deleteBatch {
                 return batchErr
             }
@@ -796,7 +792,7 @@ func (instance *Backend) deleteKeysInBatches(ctx context.Context, keys []string)
     return nil
 }
 
-/* firstDeleteFailure names the key that failed. MDel reports per key, and a batch delete that answers with the bare store error tells the caller neither which entry stopped it nor that the entries before it are already gone. The map is unordered, so the reported key is chosen by sorting rather than by iteration, which keeps two identical failures reporting identically. */
+/* firstDeleteFailure names the key that failed, chosen by sorting rather than by map iteration, so two identical failures report identically, and the counts tell the caller how much of the batch they describe. */
 func (instance *Backend) firstDeleteFailure(deleteErrors map[string]error) error {
     failedKeys := make([]string, 0, len(deleteErrors))
     for key, deleteErr := range deleteErrors {

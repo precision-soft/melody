@@ -131,7 +131,7 @@ func TestMigrateCommand_LockFailureAbortsWithoutMigratingOrUnlocking(t *testing.
         t.Fatalf("a never-acquired lock was released: %v", recorder.recordedQueries())
     }
 
-    /* the command no longer pre-prints the failure it returns: the cli runner's [error] line and the full log record already report it, and the third copy on the same console said nothing new */
+    /* the command does not pre-print the failure it returns: the cli runner's [error] line and the full log record report it */
     if true == strings.Contains(rendered, "ERROR:") {
         t.Fatalf("the returned failure must not be pre-printed by the command, got: %q", rendered)
     }
@@ -237,7 +237,7 @@ func TestMigrateCommand_FailedMigrationKeepsItsErrorOverAFailedUnlock(t *testing
     }
 }
 
-/* a pipeline reading .data.migrations to record what it deployed used to receive {"data":{}} for a run that applied migrations, and the readme told its author that --verbose affects the plain-text output — so the one flag that would have filled the document was documented as irrelevant to it */
+/* a pipeline reading .data.migrations to record what it deployed receives the detail at the default verbosity, since --verbose affects the plain-text output alone */
 func TestMigrateCommand_JsonCarriesTheDetailAtTheDefaultVerbosity(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = appliedMigrationRowsHook()
@@ -266,7 +266,7 @@ func TestMigrateCommand_JsonCarriesTheDetailAtTheDefaultVerbosity(t *testing.T) 
         t.Fatalf("expected the applied count in the document, got %#v in %q", document.Data.Details, rendered)
     }
 
-    /* the group is computed inside the same block, so a repair that moved only the printing would leave it at its placeholder */
+    /* the group is computed inside the same block, so moving only the printing would leave it at its placeholder */
     if "" == document.Data.Details["group"] || "<none>" == document.Data.Details["group"] {
         t.Fatalf("expected the migration group in the document, got %#v", document.Data.Details["group"])
     }
@@ -280,7 +280,7 @@ func TestMigrateCommand_JsonCarriesTheDetailAtTheDefaultVerbosity(t *testing.T) 
         t.Fatalf("expected the applied migration to be named, got %q", applied[0])
     }
 
-    /* the text rendering is unchanged: verbosity still decides what a person is shown */
+    /* verbosity still decides what the text rendering shows a person */
     textDatabase, textRecorder := newFakeBunDatabase()
     textRecorder.queryHook = appliedMigrationRowsHook()
 
@@ -299,7 +299,7 @@ func TestMigrateCommand_JsonCarriesTheDetailAtTheDefaultVerbosity(t *testing.T) 
     }
 }
 
-/* TestMigrateCommand_ARunThatChangedTheSchemaSaysSoOnTheText pins the line a deploy log captures. The success line lived inside wantsDetail(), so a plain run — the shape a deploy script invokes — printed a warning for the run that did nothing and not one byte for the run that applied migrations: the log was empty exactly when something had happened, and the operator reading it could not tell the two apart. The rollback sibling has always printed its line. */
+/* TestMigrateCommand_ARunThatChangedTheSchemaSaysSoOnTheText pins the line a deploy log captures: a plain run, the shape a deploy script invokes, prints a line for the run that applied migrations and not only a warning for the run that did nothing, as the rollback sibling does. */
 func TestMigrateCommand_ARunThatChangedTheSchemaSaysSoOnTheText(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = appliedMigrationRowsHook()
@@ -330,7 +330,7 @@ func TestMigrateCommand_ARunThatChangedTheSchemaSaysSoOnTheText(t *testing.T) {
     }
 }
 
-/* the machine document is deliberately untouched by the line above: under json the same run already carries the applied count, the group and the names as structured fields, so a prose duplicate would be a second and weaker spelling of what the consumer has */
+/* the machine document does not carry the success line: under json the same run already carries the applied count, the group and the names as structured fields, so a prose duplicate would be a second and weaker spelling of what the consumer has */
 func TestMigrateCommand_TheSuccessLineDoesNotEnterTheMachineDocument(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = appliedMigrationRowsHook()
@@ -364,7 +364,7 @@ func TestMigrateCommand_TheSuccessLineDoesNotEnterTheMachineDocument(t *testing.
     }
 }
 
-/* a group that fails part way through names what it already applied, on both renderings. Bun returns the landed migrations beside the failure and the command used to throw them away, so the operator was told which migration broke and nothing about which had been applied and recorded — leaving the choice between re-running (safe) and rolling back (which would take the landed ones with it) impossible to make without reading the database by hand. */
+/* a group that fails part way through names what it already applied, on both renderings, so the operator can choose between re-running and rolling back without reading the database by hand */
 func TestMigrateCommand_AFailedGroupNamesTheMigrationsThatLanded(t *testing.T) {
     applied := make([]string, 0)
 
@@ -560,7 +560,7 @@ func (instance *failingOnWriter) Write(payload []byte) (int, error) {
     return instance.buffer.Write(payload)
 }
 
-/* every text write of the report went `_, _ =`, and finish returned the command's own error alone, so a report cut short by a full disk ended with exit zero — the class the framework's table printer documents fixing with its error-tracking writer. The first lost write is what finish now refuses on, in text mode and under the json document alike; the command's own failure still wins when there is one. */
+/* a text write the report lost is remembered, so a report cut short by a full disk is refused rather than exiting zero, the class the framework's table printer guards with its error-tracking writer; finish refuses on the first lost write in text mode and under the json document alike, and the command's own failure still wins when there is one. */
 func TestMigrateCommand_AReportCutShortIsRefusedInsteadOfExitingZero(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = appliedMigrationRowsHook()
