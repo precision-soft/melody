@@ -108,7 +108,7 @@ func TestValidationErrors_RenderTheirMembersInAStableOrder(t *testing.T) {
     }
 }
 
-/* ValidationErrors is a public collection of an interface, so an entry a caller appended from a field of their own — a nil *ValidationError — is an entry that is not nil: the skip answered false and Code() was called on the nil receiver, which is a panic inside a method whose whole job is to report whether anything is wrong. */
+/* a nil *ValidationError a caller appended is an entry that is not nil, so it is skipped rather than having Code() called on its nil receiver */
 func TestValidationErrors_ATypedNilEntryIsSkippedRatherThanDereferenced(t *testing.T) {
     var absentError *ValidationError
 

@@ -36,7 +36,7 @@ func TestEnsureEnvelope_LeavesAnEnvelopeAlone(t *testing.T) {
     }
 }
 
-/* WithStamp answers a NEW envelope: the one a middleware was handed must not gain stamps under it, because the pipeline hands the same envelope to siblings that must each see what they were given */
+/* WithStamp answers a new envelope, since the pipeline hands the same envelope to siblings that must each see what they were given */
 func TestEnvelope_WithStampDoesNotMutateTheEnvelopeItWasCalledOn(t *testing.T) {
     original := NewEnvelope("payload", SentStamp{TransportName: "amqp"})
 

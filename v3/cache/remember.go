@@ -13,9 +13,7 @@ import (
     "github.com/precision-soft/melody/v3/internal"
 )
 
-/* NewDefaultRememberOption arms stampede protection with an unbounded wait and a cancelable flight. Cancelable is what keeps a hung callback from owning its key forever: when the last waiter leaves — by timeout, by its caller context, or by giving up — the flight's context is canceled, and the next caller of the key finds a canceled flight, replaces it, and leads a fresh computation. What the default does not bound is the wait itself: a waiter that brings neither a caller context nor a wait timeout parks for as long as the callback takes, so a callback that can hang still wants its own deadline inside, WithWaitTimeout on the waiters, or WithContext so an abandoned request takes its waiter out.
-
-   The two settings compose one way a caller has to know: under this cancelable default, a wait timeout SHORTER than the callback cancels every flight before it can store — the lone waiter times out, the flight loses its last waiter, the callback that honours its context returns the cancellation, nothing is written, and the next call leads a fresh flight to the same end, so the key is never populated. A caller that wants a bounded wait AND the value eventually stored pairs WithWaitTimeout with WithCancelable(false), which lets the computation finish detached and store for the callers that come after, or gives the callback its own deadline instead of the waiters. */
+/* NewDefaultRememberOption arms stampede protection with an unbounded wait and a cancelable flight: when the last waiter leaves, the flight's context is canceled, and the next caller leads a fresh computation. The wait itself is unbounded, so a callback that can hang wants its own deadline, WithWaitTimeout, or WithContext. Under this default a wait timeout shorter than the callback never stores the value; pair WithWaitTimeout with WithCancelable(false) to have it stored for later callers. */
 func NewDefaultRememberOption() *RememberOption {
     defaultWaitTimeout := time.Duration(-1)
 
@@ -26,11 +24,7 @@ func NewDefaultRememberOption() *RememberOption {
     }
 }
 
-/* RememberOption starts from the constructor defaults wherever it is built: the fields are unexported, so outside this package the only writes are the With setters, and a setter called on the exact zero value first reads the receiver as NewDefaultRememberOption before applying its own field. Without that reading, a zero value plus one setter carried a waitTimeout of zero — every miss answered with a timeout while the callback computed in the background — and configuring cancelability alone silently disarmed the stampede protection the caller never asked to configure.
-
-   waitTimeout is a pointer so that a deliberate zero — no-wait, spelled NewDefaultRememberOption().WithWaitTimeout(0) — is told apart from the field left unspoken: a nil answers the default wait, a set pointer answers exactly what it holds. Without the distinction, a protection-off option that also asked for no wait was the zero struct itself, which the guard below reads as the constructor defaults, so the caller who spelled "no coalescing and no wait" got protection armed with an unbounded wait — the opposite, on both fields. The guard now equals the zero struct only for a value built outside the constructor, which never sets the pointer, and that value is what should read as the defaults.
-
-   The caller's context lives here rather than in a signature of its own because it is one more optional thing about this call, and because it governs the wait together with waitTimeout and isCancelable: what the three do to each other is written once, on Context below. The zero-value guard survives the interface field — comparing against the zero struct puts a nil interface on one side, so the operands never share a dynamic type and the comparison answers false instead of panicking on an uncomparable one. */
+/* RememberOption starts from the constructor defaults wherever it is built: a setter called on the zero value first reads the receiver as NewDefaultRememberOption. waitTimeout is a pointer, so a deliberate zero wait is told apart from an unspoken one. The caller's context lives here as one more per-call setting; its interplay with waitTimeout and isCancelable is written on Context. */
 type RememberOption struct {
     enableStampedeProtection bool
     waitTimeout              *time.Duration
@@ -79,9 +73,7 @@ func (instance *RememberOption) WithCancelable(isCancelable bool) *RememberOptio
     return instance
 }
 
-/* Context answers the context that governs THIS caller's wait, context.Background when none was given. It ends the wait and nothing else: the computation belongs to whoever leads the flight and is awaited by everybody coalesced onto it, so a client that disconnects takes its own caller out and leaves the value being computed for the others. What cancels the computation is still the last waiter leaving, and only on a cancelable option.
-
-   The three settings answer in this order: a canceled context ends the wait first, then the wait timeout, then the leader. A zero wait timeout means no waiting at all, so the context never gets to be consulted, and an unbounded wait — the shipped default — is exactly where a context matters most, since without one the waiter parks for as long as the callback takes however long ago its own request was abandoned. Where the callback is the one that should stop, hand its own deadline to the callback: the context it receives is the flight's, not this one. */
+/* Context answers the context that governs this caller's wait, context.Background when none was given. It ends the wait and nothing else: the computation belongs to the flight, and only the last waiter leaving a cancelable option cancels it. A canceled context ends the wait first, then the wait timeout, then the leader; the callback receives the flight's context, not this one. */
 func (instance *RememberOption) Context() context.Context {
     if true == internal.IsNilInterface(instance.callerContext) {
         return context.Background()
@@ -90,7 +82,7 @@ func (instance *RememberOption) Context() context.Context {
     return instance.callerContext
 }
 
-/* WithContext answers a COPY of the option carrying the context, and leaves the receiver as it was — the one setter that does not write the receiver, because the context is per-call state where every other field is configuration: a service keeps one option, configured once, and derives a per-request option from it at every call. Written into the shared receiver, the context of one request governed the wait of every concurrent request on the same option, and two requests deriving at once raced on the field. A caller that discards the value WithContext answers keeps the option without a context, exactly as if WithContext had not been called; the chained spelling is unchanged. The copy is taken first and the zero value is normalised on the copy: normalising the receiver wrote the shared option — the one zero-value shape the package documents as a valid shared option — on every concurrent first derivation, the race in a narrower shape. */
+/* WithContext answers a copy of the option carrying the context and leaves the receiver as it was, since the context is per-call state on an option a service shares across requests. The copy is taken first and the zero value normalised on the copy, so no concurrent derivation writes the shared option. */
 func (instance *RememberOption) WithContext(callerContext context.Context) *RememberOption {
     derived := *instance
     derived.normalizeZeroReceiver()
@@ -99,7 +91,7 @@ func (instance *RememberOption) WithContext(callerContext context.Context) *Reme
     return &derived
 }
 
-/* Remember answers the cached value, computing it through the callback on a miss and storing it. The computed value is run through the backend's stored shape before it is returned, so the miss answers exactly what every later hit answers — a callback's int comes back a float64 and its struct a map, and this makes that true from the first call rather than only from the second. The cost is that the round-trip is uniform: with the default JSON serializer an integer beyond 2^53 comes back changed on the computing call as well, not only on the cached reads. Where a cached value carries an integer that large, carry a version inside it or key it so it never decodes through JSON. No major escapes this: every default serializer in the tree decodes through the same json.Unmarshal into any. */
+/* Remember answers the cached value, computing it through the callback on a miss and storing it. The computed value goes through the stored shape before it is returned, so the miss answers what every hit answers; with the JSON serializer an integer beyond 2^53 therefore comes back changed on the computing call too. */
 func Remember(
     cacheInstance cachecontract.Cache,
     key string,
@@ -107,12 +99,12 @@ func Remember(
     callback func(ctx context.Context) (any, error),
     option *RememberOption,
 ) (any, error) {
-    /* the guard reads through the interface: a typed-nil Cache is a non-nil interface that would pass a plain comparison and panic on the first method call, on the request path, in place of the error this refusal promises */
+    /* the guard reads through the interface, since a typed-nil Cache would pass a plain comparison and panic on the first method call */
     if true == internal.IsNilInterface(cacheInstance) {
         return nil, exception.NewError("cache instance is nil", nil, nil)
     }
 
-    /* the zero-value option is constructible from outside the package and would silently disarm the stampede protection it never asked to configure; it reads as the constructor defaults instead. A deliberate protection-off option built through the constructor carries waitTimeout -1 and stays what it says. */
+    /* the zero-value option reads as the constructor defaults, so it does not disarm the stampede protection; a deliberate protection-off option carries waitTimeout -1 */
     effectiveOption := option
     if nil == effectiveOption || (RememberOption{}) == *effectiveOption {
         effectiveOption = NewDefaultRememberOption()
@@ -121,7 +113,7 @@ func Remember(
     value, exists, getErr := cacheInstance.Get(key)
     getErr = normalizeThirdPartyError(getErr)
     if nil != getErr {
-        /* a payload the serializer cannot decode is a miss, not a failure: the callback recomputes and its Set overwrites the corrupt payload, so the key heals instead of staying poisoned until the entry lapses — which a ttl of zero postpones forever. Every other error keeps meaning the cache itself failed. */
+        /* a payload the serializer cannot decode is a miss: the callback recomputes and its Set overwrites the corrupt payload, so the key heals; every other error means the cache failed */
         if false == IsDeserializationError(getErr) {
             return nil, getErr
         }
@@ -185,7 +177,7 @@ func rememberWithStampedeProtection(
 
     call, exists := shard.inFlightByKey[singleFlightKey]
 
-    /* a cancelable call whose waiters all timed out is already doomed to a cancellation error; a late joiner must not inherit that poison, so it replaces the entry and becomes a fresh leader. */
+    /* a cancelable call whose waiters all timed out is doomed to a cancellation error, so a late joiner replaces the entry and leads afresh */
     if true == exists && true == call.IsCanceled() {
         exists = false
     }
@@ -235,7 +227,7 @@ func executeRememberInFlightLeader(
         shard.mutex.Unlock()
     }()
 
-    /* the callback's own panics are already recovered inside executeRememberCallbackSafely, so what this recover catches is the cache side — a Get or Set that panicked — and the fabricated error says so, instead of sending the diagnosis after a callback that never misbehaved */
+    /* the callback's panics are recovered inside executeRememberCallbackSafely, so this recover catches a panicking Get or Set, and the error says so */
     defer func() {
         recoveredValue := recover()
         if nil == recoveredValue {
@@ -297,7 +289,7 @@ func executeRememberInFlightLeader(
     call.Complete(normalizedValue, nil)
 }
 
-/* the callback runs under the CALLER's context here, unlike the coalesced path: without a flight there is nobody else waiting on this computation, so ending it ends nothing that anyone still wants. */
+/* with no flight nobody else waits on the computation, so the callback runs under the caller's context */
 func rememberWithoutStampedeProtection(
     cacheInstance cachecontract.Cache,
     key string,
@@ -327,9 +319,7 @@ func rememberWithoutStampedeProtection(
     return normalizedValue, nil
 }
 
-/* normalizeRememberedValue makes the computing call answer the exact shape every cached call will answer: without it one key had two shapes — the callback's own value on the miss, the decoded generic form on every hit — so a type assertion worked on the cold path and failed on the warm one, from the second call on. A cache that does not expose its stored shape answers the callback's value unchanged.
-
-   It runs BEFORE the store, on both paths. The round-trip is also the only place where a value the serializer encodes but cannot decode is found out — the default JSON serializer has no depth ceiling on the way in and one on the way out — and a value like that, stored first, was written and then read back as a miss on every later call: recomputed, rewritten, refused again, a loop with one write per call that no ttl ends. Refused before the store, the key stays empty and the caller gets the refusal once per call and nothing else. */
+/* normalizeRememberedValue gives the computing call the shape every cached call answers; a cache that does not expose its stored shape answers the value unchanged. It runs before the store, so a value the serializer encodes but cannot decode is refused once instead of being rewritten and missed on every call. */
 func normalizeRememberedValue(cacheInstance cachecontract.Cache, key string, value any) (any, error) {
     normalizer, isNormalizer := cacheInstance.(cachecontract.StoredValueNormalizer)
     if false == isNormalizer {
@@ -338,7 +328,7 @@ func normalizeRememberedValue(cacheInstance cachecontract.Cache, key string, val
 
     normalized, normalizeErr := normalizer.NormalizeStoredValue(value)
     if nil != normalizeErr {
-        /* the refusal names the key and the framework's message, in the store's own spelling: the round-trip now runs before the store, so a value the serializer cannot encode — a NaN, a func field — is refused here, where the store refused it before, and a reader of the message sees one class under one text whichever door refused — the text names the class, a value the serializer cannot carry through the store, and covers the decode half of the round-trip too, which the store never raises on its own; the cause says which half failed */
+        /* the refusal names the key and the store's own message, so a value the serializer cannot carry through the store reads as one class whichever half of the round-trip failed; the cause says which */
         return nil, exception.NewError(
             "cache value serialization failed",
             map[string]any{"key": key},
@@ -349,7 +339,7 @@ func normalizeRememberedValue(cacheInstance cachecontract.Cache, key string, val
     return normalized, nil
 }
 
-/* rememberSingleFlightKey names the unit callers coalesce under: one cache instance, one key, one cancelability. The instance is told apart by its pointer, so only pointer-kind implementations coalesce — a value-kind Cache has no address to tell two instances apart, and one shared flight would hand a caller the value computed for somebody else's cache, so a value-kind instance gets no coalescing at all, which costs the stampede optimization and never the answer. Two managers over one backend are two units on purpose: the unit is what Remember was handed, not what stands behind it. */
+/* rememberSingleFlightKey names the unit callers coalesce under: one cache instance, one key, one cancelability. An instance is told apart by its pointer, so a value-kind Cache gets no coalescing, which costs the optimization and never the answer; two managers over one backend are two units. */
 func rememberSingleFlightKey(cacheInstance cachecontract.Cache, key string, isCancelable bool) (string, bool) {
     cancelableSuffix := "cancelable:false"
     if true == isCancelable {
@@ -399,7 +389,7 @@ func executeRememberCallbackSafely(
     result = nil
     callbackErr = nil
 
-    /* the panic value travels as the CAUSE and the stack is captured here, on the goroutine whose frames raised it. Stringified into the context alone, an error-shaped panic collapsed to its bare message: the context naming the parameter it could not read, the chain naming the connection that refused, and any file and line were all gone, so a handler's own bug reached the operator as a message and a cache key. */
+    /* the panic value travels as the cause, with the stack captured on the goroutine that raised it, so an error-shaped panic keeps its context and chain */
     defer func() {
         recoveredValue := recover()
         if nil == recoveredValue {
@@ -419,7 +409,7 @@ func executeRememberCallbackSafely(
         result = nil
     }()
 
-    /* a typed-nil error from the callback reads as the success it means: boxed into a non-nil interface it would be memoized as the flight's failure, handed to every waiter, and would panic the first one that renders it */
+    /* a typed-nil error from the callback is the success it means; boxed, it would be memoized as the flight's failure and panic the first waiter that renders it */
     value, computeErr := callback(contextInstance)
     computeErr = normalizeThirdPartyError(computeErr)
     if nil != computeErr {

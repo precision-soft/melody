@@ -3525,6 +3525,33 @@ func TestKernel_ARefusedStaleRawPathCarriesNoRouteAndLogsTheRawPath(t *testing.T
     }
 }
 
+func TestKernel_AStaleRawPathLeavesOnlyTheRefusalWarning(t *testing.T) {
+    router := NewRouter()
+    router.HandleNamed("admin_users", nethttp.MethodGet, "/admin/users", routeRegistryTestHandler())
+
+    recordingLogger := &warningRecordingLogger{}
+
+    serviceContainer := newHttpTestContainer()
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger)
+
+    kernelHandler := NewKernel(router).ServeHttp(serviceContainer)
+
+    pathOnlyRewrite := nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+        request.URL.Path = strings.TrimPrefix(request.URL.Path, "/api")
+        kernelHandler.ServeHTTP(writer, request)
+    })
+
+    recorder := httptest.NewRecorder()
+    pathOnlyRewrite.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/api/admin%2Fusers", nil))
+
+    if nethttp.StatusBadRequest != recorder.Code {
+        t.Fatalf("expected the stale raw path refused, got %d", recorder.Code)
+    }
+    if 1 != len(recordingLogger.warningMessages) || "request path refused before the handler" != recordingLogger.warningMessages[0] {
+        t.Fatalf("expected the refusal as the only warning, got %v", recordingLogger.warningMessages)
+    }
+}
+
 /* the tie-break is registration order, deliberately, and specificity is not a factor. The rule is written on the RouteHandler contract; this pins it so a future change to the selection has to be a decision rather than an accident. */
 func TestRouter_EqualPriorityIsWonByTheFirstRegistration(t *testing.T) {
     router := NewRouter()

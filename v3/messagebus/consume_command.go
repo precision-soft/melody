@@ -33,7 +33,7 @@ type RetryPolicy struct {
     FailureTransport    messagebuscontract.Transport
     MaxDelay            time.Duration
     FailureRequeueDelay time.Duration
-    /* bound on requeues of an exhausted message after the FailureTransport rejects it; 0 keeps the default no-loss behavior (requeue until it recovers), a positive value nacks without requeue after that many failed routings so a transport-native dead-letter (AMQP DLX) can claim it instead of looping forever */
+    /* bound on requeues of an exhausted message after the FailureTransport rejects it; 0 requeues until it recovers, and a positive value nacks without requeue after that many failed routings, so a transport-native dead-letter (AMQP DLX) can claim it */
     MaxDeadLetterAttempts int
 }
 
@@ -57,7 +57,7 @@ func NewConsumeCommandWithRetry(
     }
 }
 
-/* NewConsumeCommandFromContainer builds the command so it resolves the bus, the transport map and an optional retry policy from the service container at run time, letting the framework auto-register melody:messagebus:consume once the application registers its transports. */
+/* NewConsumeCommandFromContainer builds the command so it resolves the bus, the transport map and an optional retry policy from the service container at run time, which lets the framework register melody:messagebus:consume once the application registers its transports. */
 func NewConsumeCommandFromContainer() *ConsumeCommand {
     return &ConsumeCommand{
         retryPolicy:          normalizeRetryPolicy(RetryPolicy{MaxRetries: defaultMaxRetries}),
@@ -133,7 +133,7 @@ func (instance *ConsumeCommand) Run(
     runtimeInstance runtimecontract.Runtime,
     commandContext clicontract.Context,
 ) error {
-    /* the collaborators are resolved into run-local state rather than back into the command's own fields: the command is a container-registered singleton, and the in-process cron runner overlaps a run with itself whenever an entry outruns its interval — a run-time write to a shared field would race every worker goroutine of the run already in flight. */
+    /* the collaborators are resolved into run-local state, not the command's fields: the command is a singleton, and the in-process cron runner overlaps a run with itself when an entry outruns its interval */
     session := instance.newConsumeSession(runtimeInstance)
 
     transportName := commandContext.String("transport")
@@ -199,7 +199,7 @@ func (instance *consumeSession) consumeFrom(
     signalContext, stop := signal.NotifyContext(runtimeInstance.Context(), os.Interrupt, syscall.SIGTERM)
     defer stop()
 
-    /* two lifetimes, not one. The signal context stops the pull of NEW deliveries; the handler context outlives it so an in-flight handler, and above all its Ack/Nack, still run on a live context for the whole shutdownGrace. Sharing one context cancels the acknowledgement of a message whose side effects already committed, and any transport that honours the runtime context on publish then fails the Ack and lets the broker redeliver it, while a failed Nack loses the RedeliveryStamp increment so MaxRetries never converges. */
+    /* two lifetimes: the signal context stops the pull of new deliveries, while the handler context outlives it, so an in-flight handler and its Ack or Nack run on a live context for the whole shutdownGrace */
     handlerContext, cancelHandlers := context.WithCancel(context.WithoutCancel(runtimeInstance.Context()))
     defer cancelHandlers()
 
@@ -272,12 +272,12 @@ func (instance *consumeSession) consumeFrom(
     case <-drained:
         return loopErr
     case <-time.After(instance.shutdownGrace):
-        /* returning here runs the deferred cancelHandlers, so the grace is also the deadline past which whatever is still in flight is told to stop */
+        /* returning runs the deferred cancelHandlers, so the grace is also the deadline for whatever is still in flight */
         return exception.NewError("consumer shutdown timed out waiting for in-flight handlers", nil, nil)
     }
 }
 
-/* consumeRecovered runs consume behind a panic barrier so a panic raised OUTSIDE the handler dispatch — in per-message scope setup, the transport Ack/Nack, or scope teardown — is logged and the worker goroutine survives to process the next delivery, instead of dying and silently shrinking the worker pool until the consumer stalls with no error surfaced. A handler panic is already converted into the retry/dead-letter pipeline inside dispatchSafely; this is the backstop for everything else on the per-message path. The in-flight delivery is left unacked, so the broker redelivers it. */
+/* consumeRecovered runs consume behind a panic barrier, so a panic outside the handler dispatch (scope setup, Ack/Nack, scope teardown) is logged and the worker survives to take the next delivery. A handler panic already enters the retry pipeline inside dispatchSafely; the in-flight delivery here stays unacked, so the broker redelivers it. */
 func (instance *consumeSession) consumeRecovered(
     runtimeInstance runtimecontract.Runtime,
     transport messagebuscontract.Transport,
@@ -389,7 +389,7 @@ func (instance *consumeSession) consume(
     }
 }
 
-/* messageRuntime gives each delivery its own container scope and a message-scoped logger (keyed by MessageIdStamp), mirroring the http kernel's scope-per-request idiom so ambient scope state cannot leak between in-flight messages and every log line is correlatable. The parent context is kept as-is; without a resolvable container the shared runtime is returned untouched. */
+/* messageRuntime gives each delivery its own container scope and a logger keyed by MessageIdStamp, as the http kernel scopes a request, so scope state cannot leak between in-flight messages. Without a resolvable container the shared runtime is returned untouched. */
 func (instance *consumeSession) messageRuntime(
     runtimeInstance runtimecontract.Runtime,
     envelopeInstance messagebuscontract.Envelope,
@@ -445,7 +445,7 @@ func (instance *consumeSession) dispatchSafely(
             return
         }
 
-        /* a panicking handler must flow into the retry/dead-letter pipeline like a returned error; otherwise the worker dies with the delivery unacked, the broker redelivers with an unchanged count, MaxRetries never trips and one poison message crash-loops every replica. Mirrors the http kernel's recover-to-error contract. */
+        /* a panicking handler flows into the retry and dead-letter pipeline like a returned error, so a poison message cannot crash-loop every replica with an unchanged redelivery count */
         recoveredErr, ok := recoveredValue.(error)
         if true == ok && nil != recoveredErr {
             dispatchErr = exception.NewError(
@@ -481,7 +481,7 @@ func (instance *consumeSession) retryDelay(attempt int) time.Duration {
 
     maxDelay := instance.retryPolicy.MaxDelay
 
-    /* the quotient stays int64: truncating it to int wraps on a 32-bit build once BaseDelay is small enough (a microsecond-scale delay against the one-hour default cap), and the wrapped negative turns the very first retry into a full MaxDelay wait */
+    /* the quotient stays int64, since truncated to int it wraps on a 32-bit build and turns the first retry into a full MaxDelay wait */
     if int64(attempt) > int64(maxDelay/instance.retryPolicy.BaseDelay) {
         return maxDelay
     }
@@ -510,7 +510,7 @@ func (instance *consumeSession) logError(
 ) {
     logger := logging.LoggerFromRuntime(runtimeInstance)
     if true == internal.IsNilInterface(logger) {
-        /* these records include the only trace of a recovered panic outside the handler — a runtime that resolves no logger must not make them evaporate */
+        /* these records include the only trace of a recovered panic outside the handler, so a runtime without a logger falls back rather than dropping them */
         logger = logging.EmergencyLogger()
     }
 

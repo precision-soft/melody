@@ -1332,7 +1332,8 @@ trap remove_temporary_path EXIT
 # generated-code header has to count nothing. A block comment is read as one text, so a phrase broken across its lines
 # is counted and "is used to" broken the same way is not. The planted file carries the shapes a broken string, rune or
 # escape state would leak through AHEAD of its last history comments, so a leak lowers the count instead of passing
-# unseen, and a comment repeating a phrase counts each occurrence.
+# unseen, a comment repeating a phrase counts each occurrence, and one block continues on an unindented line, so the
+# phrase broken there is joined by the space the scanner adds and by nothing else.
 COMMENT_CONTROL_DIRECTORY_STRING="$(mktemp -d)"
 TEMPORARY_PATH_STRING_LIST+=("${COMMENT_CONTROL_DIRECTORY_STRING}")
 
@@ -1348,9 +1349,12 @@ printf '%s\n' \
     '/* Serve answers the page. The request was' \
     '   refused before the route. */' \
     "const quote = '\"' // the guard previously panicked" \
+    "const apostrophe = '\\'' // the guard had been slow" \
     'const escaped = "a \" b"' \
     'const address = "http://host/path used to"' \
     '// the guard no longer panics and no longer hangs' \
+    '/* Handle answers the page. The request was' \
+    'routed before the check. */' \
     'func Serve() {}' > "${COMMENT_CONTROL_DIRECTORY_STRING}/positive.go"
 
 printf '%s\n' \
@@ -1371,8 +1375,8 @@ printf '%s\n' \
     'type Handler struct{}' > "${COMMENT_CONTROL_DIRECTORY_STRING}/negative.go"
 
 COMMENT_CONTROL_OUTPUT_STRING="$(list_history_comment_count "${COMMENT_CONTROL_DIRECTORY_STRING}/positive.go" "${COMMENT_CONTROL_DIRECTORY_STRING}/negative.go")"
-if [[ "${COMMENT_CONTROL_DIRECTORY_STRING}/positive.go"$'\t'"6" != "${COMMENT_CONTROL_OUTPUT_STRING}" ]]; then
-    fail "the history comment control failed: expected the planted file alone with 6, read [${COMMENT_CONTROL_OUTPUT_STRING}] — no verdict over the tree is possible"
+if [[ "${COMMENT_CONTROL_DIRECTORY_STRING}/positive.go"$'\t'"8" != "${COMMENT_CONTROL_OUTPUT_STRING}" ]]; then
+    fail "the history comment control failed: expected the planted file alone with 8, read [${COMMENT_CONTROL_OUTPUT_STRING}] — no verdict over the tree is possible"
 fi
 
 declare -A COMMENT_BASELINE_COUNT_INTEGER_MAP=()

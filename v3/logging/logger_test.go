@@ -510,7 +510,7 @@ func TestLevelEnabled_AnswersTrueForALoggerThatCannotBeAsked(t *testing.T) {
     }
 }
 
-/* the nil-logger fallback writes through the raw standard logger, so the one-record-one-line guarantee the default logger holds is this branch's own duty: an unescaped line break in a message of unknown origin ends the record and starts a fully-formed fake one at whatever level the payload names. No suite on any major pins the escaping here — measured before this test was written — while the default logger's twin is pinned by TestDefaultLogger_KeepsOneRecordOneLine. */
+/* the nil-logger fallback writes through the raw standard logger, so keeping one record on one line is this branch's own duty; the default logger's twin is TestDefaultLogger_KeepsOneRecordOneLine */
 func TestLogError_NilLogger_KeepsOneRecordOneLine(t *testing.T) {
     var buffer bytes.Buffer
 
@@ -557,7 +557,6 @@ func TestLogError_NilLogger_KeepsOneRecordOneLineForAnException(t *testing.T) {
         t.Fatalf("expected the escaped spelling, got %q", output)
     }
 }
-
 
 /* an errors.Join answers nothing at all to errors.Unwrap, so a record assembled from the single wrap link carried no cause, no chain, and the context of only whichever branch errors.As reached first — exactly where the failure had gathered what several replicas, several destinations or several rules had to say. */
 func TestLogError_AJoinedErrorCarriesEveryBranchIntoTheRecord(t *testing.T) {

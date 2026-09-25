@@ -133,7 +133,7 @@ func TestRequestLogger_OverridesExistingEmptyRequestId(t *testing.T) {
     }
 }
 
-/* the exit handler refuses a logger that reports itself closed; a decorator that cannot answer hid a dead file logger behind a live-looking wrapper, and the final record was handed to it and dropped — the wrapper now forwards the question to the base it decorates */
+/* the exit handler refuses a logger that reports itself closed, so the wrapper forwards the question to the base it decorates */
 func TestRequestLogger_ClosedForwardsToTheBase(t *testing.T) {
     file, createErr := os.CreateTemp(t.TempDir(), "melody-request-logger-*.log")
     if nil != createErr {
@@ -358,7 +358,7 @@ func TestProcessLogger_AnEmptyProcessIdReturnsTheBaseUndecorated(t *testing.T) {
     }
 }
 
-/* the decorator is what every handler and every listener holds — it is installed as a scope override — so a caller asking the logger it was handed asks THIS one. Answering from here instead of forwarding would report every level enabled for a journal configured at error, which is the exact opposite of the question. */
+/* the decorator is what every handler and listener holds, as a scope override, so it forwards the level question to its base; answering itself would report every level enabled for a journal configured at error */
 func TestRequestLogger_EnabledForwardsToTheBase(t *testing.T) {
     baseLogger := NewJsonLogger(io.Discard, loggingcontract.LevelError)
     wrappedLogger := NewRequestLogger(baseLogger, "request-id", "requestId")

@@ -619,11 +619,7 @@ func TestSmtpTransport_SendsLargePayloadToSlowButSteadyReader(t *testing.T) {
     }
 }
 
-/* re-arming the deadline per payload chunk must not turn it into a moving target that never fires: a peer that stops reading mid-body makes no progress, so the blocked chunk write still hits the per-step deadline and the session is cut within one timeout.
-
-   The payload has to be large enough that the client blocks while writing it rather than after: a body that fits inside the socket buffers is written whole, and the client then waits for the closing dot's acknowledgment, which is bounded by dataTerminationTimeout — two minutes — instead of by the per-step deadline this test exists to prove. Measured: at one megabyte the send is not cut at all.
-
-   The cut is therefore measured from the instant the server stops reading, not from the start of the test, because rendering a payload of that size happens inside Send and its duration tracks machine load. */
+/* a peer that stops reading mid-body makes no progress, so the blocked chunk write hits the per-step deadline and the session is cut within one timeout. The payload must exceed the socket buffers, or the client would wait on the dot acknowledgment, bounded by dataTerminationTimeout instead; the cut is timed from the instant the server stops reading. */
 func TestSmtpTransport_TimesOutWhenServerStopsReadingMidPayload(t *testing.T) {
     listener := listenWithSmallReceiveBuffer(t)
     defer listener.Close()
@@ -821,7 +817,7 @@ func serveStallMidDataSmtp(listener net.Listener, released <-chan struct{}, stal
                 drained += count
             }
 
-            /* the instant reading stops is the only moment from which "cut within one session timeout" can be measured: everything before it — rendering a payload of several megabytes, the dial, the envelope — is work whose duration tracks machine load, and a wall-clock budget spanning it measures the load rather than the deadline. */
+            /* the cut is timed from the instant reading stops, since everything before it tracks machine load */
             close(stalled)
 
             select {

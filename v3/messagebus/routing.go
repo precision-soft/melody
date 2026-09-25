@@ -19,7 +19,7 @@ type Routing struct {
 }
 
 func RouteType[T any](routing *Routing, name string, transport messagebuscontract.Transport) *Routing {
-    /* a nil — or typed-nil — transport passes into the routing table here and is dereferenced only later, on the dispatch path, where Send panics far from the wiring that registered it. Refuse it at the registration door in the framed form, the way RegisterTransports refuses a nil entry in its map, so a mis-wired route fails at boot rather than on the first message its type routes. */
+    /* a nil or typed-nil transport is refused at registration, as RegisterTransports refuses a nil entry, so a mis-wired route fails at boot rather than on its first message */
     if true == internal.IsNilInterface(transport) {
         exception.Panic(exception.NewError("messagebus route transport is nil", map[string]any{"name": name}, nil))
     }

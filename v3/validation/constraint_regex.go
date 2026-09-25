@@ -15,10 +15,10 @@ const (
     ConstraintRegexErrorInvalidPattern = "invalidPattern"
 )
 
-/* the empty pattern compiles to a regular expression that matches every string, so it is refused rather than armed; a pattern meant to match everything says so explicitly */
+/* the empty pattern would match every string, so it is refused rather than armed */
 var errEmptyRegexPattern = errors.New("the empty pattern matches every string; a pattern meant to match everything says so explicitly")
 
-/* NewRegex keeps a pattern that does not compile, and the empty pattern with it, as the constraint's error instead of panicking: Validate then refuses every non-empty value with invalidPattern, and Error answers why, so a rule declared wrong fails closed where it is used rather than validating everything in silence — the empty pattern used to compile and match every string. The tag door (WithParams) refuses the empty pattern before it reaches here. */
+/* NewRegex keeps a pattern that does not compile, the empty one included, as the constraint's error instead of panicking: Validate refuses every non-empty value with invalidPattern and Error answers why, so a rule declared wrong fails closed where it is used. The tag door (WithParams) refuses the empty pattern before it reaches here. */
 func NewRegex(pattern string) *Regex {
     if "" == pattern {
         return &Regex{
@@ -100,7 +100,7 @@ func (instance *Regex) WithParams(params map[string]string) (validationcontract.
         )
     }
 
-    /* refused at the tag door with a declaration error, the reason on errEmptyRegexPattern: NewRegex would fail the value closed, but a tag spelled regex= is a mistake to name at parse time */
+    /* a tag spelled regex= is refused at the tag door as a declaration error, the reason on errEmptyRegexPattern */
     if "" == patternString {
         return nil, exception.NewError(
             "regex constraint requires a non-empty pattern",

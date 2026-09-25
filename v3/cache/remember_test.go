@@ -1756,7 +1756,7 @@ func TestRemember_WithoutStampedeProtectionTheCallbackRunsUnderTheCallerContext(
     }
 }
 
-/* the default is the repair: under the old non-cancelable default a hung callback owned its key for the life of the process, and the replacement mechanism the flight already had could never fire. The mechanism itself is proven by the cancelable-flight tests above; this pins which side of it the constructor ships. */
+/* the constructor ships the cancelable flight, so a hung callback cannot own its key; the mechanism itself is proven by the cancelable-flight tests above */
 func TestNewDefaultRememberOption_ArmsACancelableFlight(t *testing.T) {
     if false == NewDefaultRememberOption().IsCancelable() {
         t.Fatalf("expected the default remember option to arm a cancelable flight")
@@ -1819,7 +1819,7 @@ func (instance *forwardingNormalizerCache) NormalizeStoredValue(value any) (any,
     return instance.manager.NormalizeStoredValue(value)
 }
 
-/* the normalizer door is asked of the Cache value Remember was handed, so a decorator over the manager reaches it only by implementing the contract's door itself; a decorator that does not carries the two shapes the door exists to make one, which is the documented cost */
+/* the normalizer door is asked of the Cache handed to Remember, so a decorator over the manager reaches it only by implementing the door itself */
 func TestRemember_ADecoratorThatForwardsTheNormalizerAnswersOneShape(t *testing.T) {
     backend := NewInMemoryBackend(0, time.Minute, clock.NewSystemClock())
     defer func() { _ = backend.Close() }()
@@ -2027,7 +2027,7 @@ func (instance *zzTypedNilContext) Done() <-chan struct{}        { return instan
 func (instance *zzTypedNilContext) Err() error                   { return instance.parent.Err() }
 func (instance *zzTypedNilContext) Value(key any) any            { return instance.parent.Value(key) }
 
-/* the GoDoc of Context promises context.Background when none was given, and the value is the caller's own: an application deriving an option from a request context it wraps in a type of its own, left nil, hands a context.Context that is not nil. The comparison against nil answered false, the typed nil was handed back as the option's context, and the wait that reads Done() on it dereferenced — on the cache path of a request. */
+/* a typed-nil caller context is a context.Context that is not nil, so Context answers context.Background for it, as its GoDoc promises */
 func TestRememberOption_ATypedNilCallerContextAnswersBackground(t *testing.T) {
     var absentContext *zzTypedNilContext
 

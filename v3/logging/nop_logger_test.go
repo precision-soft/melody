@@ -48,7 +48,7 @@ func TestNopLogger_DoesNotAnswerTheClosedQuestion(t *testing.T) {
     }
 }
 
-/* the substitute reports nothing enabled, which is the whole of its answer: it is the one logger for which the capability is not a threshold but a statement about every level. A caller that builds its records eagerly — the event dispatcher assembling a context map per dispatch — used to pay for every one of them against a logger that exists to accept and forget. */
+/* the substitute reports nothing enabled, the whole of its answer, so a caller that builds its records eagerly builds none against it */
 func TestNopLogger_ReportsNoLevelEnabled(t *testing.T) {
     logger := NewNopLogger()
 

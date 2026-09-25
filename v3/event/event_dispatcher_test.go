@@ -1776,7 +1776,7 @@ func TestEventDispatcher_FailingListenerBeforeRequiredListener_FailsClosed(t *te
         t.Fatalf("expected the listener's failure to travel as the cause, got: %v", err)
     }
 
-    /* the refusal must NAME the listener that ended the dispatch, and the name is resolved on this branch alone — the ordinary dispatch never pays for it. Measured on all three majors before it was written: no suite asserts it, v1 and v2 included, so without this the name could collapse to the dash and every test would still pass. */
+    /* the refusal names the listener that ended the dispatch, a name resolved on this branch alone */
     var exceptionErr *exception.Error
     if false == errors.As(err, &exceptionErr) {
         t.Fatalf("expected an exception error in the chain, got: %T", err)
@@ -1792,7 +1792,7 @@ func TestEventDispatcher_FailingListenerBeforeRequiredListener_FailsClosed(t *te
     }
 }
 
-/* the may-skip mark licenses the stop, not the failure: its own GoDoc scopes it to a listener that stops propagation, and the registrar contract says without exception that a failure with a required listener behind it reports the skip and carries the failure as its cause. Read on the failure branch the mark granted more than it was written for — the marked listener's response was served with access control never consulted. */
+/* the may-skip mark licenses the stop, not the failure, so a failure with a required listener behind it reports the skip and carries the failure as its cause */
 func TestEventDispatcher_FailingListenerWithMaySkip_StillReportsTheSkippedRequiredListener(t *testing.T) {
     dispatcher, clockInstance := testNewEventDispatcher()
 
@@ -2024,9 +2024,7 @@ func TestEventDispatcher_DoesNotBuildDebugRecordsTheJournalWouldDiscard(t *testi
 }
 
 /* the listener name is resolved where it is USED, so the paths that need it must still carry it with the journal at a level that builds no debug record at all: the failure wrapper's context and the required-listener refusal are what an operator reads when a dispatch goes wrong, and a name resolved only inside the debug branch would leave both saying "-" exactly when they matter. */
-/* the twin of the failure-path test, on the branch that only runs with debug ON: the "event listener started" record must name the listener it is about. The name is resolved through listenerNameOf at the call site rather than ahead of the branch, so a dispatch under a journal above debug pays no reflection at all — but under a journal that keeps debug, the record still has to say WHICH listener started.
-
-   Measured on all three majors before it was written: no suite asks the debug record for the name, v1 and v2 included, so the name could collapse to the dash there and every test would still pass. */
+/* with debug on, the "event listener started" record names the listener it is about, resolved through listenerNameOf at the call site */
 func TestEventDispatcher_DebugRecordNamesTheListenerItIsAbout(t *testing.T) {
     logger := &debugGateLogger{minLevel: loggingcontract.LevelDebug}
 
@@ -2148,5 +2146,4 @@ func stoppingGateListener(runtimeInstance runtimecontract.Runtime, eventValue ev
 
     return nil
 }
-
 

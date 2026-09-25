@@ -621,7 +621,7 @@ func TestLeaderGate_LeadershipDropsWhileTheElectedHookIsStillRunning(t *testing.
     <-done
 }
 
-/* The budget of one renewal is a deadline on the CALL, not a verdict on the lease, so what it has to satisfy is that it never outlives the cadence it sits inside: an attempt that outlived it would still be in flight against the same lock when its successor started. The previous invariant — a budget well below the lease — was both wrong and untested where it mattered: it read the budget as the demotion signal, and it was sampled only at ttls of 100ms and up, where the floor never engages. Below two milliseconds the floor engaged on the cadence and on the budget independently and produced a budget LARGER than the cadence, which the old assertion never saw. */
+/* the budget of one renewal is a deadline on the call, so it must never outlive the cadence it sits inside, or an attempt would still be in flight when its successor starts; sampled below two milliseconds, where the floor engages */
 func TestLeaderGate_TheRenewalBudgetNeverOutlivesTheCadenceItSitsInside(t *testing.T) {
     locker := NewInMemoryLocker(clock.NewSystemClock())
 
@@ -1113,7 +1113,7 @@ func TestLeaderGate_IsLeaderAnswersFromTheAcquireLeaseBeforeAnyRenewal(t *testin
     }
 }
 
-/* the shield keeps the process alive; what it must not keep alive is the term — a gate parked on a term whose work died renews a lease under nothing, answers IsLeader and reports no failure, where a crashed process used to hand the work to another replica */
+/* the shield keeps the process alive, but not the term: a gate parked on a term whose work died would renew a lease under nothing and answer IsLeader */
 func TestLeaderGate_APanickingOnElectedEndsTheTermAndReleasesTheLock(t *testing.T) {
     locker := NewInMemoryLocker(clock.NewSystemClock())
 
@@ -1233,7 +1233,7 @@ func (instance *typedNilScopeRuntime) Context() context.Context                {
 func (instance *typedNilScopeRuntime) Scope() containercontract.Scope          { return (*nilableTestScope)(nil) }
 func (instance *typedNilScopeRuntime) Container() containercontract.Container { return instance.container }
 
-/* the runtime package's resolution doors tolerate a typed-nil scope by falling back to the container, so such a runtime reaches the gate; runtime.New refuses it, and the refusal used to fire inside the deferred release — a second panic in the unwind of the first, with the lock kept until its ttl lapsed */
+/* the runtime package's resolution doors tolerate a typed-nil scope, so such a runtime reaches the gate; it is refused before campaigning, since runtime.New would refuse it inside the deferred release, a second panic with the lock held */
 func TestLeaderGateRun_RefusesATypedNilScopeBeforeCampaigning(t *testing.T) {
     locker := NewInMemoryLocker(clock.NewSystemClock())
     serviceContainer := container.NewContainer()

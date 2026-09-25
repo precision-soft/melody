@@ -16,7 +16,7 @@ type RequestOptions struct {
     authorization        httpclientcontract.AuthorizationOptions
     maxResponseBodyBytes int
 
-    /* refusal is the collision SetHeaders could not answer: the contract gives that door no error to return, and the request path promises an error rather than a panic, so the first refusal waits here for applyRequestOptions to fail the request with, under the index of the option that raised it. */
+    /* the collision SetHeaders could not answer, kept for applyRequestOptions to fail the request with under the index of the option that raised it */
     refusal error
 }
 
@@ -29,7 +29,7 @@ func NewRequestOptions() *RequestOptions {
     }
 }
 
-/* Headers hands out a copy: the live map invited writes that bypass the canonicalization SetHeader exists to enforce, and a non-canonical spelling planted through the getter next to the canonical one made the request-time winner a map-iteration choice — in what is often a credential header, the exact nondeterminism the setters refuse. The setters remain the one door that writes. */
+/* Headers hands out a copy, so no write bypasses the canonicalization the setters enforce. */
 func (instance *RequestOptions) Headers() map[string]string {
     return maps.Clone(instance.headers)
 }
@@ -63,12 +63,12 @@ func (instance *RequestOptions) SetMaxResponseBodyBytes(maxResponseBodyBytes int
     instance.maxResponseBodyBytes = maxResponseBodyBytes
 }
 
-/* SetHeader stores the key canonicalized, so two spellings of one header land on one entry deterministically — the last sequential write wins — instead of surviving as two map entries whose request-time winner map iteration chose. */
+/* SetHeader stores the key canonicalized, so two spellings of one header land on one entry and the last write wins. */
 func (instance *RequestOptions) SetHeader(key string, value string) {
     instance.headers[canonicalHeaderKey(key)] = value
 }
 
-/* SetHeaders refuses a map carrying two spellings that collapse onto one header, the way the client config constructor does: inside one map there is no sequential order to make the survivor deterministic. The constructor refuses by panic, at the wiring; this door runs on the request path, where a panic would bypass the caller's own handling of the failure, so a colliding map writes nothing and the refusal is kept for applyRequestOptions, which fails the request naming the option. */
+/* SetHeaders refuses a map carrying two spellings that collapse onto one header, since one map has no order to pick the survivor. On the request path a panic would bypass the caller's handling, so a colliding map writes nothing and applyRequestOptions fails the request naming the option. */
 func (instance *RequestOptions) SetHeaders(headers map[string]string) {
     canonical, err := canonicalizeHeaderMap(headers)
     if nil != err && nil == instance.refusal {

@@ -10,10 +10,10 @@ import (
     "github.com/precision-soft/melody/v3/exception"
 )
 
-/* ErrRotatedDescriptorNotClosed marks the failure Reopen reports after the rotation already happened: the fresh descriptor is installed and taking the writes, and only the descriptor it replaced refused to close — a deferred write surfacing at close, the shape a remote or failing filesystem takes. The journal did rotate, so a caller reading this must not announce one that could not. */
+/* ErrRotatedDescriptorNotClosed marks the failure Reopen reports after the rotation happened: the fresh descriptor takes the writes, and only the replaced one refused to close. A caller reading it must not report a failed rotation. */
 var ErrRotatedDescriptorNotClosed = errors.New("the descriptor replaced by the rotation could not be closed")
 
-/* NewReopenableFileWriter opens the file for appending and answers a writer that can be told to open it again under the same path. The reopen is what rename-based rotation needs: a rotator that moves the file away leaves a plain descriptor writing into the renamed inode, so the journal keeps flowing into a file no reader watches anymore — reopening after the rename points the writer at the fresh file the path now names. Every write, the reopen and the close serialize on one lock, so a record is never torn across the swap and never lands on a closed descriptor. */
+/* NewReopenableFileWriter opens the file for appending and answers a writer that can reopen it under the same path, which rename-based rotation needs. Every write, the reopen and the close serialize on one lock, so a record is never torn across the swap nor written to a closed descriptor. */
 func NewReopenableFileWriter(path string) (*ReopenableFileWriter, error) {
     file, openErr := openReopenableFile(path)
     if nil != openErr {
@@ -56,7 +56,7 @@ func (instance *ReopenableFileWriter) Write(payload []byte) (int, error) {
     return instance.file.Write(payload)
 }
 
-/* Reopen opens the path fresh and swaps the descriptor, closing the one it replaces. A path that cannot be opened keeps the current descriptor and reports the failure, because a journal writing into a renamed file is still a journal, while one whose descriptor was surrendered before the replacement existed is silence. The two failures it can report are different events and are not interchangeable: an open failure means the rotation did not happen, while a descriptor that refuses to close after the swap means it did — the writer is already on the fresh file and healthy. Only the second carries ErrRotatedDescriptorNotClosed, so a caller separates them with errors.Is instead of reading every non-nil result as a journal that failed to rotate. */
+/* Reopen opens the path fresh, swaps the descriptor and closes the one it replaces. A path that cannot be opened keeps the current descriptor and reports the failure, meaning no rotation; a replaced descriptor that refuses to close after the swap reports ErrRotatedDescriptorNotClosed, meaning the rotation happened. */
 func (instance *ReopenableFileWriter) Reopen() error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -81,7 +81,7 @@ func (instance *ReopenableFileWriter) Reopen() error {
 
     closeErr := previousFile.Close()
     if nil != closeErr {
-        /* the swap above is already committed and is not rolled back: the fresh descriptor is the one the writer holds, so this reports a rotation that happened and a surrendered descriptor that reported a deferred write on its way out */
+        /* the swap is committed and not rolled back: the fresh descriptor is the one the writer holds */
         return exception.NewError(
             "failed to close the descriptor replaced by the log rotation",
             map[string]any{
@@ -94,7 +94,7 @@ func (instance *ReopenableFileWriter) Reopen() error {
     return nil
 }
 
-/* ArmReopenOnSignal registers the given signals and reopens the file each time one arrives; SIGHUP is the conventional choice, the signal logrotate sends after a rename. A reopen that fails is reported on stderr — this writer usually IS the journal, so the failure cannot be filed through it — and the descriptor in use keeps writing. A rotation that completed and only failed to close the descriptor it replaced is announced apart from one that did not rotate at all, so a deferred write surfacing at close is never read as a journal stuck on the renamed file. The watcher belongs to the writer: Close unregisters the signals and joins the goroutine, so a torn-down application leaves no watcher armed to act on a later signal, and arming twice is refused because two watchers would race each other's reopen. */
+/* ArmReopenOnSignal reopens the file each time one of the signals arrives; SIGHUP is the one logrotate sends. A failed reopen is reported on stderr, since this writer is usually the journal, and the descriptor in use keeps writing; ErrRotatedDescriptorNotClosed is announced apart. Close unregisters the signals and joins the watcher, and arming twice is refused, since two watchers would race each other's reopen. */
 func (instance *ReopenableFileWriter) ArmReopenOnSignal(signals ...os.Signal) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -166,7 +166,7 @@ func (instance *ReopenableFileWriter) watchReopenSignals() {
     }
 }
 
-/* Close disarms the signal watcher before it surrenders the descriptor, in that order: a signal landing between the two would otherwise find the writer already refusing, and one landing after the surrender would reopen a file nobody owns. It is safe to call more than once. */
+/* Close disarms the signal watcher before it surrenders the descriptor, in that order, so no signal reopens a file nobody owns. It is safe to call more than once. */
 func (instance *ReopenableFileWriter) Close() error {
     instance.mutex.Lock()
     alreadyClosed := instance.closed
@@ -189,7 +189,7 @@ func (instance *ReopenableFileWriter) Close() error {
     }
 
     instance.closed = true
-    /* a watcher armed between the first look and this lock would outlive the writer; the re-check under the same lock that Arm takes makes that window observable */
+    /* a watcher armed between the first look and this lock would outlive the writer, so the check is repeated under the lock Arm takes */
     watcherArmed = instance.watcherArmed
     file := instance.file
 

@@ -75,7 +75,7 @@ func TestGenerate_MultiMethodRouteEmitsDistinctOperationsAndUniqueOperationIds(t
     }
 }
 
-/* Get is asked once per route and the operation built once per method, so the operations of one route are given each a tags slice of their own: a post-processor writing a tag into the GET operation used to rewrite the POST beside it. */
+/* Get is asked once per route and the operation built once per method, so each operation of one route gets a tags slice of its own */
 func TestGenerate_TheOperationsOfOneRouteDoNotShareTheirTags(t *testing.T) {
     registry := NewRegistry()
     registry.Describe("thing.handle", Descriptor{Tags: []string{"a"}})
@@ -210,7 +210,7 @@ func TestGenerate_NumericConstraintsEmbeddingAndNullability(t *testing.T) {
         t.Fatalf("expected the numericRequest component schema")
     }
 
-    /* inverted with the validation repairs: min on an integer no longer passes silently — the length constraint refuses a non-string value, so the field is advertised unsatisfiable (the empty exclusive window) instead of as an unconstrained integer */
+    /* the length constraint refuses a non-string value, so min on an integer is advertised unsatisfiable (the empty exclusive window) */
     quantity := schema.Properties["quantity"]
     if nil == quantity || "integer" != quantity.Type || nil != quantity.MinLength ||
         nil == quantity.Minimum || 0 != *quantity.Minimum || nil == quantity.ExclusiveMinimum ||
@@ -373,7 +373,7 @@ type taggedRequest struct {
     Code string   `json:"code" validate:"min=2,max=8"`
 }
 
-/* inverted with the validation repairs: min/max measure a genuine string and refuse every other shape outright, so on a []string field they no longer pass silently — the array is advertised unsatisfiable (impossible items window) instead of unconstrained — while the string field keeps its exact length bounds */
+/* min/max measure a genuine string and refuse every other shape, so a []string field is advertised unsatisfiable (an impossible items window) while the string field keeps its exact length bounds */
 func TestGenerate_MinMaxAppliesOnlyToStringLength(t *testing.T) {
     registry := NewRegistry()
     registry.Describe("tags.create", Descriptor{
@@ -857,7 +857,7 @@ func TestGenerate_ARouteWithoutMethodsDocumentsEveryPathItemVerb(t *testing.T) {
     }
 }
 
-/* a verb outside the eight the format models has no slot in a path item; the operation used to be built and dropped without a trace, an endpoint answering in production and absent from the spec — the route now stays in the document with the undescribed verb named. */
+/* a verb outside the eight the format models has no slot in a path item, so the route stays in the document with the verb named */
 func TestGenerate_ANonStandardVerbIsNamedOnThePathItem(t *testing.T) {
     routes := []httpcontract.RouteDefinition{
         fakeRoute{name: "cache.purge", pattern: "/cache/", methods: []string{"PURGE", "GET"}},

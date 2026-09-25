@@ -23,7 +23,7 @@ func NewHttpClientConfig(
     }
 }
 
-/* refuseBaseUrlWithoutTrailingSlash rejects a base url whose path does not end in a slash, at the door that stores it. RFC 3986 reference resolution — which buildUrl implements — merges a relative target over the LAST SEGMENT of the base path, so "https://host/v1" + "users" names "https://host/users": the "/v1" the caller thought of as a prefix is silently cut, and every request answers 404 in production. Refusing at construction makes the mistake fall at wiring instead. The path is judged in its escaped form, the one the merge operates on. A base with an empty path ("https://host") is legal — there is no segment to cut — and an empty base url means no base at all. A base that does not parse cannot be judged here; buildUrl reports the parse failure on the first request, sanitized. */
+/* refuseBaseUrlWithoutTrailingSlash rejects a base url whose escaped path does not end in a slash: RFC 3986 resolution merges a relative target over the last segment of the base path, so "https://host/v1" + "users" names "https://host/users". An empty path or an empty base url is legal; a base that does not parse is reported, sanitized, on the first request. */
 func refuseBaseUrlWithoutTrailingSlash(baseUrl string) {
     if "" == baseUrl {
         return
@@ -58,7 +58,7 @@ type HttpClientConfig struct {
     withoutRedirects bool
 }
 
-/* WithoutRedirects makes the client answer a redirect as the response it is instead of following it: the 3xx status and its Location reach the caller. A client that follows keeps net/http's rules, and one of them turns a POST answered 301, 302 or 303 into a GET without its body — so a caller that posts to a sink and reads the success of what came back has read the success of a page the sink pointed at, not of what the sink stored. A caller whose target must be where it was configured names that here and judges the status itself. */
+/* WithoutRedirects makes the client answer a redirect as the response it is: the 3xx status and its Location reach the caller. A following client keeps net/http's rules, one of which turns a POST answered 301, 302 or 303 into a GET without its body. */
 func (instance *HttpClientConfig) WithoutRedirects() *HttpClientConfig {
     instance.withoutRedirects = true
 

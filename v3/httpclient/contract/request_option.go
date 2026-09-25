@@ -27,7 +27,7 @@ type RequestOptions interface {
 
     SetHeader(key string, value string)
 
-    /* SetHeaders refuses a map carrying two spellings of one header, and the refusal is answered by the melody client alone: the door has no error to return, so the option set keeps the refusal and the client's request path fails the request naming the option. Another consumer of a RequestOptions value — a client of its own, a decorator, a double — sees an unwritten map and no refusal, since nothing on this contract carries it. */
+    /* SetHeaders refuses a map carrying two spellings of one header. The door returns no error, so the option set keeps the refusal and the melody client fails the request naming the option; another consumer of RequestOptions sees an unwritten map and no refusal. */
     SetHeaders(headers map[string]string)
 
     SetQuery(key string, value string)

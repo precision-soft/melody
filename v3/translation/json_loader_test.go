@@ -92,7 +92,7 @@ func TestJsonDirectoryLoader_MisnamedJsonFileIsAHardError(t *testing.T) {
     writeCatalogFile(t, directory, "messages.en.json", `{"greeting": "Hello"}`)
     writeCatalogFile(t, directory, "en.json", `{"orphan": "no domain"}`)
 
-    /* the misnamed file used to be skipped with the load reporting success, so a naming typo shipped a translator answering raw message ids with nothing pointing at the file; the refusal names it */
+    /* a misnamed file is refused by name, not skipped */
     _, loadErr := NewJsonDirectoryLoader(directory).Load()
     if nil == loadErr {
         t.Fatalf("expected a hard error for a .json file that does not parse as <domain>.<locale>.json")

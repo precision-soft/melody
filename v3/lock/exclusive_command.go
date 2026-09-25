@@ -53,7 +53,7 @@ func NewExclusiveCommandWithName(
     }
 }
 
-/* ExclusiveCommand decorates a cli command with RunExclusive, the per-tick dedup for cron-launched commands on a multi-instance deployment: the ttl is crash-safety only (the lease is refreshed while the command runs and released as soon as it returns), so it never has to be tuned against the cron interval or the command duration. */
+/* ExclusiveCommand decorates a cli command with RunExclusive, the per-tick dedup for cron-launched commands on a multi-instance deployment. The ttl is crash-safety only, since the lease is refreshed while the command runs and released when it returns, so it is never tuned against the cron interval. */
 type ExclusiveCommand struct {
     command  clicontract.Command
     locker   lockcontract.Locker
@@ -93,7 +93,7 @@ func (instance *ExclusiveCommand) Run(
     if false == ran {
         logger := logging.LoggerFromRuntime(runtimeInstance)
         if false == internal.IsNilInterface(logger) {
-            /* RunExclusive answers (false, nil) for two different events, and the exit-zero design makes this log line the single source of truth for "did not run" — so the two must not share one message: a SIGTERM that lands during the acquire is a shutdown, and attributing it to another instance sends an operator hunting for a peer that does not exist. */
+            /* RunExclusive answers (false, nil) both for a lock held elsewhere and for a shutdown during the acquire, and this log line is the one record of "did not run", so the two get distinct messages */
             skipMessage := "command skipped: an exclusive run is already in progress on another instance"
             if nil != runtimeInstance.Context().Err() {
                 skipMessage = "command skipped: shutdown was requested before the lock was acquired"

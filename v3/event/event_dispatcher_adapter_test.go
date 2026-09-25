@@ -295,7 +295,7 @@ func TestEventDispatcherAdapter_RemoveSubscriber_DistinctZeroSizeSubscribersKeep
     }
 }
 
-/* the bookkeeping is scrubbed whether or not the wrapped dispatcher still held the listener: returning early on false left the adapter's own record of a listener that no longer exists, reported by RegisteredEvents forever and removable by nothing, since every retry took the same early return */
+/* the bookkeeping is scrubbed whether or not the wrapped dispatcher still held the listener, so no record outlives it */
 func TestEventDispatcherAdapter_RemoveListener_ScrubsItsRecordForAListenerTheWrappedDispatcherNoLongerHolds(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
     adapter := NewEventDispatcherAdapter(dispatcher)

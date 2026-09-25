@@ -384,7 +384,7 @@ func TestBuildSchema_NotEmptyOnTimeFieldIsUnsatisfiable(t *testing.T) {
         t.Fatalf("expected notEmpty to clear nullable on a time.Time field, got %+v", createdAt)
     }
 
-    /* inverted with the validation repairs: notBlank judges a string and refuses a time.Time outright ("value must be a string", constraint_not_blank.go), where the pre-repair constraint stringified it via fmt and accepted it — so the satisfiable date-time string this used to assert is now the same impossible window as notEmpty */
+    /* notBlank judges a string and refuses a time.Time outright, so the field carries the same impossible window as notEmpty */
     updatedAt := schema.Properties["updatedAt"]
     if "date-time" != updatedAt.Format ||
         nil == updatedAt.MinLength || 1 != *updatedAt.MinLength ||
@@ -927,7 +927,7 @@ func TestApplyValidation_GreaterLessThanNonIntegerBoundIsUnsatisfiable(t *testin
     }
 }
 
-/* inverted with the validation repairs: a parameterized rule named without parameters fails closed (createConstraintWithParams answers "constraint requires parameters"), so the minLength 1 / maxLength 100 defaults the pre-repair mirror advertised for a bare min/max no longer exist — the field accepts nothing */
+/* a parameterized rule named without parameters fails closed, so a bare min or max accepts nothing */
 func TestApplyValidation_BareStringConstraintsAreUnsatisfiable(t *testing.T) {
     for _, tag := range []string{"min", "max"} {
         schema := &Schema{Type: "string"}
@@ -938,7 +938,7 @@ func TestApplyValidation_BareStringConstraintsAreUnsatisfiable(t *testing.T) {
     }
 }
 
-/* inverted with the validation repairs: the pre-repair bare greaterThan meant "greater than zero" and the bare lessThan "less than zero" — silent configurations nobody wrote; both now fail closed, and the assertion pins the FULL empty exclusive window on both ends, because the old open-ended ">0" advertisement satisfies a minimum-only check incidentally */
+/* a bare greaterThan or lessThan fails closed, and the assertion pins the full empty exclusive window on both ends, since an open-ended ">0" would satisfy a minimum-only check */
 func TestApplyValidation_BareNumericConstraintsAreUnsatisfiable(t *testing.T) {
     greaterThanSchema := &Schema{Type: "integer"}
     applyValidation(greaterThanSchema, "greaterThan", nil)
@@ -969,7 +969,7 @@ func TestApplyValidation_ValuedConstraintsStillHonourTheirValue(t *testing.T) {
     }
 }
 
-/* inverted with the validation repairs: a bare min beside a valued one no longer means "floor 1" — the bare rule fails closed on its own, the validator enforces every rule, and one refused rule rejects the whole field whatever its siblings allow, in either tag order */
+/* a bare min beside a valued one fails closed on its own, and one refused rule rejects the whole field, in either tag order */
 func TestApplyValidation_BareMinBesideAValuedMinStillFailsClosed(t *testing.T) {
     for _, tag := range []string{"min(value=5),min", "min,min(value=5)"} {
         schema := &Schema{Type: "string"}
@@ -1389,7 +1389,7 @@ func TestBuildSchema_NotBlankOnNonStringShapesIsUnsatisfiable(t *testing.T) {
     }
 }
 
-/* inverted with the validation repairs: the length constraints refuse a non-string value outright, so max on an integer or boolean no longer measures a stringification — EVERY bound rejects the whole non-null value space, the satisfiable max=5 of the pre-repair mirror included, and only a nullable field keeps its null (the constraint passes a nil pointer) */
+/* the length constraints refuse a non-string value, so every max on an integer or boolean rejects the whole non-null value space, and only a nullable field keeps its null */
 func TestBuildSchema_MaxOnNonStringScalar(t *testing.T) {
     components := map[string]*Schema{}
     names := map[reflect.Type]string{}
@@ -1683,7 +1683,7 @@ type uncompilableRegexThenValuelessMaxRequest struct {
     Code string `json:"code" validate:"regex(pattern=a{3,1}),max"`
 }
 
-/* inverted with the validation repairs: the bare max no longer means "default ceiling 100" — it fails the rule closed on its own, so the whole field is unsatisfiable whatever the uncompilable regex beside it would have allowed, and the assertion pins the full impossible window rather than the maxLength 0 both readings share */
+/* the bare max fails the rule closed on its own, so the field is unsatisfiable whatever the uncompilable regex beside it allows; the assertion pins the full impossible window rather than the maxLength 0 both readings share */
 func TestBuildSchema_UncompilableRegexBesideABareMaxFailsClosed(t *testing.T) {
     components := map[string]*Schema{}
     buildSchema(reflect.TypeOf(uncompilableRegexThenValuelessMaxRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
@@ -1729,7 +1729,7 @@ func TestApplyValidation_PatternIsNotARegexAlias(t *testing.T) {
     }
 }
 
-/* inverted with the validation repairs: a []byte renders as {string, byte}, but the constraints measure the RAW value, and a []byte is not a string — every one of these now refuses it outright ("value must be a string") where the pre-repair constraints ignored it (the format constraints) or measured its fmt rendering (min/max). The field is a plain slice, so even the nil blob is refused (a slice is not a pointer, nothing skips), and each field is fully unsatisfiable and required. */
+/* a []byte renders as {string, byte}, but the constraints measure the raw value, which is not a string, so each refuses it; the field is a plain slice, so even the nil blob is refused, and each field is unsatisfiable and required */
 func TestApplyValidation_StringConstraintsOnByteSliceAreUnsatisfiable(t *testing.T) {
     byteType := reflect.TypeOf([]byte(nil))
     structType := reflect.StructOf([]reflect.StructField{
@@ -1916,7 +1916,7 @@ type notBlankKindsRequest struct {
     When  time.Time `json:"when" validate:"notBlank"`
 }
 
-/* inverted with the validation repairs: notBlank turns absence into a 400 on EVERY kind — a nil pointer or interface is refused as required, the zero "" is blank, and every other zero value is refused as a non-string ("value must be a string") where it used to stringify non-blank and pass — so all seven fields are required, and the non-string ones are advertised unsatisfiable on top */
+/* notBlank turns absence into a 400 on every kind: a nil pointer or interface is refused as required, "" is blank, and every other zero value is refused as a non-string, so all seven fields are required and the non-string ones unsatisfiable */
 func TestBuildSchema_NotBlankRequiredOnEveryKind(t *testing.T) {
     components := map[string]*Schema{}
     buildSchema(reflect.TypeOf(notBlankKindsRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
@@ -1932,7 +1932,7 @@ func TestBuildSchema_NotBlankRequiredOnEveryKind(t *testing.T) {
         }
     }
 
-    /* the []byte field is no longer merely floor-free: the blob itself is refused as a non-string, so the byte-format string carries the impossible window */
+    /* the blob itself is refused as a non-string, so the byte-format string carries the impossible window */
     blob := schema.Properties["blob"]
     if nil == blob.MinLength || 1 != *blob.MinLength || nil == blob.MaxLength || 0 != *blob.MaxLength {
         t.Fatalf("expected notBlank on the []byte field advertised unsatisfiable (minLength 1, maxLength 0), got %+v", blob)
@@ -1978,7 +1978,7 @@ type embedNotBlankRequest struct {
     Title       string `json:"title"`
 }
 
-/* the validator runs a promoted embed's own tag against the embed value, so notEmpty on an embed rejects every payload of the enclosing object and the parent schema must advertise that. Inverted with the validation repairs for the notBlank half: a pointer embed is now refused whether nil (required) or materialised (a struct is not a string), so the parent it used to leave satisfiable is contradicted too. */
+/* the validator runs a promoted embed's own tag against the embed value, so notEmpty on an embed rejects every payload of the enclosing object; a pointer embed under notBlank is refused whether nil or materialised, so its parent is contradicted too */
 func TestBuildSchema_EmbedRejectAllTagContradictsTheParentSchema(t *testing.T) {
     components := map[string]*Schema{}
     buildSchema(reflect.TypeOf(embedRejectAllRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
@@ -2004,7 +2004,7 @@ func TestBuildSchema_EmbedRejectAllTagContradictsTheParentSchema(t *testing.T) {
         t.Fatalf("expected notBlank on a pointer embed to contradict the parent (nil and materialised are both refused), got %+v", notBlankParent)
     }
 
-    /* a bare parameterized constraint on an embed fails the rule closed like any other reject-all tag, where it used to resolve to the registered default */
+    /* a bare parameterized constraint on an embed fails the rule closed like any other reject-all tag */
     bareComponents := map[string]*Schema{}
     buildSchema(reflect.TypeOf(embedBareMinRequest{}), bareComponents, map[reflect.Type]string{}, map[reflect.Type]bool{})
 
@@ -2250,7 +2250,7 @@ type quotedNullRejectingRequest struct {
     Ratio  *float64 `json:"ratio,string" validate:"notBlank"`
 }
 
-/* the quoted "null" decodes to null on a pointer and to the zero value on a bare scalar, so the advertisement must follow the validator: a null-rejecting rule withdraws the spelling, a window admitting zero keeps it, and a nullable empty value space accepts exactly the null literal. Inverted with the validation repairs for the two notBlank fields: notBlank on a non-string shape now refuses everything, so the quoted forms that used to keep the two boolean literals (flag) or merely exclude null (ratio) are unsatisfiable strings. */
+/* the quoted "null" decodes to null on a pointer and to the zero value on a bare scalar, so the advertisement follows the validator: a null-rejecting rule withdraws the spelling, a window admitting zero keeps it, and a nullable empty value space accepts exactly the null literal. notBlank on a non-string shape refuses everything, so those quoted forms are unsatisfiable strings. */
 func TestBuildSchema_JsonStringOptionWithdrawsTheRejectedNullSpelling(t *testing.T) {
     components := map[string]*Schema{}
     buildSchema(reflect.TypeOf(quotedNullRejectingRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
@@ -3395,7 +3395,6 @@ func assertReferenceCarriesFloor(t *testing.T, property *Schema, reference strin
 
    The mirror is allowed to refuse MORE than the validator (fail-closed over-approximation); the declared divergences in the other direction are enumerated in declaredDivergence with their reasons, and TestLockstepMirrorStillAdvertisesSatisfiableValues keeps schemaAccepts from going vacuous — a verdict function that answered false for everything would turn the main invariant green and empty. */
 
-
 type lockstepPayload struct {
     Name string `json:"name"`
 }
@@ -3878,7 +3877,7 @@ func TestLockstepMirrorStillAdvertisesSatisfiableValues(t *testing.T) {
     }
 }
 
-/* TestLockstepNumericBoundAgreesWithValidator pins parseBoundStrict to the validator's parseIntStrict through the public doors alone: for every bound spelling, the tag goes through the real generator on one side and the real validator on the other, and the two verdicts must be EQUAL on every candidate value — not merely fail-closed — because a length bound on a genuine string is an exact mirror, with no over-approximation to hide behind. The pre-repair test this replaces pinned a hand-written copy of the old acceptance table and never touched the validator, so it stayed green while the two parsers diverged. */
+/* TestLockstepNumericBoundAgreesWithValidator pins parseBoundStrict to the validator's parseIntStrict through the public doors: for every bound spelling the tag goes through the real generator and the real validator, and the two verdicts must be equal on every candidate value, since a length bound on a genuine string is an exact mirror. */
 func TestLockstepNumericBoundAgreesWithValidator(t *testing.T) {
     validatorInstance := validation.NewValidator()
 
@@ -3912,7 +3911,7 @@ func TestLockstepNumericBoundAgreesWithValidator(t *testing.T) {
     }
 }
 
-/* the parse of a validate tag is memoized: the nine predicates of the mirror split the same tag again for every field of every document, and the document is generated per request — measured, about thirty allocations per tag per document before the memo. The memo hands out the one parse by identity, so a second reading of a tag allocates nothing and reads the very maps the first one built. */
+/* the parse of a validate tag is memoized and handed out by identity, so a second reading of a tag allocates nothing and reads the maps the first one built */
 func TestParsedTagRules_AnswersOneParsePerTag(t *testing.T) {
     tag := "notBlank,min=2,regex=^[a-z]+$"
 

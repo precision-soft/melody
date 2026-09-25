@@ -261,7 +261,7 @@ func TestManager_Many_SkipsCorruptEntriesAndNamesThem(t *testing.T) {
     }
 }
 
-/* the items come as a map, so a refusal that stopped at the first entry the iteration reached named a different key on every call — measured 179/21 over two hundred calls on two refused keys; fifty rounds leave a re-instated "first refusal wins" a chance of about 0.9^50 to hide */
+/* the items come as a map, so a refusal naming whichever entry the iteration reached first would differ between calls; fifty rounds make a first-refusal-wins rule visible */
 func TestManager_SetMultipleNamesTheRefusedKeysDeterministically(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 

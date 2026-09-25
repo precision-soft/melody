@@ -528,7 +528,7 @@ func TestJsonLogger_NormalizesTypedNilErrorToNull(t *testing.T) {
     }
 }
 
-/* an error one level down used to reach the encoder unnormalized and marshal as an empty object — every field unexported, no marshaler — so the diagnostic survived at the top level and vanished one level below it */
+/* an error one level down is normalized too, since the encoder would marshal it as an empty object */
 func TestJsonLogger_NormalizesNestedErrors(t *testing.T) {
     logger, buffer := testNewJsonLogger()
 
@@ -563,7 +563,7 @@ func TestJsonLogger_NormalizesNestedErrors(t *testing.T) {
     }
 }
 
-/* one unmarshalable value used to cost every other key of the record: the fallback now carries the whole context as text, so the service name and the cause survive next to the marshal error */
+/* one unmarshalable value costs no other key: the fallback carries the whole context as text, so the service name and the cause survive beside the marshal error */
 func TestJsonLogger_FallbackKeepsTheContextAsText(t *testing.T) {
     logger, buffer := testNewJsonLoggerWithMinLevel(loggingcontract.LevelInfo)
 
@@ -599,7 +599,7 @@ func (instance *gatedProbeWriter) Write(payload []byte) (int, error) {
     return len(payload), nil
 }
 
-/* Closed is asked by the process-boundary exit handler; an answer serialized behind an in-flight Write into a stalled pipe used to hang the one handler that must reach os.Exit — the probe is held open inside Write while Closed is required to answer */
+/* Closed is asked by the exit handler, so it must answer while a Write into a stalled pipe holds the lock; the probe is held open inside Write while Closed answers */
 func TestJsonLogger_ClosedAnswersWhileAWriteIsInFlight(t *testing.T) {
     writer := &gatedProbeWriter{
         entered: make(chan struct{}),
@@ -730,7 +730,7 @@ func TestJsonLogger_ErrorImplementingMarshalerRendersStructurally(t *testing.T) 
     }
 }
 
-/* a level outside the five known ones weighs as error instead of debug — the unknown level is the case that least deserves silence, and the zero-value exception carries an empty one; the label keeps the raw level so the record says what it was handed */
+/* a level outside the five known ones weighs as error instead of debug, and the label keeps the raw level */
 func TestJsonLogger_UnknownLevelIsWeighedAsError(t *testing.T) {
     logger, buffer := testNewJsonLoggerWithMinLevel(loggingcontract.LevelInfo)
 
@@ -1423,7 +1423,6 @@ func (instance *refusingWriter) Write(payload []byte) (int, error) {
     return 0, errors.New("the journal destination refuses every record")
 }
 
-
 /* the encoder leaves the C1 block raw in every field it writes, so a message carrying U+009B repainted the terminal the file was tailed on and a NEL in a context value ended the record for a reader splitting on Unicode line boundaries; the record spells the block as json escapes in the message and in the context alike, and decodes to the values it was given */
 func TestJsonLogger_SpellsTheC1BlockAsJsonEscapes(t *testing.T) {
     logger, buffer := testNewJsonLogger()
@@ -1517,10 +1516,7 @@ type cyclicThroughAField struct {
     Held map[string]any
 }
 
-/* the context the encoder refuses was handed to fmt whole, and fmt has no cycle detection: a map that closes
-   on itself through a struct field recursed until the goroutine stack was gone — a fatal error, not a panic, so
-   no recover anywhere turned it into a record and the process ended. Rendered key by key, the encoder detects
-   the cycle and the one key that carries it says so; the service beside it keeps its value. */
+/* a map that closes on itself through a struct field would overflow the stack inside fmt, a fatal error no recover reaches; rendered key by key, the encoder refuses the one key that carries the cycle and the service beside it keeps its value */
 func TestJsonLogger_FallbackSurvivesACycleHeldThroughAStructField(t *testing.T) {
     logger, buffer := testNewJsonLogger()
 

@@ -44,9 +44,9 @@ func ConsumeBusFromResolver(resolver containercontract.Resolver) messagebuscontr
     return BusMustFromResolver(resolver)
 }
 
-/* RegisterTransports registers the named transports the consume command resolves at run time, so registering them is enough for the framework to expose melody:messagebus:consume. It also registers a TransportsCloser beside the map, resolved as a dependency of it: the container's ordered teardown closes what answers Close() error and a map answers nothing, so without the closer no transport could ever join the shutdown — whichever run resolves the transports thereby guarantees their broker connections are closed after every consumer that depends on them. */
+/* RegisterTransports registers the named transports the consume command resolves at run time, which is enough for the framework to expose melody:messagebus:consume. It also registers a TransportsCloser as a dependency of the map, since the ordered teardown closes what answers Close() error and a map answers nothing, so the transports close after every consumer that depends on them. */
 func RegisterTransports(registrar ServiceRegistrar, transports map[string]messagebuscontract.Transport) {
-    /* a nil — or typed-nil — entry is refused here, at boot, in the framed form RouteType uses: the consume command resolves the map by name at run time and would dereference it there, far from the wiring that put it in. The closer's own nil branch stays for an entry written into the map after this call. */
+    /* a nil or typed-nil entry is refused at boot, as RouteType refuses one; the closer's own nil branch covers an entry written into the map after this call */
     for name, transport := range transports {
         if true == isNilTransport(transport) {
             exception.Panic(exception.NewError("messagebus transport is nil", map[string]any{"name": name}, nil))
@@ -63,7 +63,7 @@ func RegisterTransports(registrar ServiceRegistrar, transports map[string]messag
     registrar.RegisterService(
         ServiceTransports,
         func(resolver containercontract.Resolver) (map[string]messagebuscontract.Transport, error) {
-            /* resolving the closer through this provider records the dependency edge the teardown orders by: the map's consumers close first, the closer — and with it the transports — after them */
+            /* resolving the closer through this provider records the dependency edge the teardown orders by: the map's consumers close first, the transports after them */
             container.MustFromResolver[*TransportsCloser](resolver, ServiceTransportsCloser)
 
             return transports, nil
@@ -80,18 +80,18 @@ func (instance *TransportsCloser) Close() error {
     return instance.CloseWithContext(context.Background())
 }
 
-/* CloseWithContext is Close under the teardown's own deadline, handed to every transport that can take one. The transports are closed SERIALLY, in sorted name order, so they share the deadline rather than each getting a copy of it: two brokers that have both stopped reading cost the caller one budget between them, not two, which is the figure a supervisor's termination grace is measured against. The one that closes first therefore spends what the second does not get, and the failure map names them both. */
+/* CloseWithContext is Close under the teardown's deadline, handed to every transport that can take one. The transports close serially, in sorted name order, so they share the one deadline rather than each getting a copy, and the failure map names every one that failed. */
 func (instance *TransportsCloser) CloseWithContext(closeContext context.Context) error {
     names := make([]string, 0, len(instance.transports))
     for name := range instance.transports {
         names = append(names, name)
     }
-    /* deterministic order: map iteration would close the transports in a different order on every run */
+    /* sorted, so the transports close in the same order on every run */
     sort.Strings(names)
 
     var closeErrs []error
     for _, name := range names {
-        /* a nil entry is a wiring mistake, and it must not cost the transports that come after it. The container recovers a panicking Close and records it, so the process survives — but the panic still abandons THIS loop, and everything sorted later than the offending name would never be closed at all, its broker connection living as long as the process while the record blames one service. RegisterTransports refuses a nil entry at boot; this branch answers for one written into the map after that call. */
+        /* a nil entry is skipped, since its panic would abandon this loop and leave every transport sorted after it unclosed; RegisterTransports refuses one at boot, and this branch answers for one written into the map later */
         if true == isNilTransport(instance.transports[name]) {
             closeErrs = append(
                 closeErrs,
@@ -112,12 +112,12 @@ func (instance *TransportsCloser) CloseWithContext(closeContext context.Context)
     return errors.Join(closeErrs...)
 }
 
-/* isNilTransport reads the map entry through the typed-nil door rather than a plain nil comparison: a composition root that builds a transport conditionally hands back a non-nil interface around a nil pointer, which passes `nil ==` and then dereferences inside Close. */
+/* isNilTransport reads the entry through the typed-nil door, since a nil pointer inside a non-nil interface passes a plain comparison and then dereferences inside Close. */
 func isNilTransport(transport messagebuscontract.Transport) bool {
     return true == internal.IsNilInterface(transport)
 }
 
-/* closeOne contains a panicking transport Close as a returned failure, so the teardown of the transports that sort after it still happens. The container's own teardown makes the same decision one level up for the same reason — but its boundary is around the CLOSER, so a panic inside this loop is recorded once and the rest of the map is silently skipped. The recovered value travels as the cause, not as a stringified context slot, so an error-shaped panic keeps its own context and cause chain in the record, and the stack is captured inside the recover, the only place the frames that ran still exist — the container's own containment keeps it for the same reason. */
+/* closeOne contains a panicking transport Close as a returned failure, so the transports sorted after it still close. The recovered value travels as the cause, and the stack is captured inside the recover, the only place its frames still exist. */
 func (instance *TransportsCloser) closeOne(closeContext context.Context, name string) (closeErr error) {
     defer func() {
         recoveredValue := recover()
@@ -138,7 +138,7 @@ func (instance *TransportsCloser) closeOne(closeContext context.Context, name st
 
     transport := instance.transports[name]
 
-    /* the transport's own context-taking door is preferred when it carries one, which is what makes the deadline reach the amqp stretches rather than stopping at this loop */
+    /* the transport's own context-taking close is preferred, so the deadline reaches the transport's own stretches */
     contextCloseable, isContextCloseable := transport.(containercontract.ContextCloser)
     if true == isContextCloseable {
         closeErr = contextCloseable.CloseWithContext(closeContext)
@@ -146,7 +146,7 @@ func (instance *TransportsCloser) closeOne(closeContext context.Context, name st
         closeErr = transport.Close()
     }
 
-    /* a typed nil is the nil its producer meant, the container's own close answers the same: read as a failure it named a transport that had closed */
+    /* a typed nil is the nil its producer meant, as the container's own close reads it */
     if true == internal.IsNilInterface(closeErr) {
         return nil
     }

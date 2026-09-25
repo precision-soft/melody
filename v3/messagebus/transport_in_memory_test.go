@@ -198,7 +198,7 @@ func TestInMemoryTransport_ConcurrentSendsAndCloseAreRaceFreeAndNeverPanic(t *te
     close(stopReader)
 }
 
-/* the transport closed while the message waited out its delay: the requeue can no longer happen, and the loss is journaled on the logger captured at the Nack */
+/* the transport closed while the message waited out its delay: the requeue cannot happen, and the loss is journaled on the logger captured at the Nack */
 func TestInMemoryTransport_ADelayedRequeueDroppedAtCloseIsLogged(t *testing.T) {
     transport := NewInMemoryTransport(4)
 

@@ -9,7 +9,7 @@ import (
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/* LogTransport writes the recipients (To, Cc, Bcc), subject, both the text and HTML bodies, and per-attachment metadata of every message to the logger instead of delivering it; intended for local development so a misconfigured app never sends real mail */
+/* NewLogTransport answers a transport that writes the recipients (To, Cc, Bcc), the subject, both bodies and each attachment's metadata to the logger instead of delivering the message, so a development app never sends real mail. */
 func NewLogTransport(logger loggingcontract.Logger) *LogTransport {
     return &LogTransport{logger: logger}
 }
@@ -18,7 +18,7 @@ type LogTransport struct {
     logger loggingcontract.Logger
 }
 
-/* the logger supplied at construction is preferred; when it is nil the request-scoped logger is resolved quietly from the runtime (a missing logger service is swallowed rather than emitting an emergency log on every send), and when neither is available the send is a safe no-op */
+/* Send prefers the logger supplied at construction; when it is nil the runtime's logger is resolved quietly, and with neither the send is a no-op. */
 func (instance *LogTransport) Send(runtimeInstance runtimecontract.Runtime, message mailercontract.Message) error {
     logger := instance.logger
     if true == internal.IsNilInterface(logger) {
@@ -46,7 +46,7 @@ func (instance *LogTransport) Send(runtimeInstance runtimecontract.Runtime, mess
     return nil
 }
 
-/* summarizes each attachment as metadata only (filename, content type, Content-ID, inline flag, byte size) — never the raw content — so an inline image embedded for an HTML body is visible in the dev log without dumping its bytes; nil when the message carries no attachments, mirroring appendEmails */
+/* describeAttachments summarizes each attachment as metadata only, never its content, and answers nil for a message with no attachments. */
 func describeAttachments(attachments []mailercontract.Attachment) []map[string]any {
     if 0 == len(attachments) {
         return nil

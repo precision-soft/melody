@@ -1094,7 +1094,7 @@ func TestLogOnRecoverAndExitAfter_WritesTheCertificateForAnAlreadyLoggedError(t 
     }
 }
 
-/* a recovered value whose methods panic used to unwind into main and the process died with the Go runtime's exit code 2 — no record, no certificate, no teardown; the resolve step runs under its own shield for that. The probe panics in Unwrap, which the already-logged probe calls, and the exception package now searches the chain and reads the mark under a recover of its own: the value is no longer unresolvable, so it reaches the record under its OWN message rather than the shield's generic one, with the caller's code, and still logged. The shield stays as the defense of a value that no reader of this package would contain; no value reaches it through the public doors any more */
+/* the probe panics in Unwrap, which the already-logged probe calls; the exception package reads the mark under a recover of its own, so the value reaches the record under its own message with the caller's code. The shield of the resolve step remains for a value no reader contains. */
 func TestResolveRecoveredExitShielded_ResolvesAValueWhoseUnwrapPanicsUnderItsOwnMessage(t *testing.T) {
     err, resolvedExitCode, needsLogging := resolveRecoveredExitShielded(&panickingResolveError{}, 3)
 
@@ -1303,7 +1303,7 @@ func TestRunShieldedStepWithin_HandsTheStepADeadlineBelowItsOwn(t *testing.T) {
     }
 }
 
-/* a step that honours exactly the deadline it was handed is reported as finished. Measured before the split existed: with the two moments equal the answer was false on forty runs out of forty, because the timer is armed before the step is scheduled. */
+/* a step that honours exactly the deadline handed to it is reported as finished, since its deadline sits below the moment the shield abandons it */
 func TestRunShieldedStepWithin_AStepThatHonoursItsDeadlineIsNotAbandoned(t *testing.T) {
     const budget = 400 * time.Millisecond
 

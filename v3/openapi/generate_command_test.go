@@ -314,7 +314,7 @@ func TestGenerateCommand_WarnsOnTheWriterWhenTheInfoServiceIsAbsentAndTheDocumen
     }
 }
 
-/* The documented stdout mode prints the document on the command's one writer, so the warning used to be its first line and melody:openapi:generate > openapi.json wrote a file no parser reads; the document stays parsable and the warning is journaled through the logger the runtime resolves. */
+/* the stdout mode prints the document on the command's one writer, so the document stays parsable and the warning is journaled through the logger the runtime resolves */
 func TestGenerateCommand_TheStdoutDocumentStaysValidJsonWithoutTheInfoService(t *testing.T) {
     projectDirectory := t.TempDir()
 
@@ -391,7 +391,7 @@ func TestGenerateCommand_AConfigurationThatDoesNotResolveDoesNotFailTheStdoutMod
     }
 }
 
-/* the same tolerance one call further: a configuration that resolves but answers no kernel section — a substitute, a decorator, a double — used to dereference nil under the comment that promised the door never fails the command */
+/* a configuration that resolves but answers no kernel section does not fail the command */
 func TestGenerateCommand_AConfigurationWithoutAKernelSectionDoesNotFailTheStdoutMode(t *testing.T) {
     serviceContainer := container.NewContainer()
     serviceContainer.MustRegister(
@@ -474,7 +474,7 @@ func (instance *commandStdoutJournalEnvironmentSource) Load() (map[string]string
     return map[string]string{config.LogPathKey: ""}, nil
 }
 
-/* an empty MELODY_LOG_PATH makes the container log to stdout — the writer the document goes to in stdout mode — so the journal record would land ahead of the json exactly as the warning line used to; the warning goes to the emergency journal on stderr for that configuration, and the application's logger receives nothing. */
+/* an empty MELODY_LOG_PATH makes the container log to stdout, the writer the document goes to, so the warning goes to the emergency journal on stderr and the application's logger receives nothing */
 func TestGenerateCommand_AStdoutJournalDoesNotCarryTheWarningAheadOfTheDocument(t *testing.T) {
     projectDirectory := t.TempDir()
 

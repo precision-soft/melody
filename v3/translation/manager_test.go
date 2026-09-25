@@ -190,7 +190,7 @@ func TestTrans_PathologicallyNestedPluralDoesNotOverflow(t *testing.T) {
     }
 }
 
-/* the other branch with an empty pound — " messages" — was the old answer, which deleted the count from the message with nothing pointing at the missing key; the absent argument stays visible as its placeholder, the way the plain placeholder does */
+/* a missing plural argument stays visible as its placeholder, as the plain placeholder does */
 func TestTrans_PluralWithMissingArgumentRendersTheVisiblePlaceholder(t *testing.T) {
     manager := newTestManager()
 
@@ -232,13 +232,13 @@ func TestHasMessage(t *testing.T) {
 }
 
 func TestNewManager_RefusesANilCatalog(t *testing.T) {
-    /* skipped silently — the old behavior — a nil catalog built a translator answering raw message ids for a whole locale with nothing pointing at the wiring hole */
+    /* a nil catalog is refused, since it would build a translator answering raw ids for a whole locale */
     testhelper.AssertPanicsWithError(t, func() {
         NewManager("en", nil, nil)
     }, "translation catalog is nil")
 }
 
-/* A second catalog of a locale used to replace the first, so every message that lived only in the first answered its raw id; the catalogs of a locale are asked in the order given, the first to answer winning. */
+/* the catalogs of a locale are asked in the order given, the first to answer winning */
 func TestNewManager_TwoCatalogsOfOneLocaleAreAskedInOrder(t *testing.T) {
     first := NewMapCatalog("en")
     first.Add("messages", "greeting", "Hello")

@@ -275,9 +275,10 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         /* the route is matched on the path as the client spelled it, so an encoded separator stays inside its segment; splitRequestPath unescapes each segment after the split, so a parameter binds the decoded value */
         matchPath := internal.RequestPathAsSent(request.URL)
 
-        /* a stale RawPath is not matched: the canonical guard below refuses it, and a route selected on the re-escaped decoded path would be one the client never named, read by every kernel.response and kernel.terminate listener */
+        /* a stale RawPath is not matched and leaves no no-route record: the canonical guard below refuses it, and a route selected on the re-escaped decoded path would be one the client never named, read by every kernel.response and kernel.terminate listener */
+        rawPathIsStale := internal.RequestRawPathIsStale(request.URL)
         var matchResult *httpcontract.MatchResult
-        if false == internal.RequestRawPathIsStale(request.URL) {
+        if false == rawPathIsStale {
             matchResult, _ = instance.router.Match(
                 request.Method,
                 matchPath,
@@ -353,7 +354,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                     "routeName": routeName,
                 },
             )
-        } else {
+        } else if false == rawPathIsStale {
             allowedMethodsValue, exists := routeAttributes[RouteAttributeMethods]
             if true == exists {
                 allowedMethods, ok := allowedMethodsValue.([]string)
@@ -528,7 +529,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         /* a path that folds to a different spelling is refused after the route is matched and before it is authorized or handled, so the router, the firewall matchers and the access control never disagree about the resource. It is asked of RequestPathAsRouted, the spelling the access-control matcher reads too; requestPathIsCanonical states the boundary. */
         /* the leading form of the padded path is asked of the decoded path as well: " /public" routes as "%20/public", a target the guard would otherwise leave to the router */
         /* a stale RawPath, left by a handler in front that rewrote Path alone, does not carry the spelling the client sent, so an encoded separator would be read as a separator: it is refused, as the first and second majors refuse on the raw path */
-        if false == requestPathIsCanonical(RequestPathAsRouted(internal.RequestPathAsSent(request.URL))) || ("" != request.URL.Path && strings.TrimLeftFunc(request.URL.Path, unicode.IsSpace) != request.URL.Path) || true == internal.RequestRawPathIsStale(request.URL) {
+        if false == requestPathIsCanonical(RequestPathAsRouted(internal.RequestPathAsSent(request.URL))) || ("" != request.URL.Path && strings.TrimLeftFunc(request.URL.Path, unicode.IsSpace) != request.URL.Path) || true == rawPathIsStale {
             requestLogger.Warning(
                 "request path refused before the handler",
                 loggingcontract.Context{

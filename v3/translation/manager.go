@@ -6,7 +6,7 @@ import (
     translationcontract "github.com/precision-soft/melody/v3/translation/contract"
 )
 
-/* NewManager keeps every catalog of a locale, in the order given, and a lookup asks them in that order until one answers: a locale is assembled from several sources — the json loader builds one catalog per file it reads — so a second catalog of a locale is an ordinary wiring, and keying the locale on one catalog made the second silently replace the first, every message that lived only in the first answering its raw id. A catalog whose Locale is empty is refused as the nil one is: the locale chain never asks for the empty locale, so such a catalog could never be found. */
+/* NewManager keeps every catalog of a locale, in the order given, and a lookup asks them in that order until one answers, since a locale is assembled from several sources. A nil catalog, or one whose Locale is empty and so could never be found, is refused. */
 func NewManager(
     defaultLocale string,
     fallbackLocales []string,
@@ -14,7 +14,7 @@ func NewManager(
 ) *Manager {
     catalogsByLocale := make(map[string][]translationcontract.Catalog)
     for _, catalog := range catalogs {
-        /* refused, not skipped: a nil catalog is a wiring mistake, and dropping it silently builds a translator that answers raw message ids for a whole locale with nothing pointing at the hole — the same judgement every sibling constructor applies to a nil collaborator */
+        /* a nil catalog is refused, since skipping it would build a translator answering raw ids for a whole locale */
         if true == internal.IsNilInterface(catalog) {
             exception.Panic(exception.NewError("translation catalog is nil", nil, nil))
         }
@@ -60,7 +60,7 @@ func (instance *Manager) HasMessage(messageId string, domain string, locale stri
 }
 
 func (instance *Manager) lookup(messageId string, domain string, locale string) (string, string, bool) {
-    /* the empty domain resolves HERE, at the one door every catalog is asked through: the shipped MapCatalog coerces it too, but the contract does not oblige an application's catalog to, and a lookup handing "" through verbatim missed in exactly the catalogs that took the contract at its word */
+    /* the empty domain resolves here, the door every catalog is asked through, since the contract does not oblige an application's catalog to coerce it */
     if "" == domain {
         domain = DefaultDomain
     }

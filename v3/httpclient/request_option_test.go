@@ -125,7 +125,7 @@ func TestRequestOptions_WithHeadersAndWithQueryParamsReadTheCallersMapWhenApplie
     }
 }
 
-/* the getters hand out copies: a write through the returned map used to bypass the canonicalization SetHeader enforces, and the request-time winner between the planted spelling and the canonical one was chosen by map iteration — in what is often a credential header. */
+/* the getters hand out copies, so no write bypasses the canonicalization SetHeader enforces */
 func TestRequestOptions_HeadersHandsOutACopy(t *testing.T) {
     options := NewRequestOptions()
     options.SetHeader("X-Api-Key", "canonical")

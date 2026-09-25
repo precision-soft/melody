@@ -130,7 +130,7 @@ func TestResolveTransportConfig_TheRemainingFourOverridesAreApplied(t *testing.T
     }
 }
 
-/* the whole point of the pointer fields: a SET zero and a SET negative are statements, not "unset", and they resolve verbatim — MaxIdleConns zero is net/http's unbounded pool, a negative KeepAlive disables the dialer's probes, IdleConnTimeout zero waits forever. Under the old non-positive sentinel every one of these silently became the default beside it. */
+/* a set zero and a set negative are statements, not "unset", and resolve verbatim: MaxIdleConns zero is net/http's unbounded pool, a negative KeepAlive disables the probes, IdleConnTimeout zero waits forever */
 func TestResolveTransportConfig_ZeroAndNegativeAreResolvedVerbatim(t *testing.T) {
     resolved := resolveTransportConfig(&TransportConfig{
         KeepAlive:       TransportDuration(-1),
@@ -165,7 +165,7 @@ func TestResolveTransportConfig_AZeroTotalCarriesThePerHostPoolWithItAsUnbounded
     }
 }
 
-/* the same read on the wire: two waves of six concurrent requests against one host, the handler holding every request of a wave until all six have arrived so the wave dials six sockets; under a per-host pool of two the second wave dials four more (ten new connections, measured), under an unbounded pool it reuses all six. */
+/* two waves of six concurrent requests against one host, each wave held until all six arrived: under a per-host pool of two the second wave dials anew, under an unbounded pool it reuses all six */
 func TestNewHttpClient_AnUnboundedTotalKeepsEveryIdleConnectionOfTheHost(t *testing.T) {
     var mutex sync.Mutex
     newConnections := 0

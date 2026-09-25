@@ -48,7 +48,7 @@ func TestDispatch_WarnsWhenNothingSentOrHandledTheMessage(t *testing.T) {
 
     runtimeInstance, logger := newTestRuntimeWithRecordingLogger()
 
-    /* a send-only bus with no route for the type used to be a total silent no-op reported as success: the caller's success path ran, the outbox row was marked relayed, and the message ceased to exist — this record is the one channel that can see the difference between "delivered somewhere" and "did absolutely nothing" */
+    /* a send-only bus with no route for the type answers success, so this record is the one channel that tells "delivered somewhere" from "did nothing" */
     if _, dispatchErr := bus.Dispatch(runtimeInstance, taskCreated{TaskId: 1}); nil != dispatchErr {
         t.Fatalf("unexpected dispatch error: %v", dispatchErr)
     }

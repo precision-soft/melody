@@ -2222,7 +2222,7 @@ func TestValidator_BuildConstraintWithParamsRefusesATypedNilConstruction(t *test
     }
 }
 
-/* the segment the parser refused reaches the field error's own context: without it a long tag reports only that "the tag" is invalid, and the developer is left comparing every comma-separated rule by eye. No suite on any major pins this promotion — measured before this test was written — so it is what puts the majors in disagreement if the branch is ever lost. */
+/* the segment the parser refused reaches the field error's context, so a long tag names the rule it could not read */
 func TestValidator_TheRefusedTagSegmentReachesTheErrorContext(t *testing.T) {
     validatorInstance := NewValidator()
 
@@ -2270,7 +2270,7 @@ func buildSharedSubtree(levels int) *sharedSubtreeNode {
     return node
 }
 
-/* Every path to a shared subtree reports it, and the subtree is walked once per depth: the path-scoped cycle set alone walked it once per path, which on twenty levels of two pointers each cost 6.6 s and 2^20 walks (measured); with the memo the same value validates in under a millisecond. The bound is 500 ms — over ten thousand times the measured walk and a tenth of the old cost, so a walk that fell back to once per path fails on the clock. */
+/* every path to a shared subtree reports it, and the subtree is walked once per depth; the 500 ms bound fails a walk that fell back to once per path, which costs 2^20 walks on twenty levels of two pointers */
 func TestValidator_ASharedSubtreeIsWalkedOnceAndReportedUnderEveryPath(t *testing.T) {
     validatorInstance := NewValidator()
 
@@ -2346,7 +2346,7 @@ func TestValidator_ASharedPointerReachedAtTwoDepthsIsWalkedAtEach(t *testing.T) 
     }
 }
 
-/* a constraint that answers an error under a field of its own — the door validateRule keeps open by returning such an error verbatim — is answered verbatim under every path that reaches the shared pointer, and a constraint that answers an error TYPE of its own keeps that type under every path: the memo used to re-spell both by gluing the later path onto the field and replacing the type with this package's. */
+/* a constraint answering an error under a field of its own is answered verbatim under every path that reaches the shared pointer, and one answering an error type of its own keeps that type under every path */
 type ownFieldConstraintError struct {
     field string
 }

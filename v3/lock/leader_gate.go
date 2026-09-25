@@ -22,10 +22,10 @@ const defaultLeaderRetryFloor = 1 * time.Second
 /* defaultMaxCampaignBackoff caps the doubling delay between failed campaigns after acquire ERRORS (a store outage), so a persistent outage neither tight-loops the gate nor pushes re-election out indefinitely. */
 const defaultMaxCampaignBackoff = 1 * time.Minute
 
-/* LeaderGateOptions tunes a LeaderGate; every zero value resolves to a sensible default derived from the ttl. */
-/* defaultMaxConsecutiveRefreshFailures is the threshold a gate takes when its options name none. Three, because two consecutive losses are still comfortably a reconnect and the third says the store is not coming back inside a window that matters. At the default cadence it is unreachable — three renewals at half the ttl outlast the lease — so it changes nothing for a gate that did not ask for a denser cadence. */
+/* defaultMaxConsecutiveRefreshFailures is the threshold a gate takes when its options name none. At the default cadence it is unreachable, since three renewals at half the ttl outlast the lease. */
 const defaultMaxConsecutiveRefreshFailures = 3
 
+/* LeaderGateOptions tunes a LeaderGate; every zero value resolves to a default derived from the ttl. */
 type LeaderGateOptions struct {
     /* RetryInterval is the pause between failed campaigns while another instance leads; defaults to half the ttl, floored at one second. */
     RetryInterval time.Duration
@@ -33,20 +33,16 @@ type LeaderGateOptions struct {
     /* RefreshInterval is the lease-renewal cadence while leading; defaults to half the ttl, or defaultSessionProbeInterval when the ttl is non-positive (session-style locks whose Refresh is a liveness probe). */
     RefreshInterval time.Duration
 
-    /* OnElected runs on the Run goroutine right after the gate becomes leader, with the lease renewal already running underneath it. Its runtime carries a context cancelled when the lease is lost, so leader-only work stops instead of running alongside whoever holds the lock now; while it blocks, the gate cannot campaign again. A panic out of it ends the term: the lock is released, OnLost (or the journal) receives the panic as the cause, and the gate campaigns again after RetryInterval — the work is handed to whichever replica wins next, as a crashed process used to hand it over, instead of a gate that keeps renewing a lease under no work and reports itself leader. */
+    /* OnElected runs on the Run goroutine right after the gate becomes leader, with the lease renewal already running. Its runtime carries a context cancelled when the lease is lost, and while it blocks the gate cannot campaign again. A panic out of it ends the term: the lock is released, OnLost receives the panic as the cause, and the gate campaigns again after RetryInterval. */
     OnElected func(runtimeInstance runtimecontract.Runtime)
 
     /* OnLost runs on the Run goroutine right after leadership is lost — to a failed renewal, whose error is the cause, or to a panic out of OnElected, whose recovered value reaches it as the cause of a "leader gate hook panicked" error; when both happen in one term the renewal error wins and the panic is journaled beside it. It does not run on a clean shutdown. Left nil, the gate logs the lost term through the runtime's logger instead; wiring the hook replaces that record. */
     OnLost func(runtimeInstance runtimecontract.Runtime, cause error)
 
-    /* MaxConsecutiveRefreshFailures is how many renewals in a row may fail before the gate leaves its term, whatever the lease still says. Zero takes the default of three; a negative value removes the threshold and leaves the lease clock as the only signal — and in session mode, which has no lease clock, a negative value means probe failures never end the term at all, which is the caller explicitly declining both signals.
-
-       It exists because the two things a failed renewal can mean are not the same. A store that dropped a connection and reconnected is transient — and the lease it wrote is still the store's own promise that nobody else gets this lock until it lapses, which is why the cadence is half the lease: a lost renewal is meant to be survivable. Leaving on the first one turns an eight-second failover into a cancelled term, a re-election and work restarted from the beginning, for a lock that was never in danger.
-
-       A store that is simply gone is not transient, and there the gate should stop being useful rather than wait out a lease it will certainly not renew. The threshold is what tells the two apart in the one configuration where the lease clock cannot: at the default cadence of half the ttl, three failures already outlast the lease, so the lease clock decides and this never fires. It bites only where the cadence is deliberately much denser than the lease, which is itself the operator saying they want to hear about failure quickly. */
+    /* MaxConsecutiveRefreshFailures is how many renewals in a row may fail before the gate leaves its term, whatever the lease still says. Zero takes the default of three; a negative value leaves the lease clock as the only signal, and in session mode, which has no lease clock, means probe failures never end the term. The threshold bites only where the cadence is much denser than the lease: at the default cadence of half the ttl the lease clock decides first. */
     MaxConsecutiveRefreshFailures int
 
-    /* OnCampaignError runs on the Run goroutine for every campaign that could not even ask the store who leads — the gate then backs off and campaigns again. Left nil, the gate logs each failed campaign through the runtime's logger, because a store outage and a permanent misconfiguration (a redis locker built with a non-positive ttl, whose Acquire fails closed on every call) are indistinguishable from the outside: both look exactly like a deployment that quietly elects no leader and does no work. Wiring the hook replaces that record. */
+    /* OnCampaignError runs on the Run goroutine for every campaign that could not ask the store who leads; the gate then backs off and campaigns again. Left nil, the gate logs each failed campaign, since an outage and a misconfiguration both look like a deployment that elects no leader. Wiring the hook replaces that record. */
     OnCampaignError func(runtimeInstance runtimecontract.Runtime, cause error)
 }
 
@@ -82,7 +78,7 @@ func NewLeaderGateWithOptions(
         }
     }
     if 0 < ttl && resolved.RefreshInterval > ttl/2 {
-        /* a renewal cadence slower than half the lease lets the lease lapse before the first refresh, so a second instance can acquire and both report leadership: clamp an over-long override down to the safe derived cadence */
+        /* a cadence slower than half the lease lets the lease lapse before the first refresh, so a second instance could lead too: an over-long override is clamped to the derived cadence */
         resolved.RefreshInterval = ttl / 2
     }
     if minimumRefreshInterval > resolved.RefreshInterval {
@@ -108,10 +104,10 @@ type LeaderGate struct {
     ttl     time.Duration
     options LeaderGateOptions
 
-    /* timeAnchor is the construction instant, kept with its monotonic reading: the lease deadline is stored as an offset from it, so every lease comparison is a monotonic-clock difference. Stored as wall-clock unix nanoseconds instead, a backwards clock step (an ntp correction) would extend perceived leadership past the real lease — IsLeader would keep answering true while a second instance legally acquires, and the failure-recovery margin would refuse to demote for the whole step. */
+    /* the lease deadline is stored as an offset from this monotonic instant, so a backwards wall-clock step cannot extend perceived leadership past the real lease */
     timeAnchor time.Time
 
-    /* inTerm marks a term the gate has entered and not yet left; leaseExpiry carries the instant the held lease lapses, as nanoseconds since timeAnchor, and is zero outside a term. Both are needed: the term flag alone cannot expire on its own, and the deadline alone cannot tell an untaken lock from one whose lease is still running out after the term ended. */
+    /* inTerm marks a term entered and not yet left; leaseExpiry is the instant the held lease lapses, as nanoseconds since timeAnchor, and zero outside a term. The flag alone cannot expire, and the deadline alone cannot tell an untaken lock from a lease still running out. */
     inTerm      atomic.Bool
     leaseExpiry atomic.Int64
 }
@@ -120,7 +116,7 @@ func (instance *LeaderGate) leaseExpiryOffset(issuedAt time.Time, ttl time.Durat
     return int64(issuedAt.Sub(instance.timeAnchor) + ttl)
 }
 
-/* IsLeader answers from the lease rather than from the last renewal's verdict: the gate leads while it is inside a term AND the lease it took or last renewed is still in the future. A renewal that never answers — a store that accepted the call and went quiet — returns no error to demote on, so a term flag on its own keeps reporting leadership long after the lease lapsed and a second instance acquired it; a deadline expires by itself, with nothing to wait for. A non-positive ttl is session mode (MySQL GET_LOCK, PostgreSQL advisory): the lock lives as long as the connection does, there is no lease to outlive, and the term is the whole answer. */
+/* IsLeader answers from the lease: the gate leads while it is inside a term and the lease it took or last renewed is still in the future, so a renewal that never answers cannot keep it leading. In session mode (a non-positive ttl) there is no lease, and the term is the whole answer. */
 func (instance *LeaderGate) IsLeader() bool {
     if false == instance.inTerm.Load() {
         return false
@@ -135,7 +131,7 @@ func (instance *LeaderGate) IsLeader() bool {
     return 0 != expiry && int64(time.Since(instance.timeAnchor)) < expiry
 }
 
-/* enterTerm publishes the lease before the term, so no reader can see leadership backed by the deadline of a term that already ended. The lease is dated from the instant the acquire was ISSUED, not from when it answered: the store started the lease somewhere inside that call, and dating it from the later instant would claim time the lease does not have. In session mode there is no lease at all — the offset stays zero, IsLeader answers from the term alone and refreshFailureEndsTheTerm never consults the lease clock. */
+/* enterTerm publishes the lease before the term, so no reader sees leadership backed by an ended term's deadline. The lease is dated from the instant the acquire was issued, since the store started it somewhere inside the call; in session mode the offset stays zero. */
 func (instance *LeaderGate) enterTerm(acquireIssuedAt time.Time) {
     if 0 < instance.ttl {
         instance.leaseExpiry.Store(instance.leaseExpiryOffset(acquireIssuedAt, instance.ttl))
@@ -164,13 +160,13 @@ func (instance *LeaderGate) Run(runtimeInstance runtimecontract.Runtime) error {
             return nil
         }
 
-        /* a fresh lock per campaign: every CreateLock mints a new fencing token, and reusing a lock after losing it would alias tokens with the holder that took it over */
+        /* a fresh lock per campaign: every CreateLock mints a new fencing token, and a lock reused after losing it would alias the tokens of the holder that took it over */
         lock := instance.locker.CreateLock(instance.name, instance.ttl)
 
         acquireIssuedAt := time.Now()
         acquired, acquireErr := lock.Acquire(runtimeInstance)
         if nil != acquireErr {
-            /* a shutdown cancels the very context the backend was called with, so the campaign in flight fails with the cancellation: that is the stop itself, and reporting it would hand every graceful shutdown an error that reads like a store outage */
+            /* a shutdown cancels the context the backend is called with, so a campaign failing with the cancellation is the stop itself, not a store outage */
             if nil != runContext.Err() {
                 return nil
             }
@@ -210,7 +206,7 @@ func (instance *LeaderGate) Run(runtimeInstance runtimecontract.Runtime) error {
     }
 }
 
-/* holdTerm enters the term, leads it, and leaves it with the lock released — through defers, so a panicking OnElected hook (or a panicking backend) unwinding through here still drops the claim and still releases the lock, instead of killing the process with the lock held for the rest of its ttl on every peer. */
+/* holdTerm enters the term, leads it and leaves it with the lock released, through defers, so a panicking OnElected or backend still drops the claim and releases the lock. */
 func (instance *LeaderGate) holdTerm(
     runtimeInstance runtimecontract.Runtime,
     lock lockcontract.Lock,
@@ -224,7 +220,7 @@ func (instance *LeaderGate) holdTerm(
     return instance.lead(runtimeInstance, lock)
 }
 
-/* reportCampaignError hands a failed campaign to the OnCampaignError hook when one is wired, and records it itself otherwise: without a record a store outage and a permanent misconfiguration are both indistinguishable from a deployment that quietly elects no leader and does no work. A wired hook replaces the record rather than adding to it, so an observer that routes the failure elsewhere is not echoed. */
+/* reportCampaignError hands a failed campaign to the OnCampaignError hook when one is wired, and records it itself otherwise; a wired hook replaces the record. */
 func (instance *LeaderGate) reportCampaignError(runtimeInstance runtimecontract.Runtime, cause error) {
     if nil != instance.options.OnCampaignError {
         instance.runHookShielded(runtimeInstance, "OnCampaignError", func() {
@@ -256,7 +252,7 @@ func (instance *LeaderGate) reportLost(runtimeInstance runtimecontract.Runtime, 
     )
 }
 
-/* runHookShielded runs a user hook behind a recover, because every hook runs on the Run goroutine and Run's own documentation says to start it bare: an unshielded panic would unwind a goroutine with no recover and take the whole process down on user code the gate merely notifies. The panic is journaled here and answered as an error, so the caller that holds a term on the hook's behalf can end it. */
+/* runHookShielded runs a user hook behind a recover, since every hook runs on the bare Run goroutine, where a panic would end the process. The panic is journaled and answered as an error, so the term held for the hook can end. */
 func (instance *LeaderGate) runHookShielded(runtimeInstance runtimecontract.Runtime, hookName string, hook func()) (hookErr error) {
     defer func() {
         recoveredValue := recover()
@@ -295,7 +291,7 @@ func (instance *LeaderGate) gateLogger(runtimeInstance runtimecontract.Runtime) 
     return logger
 }
 
-/* lead holds the leadership term: it starts the lease renewal, runs OnElected underneath it, and blocks until the run context ends (returns nil), a renewal fails, or OnElected panics (returns the cause, so the gate demotes itself and re-campaigns). A panicking hook has to end the term because the recover that keeps the process alive would otherwise leave the gate parked on the term context, renewing a lease under no work, IsLeader answering true and no error anywhere — the false leader the crash used to prevent by handing the work to another replica. The renewal must be running before OnElected is invoked — nothing would renew the lease while the hook works, so a hook that merely takes longer than the ttl lets a second instance acquire while this one still reports leadership and never demotes, since demotion only follows a failed renewal. */
+/* lead holds the leadership term: it starts the lease renewal, runs OnElected underneath it, and blocks until the run context ends (nil), a renewal fails, or OnElected panics (the cause), so the gate demotes and campaigns again. The renewal runs before OnElected is invoked, so a hook that outlasts the ttl never leaves the lease unrenewed; a panicking hook ends the term, so no gate renews a lease under no work. */
 func (instance *LeaderGate) lead(runtimeInstance runtimecontract.Runtime, lock lockcontract.Lock) error {
     termContext, cancel := context.WithCancel(runtimeInstance.Context())
     defer cancel()
@@ -309,7 +305,7 @@ func (instance *LeaderGate) lead(runtimeInstance runtimecontract.Runtime, lock l
     go func() {
         defer waitGroup.Done()
 
-        /* a panicking backend Refresh would otherwise unwind a bare goroutine and kill the process with the lock still held; recovered, it is the same demotion signal a returned error is */
+        /* a panicking backend Refresh would kill the process with the lock held; recovered, it is the same demotion signal a returned error is */
         defer func() {
             if recoveredValue := recover(); nil != recoveredValue {
                 refreshFailure = exception.NewError(
@@ -324,7 +320,7 @@ func (instance *LeaderGate) lead(runtimeInstance runtimecontract.Runtime, lock l
 
         refreshFailure = instance.refreshWhileLeading(termRuntime, lock)
         if nil != refreshFailure {
-            /* the lease is gone. The claim is dropped here rather than where the term unwinds, because the term unwinds only once OnElected returns — a hook that takes its time, or one that ignores the cancelled context, would otherwise keep IsLeader answering true for a lock this instance provably no longer holds, and LOCK.md invites callers to combine the two signals for one fact. Ending the term then stops OnElected rather than let leader-only work continue alongside whoever holds the lock now. */
+            /* the lease is gone, so the claim is dropped here rather than where the term unwinds, which waits for OnElected to return; ending the term then stops OnElected */
             instance.leaveTerm()
             cancel()
         }
@@ -343,11 +339,11 @@ func (instance *LeaderGate) lead(runtimeInstance runtimecontract.Runtime, lock l
 
     <-termContext.Done()
 
-    /* cancel before Wait so a renewal already blocked on an unresponsive backend is interrupted rather than wedging the campaign loop until the connection times out */
+    /* cancel before Wait, so a renewal blocked on an unresponsive backend is interrupted rather than wedging the campaign loop */
     cancel()
     waitGroup.Wait()
 
-    /* a lost lease is the older and the stronger fact: the renewal goroutine dropped the claim itself, and it is the failure the operator has to see first */
+    /* a lost lease is the stronger fact, and the failure the operator sees first */
     if nil != refreshFailure {
         return refreshFailure
     }
@@ -355,11 +351,11 @@ func (instance *LeaderGate) lead(runtimeInstance runtimecontract.Runtime, lock l
     return hookFailure
 }
 
-/* refreshWhileLeading renews the held lease at the configured cadence until the term context ends, returning the first renewal failure. Every renewal is issued under a deadline of its own (resolveRefreshTimeout), because a call that never answers is the one failure mode this loop cannot otherwise see: it would sit in Refresh while the lease lapses and a second instance takes the lock, with no error to return and nothing to demote on. Each renewal that lands moves the lease deadline IsLeader answers from, dated from the instant the call was issued rather than from when it answered, so the claim never outlives the lease the store actually wrote. */
+/* refreshWhileLeading renews the held lease at the configured cadence until the term context ends, returning the first renewal failure. Every renewal runs under its own deadline (resolveRefreshTimeout), so a call that never answers cannot sit while the lease lapses; each landed renewal moves the lease deadline, dated from the instant it was issued. */
 func (instance *LeaderGate) refreshWhileLeading(runtimeInstance runtimecontract.Runtime, lock lockcontract.Lock) error {
     refreshTtl := instance.ttl
     if 0 >= refreshTtl {
-        /* session mode: a session locker ignores this ttl, while a lease locker rewrites the lease — renew for twice the probe cadence so the renewal never races the expiry it just set (see sessionProbeTtlFactor) */
+        /* session mode: a session locker ignores this ttl, while a lease locker rewrites the lease, so it renews for twice the probe cadence (see sessionProbeTtlFactor) */
         refreshTtl = sessionProbeTtlFactor * instance.options.RefreshInterval
     }
 
@@ -378,7 +374,7 @@ func (instance *LeaderGate) refreshWhileLeading(runtimeInstance runtimecontract.
             refreshIssuedAt := time.Now()
 
             if refreshErr := refreshOnce(runtimeInstance, lock, refreshTtl, refreshTimeout); nil != refreshErr {
-                /* a shutdown cancels the very context the backend was called with, so the renewal in flight fails with the cancellation: that is the stop itself, not a lost lease, and reporting it would drive OnLost on every clean stop */
+                /* a shutdown cancels the context the backend is called with, so a renewal failing with the cancellation is the stop itself, not a lost lease */
                 if nil != runtimeInstance.Context().Err() {
                     return nil
                 }
@@ -401,13 +397,7 @@ func (instance *LeaderGate) refreshWhileLeading(runtimeInstance runtimecontract.
     }
 }
 
-/* refreshFailureEndsTheTerm answers the one question a failed renewal poses: is the lock still ours to hold? Two things say no, and they answer different failures.
-
-   The lease clock is the authority. Until the lease this gate last wrote lapses, the store refuses the lock to everyone else whether or not this process can still reach it — so a renewal that failed while the lease runs has cost nothing yet, and leaving on it gives up availability for no exclusivity gained.
-
-   The consecutive-failure threshold covers what the lease clock cannot see: a gate whose cadence is far denser than its lease would otherwise keep working for the whole lease against a store that has plainly gone. At the default cadence the threshold is unreachable and the lease decides.
-
-   In session mode (a non-positive ttl) there is no lease and no lease clock: the lock lives as long as the backend session does, so only the threshold decides. Consulting the lease clock there would read a deadline that was never written — the zero offset dates to the gate's construction, so the FIRST failed probe of every term would demote immediately, overriding the documented three-failure tolerance and even a negative never-on-count threshold. */
+/* refreshFailureEndsTheTerm answers whether a failed renewal ends the term. The lease clock is the authority: until the lease last written lapses, the store refuses the lock to everyone else, so a failed renewal has cost nothing yet. The consecutive-failure threshold covers a cadence far denser than the lease; in session mode there is no lease clock, and only the threshold decides. */
 func (instance *LeaderGate) refreshFailureEndsTheTerm(consecutiveFailureCount int) bool {
     if 0 < instance.ttl {
         leaseExpiry := instance.timeAnchor.Add(time.Duration(instance.leaseExpiry.Load()))
@@ -423,7 +413,7 @@ func (instance *LeaderGate) refreshFailureEndsTheTerm(consecutiveFailureCount in
     return consecutiveFailureCount >= instance.options.MaxConsecutiveRefreshFailures
 }
 
-/* nextCampaignBackoff doubles the campaign backoff after an acquire error and caps it, but never below the configured RetryInterval: a RetryInterval slower than defaultMaxCampaignBackoff must never make outage retries faster than the healthy campaign cadence (which would hammer an already-struggling store and spam OnCampaignError). It also floors an overflowed doubling back to the cap. */
+/* nextCampaignBackoff doubles the backoff after an acquire error and caps it, never below the configured RetryInterval, so an outage is never retried faster than the healthy cadence. An overflowed doubling is floored back to the cap. */
 func nextCampaignBackoff(current time.Duration, retryInterval time.Duration) time.Duration {
     backoffCap := defaultMaxCampaignBackoff
     if retryInterval > backoffCap {

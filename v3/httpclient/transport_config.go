@@ -29,14 +29,14 @@ func TransportCount(value int) *int {
     return &value
 }
 
-/* TransportConfig overrides the transport melody builds for a client. A nil field means "not set" and falls back to the default beside it in DefaultTransportConfig; a set field reaches net/http VERBATIM, zero and negative included, carrying the meaning net/http and net.Dialer document for it — MaxIdleConns zero is an unbounded pool, IdleConnTimeout or ResponseHeaderTimeout zero waits forever, a negative KeepAlive disables the probes. TransportDuration and TransportCount build the pointers in place. */
+/* TransportConfig overrides the transport melody builds for a client. A nil field falls back to its default in DefaultTransportConfig; a set field reaches net/http verbatim, zero and negative included, with the meaning net/http and net.Dialer give it. */
 type TransportConfig struct {
     DialTimeout *time.Duration
     KeepAlive   *time.Duration
 
     MaxIdleConns *int
 
-    /* MaxIdleConnsPerHost bounds the idle pool of a single host. net/http defaults it to two, which caps the whole pool for a client bound to one BaseUrl: every connection past the second is closed as soon as it goes idle, so a burst dials as many sockets as it has requests and leaves almost all of them in TIME_WAIT for the MSL, until the ephemeral port range runs out and every request fails to connect. It defaults to MaxIdleConns and follows an override of it, in its meaning: an unbounded total (zero) makes the host unbounded too, spelled as the largest count because net/http reads a per-host zero as its default of two, and a negative total makes the host negative, which net/http reads as keep-alives disabled — every request dials. */
+    /* MaxIdleConnsPerHost bounds the idle pool of one host; net/http's default of two would close every connection past the second as it idles, exhausting ephemeral ports under a burst. It defaults to MaxIdleConns and follows its meaning: an unbounded total makes the host unbounded, spelled as the largest count, and a negative total disables keep-alives. */
     MaxIdleConnsPerHost *int
 
     IdleConnTimeout       *time.Duration
@@ -86,7 +86,7 @@ func resolveTransportConfig(override *TransportConfig) resolvedTransportConfig {
     if nil != override.MaxIdleConns {
         resolved.MaxIdleConns = *override.MaxIdleConns
 
-        /* the per-host pool follows the total unless the caller pins it, so raising MaxIdleConns alone is never silently capped at net/http's per-host default of two; it follows the total's meaning rather than its number — zero is an unbounded total, and copied to the host it would read as net/http's default of two, the very cap this rule exists to avoid, so the host becomes unbounded in the only spelling net/http has for it */
+        /* the per-host pool follows the total's meaning unless the caller pins it: zero is an unbounded total, which copied to the host would read as net/http's default of two, so the host becomes the largest count */
         resolved.MaxIdleConnsPerHost = *override.MaxIdleConns
         if 0 == *override.MaxIdleConns {
             resolved.MaxIdleConnsPerHost = math.MaxInt

@@ -67,7 +67,7 @@ func (instance *refreshFailingLock) Refresh(runtimeInstance runtimecontract.Runt
     return exception.NewError("lease lost", nil, nil)
 }
 
-/* contextCancelledAcquireLock stands in for a backend round trip cut short by a SIGTERM: Acquire fails with the runtime cancellation wrapped in a store error, exactly as a real locker reports an in-flight Acquire when the context it was called with is cancelled underneath it. */
+/* contextCancelledAcquireLock stands in for a backend round trip cut short by a SIGTERM: Acquire fails with the runtime cancellation wrapped in a store error, as a real locker reports an in-flight Acquire whose context is cancelled. */
 type contextCancelledAcquireLocker struct{}
 
 func (instance *contextCancelledAcquireLocker) CreateLock(name string, ttl time.Duration) lockcontract.Lock {
@@ -154,7 +154,7 @@ func TestRunExclusive_FailsClosedOnAcquireError(t *testing.T) {
 }
 
 func TestRunExclusive_AcquireCancellationIsShutdownNotError(t *testing.T) {
-    /* a SIGTERM cancels the very context the backend was called with, so an in-flight Acquire fails with the cancellation wrapped in a store error; that is the stop itself and must read as a clean skip, never as an error a cron fleet reports as a failed run */
+    /* a SIGTERM cancels the context the backend is called with, so an in-flight Acquire fails with the cancellation; that is the stop itself and reads as a clean skip, not a failed run */
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
 
@@ -507,7 +507,7 @@ func (instance *slowSucceedingRefreshLock) Refresh(runtimeInstance runtimecontra
     }
 }
 
-/* A renewal that ANSWERS, inside the lease it is renewing, renewed it — however long the store took to say so. Demoting on the latency of one call instead of on the lease clock cancels work that was never in danger and, under a LeaderGate, drops a term that was never lost. The delay here sits above the old per-call verdict (a quarter of the ttl) and below the lease, which is exactly the band that used to report a lost lock. */
+/* a renewal that answers inside the lease it renews renewed it, however slowly, and demotion follows the lease clock; the delay sits between a quarter of the ttl and the lease */
 func TestRunExclusive_ASlowButSuccessfulRenewalDoesNotLoseTheLease(t *testing.T) {
     ttl := 200 * time.Millisecond
     locker := &slowSucceedingRefreshLocker{delay: 80 * time.Millisecond}
@@ -931,7 +931,7 @@ func TestRunExclusive_RefusesATypedNilScopeBeforeAcquiring(t *testing.T) {
     }
 }
 
-/* refreshHoldingLock answers each Refresh slowly, the way a store on the wire does, and records whether a Release arrived while one was still in flight — the window a panicking callback used to open, the release going out while the renewal was on the wire */
+/* refreshHoldingLock answers each Refresh slowly, as a store on the wire does, and records whether a Release arrived while one was still in flight */
 type refreshHoldingLock struct {
     inner lockcontract.Lock
 
@@ -982,7 +982,7 @@ func TestRunExclusive_ACallbackPanicJoinsTheRefreshBeforeReleasing(t *testing.T)
     func() {
         defer func() { recovered = recover() }()
 
-        /* the callback panics at the instant a renewal is on the wire, which is what makes the old order observable every time rather than by timing */
+        /* the callback panics while a renewal is on the wire, so the order of the join and the release is observable every time rather than by timing */
         _, _ = RunExclusive(runtimeInstance, locker, "callback-panics", 4*time.Millisecond, func(runtimecontract.Runtime) error {
             deadline := time.Now().Add(2 * time.Second)
             for 0 == locker.last.refreshInFlight.Load() {

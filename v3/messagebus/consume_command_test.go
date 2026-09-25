@@ -788,7 +788,7 @@ func TestRun_OverlappingRunsShareNoMutableState(t *testing.T) {
     wait.Wait()
 }
 
-/* RetryPolicy is a public struct an application fills in, and FailureTransport is a field it sets from a transport it resolved: a *InMemoryTransport left nil is a Transport that is not nil. The comparison against nil answered false, Send was called on the nil receiver, and the panic that followed was caught by the session's own recovery and filed as a handling failure — so the exhausted message was neither routed nor nacked, which is the one outcome the retry pipeline has no name for. Absent means absent, whichever nil it is spelled with. */
+/* a nil *InMemoryTransport set as FailureTransport is a Transport that is not nil, and is read as absent */
 func TestConsume_ATypedNilFailureTransportIsReadAsAbsent(t *testing.T) {
     var absentTransport *InMemoryTransport
 

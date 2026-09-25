@@ -37,7 +37,7 @@ type HttpClient struct {
     timeout time.Duration
 }
 
-/* NewHttpClient builds a client over its own net/http transport, which owns an idle connection pool: hold the client for as long as the application calls the service it points at, and close it when it is done, rather than building one per call. A nil configuration panics at the point the wiring mistake is made — NewDefaultHttpClient is the constructor that asks for the defaults. */
+/* NewHttpClient builds a client over its own net/http transport and idle connection pool: hold the client while the application calls the service, and close it when done, rather than building one per call. A nil configuration panics; NewDefaultHttpClient asks for the defaults. */
 func NewHttpClient(config *HttpClientConfig) *HttpClient {
     if nil == config {
         exception.Panic(
@@ -87,7 +87,7 @@ func NewHttpClient(config *HttpClientConfig) *HttpClient {
     return instance
 }
 
-/* answerRedirectAsTheResponse is the policy of a client built WithoutRedirects: net/http reads ErrUseLastResponse as "hand the redirect back unfollowed, with its body open", so the caller receives the 3xx and decides. Nothing is stripped, because nothing is sent on. */
+/* answerRedirectAsTheResponse is the policy of a client built WithoutRedirects: net/http hands the redirect back unfollowed, body open, so the caller receives the 3xx. */
 func answerRedirectAsTheResponse(request *nethttp.Request, via []*nethttp.Request) error {
     return nethttp.ErrUseLastResponse
 }
@@ -95,12 +95,12 @@ func answerRedirectAsTheResponse(request *nethttp.Request, via []*nethttp.Reques
 /* defaultMaxRedirects mirrors net/http's own cap; it is stated here because the client installs its own policy. */
 const defaultMaxRedirects = 10
 
-/* requestCredentialHeadersKeyType keys the per-request credential header names on the request context. The redirect policy only knows the header names the client was CONFIGURED with; the ones a caller attaches to a single request through WithHeader/WithHeaders are just as secret, and the context is the only channel that reaches a redirect the client itself creates. */
+/* requestCredentialHeadersKeyType keys the per-request credential header names on the request context, the only channel that reaches a redirect the client itself creates. */
 type requestCredentialHeadersKeyType struct{}
 
 var requestCredentialHeadersKey = requestCredentialHeadersKeyType{}
 
-/* credentialStrippingRedirectPolicy keeps net/http's ten-redirect cap but removes every credential the client attaches to each request once the redirect leaves the original origin. net/http strips only Authorization, WWW-Authenticate and Cookie, and only across domains — a client configured with an api-key header (X-Api-Key, X-Internal-Token, ...) would otherwise hand that secret to whatever host the first server points it at, which the operator of that server chooses. A scheme downgrade counts as leaving the origin: https -> http would put the credential on the wire in the clear. It is a method rather than a closure over the header map because net/http runs it on the request goroutine while SetHeader may be writing that very map. */
+/* credentialStrippingRedirectPolicy keeps net/http's ten-redirect cap and removes every credential the client attaches once the redirect leaves the original origin, a scheme downgrade included; net/http strips only Authorization, WWW-Authenticate and Cookie, and only across domains. It is a method, not a closure over the header map, since net/http runs it on the request goroutine while SetHeader may be writing that map. */
 func (instance *HttpClient) credentialStrippingRedirectPolicy(request *nethttp.Request, via []*nethttp.Request) error {
     if defaultMaxRedirects <= len(via) {
         return exception.NewError(
@@ -133,7 +133,7 @@ func (instance *HttpClient) credentialStrippingRedirectPolicy(request *nethttp.R
     request.Header.Del("Cookie")
     request.Header.Del("Proxy-Authorization")
 
-    /* net/http auto-populates Referer with the full previous url, query string included; on a non-downgrade cross-origin hop it does not strip it, so a secret placed in the url (WithQuery) would reach the redirect target the first server chose. */
+    /* net/http fills Referer with the full previous url, query included, and keeps it on a cross-origin hop, so a secret passed through WithQuery would reach the redirect target */
     request.Header.Del("Referer")
 
     return nil
@@ -155,7 +155,7 @@ func withRequestCredentialHeaders(request *nethttp.Request, headers map[string]s
     )
 }
 
-/* isSameOrigin compares the scheme, the host and the EFFECTIVE port: "https://host" and "https://host:443" name one origin, and hosts are case-insensitive, so neither spelling may be read as a credential boundary the caller never crossed. */
+/* isSameOrigin compares the scheme, the case-insensitive host and the effective port, so "https://host" and "https://host:443" are one origin. */
 func isSameOrigin(origin *url.URL, target *url.URL) bool {
     if nil == origin || nil == target {
         return false
@@ -188,7 +188,7 @@ func effectivePort(value *url.URL) string {
     return ""
 }
 
-/* sanitizeUrlForDiagnostics strips the two places a url carries a secret — the userinfo and the query values — while keeping everything that makes a failure diagnosable: the scheme, the host, the path and the parameter names. A url a caller built by hand may not parse at all, which is exactly the failure being reported, so the textual fallback cuts the same two regions without a parser. */
+/* sanitizeUrlForDiagnostics strips the userinfo and the query values, where a url carries a secret, and keeps the scheme, host, path and parameter names. A url that does not parse is cut textually. */
 func sanitizeUrlForDiagnostics(urlString string) string {
     parsed, err := url.Parse(urlString)
     if nil != err {
@@ -200,7 +200,7 @@ func sanitizeUrlForDiagnostics(urlString string) string {
     }
 
     if "" != parsed.Opaque {
-        /* an opaque url keeps its whole reference in one unparsed span, so net/url finds no userinfo in it and the branch above has nothing to redact: "http:user:secret@host/path" parses with a nil User and String writes the span back verbatim. The credential is in the text and only a textual cut reaches it. */
+        /* an opaque url keeps its reference in one unparsed span, so net/url finds no userinfo in "http:user:secret@host/path" and only a textual cut reaches the credential */
         parsed.Opaque = redactAuthorityUserinfo(parsed.Opaque, 0)
     }
 
@@ -214,7 +214,7 @@ func sanitizeUrlForDiagnostics(urlString string) string {
     return parsed.String()
 }
 
-/* sanitizeUrlTextually removes the userinfo and the whole query from a url net/url refused to parse. The userinfo is cut wherever the reference can carry one, not only after a scheme separator: net/url refuses on a bad port, a control character, a broken percent escape or an unclosed bracket, and a reference spelled "//user:secret@host:notaport/path" reaches this function with a credential and no "://" in it at all. */
+/* sanitizeUrlTextually removes the userinfo and the whole query from a url net/url refused to parse. The userinfo is cut wherever the reference can carry one, since "//user:secret@host:notaport/path" reaches here with no "://". */
 func sanitizeUrlTextually(urlString string) string {
     sanitized := urlString
 
@@ -230,7 +230,7 @@ func sanitizeUrlTextually(urlString string) string {
     return redactAuthorityUserinfo(sanitized, authorityStart)
 }
 
-/* authorityStartIndex reports where the region that can hold a userinfo begins: after the "://" of an absolute url, after the leading "//" of a scheme-relative reference, or after the ":" of an opaque one, whose remainder spells a userinfo exactly the same way. A reference with none of the three is a relative path, it has no authority, and an "@" inside it belongs to the path. */
+/* authorityStartIndex reports where the region that can hold a userinfo begins: after the "://" of an absolute url, the leading "//" of a scheme-relative reference, or the ":" of an opaque one. A relative path has no authority, and an "@" in it belongs to the path. */
 func authorityStartIndex(value string) (int, bool) {
     if schemeEnd := strings.Index(value, "://"); 0 <= schemeEnd {
         return schemeEnd + len("://"), true
@@ -247,7 +247,7 @@ func authorityStartIndex(value string) (int, bool) {
     return 0, false
 }
 
-/* schemeSeparatorIndex reports the index of the ":" that closes a scheme at the head of the value, or -1 when the value does not open with one. The grammar is the one net/url applies: a letter, then letters, digits, "+", "-" and "."; a relative path that merely contains a colon is not a scheme, and neither is a value that opens with the colon itself. */
+/* schemeSeparatorIndex reports the index of the ":" closing a scheme at the head of the value, or -1, under net/url's grammar: a letter, then letters, digits, "+", "-" and ".". */
 func schemeSeparatorIndex(value string) int {
     for index := 0; index < len(value); index++ {
         currentByte := value[index]
@@ -273,7 +273,7 @@ func schemeSeparatorIndex(value string) int {
     return -1
 }
 
-/* redactAuthorityUserinfo replaces the userinfo of the authority beginning at authorityStart with the redacted pair, and returns the value as it stands when that authority carries none. The authority ends at the first path separator after it, so an "@" belonging to the path is left where it is. */
+/* redactAuthorityUserinfo replaces the userinfo of the authority at authorityStart with the redacted pair. The authority ends at the first path separator, so an "@" in the path is left alone. */
 func redactAuthorityUserinfo(value string, authorityStart int) string {
     authorityEnd := strings.Index(value[authorityStart:], "/")
     if 0 > authorityEnd {
@@ -329,7 +329,7 @@ func (instance *HttpClient) Request(method string, urlString string, options ...
 
     maxResponseBodyBytes := requestConfig.MaxResponseBodyBytes()
     if 0 >= maxResponseBodyBytes {
-        /* the cap is known before anything is dialled, and it used to be read after the exchange: a POST that had already committed its side effect answered with an error phrased as though nothing had been sent, and a caller retrying on it duplicated the operation. */
+        /* the cap is judged before anything is dialled, so a refused body never follows a committed side effect a caller would retry */
         return nil, exception.NewError(
             "invalid max response body bytes",
             exceptioncontract.Context{
@@ -354,7 +354,7 @@ func (instance *HttpClient) Request(method string, urlString string, options ...
     }
     defer response.Body.Close()
 
-    /* the +1 lets ReadAll observe one byte past the cap so an over-long body is detected; saturate instead of wrapping, because int64(math.MaxInt)+1 is negative and LimitReader would then read nothing and return an empty body with no error */
+    /* the +1 lets ReadAll see one byte past the cap; it saturates, since int64(math.MaxInt)+1 is negative and LimitReader would then read nothing */
     readLimit := int64(maxResponseBodyBytes)
     if math.MaxInt64 > readLimit {
         readLimit++
@@ -397,7 +397,7 @@ func (instance *HttpClient) Request(method string, urlString string, options ...
     ), nil
 }
 
-/* RequestStream hands the caller a response whose body is still on the wire. The caller OWNS it and must Close it on every path, including the ones that never read it — a status it does not like, an error it returns instead — because the streaming client carries no whole-request deadline: an unclosed stream pins its connection and its descriptor for as long as the process lives. RequestStreamWithContext is the variant that can bound one from the outside. The response body cap bounds the stream exactly as it bounds a buffered body, the inherited default included; a caller streaming more than the default names its own cap through WithMaxResponseBodyBytes. */
+/* RequestStream hands the caller a response whose body is still on the wire, which the caller owns and closes on every path, since the streaming client carries no whole-request deadline; RequestStreamWithContext can bound it from outside. The response body cap bounds the stream as it bounds a buffered body, the inherited default included. */
 func (instance *HttpClient) RequestStream(
     method string,
     urlString string,
@@ -406,7 +406,7 @@ func (instance *HttpClient) RequestStream(
     return instance.RequestStreamWithContext(context.Background(), method, urlString, options...)
 }
 
-/* RequestStreamWithContext is RequestStream bound to a context: cancelling it ends the request and the body read, which is the only remedy for a stream a server never ends. The close obligation described on RequestStream is unchanged — cancelling releases the connection, it does not close the StreamResponse for the caller. */
+/* RequestStreamWithContext is RequestStream bound to a context: cancelling it ends the request and the body read. The caller still closes the StreamResponse. */
 func (instance *HttpClient) RequestStreamWithContext(
     contextInstance context.Context,
     method string,
@@ -422,7 +422,7 @@ func (instance *HttpClient) RequestStreamWithContext(
         return nil, err
     }
 
-    /* the cap is judged before anything is dialled, the rule the buffered path states: read after the exchange, a POST that had already committed its side effect answered with an error phrased as though nothing had been sent, and a caller retrying on it duplicated the operation */
+    /* the cap is judged before anything is dialled, as on the buffered path */
     if 0 >= requestConfig.MaxResponseBodyBytes() {
         return nil, exception.NewError(
             "invalid max response body bytes",
@@ -447,7 +447,7 @@ func (instance *HttpClient) RequestStreamWithContext(
         return nil, newRequestFailedError(method, requestInstance.URL, err)
     }
 
-    /* the cap binds every stream, the inherited default included: an unbounded body behind a bounded contract delivered whatever the server chose to send, and the caller who never named a cap is exactly the one who never audited for that. */
+    /* the cap binds every stream, the inherited default included */
     body := newLimitedStreamBody(
         response.Body,
         requestConfig.MaxResponseBodyBytes(),
@@ -462,7 +462,7 @@ func (instance *HttpClient) RequestStreamWithContext(
     ), nil
 }
 
-/* applyRequestOptions folds the caller's options onto a fresh option set. A nil option is refused rather than skipped: an option chosen by a condition whose other branch produced nothing is a wiring mistake, and calling it would be a nil function call on the request path, outside any recovery this package owns. A refusal an option could not answer itself — SetHeaders on a colliding map — is answered here, under the index of the option that raised it, for the same reason: the request path promises an error, and the option contract has no error to return. */
+/* applyRequestOptions folds the caller's options onto a fresh option set. A nil option is refused, since calling it would panic on the request path; a refusal an option kept, such as SetHeaders on a colliding map, fails the request under the index of that option. */
 func applyRequestOptions(options []httpclientcontract.RequestOption) (*RequestOptions, error) {
     requestConfig := NewRequestOptions()
 
@@ -493,14 +493,14 @@ func applyRequestOptions(options []httpclientcontract.RequestOption) (*RequestOp
     return requestConfig, nil
 }
 
-/* newRequestFailedError reports a failed exchange without the url net/http embeds in its own error text. A *url.Error carries the whole request url — query string included — and the cause chain is rendered into the log record, so a token passed through WithQuery, or a password spelled in the userinfo, would be written out by the most ordinary failure there is: a refused connection. The *url.Error stays in the chain, because Client.Do documents it as the type of every error it answers and errors.As on it is the form retry and breaker code is written in; it carries the sanitized url in place of the one it quoted, so Op, Timeout and the inner cause survive and the query values and the userinfo do not. The sanitized url sits beside it in the context as well. */
+/* newRequestFailedError reports a failed exchange without the url net/http embeds in its error, which carries the query and userinfo into the logged cause chain. The *url.Error stays in the chain for errors.As, carrying the sanitized url, and the sanitized url sits in the context too. */
 func newRequestFailedError(method string, requestUrl *url.URL, err error) error {
     urlForDiagnostics := ""
     if nil != requestUrl {
         urlForDiagnostics = sanitizeUrlForDiagnostics(requestUrl.String())
     }
 
-    /* the link is rebuilt whatever its Err holds: net/http never answers a *url.Error with a nil Err, but the one shape a caller of this package could hand over that way would be the one shape whose url reached the record unsanitized */
+    /* the link is rebuilt whatever its Err holds, so no shape of *url.Error reaches the record unsanitized */
     cause := err
     if urlErr, ok := err.(*url.Error); true == ok {
         cause = &url.Error{Op: urlErr.Op, URL: sanitizeUrlForDiagnostics(urlErr.URL), Err: urlErr.Err}
@@ -516,7 +516,7 @@ func newRequestFailedError(method string, requestUrl *url.URL, err error) error 
     )
 }
 
-/* buildRequest turns the caller's options into a net/http request: the url, the body, the headers of the client and of the request, and the authorization. The caller's context is bound here rather than by the caller afterwards, because the per-request credential header names are planted in the request's context and a WithContext applied later replaces the whole context, taking the plant with it — the redirect policy would then find nothing to strip and a per-request credential would follow a cross-origin redirect. */
+/* buildRequest turns the caller's options into a net/http request. The caller's context is bound here, since the per-request credential header names are planted in the request context and a later WithContext would drop them from the redirect policy's reach. */
 func (instance *HttpClient) buildRequest(
     contextInstance context.Context,
     method string,
@@ -541,7 +541,7 @@ func (instance *HttpClient) buildRequest(
                 "method": method,
                 "url":    sanitizeUrlForDiagnostics(fullUrl),
             },
-            /* net/url's parse error quotes the url it was handed, userinfo included, so it cannot travel as the cause; what it adds beyond the message is which character it refused. */
+            /* net/url's parse error quotes the url, userinfo included, so it cannot travel as the cause */
             exception.NewError(sanitizeUrlParseError(err), nil, nil),
         )
     }
@@ -567,7 +567,7 @@ func (instance *HttpClient) buildRequest(
     return request, nil
 }
 
-/* applyAuthorization writes the credential the caller asked for. A bearer token wins over a basic credential when both are set — the two cannot share one Authorization header. Basic travels whenever it was asked for, empty halves included: an api key spelled as the password of an empty user is the ordinary shape of "-u :key", and dropping it silently sent the request unauthenticated with nothing to say so. It runs after every header door, so a typed credential wins over an Authorization header written through the client's or the request's header map: the credential is the caller's statement about this request's identity, and WithBasicAuth("", "") sends Basic with two empty halves because that is what was asked for. */
+/* applyAuthorization writes the credential the caller asked for: a bearer token wins over basic, and basic travels whenever asked for, empty halves included. It runs after every header door, so a typed credential wins over an Authorization header from a header map. */
 func applyAuthorization(request *nethttp.Request, authorization httpclientcontract.AuthorizationOptions) {
     if true == internal.IsNilInterface(authorization) {
         return
@@ -591,7 +591,7 @@ func applyAuthorization(request *nethttp.Request, authorization httpclientcontra
     )
 }
 
-/* buildRequestBodyReader wraps the caller's body. A []byte is copied because net/http writes the request body on its own goroutine and Client.Do returns as soon as the response headers arrive: a server that answers without draining the body leaves the transport reading the caller's slice after the call returned, so a pooled buffer reused right after a request is a data race and torn bytes on the wire. */
+/* buildRequestBodyReader wraps the caller's body. A []byte is copied, since net/http may still read the body on its own goroutine after Client.Do returns, and a pooled buffer reused then would be a data race. */
 func buildRequestBodyReader(requestConfig *RequestOptions) (io.Reader, error) {
     body := requestConfig.Body()
     if nil == body {
@@ -627,7 +627,7 @@ func buildRequestBodyReader(requestConfig *RequestOptions) (io.Reader, error) {
     )
 }
 
-/* SetBaseUrl refuses a base whose path lacks its trailing slash, the rule the constructor states: RFC 3986 resolution merges a relative target over the last segment of the base path, so the missing slash silently cuts the segment the caller meant to keep. */
+/* SetBaseUrl refuses a base whose path lacks its trailing slash, the rule the constructor states. */
 func (instance *HttpClient) SetBaseUrl(baseUrl string) {
     refuseBaseUrlWithoutTrailingSlash(baseUrl)
 
@@ -637,7 +637,7 @@ func (instance *HttpClient) SetBaseUrl(baseUrl string) {
     instance.baseUrl = baseUrl
 }
 
-/* SetHeader stores the header under its canonical spelling, the one the constructor stores under: the map is applied to every request with Set, which canonicalizes, so rotating a credential under a different spelling than the one it was configured with used to leave two live entries whose survivor was chosen by map iteration order — a different credential per request. Canonicalizing here makes the collision structurally impossible, and a rotation overwrites the entry it means to. */
+/* SetHeader stores the header under its canonical spelling, as the constructor does, so a rotated credential overwrites the entry it means to. */
 func (instance *HttpClient) SetHeader(key string, value string) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -652,7 +652,7 @@ func (instance *HttpClient) SetTimeout(timeout time.Duration) {
     instance.timeout = timeout
 }
 
-/* Close releases the idle connections the client's own transport is holding. Every client builds its own pool — a hundred connections per host by default, kept for ninety seconds — and dropping the last reference to the client releases none of them, because each parked connection has a read loop of its own keeping the transport reachable. Close does not abort requests in flight, and the client stays usable afterwards: it dials again. */
+/* Close releases the idle connections of the client's own transport, which dropping the last reference does not. It does not abort requests in flight, and the client stays usable afterwards. */
 func (instance *HttpClient) Close() error {
     transport, ok := instance.client.Transport.(*nethttp.Transport)
     if false == ok {
@@ -664,9 +664,7 @@ func (instance *HttpClient) Close() error {
     return nil
 }
 
-/* buildUrl resolves the caller's target against the configured base url by RFC 3986 reference resolution — the rule Symfony and Guzzle implement: an absolute-path target replaces the base path entirely, a relative one merges over the last segment of the base path, an empty target names the base resource itself, and a network-path reference ("//host/x") takes the base scheme onto its own host. The constructor refuses a base whose path lacks its trailing slash, so the merge never cuts a prefix the caller meant to keep.
-
-   When the client HAS a base url, a target whose RESOLVED url leaves the base origin is refused: the headers and the authorization this client was configured with would otherwise travel to a host the target string chose — the very leak the redirect policy exists to stop, one hop earlier. The judgment is on the resolved url rather than on the target's spelling, so the network-path form — which reaches a foreign host while naming no scheme — is refused by the same reading, and a scheme spelled "HTTP://" needs no special-casing to be recognized as absolute. A caller that talks to more than one origin builds a client without a base url; a relative target on such a client is refused by name, because the request it would build can name no host at all. */
+/* buildUrl resolves the target against the base url by RFC 3986 reference resolution: an absolute-path target replaces the base path, a relative one merges over its last segment, an empty one names the base itself, and "//host/x" takes the base scheme. With a base url, a target whose resolved url leaves the base origin is refused, so the configured credentials never travel to a host the target chose; without one, a relative target is refused. */
 func (instance *HttpClient) buildUrl(urlString string, query map[string]string) (string, error) {
     instance.mutex.RLock()
     baseUrl := instance.baseUrl
@@ -731,7 +729,7 @@ func (instance *HttpClient) buildUrl(urlString string, query map[string]string) 
     return resolvedUrl.String(), nil
 }
 
-/* sanitizeUrlParseError keeps what net/url says about a url it refused while dropping the url itself, which its message quotes in full — userinfo and query included. */
+/* sanitizeUrlParseError keeps what net/url says about a refused url and drops the url itself, which its message quotes with userinfo and query. */
 func sanitizeUrlParseError(err error) string {
     if urlErr, ok := err.(*url.Error); true == ok && nil != urlErr.Err {
         return urlErr.Err.Error()
@@ -740,13 +738,13 @@ func sanitizeUrlParseError(err error) string {
     return err.Error()
 }
 
-/* streamClientForRequest drops the whole-request Timeout for the streaming path. nethttp.Client.Timeout bounds everything up to and including the body read, so a long-lived stream (server-sent events, a log tail, a large download) is force-closed mid-read the moment the client timeout elapses — the streaming API is unusable beyond it. The header phase stays bounded by the transport (DialTimeout, TLSHandshakeTimeout, ResponseHeaderTimeout); the body's lifetime belongs to the caller, who closes it, or to a context the caller attaches to the request. An explicit per-request timeout is still honored, because a caller that asks for one on a stream is asking to bound the stream. */
+/* streamClientForRequest drops the whole-request Timeout for the streaming path, since it would force-close a long-lived body mid-read. The header phase stays bounded by the transport, the body belongs to the caller or its context, and an explicit per-request timeout is still honored. */
 func (instance *HttpClient) streamClientForRequest(timeout time.Duration) *nethttp.Client {
     if 0 < timeout {
         return instance.clientForRequest(timeout)
     }
 
-    /* a negative timeout is not a request to run forever: every other guard in this package reads a non-positive duration as unset, and a caller computing what is left of a deadline that has already passed would otherwise get an unbounded stream out of an exhausted budget. */
+    /* a negative timeout reads as unset, as everywhere in this package, so an exhausted budget cannot yield an unbounded stream */
     if 0 > timeout {
         return instance.clientForRequest(0)
     }

@@ -15,7 +15,7 @@ import (
 
 func NewInMemoryTransport(bufferSize int) *InMemoryTransport {
     if 0 > bufferSize {
-        /* a negative size would reach make(chan) and die with a raw runtime panic; refuse it here in the framed form every sibling constructor uses */
+        /* a negative size would panic in make(chan), so it is refused in the framed form every sibling constructor uses */
         exception.Panic(exception.NewError("in-memory transport buffer size may not be negative", map[string]any{"bufferSize": bufferSize}, nil))
     }
 
@@ -30,7 +30,7 @@ type InMemoryTransport struct {
     done      chan struct{}
     closeOnce sync.Once
 
-    /* sendMutex lets Close close the delivery queue without racing a send onto it. Every path that sends on queue holds it as a READER for the whole two-step send — the closed-check and the send itself — and Close holds it as the WRITER around close(queue), after it has already closed done. So a send is never inside its critical section when the queue closes, and a send that starts after Close finishes sees done closed on the first step and returns before it can touch the queue. Without closing the queue, a consumer ranging over Receive() never sees the end of stream Close is supposed to signal. */
+    /* sendMutex lets Close close the queue without racing a send: every send holds it as a reader across its closed-check and the send, and Close holds it as the writer around close(queue), after closing done. The queue is closed so a consumer ranging over Receive() sees the end of stream. */
     sendMutex sync.RWMutex
 
     loggerMutex sync.RWMutex
@@ -53,7 +53,7 @@ func (instance *InMemoryTransport) Send(
         envelopeInstance = envelopeInstance.WithStamp(ReceivedStamp{TransportName: "in_memory"})
     }
 
-    /* held for the whole two-step send so Close cannot close the queue between the closed-check and the send below; a send that starts after Close has run sees done closed on the first step and returns before touching the queue */
+    /* held across the two-step send, so Close cannot close the queue between the closed-check and the send */
     instance.sendMutex.RLock()
     defer instance.sendMutex.RUnlock()
 
@@ -81,7 +81,7 @@ func (instance *InMemoryTransport) Receive(
 
 func (instance *InMemoryTransport) Close() error {
     instance.closeOnce.Do(func() {
-        /* done first, outside the write lock, so any send parked on the queue is unblocked through its own done case and can release its read lock; then the write lock waits for every in-flight send to leave its critical section before the queue is closed, so no send is ever picked onto a closed channel. Closing the queue is what lets a consumer ranging over Receive() see the end of stream. */
+        /* done is closed first, outside the write lock, so a send parked on the queue leaves through its done case and releases its read lock; the write lock then waits for every in-flight send before the queue is closed */
         close(instance.done)
 
         instance.sendMutex.Lock()
@@ -109,7 +109,7 @@ func (instance *InMemoryTransport) Nack(
     }
 
     if delayStamp, hasDelay := LastStampOfType[DelayStamp](envelopeInstance); true == hasDelay && 0 < delayStamp.Delay {
-        /* the requeue happens after the Nack already answered success, on a goroutine the caller cannot observe — so the logger is captured NOW, from the runtime of the Nack, where every real wiring carries one. Relying on the transport's own configured logger alone made the drop absolutely silent in every production assembly, since nothing in the framework wires WithLogger. */
+        /* the requeue runs after the Nack answered, on a goroutine the caller cannot observe, so the logger is captured now from the Nack's runtime */
         go instance.requeueAfter(envelopeInstance, delayStamp.Delay, instance.resolveLogger(runtimeInstance))
 
         return nil
@@ -119,11 +119,11 @@ func (instance *InMemoryTransport) Nack(
 }
 
 func (instance *InMemoryTransport) requeue(envelopeInstance messagebuscontract.Envelope) error {
-    /* held across both selects for the same reason Send holds it: Close must not close the queue between the closed-check and the send */
+    /* held across both selects for the reason Send holds it */
     instance.sendMutex.RLock()
     defer instance.sendMutex.RUnlock()
 
-    /* the closed check runs on its own first: inside one select a ready queue slot and a closed transport are picked at RANDOM, so a requeue strictly after Close would intermittently still land — Send refuses deterministically through the same two-step form */
+    /* the closed check runs on its own first, since one select picks at random between a ready queue slot and a closed transport */
     select {
     case <-instance.done:
         return exception.NewError("in-memory transport is closed", nil, nil)
@@ -148,7 +148,7 @@ func (instance *InMemoryTransport) requeueAfter(
     timer := time.NewTimer(delay)
     defer timer.Stop()
 
-    /* a drop is journaled on the logger captured at the Nack, or on the emergency logger where that runtime carried none: the drop is the moment a line is owed, so the fallback is taken here rather than at every delayed Nack */
+    /* a drop is journaled on the logger captured at the Nack, or on the emergency logger where that runtime carried none */
     if true == internal.IsNilInterface(logger) {
         logger = logging.EmergencyLogger()
     }
@@ -159,14 +159,14 @@ func (instance *InMemoryTransport) requeueAfter(
             logger.Error("in-memory transport dropped a delayed requeue", exception.LogContext(requeueErr))
         }
     case <-instance.done:
-        /* the transport closed while the message waited out its delay: the requeue can no longer happen, and the loss is said as the timer-branch loss is, rather than ending with the goroutine */
+        /* the transport closed while the message waited out its delay, so the requeue is dropped and the loss is journaled */
         logger.Error("in-memory transport dropped a delayed requeue: the transport was closed before its delay ran out", map[string]any{"delay": delay.String()})
     }
 }
 
 /* resolveLogger prefers the runtime's logger — present in every framework-assembled scope — and falls back to the one configured through WithLogger. */
 func (instance *InMemoryTransport) resolveLogger(runtimeInstance runtimecontract.Runtime) loggingcontract.Logger {
-    /* resolved without logging.LoggerFromRuntime, which writes an emergency line for every runtime that carries no logger: this runs on every delayed Nack, and the line is owed only when a requeue is dropped */
+    /* resolved without logging.LoggerFromRuntime, which writes an emergency line per runtime without a logger; this runs on every delayed Nack, and a line is owed only for a drop */
     if logger, resolveErr := runtime.FromRuntime[loggingcontract.Logger](runtimeInstance, logging.ServiceLogger); nil == resolveErr && false == internal.IsNilInterface(logger) {
         return logger
     }

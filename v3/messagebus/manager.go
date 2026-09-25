@@ -44,7 +44,7 @@ func (instance *Manager) Dispatch(
     return result, chainErr
 }
 
-/* warnWhenUntouched records a dispatch that succeeded while nothing sent, handled or even received the message — a send-only bus with no route for the type, or a bus assembled with no middlewares at all. The terminal chain answers success by construction, so this is the one place that can see the difference between "delivered somewhere" and "did absolutely nothing": without the record, a forgotten RouteType line means every dispatch of that type returns nil error while the message ceases to exist. A received envelope is exempt — on the consume path the handle middleware owns the missing-handler verdict. */
+/* warnWhenUntouched records a dispatch that succeeded while nothing sent, handled or received the message, a type with no route or a bus with no middlewares: the terminal chain answers success by construction, so otherwise the message ceases to exist with a nil error. A received envelope is exempt, since the handle middleware owns that verdict. */
 func (instance *Manager) warnWhenUntouched(
     runtimeInstance runtimecontract.Runtime,
     envelopeInstance messagebuscontract.Envelope,

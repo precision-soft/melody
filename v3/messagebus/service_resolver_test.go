@@ -180,7 +180,7 @@ func TestRegisterTransports_TransportsJoinTheContainerTeardown(t *testing.T) {
         t.Fatalf("unexpected container close error: %v", closeErr)
     }
 
-    /* the old Close(runtime) contract made this structurally impossible: the teardown recognizes Close() error and nothing else, so no transport was ever closed and a broker connection lived exactly as long as the process */
+    /* the teardown recognizes Close() error and nothing else, so the transports close only through it */
     if false == transport.closed.Load() {
         t.Fatalf("expected the container teardown to close the registered transport")
     }
@@ -244,9 +244,7 @@ func transportsNamedIn(closeErr error) map[string]bool {
     return named
 }
 
-/* closePanickingTransport is the composition-root mistake that used to cost every transport sorted
-   after it: the container recovers the panic and records it, but the closer's own loop was already
-   abandoned. */
+/* closePanickingTransport is the composition-root mistake whose panic must not abandon the transports sorted after it. */
 type closePanickingTransport struct {
     recordingCloseTransport
 }
