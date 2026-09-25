@@ -132,7 +132,7 @@ type ConvertedPriceResponse struct {
     RateAsOf   string  `json:"rateAsOf"`
 }
 
-/* convertedPriceFor answers the conversion the caller asked for, or nothing when they asked for none. The parameter is read with StringAt, the first value, because the client chooses its shape and the String accessor panics on a repeated key. An unknown code is a 400, since the unconverted document would look like a successful conversion. */
+/* convertedPriceFor answers the conversion the caller asked for, or nothing when they asked for none. The parameter is read with StringAt, the first value, because the client chooses its shape and a repeated key answers like a single one. An unknown code is a 400, since the unconverted document would look like a successful conversion. */
 func convertedPriceFor(
     request melodyhttpcontract.Request,
     product *entity.Product,

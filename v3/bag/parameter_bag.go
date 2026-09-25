@@ -18,7 +18,7 @@ func NewParameterBag() *ParameterBag {
     }
 }
 
-/* NewParameterBagFromValues keeps a single and a repeated key apart by type: a key that occurred once is stored as a string, a repeated one as a string slice, read through StringSlice or StringAt. Reading a repeated key as a single string is refused. */
+/* NewParameterBagFromValues keeps a single and a repeated key apart by type: a key that occurred once is stored as a string, a repeated one as a string slice, read through StringSlice or StringAt. Reading a repeated key as a single string answers its first value. */
 func NewParameterBagFromValues(values url.Values) *ParameterBag {
     parameterBag := NewParameterBag()
 

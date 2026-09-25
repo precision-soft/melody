@@ -47,6 +47,35 @@ func TestValidateProductNamesTheFirstFieldItFailsOn(t *testing.T) {
     }
 }
 
+func TestValidateProductRefusesTheEarliestInvalidFieldFirst(t *testing.T) {
+    product := &entity.Product{Name: " ", Description: " ", CategoryId: " ", CurrencyId: " ", Price: -1, Stock: -1}
+
+    steps := []struct {
+        expected string
+        repair   func(product *entity.Product)
+    }{
+        {expected: "name is required", repair: func(product *entity.Product) { product.Name = "DDR5 32GB Dual Kit" }},
+        {expected: "description is required", repair: func(product *entity.Product) { product.Description = "black" }},
+        {expected: "category id is required", repair: func(product *entity.Product) { product.CategoryId = "cat-1" }},
+        {expected: "currency id is required", repair: func(product *entity.Product) { product.CurrencyId = "cur-eur" }},
+        {expected: "price must be >= 0", repair: func(product *entity.Product) { product.Price = 0 }},
+        {expected: "stock must be >= 0", repair: func(product *entity.Product) { product.Stock = 0 }},
+    }
+
+    for _, step := range steps {
+        validationErr := validateProduct(product)
+        if nil == validationErr || step.expected != validationErr.Error() {
+            t.Fatalf("expected %q, got %v", step.expected, validationErr)
+        }
+
+        step.repair(product)
+    }
+
+    if validationErr := validateProduct(product); nil != validationErr {
+        t.Fatalf("expected the repaired product to pass, got %v", validationErr)
+    }
+}
+
 func TestNextProductIdContinuesTheSeededNumbering(t *testing.T) {
     if "prod-8" != nextProductId([]string{"prod-1", "prod-7", "prod-3"}) {
         t.Fatalf("expected prod-8, got %q", nextProductId([]string{"prod-1", "prod-7", "prod-3"}))

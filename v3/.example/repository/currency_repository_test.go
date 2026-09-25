@@ -23,3 +23,9 @@ func TestValidateCurrencyNamesTheFirstFieldItFailsOn(t *testing.T) {
         t.Fatalf("expected a complete currency to pass, got %v", validationErr)
     }
 }
+
+func TestNextCurrencyIdContinuesTheSeededNumbering(t *testing.T) {
+    if "cur-3" != nextCurrencyId([]string{"cur-1", "cur-2"}) {
+        t.Fatalf("expected cur-3, got %q", nextCurrencyId([]string{"cur-1", "cur-2"}))
+    }
+}

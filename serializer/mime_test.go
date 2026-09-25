@@ -72,3 +72,17 @@ func TestParseAcceptHeader_SkipsTheMembersThatAreNotMediaRanges(t *testing.T) {
         t.Fatalf("expected no empty mime to enter the negotiation, got %#v", parsed)
     }
 }
+
+/* two ranges of equal specificity cover the candidate; the first in the parsed list answers, and the parse has sorted it to the highest quality, so a q=0 twin does not turn the candidate into a refusal. */
+func TestAcceptQualityFor_AnswersTheHighestQualityAmongRangesOfEqualSpecificity(t *testing.T) {
+    parsed, _ := parseAcceptHeader("text/html;q=0, text/html;q=0.5")
+
+    quality, specificity, matched := acceptQualityFor(parsed, "text/html")
+    if false == matched || 3 != specificity {
+        t.Fatalf("expected an exact match, got matched=%v specificity=%d", matched, specificity)
+    }
+
+    if 0.5 != quality {
+        t.Fatalf("expected the quality of the higher range, 0.5, got %v", quality)
+    }
+}

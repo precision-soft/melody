@@ -310,9 +310,9 @@ A [`container.Lazy`](../../container/lazy.go) handle built over a scope follows 
     - [`WithoutTypeRegistration()`](../../container/register_option.go)
     - [`Replacing()`](../../container/register_option.go)
     - [`WithTeardownDependency(serviceNames ...string)`](../../container/register_option.go)
+    - [`WithCollectionPriority(priority int)`](../../container/register_option.go)
 - Override options:
     - [`ClosedWithScope()`](../../container/override_option.go)
-    - [`WithCollectionPriority(priority int)`](../../container/register_option.go)
 - Interface collection:
     - [`AllImplementing[T]`](../../container/resolver_implementing.go)
     - [`MustAllImplementing[T]`](../../container/resolver_implementing.go)

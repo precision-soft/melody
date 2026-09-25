@@ -29,7 +29,7 @@ The application boot is split around configuration resolve:
 
 1. **Pre-resolve**: modules may register module-level configurations via [`ConfigModule`](../../application/contract/config_module.go), then register parameters via [`ParameterModule`](../../application/contract/parameter_module.go).
 2. **Resolve**: application configuration is resolved.
-3. **Post-resolve**: modules may register services via [`ServiceModule`](../../application/contract/service_module.go), then request-lifetime services via [`ScopedServiceModule`](../../application/contract/scoped_service_module.go), then register security/events/CLI/HTTP.
+3. **Post-resolve**: modules may register services via [`ServiceModule`](../../application/contract/service_module.go), then request-lifetime services via [`ScopedServiceModule`](../../application/contract/scoped_service_module.go), then register security, event subscribers, HTTP middlewares, HTTP handler decorators, HTTP routes and, last, CLI commands.
 
 This allows HTTP/CLI module code to read resolved configuration values during registration, e.g.
 `kernelInstance.Config().MustGet("my.param").String()`.
@@ -162,6 +162,7 @@ import (
 
 	"github.com/precision-soft/melody/v3/application"
 	applicationcontract "github.com/precision-soft/melody/v3/application/contract"
+	containercontract "github.com/precision-soft/melody/v3/container/contract"
 	melodyhttp "github.com/precision-soft/melody/v3/http"
 	httpcontract "github.com/precision-soft/melody/v3/http/contract"
 	kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
@@ -205,8 +206,8 @@ func (instance *demoModule) RegisterServices(
 ) {
 	registrar.RegisterService(
 		"service.demo.value",
-		func(serviceLocator any) (any, error) {
-			_ = serviceLocator
+		func(resolver containercontract.Resolver) (string, error) {
+			_ = resolver
 			return "value", nil
 		},
 	)

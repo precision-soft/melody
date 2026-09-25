@@ -66,10 +66,10 @@ func runExampleCurrencyConversionCheck(client *http.Client, baseUrl string) {
     }
     pass("example currency: converting into %s answers a price stamped with the quote it used (%s)", otherCode, converted.Converted.RateAsOf)
 
-    /* the shape of a query parameter is the client's to choose, and the string accessor beside the one this
-       door uses panics on a repeated key — through a public door that is an unauthenticated five hundred */
+    /* the shape of a query parameter is the client's to choose, and a repeated key answers like a single one —
+       a refusal at a public door would be an unauthenticated five hundred */
     if http.StatusOK != exampleProductReadStatus(client, baseUrl, "?currency="+otherCode+"&currency="+ownCode) {
-        fail("example currency: a repeated currency parameter was not answered with 200 — the door read it through an accessor that refuses a repeated key")
+        fail("example currency: a repeated currency parameter was not answered with 200 — the door did not read a repeated key as its first value")
     }
     pass("example currency: a repeated currency parameter is answered rather than refused")
 

@@ -32,3 +32,31 @@ func TestValidateCatalogReadingNamesTheFirstFieldItFailsOn(t *testing.T) {
         t.Fatalf("expected a complete reading to pass, got %v", validationErr)
     }
 }
+
+func TestValidateCatalogReadingRefusesTheEarliestInvalidFieldFirst(t *testing.T) {
+    reading := &CatalogReadingRecord{ProductCount: -1}
+
+    steps := []struct {
+        expected string
+        repair   func(reading *CatalogReadingRecord)
+    }{
+        {expected: "taken at is required", repair: func(reading *CatalogReadingRecord) {
+            reading.TakenAt = time.Date(2026, time.September, 25, 12, 0, 0, 0, time.UTC)
+        }},
+        {expected: "headline is required", repair: func(reading *CatalogReadingRecord) { reading.Headline = "catalogue" }},
+        {expected: "counts may not be negative", repair: func(reading *CatalogReadingRecord) { reading.ProductCount = 0 }},
+    }
+
+    for _, step := range steps {
+        validationErr := validateCatalogReading(reading)
+        if nil == validationErr || step.expected != validationErr.Error() {
+            t.Fatalf("expected %q, got %v", step.expected, validationErr)
+        }
+
+        step.repair(reading)
+    }
+
+    if validationErr := validateCatalogReading(reading); nil != validationErr {
+        t.Fatalf("expected the repaired reading to pass, got %v", validationErr)
+    }
+}

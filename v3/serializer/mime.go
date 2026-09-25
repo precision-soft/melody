@@ -153,7 +153,7 @@ func acceptMatchSpecificity(acceptedMimeValue string, candidateMime string) int 
     return 0
 }
 
-/* acceptQualityFor answers the quality of the most specific accepted range that covers the candidate. A q of 0 is kept in the parsed list, so a candidate whose most specific range carries it answers 0, a refusal, rather than falling through to the default. */
+/* acceptQualityFor answers the quality of the most specific accepted range that covers the candidate; among ranges of equal specificity the first in the parsed list wins, which the sort by quality makes the highest. A q of 0 is kept in the parsed list, so a candidate whose winning range carries it answers 0, a refusal, rather than falling through to the default. */
 func acceptQualityFor(acceptedMimes []acceptedMime, candidateMime string) (float64, int, bool) {
     bestSpecificity := 0
     bestQuality := 0.0

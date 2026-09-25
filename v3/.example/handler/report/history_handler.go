@@ -64,7 +64,7 @@ func ApiHistoryHandler() melodyhttpcontract.Handler {
     }
 }
 
-/* historyLimitOf reads the caller's limit, or answers the default when they gave none. It reads with StringAt, the first value, because the String accessor panics on a repeated key, which at this public door would be an unauthenticated 500. */
+/* historyLimitOf reads the caller's limit, or answers the default when they gave none. It reads the first value with StringAt, so a repeated key at this public door answers like a single one. */
 func historyLimitOf(request melodyhttpcontract.Request) (int, error) {
     raw, present, indexErr := melodybag.StringAt(request.Query(), historyLimitParameter, 0)
     if nil != indexErr {
