@@ -313,7 +313,7 @@ func TestService_WildcardEntriesArePortSignificant(t *testing.T) {
     }
 }
 
-/* RestrictiveService is the one configuration in this package that pairs AllowCredentials with the caller's list, which is the pairing every guard in NewService exists to police — and until now no test entered it, so the whole restrictive policy was carried by a constructor nothing executed. */
+/* RestrictiveService is the one configuration in this package that pairs AllowCredentials with the caller's list, which is the pairing every guard in NewService exists to police; this enters it. */
 
 func TestRestrictiveService_PairsCredentialsWithTheNamedOrigins(t *testing.T) {
     service := RestrictiveService([]string{"https://app.example.com"})
@@ -393,7 +393,7 @@ func TestRestrictiveService_RefusesToBootWithAnExplicitlyEmptyOriginList(t *test
     RestrictiveService([]string{})
 }
 
-/* the four slice accessors hand out a copy. The service is a process-wide singleton read from every request goroutine, so a caller that mutated what it was handed would rewrite the policy of every request that follows — and OriginAllowed reads the very slice AllowOrigins returns. */
+/* the four slice accessors hand out a copy. The service is a process-wide singleton read from every request goroutine, so a caller that mutated what it receives would rewrite the policy of every request that follows, and OriginAllowed reads the very slice AllowOrigins returns. */
 
 func TestService_SliceAccessorsHandOutACopy(t *testing.T) {
     service := NewService(Config{

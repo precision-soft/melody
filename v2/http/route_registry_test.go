@@ -16,7 +16,7 @@ func routeRegistryTestHandler() httpcontract.Handler {
     }
 }
 
-/* registration was the single channel with no duplicate handling: two unnamed routes on one method and pattern were both stored and the later one could never be dispatched — the tie falls to the first registered — so the shadowing was invisible everywhere. */
+/* an exact dispatch duplicate is refused: two unnamed routes on one method and pattern would both be stored and the later one could never be dispatched (the tie falls to the first registered), a shadowing invisible everywhere. */
 func TestRouteRegistry_RefusesAnExactDispatchDuplicate(t *testing.T) {
     router := NewRouter()
 

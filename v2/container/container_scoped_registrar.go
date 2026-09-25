@@ -8,9 +8,7 @@ import (
     "github.com/precision-soft/melody/v2/exception"
 )
 
-/* scopePlan is the set of scoped registrations a scope is created against. It is built once and never written to afterwards, so every scope holds a reference to the same value instead of a copy of the maps: creating a scope is a pointer load, whatever the size of the plan.
-
-   A registration made after a scope already exists rebuilds the plan for the scopes created next; the ones already running keep the plan they were created with. That is the only reading under which a scope's contents do not change under its own feet halfway through a request. */
+/* scopePlan is the set of scoped registrations a scope is created against. It is never written after it is built, so every scope holds a reference to it and creating a scope is a pointer load; a later registration builds a new plan for the scopes created next, while running scopes keep theirs. */
 type scopePlan struct {
     providers                   map[string]providerAny
     typeProviders               map[reflect.Type]providerAny
@@ -83,9 +81,7 @@ func (instance *container) MustRegisterScoped(
     }
 }
 
-/* registerScoped records a provider the scopes of this container own. The registration is refused when the container already holds the name, unless the caller declared Replacing: a name that answers with a process singleton outside a scope and with a per-request service inside one is exactly the ambiguity the two lifetimes exist to keep apart, and it must be admitted deliberately rather than fall out of the order the modules registered in.
-
-   There is no hard seal after boot. A late registration invalidates the published plan and the scopes created next see it, while the ones already running keep the plan they were created with — which is what lets a test register a scoped service on a container it has just built. */
+/* registerScoped records a provider the scopes of this container own. It is refused when the container already holds the name unless the caller declared Replacing, so a name that means a singleton outside a scope and a per-request service inside one is admitted only deliberately. A late registration invalidates the published plan and reaches the scopes created next. */
 func (instance *container) registerScoped(
     serviceName string,
     serviceType reflect.Type,
@@ -223,7 +219,7 @@ func (instance *container) registerScopedType(
     return nil
 }
 
-/* scopedRegistrationBlocksLocked reports whether a scoped registration stands in the way of taking this name on the container. The check is what makes the refusal independent of the order the two levels registered in: without it, whether a collision is reported at all would depend on which module ran first. */
+/* scopedRegistrationBlocksLocked reports whether a scoped registration stands in the way of taking this name on the container, so the refusal does not depend on the order the two levels registered in. */
 func (instance *container) scopedRegistrationBlocksLocked(serviceName string) bool {
     if _, exists := instance.scopedProviders[serviceName]; false == exists {
         return false

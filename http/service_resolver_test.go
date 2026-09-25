@@ -9,7 +9,7 @@ import (
     httpcontract "github.com/precision-soft/melody/http/contract"
 )
 
-/* the three Must resolvers are how the framework and an application reach the routing services out of the container; two of them had never been entered. Each is bound to a service name, and a resolver reading the wrong name would hand back a service of the wrong kind — the failure surfaces as a type assertion deep inside url generation rather than at the wiring mistake. */
+/* the three Must resolvers are how the framework and an application reach the routing services out of the container. Each is bound to a service name, and a resolver reading the wrong name would hand back a service of the wrong kind, the failure surfacing as a type assertion deep inside url generation rather than at the wiring mistake. */
 
 func newRoutingServiceContainer() (containercontract.Container, *RouteRegistry, *Router) {
     serviceContainer := container.NewContainer()
@@ -105,7 +105,7 @@ func TestRoutingServiceNames_AreDistinct(t *testing.T) {
     }
 }
 
-/* the request context lives only on a request scope — the kernel installs it per request and the root container never carries it — so its accessor takes a resolver: the door the documentation's scoped-provider example already used before the function existed */
+/* the request context lives only on a request scope (the kernel installs it per request and the root container never carries it), so its accessor takes a resolver, the door the documentation's scoped-provider example uses */
 func TestRequestContextMustFromResolver_ResolvesTheInstalledContext(t *testing.T) {
     serviceContainer := container.NewContainer()
 

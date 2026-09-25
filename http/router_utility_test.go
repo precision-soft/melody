@@ -1164,7 +1164,7 @@ func TestWriteResponse_SkipsPersistenceForATypedNilManager(t *testing.T) {
     }
 }
 
-/* A session deleted while the request was running is not a storage outage and must not be answered as one: the write is refused so the deleted session cannot be re-created, the browser cookie is expired so the client stops presenting an id that no longer exists, and the handler's own response is served unchanged. */
+/* A session deleted while the request was running is not a storage outage and must not be answered as one: the write is refused so the deleted session cannot be re-created, the browser cookie is expired so the client stops presenting an id the store does not hold, and the handler's own response is served unchanged. */
 func TestWriteResponse_ADeletedSessionExpiresTheCookieAndKeepsTheResponse(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
@@ -1475,7 +1475,7 @@ func (instance *panickingCloser) Close() error {
     panic("close died on the state the panic invalidated")
 }
 
-/* the response writeResponse returns feeds the terminate event and the access log; for a stream the handler committed itself, the truth lives on the connection — the journal recorded 204 for every streamed 200 and a rendered-but-never-written 500 for a panic mid-stream. */
+/* the response writeResponse returns feeds the terminate event and the access log; for a stream the handler committed itself, the truth lives on the connection, so the journal records the committed status rather than 204 for a streamed 200 or a rendered-but-never-written 500 for a panic mid-stream. */
 func TestWriteResponse_ADiscardedResponseReportsTheCommittedStatus(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/stream", nil)
     melodyRequest := NewRequest(netRequest, nil, nil, nil)
@@ -1591,7 +1591,7 @@ func writeResponseWithSessionOutcome(
     )
 }
 
-/* a session another request ended under this one is the session ending, not a storage outage — the contract says so in as many words. At error it read exactly like a redis that had fallen over, so a user who logged out in a second tab paged the operator once per concurrent request. */
+/* a session another request ended under this one is the session ending, not a storage outage, as the contract says in as many words. At error it would read exactly like a redis that had fallen over, and a user who logged out in a second tab would page the operator once per concurrent request. */
 func TestWriteResponse_ADeletedSessionIsRecordedAtWarningWithTheRequestCoordinates(t *testing.T) {
     capture := &sessionPersistenceCaptureLogger{}
 
@@ -1743,7 +1743,7 @@ func TestRequestPathIsCanonical_RefusesFoldsAndAllowsTrailingSlash(t *testing.T)
         "/public\t",
         "/public\u00a0",
         "/ ",
-        /* the LEADING form: a handler in front of the kernel that rewrites the path, the standard library's StripPrefix on "/api%20/public", hands the kernel " /public", which the router routed as a segment of its own while the matcher trimmed it to "/public" */
+        /* the LEADING form: a handler in front of the kernel that rewrites the path, the standard library's StripPrefix on "/api%20/public", hands the kernel " /public", which the router would route as a segment of its own while the matcher trims it to "/public" */
         " /public",
         "\t/public",
         "\u00a0/public",
@@ -1831,7 +1831,7 @@ func (instance *closeTrackingResponseBodyReader) Close() error {
     return nil
 }
 
-/* the response being replaced owns whatever its body reader holds, and nothing downstream will ever read it: a file response left its *os.File open for the life of the process, one descriptor per request whose status landed outside the range net/http accepts */
+/* the response being replaced owns whatever its body reader holds, and nothing downstream will ever read it: a file response would leave its *os.File open for the life of the process, one descriptor per request whose status landed outside the range net/http accepts */
 func TestWriteResponse_ClosesTheBodyItDiscardsForAnOutOfRangeStatus(t *testing.T) {
     bodyReader := &closeTrackingResponseBodyReader{reader: strings.NewReader("file bytes")}
 
@@ -1852,8 +1852,7 @@ func TestWriteResponse_ClosesTheBodyItDiscardsForAnOutOfRangeStatus(t *testing.T
     }
 }
 
-
-/* Cache-Control is a list header a response may carry on several field lines, and its directives may carry quoted field-name lists. Reading only the first line loses every directive on the ones behind it, and splitting on a bare comma cuts through the quotes — both rewrite a header the guard was only supposed to add "private" to. */
+/* Cache-Control is a list header a response may carry on several field lines, and its directives may carry quoted field-name lists. Reading only the first line would lose every directive on the ones behind it, and splitting on a bare comma would cut through the quotes, both rewriting a header the guard is only supposed to add "private" to. */
 func TestMarkResponsePrivateForSessionCookie_KeepsEveryFieldLineAndQuotedList(t *testing.T) {
     t.Run("directives on a second field line survive", func(t *testing.T) {
         response := NewResponse(nethttp.StatusOK, nil)

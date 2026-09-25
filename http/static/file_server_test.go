@@ -1550,7 +1550,7 @@ func newRefusingFileServer(openErr error) *FileServer {
     }
 }
 
-/* A path whose symlinks resolve outside the served directory comes back from resolveAndOpen as fs.ErrPermission, and it is the only thing here that does. Recorded at debug it was byte-identical to a mistyped stylesheet href — the very indistinguishability the logging on this path exists to end — so the level is what carries the distinction and is what this pins. */
+/* A path whose symlinks resolve outside the served directory comes back from resolveAndOpen as fs.ErrPermission, and it is the only thing here that does. Recorded at debug it would be byte-identical to a mistyped stylesheet href, the very indistinguishability the logging on this path exists to end, so the level carries the distinction and is what this pins. */
 func TestFileServer_AnEscapeRefusalIsRecordedAtWarningRatherThanDebug(t *testing.T) {
     logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
 
@@ -1703,7 +1703,7 @@ func (instance *trackingFile) Close() error {
     return instance.File.Close()
 }
 
-/* statFailingFileSystem opens successfully and then refuses to describe what it opened, which is the shape that reaches the stat refusal: a file unlinked between the open and the description, or a mount that answers an open out of a cache it can no longer stat. */
+/* statFailingFileSystem opens successfully and then refuses to describe what it opened, which is the shape that reaches the stat refusal: a file unlinked between the open and the description, or a mount that answers an open out of a cache it cannot stat. */
 type statFailingFileSystem struct {
     statErr     error
     closedCount int
@@ -2674,7 +2674,7 @@ func TestFileServer_ServeReader_TheEmbeddedPublicDirectoryIsJoinedOntoThePath(t 
     }
 }
 
-/* every caching header a static answer carries is decided on the streaming resolution, which is the one a running application uses — and none of it had a test there. The tag is what a revalidating cache offers back, the modification date is what an older one offers, and the cache control is what tells a shared cache it may keep the copy at all. */
+/* every caching header a static answer carries is decided on the streaming resolution, which is the one a running application uses. The tag is what a revalidating cache offers back, the modification date is what an older one offers, and the cache control is what tells a shared cache it may keep the copy at all. */
 func TestFileServer_ServeReader_ACachedAnswerCarriesTheTagTheDateAndTheCacheControl(t *testing.T) {
     modifiedAt := time.Date(2026, 1, 3, 12, 34, 56, 0, time.UTC)
 
@@ -2836,7 +2836,7 @@ func TestFileServer_ServeReader_AnUnchangedDateAnswersNotModifiedAndClosesTheFil
     }
 }
 
-/* a client that offered a tag has already said which bytes it holds, so the date is not consulted at all — otherwise a deploy that rewrites content while preserving timestamps answers 304 to a cache that just proved, by offering a tag that does not match, that it holds different bytes. The buffered twin has this test; the streaming one, which is the path every request takes, did not. */
+/* a client that offered a tag has already said which bytes it holds, so the date is not consulted at all; otherwise a deploy that rewrites content while preserving timestamps would answer 304 to a cache that just proved, by offering a tag that does not match, that it holds different bytes. The streaming resolution is the path every request takes. */
 func TestFileServer_ServeReader_TheDateIsIgnoredWhenATagWasOffered(t *testing.T) {
     modifiedAt := time.Date(2026, 1, 3, 12, 34, 56, 0, time.UTC)
 
@@ -3049,7 +3049,7 @@ func (instance *levelRecordingLogger) Info(message string, context exceptioncont
     instance.infoMessages = append(instance.infoMessages, message)
 }
 
-/* the non-retrieval method is ordinary control flow for a globally mounted middleware — every POST in the application takes this exit — and is recorded at debug, the level logOpenFailure's own comment reserves for the per-request ordinary case; at info it doubled the journal of every api request. Both textual halves answer alike. */
+/* the non-retrieval method is ordinary control flow for a globally mounted middleware (every POST in the application takes this exit) and is recorded at debug, the level logOpenFailure's own comment reserves for the per-request ordinary case; at info it would double the journal of every api request. Both textual halves answer alike. */
 func TestFileServer_ANonRetrievalMethodIsRecordedAtDebugOnTheStreamingHalf(t *testing.T) {
     logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
 
@@ -3142,7 +3142,7 @@ func TestNewFileServer_RefusesNilOptionsByName(t *testing.T) {
     )
 }
 
-/* an embedded filesystem reports the zero instant for every file, and rendering it as year 1 published a validator that is not one: the zero time is never After anything, so every If-Modified-Since without an entity tag was answered 304 for the life of the deployment */
+/* an embedded filesystem reports the zero instant for every file, and rendering it as year 1 would publish a validator that is not one: the zero time is never After anything, so every If-Modified-Since without an entity tag would be answered 304 for the life of the deployment */
 func TestFileServer_AnUndatedFileEmitsNoLastModifiedAndAnswersNoConditional304(t *testing.T) {
     fileSystem := fstest.MapFS{
         "a.txt": &fstest.MapFile{
@@ -3184,7 +3184,7 @@ func TestFileServer_AnUndatedFileEmitsNoLastModifiedAndAnswersNoConditional304(t
     }
 }
 
-/* the streaming twin of the guard above: both paths build their own header block, and only one of them being corrected would answer 304 forever through the reader door */
+/* the streaming twin of the guard above: both paths build their own header block, and either one left unguarded would answer 304 forever through its door */
 func TestFileServer_ServeReader_AnUndatedFileEmitsNoLastModifiedAndAnswersNoConditional304(t *testing.T) {
     fileSystem := fstest.MapFS{
         "a.txt": &fstest.MapFile{
@@ -3259,7 +3259,7 @@ func TestFileServer_ADatedFileKeepsItsLastModifiedAndItsConditional304(t *testin
     }
 }
 
-/* MELODY_PUBLIC_DIR stays a runtime key while the embedded layout is frozen at compile time, so a value the build did not embed used to boot cleanly and answer 404 for every asset in the binary */
+/* MELODY_PUBLIC_DIR stays a runtime key while the embedded layout is frozen at compile time, so a value the build did not embed would otherwise boot cleanly and answer 404 for every asset in the binary */
 func TestNewFileServer_RefusesAPublicDirectoryTheEmbeddedFileSystemDoesNotHold(t *testing.T) {
     fileSystem := fstest.MapFS{
         "public/app.css": &fstest.MapFile{

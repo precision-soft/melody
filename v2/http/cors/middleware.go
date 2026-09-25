@@ -26,7 +26,7 @@ func Middleware(service *Service) httpcontract.Middleware {
                 return response, nil
             }
 
-            /* a streaming handler (Server-Sent Events, a long poll) commits its headers straight to the writer and returns a response the write path then discards, so the cross-origin headers applied to that response below never reach the connection. Apply them to the writer here, before the handler runs: Vary on every path so a shared cache keys on the origin, and the allow-origin headers when the origin is allowed. The write path replaces these with the response's own copy for an ordinary handler, so its response is decorated once as before. */
+            /* a streaming handler commits its headers straight to the writer and returns a response the write path discards, so the cross-origin headers are applied to the writer before the handler runs: Vary on every path, the allow-origin headers when the origin is allowed. For an ordinary handler the write path replaces them with the response's own copy. */
             addVaryOrigin(writer.Header())
             if true == allowOrigin {
                 service.ApplyResponseHeaders(origin, writer.Header())

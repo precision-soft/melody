@@ -1225,15 +1225,22 @@ if [[ 0 -lt ${STALE_COUNT_INTEGER} ]]; then
 fi
 
 # history in a comment. The house rule keeps the story of a change in the CHANGELOG and the package documents,
-# and a comment states the present contract only, so a comment on the third major that narrates what the code
-# used to do, or carries a measurement, is counted per file against comment.baseline. Only comment text is
-# read: a phrase inside a string literal, a raw string or a rune is code, and `//go:` directives and the
-# generated-code header are not prose. The baseline is a ratchet — a file above its line fails, and a file
-# below it fails until the line is lowered — so the count only ever goes down.
+# and a comment states the present contract only, so a comment that narrates what the code used to do, or
+# carries a measurement, is counted per file: against comment.baseline on the third major, and against
+# comment-frozen.baseline on the first and second majors, their integrations and their example applications.
+# Only comment text is read: a phrase inside a string literal, a raw string or a rune is code, and `//go:`
+# directives and the generated-code header are not prose. Each baseline is a ratchet — a file above its line
+# fails, and a file below it fails until the line is lowered — so the count only ever goes down.
 COMMENT_BASELINE_PATH_STRING=".dev/validate/comment.baseline"
 
 if [[ ! -f "${COMMENT_BASELINE_PATH_STRING}" ]]; then
     fail "the baseline is missing: ${COMMENT_BASELINE_PATH_STRING}. Without it every history clause reads as new, so restore it rather than let the run invent a verdict"
+fi
+
+COMMENT_FROZEN_BASELINE_PATH_STRING=".dev/validate/comment-frozen.baseline"
+
+if [[ ! -f "${COMMENT_FROZEN_BASELINE_PATH_STRING}" ]]; then
+    fail "the baseline is missing: ${COMMENT_FROZEN_BASELINE_PATH_STRING}. Without it every history clause reads as new, so restore it rather than let the run invent a verdict"
 fi
 
 # prints "path<tab>count" for every file whose comments carry at least one history phrase.
@@ -1348,7 +1355,12 @@ trap remove_temporary_path EXIT
 # line comment and closes one, and two sit side by side, so each boundary's start and end alternatives count; every
 # member of an alternation is planted once; a block continues on a tab-indented line; a line comment carrying an
 # apostrophe precedes a counted one, and a string and a block each close ahead of a counted comment on their line;
-# a "used to" glued to the one before it counts once; and every form of "is used to" counts nothing.
+# a "used to" glued to the one before it counts once, and three in one comment count three; every bounded phrase is
+# also planted between punctuation, and a "used to" after a digit; a phrase beside "go:" or "Code generated" inside
+# a comment is counted; a string and a rune ending in an escaped backslash precede a counted comment on their line;
+# every bounded phrase is planted between digits, which bound it as punctuation does; the file that ends inside a
+# comment carries one counted clause of its own, so the count is kept per file; and every form of "is used to", one
+# opening a comment included, and a phrase split by a carriage return inside a line count nothing.
 COMMENT_CONTROL_DIRECTORY_STRING="$(mktemp -d)"
 TEMPORARY_PATH_STRING_LIST+=("${COMMENT_CONTROL_DIRECTORY_STRING}")
 
@@ -1393,11 +1405,20 @@ printf '%s\n' \
     '// the guard was called once' \
     '/* the guard had been slow */ // the present answer' \
     '// this used toused to hang' \
+    '// it used to hang, used to panic and used to leak' \
+    '// (measured), (previously), (no longer), (had been), (pre-repair), (the repairs), (was answered).' \
+    '// v2used to hang' \
+    '// the guard previously read go:generate' \
+    '// the guard previously read Code generated' \
+    '// 1measured1 2previously2 3no longer3 4was answered4 5had been5 6pre-repair6 7the repairs7' \
+    'const tail = "a\\" // the guard previously hung' \
+    "const slash = '\\\\' // the guard had been slow" \
     'func Serve() {}' > "${COMMENT_CONTROL_DIRECTORY_STRING}/positive.go"
 
 printf '%s\n' \
     'package control' \
     '' \
+    '// the guard previously hung' \
     '/* the file ends inside this comment' > "${COMMENT_CONTROL_DIRECTORY_STRING}/unterminated.go"
 
 printf '%s\n' \
@@ -1419,52 +1440,107 @@ printf '%s\n' \
     '// apreviously, previouslyx, ano longer, no longers, awas answered, was answeredx, ahad been, had beens' \
     '// apre-repair, pre-repairs, the older, inverted with thesis, athe repair, the repairman, measuredly' \
     '// handles are used to, be used to, been used to, being used to serve' \
+    '//is used to serve the page' \
+    '//be used to serve the page' \
+    $'// the guard measu\rred once' \
     'type Handler struct{}' > "${COMMENT_CONTROL_DIRECTORY_STRING}/negative.go"
 
 COMMENT_CONTROL_OUTPUT_STRING="$(list_history_comment_count "${COMMENT_CONTROL_DIRECTORY_STRING}/positive.go" "${COMMENT_CONTROL_DIRECTORY_STRING}/unterminated.go" "${COMMENT_CONTROL_DIRECTORY_STRING}/negative.go")"
-if [[ "${COMMENT_CONTROL_DIRECTORY_STRING}/positive.go"$'\t'"55" != "${COMMENT_CONTROL_OUTPUT_STRING}" ]]; then
-    fail "the history comment control failed: expected the planted file alone with 55, read [${COMMENT_CONTROL_OUTPUT_STRING}] — no verdict over the tree is possible"
+if [[ "${COMMENT_CONTROL_DIRECTORY_STRING}/positive.go"$'\t'"77"$'\n'"${COMMENT_CONTROL_DIRECTORY_STRING}/unterminated.go"$'\t'"1" != "${COMMENT_CONTROL_OUTPUT_STRING}" ]]; then
+    fail "the history comment control failed: expected the planted file with 77 and the unterminated one with 1, read [${COMMENT_CONTROL_OUTPUT_STRING}] — no verdict over the tree is possible"
 fi
 
-declare -A COMMENT_BASELINE_COUNT_INTEGER_MAP=()
-declare -A COMMENT_BASELINE_LINE_INTEGER_MAP=()
-COMMENT_BROKEN_COUNT_INTEGER=0
-COMMENT_BASELINE_LINE_NUMBER_INTEGER=0
+# reads one baseline and holds the files it covers to it: a file above its line fails, a line above its file
+# fails until it is lowered, and a line for a file that carries none fails until it is deleted.
+#
+#   check_comment_baseline <baseline path> <scope> <file>...
+check_comment_baseline() {
+    local baseline_path_string="$1"
+    local scope_string="$2"
+    shift 2
 
-while IFS= read -r COMMENT_BASELINE_LINE_STRING || [[ "" != "${COMMENT_BASELINE_LINE_STRING}" ]]; do
-    COMMENT_BASELINE_LINE_NUMBER_INTEGER=$((COMMENT_BASELINE_LINE_NUMBER_INTEGER + 1))
+    local -A baseline_count_integer_map=()
+    local -A baseline_line_integer_map=()
+    local -A seen_integer_map=()
+    local broken_count_integer=0
+    local line_number_integer=0
+    local history_total_integer=0
+    local over_count_integer=0
+    local under_count_integer=0
+    local line_string row_path_string row_count_string path_string count_string allowed_integer
 
-    if [[ "" = "${COMMENT_BASELINE_LINE_STRING// /}" ]]; then
-        continue
+    while IFS= read -r line_string || [[ "" != "${line_string}" ]]; do
+        line_number_integer=$((line_number_integer + 1))
+
+        if [[ "" = "${line_string// /}" ]]; then
+            continue
+        fi
+
+        case "${line_string}" in \#*) continue ;; esac
+
+        IFS='~' read -r row_path_string row_count_string <<< "${line_string}"
+        row_path_string="$(trim_field "${row_path_string}")"
+        row_count_string="$(trim_field "${row_count_string}")"
+
+        if [[ "" = "${row_path_string}" || ! "${row_count_string}" =~ ^[1-9][0-9]*$ ]]; then
+            println "  broken   ${baseline_path_string}:${line_number_integer} does not split into path ~ positive count"
+            broken_count_integer=$((broken_count_integer + 1))
+
+            continue
+        fi
+
+        if [[ "" != "${baseline_line_integer_map[${row_path_string}]:-}" ]]; then
+            println "  broken   ${baseline_path_string}:${line_number_integer} repeats the path first written at line ${baseline_line_integer_map[${row_path_string}]}"
+            broken_count_integer=$((broken_count_integer + 1))
+
+            continue
+        fi
+
+        baseline_line_integer_map["${row_path_string}"]="${line_number_integer}"
+        baseline_count_integer_map["${row_path_string}"]="${row_count_string}"
+    done < "${baseline_path_string}"
+
+    if [[ 0 -lt ${broken_count_integer} ]]; then
+        fail "${broken_count_integer} unreadable line(s) in ${baseline_path_string}: no verdict is possible over a baseline that does not parse"
     fi
 
-    case "${COMMENT_BASELINE_LINE_STRING}" in \#*) continue ;; esac
+    while IFS=$'\t' read -r path_string count_string; do
+        if [[ "" = "${path_string}" ]]; then
+            continue
+        fi
 
-    IFS='~' read -r ROW_PATH_STRING ROW_COUNT_STRING <<< "${COMMENT_BASELINE_LINE_STRING}"
-    ROW_PATH_STRING="$(trim_field "${ROW_PATH_STRING}")"
-    ROW_COUNT_STRING="$(trim_field "${ROW_COUNT_STRING}")"
+        seen_integer_map["${path_string}"]=1
+        history_total_integer=$((history_total_integer + count_string))
+        allowed_integer="${baseline_count_integer_map[${path_string}]:-0}"
 
-    if [[ "" = "${ROW_PATH_STRING}" || ! "${ROW_COUNT_STRING}" =~ ^[1-9][0-9]*$ ]]; then
-        println "  broken   ${COMMENT_BASELINE_PATH_STRING}:${COMMENT_BASELINE_LINE_NUMBER_INTEGER} does not split into path ~ positive count"
-        COMMENT_BROKEN_COUNT_INTEGER=$((COMMENT_BROKEN_COUNT_INTEGER + 1))
+        if [[ ${count_string} -gt ${allowed_integer} ]]; then
+            println "  history  ${path_string}: ${count_string} history clause(s) in comments, the baseline allows ${allowed_integer} — state the present contract and leave the story to the CHANGELOG"
+            over_count_integer=$((over_count_integer + 1))
+        elif [[ ${count_string} -lt ${allowed_integer} ]]; then
+            println "  lower    ${baseline_path_string}:${baseline_line_integer_map[${path_string}]} allows ${allowed_integer} for ${path_string}, which now carries ${count_string} — lower the line"
+            under_count_integer=$((under_count_integer + 1))
+        fi
+    done < <(if [[ 0 -lt $# ]]; then list_history_comment_count "$@"; fi)
 
-        continue
+    for path_string in "${!baseline_count_integer_map[@]}"; do
+        if [[ "" != "${seen_integer_map[${path_string}]:-}" ]]; then
+            continue
+        fi
+
+        println "  stale    ${baseline_path_string}:${baseline_line_integer_map[${path_string}]} allows history in ${path_string}, which carries none — delete the line"
+        under_count_integer=$((under_count_integer + 1))
+    done
+
+    info "read the comments of $# file(s) of ${scope_string}: ${history_total_integer} history clause(s) in ${#seen_integer_map[@]} file(s), all within ${baseline_path_string} unless reported above"
+
+    if [[ 0 -lt ${over_count_integer} ]]; then
+        fail "${over_count_integer} file(s) carry more history in their comments than ${baseline_path_string} allows"
     fi
 
-    if [[ "" != "${COMMENT_BASELINE_LINE_INTEGER_MAP[${ROW_PATH_STRING}]:-}" ]]; then
-        println "  broken   ${COMMENT_BASELINE_PATH_STRING}:${COMMENT_BASELINE_LINE_NUMBER_INTEGER} repeats the path first written at line ${COMMENT_BASELINE_LINE_INTEGER_MAP[${ROW_PATH_STRING}]}"
-        COMMENT_BROKEN_COUNT_INTEGER=$((COMMENT_BROKEN_COUNT_INTEGER + 1))
-
-        continue
+    if [[ 0 -lt ${under_count_integer} ]]; then
+        fail "${under_count_integer} line(s) of ${baseline_path_string} allow more than the file carries: lower or delete them, so the count only goes down"
     fi
-
-    COMMENT_BASELINE_LINE_INTEGER_MAP["${ROW_PATH_STRING}"]="${COMMENT_BASELINE_LINE_NUMBER_INTEGER}"
-    COMMENT_BASELINE_COUNT_INTEGER_MAP["${ROW_PATH_STRING}"]="${ROW_COUNT_STRING}"
-done < "${COMMENT_BASELINE_PATH_STRING}"
-
-if [[ 0 -lt ${COMMENT_BROKEN_COUNT_INTEGER} ]]; then
-    fail "${COMMENT_BROKEN_COUNT_INTEGER} unreadable line(s) in ${COMMENT_BASELINE_PATH_STRING}: no verdict is possible over a baseline that does not parse"
-fi
+}
 
 COMMENT_FILE_STRING_LIST=()
 while IFS= read -r COMMENT_FILE_STRING; do
@@ -1473,46 +1549,21 @@ while IFS= read -r COMMENT_FILE_STRING; do
     fi
 done < <(list_repository_path 'v3/*.go' 'integrations/*/v3/*.go')
 
-declare -A COMMENT_SEEN_INTEGER_MAP=()
-COMMENT_HISTORY_TOTAL_INTEGER=0
-COMMENT_OVER_COUNT_INTEGER=0
-COMMENT_UNDER_COUNT_INTEGER=0
+check_comment_baseline "${COMMENT_BASELINE_PATH_STRING}" "the third major" "${COMMENT_FILE_STRING_LIST[@]}"
 
-while IFS=$'\t' read -r COMMENT_PATH_STRING COMMENT_COUNT_STRING; do
-    if [[ "" = "${COMMENT_PATH_STRING}" ]]; then
-        continue
+# the first and second majors, their integrations and their example applications: every Go file outside the
+# third major and outside .dev.
+COMMENT_FROZEN_FILE_STRING_LIST=()
+while IFS= read -r COMMENT_FILE_STRING; do
+    case "${COMMENT_FILE_STRING}" in
+        v3/* | integrations/*/v3/* | .dev/*) continue ;;
+    esac
+
+    if [[ -f "${COMMENT_FILE_STRING}" ]]; then
+        COMMENT_FROZEN_FILE_STRING_LIST+=("${COMMENT_FILE_STRING}")
     fi
+done < <(list_repository_path '*.go')
 
-    COMMENT_SEEN_INTEGER_MAP["${COMMENT_PATH_STRING}"]=1
-    COMMENT_HISTORY_TOTAL_INTEGER=$((COMMENT_HISTORY_TOTAL_INTEGER + COMMENT_COUNT_STRING))
-    COMMENT_ALLOWED_INTEGER="${COMMENT_BASELINE_COUNT_INTEGER_MAP[${COMMENT_PATH_STRING}]:-0}"
+check_comment_baseline "${COMMENT_FROZEN_BASELINE_PATH_STRING}" "the first and second majors" "${COMMENT_FROZEN_FILE_STRING_LIST[@]}"
 
-    if [[ ${COMMENT_COUNT_STRING} -gt ${COMMENT_ALLOWED_INTEGER} ]]; then
-        println "  history  ${COMMENT_PATH_STRING}: ${COMMENT_COUNT_STRING} history clause(s) in comments, the baseline allows ${COMMENT_ALLOWED_INTEGER} — state the present contract and leave the story to the CHANGELOG"
-        COMMENT_OVER_COUNT_INTEGER=$((COMMENT_OVER_COUNT_INTEGER + 1))
-    elif [[ ${COMMENT_COUNT_STRING} -lt ${COMMENT_ALLOWED_INTEGER} ]]; then
-        println "  lower    ${COMMENT_BASELINE_PATH_STRING}:${COMMENT_BASELINE_LINE_INTEGER_MAP[${COMMENT_PATH_STRING}]} allows ${COMMENT_ALLOWED_INTEGER} for ${COMMENT_PATH_STRING}, which now carries ${COMMENT_COUNT_STRING} — lower the line"
-        COMMENT_UNDER_COUNT_INTEGER=$((COMMENT_UNDER_COUNT_INTEGER + 1))
-    fi
-done < <(if [[ 0 -lt ${#COMMENT_FILE_STRING_LIST[@]} ]]; then list_history_comment_count "${COMMENT_FILE_STRING_LIST[@]}"; fi)
-
-for COMMENT_PATH_STRING in "${!COMMENT_BASELINE_COUNT_INTEGER_MAP[@]}"; do
-    if [[ "" != "${COMMENT_SEEN_INTEGER_MAP[${COMMENT_PATH_STRING}]:-}" ]]; then
-        continue
-    fi
-
-    println "  stale    ${COMMENT_BASELINE_PATH_STRING}:${COMMENT_BASELINE_LINE_INTEGER_MAP[${COMMENT_PATH_STRING}]} allows history in ${COMMENT_PATH_STRING}, which carries none — delete the line"
-    COMMENT_UNDER_COUNT_INTEGER=$((COMMENT_UNDER_COUNT_INTEGER + 1))
-done
-
-info "read the comments of ${#COMMENT_FILE_STRING_LIST[@]} file(s) of the third major: ${COMMENT_HISTORY_TOTAL_INTEGER} history clause(s) in ${#COMMENT_SEEN_INTEGER_MAP[@]} file(s), all within ${COMMENT_BASELINE_PATH_STRING} unless reported above"
-
-if [[ 0 -lt ${COMMENT_OVER_COUNT_INTEGER} ]]; then
-    fail "${COMMENT_OVER_COUNT_INTEGER} file(s) carry more history in their comments than ${COMMENT_BASELINE_PATH_STRING} allows"
-fi
-
-if [[ 0 -lt ${COMMENT_UNDER_COUNT_INTEGER} ]]; then
-    fail "${COMMENT_UNDER_COUNT_INTEGER} line(s) of ${COMMENT_BASELINE_PATH_STRING} allow more than the file carries: lower or delete them, so the count only goes down"
-fi
-
-success "package documentation agrees with the code of every major outside the ${GAP_COUNT_INTEGER} recorded divergences, and no comment of the third major carries more history than ${COMMENT_BASELINE_PATH_STRING} allows"
+success "package documentation agrees with the code of every major outside the ${GAP_COUNT_INTEGER} recorded divergences, and no comment of any major carries more history than ${COMMENT_BASELINE_PATH_STRING} and ${COMMENT_FROZEN_BASELINE_PATH_STRING} allow"

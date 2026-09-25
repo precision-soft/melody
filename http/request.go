@@ -70,7 +70,7 @@ func NewRequest(
             if nil == parseFormErr {
                 postBag = bag.NewParameterBagFromValues(httpRequest.PostForm)
             } else if bodyParseErr := urlEncodedBodyParseError(bufferedBody, rawBody); nil != bodyParseErr {
-                /* a form that does not parse is recorded the way a body that does not read is, and the kernel refuses the request for both: a warning that let the request continue handed the handler an empty form for a real submission — "field missing" answered about a field the client sent. The half the parse did yield is deliberately not published: the request is refused, and a partially read form is exactly what the handler must not be given. */
+                /* a form that does not parse is recorded like a body that does not read, and the kernel refuses the request for both, so a handler is never given an empty form for a real submission. The half the parse yielded is not published. */
                 bodyReadErr = exception.NewError(
                     "failed to parse form data",
                     map[string]any{
@@ -80,7 +80,7 @@ func NewRequest(
                     bodyParseErr,
                 )
             } else {
-                /* the body parsed and only the QUERY did not, which is a different failure and not the handler's form: net/http drops the malformed query pairs, which Request already read for itself through URL.Query(). Refusing the whole request for one turned a served submission into a 400 — a POST whose body is perfectly valid, answered 400 because the client wrote its query with a legacy semicolon separator — and left the handler an empty form on the way there. */
+                /* the body parsed and only the query did not: net/http drops the malformed query pairs, which Request reads for itself through URL.Query(), so the submission is served rather than refused for a query written with a legacy semicolon separator. */
                 postBag = bag.NewParameterBagFromValues(httpRequest.PostForm)
             }
         }
@@ -242,7 +242,7 @@ func (instance *Request) FormValue(key string) string {
     return instance.httpRequest.FormValue(key)
 }
 
-/* Input answers the first value of a repeated key, as FormValue beside it and url.Values.Get already do. The request bags keep a single key and a repeated one apart by type and bag.String refuses a slice with a panic — right where the key is the programmer's, wrong here, because the shape of a request parameter is the client's to choose: "?tag=a&tag=b" turned every handler reading a parameter by name into a 500 with a full stack record, unauthenticated and free to repeat. A handler that needs the whole array reads it with bag.StringSlice, which is what the panic was pointing at. */
+/* Input answers the first value of a repeated key, as FormValue and url.Values.Get do: a request parameter's shape is the client's to choose, so "?tag=a&tag=b" does not turn a handler reading a parameter by name into a 500. A handler that needs every value reads it with bag.StringSlice. */
 func (instance *Request) Input(key string) string {
     if nil != instance.post && true == instance.post.Has(key) {
         return firstStringValue(instance.post, key)

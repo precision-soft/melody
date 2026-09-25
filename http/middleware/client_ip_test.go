@@ -179,7 +179,7 @@ func TestForwardedClientIpResolver_MatchesMappedTrustedPrefix(t *testing.T) {
     }
 }
 
-/* A trusted edge may write an IPv6 hop as a bracketed literal with no port. net.SplitHostPort rejects that shape and netip.ParseAddr rejects the brackets it still carries, so the hop read as garbage and the resolver fell back to the direct peer — every IPv6 client behind such an edge collapsed onto the proxy's single rate limit bucket while IPv4 clients kept their own. */
+/* A trusted edge may write an IPv6 hop as a bracketed literal with no port. net.SplitHostPort rejects that shape and netip.ParseAddr rejects the brackets it still carries, so unstripped the hop would read as garbage and the resolver would fall back to the direct peer, collapsing every IPv6 client behind such an edge onto the proxy's single rate limit bucket while IPv4 clients keep their own. */
 func TestForwardedClientIpResolver_ResolvesBracketedIpv6HopWithoutPort(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
 
@@ -215,7 +215,7 @@ func TestForwardedClientIpResolver_BracketedAndBareIpv6KeyTheSameClient(t *testi
     }
 }
 
-/* the closure reads the trusted list on every request: retained live, a caller reusing its slice rewrote the trust decision mid-serving — the same rule Kernel.SetForwardedHeadersPolicy applies to the same list. */
+/* the closure reads the trusted list on every request: retained live, a caller reusing its slice would rewrite the trust decision mid-serving, which is the rule Kernel.SetForwardedHeadersPolicy applies to the same list. */
 func TestForwardedClientIpResolver_CopiesTheTrustedProxyListAtConstruction(t *testing.T) {
     trustedProxyList := []string{"10.0.0.0/8"}
     resolver := NewForwardedClientIpResolver(httpcontract.ForwardedHeadersPolicy{

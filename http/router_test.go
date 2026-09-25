@@ -835,7 +835,7 @@ func TestRouter_MatchHandsOutACopyOfTheRouteAttributes(t *testing.T) {
     }
 }
 
-/* a route the registry declined is not put in the matching tree. The index the tree receives is the position of the last STORED route, so registering it for a declined duplicate gave the pattern's entry somebody else's route — the invariant every reader of the tree relies on, and the one the priority tie-break reads the index for. */
+/* a route the registry declined is not put in the matching tree. The index the tree receives is the position of the last STORED route, so registering a declined duplicate would give the pattern's entry somebody else's route, breaking the invariant every reader of the tree relies on, the priority tie-break included. */
 func TestRouterAddRoute_ADeclinedDuplicateDoesNotEnterTheMatchingTree(t *testing.T) {
     router := NewRouter()
 

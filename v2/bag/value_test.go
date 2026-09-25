@@ -206,7 +206,7 @@ func TestValue_PresentNilReportsUnsetAcrossAllAccessors(t *testing.T) {
     }
 }
 
-/* the request bags keep the single and the repeated key apart by type, and a repeated key answers its first value the way Input and url.Values.Get do; the documented reads through StringOrDefault and HasNonEmptyString used to inherit a panic here, raised by one duplicated query key. */
+/* the request bags keep the single and the repeated key apart by type, and a repeated key answers its first value the way Input and url.Values.Get do, so the documented reads through StringOrDefault and HasNonEmptyString do not panic on one duplicated query key. */
 func TestString_ReadsTheFirstValueOfARepeatedKey(t *testing.T) {
     parameterBag := NewParameterBagFromValues(url.Values{"name": {"a", "b"}})
 

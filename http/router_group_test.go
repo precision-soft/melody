@@ -25,7 +25,7 @@ func TestRouteGroup_PanicsWhenRouterIsNil(t *testing.T) {
     }, "router is nil")
 }
 
-/* nil options read as the default options, the router's own answer for the same input: the group was the one registration surface that refused what its sibling accepts. The route carries the group's prefix and answers every method, exactly what the defaults mean. */
+/* nil options read as the default options, the router's own answer for the same input. The route carries the group's prefix and answers every method, exactly what the defaults mean. */
 func TestRouteGroup_NilOptionsReadAsTheDefaultOptions(t *testing.T) {
     router := NewRouter()
     group := router.Group("/api")

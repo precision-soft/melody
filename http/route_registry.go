@@ -66,9 +66,9 @@ func (instance *RouteRegistry) RouteDefinitionForUrlGeneration(routeName string)
     return NewUrlGenerationRouteDefinition(routeValue), true
 }
 
-/* registerRoute answers whether the route was stored. It is not stored when an aggregating boot records it as a dispatch duplicate instead of panicking over it, and the caller needs that answer: the index it puts in the matching tree is the position of the last stored route, so a route the registry declined left the tree pointing an entry at somebody else's route. */
+/* registerRoute answers whether the route was stored; an aggregating boot records a dispatch duplicate instead of storing it. The caller needs the answer because the index it puts in the matching tree is the position of the last stored route. */
 func (instance *RouteRegistry) registerRoute(routeValue route) bool {
-    /* an exact dispatch duplicate is refused before anything is stored: registration was the single channel with no collision handling — services, parameters and cli commands all report duplicates — and the second registration is unreachable by construction, which is precisely the silent kind of shadowing an operator cannot see */
+    /* an exact dispatch duplicate is refused before anything is stored, as services, parameters and cli commands refuse theirs: the second registration would be unreachable and would shadow silently */
     dispatchIdentity := routeDispatchIdentity(routeValue)
     if _, exists := instance.routeByDispatchIdentity[dispatchIdentity]; true == exists {
         if nil != instance.bootCollisionRecorder {

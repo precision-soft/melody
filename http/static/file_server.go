@@ -59,7 +59,7 @@ func NewFileServer(options *Options) *FileServer {
         exception.Panic(exception.NewError("file system may not be nil for the file server", nil, nil))
     }
 
-    /* in the embedded mode the public directory is a path INSIDE a filesystem whose layout was frozen at compile time, while the value naming it stays a runtime key: MELODY_PUBLIC_DIR set to a directory the build did not embed passed every validation, booted, and then answered 404 for every asset the binary carries. The directory is proven here instead, because a public directory that does not exist is a wiring fault of the deployment and the alternative — ignoring the key in this mode — would dissolve the join that confines a stripped prefix to it. */
+    /* in the embedded mode the public directory is a path inside a filesystem frozen at compile time, while the value naming it stays a runtime key, so the directory is proven to exist here: a public directory the build did not embed is a wiring fault of the deployment, and ignoring the key would dissolve the join that confines a stripped prefix to it. */
     if ModeEmbedded == options.fileServerConfig.mode {
         embeddedPublicDir := strings.TrimSpace(options.fileServerConfig.publicDir)
         if "" != embeddedPublicDir {
@@ -88,7 +88,7 @@ func NewFileServer(options *Options) *FileServer {
         config.indexFile = "index.html"
     }
 
-    /* an explicit zero is honoured as max-age=0 — always revalidate, with the ETag and Last-Modified machinery intact — because the configuration door validates zero as a distinct choice; only a negative value reads as unset and takes the default. Coercing zero shipped an hour of freshness to the operator who asked for none. */
+    /* an explicit zero is honoured as max-age=0, always revalidate, because the configuration door validates zero as a distinct choice; only a negative value reads as unset and takes the default. */
     if true == config.enableCache && 0 > config.cacheMaxAge {
         config.cacheMaxAge = 3600
     }
@@ -242,7 +242,7 @@ func (instance *FileServer) Serve(
     }
 
     if "/" == cleanedPath {
-        /* the spellings that fold into the root are refused on the ground the branch below states and until now alone carried: the matchers in front of the application compare the raw path, so "/open/.." is a url no rule on this mount ever saw, and answering it serves the mount's index page from behind whatever rule that other prefix carries. The index file is named by configuration and never by the request, so the target cannot be aimed elsewhere — the exposure of that one page can. Canonical is the mount root itself, with or without its trailing slash. */
+        /* the spellings that fold into the root are refused for the reason the branch below states: the matchers in front compare the raw path, so "/open/.." would serve the mount's index page from behind whatever rule another prefix carries. Canonical is the mount root itself, with or without its trailing slash. */
         canonicalRoot := strings.TrimSuffix(instance.config.stripPrefix, "/")
 
         if canonicalRoot != request.HttpRequest().URL.Path && canonicalRoot+"/" != request.HttpRequest().URL.Path {
@@ -378,7 +378,7 @@ func (instance *FileServer) Serve(
             headers.Set("ETag", etag)
         }
 
-        /* a filesystem that carries no modification time reports the zero instant, and rendering it as "Mon, 01 Jan 0001 00:00:00 GMT" publishes a validator that is not one: the zero time is never After anything, so every conditional request carrying If-Modified-Since and no entity tag was answered 304 for the life of the deployment. An absent header states what is true — this filesystem cannot date its files — and leaves the entity tag as the only validator, which is where the build version already answers. */
+        /* a filesystem that carries no modification time reports the zero instant, which is not a validator: it is never After anything, so every If-Modified-Since would be answered 304. No Last-Modified header is written, and the entity tag, built from the build version, is the only validator. */
         if false == fileInfo.ModTime().IsZero() {
             lastModified := fileInfo.ModTime().UTC().Format(nethttp.TimeFormat)
             headers.Set("Last-Modified", lastModified)
@@ -557,7 +557,7 @@ func (instance *FileServer) serveForStreaming(
     }
 
     if "/" == cleanedPath {
-        /* the spellings that fold into the root are refused on the ground the branch below states and until now alone carried: the matchers in front of the application compare the raw path, so "/open/.." is a url no rule on this mount ever saw, and answering it serves the mount's index page from behind whatever rule that other prefix carries. The index file is named by configuration and never by the request, so the target cannot be aimed elsewhere — the exposure of that one page can. Canonical is the mount root itself, with or without its trailing slash. */
+        /* the spellings that fold into the root are refused for the reason the branch below states: the matchers in front compare the raw path, so "/open/.." would serve the mount's index page from behind whatever rule another prefix carries. Canonical is the mount root itself, with or without its trailing slash. */
         canonicalRoot := strings.TrimSuffix(instance.config.stripPrefix, "/")
 
         if canonicalRoot != request.HttpRequest().URL.Path && canonicalRoot+"/" != request.HttpRequest().URL.Path {
@@ -694,7 +694,7 @@ func (instance *FileServer) serveForStreaming(
             headers.Set("ETag", etag)
         }
 
-        /* a filesystem that carries no modification time reports the zero instant, and rendering it as "Mon, 01 Jan 0001 00:00:00 GMT" publishes a validator that is not one: the zero time is never After anything, so every conditional request carrying If-Modified-Since and no entity tag was answered 304 for the life of the deployment. An absent header states what is true — this filesystem cannot date its files — and leaves the entity tag as the only validator, which is where the build version already answers. */
+        /* a filesystem that carries no modification time reports the zero instant, which is not a validator: it is never After anything, so every If-Modified-Since would be answered 304. No Last-Modified header is written, and the entity tag, built from the build version, is the only validator. */
         if false == fileInfo.ModTime().IsZero() {
             lastModified := fileInfo.ModTime().UTC().Format(nethttp.TimeFormat)
             headers.Set("Last-Modified", lastModified)

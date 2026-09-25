@@ -43,7 +43,7 @@ func NormalizeResultToResponse(
         return nil, nil
     }
 
-    /* the assertion is against the contract, the same question the controller registration door asks: a caller's own Response implementation is served with its status and headers rather than being handed to the serializer, which rendered it as a value — all unexported fields, so an empty body under a 200 that replaced the status the caller chose. The typed nil is read through the interface, where a bare comparison would take it for a live response. */
+    /* the assertion is against the contract, the question the controller registration door asks: a caller's own Response implementation is served with its status and headers, not handed to the serializer as a value. The typed nil is read through the interface. */
     responseInstance, ok := value.(httpcontract.Response)
     if true == ok {
         if true == internal.IsNilInterface(responseInstance) {
@@ -77,7 +77,7 @@ func NormalizeResultToResponse(
                 return EmptyResponse(nethttp.StatusNotAcceptable), nil
             }
 
-            /* a resolution failure that is not the not-acceptable refusal is recorded before the fallback serves the default representation: it was dropped whole, so a client that named an available type and received another had no diagnostic anywhere */
+            /* a resolution failure that is not the not-acceptable refusal is recorded before the fallback serves the default representation, so a client that named an available type and received another leaves a diagnostic */
             if nil != err {
                 loggerInstance := logging.LoggerFromRuntime(runtimeInstance)
                 if nil != loggerInstance {

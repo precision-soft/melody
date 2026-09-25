@@ -40,7 +40,7 @@ type tombstone struct {
     deletedAt time.Time
 }
 
-/* NewManager takes a storage it does not own: Close leaves it open, because a storage handed in was built by someone else and is closed by whoever built it. That is the same rule NewFileStorageFromFile follows for an injected file handle, and it is what the container path needs — the storage is a registered service the container closes itself, so a manager that closed it too would close it twice, which a storage wrapping a connection typically reports as a failure on the second call and turns a clean shutdown into a reported one. Use NewManagerOwningStorage to get the cascade back. */
+/* NewManager takes a storage it does not own: Close leaves it open for whoever built it to close, as NewFileStorageFromFile leaves an injected handle. On the container path the storage is a registered service the container closes, so closing it here too would close it twice. NewManagerOwningStorage gets the cascade back. */
 func NewManager(storage sessioncontract.Storage, ttl time.Duration) *Manager {
     return newManager(storage, ttl, false, TombstoneRetention)
 }
@@ -76,7 +76,7 @@ func newManager(storage sessioncontract.Storage, ttl time.Duration, ownsStorage 
         exception.Panic(exception.NewError("session storage is nil", nil, nil))
     }
 
-    /* a negative ttl is refused here rather than carried into the storages, where `0 < ttl` is false for it and the entry is stored with no expiry at all — a lifetime that reads as "already lapsed" would produce the immortal session instead, the exact opposite of what it asks for, and silently. The configuration path already refuses it (config.validateSessionTtl); this is the same guard for callers that wire the manager themselves. Zero keeps its meaning of no expiry. */
+    /* a negative ttl is refused here rather than carried into the storages, where `0 < ttl` is false for it and the entry would be stored with no expiry at all. The configuration path refuses it too (config.validateSessionTtl); zero keeps its meaning of no expiry. */
     if 0 > ttl {
         exception.Panic(
             exception.NewError(
@@ -146,7 +146,7 @@ func (instance *Manager) NewSession() sessioncontract.Session {
     }
 }
 
-/* RegenerateSession rotates a session id, the defence against session fixation: the returned session carries the values over under a fresh id and the entry the previous id pointed at is removed. Rotation lives on the manager because only it holds the storage the candidate id is probed against and the previous entry deleted from — a Session keeps no storage reference. The result is a new object marked modified, so publishing it on the request under http.RequestAttributeSession is what makes the response path store it and emit its cookie — http.RegenerateRequestSession does both. The session passed in is latched cleared — a later write to it cannot lift that — so a caller that forgets to publish the rotated one has the response path expire the browser cookie and hand out a fresh session, instead of leaving the client presenting an id that no longer exists. */
+/* RegenerateSession rotates a session id, the defence against session fixation: the returned session carries the values over under a fresh id and the previous entry is removed. The result is marked modified, so publishing it on the request under http.RequestAttributeSession makes the response path store it and emit its cookie, which http.RegenerateRequestSession does. The session passed in is latched cleared, so a caller that forgets to publish the rotated one has the response path expire the cookie and hand out a fresh session instead of leaving the client presenting an id the store does not hold. */
 func (instance *Manager) RegenerateSession(sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
     if true == internal.IsNilInterface(sessionInstance) {
         return nil, exception.NewError("session is nil in regenerate session", nil, nil)
@@ -172,7 +172,7 @@ func (instance *Manager) RegenerateSession(sessionInstance sessioncontract.Sessi
         return nil, deleteErr
     }
 
-    /* the rotated-away session is cleared, and Clear latches: a caller that rotates and then keeps writing to the ORIGINAL object cannot make it look live again, so the response path cannot save the just-deleted id back and re-issue it as the cookie — which would undo the rotation and hand a pre-login, plantable id the authenticated identity. That latch is also the fail-safe for a caller that forgets to publish the rotated session: the response path emits the clearing cookie and the client is logged out cleanly instead of presenting an id that no longer exists. It is applied only once the entry is gone, so a failed delete leaves the caller a session it can keep using. A foreign Session implementation is cleared through its own Clear, which may or may not latch. */
+    /* the rotated-away session is cleared, and Clear latches: a caller that keeps writing to the original object cannot make it look live again, so the response path cannot save the deleted id back and re-issue it with the authenticated identity. The latch is also the fail-safe for a caller that forgets to publish the rotated session, which is logged out cleanly. It is applied only once the entry is gone, so a failed delete leaves a usable session; a foreign Session is cleared through its own Clear, which may or may not latch. */
     sessionInstance.Clear()
 
     return &Session{
@@ -184,12 +184,12 @@ func (instance *Manager) RegenerateSession(sessionInstance sessioncontract.Sessi
 }
 
 func (instance *Manager) SaveSession(sessionInstance sessioncontract.Session) error {
-    /* the guard is IsNilInterface and not `nil ==`, the same as RegenerateSession: a typed nil session — the zero value of a *Session variable a caller left unassigned — is not equal to nil once it is carried in the interface, so a bare comparison lets it through and Snapshot below dereferences it. That panic replaces a returned error the caller can act on, and on the response path it happens inside the recovery defer, where a second panic escapes ServeHttp with no response at all. */
+    /* IsNilInterface and not `nil ==`, as in RegenerateSession: a typed nil session is not nil once carried in the interface, and Snapshot below would dereference it, a panic in place of an error the caller can act on, and on the response path a second panic inside the recovery defer. */
     if true == internal.IsNilInterface(sessionInstance) {
         return exception.NewError("session is nil in save session", nil, nil)
     }
 
-    /* one snapshot pairs the branch decision with the values it acts on: reading the flags and the values through the individual accessors let a concurrent Clear land between the reads, and the save branch then wrote the emptied map — or the full pre-logout map — under an id the caller was just told is cleared. */
+    /* one snapshot pairs the branch decision with the values it acts on, so a concurrent Clear cannot land between reads and have the save branch write the emptied or the pre-logout map under an id the caller was told is cleared. */
     values, sessionModified, sessionCleared := sessionInstance.Snapshot()
 
     if true == sessionCleared {
@@ -212,9 +212,7 @@ func (instance *Manager) SaveSession(sessionInstance sessioncontract.Session) er
         )
     }
 
-    /* a session deleted while this request was in flight is not written back. Storage.Save is a blind upsert, so without this a request that loaded the session before a logout deleted it re-creates the entry when its own handler finishes — with the identity intact and the cookie re-issued — and the window is as long as a request takes, which is long enough for someone holding a stolen cookie to keep a revoked session alive by repeating a slow one.
-
-       The check and the write are one critical section, and that is the whole point: testing the record and then writing outside the lock leaves the same race in miniature, where a delete lands between the two and the write that follows it resurrects the session anyway. The section is keyed to this session id, because that is the whole extent of what it defends — a delete of a DIFFERENT id can neither resurrect nor be resurrected by this write, and holding one lock for all of them would put every session write in the process behind whatever round trip the storage is in the middle of. */
+    /* a session deleted while this request was in flight is not written back: Storage.Save is a blind upsert, so a request that loaded the session before a logout would re-create it with the identity intact, a window someone holding a stolen cookie could keep open by repeating a slow request. The check and the write are one critical section, keyed to this session id, since a delete of a different id cannot interact with this write. */
     sessionMutex := instance.sessionMutexOf(sessionId)
     sessionMutex.Lock()
     defer sessionMutex.Unlock()
@@ -286,9 +284,7 @@ func (instance *Manager) buryTombstone(sessionId string) {
     instance.buryTombstoneAt(sessionId, time.Now())
 }
 
-/* buryTombstoneAt records a burial at a given instant, which is what lets the pruning be driven by the order of the burials rather than by a walk of the whole record.
-
-   Pruning still rides on the burial, so nothing has to sweep the record on a timer — but it now walks only the burials that have actually lapsed. Every tombstone is held for the same window, so the burials lapse in the order they happened and the lapsed ones are a prefix of the queue: the walk stops at the first one still inside the window. Sweeping the whole map instead cost a step per remembered deletion on every login and every logout, and the record grows with the rate of logins, so the burial got slower exactly as the traffic that drives it got heavier — at a hundred thousand remembered deletions one logout cost six hundred microseconds, with the manager's lock held for all of it. */
+/* buryTombstoneAt records a burial at a given instant. Pruning rides on the burial and walks only what has lapsed: every tombstone is held for the same window, so the lapsed burials are a prefix of the queue and the walk stops at the first one still inside it, and a login or a logout does not pay a step per remembered deletion. */
 func (instance *Manager) buryTombstoneAt(sessionId string, deletedAt time.Time) {
     instance.tombstoneMutex.Lock()
     defer instance.tombstoneMutex.Unlock()

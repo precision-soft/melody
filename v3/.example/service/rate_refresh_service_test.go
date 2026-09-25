@@ -712,7 +712,7 @@ func TestRateRefreshServiceRefresh_NamesBothSpellingsOfACurrencyQuotedTwice(t *t
     }
 }
 
-/* every spelling of a currency quoted more than twice is named, and the refusal reads the same on every run, which a judgement made while walking the document's map would not */
+/* every spelling of a currency quoted under several spellings is named, three here, and the refusal reads the same on every run, which a judgement made while walking the document's map would not */
 func TestRateRefreshServiceRefresh_NamesEverySpellingOfACurrencyTheSameOnEveryRun(t *testing.T) {
     messageSet := map[string]bool{}
 

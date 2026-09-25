@@ -209,7 +209,7 @@ func TestLazyService_GetIsSafeForConcurrentUse(t *testing.T) {
     waitGroup.Wait()
 }
 
-/* Get is the panicking door of the handle, and its nil-yield refusal had never been entered: a resolver that answers (nil, nil) — a provider whose value the container never filed, a typed nil boxed by a foreign resolver — would otherwise hand the caller a nil the compiler says is a live service, dereferenced somewhere far from the handle. The refusal has to carry its own message, because the failure path of the same call answers with whatever the resolver refused and a reader has to be able to tell the two apart. */
+/* Get is the panicking door of the handle, and it refuses a nil yield: a resolver that answers (nil, nil), a provider whose value the container never filed or a typed nil boxed by a foreign resolver, would otherwise hand the caller a nil the compiler says is a live service. The refusal carries its own message, because the failure path of the same call answers with whatever the resolver refused and a reader has to be able to tell the two apart. */
 func TestLazyService_GetRefusesANilYieldByName(t *testing.T) {
     handle := &LazyService[*lazyProbeItem]{
         resolve: func() (*lazyProbeItem, error) {
@@ -263,7 +263,7 @@ func TestLazyService_GetCarriesTheResolversOwnFailure(t *testing.T) {
     _ = handle.Get()
 }
 
-/* the deferred by-type handle is the counterpart of Lazy for a component assembled before the service is safe to resolve; nothing executed it, so the closure it builds — the one that reaches FromResolverByType rather than FromResolver — was never proven to resolve anything at all. */
+/* the deferred by-type handle is the counterpart of Lazy for a component assembled before the service is safe to resolve; its closure reaches FromResolverByType rather than FromResolver, and this proves it resolves. */
 func TestLazyByType_ResolvesTheServiceOnFirstUse(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -504,11 +504,7 @@ func (instance *lazyTeardownReader) Close() error {
     return nil
 }
 
-/* A service closing through a handle must be served what the resolver beside it still answers directly.
-The container raises the flag IsClosed reports at the START of its teardown and stops answering resolutions
-only at the end, deliberately, so that a service's own Close is entitled to what it depends on. A handle
-that read the earlier flag turned terminal for the whole window and dropped its memoized value on the way,
-so a worker releasing a lease from Close was refused by the handle and served by the door beside it. */
+/* A service closing through a handle must be served what the resolver beside it still answers directly. The container raises the flag IsClosed reports at the START of its teardown and stops answering resolutions only at the end, so that a service's own Close is entitled to what it depends on; a handle reading the earlier flag would turn terminal for the whole window and drop its memoized value, and a worker releasing a lease from Close would be refused by the handle and served by the door beside it. */
 func TestLazyService_AContainerBackedHandleServesTheClosingServiceDuringTheTeardown(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -550,9 +546,7 @@ func TestLazyService_AContainerBackedHandleServesTheClosingServiceDuringTheTeard
     }
 }
 
-/* The same window, read through the resolver a provider was handed — the shape the LazyService godoc
-recommends when the teardown ordering matters, and therefore the shape that must not be the broken one.
-That view carries no scope, so its liveness answer comes from the container underneath it. */
+/* The same window, read through the resolver a provider receives: the shape the LazyService godoc recommends when the teardown ordering matters, and therefore the shape that must not be the broken one. That view carries no scope, so its liveness answer comes from the container underneath it. */
 func TestLazyService_AProviderResolverBackedHandleServesTheClosingServiceDuringTheTeardown(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -593,10 +587,7 @@ func TestLazyService_AProviderResolverBackedHandleServesTheClosingServiceDuringT
     }
 }
 
-/* The scope keeps the terminal reading, and this is what says so: a scope stops answering resolutions the
-moment it is marked closed, so both its doors refuse together and a handle over it must go on refusing. The
-window the container has does not exist there, and widening the container's repair onto the scope would
-serve a dead request's state. */
+/* The scope keeps the terminal reading, and this is what says so: a scope stops answering resolutions the moment it is marked closed, so both its doors refuse together and a handle over it must go on refusing. The container's teardown window does not exist there, and widening it onto the scope would serve a dead request's state. */
 func TestLazyService_AScopeBackedHandleAndTheScopeDoorRefuseTogetherDuringTheScopeTeardown(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -640,9 +631,7 @@ func TestLazyService_AScopeBackedHandleAndTheScopeDoorRefuseTogetherDuringTheSco
     }
 }
 
-/* A handle built over the resolver a SCOPED provider was handed holds that one request's state, so it has
-to turn terminal with the request — the container it layers over is still live and would answer forever.
-This is the arm the container's own teardown window must not be widened onto. */
+/* A handle built over the resolver a SCOPED provider receives holds that one request's state, so it has to turn terminal with the request: the container it layers over is still live and would answer forever. This is the arm the container's own teardown window must not be widened onto. */
 func TestLazyService_AScopedProviderResolverBackedHandleTurnsTerminalWithTheScope(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -683,12 +672,7 @@ func TestLazyService_AScopedProviderResolverBackedHandleTurnsTerminalWithTheScop
     }
 }
 
-/* A service registered on the CONTAINER is one instance for the whole process, but its provider first
-runs inside whichever request happened to reach it, and the view it is handed still carries that request's
-scope — suspended, so the provider's own wiring cannot read it. The liveness question has to follow the
-same predicate: a suspended view reads the container, so a handle the singleton captured must outlive the
-request that built it. Asking only whether a scope pointer was present killed the handle with that one
-request, while the container went on answering the same name directly for the rest of the process. */
+/* A service registered on the CONTAINER is one instance for the whole process, but its provider first runs inside whichever request happened to reach it, and the view it receives still carries that request's scope, suspended so the provider's own wiring cannot read it. The liveness question follows the same predicate: a suspended view reads the container, so a handle the singleton captured outlives the request that built it; asking only whether a scope pointer is present would kill the handle with that one request, while the container goes on answering the same name for the rest of the process. */
 func TestLazyService_ASingletonsCapturedHandleOutlivesTheRequestThatBuiltIt(t *testing.T) {
     serviceContainer := NewContainer()
 

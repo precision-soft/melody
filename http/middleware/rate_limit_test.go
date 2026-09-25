@@ -847,7 +847,7 @@ func TestSlidingWindowLimiter_HoldsTheRateWhereTheFixedWindowDoesNot(t *testing.
     }
 }
 
-/* the deprecated spelling must keep working: it is a type alias plus two forwarding constructors, so an application on the old name is unaffected */
+/* the deprecated spelling must keep working: it is a type alias plus two forwarding constructors, so an application on the deprecated name is unaffected */
 func TestTokenBucketLimiter_DeprecatedAliasStillConstructsTheFixedWindowLimiter(t *testing.T) {
     var limiter *FixedWindowLimiter = NewTokenBucketLimiter(2, time.Minute)
 
@@ -872,7 +872,7 @@ func allowingNext() httpcontract.Handler {
     }
 }
 
-/* IpRateLimit builds its config internally and hands back only the middleware, so the resolver the documentation prescribes for a deployment behind a reverse proxy could never be reached: every client shared the proxy's single budget. The additive variant takes the resolver up front. */
+/* IpRateLimit builds its config internally and hands back only the middleware, so the resolver a deployment behind a reverse proxy needs cannot be set on it, and every client would share the proxy's single budget. The additive variant takes the resolver up front. */
 func TestIpRateLimitWithResolver_ChargesTheForwardedClient(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
     handler := IpRateLimitWithResolver(1, resolver)(allowingNext())
@@ -893,7 +893,7 @@ func TestIpRateLimitWithResolver_ChargesTheForwardedClient(t *testing.T) {
     }
 }
 
-/* The direct-peer behaviour of the original helper is correct without a proxy in front and stays exactly as it was, so an application that upgrades keeps compiling and keeps its semantics. */
+/* The direct-peer behaviour of the original helper is correct without a proxy in front, so an application keeps compiling and keeps its semantics. */
 func TestIpRateLimit_StillChargesTheDirectPeer(t *testing.T) {
     handler := IpRateLimit(1)(allowingNext())
 
@@ -928,7 +928,7 @@ func TestSimpleRateLimitWithResolver_ChargesTheForwardedClient(t *testing.T) {
     }
 }
 
-/* UserRateLimit falls back to the client address for a request carrying no user id, so unauthenticated traffic behind a proxy shared one budget — the traffic a limiter is most needed for. */
+/* UserRateLimit falls back to the client address for a request carrying no user id, so without a resolver unauthenticated traffic behind a proxy would share one budget, the traffic a limiter is most needed for. */
 func TestUserRateLimitWithResolver_ChargesTheForwardedClientWhenAnonymous(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
     anonymous := func(request httpcontract.Request) string { return "" }
@@ -1014,7 +1014,7 @@ func TestSlidingWindowLimiter_MaxDurationWindowSurvivesIdlePrune(t *testing.T) {
     }
 }
 
-/* SimpleRateLimit is one of the three helpers an application actually calls, and no test entered it. Its documented semantics are the direct peer — the resolver cannot be set afterwards because the helper builds its config internally — so two clients behind one proxy sharing a budget is the correct behaviour here, and the sentence that says so needs a test that fails if the helper starts reading a forwarded header. */
+/* SimpleRateLimit is one of the three helpers an application actually calls. Its documented semantics are the direct peer (the resolver cannot be set afterwards because the helper builds its config internally), so two clients behind one proxy sharing a budget is the correct behaviour here, and this fails if the helper starts reading a forwarded header. */
 
 func TestSimpleRateLimit_ChargesTheDirectPeer(t *testing.T) {
     handler := SimpleRateLimit(1)(allowingNext())
@@ -1084,7 +1084,7 @@ func TestUserRateLimit_RefusesANilUserIdCallbackAtConstruction(t *testing.T) {
     }
 }
 
-/* UserRateLimit keys on the identity rather than the address, which is the whole point of it: one user must carry one budget across every address they arrive from, and two users sharing an address must not share one. Neither direction had a test on the helper itself. */
+/* UserRateLimit keys on the identity rather than the address, which is the whole point of it: one user carries one budget across every address they arrive from, and two users sharing an address do not share one. */
 
 func TestUserRateLimit_KeysOnTheIdentityRatherThanTheAddress(t *testing.T) {
     identity := "alice"
@@ -1133,7 +1133,7 @@ func TestUserRateLimit_FallsBackToTheAddressWhenAnonymous(t *testing.T) {
     }
 }
 
-/* the resolver accessor is what makes SetClientIpResolver verifiable from outside; it had no test at all, so a setter that stored nowhere would have read as working through every path that only exercises the default. */
+/* the resolver accessor is what makes SetClientIpResolver verifiable from outside: a setter that stored nowhere would read as working through every path that only exercises the default. */
 
 func TestRateLimitConfig_ClientIpResolverAccessorReportsWhatWasSet(t *testing.T) {
     config := NewRateLimitConfig(NewFixedWindowLimiter(1, time.Minute), nil, nil)
@@ -1216,7 +1216,7 @@ func TestRateLimitMiddleware_RefusesANilConfigByName(t *testing.T) {
     _ = RateLimitMiddleware(nil)
 }
 
-/* the middleware's record classifies the caller's cancellation apart from a store failure: at error every disconnect on a rate-limited route paged the operator for a healthy store. */
+/* the middleware's record classifies the caller's cancellation apart from a store failure: at error every disconnect on a rate-limited route would page the operator for a healthy store. */
 func TestRateLimitMiddleware_ACancelledLimiterCallIsRecordedAtWarning(t *testing.T) {
     capture := &rateLimitCaptureLogger{}
 
@@ -1292,7 +1292,7 @@ func (instance *alreadyReportingRuntimeLimiter) AllowWithRuntime(runtimeInstance
     )
 }
 
-/* a limiter that filed its own record marks it, and the middleware then writes nothing beside it. The limiter knows the key and the failure mode and has doors with no error return at all, so it is the honest place to file from; without the mark being read here, arming its default turned every refused request during an outage into two identical records — at the moment the journal is under the most load. */
+/* a limiter that filed its own record marks it, and the middleware then writes nothing beside it. The limiter knows the key and the failure mode and has doors with no error return at all, so it is the honest place to file from; unread, the mark would turn every refused request during an outage into two identical records, at the moment the journal is under the most load. */
 func TestRateLimitMiddleware_AFailureTheLimiterAlreadyRecordedIsNotRecordedAgain(t *testing.T) {
     capture := &rateLimitCaptureLogger{}
 
@@ -1359,7 +1359,7 @@ func TestRegisterRateLimitRequestListener_RefusesATypedNilLimiterByName(t *testi
     RegisterRateLimitRequestListener(nil, NewRateLimitConfig((*FixedWindowLimiter)(nil), nil, nil))
 }
 
-/* the marks are searched with a binary search, which is entitled to an ordered slice, so the recorded instant is clamped to the last mark. A wall clock moved backwards under the process otherwise appended out of order, and an unordered slice does not merely keep an expired mark — the search can cut a LIVE one away and hand the key its budget back, on a limiter the package points at login, one-time codes and password reset. */
+/* the marks are searched with a binary search, which is entitled to an ordered slice, so the recorded instant is clamped to the last mark. A wall clock moved backwards under the process would otherwise append out of order, and on an unordered slice the search can cut a LIVE mark away and hand the key its budget back, on a limiter the package points at login, one-time codes and password reset. */
 func TestSlidingWindowLimiter_AClockMovedBackwardsNeverReplenishesTheBudget(t *testing.T) {
     startedAt := time.Now()
     frozenClock := clock.NewFrozenClock(startedAt)

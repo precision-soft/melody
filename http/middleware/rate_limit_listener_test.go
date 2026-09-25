@@ -202,7 +202,7 @@ func TestRegisterRateLimitRequestListener_RefusesAMissingLimiter(t *testing.T) {
     )
 }
 
-/* the listener door classifies the caller's cancellation apart from a store failure, the way its middleware twin does: at error every client that hung up mid-round-trip paged the operator for a healthy store — and this door meters every request, ahead of authentication, so it sees more of those than the middleware ever does. */
+/* the listener door classifies the caller's cancellation apart from a store failure, the way its middleware twin does: at error every client that hangs up mid-round-trip would page the operator for a healthy store, and this door meters every request, ahead of authentication, so it sees more of those than the middleware does. */
 func TestRegisterRateLimitRequestListener_ACancelledLimiterCallIsRecordedAtWarning(t *testing.T) {
     capture := &rateLimitCaptureLogger{Logger: logging.NewNopLogger()}
 

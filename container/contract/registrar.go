@@ -3,9 +3,7 @@ package contract
 type RegisterOptions struct {
     AlsoRegisterType         bool
     TypeRegistrationIsStrict bool
-    /* ReplacesContainerService admits a SCOPED registration whose name — or whose registered type — the container already claims; the container-level registration paths do not read it. Without it the collision is refused at the point it is made: a scoped service silently shadowing a container singleton is a wiring mistake whose symptom appears one lifetime away from its cause. With it, the scoped registration answers inside a scope and the container's keeps its own lifetime outside one. Declared where nothing collides yet, the waiver stands: a container registration of the same name arriving later is admitted without declaring anything itself.
-
-       It admits substitution, not decoration. A scoped provider that resolves the name it is replacing re-enters itself, and the resolution is reported as the circular dependency it is; a decorator has to take the decorated service under its own name. */
+    /* ReplacesContainerService admits a scoped registration whose name or registered type the container already claims; the container registration paths do not read it, and without it the collision is refused where it is made. The waiver is remembered, so a container registration of the same name arriving later is admitted. It admits substitution, not decoration: a scoped provider that resolves the name it replaces is reported as a circular dependency. */
     ReplacesContainerService bool
 }
 

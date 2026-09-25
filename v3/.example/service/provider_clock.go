@@ -29,7 +29,7 @@ type providerClockReading struct {
     Age  string
 }
 
-/* readProviderClock measures the provider's clock from one answer's headers, the request having left at sentAt and the answer arrived at receivedAt, both on this clock. The Age is honoured because a cache keeps the origin's Date on an answer it hands out again; an Age that is not a non-negative integer is ignored, and one above the ceiling makes the answer's clock unreadable, judged as an answer that carried no date. The provider's instant is read at the middle of the two-second span of Date and Age. */
+/* readProviderClock measures the provider's clock from one answer's headers, the request having left at sentAt and the answer arrived at receivedAt, both on this clock. The Age is honoured because a cache keeps the origin's Date on an answer it hands out again; an Age that is not a non-negative integer is ignored, and one at or past the ceiling makes the answer's clock unreadable, judged as an answer that carried no date. The provider's instant is read at the middle of the span Date and Age leave open: one second for a Date alone, two with an Age. */
 func readProviderClock(headers nethttp.Header, sentAt time.Time, receivedAt time.Time) providerClockReading {
     dateValue := strings.TrimSpace(headers.Get("Date"))
     ageValue := strings.TrimSpace(headers.Get("Age"))

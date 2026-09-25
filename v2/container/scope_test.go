@@ -703,9 +703,7 @@ func (instance *scopeLifetimeProbe) Close() error {
     return nil
 }
 
-/* The container is request-agnostic: a service it owns is one instance for the whole process. Resolving that service THROUGH a request scope must not change what it is — the scope layers over the container for the code running inside a request, it does not reach underneath into the container's own wiring.
-
-   This is the shape that broke: a provider that asks for the logger. The kernel installs a request logger into every scope under the same name the container registers, so a provider doing nothing request-specific at all was assembled from a scope entry, kept per request, and closed when the request ended. Live in the repository: the bunorm providers read the logger while opening, so the *bun.DB pool was closed at the end of the request that first resolved it. The provider must see the container's own logger, be built once, and never be closed by a request ending. */
+/* The container is request-agnostic: a service it owns is one instance for the whole process, and resolving it THROUGH a request scope must not change what it is. The shape at stake is a provider that asks for the logger: the kernel installs a request logger into every scope under the name the container registers, so a provider reading it through the scope would be built from a scope entry, kept per request and closed when the request ends, as a bunorm pool that reads the logger while opening would be. The provider must see the container's own logger, be built once, and never be closed by a request ending. */
 func TestScope_AContainerServiceStaysASingletonWhenResolvedThroughAScope(t *testing.T) {
     var buildCount atomic.Int64
     var closeCount atomic.Int64
@@ -808,7 +806,7 @@ func TestScope_AContainerProviderCannotReachAScopeOnlyEntry(t *testing.T) {
     }
 }
 
-/* a scoped service resolved BY TYPE is filed under its name AND its type, and the dependency edge targets the name node while the resolution stack carried the type node. Without the alias collapse the type node carried no edges, sorted ahead of every "scope:service:" key, and closed the shared instance in the first heap wave — the transaction underneath a repository still holding it. */
+/* a scoped service resolved BY TYPE is filed under its name AND its type, and the dependency edge targets the name node while the resolution stack carries the type node. Without the alias collapse the type node would carry no edges and close the shared instance first, the transaction underneath a repository still holding it. */
 func TestScopeClose_TypeAliasClosesAfterDependent(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -880,7 +878,7 @@ func (instance dualFiledValueService) Close() error {
     return nil
 }
 
-/* a VALUE-typed scoped service with an uncomparable field, filed under name and type, defeats both identity marks — no pointer, no equality — and used to be closed once per node. The alias link recorded at filing time is what tells the teardown the two nodes are one filing. */
+/* a VALUE-typed scoped service with an uncomparable field, filed under name and type, defeats both identity marks (no pointer, no equality), so only the alias link recorded at filing time tells the teardown the two nodes are one filing, and it closes once. */
 func TestScopeClose_DualFiledUncomparableValue_ClosedOnce(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -914,7 +912,7 @@ func TestScopeClose_DualFiledUncomparableValue_ClosedOnce(t *testing.T) {
     }
 }
 
-/* a ClosedWithScope override replacing a created instance evicts it from the maps the teardown reads, but the evicted value is still the scope's to close — it waits in the graveyard and closes with the scope, exactly once. Before the graveyard it simply leaked, with both calls reporting success. */
+/* a ClosedWithScope override replacing a created instance evicts it from the maps the teardown reads, but the evicted value is still the scope's to close: it waits in the graveyard and closes with the scope, exactly once. */
 func TestScopeClose_EvictedCreatedInstanceClosedAtTeardown(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -984,7 +982,7 @@ func (instance *secondEvictedFailingService) Close() error {
     return instance.failure
 }
 
-/* two evicted created instances whose closes both fail are both recorded: the graveyard entries carry no node key of their own, so a shared constant key let the second failure overwrite the first's record, naming one failure where two happened */
+/* two evicted created instances whose closes both fail are both recorded: the graveyard entries carry no node key of their own, so the failure map is keyed by position and neither failure overwrites the other */
 func TestScopeClose_TwoFailingEvictedInstancesAreBothRecorded(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1065,7 +1063,7 @@ func TestScopeClose_TwoFailingEvictedInstancesAreBothRecorded(t *testing.T) {
     }
 }
 
-/* the three panicking override doors on a scope had never been executed. Two of them are not on the Scope interface at all — they are reached through the optional options companion, which is exactly the shape a caller gets wrong — and all three have to carry their own message: a request-scoped substitution that failed has to say whether the protected door or the plain one refused it. */
+/* the three panicking override doors on a scope install their value and each carry their own message. Two of them are not on the Scope interface at all but on the optional options companion, the shape a caller gets wrong, and a request-scoped substitution that failed has to say whether the protected door or the plain one refused it. */
 func TestScope_MustOverrideInstance_InstallsAndNamesItsOwnFailure(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1405,7 +1403,7 @@ func (instance *overrideScopeGreeter) Greet() string {
 
 type scopeOverrideOutsider struct{}
 
-/* the scope override propagates to every type its name is registered under, exactly as the container-level sibling propagates: without it, a type-keyed resolution through the scope answered the container's memoized instance while the name answered the override — a divergence that appeared exactly once the container had built the name, the ordinary warm state of a running process */
+/* the scope override propagates to every type its name is registered under, as the container-level sibling does: otherwise a type-keyed resolution through the scope would answer the container's memoized instance while the name answers the override, once the container has built the name, the ordinary warm state of a running process */
 func TestScope_OverridePropagatesToEveryRegisteredTypeOfTheName(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1581,7 +1579,7 @@ func TestScope_ClosedAnswersTheLifecycle(t *testing.T) {
     }
 }
 
-/* the propagation reads the scoped plan too: a scoped service resolved by type files what it built under the registered type, and an override arriving after that build must outrank it — filed under the value's concrete type alone, the created instance kept answering the type while the name answered the override */
+/* the propagation reads the scoped plan too: a scoped service resolved by type files what it built under the registered type, and an override arriving after that build must outrank it; filed under the value's concrete type alone, the created instance would keep answering the type while the name answers the override */
 func TestScope_OverridePropagationCoversTheScopedPlanLayer(t *testing.T) {
     serviceContainer := NewContainer()
 

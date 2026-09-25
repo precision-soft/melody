@@ -205,7 +205,7 @@ func (instance *scope) registerTypeOnScopeLocked(
         return nil
     }
 
-    /* refuse a type whose identity key another, DIFFERENT scoped type already claimed on this scope, the way the container refuses it at its own registration door: scopedTypeNodeKey folds a type through typeIdentityKey, so a colliding pair shares one teardown node and one creation-guard key while holding two instances — one instance's Close is skipped and a resolution of one reads as a cycle through the other. The container door and the boot scope plan already run this check; only the live RegisterScoped path reached the maps without it. */
+    /* refuse a type whose identity key a different scoped type already claimed on this scope, as the container and the boot scope plan do: the pair would share one teardown node and one creation-guard key while holding two instances. */
     if collidingType, collides := instance.scopedTypeIdentityCollision(canonicalType); true == collides {
         return exception.NewError(
             "scoped service type identity key collides with a different registered scoped type",

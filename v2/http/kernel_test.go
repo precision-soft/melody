@@ -370,7 +370,7 @@ func TestKernel_DoesNotDoublePersistSessionWhenWriteFailsAfterCommit(t *testing.
     }
 }
 
-/* the wiring panics of the request setup are raised above the main recovery guard, so a client used to meet a reset connection with nothing recorded; the early guard answers them, and it has to sit between the terminate guard and the scope close, which the status read at close time is what proves. */
+/* the wiring panics of the request setup are raised above the main recovery guard, where a client would meet a reset connection with nothing recorded; the early guard answers them, and it sits between the terminate guard and the scope close, which the status read at close time proves. */
 func TestKernel_ServeHttpClosesScopeWhenRequestLoggerSetupFails(t *testing.T) {
     recorder := httptest.NewRecorder()
 
@@ -829,7 +829,7 @@ func TestKernel_PanicRecoveryClosesTheDiscardedFileBackedResponse(t *testing.T) 
     }
 }
 
-/* net/http documents this sentinel as "abort the connection and suppress the log"; converting it into an error answered an aborted upload with a 500 and an error line, and a reverse proxy panics with it on every client disconnect mid-stream */
+/* net/http documents this sentinel as "abort the connection and suppress the log"; converted into an error it would answer an aborted upload with a 500 and an error line, and a reverse proxy panics with it on every client disconnect mid-stream */
 func TestKernel_AbortHandlerPanicClosesTheConnectionWithoutAResponse(t *testing.T) {
     router := NewRouter()
 
@@ -854,7 +854,7 @@ func TestKernel_AbortHandlerPanicClosesTheConnectionWithoutAResponse(t *testing.
     }
 }
 
-/* the kernel resolves the scheme through the configured forwarded-headers policy and publishes it on the request; a listener has no access to that policy, so without the attribute the access log reported http for every request a trusted proxy terminated as https */
+/* the kernel resolves the scheme through the configured forwarded-headers policy and publishes it on the request; a listener has no access to that policy, so without the attribute the access log would report http for every request a trusted proxy terminated as https */
 func TestKernel_PublishesThePolicyResolvedSchemeOnTheRequest(t *testing.T) {
     router := NewRouter()
 
@@ -1252,7 +1252,7 @@ func TestKernel_RouteAttributesCannotReplaceTheKernelOwnedAttributes(t *testing.
     }
 }
 
-/* A handler returning (nil, nil) was answered with an empty 204 written straight out, without kernel.response ever being dispatched — so the one hook that decorates a response never saw it. Measured with the framework's own cross-origin wiring, a nil-returning DELETE came back with no Access-Control-Allow-Origin at all while the identical explicit 204 carried the full set, and the access log recorded status 0. */
+/* A handler returning (nil, nil) is answered with an empty 204 that goes through kernel.response like any other response: the one hook that decorates a response has to see it, or a nil-returning cross-origin DELETE would come back without Access-Control-Allow-Origin while the identical explicit 204 carries it, and the access log would record status 0. */
 func TestKernel_DispatchesResponseEventForHandlerReturningNoResponse(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -1887,7 +1887,7 @@ func TestKernel_LogsWhenACommittedResponseDropsARotatedSession(t *testing.T) {
     }
 }
 
-/* a listener that stops propagation is entitled to answer the request, but not to answer it with a listener marked required never consulted: the fail-closed branch tested for the absence of a response, so a cache listener that stopped propagation ahead of access control had its cached page served to whoever asked */
+/* a listener that stops propagation is entitled to answer the request, but not with a listener marked required never consulted: a check for the absence of a response alone would serve the page of a cache listener that stopped propagation ahead of access control to whoever asked */
 func TestKernel_FailsClosedWhenARequiredListenerWasSkippedEvenThoughAResponseWasProduced(t *testing.T) {
     handlerRan := false
 
@@ -2459,7 +2459,7 @@ func TestLogHandlerError_ACancellationWithALiveRequestContextStaysAnError(t *tes
     }
 }
 
-/* the trusted proxy list decides every request's proxy trust; retained live, a caller reusing its slice rewrote the decision mid-serving as a data race. The setter copies. */
+/* the trusted proxy list decides every request's proxy trust; retained live, a caller reusing its slice would rewrite the decision mid-serving as a data race, so the setter copies. */
 func TestSetForwardedHeadersPolicy_CopiesTheTrustedProxyList(t *testing.T) {
     kernel := NewKernel(NewRouter())
 
@@ -2523,7 +2523,7 @@ func serveAndCountErrorRecords(t *testing.T, handler httpcontract.Handler) *reco
     return countingLogger
 }
 
-/* a handler's plain errors.New carries no AlreadyLogged implementer, so the mark the kernel writes had nowhere to land and the exception listener filed the same failure a second time */
+/* a handler's plain errors.New carries no AlreadyLogged implementer, so the kernel wraps it in a marked carrier; without the carrier the exception listener would file the same failure a second time */
 func TestKernel_AForeignHandlerErrorFilesOneRecordNotTwo(t *testing.T) {
     countingLogger := serveAndCountErrorRecords(
         t,
@@ -2652,7 +2652,7 @@ func (instance *kernelHandlerErrorCaptureLogger) Error(message string, context l
     instance.errorMessages = append(instance.errorMessages, message)
 }
 
-/* TestLogHandlerError_ARuleWiringFaultIsFiledAtError pins the classification on the writer that runs FIRST. A validation exception a handler returns is filed here and MARKED here, so the exception listener — which carries the same rule of its own — only attaches coordinates to it and never reaches its error branch. A struct tag naming a rule that does not exist refuses every request that route will ever serve, and it sat at warning among the users who mistyped their address. */
+/* TestLogHandlerError_ARuleWiringFaultIsFiledAtError pins the classification on the writer that runs FIRST. A validation exception a handler returns is filed here and MARKED here, so the exception listener, which carries the same rule of its own, only attaches coordinates to it and never reaches its error branch. A struct tag naming a rule that does not exist refuses every request that route will ever serve, so it is an error, not a warning among the users who mistyped their address. */
 func TestLogHandlerError_ARuleWiringFaultIsFiledAtError(t *testing.T) {
     capture := &kernelHandlerErrorCaptureLogger{Logger: logging.NewNopLogger()}
 
@@ -2670,7 +2670,7 @@ func TestLogHandlerError_ARuleWiringFaultIsFiledAtError(t *testing.T) {
     }
 }
 
-/* a deliberate 4xx blaming the submitted VALUE is a refusal and keeps the warning it always had: the classification must separate the declaration from the value, not raise every 4xx */
+/* a deliberate 4xx blaming the submitted VALUE is a refusal and keeps its warning: the classification separates the declaration from the value rather than raising every 4xx */
 func TestLogHandlerError_AGenuineFieldRefusalStaysAtWarning(t *testing.T) {
     capture := &kernelHandlerErrorCaptureLogger{Logger: logging.NewNopLogger()}
 
@@ -2822,7 +2822,7 @@ func TestKernel_RefusesAWhitespacePaddedRequestPathBeforeTheHandler(t *testing.T
     }
 }
 
-/* the LEADING twin of the padded path: Go's own server refuses a request line that does not begin with "/", but a handler mounted in front of the kernel that rewrites the path — the standard library's StripPrefix — hands the kernel " /public" for "/api%20/public", which the router routed as a segment of its own while the access-control matcher trimmed it and answered with the rule of "/public" */
+/* the LEADING twin of the padded path: Go's own server refuses a request line that does not begin with "/", but a handler mounted in front of the kernel that rewrites the path (the standard library's StripPrefix) hands the kernel " /public" for "/api%20/public", which the router would route as a segment of its own while the access-control matcher trims it and answers with the rule of "/public" */
 func TestKernel_RefusesALeadingWhitespacePathAHandlerInFrontHandedIt(t *testing.T) {
     for _, rawPath := range []string{"/api%20/public", "/api%09/public", "/api%C2%A0/public"} {
         handlerRan := false
@@ -2885,7 +2885,7 @@ func TestKernel_ServesCanonicalRequestPathThroughToTheHandler(t *testing.T) {
     }
 }
 
-/* net/http decodes "%2F" into a separator before the kernel reads the path, so "/admin%2Fusers" — one segment to a proxy or a WAF rule written against the raw request line — reached the "/admin/users" handler; a spelling that carries an encoded separator is refused before routing acts on it, in either case of the hex digit */
+/* net/http decodes "%2F" into a separator before the kernel reads the path, so "/admin%2Fusers", one segment to a proxy or a WAF rule written against the raw request line, would reach the "/admin/users" handler; a spelling that carries an encoded separator is refused before routing acts on it, in either case of the hex digit */
 func TestKernel_RefusesAnEncodedSeparatorBeforeTheHandler(t *testing.T) {
     for _, rawPath := range []string{"/admin%2Fusers", "/admin%2fusers", "/public%2F", "/files/a%2Fb/c", "/admin%2Fusers{", "/admin%2Fusers/\xc3\xa9"} {
         handlerRan := ""
@@ -2965,7 +2965,7 @@ func TestKernel_ServesTheSpellingsThatCarryNoEncodedSeparator(t *testing.T) {
     }
 }
 
-/* a multipart upload past the body limit surfaces as a handler's *MaxBytesError, which is not an HttpException and so was rendered 500 at error level while the urlencoded and json paths answered 413; the normalizer maps it onto a 413 HttpException so the three body paths agree, and leaves any other error untouched. */
+/* a multipart upload past the body limit surfaces as a handler's *MaxBytesError, which is not an HttpException and would render 500 at error level where the urlencoded and json paths answer 413; the normalizer maps it onto a 413 HttpException so the three body paths agree, and leaves any other error untouched. */
 func TestNormalizeBodyLimitError_MapsMaxBytesErrorTo413(t *testing.T) {
     maxBytesError := &nethttp.MaxBytesError{Limit: 1048576}
 
@@ -2995,7 +2995,7 @@ func TestNormalizeBodyLimitError_LeavesOtherErrorsUntouched(t *testing.T) {
     }
 }
 
-/* the abort sentinel suppresses the response, not the ownership of what it holds: the branch re-raised it ten lines before the in-flight response was captured and seventy before either close, so a deliberate abort over a file-backed response leaked the descriptor. invokeErrorHandlerSafely already refuses to honour the sentinel for exactly this reason, which is the contradiction this closes. */
+/* the abort sentinel suppresses the response, not the ownership of what it holds: a deliberate abort over a file-backed response still closes the descriptor, which is also why invokeErrorHandlerSafely refuses to honour the sentinel. */
 func TestKernel_AbortHandlerPanicStillClosesTheResponseInFlight(t *testing.T) {
     bodyReader := &closeTrackingReader{}
 

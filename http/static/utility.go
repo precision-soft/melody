@@ -19,7 +19,7 @@ func osDirFileSystem(basePath string) fs.FS {
     }
 }
 
-/* the name is resolved exactly as it arrived. Trimming the surrounding whitespace would make " app.css" and "app.css" name the same file, and the access-control matchers in front of the application compare the raw request path: a rule on "/internal/" does not fire for "/ internal/secret.json", so resolving the trimmed spelling hands out a file the rule was written to protect. The embedded mode never trimmed, so the untrimmed resolution is also the one answer both modes give. */
+/* Open resolves the name exactly as it arrived: trimming the surrounding whitespace would make " app.css" name "app.css", and the access-control matchers compare the raw request path, so a rule on "/internal/" would not fire for "/ internal/secret.json". Both modes resolve the untrimmed name. */
 func (instance *dirFileSystem) Open(name string) (fs.File, error) {
     if "" == name {
         return os.Open(instance.basePath)

@@ -900,7 +900,7 @@ func (instance *sameTypeZeroSizeCloser) Close() error {
     return nil
 }
 
-/* two distinct services of one zero-size type share an address, so pairing the address with the type is not enough to tell them apart; without the dependency-graph qualifier the second one was collapsed onto the first and never closed */
+/* two distinct services of one zero-size type share an address, so pairing the address with the type is not enough to tell them apart; without the dependency-graph qualifier the second one would be collapsed onto the first and never closed */
 func TestContainer_Close_DistinctServicesOfOneZeroSizeTypeEachClose(t *testing.T) {
     sameTypeZeroSizeCloseCount = 0
 
@@ -986,7 +986,7 @@ func (instance *replacedBuiltProbe) Close() error {
     return nil
 }
 
-/* an override replacing an instance the container built evicts it from the only maps the close sweep reads: it used to leak forever, with both the resolution and the override reporting success. The evicted value waits in the graveyard and the teardown closes it — once — alongside the override that took its place. */
+/* an override replacing an instance the container built evicts it from the only maps the close sweep reads; the evicted value waits in the graveyard and the teardown closes it, once, alongside the override that took its place. */
 func TestContainer_Close_ReplacedBuiltInstanceIsClosed(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1059,7 +1059,7 @@ func (instance *secondReplacedFailingProbe) Close() error {
     return instance.failure
 }
 
-/* two replaced built instances whose closes both fail are both recorded: the graveyard entries carry no node key of their own, so a shared constant key let the second failure overwrite the first's record, naming one failure where two happened */
+/* two replaced built instances whose closes both fail are both recorded: the graveyard entries carry no node key of their own, so the failure map is keyed by position and neither failure overwrites the other */
 func TestContainer_Close_TwoFailingReplacedInstancesAreBothRecorded(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1164,13 +1164,13 @@ func TestContainer_Close_ReplacedOverrideIsNotClosed(t *testing.T) {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
-    /* MEASURED, not assumed: the surviving override IS closed with the container, and only the EVICTED one is left to its installer. A loop that merely refuses the evicted label passes over an empty slice too, so it cannot tell this apart from a teardown that closed nothing at all */
+    /* the surviving override IS closed with the container, and only the evicted one is left to its installer. A loop that merely refuses the evicted label passes over an empty slice too, so it cannot tell this apart from a teardown that closed nothing at all */
     if 1 != len(closeSequence) || "second-override" != closeSequence[0] {
         t.Fatalf("expected only the surviving override to be closed, got %v", closeSequence)
     }
 }
 
-/* a close that both fails and cycles used to keep the failures and drop the cycle's node list — the operator saw WHICH services failed but not which ones cycled. The nodes ride inside the failure text now. */
+/* a close that both fails and cycles keeps the cycle's node list beside the failures: the nodes ride inside the failure text, so the operator sees which services cycled as well as which failed. */
 func TestContainer_Close_CycleFailureNamesTheNodes(t *testing.T) {
     serviceContainer := NewContainer().(*container)
 
@@ -1263,7 +1263,7 @@ func (instance *lazyHoldingService) Close() error {
     return nil
 }
 
-/* a service that keeps its resolver and reaches through it after its provider returned depends on what it then resolves exactly as hard as one that resolved it during construction. The edge used to be read from the live resolution stack, which is empty by then, so no edge was recorded at all — here that closes the dependency FIRST, and the holder's own Close then runs over a service that has already ended. Without the edge the creation-order tie-break decides, and it disagrees with the graph: the dependency is built AFTER the holder that reaches for it, so latest-first closes it before its holder. */
+/* a service that keeps its resolver and reaches through it after its provider returned depends on what it then resolves exactly as hard as one that resolved it during construction. The live resolution stack is empty by then, so the edge comes from the view's owner. Without the edge the creation-order tie-break decides, and it disagrees with the graph: the dependency is built AFTER the holder that reaches for it, so latest-first would close it before its holder. */
 func TestContainer_Close_ClosesAHolderBeforeTheServiceItResolvedThroughAKeptResolver(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1342,7 +1342,7 @@ func (instance *panickingCloseWithTextService) Close() error {
     panic("the drain buffer was nil")
 }
 
-/* TestContainer_Close_APanickingCloseCarriesItsCauseAndItsStack pins what an operator learns from the one boundary that contains a teardown panic: nothing above it sees the panic and nothing below it survives, so whatever the recorded failure drops is gone. An error-shaped panic value kept only as its stringified message collapsed to one line at the render boundary, taking the context map and the cause chain of the very error the Close raised with it, and the frames that ran existed only inside the recover. */
+/* TestContainer_Close_APanickingCloseCarriesItsCauseAndItsStack pins what an operator learns from the one boundary that contains a teardown panic: nothing above it sees the panic and nothing below it survives, so whatever the recorded failure drops is gone. An error-shaped panic value kept only as its stringified message would collapse to one line at the render boundary, losing the context map and the cause chain, and the frames that ran exist only inside the recover. */
 func TestContainer_Close_APanickingCloseCarriesItsCauseAndItsStack(t *testing.T) {
     panicCause := exception.NewError(
         "the socket was already gone",
@@ -1394,7 +1394,7 @@ func TestContainer_Close_APanickingCloseWithoutAnErrorValueStillRecordsTheStack(
     }
 }
 
-/* TestContainer_Close_ClosesTheEarliestCreatedServiceLast pins the tie-break the dependency graph leaves open. It used to be the node key descending — a string comparison nobody wrote — so a service resolved first at boot and used silently by everything afterwards, the logger being the case that matters, was closed in the middle of the teardown by nothing but its name. Whether a worker still had somewhere to report its drain came down to whether it sorted above or below its dependency: renaming app.worker to zz.worker was the whole difference. */
+/* TestContainer_Close_ClosesTheEarliestCreatedServiceLast pins the tie-break the dependency graph leaves open: a service resolved first at boot and used silently by everything afterwards, the logger being the case that matters, closes last whatever its name. Under a node-key order, whether a worker still had somewhere to report its drain would come down to whether app.worker sorted above or below its dependency. */
 func TestContainer_Close_ClosesTheEarliestCreatedServiceLast(t *testing.T) {
     for _, dependentName := range []string{"service.aaa.worker", "service.zzz.worker"} {
         serviceContainer := NewContainer()
@@ -1506,7 +1506,7 @@ func (instance *closeTimeResolvingService) Close() error {
     return nil
 }
 
-/* TestContainer_Close_AServiceStillResolvesDuringTheTeardown pins the first of the two closing states against the second. Refusing every resolution from the moment Close begins would take away the very thing closing the logger last exists to give: a worker reporting its drain resolves what it reports through, from inside its own Close. What is refused is a resolution made after the LAST close returned, which used to answer the instance found in the map — already closed — with a nil error. */
+/* TestContainer_Close_AServiceStillResolvesDuringTheTeardown pins the first of the two closing states against the second. Refusing every resolution from the moment Close begins would take away the very thing closing the logger last exists to give: a worker reporting its drain resolves what it reports through, from inside its own Close. What is refused is a resolution made after the LAST close returned, which would otherwise answer the instance found in the map, already closed, with a nil error. */
 func TestContainer_Close_AServiceStillResolvesDuringTheTeardown(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1558,7 +1558,7 @@ func TestContainer_Close_AServiceStillResolvesDuringTheTeardown(t *testing.T) {
     }
 }
 
-/* TestContainer_Get_RefusesAfterTheTeardownFinished pins the second closing state. A resolution performed once the teardown is over was answered out of the maps — which the teardown has just emptied of meaning — so a caller holding a resolver received a handle to a service every Close in the process had already run on, with a nil error saying it was fine. The fast path is asked separately because a memoized instance never reaches the creation guard that refuses a closed container. */
+/* TestContainer_Get_RefusesAfterTheTeardownFinished pins the second closing state: a resolution performed once the teardown is over would otherwise be answered out of the maps, handing a caller that kept a resolver a service every Close in the process has already run on, with a nil error. The fast path is asked separately because a memoized instance never reaches the creation guard that refuses a closed container. */
 func TestContainer_Get_RefusesAfterTheTeardownFinished(t *testing.T) {
     serviceContainer := NewContainer()
 

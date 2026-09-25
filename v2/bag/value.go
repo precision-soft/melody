@@ -23,7 +23,7 @@ func String(parameterBag bagcontract.ParameterBag, name string) (string, bool) {
         return stringValue, true
     }
 
-    /* the request bags keep the single and the repeated key apart by type, so a []string landing here is a genuinely repeated key. It answers its FIRST value, the way Input and url.Values.Get answer a repeated key: the shape of a request parameter is chosen by the client, and a refusal here turned every documented read through StringOrDefault or HasNonEmptyString into a panic — a 500 an unauthenticated client could raise with one duplicated query key. The whole list is read with StringSlice or StringAt; an empty list is a key with no value, reported unset like nil. */
+    /* the request bags keep the single and the repeated key apart by type, so a []string here is a genuinely repeated key, and it answers its first value, as Input and url.Values.Get do: the shape of a request parameter is the client's choice, and a refusal would turn every read through StringOrDefault or HasNonEmptyString into a 500 any client could raise with one duplicated query key. The whole list is read with StringSlice or StringAt; an empty list is reported unset like nil. */
     if sliceValue, isSlice := value.([]string); true == isSlice {
         if 0 == len(sliceValue) {
             return "", false
@@ -32,7 +32,7 @@ func String(parameterBag bagcontract.ParameterBag, name string) (string, bool) {
         return sliceValue[0], true
     }
 
-    /* a present value that is neither a string nor a string slice — an int, a bool, a float — reports absent rather than present-but-empty: returning ("", true) defeated StringOrDefault, which substitutes the default only when the value is absent, so an int parameter read through it came back "" instead of the default. Absent is the honest answer for "there is no string here", and it restores the default-fallback contract the sibling accessors keep. */
+    /* a present value that is neither a string nor a string slice reports absent rather than present-but-empty, so StringOrDefault, which substitutes the default only for an absent value, answers the default for it as the sibling accessors do. */
     return "", false
 }
 

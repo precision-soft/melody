@@ -52,7 +52,7 @@ type scope struct {
     /* the services built through this scope are kept apart from the overrides installed into it: an override belongs to whoever installed it and outlives the scope, while a service created from one holds that request's substitutes and must not survive it. Keeping them in their own maps is what lets the scope be emptied of the second kind without touching the first. */
     createdInstances     map[string]any
     createdTypeInstances map[reflect.Type]any
-    /* one created instance filed under its name AND its type is two teardown nodes for one value, and a dependency edge recorded against either must constrain both. The link from the type node to the name node is written at the moment of the dual filing — the only place that knows the two are one — and the teardown collapses along it before it orders anything. Without the collapse the type alias carries no edges and — stamped after its name filing, so popped first under the latest-first tie-break — closes the shared instance ahead of its still-open dependents. */
+    /* one created instance filed under its name and its type is two teardown nodes for one value. The link from the type node to the name node is written at the dual filing, the only place that knows the two are one, and the teardown collapses along it before ordering, so an edge recorded against either constrains both. */
     createdAliasNodeKeys map[string]string
     /* a created instance evicted by a ClosedWithScope override left the maps the teardown reads, but it is still the scope's to close; it waits here and the teardown closes it after the ordered walk, under the same identity marks that keep any still-filed alias of it from being closed twice. */
     evictedCreatedInstances []any
@@ -91,7 +91,7 @@ func (instance *scope) Get(serviceName string) (any, error) {
 
     containerInstance := instance.container.Load()
     if nil == containerInstance {
-        /* return the closed-scope error instead of panicking: error-returning methods follow the Must/non-Must convention (Must* wrappers keep panicking), and a panic here is fatal in handler-spawned goroutines that outlive the request — the kernel closes the scope when ServeHttp returns and no recover covers those goroutines */
+        /* a closed scope answers an error rather than a panic: a handler-spawned goroutine that outlives the request has no recover around it. The Must* wrappers keep panicking. */
         return nil, exception.NewError(
             "scope is closed",
             nil,
@@ -148,7 +148,7 @@ func (instance *scope) GetByType(targetType reflect.Type) (any, error) {
 func (instance *scope) MustGetByType(targetType reflect.Type) any {
     value, getByTypeErr := instance.GetByType(targetType)
     if nil != getByTypeErr {
-        /* a nil targetType yields a clean GetByType error, so guard the type string here too rather than dereferencing a nil reflect.Type (whose String() panics with an obscure nil-pointer error and discards the wrapped cause), matching resolverContext.MustGetByType */
+        /* a nil targetType yields a clean error rather than a panic from reflect.Type.String(), matching resolverContext.MustGetByType. */
         targetTypeString := ""
         if nil != targetType {
             targetTypeString = targetType.String()
@@ -211,7 +211,7 @@ func (instance *scope) HasType(targetType reflect.Type) bool {
         return false
     }
 
-    /* every lookup is canonical, because that is the key both the overrides and the registrations are filed under: an override is stored under canonicalServiceType of the value's type, and GetByType canonicalises before it looks. Asking with the value type was answered "no" for a service the very next GetByType resolves. */
+    /* every lookup is canonical, the key both overrides and registrations are filed under: an override is stored under canonicalServiceType of its value's type, and GetByType canonicalises before it looks. */
     canonicalType := canonicalServiceType(targetType)
     if nil == canonicalType {
         return false
@@ -447,7 +447,7 @@ func (instance *scope) OverrideProtectedInstanceWithOptions(
         }
     }
 
-    /* the override propagates to every type this name is registered under, exactly as the container-level sibling propagates — without this, a type-keyed resolution through the scope answered the container's instance while the name answered the override, whenever the container had already memoized the name. The same assignability rule guards the propagation: a value a registered type cannot hold is refused before anything is written, so the name and type maps never learn two different answers. */
+    /* the override propagates to every type this name is registered under, as the container's sibling does, so the name and the type answer the same value; a value a registered type cannot hold is refused before anything is written. */
     for _, registeredType := range propagatedTypes {
         if false == overrideValueFitsRegisteredType(valueType, registeredType) {
             return exception.NewError(
@@ -524,12 +524,12 @@ func (instance *scope) MustOverrideProtectedInstance(serviceName string, value a
     }
 }
 
-/* Closed reports whether Close has ended the request this scope stood for. It lives on the concrete scope rather than the contract, the shape the logger's own liveness question has: a caller that holds something merely promising Resolver or Scope asks through an interface assertion and treats a value that cannot answer as open. The lazy handle is the reader this exists for — a memoized value from a scope that answers true here is a dead request's state and must not be served again. */
+/* Closed reports whether Close has ended the request this scope stood for. It lives on the concrete scope, not the contract, so a caller asks through an interface assertion and reads a value that cannot answer as open; the lazy handle reads it to stop serving a dead request's state. */
 func (instance *scope) Closed() bool {
     return nil == instance.container.Load()
 }
 
-/* Container answers the container this scope layers over, nil once the scope is closed. It lives on the concrete scope rather than the contract, like Closed: a process-lifetime service that defers work past its own construction replays it through the container behind its resolver — the lock-guarded, process-lifetime half — not through the resolution context that built it, and asks for the door through the ContainerCarrier assertion. */
+/* Container answers the container this scope layers over, nil once the scope is closed. A process-lifetime service replays deferred work through it, reached with the ContainerCarrier assertion. */
 func (instance *scope) Container() containercontract.Container {
     containerInstance := instance.container.Load()
     if nil == containerInstance {
@@ -539,7 +539,7 @@ func (instance *scope) Container() containercontract.Container {
     return containerInstance
 }
 
-/* Close ends the request the scope stands for and closes the services the scope itself built. Only those: an override was installed from outside and belongs to whoever installed it, and a singleton reached through the scope belongs to the root container, which closes it when the process ends — closing either here would tear down, once per request, something the next request still needs. What the scope built is exactly what a service which read one of those entries turned into, so it holds that request and has nobody else to close it. */
+/* Close ends the request the scope stands for and closes only the services the scope built. An override belongs to whoever installed it and a singleton reached through the scope to the root container, so closing either here would tear down what the next request needs. */
 func (instance *scope) Close() error {
     /* the dependency graph lives on the scope but is guarded by the CONTAINER mutex, because the resolver writes it with that lock held and never takes the scope's for it. The snapshot is therefore taken container first, scope second — the one order the two locks are ever taken in. A creation racing this Close either has its edge in the snapshot or does not, and a missing edge degrades to the creation order, latest first; that is the same window the created instances themselves already have. */
     dependencyGraph := map[string]map[string]struct{}(nil)
@@ -582,9 +582,7 @@ func (instance *scope) Close() error {
     return closeCreatedScopeInstances(createdInstances, createdTypeInstances, createdAliasNodeKeys, dependencyGraph, evictedCreatedInstances, creationOrderByNodeKey)
 }
 
-/* closeCreatedScopeInstances closes each service the scope built, once. One instance filed under its name and its type is first collapsed onto the name node along the alias links recorded at filing time, with the edges of both nodes merged onto the survivor, so a dependency edge recorded against either alias constrains the one close that happens; whatever identity the links do not cover is still caught by the pointer/value marks at close time. A panicking or failing Close is recorded and the loop carries on, because a request scope closes on the way out of a handler and one bad service must not keep the rest of that request's services alive.
-
-   The order is the scope's own dependency graph, dependents before their dependencies: a scoped repository holding a scoped transaction is the ordinary case now that a scope owns registrations, and closing the two by name would be a coin flip. Nodes the graph says nothing about, and nodes left over by a cycle, fall back to creation order, latest first — the same tie-break the container's teardown applies, because the two share one walk. The evicted instances close after the ordered walk, under the same marks. */
+/* closeCreatedScopeInstances closes each service the scope built, once: an instance filed under its name and its type collapses onto the name node first, edges merged, and the pointer and value marks catch the rest. The order is the scope's dependency graph, dependents first, then creation order, latest first, the container's own rule; a failing or panicking Close is recorded and the loop carries on, and the evicted instances close after the ordered walk. */
 func closeCreatedScopeInstances(
     createdInstances map[string]any,
     createdTypeInstances map[reflect.Type]any,
@@ -724,7 +722,7 @@ func closeCreatedScopeInstances(
         closeCandidateValue(nodeKey, valueOfNodeKey[nodeKey])
     }
 
-    /* the evicted instances carry no node key of their own, so the failure map is keyed by position: with one shared constant key a second evicted close that failed overwrote the first, and the scope-close error named one failure where two happened — the half-diagnosis the dependency-cycle key above guards against. */
+    /* the evicted instances carry no node key, so the failure map is keyed by position and each failed close keeps its own record. */
     for evictedIndex, evictedValue := range evictedCreatedInstances {
         closeCandidateValue(fmt.Sprintf("scope.evictedInstance[%d]", evictedIndex), evictedValue)
     }
@@ -822,7 +820,7 @@ func (instance *scope) lookupInstanceByType(canonicalType reflect.Type) (any, bo
     return value, exists, nil
 }
 
-/* storeCreatedInstance keeps a service the resolver built out of this scope's entries. It belongs to the request the scope stands for: the value holds the per-request logger, the request context or whatever else was overridden, and the root container would hand that same instance — carrying one request's identity — to every request for the rest of the process. It is filed under the name, the type, or both, exactly as the root container would have filed it, and it is gone when the scope closes. An override installed while the provider ran occupies the slot already and wins — the value it beat is handed back for the guard to close. A dual filing records its type→name alias link, which is what the teardown collapses along. */
+/* storeCreatedInstance keeps a service built out of this scope's entries in the scope: it holds the request's logger, context or overrides, and the root container would hand it to every later request. It is filed as the root container would file it; an override installed while the provider ran wins and the value it beat is handed back for the guard to close, and a dual filing records its type-to-name alias link. */
 func (instance *scope) storeCreatedInstance(
     serviceName string,
     canonicalType reflect.Type,
