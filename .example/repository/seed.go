@@ -9,8 +9,6 @@ import (
     "github.com/uptrace/bun"
 )
 
-/* the catalogue the application opens with: the in-memory repository holds it for the life of the process, and the database-backed one writes it once into an empty table */
-
 func seedProductList(now time.Time) []*entity.Product {
     return []*entity.Product{
         entity.NewProduct(

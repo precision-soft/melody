@@ -172,6 +172,41 @@ func TestSizeCheckedReader_StopsShortOfTheDeclaredSizeWhenTheBodyIsLonger(t *tes
     }
 }
 
+/* minio drains a multipart body on a goroutine of its own while Put reads the rejection after the upload fails, so the flag is written by one goroutine and read by another: the reader here spins on the flag while the body is drained elsewhere, and must see it raised. */
+func TestSizeCheckedReader_RejectionIsReadFromAnotherGoroutineThanTheDrain(t *testing.T) {
+    checked := newSizeCheckedReader(context.Background(), "invoices/2026-07.pdf", &sequentialReader{reader: strings.NewReader(strings.Repeat("b", 64))}, 16)
+    release := make(chan struct{})
+
+    var ready sync.WaitGroup
+    var done sync.WaitGroup
+
+    ready.Add(2)
+    done.Add(2)
+
+    go func() {
+        defer done.Done()
+
+        ready.Done()
+        <-release
+
+        _, _ = io.Copy(io.Discard, checked)
+    }()
+
+    go func() {
+        defer done.Done()
+
+        ready.Done()
+        <-release
+
+        for false == checked.rejected.Load() {
+        }
+    }()
+
+    ready.Wait()
+    close(release)
+    done.Wait()
+}
+
 func TestSizeCheckedReader_YieldsAnExactlySizedBodyWhole(t *testing.T) {
     body := strings.Repeat("b", 64)
 

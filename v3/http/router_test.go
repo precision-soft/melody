@@ -5,6 +5,7 @@ import (
     nethttp "net/http"
     "net/http/httptest"
     "strings"
+    "sync"
     "testing"
 
     "github.com/precision-soft/melody/v3/exception"
@@ -1006,4 +1007,50 @@ func TestRouter_CatchAllKeepsAnEncodedSeparatorInsideItsSegment(t *testing.T) {
     if captured[0] == captured[1] {
         t.Fatalf("expected the encoded separator to keep the two targets apart, both bound %q", captured[0])
     }
+}
+
+/* the readers spin on the registration guard while the kernel raises the flag from another goroutine, the way a late registration meets a kernel that starts serving: each reader must see the raised flag and refuse. */
+func TestRouter_RegistrationGuardReadsTheServingFlagRaisedByAnotherGoroutine(t *testing.T) {
+    const readerCount = 8
+
+    router := NewRouter()
+    release := make(chan struct{})
+
+    var ready sync.WaitGroup
+    var done sync.WaitGroup
+
+    ready.Add(readerCount)
+    done.Add(readerCount)
+
+    for index := 0; index < readerCount; index++ {
+        go func() {
+            defer done.Done()
+
+            ready.Done()
+            <-release
+
+            for {
+                refused := false
+
+                func() {
+                    defer func() {
+                        if nil != recover() {
+                            refused = true
+                        }
+                    }()
+
+                    router.refuseRegistrationWhileServing("/late")
+                }()
+
+                if true == refused {
+                    return
+                }
+            }
+        }()
+    }
+
+    ready.Wait()
+    close(release)
+    router.freezeForServing()
+    done.Wait()
 }

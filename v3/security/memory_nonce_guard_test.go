@@ -1,6 +1,7 @@
 package security
 
 import (
+    "sync"
     "testing"
     "time"
 
@@ -96,4 +97,49 @@ func TestNewMemoryNonceGuardWithClock_RefusesATypedNilClock(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
         NewMemoryNonceGuardWithClock(unassignedClock)
     }, "nonce guard clock is nil")
+}
+
+/* every goroutine waits on one release channel, so the check and the record of the same nonce are attempted together: one Remember accepts it and every other one reads the replay. */
+func TestMemoryNonceGuard_AcceptsANonceOnceUnderConcurrentPresentation(t *testing.T) {
+    const presenterCount = 32
+
+    guard := NewMemoryNonceGuard()
+    release := make(chan struct{})
+
+    var ready sync.WaitGroup
+    var done sync.WaitGroup
+    var acceptedMutex sync.Mutex
+    accepted := 0
+
+    ready.Add(presenterCount)
+    done.Add(presenterCount)
+
+    for index := 0; index < presenterCount; index++ {
+        go func() {
+            defer done.Done()
+
+            ready.Done()
+            <-release
+
+            seen, rememberErr := guard.Remember(nil, "shared-nonce", time.Minute)
+            if nil != rememberErr {
+                t.Errorf("unexpected remember error: %v", rememberErr)
+                return
+            }
+
+            if false == seen {
+                acceptedMutex.Lock()
+                accepted++
+                acceptedMutex.Unlock()
+            }
+        }()
+    }
+
+    ready.Wait()
+    close(release)
+    done.Wait()
+
+    if 1 != accepted {
+        t.Fatalf("expected exactly one presentation of the nonce to be accepted, got %d", accepted)
+    }
 }

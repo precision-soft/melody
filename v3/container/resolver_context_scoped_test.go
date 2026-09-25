@@ -13,40 +13,6 @@ type scopedProbe struct {
     value string
 }
 
-/* scopedCloseRecorder records the order its services were closed in, which is the only way to observe that a teardown honoured the dependency graph rather than the node names. */
-type scopedCloseRecorder struct {
-    mutex sync.Mutex
-    order []string
-}
-
-func (instance *scopedCloseRecorder) record(name string) {
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    instance.order = append(instance.order, name)
-}
-
-func (instance *scopedCloseRecorder) recorded() []string {
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    copied := make([]string, len(instance.order))
-    copy(copied, instance.order)
-
-    return copied
-}
-
-type recordingScopedService struct {
-    name     string
-    recorder *scopedCloseRecorder
-}
-
-func (instance *recordingScopedService) Close() error {
-    instance.recorder.record(instance.name)
-
-    return nil
-}
-
 func TestScope_AScopedServiceIsBuiltOncePerScopeAndNotShared(t *testing.T) {
     serviceContainer := NewContainer()
 

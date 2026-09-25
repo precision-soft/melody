@@ -2,9 +2,11 @@ package logging
 
 import (
     "errors"
+    "fmt"
     "os"
     "path/filepath"
     "strings"
+    "sync"
     "syscall"
     "testing"
     "time"
@@ -310,5 +312,75 @@ func TestReopenableFileWriter_AFailedOpenDoesNotCarryTheRotatedDescriptorSentine
 
     if true == errors.Is(closedWriter.Reopen(), ErrRotatedDescriptorNotClosed) {
         t.Fatalf("expected a closed writer's refusal to stay a failed rotation")
+    }
+}
+
+/* the writer and the reopener leave one release channel together and run to the end side by side, so writes land while the descriptor is swapped and closed under them: every record reaches the file whole and no write meets a closed descriptor. */
+func TestReopenableFileWriter_WritesStayWholeWhileReopenSwapsTheDescriptor(t *testing.T) {
+    const recordCount = 2000
+    const reopenCount = 200
+
+    logPath := filepath.Join(t.TempDir(), "application.log")
+
+    writer, newErr := NewReopenableFileWriter(logPath)
+    if nil != newErr {
+        t.Fatalf("unexpected constructor error: %v", newErr)
+    }
+    defer func() { _ = writer.Close() }()
+
+    release := make(chan struct{})
+
+    var ready sync.WaitGroup
+    var done sync.WaitGroup
+
+    ready.Add(2)
+    done.Add(2)
+
+    go func() {
+        defer done.Done()
+
+        ready.Done()
+        <-release
+
+        for index := 0; index < recordCount; index++ {
+            if _, writeErr := writer.Write([]byte(fmt.Sprintf("record-%04d\n", index))); nil != writeErr {
+                t.Errorf("write %d failed while the descriptor was reopened: %v", index, writeErr)
+                return
+            }
+        }
+    }()
+
+    go func() {
+        defer done.Done()
+
+        ready.Done()
+        <-release
+
+        for index := 0; index < reopenCount; index++ {
+            if reopenErr := writer.Reopen(); nil != reopenErr {
+                t.Errorf("reopen %d failed: %v", index, reopenErr)
+                return
+            }
+        }
+    }()
+
+    ready.Wait()
+    close(release)
+    done.Wait()
+
+    content, readErr := os.ReadFile(logPath)
+    if nil != readErr {
+        t.Fatalf("unexpected read error: %v", readErr)
+    }
+
+    lines := strings.Split(strings.TrimSuffix(string(content), "\n"), "\n")
+    if recordCount != len(lines) {
+        t.Fatalf("expected %d records in the file, got %d", recordCount, len(lines))
+    }
+
+    for index, line := range lines {
+        if fmt.Sprintf("record-%04d", index) != line {
+            t.Fatalf("expected record %d whole and in order, got %q", index, line)
+        }
     }
 }
