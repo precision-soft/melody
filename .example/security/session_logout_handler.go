@@ -29,8 +29,8 @@ func (instance *sessionLogoutHandler) Logout(
         }, nil
     }
 
-    sessionInstance.Delete(SessionKeySecurityUserId)
-    sessionInstance.Delete(SessionKeySecurityRoles)
+    /* the whole session ends, not only the identity in it: an emptied session would be saved back under the same id with a re-issued cookie, while Clear routes the response path to DeleteSession and to the expired cookie */
+    sessionInstance.Clear()
 
     response, err := melodyhttp.JsonResponse(http.StatusOK, map[string]any{
         "success": true,

@@ -5,6 +5,7 @@ import (
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
+    "github.com/precision-soft/melody/v3/internal"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -18,20 +19,30 @@ func LoggerMustFromRuntime(runtimeInstance runtimecontract.Runtime) loggingcontr
     return runtime.MustFromRuntime[loggingcontract.Logger](runtimeInstance, ServiceLogger)
 }
 
+/* LoggerFromRuntime resolves the logger and answers nil when it cannot, recording the failure through the emergency logger. A typed nil, which the container refuses today, is answered nil too, since it would panic on the first call. */
 func LoggerFromRuntime(runtimeInstance runtimecontract.Runtime) loggingcontract.Logger {
     loggerInstance, err := runtime.FromRuntime[loggingcontract.Logger](runtimeInstance, ServiceLogger)
-    if nil == loggerInstance || nil != err {
-        if nil != err {
-            EmergencyLogger().Emergency(
-                "could not get the logger from runtime",
-                exception.LogContext(
-                    err,
-                    exceptioncontract.Context{
-                        "service": ServiceLogger,
-                    },
-                ),
-            )
-        }
+    if nil != err {
+        EmergencyLogger().Emergency(
+            "could not get the logger from runtime",
+            exception.LogContext(
+                err,
+                exceptioncontract.Context{
+                    "service": ServiceLogger,
+                },
+            ),
+        )
+
+        return nil
+    }
+
+    if true == internal.IsNilInterface(loggerInstance) {
+        EmergencyLogger().Emergency(
+            "the logger resolved from runtime is nil",
+            exceptioncontract.Context{
+                "service": ServiceLogger,
+            },
+        )
 
         return nil
     }

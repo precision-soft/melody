@@ -1,8 +1,11 @@
 package application
 
 import (
+    "reflect"
+
     applicationcontract "github.com/precision-soft/melody/v3/application/contract"
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/internal"
     securityconfig "github.com/precision-soft/melody/v3/security/config"
 )
 
@@ -17,7 +20,10 @@ func (instance *Application) registerModuleAtDepth(moduleInstance applicationcon
         exception.Panic(exception.NewError("may not register modules after boot", nil, nil))
     }
 
-    if nil == moduleInstance {
+    instance.refuseModuleRegistrationDuringBoot()
+
+    /* read through the interface: a typed nil passes a plain comparison and would fail later inside the module's own hook */
+    if true == internal.IsNilInterface(moduleInstance) {
         exception.Panic(
             exception.NewError("module instance may not be nil", nil, nil),
         )
@@ -29,6 +35,27 @@ func (instance *Application) registerModuleAtDepth(moduleInstance applicationcon
         )
     }
 
+    /* a module's identity is its instance, so one instance reached through two providers boots once, its children included; Name stays informative, and two distinct instances sharing one name stay two modules. Comparability is asked of the value, not the type, as the container's isComparableValue does: an interface field holding a map would panic as a map key. */
+    if false == reflect.ValueOf(moduleInstance).Comparable() {
+        instance.appendModule(moduleInstance, depth)
+
+        return
+    }
+
+    if nil == instance.registeredModuleInstances {
+        instance.registeredModuleInstances = make(map[applicationcontract.Module]struct{})
+    }
+
+    if _, exists := instance.registeredModuleInstances[moduleInstance]; true == exists {
+        return
+    }
+
+    instance.registeredModuleInstances[moduleInstance] = struct{}{}
+
+    instance.appendModule(moduleInstance, depth)
+}
+
+func (instance *Application) appendModule(moduleInstance applicationcontract.Module, depth int) {
     instance.modules = append(instance.modules, moduleInstance)
 
     if moduleProvider, ok := moduleInstance.(applicationcontract.ModuleProvider); true == ok {
@@ -43,15 +70,40 @@ func (instance *Application) RegisterModuleProvider(provider applicationcontract
         exception.Panic(exception.NewError("may not register modules after boot", nil, nil))
     }
 
-    if nil == provider {
+    instance.refuseModuleRegistrationDuringBoot()
+
+    /* read through the interface: a typed nil reaches the type assertion on the next line */
+    if true == internal.IsNilInterface(provider) {
         exception.Panic(
             exception.NewError("module provider may not be nil", nil, nil),
         )
     }
 
-    for _, providedModule := range provider.Modules() {
-        instance.RegisterModule(providedModule)
+    /* a provider that is itself a module is delegated whole, so its own hooks boot exactly as through RegisterModule */
+    if moduleInstance, isModule := provider.(applicationcontract.Module); true == isModule {
+        instance.registerModuleAtDepth(moduleInstance, 0)
+
+        return
     }
+
+    for _, providedModule := range provider.Modules() {
+        instance.registerModuleAtDepth(providedModule, 1)
+    }
+}
+
+/* refuseModuleRegistrationDuringBoot closes both module doors for the boot window: the phase loops iterate a snapshot of the module list, so a module registered from a boot hook would receive only the hooks of the phases still ahead. */
+func (instance *Application) refuseModuleRegistrationDuringBoot() {
+    if false == instance.booting {
+        return
+    }
+
+    exception.Panic(
+        exception.NewError(
+            "may not register a module from inside a module boot hook; a module that carries other modules implements ModuleProvider",
+            nil,
+            nil,
+        ),
+    )
 }
 
 func (instance *Application) bootModulesPreConfigurationResolve() {
@@ -75,7 +127,7 @@ func (instance *Application) bootModulesPostConfigurationResolve() {
         }
     }
 
-    /* the scoped registrations come after the process-lifetime ones and before the framework's own, so a module scoping a name the framework registers later meets the refusal from either side and lands in the aggregated boot report beside its siblings */
+    /* the scoped registrations come after the process-lifetime ones and before the framework's own, so a module scoping a name the framework registers later lands in the aggregated boot report */
     for _, moduleInstance := range instance.modules {
         if scopedServiceModule, ok := moduleInstance.(applicationcontract.ScopedServiceModule); true == ok {
             scopedServiceModule.RegisterScopedServices(instance)
@@ -93,15 +145,20 @@ func (instance *Application) bootModulesPostConfigurationResolve() {
         instance.securityConfiguration = compiledConfiguration
     }
 
+    /* one loop per hook: each hook runs across every module before the next begins, the granularity the contracts document, so a module may rely on every sibling's listeners before any middleware registers */
     for _, moduleInstance := range instance.modules {
         if eventsModule, ok := moduleInstance.(applicationcontract.EventModule); true == ok {
             eventsModule.RegisterEventSubscribers(instance.kernel)
         }
+    }
 
+    for _, moduleInstance := range instance.modules {
         if httpMiddlewareModule, ok := moduleInstance.(applicationcontract.HttpMiddlewareModule); true == ok {
             httpMiddlewareModule.RegisterHttpMiddlewares(instance.kernel, instance.httpMiddlewares)
         }
+    }
 
+    for _, moduleInstance := range instance.modules {
         if decoratorModule, ok := moduleInstance.(applicationcontract.HttpHandlerDecoratorModule); true == ok {
             for _, decorator := range decoratorModule.RegisterHttpHandlerDecorators(instance.kernel) {
                 if nil == decorator {
@@ -111,11 +168,15 @@ func (instance *Application) bootModulesPostConfigurationResolve() {
                 instance.httpHandlerDecorators = append(instance.httpHandlerDecorators, decorator)
             }
         }
+    }
 
+    for _, moduleInstance := range instance.modules {
         if httpModule, ok := moduleInstance.(applicationcontract.HttpModule); true == ok {
             httpModule.RegisterHttpRoutes(instance.kernel)
         }
+    }
 
+    for _, moduleInstance := range instance.modules {
         if cliModule, ok := moduleInstance.(applicationcontract.CliModule); true == ok {
             commands := cliModule.RegisterCliCommands(instance.kernel)
 

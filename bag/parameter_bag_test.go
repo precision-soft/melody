@@ -153,7 +153,7 @@ func TestParameterBag_Count_CountsNamesNotValues(t *testing.T) {
     }
 }
 
-/* All copies as deep as the bag's own writers go: a mutation on the returned slice or map must not write into the stored value behind the lock */
+/* the zero value is constructible outside the constructors and carries a nil map; it reads as empty, and its first write allocates the map and lands instead of panicking */
 func TestParameterBag_TheZeroValueAcceptsItsFirstWrite(t *testing.T) {
     var bagInstance ParameterBag
 
@@ -183,6 +183,7 @@ func TestParameterBag_TheZeroValueAcceptsItsFirstAppend(t *testing.T) {
     }
 }
 
+/* All copies as deep as the bag's own writers go: a mutation on the returned slice or map must not write into the stored value behind the lock */
 func TestParameterBag_All_CopiesKnownShapesDeep(t *testing.T) {
     parameterBag := NewParameterBag()
     parameterBag.Set("slice", []string{"a", "b"})

@@ -15,7 +15,7 @@ type defaultAccessDeniedHandler struct {
 }
 
 func (instance *defaultAccessDeniedHandler) Handle(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, decisionErr error) (melodyhttpcontract.Response, error) {
-    if true == isHtmlRequest(request) {
+    if true == melodyhttp.PrefersHtml(request) {
         return melodyhttp.HtmlResponse(
             403,
             "<h1>Forbidden</h1>",

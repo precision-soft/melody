@@ -1,10 +1,13 @@
 package security
 
 import (
+    "errors"
+
     "github.com/precision-soft/melody/v3/event"
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
@@ -34,7 +37,7 @@ func NewCompiledFirewall(
         name:                        name,
         matcher:                     matcher,
         matcherDescription:          matcherDescription,
-        rules:                       rules,
+        rules:                       append([]securitycontract.Rule{}, rules...),
         tokenSource:                 tokenSource,
         accessControl:               accessControl,
         accessDecisionManager:       accessDecisionManager,
@@ -130,7 +133,8 @@ func (instance *CompiledFirewall) Login(
     request httpcontract.Request,
     input securitycontract.LoginInput,
 ) (*securitycontract.LoginResult, error) {
-    if nil == instance.loginHandler {
+    /* IsNilInterface: the handler comes through NewCompiledFirewall unvalidated, so a typed nil must not reach the call below */
+    if true == internal.IsNilInterface(instance.loginHandler) {
         return nil, exception.NewError(
             "firewall login handler is nil",
             exceptioncontract.Context{
@@ -144,7 +148,14 @@ func (instance *CompiledFirewall) Login(
     if nil != err {
         dispatchErr := instance.dispatchLoginFailure(runtimeInstance, request, err)
         if nil != dispatchErr {
-            return nil, dispatchErr
+            /* both failures travel as causes: the login error first, so the client sees its reason, and the dispatch error beside it, so its context survives the render boundary */
+            return nil, exception.NewError(
+                "security login failure event dispatch failed",
+                exceptioncontract.Context{
+                    "firewallName": instance.name,
+                },
+                errors.Join(err, dispatchErr),
+            )
         }
 
         return nil, err
@@ -173,7 +184,8 @@ func (instance *CompiledFirewall) Logout(
     request httpcontract.Request,
     input securitycontract.LogoutInput,
 ) (*securitycontract.LogoutResult, error) {
-    if nil == instance.logoutHandler {
+    /* IsNilInterface, as for the login handler */
+    if true == internal.IsNilInterface(instance.logoutHandler) {
         return nil, exception.NewError(
             "firewall logout handler is nil",
             exceptioncontract.Context{
@@ -187,10 +199,28 @@ func (instance *CompiledFirewall) Logout(
     if nil != err {
         dispatchErr := instance.dispatchLogoutFailure(runtimeInstance, request, err)
         if nil != dispatchErr {
-            return nil, dispatchErr
+            /* both failures travel as causes: the logout error first, so the client sees its reason, and the dispatch error beside it, so its context survives the render boundary */
+            return nil, exception.NewError(
+                "security logout failure event dispatch failed",
+                exceptioncontract.Context{
+                    "firewallName": instance.name,
+                },
+                errors.Join(err, dispatchErr),
+            )
         }
 
         return nil, err
+    }
+
+    if nil == result {
+        /* a nil result fails closed as in Login, since the caller dereferences result.Response */
+        return nil, exception.NewError(
+            "firewall logout handler returned nil result",
+            exceptioncontract.Context{
+                "firewallName": instance.name,
+            },
+            nil,
+        )
     }
 
     dispatchErr := instance.dispatchLogoutSuccess(runtimeInstance, request)
@@ -278,7 +308,7 @@ type CompiledConfiguration struct {
 
 func NewCompiledConfiguration(firewalls []*CompiledFirewall, globalAccessControl *AccessControl) *CompiledConfiguration {
     return &CompiledConfiguration{
-        firewalls:           firewalls,
+        firewalls:           append([]*CompiledFirewall{}, firewalls...),
         globalAccessControl: globalAccessControl,
     }
 }

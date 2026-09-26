@@ -8,6 +8,7 @@ import (
     "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/event"
     "github.com/precision-soft/melody/v3/.example/repository"
+    "github.com/precision-soft/melody/v3/.example/security"
     melodycache "github.com/precision-soft/melody/v3/cache"
     melodycachecontract "github.com/precision-soft/melody/v3/cache/contract"
     "github.com/precision-soft/melody/v3/container"
@@ -62,12 +63,16 @@ func (instance *UserService) List() ([]*entity.User, error) {
 }
 
 func (instance *UserService) FindById(id string) (*entity.User, bool, error) {
+    /* an identifier no cache key can carry names no row, so it is answered as absent without asking the cache */
+    if false == CacheSafeIdentifier(id) {
+        return nil, false, nil
+    }
+
     cacheKey := CacheKeyUserById(id)
 
-    cached, rememberErr := melodycache.Remember(
+    cached, rememberErr := rememberEntityOrAbsence(
         instance.cache,
         cacheKey,
-        0,
         func(ctx context.Context) (any, error) {
             user, found, findErr := instance.userRepository.FindById(ctx, id)
             if nil != findErr {
@@ -80,7 +85,6 @@ func (instance *UserService) FindById(id string) (*entity.User, bool, error) {
 
             return user, nil
         },
-        nil,
     )
     if nil != rememberErr {
         return nil, false, rememberErr
@@ -99,17 +103,17 @@ func (instance *UserService) FindById(id string) (*entity.User, bool, error) {
 }
 
 func (instance *UserService) FindByUsername(username string) (*entity.User, bool, error) {
-    normalizedUsername := strings.ToLower(strings.TrimSpace(username))
-    if "" == normalizedUsername {
+    /* CacheSafeIdentifier also refuses the empty spelling, and a name longer than the user table holds is answered as absent on the anonymous login door */
+    normalizedUsername := repository.NormalizedUsername(username)
+    if false == CacheSafeIdentifier(normalizedUsername) {
         return nil, false, nil
     }
 
     cacheKey := CacheKeyUserByUsername(normalizedUsername)
 
-    cached, rememberErr := melodycache.Remember(
+    cached, rememberErr := rememberEntityOrAbsence(
         instance.cache,
         cacheKey,
-        0,
         func(ctx context.Context) (any, error) {
             user, found, findErr := instance.userRepository.FindByUsername(ctx, normalizedUsername)
             if nil != findErr {
@@ -122,7 +126,6 @@ func (instance *UserService) FindByUsername(username string) (*entity.User, bool
 
             return user, nil
         },
-        nil,
     )
     if nil != rememberErr {
         return nil, false, rememberErr
@@ -144,10 +147,10 @@ func (instance *UserService) Create(
     runtimeInstance melodyruntimecontract.Runtime,
     userId string,
     username string,
-    passwordSha256Hex string,
+    passwordHash string,
     roles []string,
 ) (*entity.User, error) {
-    user := entity.NewUser(userId, username, passwordSha256Hex, roles)
+    user := entity.NewUser(userId, username, passwordHash, roles)
 
     createErr := instance.userRepository.Create(WriteContext(runtimeInstance), user)
     if nil != createErr {
@@ -167,11 +170,70 @@ func (instance *UserService) Create(
     return user, nil
 }
 
+/* GrantRole adds one role to an account through the repository's atomic door, so the console grant and the admin update door serialise on the account; the event carries the account the door wrote. A role already held is answered as held without an event, and the account's cache entries are dropped anyway, which heals entries a grant whose dispatch failed left standing. A dispatch that fails after the write is answered with the account, so a caller can say the grant is in the directory. */
+func (instance *UserService) GrantRole(
+    runtimeInstance melodyruntimecontract.Runtime,
+    userId string,
+    role string,
+) (*entity.User, repository.GrantRoleOutcome, error) {
+    ctx := WriteContext(runtimeInstance)
+
+    account, outcome, grantErr := instance.userRepository.GrantRole(ctx, userId, role)
+    if nil != grantErr {
+        return nil, outcome, grantErr
+    }
+
+    if repository.GrantRoleAlreadyHeld == outcome {
+        if dropErr := instance.dropCachedUser(account); nil != dropErr {
+            return nil, outcome, dropErr
+        }
+
+        return account, outcome, nil
+    }
+
+    if repository.GrantRoleGranted != outcome {
+        return nil, outcome, nil
+    }
+
+    updatedEvent := event.NewUserUpdatedEvent(account, account.Username)
+    _, dispatchErr := instance.eventDispatcher.DispatchName(
+        runtimeInstance,
+        event.UserUpdatedEventName,
+        updatedEvent,
+    )
+    if nil != dispatchErr {
+        return account, outcome, dispatchErr
+    }
+
+    return account, outcome, nil
+}
+
+/* dropCachedUser drops the entries an account is served from — by id, by username and the list — the same
+   three the updated listener drops, by the keys and without the event. */
+func (instance *UserService) dropCachedUser(account *entity.User) error {
+    if nil == account {
+        return nil
+    }
+
+    keyList := []string{CacheKeyUserById(account.Id), CacheKeyUserList}
+    if normalizedUsername := repository.NormalizedUsername(account.Username); "" != normalizedUsername && true == CacheSafeIdentifier(normalizedUsername) {
+        keyList = append(keyList, CacheKeyUserByUsername(normalizedUsername))
+    }
+
+    for _, key := range keyList {
+        if deleteErr := instance.cache.Delete(key); nil != deleteErr {
+            return deleteErr
+        }
+    }
+
+    return nil
+}
+
 func (instance *UserService) Update(
     runtimeInstance melodyruntimecontract.Runtime,
     userId string,
     username string,
-    passwordSha256Hex string,
+    passwordHash string,
     roles []string,
 ) (*entity.User, bool, error) {
     ctx := WriteContext(runtimeInstance)
@@ -185,11 +247,15 @@ func (instance *UserService) Update(
         return nil, false, nil
     }
 
-    user.Username = username
-    user.Password = passwordSha256Hex
-    user.Roles = roles
+    /* under the in-memory configuration the loaded entity is the repository's stored value, shared with concurrent readers, so the changes land on a copy and a rename the repository refuses leaves the stored account untouched */
+    previousUsername := user.Username
 
-    updated, updateErr := instance.userRepository.Update(ctx, user)
+    modified := *user
+    modified.Username = username
+    modified.Password = passwordHash
+    modified.Roles = roles
+
+    updated, updateErr := instance.userRepository.Update(ctx, &modified)
     if nil != updateErr {
         return nil, false, updateErr
     }
@@ -197,7 +263,7 @@ func (instance *UserService) Update(
         return nil, false, nil
     }
 
-    updatedEvent := event.NewUserUpdatedEvent(user)
+    updatedEvent := event.NewUserUpdatedEvent(&modified, previousUsername)
     _, dispatchErr := instance.eventDispatcher.DispatchName(
         runtimeInstance,
         event.UserUpdatedEventName,
@@ -207,7 +273,7 @@ func (instance *UserService) Update(
         return nil, true, dispatchErr
     }
 
-    return user, true, nil
+    return &modified, true, nil
 }
 
 func (instance *UserService) DeleteById(
@@ -246,16 +312,16 @@ func (instance *UserService) DeleteById(
     return true, nil
 }
 
-func (instance *UserService) AuthenticateByUsernameAndPasswordHash(
+func (instance *UserService) AuthenticateByUsernameAndPassword(
     username string,
-    passwordSha256Hex string,
+    password string,
 ) (*entity.User, bool, error) {
     normalizedUsername := strings.TrimSpace(username)
     if "" == normalizedUsername {
         return nil, false, nil
     }
 
-    if "" == strings.TrimSpace(passwordSha256Hex) {
+    if "" == password {
         return nil, false, nil
     }
 
@@ -264,10 +330,13 @@ func (instance *UserService) AuthenticateByUsernameAndPasswordHash(
         return nil, false, findErr
     }
     if false == found {
+        /* an absent username spends a bcrypt comparison too, so it is not answered faster than a wrong password: the timing would reveal which usernames exist */
+        security.DummyPasswordMatch(password)
+
         return nil, false, nil
     }
 
-    if passwordSha256Hex != user.Password {
+    if false == security.PasswordMatches(user.Password, password) {
         return nil, false, nil
     }
 

@@ -2,11 +2,14 @@ package rueidis
 
 import (
     "context"
+    "errors"
     "strconv"
     "time"
 
     "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/logging"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     "github.com/redis/rueidis"
 )
@@ -15,9 +18,9 @@ const defaultRateLimiterPrefix = "melody:rate_limit:"
 
 const defaultRateLimiterCallTimeout = 250 * time.Millisecond
 
-/* rateLimiterScript is the atomic fixed-window counter: one INCR per call, with the window expiry set only when the counter is created, all in a single round trip. */
+/* rateLimiterScript is the atomic fixed-window counter: one INCR per call, with the window expiry armed in the same round trip by the call that creates the counter and by any later call that finds the key without an expiry. A key that reached the store without a ttl, through a PERSIST, an eviction policy or a hand-written value, would otherwise never lapse and, under the fail-closed default, refuse its requests permanently; reading the ttl inside the script keeps the check and the arming atomic. */
 var rateLimiterScript = rueidis.NewLuaScript(`local count = redis.call("incr", KEYS[1])
-if count == 1 then
+if count == 1 or redis.call("pttl", KEYS[1]) < 0 then
     redis.call("pexpire", KEYS[1], tonumber(ARGV[1]))
 end
 return count`)
@@ -46,25 +49,21 @@ func WithRateLimiterFailureMode(mode RateLimiterFailureMode) RateLimiterOption {
     }
 }
 
-/* WithRateLimiterOnError observes store failures from the plain Allow path, which has no error return; AllowWithRuntime reports them to the caller as well. */
+/* WithRateLimiterOnError observes store failures from the plain Allow path, which has no error return; AllowWithRuntime reports them to the caller as well. It replaces the record the limiter writes when no observer is given: the failure is handed over untouched and unmarked, since an observer may be a metric rather than a journal. */
 func WithRateLimiterOnError(onError func(error)) RateLimiterOption {
     return func(instance *RateLimiter) {
         instance.onError = onError
     }
 }
 
-/* WithRateLimiterCallTimeout bounds the store round trip on both entry points: the plain Allow path, which carries no request context, and AllowWithRuntime, where it caps the runtime context so a request whose context has no deadline — melody's http kernel attaches none — still fails fast instead of hanging on an unresponsive store (the whole point of fail-closed on login/OTP routes). A non-positive timeout falls back to the default, following this package's zero-means-default convention, so a config-sourced unset value can never build an already-cancelled context that forces every call onto the store-failure path. */
+/* WithRateLimiterCallTimeout bounds the store round trip on both entry points: the plain Allow path, which carries no request context, and AllowWithRuntime, where it caps the runtime context so a request without a deadline, as melody's http kernel leaves it, fails fast, which fail-closed login and OTP routes depend on. A non-positive timeout falls back to the default; the cache subpackage reads non-positive as unbounded and says so on its own option. */
 func WithRateLimiterCallTimeout(timeout time.Duration) RateLimiterOption {
     return func(instance *RateLimiter) {
-        if 0 >= timeout {
-            timeout = defaultRateLimiterCallTimeout
-        }
-
-        instance.callTimeout = timeout
+        instance.callTimeout = resolvedCallTimeout(timeout, defaultRateLimiterCallTimeout)
     }
 }
 
-/* NewRateLimiter returns a Redis-backed fixed-window limiter shared by every application instance, implementing both httpcontract.RateLimiter and httpcontract.RuntimeRateLimiter — the distributed drop-in for the in-process middleware limiters. The counter is atomic (one Lua round trip), so N instances enforce one shared limit; note the fixed window admits up to 2x the limit across a window edge. Store failures follow the configured failure mode and default to FailureModeClosed. */
+/* NewRateLimiter returns a Redis-backed fixed-window limiter shared by every application instance, implementing httpcontract.RateLimiter and httpcontract.RuntimeRateLimiter as the distributed drop-in for the in-process limiters. The counter is one atomic Lua round trip, so N instances enforce one limit, and the fixed window admits up to twice the limit across a window edge; store failures follow the failure mode, FailureModeClosed by default. Unlike the in-process limiter, which clamps a non-positive rate or window, it panics at boot, since a distributed limit disarmed by an unset environment key would be disarmed on every instance. */
 func NewRateLimiter(
     client rueidis.Client,
     limit int,
@@ -115,33 +114,36 @@ func (instance *RateLimiter) Allow(key string) bool {
 
     allowed, allowErr := instance.allow(callContext, key)
     if nil != allowErr {
-        instance.reportError(allowErr)
+        instance.reportError(nil, allowErr)
     }
 
     return allowed
 }
 
 func (instance *RateLimiter) AllowWithRuntime(runtimeInstance runtimecontract.Runtime, key string) (bool, error) {
-    /* cap the runtime context with the call timeout: context.WithTimeout keeps whichever deadline is earlier, so a request that already carries a tighter deadline still wins, while a request whose context has no deadline — as melody's http kernel leaves it — is bounded here rather than hanging on an unresponsive store. */
+    /* cap the runtime context with the call timeout; context.WithTimeout keeps the earlier deadline, so a tighter request deadline still wins */
     callContext, cancel := context.WithTimeout(runtimeInstance.Context(), instance.callTimeout)
     defer cancel()
 
     allowed, allowErr := instance.allow(callContext, key)
     if nil != allowErr {
-        instance.reportError(allowErr)
+        allowErr = instance.reportError(logging.LoggerFromRuntime(runtimeInstance), allowErr)
     }
 
     return allowed, allowErr
 }
 
-/* Reset drops the counter for one key best-effort; a store failure only reports through the error observer, matching the interface's void signature. */
+/* Reset drops the counter for one key best-effort. It returns nothing, so a store failure reports through the error observer, or a record when none was given, since a failed reset leaves an account locked after a successful login. */
 func (instance *RateLimiter) Reset(key string) {
     callContext, cancel := context.WithTimeout(context.Background(), instance.callTimeout)
     defer cancel()
 
     command := instance.client.B().Del().Key(instance.prefix + key).Build()
     if resultErr := instance.client.Do(callContext, command).Error(); nil != resultErr {
-        instance.reportError(exception.NewError("redis rate limiter reset failed", map[string]any{"key": key}, resultErr))
+        instance.reportError(
+            nil,
+            exception.NewError("redis rate limiter reset failed", map[string]any{"key": key}, resultErr),
+        )
     }
 }
 
@@ -153,6 +155,15 @@ func (instance *RateLimiter) allow(callContext context.Context, key string) (boo
 
     count, resultErr := result.AsInt64()
     if nil != resultErr {
+        /* the caller's own cancellation is not a store failure: a client that disconnected mid-round-trip surfaces as the context's cancellation and is named so, not as a redis outage. The failure-mode answer applies either way; the call-timeout deadline stays a store failure, since that budget exists to catch a slow store. */
+        if true == errors.Is(resultErr, context.Canceled) {
+            return FailureModeOpen == instance.failureMode, exception.NewError(
+                "redis rate limiter call cancelled by the caller",
+                map[string]any{"key": key, "failureMode": string(instance.failureMode)},
+                resultErr,
+            )
+        }
+
         return FailureModeOpen == instance.failureMode, exception.NewError(
             "redis rate limiter store failure",
             map[string]any{"key": key, "failureMode": string(instance.failureMode)},
@@ -163,12 +174,28 @@ func (instance *RateLimiter) allow(callContext context.Context, key string) (boo
     return count <= int64(instance.limit), nil
 }
 
-func (instance *RateLimiter) reportError(err error) {
-    if nil == instance.onError {
-        return
+/* reportError delivers a store failure and answers the error the caller should carry on with. An observer given by the application gets the failure untouched and unmarked, since it may be a counter rather than a journal. With no observer the failure is recorded here, because Allow answers a bool and Reset nothing, so an outage would otherwise reach no channel; the record takes the level the http middleware picks, a caller's own cancellation not being an outage. The error is then marked already-logged, the framework's mark the exception listener and the http kernel honour, so the middleware files nothing a second time. */
+func (instance *RateLimiter) reportError(logger loggingcontract.Logger, err error) error {
+    if nil != instance.onError {
+        instance.onError(err)
+
+        return err
     }
 
-    instance.onError(err)
+    if nil == logger {
+        logger = logging.EmergencyLogger()
+    }
+
+    /* the key and the failure mode already travel in the error's own context, put there where the call was made */
+    recordContext := exception.LogContext(err)
+
+    if true == errors.Is(err, context.Canceled) {
+        logger.Warning("rate limiter call cancelled", recordContext)
+    } else {
+        logger.Error("rate limiter store failure", recordContext)
+    }
+
+    return exception.MarkLogged(err)
 }
 
 var _ httpcontract.RateLimiter = (*RateLimiter)(nil)

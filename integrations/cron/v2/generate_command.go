@@ -56,7 +56,7 @@ func NewGenerateCommand(configuration *Configuration) *GenerateCommand {
     return command
 }
 
-/* RegisterTemplate installs the template under its name, replacing an existing one silently: replacement by name is the door through which an application overrides a builtin dialect. Two application templates sharing a name resolve to the later registration, so a caller that must not replace anything checks the name first. */
+/* RegisterTemplate installs the template under its name, silently replacing an existing one: replacement by name is how an application overrides a builtin dialect, so a caller that must not replace anything checks the name first. */
 func (instance *GenerateCommand) RegisterTemplate(template Template) {
     instance.templates[template.Name()] = template
 }
@@ -73,7 +73,7 @@ func (instance *GenerateCommand) Flags() []clicontract.Flag {
     return output.MergeFlags(output.StandardFlags(), instance.ownFlags())
 }
 
-/* ownFlags keeps the generator's flags apart from the standard set every melody command carries: the framework rewrites -v/-vv into --verbosity for every command, so a command without the standard flags dies on the framework's own convention with "flag provided but not defined". */
+/* ownFlags keeps the generator's flags apart from the standard set, since the framework rewrites -v/-vv into --verbosity for every command and a command without the standard flags fails with "flag provided but not defined". */
 func (instance *GenerateCommand) ownFlags() []clicontract.Flag {
     return []clicontract.Flag{
         &clicontract.StringFlag{
@@ -110,7 +110,7 @@ func (instance *GenerateCommand) ownFlags() []clicontract.Flag {
         },
         &clicontract.BoolFlag{
             Name:  flagNamePrune,
-            Usage: "empty the destinations in dir(--out) that this generator wrote earlier and this run no longer produces, so an entry retired or moved between versions stops running. Only files carrying the current template's ownership marker are touched, and destinations outside dir(--out) are never swept",
+            Usage: "empty the destinations in dir(--out) that this generator wrote earlier for this application and this run no longer produces, so an entry retired or moved between versions stops running. Only files carrying the current template's ownership line for this application are touched — a file another application wrote, or one written before the line named the application, is left alone — and destinations outside dir(--out) are never swept",
         },
     }
 }
@@ -160,6 +160,7 @@ type runOptions struct {
     heartbeatRequested []string
     heartbeatEnabled   bool
     prune              bool
+    applicationName    string
 }
 
 func (instance *GenerateCommand) runWithConfiguration(
@@ -173,7 +174,7 @@ func (instance *GenerateCommand) runWithConfiguration(
     pruned := ([]string)(nil)
     emptyMessage := ""
 
-    /* the report is a defer so that no failure path can leave the run without a document: under --format=json every early return used to travel straight out past the one door that builds the envelope, and the cli silences the command's own error line in json mode, so `app melody:cron:generate --format=json | jq …` received an empty stream — indistinguishable from a missing binary — for a malformed schedule or an unwritable directory. The sibling integration's commands have carried this shape since the verdict that gave migrate its machine contract. */
+    /* the report is a defer so that no failure path leaves the run without a document: the cli silences the command's own error line under --format=json, so an early return would hand a consumer an empty stream */
     defer func() {
         runErr = instance.reportWrites(commandContext, option, startedAt, writes, pruned, emptyMessage, runErr)
     }()
@@ -209,9 +210,18 @@ func (instance *GenerateCommand) resolveRunOptions(
     if nil != templateLookupErr {
         return nil, templateLookupErr
     }
+
+    applicationName, applicationNameErr := applicationIdentity(configuration)
+    if nil != applicationNameErr {
+        return nil, applicationNameErr
+    }
+    options.applicationName = applicationName
+
+    /* one template owned by this application renders and sweeps, so the ownership line every destination carries and the line the sweep asks for come from the same object */
+    template = templateOwnedBy(template, applicationName)
     options.template = template
 
-    /* a dialect that renders no user column at all (busybox crond and per-user crontabs reject one) never needs a user to place the heartbeat line — demanding one turns a valid configuration into a hard error */
+    /* a dialect that renders no user column never needs a user to place the heartbeat line */
     rendersUserColumn := templateRendersUserColumn(template)
 
     outputPath := resolveDefaultPath(commandContext, configuration, flagNameOutput, ParameterDestinationFile)
@@ -248,6 +258,7 @@ func (instance *GenerateCommand) resolveRunOptions(
         }
         logsDir = absoluteLogsDir
 
+        /* the logs directory is created before anything is rendered, because under system cron a shell whose redirection cannot create its file aborts the command; creating it is idempotent, so a run that fails later leaves it behind */
         if mkdirErr := os.MkdirAll(logsDir, 0o755); nil != mkdirErr {
             return nil, exception.NewError(
                 "cron: could not create the logs directory",
@@ -258,7 +269,8 @@ func (instance *GenerateCommand) resolveRunOptions(
     }
     options.logsDir = logsDir
 
-    options.binary = resolveDefault(commandContext, configuration, flagNameBinary, ParameterBinary)
+    /* a relative melody.cron.binary is anchored under the project like its three sibling paths, while a relative --binary keeps the shell's convention */
+    options.binary = resolveDefaultPath(commandContext, configuration, flagNameBinary, ParameterBinary)
     options.defaultUserName = resolveDefault(commandContext, configuration, flagNameDefaultUser, ParameterUser)
 
     heartbeatPath := resolveDefaultPath(commandContext, configuration, flagNameHeartbeatPath, ParameterHeartbeatPath)
@@ -355,7 +367,7 @@ type destinationWrite struct {
     HeartbeatOnly bool   `json:"heartbeatOnly"`
 }
 
-/* writeDestinations answers what it wrote, what there was to say about an empty run and what stopped it, leaving the one report door to the caller's defer: reporting from here left the seven failure paths below with no document at all, and the writes accumulated before a failure are exactly what tells the consumer which files a partial run left on disk — the destinations are written one by one with no rollback. */
+/* writeDestinations answers what it wrote, what there was to say about an empty run and what stopped it, and leaves the report to the caller's defer: destinations are written one by one with no rollback, so the writes before a failure tell the consumer what a partial run left on disk. */
 func (instance *GenerateCommand) writeDestinations(
     option output.Option,
     options *runOptions,
@@ -366,7 +378,7 @@ func (instance *GenerateCommand) writeDestinations(
         return nil, nil, "", groupErr
     }
 
-    /* an empty configuration still sweeps: emptying the configuration is exactly the version in which every destination the previous one wrote is stale, and answering "nothing to write" while leaving them all live is the worst of the three cases. It stays a success either way — a run that has nothing to write has not failed. */
+    /* an empty configuration still sweeps, since every destination the previous one wrote is stale; a run with nothing to write is still a success */
     if 0 == len(entriesByDestination) && false == options.heartbeatEnabled {
         pruned, pruneErr := pruneStaleDestinations(options, nil)
 
@@ -439,14 +451,19 @@ func (instance *GenerateCommand) writeDestinations(
     return writes, pruned, "", pruneErr
 }
 
-/* pruneStaleDestinations empties the destinations this generator wrote earlier and this run no longer produces. Without it a version that retires an entry leaves its file untouched and crond keeps running the retired job forever, and a version that MOVES an entry to another destination leaves it live in both — the double execution the runner refuses at construction, produced silently by the generator.
-
-Three rules bound what it may touch, because emptying a file is not reversible. It is opt-in, so a deployment that manages the directory itself is unaffected. It reads only the output directory, never recursing and never following a destination an entry placed elsewhere by absolute path — those live where the operator put them and are not this directory's to reconcile. And it empties only a file whose first bytes carry the ownership marker of the template generating now, so a file this generator cannot prove it wrote is left exactly as it is.
-
-Emptying means rendering the template with no entries: the destination keeps its header and with it the marker, so it stays recognizable to the next run rather than becoming an unowned file the sweep would refuse to touch ever again. */
+/* pruneStaleDestinations empties the destinations this generator wrote earlier that this run does not produce, so a retired or moved entry does not keep running under crond. Because emptying is irreversible it is opt-in, reads only the output directory without recursing or following an absolute destination, and empties only a file whose leading lines carry, as an exact line, the ownership line of the template generating now for this application; a run with no application name cannot sweep. Emptying renders the template with no entries, so the file keeps its header and marker and stays recognisable to the next run. */
 func pruneStaleDestinations(options *runOptions, writes []destinationWrite) ([]string, error) {
     if false == options.prune {
         return nil, nil
+    }
+
+    /* without a name no line separates this application's destinations from another's, so the sweep is refused before the directory is read */
+    if "" == options.applicationName {
+        return nil, exception.NewError(
+            "cron: --prune needs the name the application runs under to tell its own destinations from another application's, and the cli configuration carries none",
+            exceptioncontract.Context{"flag": flagNamePrune},
+            nil,
+        )
     }
 
     ownedTemplate, isOwnedTemplate := options.template.(OwnedTemplate)
@@ -457,6 +474,15 @@ func pruneStaleDestinations(options *runOptions, writes []destinationWrite) ([]s
     marker := ownedTemplate.OwnershipMarker()
     if "" == strings.TrimSpace(marker) {
         return nil, nil
+    }
+
+    /* the sweep runs only on a line that names this application: a template the generator could not hand the name to, such as a custom dialect embedding a builtin, answers the bare prefix another application writes as well, so for it the destination is written and the sweep is refused, naming the line */
+    if false == strings.HasSuffix(marker, " for "+options.applicationName) {
+        return nil, exception.NewError(
+            "cron: --prune sweeps only on an ownership line that names this application, and the template's line does not; give the dialect a line ending in \" for \" and the application's cli name, or generate without --prune",
+            exceptioncontract.Context{"flag": flagNamePrune, "ownershipMarker": marker, "application": options.applicationName},
+            nil,
+        )
     }
 
     written := make(map[string]bool, len(writes))
@@ -487,7 +513,7 @@ func pruneStaleDestinations(options *runOptions, writes []destinationWrite) ([]s
     pruned := make([]string, 0)
 
     for _, directoryEntry := range directoryEntries {
-        /* only a regular file is a candidate. Skipping directories alone left the sweep opening whatever else the directory held, and opening a fifo with no writer blocks forever: one named pipe beside the destinations wedged the generator inside os.Open with no deadline and no diagnostic. A device, a socket and a symlink are refused for the same reason — this generator wrote none of them, so none of them can be one of its own. */
+        /* only a regular file is a candidate: opening a fifo with no writer blocks forever, and a device, socket or symlink is not something this generator wrote */
         if false == directoryEntry.Type().IsRegular() {
             continue
         }
@@ -519,6 +545,10 @@ func pruneStaleDestinations(options *runOptions, writes []destinationWrite) ([]s
 /* ownershipMarkerReadLimit bounds what is read to decide ownership: the marker rides in the header block every rendered destination opens with, and a file large enough to push it past this is not one this generator wrote. */
 const ownershipMarkerReadLimit = 8 * 1024
 
+/* ownershipMarkerLineLimit bounds where in that head the marker may stand: every builtin template renders it inside the leading comment block, so a file that merely quotes the marker further down is not emptied. */
+const ownershipMarkerLineLimit = 10
+
+/* fileCarriesOwnershipMarker recognises ownership by an exact marker line among the file's leading lines. Exactness keeps apart a marker that extends another, a custom dialect suffixing the builtin marker, one application's line and another's, and the bare prefix of a line that names no application. */
 func fileCarriesOwnershipMarker(path string, marker string) (bool, error) {
     fileInstance, openErr := os.Open(path)
     if nil != openErr {
@@ -541,12 +571,21 @@ func fileCarriesOwnershipMarker(path string, marker string) (bool, error) {
         )
     }
 
-    return strings.Contains(string(head[:read]), marker), nil
+    lines := strings.SplitN(string(head[:read]), "\n", ownershipMarkerLineLimit+1)
+    if ownershipMarkerLineLimit < len(lines) {
+        lines = lines[:ownershipMarkerLineLimit]
+    }
+
+    for _, line := range lines {
+        if marker == strings.TrimSpace(line) {
+            return true, nil
+        }
+    }
+
+    return false, nil
 }
 
-/* reportWrites is the generator's one report door, reached from the run's defer on every path: the written summary as text lines, or as the single machine-readable document under --format=json — the failure inside it, beside whatever the run had already written before it stopped. The summary is essential output — the command's whole visible result — so --quiet, which suppresses headers and non-essential output, does not silence it.
-
-The run's own failure stays the verdict the command returns; a rendering failure becomes one only when the run itself succeeded, which is the rule the sibling integration's exit door states in the same words. In text mode the failure travels alone, as it always has: the cli entry point prints it. */
+/* reportWrites is the generator's one report door, reached from the run's defer on every path: text lines, or the single machine-readable document under --format=json carrying the failure beside what was already written. The summary is the command's whole result, so --quiet does not silence it. The run's failure stays the returned verdict; a rendering failure becomes one only when the run succeeded, and in text mode the failure travels alone for the cli entry point to print. */
 func (instance *GenerateCommand) reportWrites(
     commandContext *clicontract.CommandContext,
     option output.Option,
@@ -564,7 +603,7 @@ func (instance *GenerateCommand) reportWrites(
             writes = []destinationWrite{}
         }
 
-        /* pruned is a list on every run, empty rather than null when nothing was swept or the sweep was never asked for: a field whose json type changes with the outcome cannot be consumed at all, which is the rule the machine contracts of the debug family were put on */
+        /* pruned is an empty list rather than null when nothing was swept, so the field keeps its json type on every outcome */
         if nil == pruned {
             pruned = []string{}
         }
@@ -576,7 +615,7 @@ func (instance *GenerateCommand) reportWrites(
         }
 
         if nil != runErr {
-            /* the details and the cause used to be nil on every failure alike, so the machine document — the one a deploy pipeline reads — was the single rendering that threw away what the error already carried: a failed rename filed the destination and the source in the journal at the same instant and answered `"details":null,"cause":null` on stdout. The details object stays an object when the failure carries no context, so the field keeps its json type on every failure. */
+            /* the envelope carries the failure's details and cause, and details stays an object when the failure carries no context, so the field keeps its json type on every failure */
             envelope.SetError(
                 "cron.generateFailed",
                 "the cron manifest generation failed",
@@ -593,7 +632,7 @@ func (instance *GenerateCommand) reportWrites(
         return renderErr
     }
 
-    /* a run that fails part way through still names what it already did, the way the json branch beside it does. Emptying a destination is irreversible and the sweep returns the destinations it emptied beside its failure, so returning here without printing them left the operator of a failed deploy with no record at all of which manifests had just been blanked — not one "pruned" line, not even the "wrote" lines of the writes that had succeeded. */
+    /* a run that fails part way still prints what it wrote and pruned, since emptying is irreversible and the operator needs to know which manifests were blanked */
     if nil != runErr {
         printDestinationWrites(commandContext, writes)
         printPrunedDestinations(commandContext, pruned)
@@ -632,8 +671,10 @@ func printPrunedDestinations(commandContext *clicontract.CommandContext, pruned 
     }
 }
 
+/* atomicWriteFile writes the content to a temporary file beside the destination and renames it into place, removing the temporary file on every failure it sees. The mode applies to a new destination; an existing one keeps its permission bits, without setuid, setgid and sticky, so a crontab narrowed to 0600 is not widened. A process killed before the rename leaves the temporary file carrying the ownership marker, which a later --prune empties and reports. */
 func atomicWriteFile(destination string, content []byte, mode os.FileMode) error {
-    tmpFile, createErr := os.CreateTemp(filepath.Dir(destination), filepath.Base(destination)+".*.tmp")
+    /* the temp name does not carry the destination's basename, which may fill the 255 bytes of a path component on its own */
+    tmpFile, createErr := os.CreateTemp(filepath.Dir(destination), ".melody-cron-*.tmp")
     if nil != createErr {
         return exception.NewError(
             "cron: could not create temporary crontab next to destination",
@@ -676,7 +717,7 @@ func atomicWriteFile(destination string, content []byte, mode os.FileMode) error
         )
     }
 
-    if chmodErr := os.Chmod(tmpPath, mode); nil != chmodErr {
+    if chmodErr := os.Chmod(tmpPath, destinationFileMode(destination, mode)); nil != chmodErr {
         return exception.NewError(
             "cron: could not chmod temporary crontab",
             exceptioncontract.Context{
@@ -705,6 +746,16 @@ func atomicWriteFile(destination string, content []byte, mode os.FileMode) error
     }
 
     return nil
+}
+
+/* destinationFileMode answers the permission bits the destination already carries, without setuid, setgid and sticky, or the caller's mode for a new file. */
+func destinationFileMode(destination string, newFileMode os.FileMode) os.FileMode {
+    info, statErr := os.Stat(destination)
+    if nil != statErr {
+        return newFileMode
+    }
+
+    return info.Mode().Perm()
 }
 
 func syncDir(path string) error {
@@ -816,6 +867,7 @@ func resolveEntryDestination(entryDestination string, defaultDestination string,
     return joined, nil
 }
 
+/* isWithinDir answers on the cleaned names deliberately: it refuses a DestinationFile that walks out of dir(--out) with "..", while a symbolic link inside the directory is the operator's layout and is allowed, as an absolute path is. */
 func isWithinDir(candidate string, parent string) bool {
     if candidate == parent {
         return true
@@ -914,7 +966,7 @@ func expandEntriesForCommand(
             return nil, logPathErr
         }
 
-        /* every entry carries its own schedule: Render is userland, Schedule.Defaults is documented as mutating in place, and a template that calls it on the schedule it was handed would otherwise rewrite the one behind every sibling entry of this command — and, before Entries copied, the registered one for the rest of the process */
+        /* every entry carries its own schedule copy: Render is userland and Schedule.Defaults mutates in place, so a template calling it would otherwise rewrite the schedule of every sibling entry */
         entry := Entry{
             Name:            commandName,
             User:            user,
@@ -933,7 +985,7 @@ func expandEntriesForCommand(
                 )
             }
 
-            /* the entry's own arguments come last, after the instance flags this generator adds, so the manifest line runs the command line the entry declared — the same one the in-process runner hands the child. A Configuration drives both halves, and an argument honoured by only one of them is a divergence nothing would report. */
+            /* the entry's own arguments come after the instance flags, so the manifest line runs the command line the in-process runner hands the child */
             args = append(args, config.Arguments...)
 
             entry.Binary = binary
@@ -999,7 +1051,7 @@ func resolveEntryLogPath(
         )
     }
 
-    /* a LogFileName carrying a subdirectory ("nightly/report.log") stays within the logs dir and passes the guard above, but nothing else ever creates that subdirectory — and under system cron the shell aborts the whole command when the >> redirection cannot create its file, so the scheduled job silently never runs. The destination side already creates its parent the same way. */
+    /* a LogFileName carrying a subdirectory stays within the logs dir but nothing else creates that subdirectory, and under system cron the shell aborts the command when the >> redirection cannot create its file */
     if mkdirErr := os.MkdirAll(filepath.Dir(joined), 0o755); nil != mkdirErr {
         return "", exception.NewError(
             "cron: could not create the log file directory",
@@ -1014,7 +1066,7 @@ func resolveEntryLogPath(
     return joined, nil
 }
 
-/* configurationFromRuntime resolves through the run's scope with the container as the fallback, the way every other command on this seam reads its services: a scope-level substitution of the configuration is honoured here exactly as the framework's own runtime door honours it. */
+/* configurationFromRuntime resolves through the run's scope with the container as the fallback, so a scope-level substitution of the configuration is honoured. */
 func configurationFromRuntime(runtimeInstance runtimecontract.Runtime) (configcontract.Configuration, error) {
     configuration, fromRuntimeErr := runtime.FromRuntime[configcontract.Configuration](runtimeInstance, melodyconfig.ServiceConfig)
     if nil != fromRuntimeErr {
@@ -1026,6 +1078,39 @@ func configurationFromRuntime(runtimeInstance runtimecontract.Runtime) (configco
     }
 
     return configuration, nil
+}
+
+/* applicationIdentity answers the application's cli name, which the ownership line names. A configuration without a cli configuration answers the empty name, which the sweep refuses, and a name spanning lines is refused, since the ownership line has to be one line to be read back. */
+func applicationIdentity(configuration configcontract.Configuration) (string, error) {
+    cliConfiguration := configuration.Cli()
+    if true == isNilInterface(cliConfiguration) {
+        return "", nil
+    }
+
+    applicationName := strings.TrimSpace(cliConfiguration.Name())
+    if true == strings.ContainsAny(applicationName, "\r\n") {
+        return "", exception.NewError(
+            "cron: the name the application runs under spans lines, so it cannot open the ownership line of a generated destination; configure a single-line cli name",
+            exceptioncontract.Context{"applicationName": applicationName},
+            nil,
+        )
+    }
+
+    return applicationName, nil
+}
+
+/* templateOwnedBy hands the application's name to a template that can carry it and answers the copy that renders that application's ownership line; a custom dialect is used as it is, with whatever line it declares, and an empty name leaves every template unowned. The copy is derived only for the package's own dialects by concrete type, so a wrapper that embeds a builtin keeps its own rendering; the line it answers is the builtin's bare prefix, on which pruneStaleDestinations refuses to sweep. */
+func templateOwnedBy(template Template, applicationName string) Template {
+    if "" == applicationName {
+        return template
+    }
+
+    switch ownedTemplate := template.(type) {
+    case *CrontabTemplate:
+        return ownedTemplate.ownedBy(applicationName)
+    }
+
+    return template
 }
 
 func resolveDefault(
@@ -1051,7 +1136,7 @@ func resolveDefault(
     return ""
 }
 
-/* resolveDefaultPath is resolveDefault for a value that names a path, and it differs in one thing: a relative path that came from a PARAMETER is anchored at the project directory, while one typed as a cli FLAG stays relative to the working directory. The two sources answer to different conventions. A flag is typed in a shell, next to the paths that shell already resolves, and anchoring it elsewhere would surprise every operator. A parameter is part of the application's configuration and belongs to the project: melody resolves MELODY_LOG_PATH, kernel.logs_dir and kernel.cache_dir against the project directory for exactly that reason, and cron was the one place where "melody.cron.logs_dir = var/log/cron" meant a different directory depending on where the binary was invoked from — under a supervisor that starts from /, the generated crontab baked /var/log/cron into itself. The shipped defaults hid it by carrying %kernel.project_dir% themselves. */
+/* resolveDefaultPath is resolveDefault for a path: a relative path from a parameter is anchored at the project directory, as melody anchors MELODY_LOG_PATH, kernel.logs_dir and kernel.cache_dir, while one typed as a cli flag stays relative to the working directory the shell resolves it against. */
 func resolveDefaultPath(
     commandContext *clicontract.CommandContext,
     configuration configcontract.Configuration,
@@ -1077,7 +1162,7 @@ func resolveDefaultPath(
     return anchorConfiguredPath(parameter.String(), configuration)
 }
 
-/* anchorConfiguredPath carries locally the rule application/bootstrap.go applies to every other melody runtime path; it cannot call that door, which is unexported and in another module. A configuration that names no project directory keeps the working-directory anchoring, because there is nothing better to anchor to and refusing would turn a generator that works today into a boot failure. */
+/* anchorConfiguredPath carries locally the rule application/bootstrap.go applies to every other runtime path, which is unexported and in another module. A configuration that names no project directory keeps the working-directory anchoring rather than failing boot. */
 func anchorConfiguredPath(value string, configuration configcontract.Configuration) string {
     if "" == value {
         return value
@@ -1100,7 +1185,7 @@ func anchorConfiguredPath(value string, configuration configcontract.Configurati
     return filepath.Join(projectDirectory, value)
 }
 
-/* isHeartbeatAutoEnabled separates an unset opt-in from a malformed one. Reading a value the parameter cannot convert as "not enabled" would generate a crontab without the liveness line the operator asked for and report success — the misspelling would be indistinguishable from never having asked. */
+/* isHeartbeatAutoEnabled separates an unset opt-in from a malformed one, so a misspelt value is refused instead of generating a crontab without the liveness line the operator asked for. */
 func isHeartbeatAutoEnabled(configuration configcontract.Configuration) (bool, error) {
     if nil == configuration {
         return false, nil
@@ -1127,12 +1212,13 @@ func isHeartbeatAutoEnabled(configuration configcontract.Configuration) (bool, e
 
 var _ clicontract.Command = (*GenerateCommand)(nil)
 
-/* errorDetailsOf renders the failure's own context as the json envelope's details, an empty object rather than null when it carries none: a field whose json type changes with the outcome cannot be consumed at all. It is written here rather than shared with the migrate integration because the two are separate modules. */
+/* errorDetailsOf renders the failure's own context as the json envelope's details, an empty object rather than null when it carries none, so the field keeps its json type. */
 func errorDetailsOf(runErr error) map[string]any {
     details := map[string]any{}
 
     var provider exceptioncontract.ContextProvider
-    if true == errors.As(runErr, &provider) && nil != provider {
+    /* a typed-nil link in the chain satisfies As and passes a plain nil comparison, and Context() on the nil receiver would panic inside the report */
+    if true == errors.As(runErr, &provider) && false == isNilInterface(provider) {
         for key, value := range provider.Context() {
             details[key] = value
         }
@@ -1141,7 +1227,7 @@ func errorDetailsOf(runErr error) map[string]any {
     return details
 }
 
-/* errorCauseOf answers the failure's text together with the whole chain beneath it. The chain starts at the failure itself rather than one link below, because this envelope's message is a fixed label — "the cron manifest generation failed" — so the cause is where the failure's own sentence lives; the migrate integration's envelope puts that sentence in the message and its cause therefore starts one link lower. */
+/* errorCauseOf answers the failure's text with the whole chain beneath it, starting at the failure itself because the envelope's message is a fixed label and the failure's own sentence lives in the cause. */
 func errorCauseOf(runErr error) *output.ErrorCause {
     causeChain := exception.BuildCauseChain(runErr, 8)
     if 0 == len(causeChain) {

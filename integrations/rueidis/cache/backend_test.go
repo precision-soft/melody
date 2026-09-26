@@ -233,7 +233,7 @@ func TestSetMultipleCtx_RefusesANegativeTtl(t *testing.T) {
     }
 }
 
-/* zero keeps meaning no expiry on both doors, which is what separates it from the negative value refused above. */
+/* zero keeps meaning no expiry on both doors, which is what separates it from a negative value, which is refused. */
 func TestSetCtx_AZeroTtlStoresWithoutExpiry(t *testing.T) {
     backend, client := liveBackend(t)
 
@@ -970,7 +970,7 @@ func TestFirstSetFailure_NamesTheSortedFirstKeyAndCountsTheRest(t *testing.T) {
     }
 }
 
-/* the validation refusal names the sorted-first malformed key, never a map-iteration choice — the nondeterminism the response reporting further down already refuses. Validation runs before anything is sent, so the batch leaves no trace. */
+/* the validation refusal names the sorted-first malformed key, never a map-iteration choice, as the response reporting does; validation runs before anything is sent, so the batch leaves no trace. */
 func TestSetMultipleCtx_NamesTheSortedFirstMalformedKey(t *testing.T) {
     backend, _ := liveBackend(t)
 
@@ -1026,7 +1026,7 @@ func TestDeleteKeysInBatches_AMultiBatchFailureReportsTheOperationsExtent(t *tes
     }
 }
 
-/* the caller's own mistakes are named the way the in-memory backend names them, because the shared contract makes the grammar of a refusal part of the promise. Three distinct mistakes used to arrive under one message that is also the message of a store outage, so neither the operator nor the application could tell a bug in the call from redis being down. Redis refuses all three itself — what was missing was never the refusal but its name. */
+/* the caller's own mistakes are named the way the in-memory backend names them, because the shared contract makes the grammar of a refusal part of the promise: three distinct mistakes each carry their own message, apart from the message of a store outage, so a bug in the call reads apart from redis being down. Redis refuses all three itself; this names its refusal. */
 func TestBackend_CounterRefusalsAreNamedTheWayTheInMemorySiblingNamesThem(t *testing.T) {
     for _, testCase := range []struct {
         name    string

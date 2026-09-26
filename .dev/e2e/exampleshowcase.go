@@ -9,9 +9,7 @@ import (
     "strings"
 )
 
-/* The v1 example's showcase wirings, driven over the wire. The origin and the api token are the values its
-.env ships (APP_CORS_ALLOW_ORIGINS, APP_API_TOKEN); the forwarded address is a TEST-NET-3 literal no real
-client carries, so finding it in a rate-limit key can only mean the forwarded header was believed. */
+/* The v1 example's showcase wirings, driven over the wire. The origin and the api token are the values its .env ships (APP_CORS_ALLOW_ORIGINS, APP_API_TOKEN); the forwarded address is a TEST-NET-3 literal no real client carries, so finding it in a rate-limit key can only mean the forwarded header was believed. */
 const (
     exampleShowcaseAllowedOrigin    = "https://catalog.example.test"
     exampleShowcaseDisallowedOrigin = "https://elsewhere.example.test"
@@ -20,10 +18,7 @@ const (
     exampleShowcaseForwardedFor     = "203.0.113.77"
 )
 
-/* runExampleShowcaseAssertions covers the wirings only the v1 example carries: the cors listeners, the api-key
-firewall, gzip compression, per-field validation errors and the trusted-proxy client address. It runs between
-the login flow and the integration demos, so the throttled writes it spends are cleared by the rate-limit
-subsection's own reset before that section counts an exact budget. */
+/* runExampleShowcaseAssertions covers the wirings only the v1 example carries: the cors listeners, the api-key firewall, gzip compression, per-field validation errors and the trusted-proxy client address. It runs between the login flow and the integration demos, so the throttled writes it spends are cleared by the rate-limit subsection's own reset before that section counts an exact budget. */
 func runExampleShowcaseAssertions(major exampleMajor, application *exampleApplication, redisAddress string) {
     assertExampleCorsPreflight(major)
     assertExampleCorsDecoratesARefusal(major)
@@ -35,12 +30,7 @@ func runExampleShowcaseAssertions(major exampleMajor, application *exampleApplic
     assertExampleStaticCacheValidators(major)
 }
 
-/* assertExampleStaticCacheValidators proves the static cache the v1 example arms in its .env
-(MELODY_STATIC_ENABLE_CACHE): a tracked asset answers with the validators and the cache policy, a client
-replaying the ETag is answered 304 with no body, a stale ETag gets the bytes again, and the two validators
-keep their precedence — If-Modified-Since is consulted only when no If-None-Match was offered, so a mismatched
-ETag wins over a matching date. The values are read from the live answer rather than assumed, because the
-workspace copy does not preserve the source tree's modification times. */
+/* assertExampleStaticCacheValidators proves the static cache the v1 example arms in its .env (MELODY_STATIC_ENABLE_CACHE): a tracked asset answers with the validators and the cache policy, a client replaying the ETag is answered 304 with no body, a stale ETag gets the bytes again, and the two validators keep their precedence — If-Modified-Since is consulted only when no If-None-Match was offered, so a mismatched ETag wins over a matching date. The values are read from the live answer rather than assumed, because the workspace copy does not preserve the source tree's modification times. */
 func assertExampleStaticCacheValidators(major exampleMajor) {
     client := newExampleClient(major)
 
@@ -91,8 +81,7 @@ func assertExampleStaticCacheValidators(major exampleMajor) {
     }
     pass("[%s] a replayed Last-Modified is answered 304", major.label)
 
-    /* the negative that separates the precedence from a date-only implementation: the date says unchanged,
-       the ETag says stale, and an implementation consulting the date despite the offered ETag answers 304 here */
+    /* the negative that separates the precedence from a date-only implementation: the date says unchanged, the ETag says stale, and an implementation consulting the date despite the offered ETag answers 304 here */
     precedence := client.callWithHeaderList("GET", exampleStaticAsset, "", "", map[string]string{
         "If-None-Match":     `"not-the-etag"`,
         "If-Modified-Since": lastModified,
@@ -103,10 +92,7 @@ func assertExampleStaticCacheValidators(major exampleMajor) {
     pass("[%s] the offered ETag silences If-Modified-Since, as the precedence demands", major.label)
 }
 
-/* assertExampleCorsPreflight asks the browser's question before a cross-origin POST: OPTIONS with the origin
-and the requested method and header. The route is registered for POST alone, so the 204 can only come from the
-cors request listener answering AHEAD of routing and of the security chain — an anonymous client, no cookie,
-and a path whose access control demands ROLE_EDITOR. */
+/* assertExampleCorsPreflight asks the browser's question before a cross-origin POST: OPTIONS with the origin and the requested method and header. The route is registered for POST alone, so the 204 can only come from the cors request listener answering AHEAD of routing and of the security chain — an anonymous client, no cookie, and a path whose access control demands ROLE_EDITOR. */
 func assertExampleCorsPreflight(major exampleMajor) {
     client := newExampleClient(major)
 
@@ -141,9 +127,7 @@ func assertExampleCorsPreflight(major exampleMajor) {
     pass("[%s] a preflight from a disallowed origin is granted nothing", major.label)
 }
 
-/* assertExampleCorsDecoratesARefusal is the reason the example registers the cors LISTENERS rather than the
-middleware: a security refusal never enters the middleware chain, and without the response listener a browser
-would see a cors failure where the server said 401 — the refusal a client is supposed to branch on. */
+/* assertExampleCorsDecoratesARefusal is the reason the example registers the cors LISTENERS rather than the middleware: a security refusal never enters the middleware chain, and without the response listener a browser would see a cors failure where the server said 401 — the refusal a client is supposed to branch on. */
 func assertExampleCorsDecoratesARefusal(major exampleMajor) {
     client := newExampleClient(major)
 
@@ -160,10 +144,7 @@ func assertExampleCorsDecoratesARefusal(major exampleMajor) {
     pass("[%s] the security refusal itself carries the cors headers (listeners, not middleware)", major.label)
 }
 
-/* assertExampleApiKeyFirewall proves the door APP_API_TOKEN promises: the key alone reaches the catalogue, no
-session involved, and a wrong key is a 401 — not a fall-through to some weaker rule. The matcher claims only
-requests that PRESENT the header, which the cookie-borne flows all around this probe keep proving from the
-other side: they carry no key and keep working. */
+/* assertExampleApiKeyFirewall proves the door APP_API_TOKEN promises: the key alone reaches the catalogue, no session involved, and a wrong key is a 401 — not a fall-through to some weaker rule. The matcher claims only requests that PRESENT the header, which the cookie-borne flows all around this probe keep proving from the other side: they carry no key and keep working. */
 func assertExampleApiKeyFirewall(major exampleMajor) {
     client := newExampleClient(major)
 
@@ -192,10 +173,7 @@ func assertExampleApiKeyFirewall(major exampleMajor) {
     pass("[%s] a wrong api key is refused with 401", major.label)
 }
 
-/* assertExampleGzipCompression reads the listing twice through the api-key door: once as identity, once asking
-for gzip. The identity read also guards the probe's own premise — the compression middleware only compresses
-bodies of at least a kilobyte, so a seed catalogue that shrank below that would quietly turn the second half
-into a test of nothing. */
+/* assertExampleGzipCompression reads the listing twice through the api-key door: once as identity, once asking for gzip. The identity read also guards the probe's own premise — the compression middleware only compresses bodies of at least a kilobyte, so a seed catalogue that shrank below that would quietly turn the second half into a test of nothing. */
 func assertExampleGzipCompression(major exampleMajor) {
     client := newExampleClient(major)
 
@@ -245,9 +223,7 @@ func assertExampleGzipCompression(major exampleMajor) {
     pass("[%s] the listing travels gzip-compressed (%d bytes over %d) and inflates to the identity answer", major.label, len(compressed.body), len(identity.body))
 }
 
-/* assertExampleValidationAnswersPerField sends the two-mistake payload: a one-letter name under the minimum
-and a negative price. The point is the SHAPE of the refusal — one errors entry per violated field, not one
-joined string a client would have to split back apart. */
+/* assertExampleValidationAnswersPerField sends the two-mistake payload: a one-letter name under the minimum and a negative price. The point is the SHAPE of the refusal — one errors entry per violated field, not one joined string a client would have to split back apart. */
 func assertExampleValidationAnswersPerField(major exampleMajor, application *exampleApplication) {
     editor := exampleEditorClient(major, application)
 
@@ -293,10 +269,7 @@ func assertExampleValidationAnswersPerField(major exampleMajor, application *exa
     pass("[%s] a two-mistake payload is refused 400 with one errors entry per field", major.label)
 }
 
-/* assertExampleForwardedAddressKeysTheLimiter proves the trusted-proxy wiring end to end, out of band: a write
-carrying X-Forwarded-For from the harness (a loopback peer, which the example's trusted list includes) must be
-budgeted against the FORWARDED address, so a rate-limit key naming the TEST-NET-3 literal must appear in redis.
-Without the resolver the key would name the peer and the forwarded header would be decoration. */
+/* assertExampleForwardedAddressKeysTheLimiter proves the trusted-proxy wiring end to end, out of band: a write carrying X-Forwarded-For from the harness (a loopback peer, which the example's trusted list includes) must be budgeted against the FORWARDED address, so a rate-limit key naming the TEST-NET-3 literal must appear in redis. Without the resolver the key would name the peer and the forwarded header would be decoration. */
 func assertExampleForwardedAddressKeysTheLimiter(major exampleMajor, application *exampleApplication, redisAddress string) {
     if "" == redisAddress {
         skip("[%s] REDIS_ADDRESS is not set, so the forwarded-address probe has no out-of-band half", major.label)
@@ -318,8 +291,7 @@ func assertExampleForwardedAddressKeysTheLimiter(major exampleMajor, application
         `{"id":"","name":"x","description":"probe","categoryId":"cat-1","price":-1,"currencyId":"cur-eur","stock":1}`,
     )
 
-    /* the payload is the same two-mistake refusal as above on purpose: the limiter counts the request before
-       the validator refuses it, so the probe spends budget without creating a row to clean up */
+    /* the payload is the same two-mistake refusal as above on purpose: the limiter counts the request before the validator refuses it, so the probe spends budget without creating a row to clean up */
     if http.StatusBadRequest != forwarded.statusCode {
         fail("[%s] the forwarded probe answered %d, wanted the validator's 400", major.label, forwarded.statusCode)
     }
@@ -352,14 +324,7 @@ func assertExampleForwardedAddressKeysTheLimiter(major exampleMajor, application
     resetExampleRateLimitCounters("["+major.label+"] forwarded-address probe", redisAddress, prefix)
 }
 
-/* assertExampleIdentityAndGrammarDoors proves, over the wire, the two identity repairs only the database can
-fake and only the cache can hide. The accent probe: the user table's collation folds accents ('café' = 'cafe'
-under utf8mb4_0900_ai_ci), so before the binary-collation comparison a login under the accent-stripped
-spelling authenticated a user nobody created under it; the rename probe: the by-username cache entry carries
-no ttl, so before the previous-username invalidation the OLD spelling kept signing in from the cache after a
-rename. Both proofs are the NEGATIVE — the refused login — beside the positive control that the proper
-spelling works; the grammar probe: a product id carrying an interior space used to land in the database and
-then poison every later cache write, so the door must answer 400 and the listing must never carry it. */
+/* assertExampleIdentityAndGrammarDoors proves, over the wire, the two identity repairs only the database can fake and only the cache can hide. The accent probe: the user table's collation folds accents ('café' = 'cafe' under utf8mb4_0900_ai_ci), so before the binary-collation comparison a login under the accent-stripped spelling authenticated a user nobody created under it; the rename probe: the by-username cache entry carries no ttl, so before the previous-username invalidation the OLD spelling kept signing in from the cache after a rename. Both proofs are the NEGATIVE — the refused login — beside the positive control that the proper spelling works; the grammar probe: a product id carrying an interior space used to land in the database and then poison every later cache write, so the door must answer 400 and the listing must never carry it. */
 func assertExampleIdentityAndGrammarDoors(major exampleMajor, application *exampleApplication) {
     editor := exampleEditorClient(major, application)
 
@@ -389,8 +354,7 @@ func assertExampleIdentityAndGrammarDoors(major exampleMajor, application *examp
         fail("[%s] the seeded admin could not sign in (%d): %s", major.label, adminSignIn.statusCode, exampleTruncate(adminSignIn.body))
     }
 
-    /* the user table persists between runs, so a probe user a failed run left behind would turn the create
-       below into "username already exists"; both spellings the probe ever writes are removed first */
+    /* the user table persists between runs, so a probe user a failed run left behind would turn the create below into "username already exists"; both spellings the probe ever writes are removed first */
     removeExampleProbeUsers(major, admin, "café-probe", "cafe-probe-renamed")
 
     created := admin.call(
@@ -449,8 +413,7 @@ func assertExampleIdentityAndGrammarDoors(major exampleMajor, application *examp
     }
 }
 
-/* removeExampleProbeUsers deletes every listed username through the admin api, tolerating absence: it exists
-for the probe rows a failed earlier run may have left in the persistent user table. */
+/* removeExampleProbeUsers deletes every listed username through the admin api, tolerating absence: it exists for the probe rows a failed earlier run may have left in the persistent user table. */
 func removeExampleProbeUsers(major exampleMajor, admin *exampleClient, usernames ...string) {
     listing := admin.call("GET", "/users/api/read/", "application/json", "", "")
     if http.StatusOK != listing.statusCode {

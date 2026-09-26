@@ -166,6 +166,142 @@ func TestConfigurationRegisterRuntime_SuccessfullyRegisters(t *testing.T) {
     }
 }
 
+func TestConfigurationRegisterRuntime_PreBootTemplateIsDeferredThenResolves(t *testing.T) {
+    source := &testEnvironmentSource{values: map[string]string{"APP_URL": "https://example.test"}}
+
+    environment, err := NewEnvironment(source)
+    if nil != err {
+        t.Fatalf("new environment error: %v", err)
+    }
+
+    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    if nil != err {
+        t.Fatalf("new configuration error: %v", err)
+    }
+
+    configuration.RegisterRuntime("app.callback", "%env(APP_URL)%/callback")
+
+    parameter := configuration.Get("app.callback")
+    if nil == parameter {
+        t.Fatalf("expected parameter to exist after RegisterRuntime")
+    }
+
+    func() {
+        defer func() {
+            if nil == recover() {
+                t.Fatalf("expected a pre-boot read of a templated runtime parameter to refuse, not serve the raw template")
+            }
+        }()
+
+        _ = parameter.String()
+    }()
+
+    if resolveErr := configuration.Resolve(); nil != resolveErr {
+        t.Fatalf("unexpected resolve error: %v", resolveErr)
+    }
+
+    if "https://example.test/callback" != parameter.String() {
+        t.Fatalf("expected the resolved value after boot, got: %s", parameter.String())
+    }
+}
+
+/* a percent the scan treats as data carries no template, so the value is its own resolved form and a module may read it before boot: the deferral is decided by the resolution's grammar, not by the presence of a percent */
+func TestConfigurationRegisterRuntime_PreBootLiteralPercentIsReadable(t *testing.T) {
+    for _, literal := range []string{"Coverage 95%", "a%2Fb", "50% off"} {
+        environment, err := NewEnvironment(&testEnvironmentSource{values: map[string]string{}})
+        if nil != err {
+            t.Fatalf("new environment error: %v", err)
+        }
+
+        configuration, err := NewConfiguration(environment, "/tmp/melody")
+        if nil != err {
+            t.Fatalf("new configuration error: %v", err)
+        }
+
+        configuration.RegisterRuntime("app.literal", literal)
+
+        if literal != configuration.MustGet("app.literal").String() {
+            t.Fatalf("%q: expected the literal readable before boot, got %q", literal, configuration.MustGet("app.literal").String())
+        }
+
+        if resolveErr := configuration.Resolve(); nil != resolveErr {
+            t.Fatalf("%q: unexpected resolve error: %v", literal, resolveErr)
+        }
+
+        if literal != configuration.MustGet("app.literal").String() {
+            t.Fatalf("%q: expected the literal unchanged after boot, got %q", literal, configuration.MustGet("app.literal").String())
+        }
+    }
+}
+
+/* the doubled percent is a template construct: the raw value is not the resolved one, so it stays deferred until the boot pass folds it */
+func TestConfigurationRegisterRuntime_PreBootDoubledPercentIsDeferredThenResolves(t *testing.T) {
+    environment, err := NewEnvironment(&testEnvironmentSource{values: map[string]string{}})
+    if nil != err {
+        t.Fatalf("new environment error: %v", err)
+    }
+
+    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    if nil != err {
+        t.Fatalf("new configuration error: %v", err)
+    }
+
+    configuration.RegisterRuntime("app.password", "pa%%ss")
+
+    func() {
+        defer func() {
+            if nil == recover() {
+                t.Fatalf("expected a pre-boot read of a doubled-percent value to refuse, not serve the escaped form")
+            }
+        }()
+
+        _ = configuration.MustGet("app.password").String()
+    }()
+
+    if resolveErr := configuration.Resolve(); nil != resolveErr {
+        t.Fatalf("unexpected resolve error: %v", resolveErr)
+    }
+
+    if "pa%ss" != configuration.MustGet("app.password").String() {
+        t.Fatalf("expected the folded percent after boot, got %q", configuration.MustGet("app.password").String())
+    }
+}
+
+/* a %name% reference registered before the parameter it names is the case the deferral exists for: refused until boot, settled by the batch resolution whichever order the composition root registered in */
+func TestConfigurationRegisterRuntime_PreBootParameterReferenceIsDeferredThenResolves(t *testing.T) {
+    environment, err := NewEnvironment(&testEnvironmentSource{values: map[string]string{}})
+    if nil != err {
+        t.Fatalf("new environment error: %v", err)
+    }
+
+    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    if nil != err {
+        t.Fatalf("new configuration error: %v", err)
+    }
+
+    configuration.RegisterRuntime("app.banner", "service-%app.name%")
+
+    func() {
+        defer func() {
+            if nil == recover() {
+                t.Fatalf("expected a pre-boot read of a forward reference to refuse, not serve the raw template")
+            }
+        }()
+
+        _ = configuration.MustGet("app.banner").String()
+    }()
+
+    configuration.RegisterRuntime("app.name", "melody")
+
+    if resolveErr := configuration.Resolve(); nil != resolveErr {
+        t.Fatalf("unexpected resolve error: %v", resolveErr)
+    }
+
+    if "service-melody" != configuration.MustGet("app.banner").String() {
+        t.Fatalf("expected the reference settled after boot, got %q", configuration.MustGet("app.banner").String())
+    }
+}
+
 func TestConfigurationRegisterRuntime_ConcurrentCallsDoNotPanic(t *testing.T) {
     source := &testEnvironmentSource{values: map[string]string{}}
 
@@ -290,7 +426,7 @@ func TestParameterPlaceholderPattern_AcceptsDottedIdentifiers(t *testing.T) {
     }
 }
 
-/* A value that escapes a literal percent with %% resolves to text of the shape %NAME%, which the post-resolution scan then rejected as an "unresolved placeholder" — failing the whole boot for a correctly escaped literal. */
+/* A value that escapes a literal percent with %% resolves to text of the shape %NAME%, and the post-resolution check must not reject it as an unresolved placeholder: a correctly escaped literal passes the boot. */
 func TestConfiguration_EscapedPercentLiteralDoesNotFailValidation(t *testing.T) {
     source := &testEnvironmentSource{values: map[string]string{
         CliDescriptionKey: "%%APP_NAME%% stays literal",
@@ -447,7 +583,7 @@ func TestRegisterRuntime_LeavesAnOrdinaryParameterUnmarked(t *testing.T) {
     }
 }
 
-/* a MarkSecret arriving after the boot resolve travels to the parameters whose templates read the key, exactly as the early marking does: without the retroactive scan the key was redacted while the dsn assembled from it printed in full */
+/* a MarkSecret arriving after the boot resolve travels to the parameters whose templates read the key, exactly as the early marking does, so the dsn assembled from the key is redacted beside it */
 func TestMarkSecret_PropagatesRetroactivelyToDirectReaders(t *testing.T) {
     environment := &Environment{values: map[string]string{
         "DB_PASSWORD": "hunter2",
@@ -481,7 +617,7 @@ func TestMarkSecret_PropagatesRetroactivelyToDirectReaders(t *testing.T) {
     }
 }
 
-/* a late mark covers the whole derivation chain, not the direct readers alone: the second hop used to keep printing the assembled value while the first was redacted, because the retroactive scan stopped after one step */
+/* a late mark covers the whole derivation chain, not the direct readers alone: the retroactive scan follows the marking to a fixpoint, so the second hop is redacted with the first */
 func TestMarkSecret_PropagatesRetroactivelyThroughDerivationChains(t *testing.T) {
     environment := &Environment{values: map[string]string{
         "G6_SECRET": "hunter2",
@@ -515,7 +651,41 @@ func TestMarkSecret_PropagatesRetroactivelyThroughDerivationChains(t *testing.T)
     }
 }
 
-/* a runtime registration that fails to resolve leaves nothing behind: publishing before resolving served the raw template to every reader that outlived the recovered panic and burnt the name for the corrected retry */
+/* the late mark reaches a reader spelled with the kernel.* alias of the marked MELODY_* key: the aliased pair is one parameter under two names, so the propagation seeds every spelling, and a scan over the marked spelling alone would leave the alias-spelled reader printing the derived value in full */
+func TestMarkSecret_ReachesAReaderSpelledWithTheKernelAlias(t *testing.T) {
+    environment := &Environment{values: map[string]string{
+        LogPathKey: "/var/log/app.log",
+    }}
+
+    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    if nil != err {
+        t.Fatalf("configuration error: %v", err)
+    }
+
+    configuration.RegisterRuntime("observability.sink", "file://%kernel.log_path%")
+
+    if resolveErr := configuration.Resolve(); nil != resolveErr {
+        t.Fatalf("resolve error: %v", resolveErr)
+    }
+
+    if true == configuration.MustGet("observability.sink").IsSecret() {
+        t.Fatalf("expected the alias-spelled reader to start unmarked")
+    }
+
+    if false == configuration.MarkSecret(LogPathKey) {
+        t.Fatalf("expected the marking to land")
+    }
+
+    if false == configuration.MustGet(KernelLogPath).IsSecret() {
+        t.Fatalf("expected the kernel spelling of the marked key to be marked")
+    }
+
+    if false == configuration.MustGet("observability.sink").IsSecret() {
+        t.Fatalf("expected the late marking to reach the reader through the kernel alias")
+    }
+}
+
+/* a runtime registration that fails to resolve leaves nothing behind: a parameter published and not rolled back would serve its raw template to every reader that outlived the recovered panic and burn the name for the corrected retry */
 func TestRegisterRuntime_FailedResolutionLeavesNoHalfMadeParameter(t *testing.T) {
     environment := &Environment{values: map[string]string{}}
 
@@ -585,7 +755,7 @@ func TestRegisterRuntime_RefusesWhitespaceNames(t *testing.T) {
     }()
 }
 
-/* a runtime parameter is named in its conversion errors: identified only by its empty environmentKey it was anonymous, and "cannot convert" named nothing an operator could find */
+/* a runtime parameter is named in its conversion errors: identified only by its empty environmentKey it would be anonymous, and "cannot convert" would name nothing an operator could find */
 func TestRuntimeParameter_ConversionErrorNamesTheParameter(t *testing.T) {
     environment := &Environment{values: map[string]string{}}
 
@@ -610,16 +780,13 @@ func TestRuntimeParameter_ConversionErrorNamesTheParameter(t *testing.T) {
     }
 }
 
-/* TestMain silences the standard logger for the whole package: the configuration reports through it on
-several paths, and the output belongs to the code under test rather than to the test run. */
+/* TestMain silences the standard logger for the whole package: the configuration reports through it on several paths, and the output belongs to the code under test rather than to the test run. */
 func TestMain(mainInstance *testing.M) {
     log.SetOutput(io.Discard)
     os.Exit(mainInstance.Run())
 }
 
-/* newResolvedConfiguration builds a configuration over a fixed environment, lets the caller declare its
-parameters and resolves them, which is the shape almost every test of this file and of the resolve path
-needs before it can assert anything. */
+/* newResolvedConfiguration builds a configuration over a fixed environment, lets the caller declare its parameters and resolves them, which is the shape almost every test of this file and of the resolve path needs before it can assert anything. */
 func newResolvedConfiguration(
     t *testing.T,
     environmentValues map[string]string,

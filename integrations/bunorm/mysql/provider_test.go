@@ -781,7 +781,7 @@ func TestProviderOpenMarksThePasswordParameterSecret(t *testing.T) {
     }
 }
 
-/* the migration open is the door the registry's bound context did not reach: OpenForMigration carried no context at all, so a db:migrate cancelled by a supervisor slept out the whole retry budget against a down database. The derived provider is the same one either way — only the context differs — so the sleep has to be cut here too. */
+/* the registry's bound context reaches the migration open through OpenForMigrationContext, so a db:migrate cancelled by a supervisor does not sleep out the retry budget against a down database; the derived provider is the same either way and only the context differs, so the sleep is cut here too. */
 func TestProviderOpenForMigrationContextCancelsTheRetrySleep(t *testing.T) {
     resolver := newStubResolver("127.0.0.1", "1", "melody_unreachable", "melody", "melody")
 
@@ -816,7 +816,7 @@ func TestProviderOpenForMigrationContextCancelsTheRetrySleep(t *testing.T) {
         t.Fatalf("expected the cancellation to cut the retry sleep, took %v", elapsed)
     }
 
-    /* the cause stays the cancellation, but the outage that was being retried arrives STRUCTURED beside it. Flattened into openErr.Error() it handed the operator a sentence and nothing to act on, while the retry warning one branch above lifted the same failure's context and cause chain — one record shape for the same failure, decided by whether the caller happened to cancel. */
+    /* the cause stays the cancellation, and the outage being retried arrives structured beside it with the context and cause chain the retry warning carries, so one failure has one record shape whether or not the caller cancelled */
     var melodyErr *exception.Error
     if false == errors.As(openErr, &melodyErr) {
         t.Fatalf("expected a melody error carrying the failed attempt, got %T", openErr)
@@ -833,7 +833,7 @@ func TestProviderOpenForMigrationContextCancelsTheRetrySleep(t *testing.T) {
     }
 }
 
-/* the context-less door stays what it was for every caller that holds no context: it is OpenForMigrationContext under a background one, which is why it can still be reached without changing a single call site */
+/* the context-less door is OpenForMigrationContext under a background context, so a caller that holds no context reaches it unchanged */
 func TestProviderOpenForMigrationRunsTheSameAttemptUnderABackgroundContext(t *testing.T) {
     resolver := newStubResolver("127.0.0.1", "1", "melody_unreachable", "melody", "melody")
 
@@ -888,7 +888,7 @@ func TestProviderOpenContextCancelsTheRetrySleep(t *testing.T) {
         t.Fatalf("expected the cancellation to cut the retry sleep, took %v", elapsed)
     }
 
-    /* the cause stays the cancellation, but the outage that was being retried arrives STRUCTURED beside it. Flattened into openErr.Error() it handed the operator a sentence and nothing to act on, while the retry warning one branch above lifted the same failure's context and cause chain — one record shape for the same failure, decided by whether the caller happened to cancel. */
+    /* the cause stays the cancellation, and the outage being retried arrives structured beside it with the context and cause chain the retry warning carries, so one failure has one record shape whether or not the caller cancelled */
     var melodyErr *exception.Error
     if false == errors.As(openErr, &melodyErr) {
         t.Fatalf("expected a melody error carrying the failed attempt, got %T", openErr)
@@ -1029,7 +1029,7 @@ func newStubResolverWithLogger(logger loggingcontract.Logger) *stubResolverWithL
     }
 }
 
-/* the caller's own cancellation is a clean stop, not a database outage: the transient classifier carries no cancellation marker, so a shutdown that cancelled the open fell through to the terminal branch and paged the operator with "non-transient error" against a healthy database. */
+/* the caller's own cancellation is a clean stop, not a database outage: the transient classifier carries no cancellation marker, so without its own branch a shutdown would reach the terminal branch and page with "non-transient error" against a healthy database. */
 func TestOpenWithRetry_ACancelledOpenIsAWarningRatherThanANonTransientOutage(t *testing.T) {
     logger := &capturingProviderLogger{}
     resolver := newStubResolverWithLogger(logger)
@@ -1220,7 +1220,7 @@ func TestIsTransientError_TheMarkersThemselvesStillMatch(t *testing.T) {
     }
 }
 
-/* the TLS posture is read where the DRIVER receives it, not only from the helper that computes it. The helper has its own test, but nothing observed that its answer reaches the connector, and the wiring is what decides whether a session is encrypted — a deleted assignment would have left every default connection in plaintext with the helper's test still green. The post-build hook is handed the very configuration the connector is built from, so it is the seam; it refuses afterwards, which stops the attempt before any dial. */
+/* the TLS posture is read where the driver receives it, not only from the helper that computes it: the wiring decides whether a session is encrypted, and the helper's own test cannot see an assignment dropped. The post-build hook is handed the configuration the connector is built from, so it is the seam; it refuses afterwards, which stops the attempt before any dial. */
 func openObservingTheTlsPosture(t *testing.T, providerOptions ...ProviderOption) *tls.Config {
     t.Helper()
 
@@ -1279,5 +1279,103 @@ func TestProviderOpen_AnExplicitTlsConfigReachesTheDriverUntouched(t *testing.T)
 
     if pinnedTlsConfig != openObservingTheTlsPosture(t, WithTlsConfig(pinnedTlsConfig)) {
         t.Fatal("an explicit TLS configuration must reach the driver exactly as it was given")
+    }
+}
+
+
+/* TestComputeBackoffDelayFloorsASubMillisecondInitialDelay pins the floor: a one-nanosecond delay is shorter than the dial it separates, the re-dial storm the delay guards refuse. The growth is asserted from the floor as well as the floor itself, since clamping the answer rather than the starting point would return the floor at every attempt and stop backing off. */
+func TestComputeBackoffDelayFloorsASubMillisecondInitialDelay(t *testing.T) {
+    provider := newTestProvider().
+        WithRetryConfig(NewRetryConfig(10, time.Nanosecond, 5*time.Second, 2.0))
+
+    if time.Millisecond != provider.computeBackoffDelay(1) {
+        t.Fatalf("expected a one-nanosecond initial delay to be floored to 1ms, got %s", provider.computeBackoffDelay(1))
+    }
+
+    if 2*time.Millisecond != provider.computeBackoffDelay(2) {
+        t.Fatalf("expected the backoff to keep growing from the floor, got %s", provider.computeBackoffDelay(2))
+    }
+}
+
+/* the floor covers the CEILING too: a sub-millisecond max delay would otherwise cap a perfectly sane initial delay straight back under the floor, which is the same storm reached from the other field. */
+func TestComputeBackoffDelayFloorsASubMillisecondCeiling(t *testing.T) {
+    provider := newTestProvider().
+        WithRetryConfig(NewRetryConfig(10, time.Second, time.Nanosecond, 2.0))
+
+    if time.Millisecond != provider.computeBackoffDelay(1) {
+        t.Fatalf("expected a one-nanosecond max delay to be floored to 1ms, got %s", provider.computeBackoffDelay(1))
+    }
+}
+
+/* TestComputeBackoffDelayAnswersAConstantMultiplierInBoundedTime guards the cost, as a deadline because that is the only way it is observable: a multiplier of exactly 1 is a valid constant backoff, and a growth walked attempt by attempt never leaves early under it, billions of multiplications at the largest attempt where the closed form is one math.Pow. The 250ms window sits well under what the walk costs on the development container and leaves the closed form ample slack, and the value is asserted beside the deadline so a quick wrong answer cannot pass. */
+func TestComputeBackoffDelayAnswersAConstantMultiplierInBoundedTime(t *testing.T) {
+    provider := newTestProvider().
+        WithRetryConfig(NewRetryConfig(0, 10*time.Millisecond, 5*time.Second, 1.0))
+
+    answered := make(chan time.Duration, 1)
+    go func() {
+        answered <- provider.computeBackoffDelay(4000000000)
+    }()
+
+    select {
+    case delay := <-answered:
+        if 10*time.Millisecond != delay {
+            t.Fatalf("expected a constant backoff to stay at the initial delay, got %s", delay)
+        }
+    case <-time.After(250 * time.Millisecond):
+        t.Fatal("the constant backoff did not answer in bounded time: the growth is being walked one attempt at a time")
+    }
+}
+
+/* an attempt of zero is not an attempt already made and reads as the first one; without that reading the unsigned subtraction wraps to four billion steps of growth and the delay leaves for the ceiling. */
+func TestComputeBackoffDelayReadsAZeroAttemptAsTheFirst(t *testing.T) {
+    provider := newTestProvider().
+        WithRetryConfig(NewRetryConfig(3, 100*time.Millisecond, 250*time.Millisecond, 2.0))
+
+    if 100*time.Millisecond != provider.computeBackoffDelay(0) {
+        t.Fatalf("expected a zero attempt to read as the first, got %s", provider.computeBackoffDelay(0))
+    }
+}
+
+/* a bare IPv6 literal joined as host:port reads as an address with too many colons: pgdriver refuses it by name, and go-sql-driver re-joins it into a bracketed host that does not exist and dials that through the whole retry budget. The literal is bracketed, one already bracketed is left alone, and a host name or an IPv4 literal is joined as it is. */
+func TestDialAddressOf_BracketsABareIpv6Literal(t *testing.T) {
+    caseList := []struct {
+        host     string
+        expected string
+    }{
+        {"::1", "[::1]:3306"},
+        {"2001:db8::5", "[2001:db8::5]:3306"},
+        {"fe80::1%eth0", "[fe80::1%eth0]:3306"},
+        {"[::1]", "[::1]:3306"},
+        {"localhost", "localhost:3306"},
+        {"10.0.0.1", "10.0.0.1:3306"},
+        {"", ":3306"},
+    }
+
+    for _, testCase := range caseList {
+        if actual := dialAddressOf(testCase.host, "3306"); testCase.expected != actual {
+            t.Errorf("dialAddressOf(%q) = %q, wanted %q", testCase.host, actual, testCase.expected)
+        }
+    }
+}
+
+/* an unset host would make the driver dial ":port", the local system, and connect to whatever listens there with the configured credentials, so it is refused by name before the driver configuration is built. */
+func TestProviderOpen_RefusesAnEmptyHostBeforeBuildingTheDriverConfig(t *testing.T) {
+    provider := newTestProvider(
+        WithPostBuildHook(func(ctx context.Context, resolver containercontract.Resolver, driverConfig *driver.Config) error {
+            t.Fatal("the driver configuration was built for an empty host")
+
+            return nil
+        }),
+    )
+
+    database, openErr := provider.Open(newStubResolver("", "3306", "melody", "melody_user", "melody_password"))
+    if nil != database {
+        _ = database.Close()
+        t.Fatal("expected no database handle for an empty host")
+    }
+
+    if nil == openErr || false == strings.Contains(openErr.Error(), "the host is empty") {
+        t.Fatalf("expected the refusal to name the host, got %v", openErr)
     }
 }

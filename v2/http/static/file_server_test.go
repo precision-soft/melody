@@ -808,11 +808,7 @@ func TestFileServer_StripPrefix_RefusesANonCanonicalPath(t *testing.T) {
     }
 }
 
-/* The mount root answers the configured index file — that resolution is named by configuration and is what
-a browser asks for by visiting the site — but only for the root as it is actually spelled. The branch that
-resolves every other path refuses a spelling `path.Clean` folded, because the matchers in front of the
-application compare the raw path; the root branch carries the same refusal, or the mount's index page is
-served from behind whatever rule the folded-away prefix carried. */
+/* The mount root answers the configured index file — that resolution is named by configuration and is what a browser asks for by visiting the site — but only for the root as it is actually spelled. The branch that resolves every other path refuses a spelling `path.Clean` folded, because the matchers in front of the application compare the raw path; the root branch carries the same refusal, or the mount's index page is served from behind whatever rule the folded-away prefix carried. */
 func TestFileServer_ServesTheIndexFileForTheMountRoot(t *testing.T) {
     server := newFoldingRootTestFileServer()
 
@@ -850,8 +846,7 @@ func TestFileServer_RefusesTheSpellingsThatFoldIntoTheRoot(t *testing.T) {
     }
 }
 
-/* The two halves are textual twins and only the streaming one has a production caller, so the refusal is
-asserted on it by name rather than through Serve alone. */
+/* The two halves are textual twins and only the streaming one has a production caller, so the refusal is asserted on it by name rather than through Serve alone. */
 func TestFileServer_ServeReaderRefusesTheSpellingsThatFoldIntoTheRoot(t *testing.T) {
     server := newFoldingRootTestFileServer()
 
@@ -1555,7 +1550,7 @@ func newRefusingFileServer(openErr error) *FileServer {
     }
 }
 
-/* A path whose symlinks resolve outside the served directory comes back from resolveAndOpen as fs.ErrPermission, and it is the only thing here that does. Recorded at debug it was byte-identical to a mistyped stylesheet href — the very indistinguishability the logging on this path exists to end — so the level is what carries the distinction and is what this pins. */
+/* A path whose symlinks resolve outside the served directory comes back from resolveAndOpen as fs.ErrPermission, and it is the only thing here that does. Recorded at debug it would be byte-identical to a mistyped stylesheet href, the very indistinguishability the logging on this path exists to end, so the level carries the distinction and is what this pins. */
 func TestFileServer_AnEscapeRefusalIsRecordedAtWarningRatherThanDebug(t *testing.T) {
     logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
 
@@ -1708,7 +1703,7 @@ func (instance *trackingFile) Close() error {
     return instance.File.Close()
 }
 
-/* statFailingFileSystem opens successfully and then refuses to describe what it opened, which is the shape that reaches the stat refusal: a file unlinked between the open and the description, or a mount that answers an open out of a cache it can no longer stat. */
+/* statFailingFileSystem opens successfully and then refuses to describe what it opened, which is the shape that reaches the stat refusal: a file unlinked between the open and the description, or a mount that answers an open out of a cache it cannot stat. */
 type statFailingFileSystem struct {
     statErr     error
     closedCount int
@@ -2501,7 +2496,7 @@ func TestFileServer_ServeReader_StripPrefixServesTheFileBeneathTheMount(t *testi
 
 /* the mount point itself is the site root as far as the client is concerned, so a request for the prefix alone answers the index file.
 
-The substitution that puts "/" back is SHADOWED, and this test is not its proof: the anchoring below it prefixes a leading slash onto whatever the trim left, so an empty remainder folds onto the root either way and removing the substitution changes nothing observable. It is proved on its verdict instead, by the inversion that turns every non-empty remainder into the root — which is the mount serving its index file for every asset beneath it. */
+   The substitution that puts "/" back is SHADOWED, and this test is not its proof: the anchoring below it prefixes a leading slash onto whatever the trim left, so an empty remainder folds onto the root either way and removing the substitution changes nothing observable. It is proved on its verdict instead, by the inversion that turns every non-empty remainder into the root — which is the mount serving its index file for every asset beneath it. */
 func TestFileServer_ServeReader_TheMountPointAloneResolvesToTheIndexFile(t *testing.T) {
     server := NewFileServer(
         NewOptions(
@@ -2679,7 +2674,7 @@ func TestFileServer_ServeReader_TheEmbeddedPublicDirectoryIsJoinedOntoThePath(t 
     }
 }
 
-/* every caching header a static answer carries is decided on the streaming resolution, which is the one a running application uses — and none of it had a test there. The tag is what a revalidating cache offers back, the modification date is what an older one offers, and the cache control is what tells a shared cache it may keep the copy at all. */
+/* every caching header a static answer carries is decided on the streaming resolution, which is the one a running application uses. The tag is what a revalidating cache offers back, the modification date is what an older one offers, and the cache control is what tells a shared cache it may keep the copy at all. */
 func TestFileServer_ServeReader_ACachedAnswerCarriesTheTagTheDateAndTheCacheControl(t *testing.T) {
     modifiedAt := time.Date(2026, 1, 3, 12, 34, 56, 0, time.UTC)
 
@@ -2841,7 +2836,7 @@ func TestFileServer_ServeReader_AnUnchangedDateAnswersNotModifiedAndClosesTheFil
     }
 }
 
-/* a client that offered a tag has already said which bytes it holds, so the date is not consulted at all — otherwise a deploy that rewrites content while preserving timestamps answers 304 to a cache that just proved, by offering a tag that does not match, that it holds different bytes. The buffered twin has this test; the streaming one, which is the path every request takes, did not. */
+/* a client that offered a tag has already said which bytes it holds, so the date is not consulted at all; otherwise a deploy that rewrites content while preserving timestamps would answer 304 to a cache that just proved, by offering a tag that does not match, that it holds different bytes. The streaming resolution is the path every request takes. */
 func TestFileServer_ServeReader_TheDateIsIgnoredWhenATagWasOffered(t *testing.T) {
     modifiedAt := time.Date(2026, 1, 3, 12, 34, 56, 0, time.UTC)
 
@@ -3054,7 +3049,7 @@ func (instance *levelRecordingLogger) Info(message string, context exceptioncont
     instance.infoMessages = append(instance.infoMessages, message)
 }
 
-/* the non-retrieval method is ordinary control flow for a globally mounted middleware — every POST in the application takes this exit — and is recorded at debug, the level logOpenFailure's own comment reserves for the per-request ordinary case; at info it doubled the journal of every api request. Both textual halves answer alike. */
+/* the non-retrieval method is ordinary control flow for a globally mounted middleware (every POST in the application takes this exit) and is recorded at debug, the level logOpenFailure's own comment reserves for the per-request ordinary case; at info it would double the journal of every api request. Both textual halves answer alike. */
 func TestFileServer_ANonRetrievalMethodIsRecordedAtDebugOnTheStreamingHalf(t *testing.T) {
     logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
 
@@ -3147,7 +3142,7 @@ func TestNewFileServer_RefusesNilOptionsByName(t *testing.T) {
     )
 }
 
-/* an embedded filesystem reports the zero instant for every file, and rendering it as year 1 published a validator that is not one: the zero time is never After anything, so every If-Modified-Since without an entity tag was answered 304 for the life of the deployment */
+/* an embedded filesystem reports the zero instant for every file, and rendering it as year 1 would publish a validator that is not one: the zero time is never After anything, so every If-Modified-Since without an entity tag would be answered 304 for the life of the deployment */
 func TestFileServer_AnUndatedFileEmitsNoLastModifiedAndAnswersNoConditional304(t *testing.T) {
     fileSystem := fstest.MapFS{
         "a.txt": &fstest.MapFile{
@@ -3189,7 +3184,7 @@ func TestFileServer_AnUndatedFileEmitsNoLastModifiedAndAnswersNoConditional304(t
     }
 }
 
-/* the streaming twin of the guard above: both paths build their own header block, and only one of them being corrected would answer 304 forever through the reader door */
+/* the streaming twin of the guard above: both paths build their own header block, and either one left unguarded would answer 304 forever through its door */
 func TestFileServer_ServeReader_AnUndatedFileEmitsNoLastModifiedAndAnswersNoConditional304(t *testing.T) {
     fileSystem := fstest.MapFS{
         "a.txt": &fstest.MapFile{
@@ -3264,7 +3259,7 @@ func TestFileServer_ADatedFileKeepsItsLastModifiedAndItsConditional304(t *testin
     }
 }
 
-/* MELODY_PUBLIC_DIR stays a runtime key while the embedded layout is frozen at compile time, so a value the build did not embed used to boot cleanly and answer 404 for every asset in the binary */
+/* MELODY_PUBLIC_DIR stays a runtime key while the embedded layout is frozen at compile time, so a value the build did not embed would otherwise boot cleanly and answer 404 for every asset in the binary */
 func TestNewFileServer_RefusesAPublicDirectoryTheEmbeddedFileSystemDoesNotHold(t *testing.T) {
     fileSystem := fstest.MapFS{
         "public/app.css": &fstest.MapFile{
@@ -3337,5 +3332,45 @@ func TestNewFileServer_AcceptsAnEmptyEmbeddedPublicDirectory(t *testing.T) {
 
     if "body{}" != string(body) {
         t.Fatalf("unexpected body %q", body)
+    }
+}
+
+/* The request is an application-implementable contract, so a nil pointer of a request type reaches this
+door as a non-nil interface and the read below dereferences it. The untyped literal a sibling probe passes
+is the only shape a bare comparison already catches. */
+func TestFileServer_ATypedNilRequestIsSkippedByBothDoors(t *testing.T) {
+    directory := t.TempDir()
+
+    if err := osWriteFile(directory+"/index.html", []byte("hello")); nil != err {
+        t.Fatalf("write file error: %v", err)
+    }
+
+    server := NewFileServer(
+        NewOptions(
+            NewFileServerConfig(ModeFilesystem, directory, "index.html", "", false, 0, false),
+            "",
+            nil,
+        ),
+    )
+
+    var unassignedRequest *testhelper.HttpTestRequest
+
+    /* each door is asserted through its OWN warning: serveForStreaming below them carries the same reading
+    and refuses the request too, so a probe that only asks whether the door served cannot tell which guard
+    answered. */
+    serveLogger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
+    if _, _, _, served := server.Serve(unassignedRequest, serveLogger); true == served {
+        t.Fatalf("expected Serve to skip a typed nil request")
+    }
+    if 1 != len(serveLogger.warningMessages) || "static serve skipped because request is nil" != serveLogger.warningMessages[0] {
+        t.Fatalf("expected Serve's own refusal to be the one that answered, got %v", serveLogger.warningMessages)
+    }
+
+    readerLogger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
+    if _, _, _, served := server.ServeReader(unassignedRequest, readerLogger); true == served {
+        t.Fatalf("expected ServeReader to skip a typed nil request")
+    }
+    if 1 != len(readerLogger.warningMessages) || "static serve reader skipped because request is nil" != readerLogger.warningMessages[0] {
+        t.Fatalf("expected ServeReader's own refusal to be the one that answered, got %v", readerLogger.warningMessages)
     }
 }

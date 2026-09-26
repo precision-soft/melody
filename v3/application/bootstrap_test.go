@@ -65,3 +65,17 @@ func TestEnsureRuntimeDirectories_ReturnsErrorWhenPathIsFile(t *testing.T) {
         t.Fatalf("expected error")
     }
 }
+
+func TestResolveRuntimePath_AnchorsOnlyARelativePath(t *testing.T) {
+    if filepath.Join("/project", "custom", "app.log") != resolveRuntimePath("/project", filepath.Join("custom", "app.log")) {
+        t.Fatalf("expected the relative path anchored to the project directory")
+    }
+
+    if filepath.Join("/absolute", "app.log") != resolveRuntimePath("/project", filepath.Join("/absolute", "app.log")) {
+        t.Fatalf("expected the absolute path untouched")
+    }
+
+    if "" != resolveRuntimePath("/project", "") {
+        t.Fatalf("expected the empty path untouched")
+    }
+}

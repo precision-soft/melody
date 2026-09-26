@@ -3,7 +3,9 @@ package security
 import (
     "strings"
 
+    "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
@@ -18,7 +20,8 @@ type PathPrefixMatcher struct {
 }
 
 func (instance *PathPrefixMatcher) Matches(request httpcontract.Request) bool {
-    if nil == request {
+    /* IsNilInterface: the request is an application-implementable contract, and the next line dereferences it */
+    if true == internal.IsNilInterface(request) {
         return false
     }
 
@@ -30,13 +33,24 @@ func (instance *PathPrefixMatcher) Matches(request httpcontract.Request) bool {
         return false
     }
 
-    path := request.HttpRequest().URL.Path
+    /* the spelling the router reads, so a firewall written for "/admin/" does not claim "/admin%2Fusers", a one-segment resource the router never routes under "/admin"; the access-control matcher reads the same spelling */
+    path := http.RequestPathAsRouted(internal.RequestPathAsSent(request.HttpRequest().URL))
 
     if "" == instance.prefix {
         return true
     }
 
-    return true == strings.HasPrefix(path, instance.prefix)
+    if true == strings.HasPrefix(path, instance.prefix) {
+        return true
+    }
+
+    /* the router reads "/admin/" and "/admin" as the same route, so a prefix written with the trailing slash also claims the bare spelling, and only it: "/admin/" still selects nothing under "/administrator" */
+    trimmedPrefix := strings.TrimRight(instance.prefix, "/")
+    if "" != trimmedPrefix && path == trimmedPrefix {
+        return true
+    }
+
+    return false
 }
 
 var _ securitycontract.Matcher = (*PathPrefixMatcher)(nil)

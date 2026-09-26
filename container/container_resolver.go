@@ -23,9 +23,7 @@ type creationState struct {
 type createWithGuardLookupFunc func() (any, bool)
 type createWithGuardCreateFunc func(resolver containercontract.Resolver) (any, error, *providerDebugInfo)
 
-/* instanceStore is where a finished service is kept. A container provider builds a process-lifetime singleton and writes the container's own maps; a scoped provider builds one instance for the scope that drove the resolution and writes that scope alone, which is what keeps the root container blind to it. Naming the target rather than hiding it inside the creation closure is what lets one creation guard serve both lifetimes without knowing which it is running.
-
-keep answers with the value that ends up installed: an override that landed while the provider ran already occupies the slot and wins — an override answers before anything is built, and blindly overwriting it would revoke an installation the overrider was told succeeded — so keep leaves it in place and hands it back with overrideWins raised, and the guard closes the value it built and serves the override instead. */
+/* instanceStore is where a finished service is kept: the container's maps for a container provider, the driving scope alone for a scoped one, so one creation guard serves both lifetimes. keep answers with the value that ends up installed: an override that landed while the provider ran wins and is handed back with overrideWins raised, and the guard closes the value it built. */
 type instanceStore struct {
     keep func(value any) (keptValue any, overrideWins bool, err error)
 }
@@ -55,7 +53,7 @@ func (instance *container) serviceWithCreationGuardLocked(
     lookup := creation.lookup
     create := creation.create
 
-    /* a resolution after the teardown finished is refused before the lookup, not after it: the maps still hold what was built, and answering out of them handed the caller a service every Close in the process has already run on, with a nil error saying it was fine. During the teardown the lookup still answers — a service's own Close is entitled to what it depends on — which is the other half of closing the logger last. */
+    /* a resolution after the teardown finished is refused before the lookup, because the maps still hold closed services; during the teardown the lookup still answers, so a service's own Close can resolve what it depends on. */
     if true == instance.teardownFinished {
         return nil, newContainerClosedError(creatingKey)
     }
@@ -198,7 +196,7 @@ func (instance *container) serviceWithCreationGuardLocked(
         createdValue, err, debugInfo = create(providerResolver)
 
         if true == internal.IsNilInterface(createdValue) {
-            /* a nil value handed back together with an error is the provider saying why it could not build the service — "service is not registered" is the everyday one — and that reason is the failure worth naming. Overwriting it here would put a symptom at the top and bury the cause one level down, so the generic report is kept for the genuinely silent (nil, nil) return, where nothing else says anything at all. */
+            /* a nil value with an error is the provider saying why it could not build the service, and that reason is kept as the failure; the generic report is only for a silent (nil, nil) return. */
             if nil != err {
                 return nil, err, debugInfo
             }

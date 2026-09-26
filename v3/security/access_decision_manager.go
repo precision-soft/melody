@@ -39,7 +39,7 @@ func NewAccessDecisionManager(strategy securitycontract.DecisionStrategy, voters
     }
 
     return &AccessDecisionManager{
-        voters:   voters,
+        voters:   append([]securitycontract.Voter{}, voters...),
         strategy: strategy,
     }
 }
@@ -58,6 +58,11 @@ func (instance *AccessDecisionManager) Strategy() securitycontract.DecisionStrat
 }
 
 func (instance *AccessDecisionManager) DecideAll(token securitycontract.Token, attributes []string, subject any) error {
+    /* an empty attribute list is a refusal, not a vacuous grant, as in DecideAny; the compiled access control never produces one, so only a direct caller reaches it */
+    if 0 == len(attributes) {
+        return exception.Forbidden("forbidden")
+    }
+
     for _, attribute := range attributes {
         err := instance.decideSingleAttribute(token, attribute, subject)
         if nil != err {

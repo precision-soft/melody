@@ -2,7 +2,6 @@ package http
 
 import (
     "encoding/json"
-    "regexp"
 
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
 )
@@ -195,17 +194,18 @@ func (instance *Router) RouteDefinition(routeName string) (httpcontract.RouteDef
 }
 
 func mapRouteToDefinition(routeValue route) *RouteDefinition {
+    /* the declared pattern is published, unanchored, not the compiled form; RouteManifestEntry.Requirements tells a consumer to anchor it */
     requirements := map[string]string{}
-    for key, regexValue := range routeValue.requirements {
+    for key, sourceValue := range routeValue.requirementSources {
         if "" == key {
             continue
         }
 
-        if nil == regexValue {
+        if "" == sourceValue {
             continue
         }
 
-        requirements[key] = regexValue.String()
+        requirements[key] = sourceValue
     }
 
     defaults := map[string]string{}
@@ -239,5 +239,3 @@ func mapRouteToDefinition(routeValue route) *RouteDefinition {
         attributes,
     )
 }
-
-var _ = regexp.Regexp{}

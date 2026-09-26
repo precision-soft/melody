@@ -32,7 +32,7 @@ func NewEvent(
 }
 
 func NewEventFromEvent(event eventcontract.Event) *Event {
-    /* the parameter is an interface, so a nil *Event handed in as one is not equal to nil and would pass a plain comparison, then dereference on the first accessor below — a runtime panic naming a memory address instead of the framework error the caller can act on. NewEvent above tests its clock the same way for the same reason. */
+    /* the parameter is an interface, so a nil *Event passes a plain comparison and would dereference on the first accessor below */
     if true == internal.IsNilInterface(event) {
         exception.Panic(
             exception.NewError("event value may not be nil", nil, nil),
@@ -45,7 +45,7 @@ func NewEventFromEvent(event eventcontract.Event) *Event {
         event.Timestamp(),
     )
 
-    /* the stop is part of what the event says about itself, and a copy that drops it tells a listener the propagation is live when it has already been stopped */
+    /* the copy keeps the stop, so a listener never reads a stopped propagation as live */
     if true == event.IsPropagationStopped() {
         copied.StopPropagation()
     }

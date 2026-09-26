@@ -3,6 +3,7 @@ package security
 import (
     stdpath "path"
     "regexp"
+    "regexp/syntax"
     "strings"
 
     "github.com/precision-soft/melody/exception"
@@ -32,7 +33,7 @@ func normalizeAccessControlAttributes(attributes []string) []string {
         )
     }
 
-    /* a rule whose attributes all normalize away still matches its path, and an empty attribute list grants every authenticated principal while shadowing any longer-prefixed rule that would have denied; the blank attribute is refused here rather than degrading the guard silently */
+    /* a blank attribute is refused: a rule whose attributes all normalize away would still match its path, grant every authenticated principal and shadow any longer-prefixed rule that denies */
     if 0 == len(normalizedAttributes) {
         exception.Panic(
             exception.NewError("access control rule requires at least one attribute", nil, nil),
@@ -42,11 +43,11 @@ func normalizeAccessControlAttributes(attributes []string) []string {
     return normalizedAttributes
 }
 
-/* NewAccessControlRule builds a rule bounded to a path SEGMENT: pathPrefix matches the path itself and any descendant under a "/" boundary, never a path that merely begins with the same letters — "/admin" governs "/admin" and "/admin/panel" but not "/administrator". This is the rule a caller reaches for by default, so the plain name is the bounded one; a rule that must reach across segment boundaries is the explicit exception, NewAccessControlRawPrefixRule. An empty prefix is refused rather than made a catch-all, and PUBLIC_ACCESS is allowed here because a segment-bounded public rule cannot shadow a bounded denial the way a raw one can. */
+/* NewAccessControlRule builds a rule bounded to a path segment: "/admin" governs "/admin" and "/admin/panel" but not "/administrator". An empty prefix is refused rather than made a catch-all, and PUBLIC_ACCESS is allowed, since a segment-bounded public rule cannot shadow a bounded denial; NewAccessControlRawPrefixRule is the cross-segment exception. */
 func NewAccessControlRule(pathPrefix string, attributes ...string) AccessControlRule {
     normalizedPrefix := normalizePathPrefix(pathPrefix)
 
-    /* reject an empty prefix the way the exact and regex constructors reject empty input: an empty prefix would otherwise normalize to "" and become a catch-all fallback rule, so a rule declared for one section would silently govern every unmatched path. A genuinely global rule declares an explicit "/" prefix. */
+    /* an empty prefix is refused, as the exact and regex constructors refuse empty input: it would normalize to "" and become a catch-all fallback; a global rule declares "/" */
     if "" == normalizedPrefix {
         exception.Panic(
             exception.NewError("access control segment prefix may not be empty", nil, nil),
@@ -68,7 +69,7 @@ func NewAccessControlRule(pathPrefix string, attributes ...string) AccessControl
     }
 }
 
-/* NewAccessControlRawPrefixRule builds a rule that matches across segment boundaries: pathPrefix matches every path that begins with it, so "/admin" governs "/administrator" and "/admin-tools" as readily as "/admin/panel". It is the sharp tool, kept behind an explicit name because, being the longest match, a raw rule shadows a correctly bounded rule that would have denied — which is why PUBLIC_ACCESS is refused on it: a raw public rule opens every path that merely begins with the prefix. Reach for NewAccessControlRule unless a cross-segment reach is exactly what the rule means. */
+/* NewAccessControlRawPrefixRule builds a rule that matches every path beginning with pathPrefix, so "/admin" governs "/administrator" as readily as "/admin/panel". Being the longest match, a raw rule shadows a bounded rule that would deny, so PUBLIC_ACCESS is refused on it. Use NewAccessControlRule unless a cross-segment reach is what the rule means. */
 func NewAccessControlRawPrefixRule(pathPrefix string, attributes ...string) AccessControlRule {
     for _, attribute := range attributes {
         if securitycontract.AttributePublicAccess == strings.TrimSpace(attribute) {
@@ -114,20 +115,102 @@ func NewAccessControlExactRule(path string, attributes ...string) AccessControlR
     return rule
 }
 
-/* NewAccessControlRegexRule builds a rule that matches when the pattern is found anywhere in the
-canonicalized request path. The pattern is compiled UNANCHORED and tested with regexp.MatchString, so
-it is a substring match, not a whole-path one: "/public" matches "/admin/public-notes" and
-"/x/publications" as readily as "/public". This is deliberate and mirrors the path regex of other
-frameworks, but it is the opposite of a route requirement, which melody anchors with ^(?:…)$ — so a
-rule meant to name one section must anchor itself. Write "^/public(/|$)" to bound it to the /public
-tree. Regex rules are the lowest match priority (after exact and prefix rules), and among themselves
-the first registered that matches wins. */
+/* accessControlRegexPatternIsAnchored reports whether every path the pattern can match starts where the path starts, which keeps a public rule out of the middle of an unrelated path. It reads the parsed expression, not the text: "^/public|/status" begins with "^" while its second branch floats, and "(?i)^/public(/|$)" is anchored behind its flag group. An alternation is anchored only when every branch is; \A anchors like ^, (?m)^ does not. A start-anchored pattern can still over-match at its tail, but that only shadows a route guarded by a later regex, since exact and prefix rules outrank every regex. */
+func accessControlRegexPatternIsAnchored(pattern string) bool {
+    parsedPattern, parseErr := syntax.Parse(pattern, syntax.Perl)
+    if nil != parseErr {
+        /* an unparseable pattern is refused by the compile below; answering false only routes it to the PUBLIC_ACCESS refusal first */
+        return false
+    }
+
+    return accessControlExpressionIsAnchored(parsedPattern.Simplify())
+}
+
+func accessControlExpressionIsAnchored(expression *syntax.Regexp) bool {
+    if nil == expression {
+        return false
+    }
+
+    switch expression.Op {
+    case syntax.OpBeginText:
+        return true
+
+    case syntax.OpConcat:
+        /* a concatenation is anchored by its first element that consumes or asserts anything; a zero-width element in front of the anchor does not move the start */
+        for _, subExpression := range expression.Sub {
+            if true == accessControlExpressionMatchesEmptyOnly(subExpression) {
+                continue
+            }
+
+            return accessControlExpressionIsAnchored(subExpression)
+        }
+
+        return false
+
+    case syntax.OpAlternate:
+        for _, subExpression := range expression.Sub {
+            if false == accessControlExpressionIsAnchored(subExpression) {
+                return false
+            }
+        }
+
+        return 0 < len(expression.Sub)
+
+    case syntax.OpCapture:
+        if 1 != len(expression.Sub) {
+            return false
+        }
+
+        return accessControlExpressionIsAnchored(expression.Sub[0])
+
+    case syntax.OpPlus:
+        if 1 != len(expression.Sub) {
+            return false
+        }
+
+        return accessControlExpressionIsAnchored(expression.Sub[0])
+    }
+
+    return false
+}
+
+/* accessControlExpressionMatchesEmptyOnly reports whether the expression consumes nothing and asserts nothing about position, so it cannot move where the match begins. */
+func accessControlExpressionMatchesEmptyOnly(expression *syntax.Regexp) bool {
+    if nil == expression {
+        return false
+    }
+
+    switch expression.Op {
+    case syntax.OpEmptyMatch, syntax.OpNoMatch:
+        return true
+
+    case syntax.OpCapture:
+        if 1 != len(expression.Sub) {
+            return false
+        }
+
+        return accessControlExpressionMatchesEmptyOnly(expression.Sub[0])
+    }
+
+    return false
+}
+
+/* NewAccessControlRegexRule builds a rule that matches when the pattern is found anywhere in the canonicalized request path: it is compiled unanchored, so "/public" matches "/admin/public-notes", unlike a route requirement, which melody anchors. Write "^/public(/|$)" to bound it to one tree. Regex rules match after exact and prefix rules, and among themselves the first registered wins. */
 func NewAccessControlRegexRule(pattern string, attributes ...string) AccessControlRule {
     normalizedPattern := strings.TrimSpace(pattern)
     if "" == normalizedPattern {
         exception.Panic(
             exception.NewError("access control regex pattern may not be empty", nil, nil),
         )
+    }
+
+    /* PUBLIC_ACCESS on a pattern not anchored to the path start would open every path it matches as a substring, and the first registered regex wins, so it is refused, as on a raw prefix rule; a start-anchored pattern such as "^/public(/|$)" stays allowed */
+    for _, attribute := range attributes {
+        if securitycontract.AttributePublicAccess == strings.TrimSpace(attribute) && false == accessControlRegexPatternIsAnchored(normalizedPattern) {
+            exception.Panic(
+                exception.NewError("access control PUBLIC_ACCESS may not be declared on an unanchored regex rule; anchor the pattern to the path start with ^ (for example ^/public(/|$)) so it cannot match inside a protected path", nil, nil),
+            )
+        }
     }
 
     compiled, compileErr := regexp.Compile(normalizedPattern)
@@ -151,7 +234,7 @@ func NewAccessControlRegexRule(pattern string, attributes ...string) AccessContr
     return rule
 }
 
-/* Deprecated: use NewAccessControlRule, which now builds the segment-prefix rule this constructor always built. Kept as an alias so existing callers continue to compile. */
+/* Deprecated: use NewAccessControlRule, which builds the same segment-prefix rule. Kept as an alias so existing callers continue to compile. */
 func NewAccessControlRuleWithSegmentPrefix(pathPrefix string, attributes ...string) AccessControlRule {
     return NewAccessControlRule(pathPrefix, attributes...)
 }
@@ -208,7 +291,7 @@ func (instance *AccessControl) Rules() []AccessControlRule {
     return append([]AccessControlRule{}, instance.rules...)
 }
 
-/* Match resolves by category before position: an exact rule beats every prefix rule, a longer prefix beats a shorter one regardless of registration order, every prefix beats every regex, and the empty-prefix fallback answers only when nothing else did. Position in the rule list — what the merge strategies order — breaks only the ties inside a category: equal-length prefixes, regexes, exact duplicates and fallbacks each resolve to the first registered. */
+/* Match resolves by category before position: an exact rule beats every prefix rule, a longer prefix beats a shorter one, every prefix beats every regex, and the empty-prefix fallback answers last. Registration order breaks only the ties inside a category. */
 func (instance *AccessControl) Match(path string) ([]string, bool) {
     matchedIndex, matched := instance.matchRuleIndex(path)
     if false == matched {
@@ -218,20 +301,7 @@ func (instance *AccessControl) Match(path string) ([]string, bool) {
     return append([]string{}, instance.rules[matchedIndex].attributes...), true
 }
 
-/* canonicalizeAccessControlPath folds the spellings that reach the same resource into the one the rules are
-written in. net/http hands the path through unfolded, so "//admin/panel" and "/open/../admin/panel" are
-matched by no rule that names "/admin" — and no rule matched is granted, with the token never consulted.
-
-Folding is NOT sufficient on its own, and the http kernel does not rely on it: because the router matches
-the path as sent and does not fold "..", a request routed to a protected handler under a folded spelling
-would be authorized here against the folded spelling's rule — a different, possibly more permissive one, or
-none. The kernel closes that by refusing a non-canonical request path before it is routed or authorized
-(http.requestPathIsCanonical), so every path this sees is already the one spelling. The fold remains as the
-matcher's own defence for a caller that consults AccessControl without that guard, and it can only make a
-rule match a request it did not match before — it never opens what a rule had closed for the same spelling.
-
-The surrounding whitespace is trimmed before the fold rather than left alone: the trim makes the matcher
-answer for one spelling more than the router accepts, which refuses more than intended and never less. */
+/* canonicalizeAccessControlPath folds the spellings that reach one resource, "//admin" or "/open/../admin", into the one the rules are written in, and trims surrounding whitespace. Neither is a defence on its own, since the router serves the sent spelling: the http kernel refuses a non-canonical path before routing or authorization (http.requestPathIsCanonical), so every path it hands here is already canonical. The fold and the trim serve a caller that consults AccessControl without that guard. */
 func canonicalizeAccessControlPath(requestPath string) string {
     canonicalPath := strings.TrimSpace(requestPath)
     if "" == canonicalPath {

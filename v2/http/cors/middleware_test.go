@@ -414,3 +414,27 @@ func TestMiddleware_AppliesHeadersToTheWriterBeforeTheHandlerRuns(t *testing.T) 
         t.Fatalf("expected Vary: Origin on the writer before the handler ran, got %q", varyOnWriterWhenHandlerRan)
     }
 }
+
+/* the canonical door reads a nil service as the default one rather than dereferencing it on the first request it meters; asserting that a middleware came back only proves the constructor returned, so the answer itself is read here against what DefaultService grants. */
+func TestMiddleware_ANilServiceReadsAsTheDefaultService(t *testing.T) {
+    handler := Middleware(nil)(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return http.TextResponse(nethttp.StatusOK, "ok"), nil
+    })
+
+    request := httptest.NewRequest(nethttp.MethodOptions, "/x", nil)
+    request.Header.Set("Origin", "https://example.com")
+    request.Header.Set("Access-Control-Request-Method", nethttp.MethodPost)
+
+    response, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if nethttp.StatusNoContent != response.StatusCode() {
+        t.Fatalf("expected the default service to answer the preflight, got status %d", response.StatusCode())
+    }
+
+    if "https://example.com" != response.Headers().Get("Access-Control-Allow-Origin") {
+        t.Fatalf("expected the default service to allow the origin, got %q", response.Headers().Get("Access-Control-Allow-Origin"))
+    }
+}

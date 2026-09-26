@@ -1,7 +1,6 @@
 package http
 
 import (
-    "errors"
     "fmt"
     "html"
     nethttp "net/http"
@@ -11,27 +10,14 @@ import (
     "github.com/precision-soft/melody/v2/exception"
     exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
     httpcontract "github.com/precision-soft/melody/v2/http/contract"
+    "github.com/precision-soft/melody/v2/internal"
     "github.com/precision-soft/melody/v2/runtime"
     runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
     "github.com/precision-soft/melody/v2/serializer"
     serializercontract "github.com/precision-soft/melody/v2/serializer/contract"
 )
 
-/* renderErrorResponse builds the framework's error response, and it is the one door every default
-rendering goes through — the exception listener and each of the kernel's own fallback paths — so a
-request is answered in the same shape whichever of them renders it.
-
-The body honours the same negotiation the success path honours: a client that prefers html gets the
-html error page, anything else goes through the serializer manager resolved against the joined
-Accept lines. The one asymmetry is deliberate and fail-closed: an Accept header that refuses every
-available media type keeps the error's own status code and is served the default json body, where
-the success path answers 406 — an error status is the signal itself, and masking a security refusal
-behind not-acceptable would hide it from the client that has to react to it. A runtime without a
-serializer manager, a serializer that fails, or a payload that cannot be marshalled all fall back to
-the default json body under the same rule: an error response always exists.
-
-The base payload carries the error message and the moment; entries of payloadExtras are carried
-next to them, and the base keys win a collision so the rendered error always names itself. */
+/* renderErrorResponse builds the framework's error response; the exception listener and every kernel fallback render through it, so a request is answered in one shape. The body honours the negotiation the success path honours, with one deliberate fail-closed asymmetry: an Accept header that refuses every available type keeps the error's status and gets the default json body, where the success path answers 406. A missing serializer manager, a failing serializer or an unmarshallable payload fall back to that json body too, and the base keys win over payloadExtras. */
 func renderErrorResponse(
     runtimeInstance runtimecontract.Runtime,
     request httpcontract.Request,
@@ -77,10 +63,7 @@ func renderNegotiatedErrorPayload(
     message string,
     payload map[string]any,
 ) httpcontract.Response {
-    /* the manager is resolved quietly, not through the soft resolver that logs its failure: a
-       runtime without a serializer manager is a legitimate configuration whose error bodies simply
-       stay json, and an error line per rendered error would let a refused request write to the log
-       through the very absence the fallback exists for */
+    /* the manager is resolved quietly, not through the soft resolver that logs its failure: a runtime without a serializer manager is a legitimate configuration whose error bodies simply stay json, and an error line per rendered error would let a refused request write to the log through the very absence the fallback exists for */
     serializerManager := (*serializer.SerializerManager)(nil)
     if nil != runtimeInstance {
         serializerManager, _ = runtime.FromRuntime[*serializer.SerializerManager](runtimeInstance, serializer.ServiceSerializerManager)
@@ -90,8 +73,9 @@ func renderNegotiatedErrorPayload(
         return jsonErrorResponseFromPayload(statusCode, message, payload)
     }
 
+    /* every resolution failure, the not-acceptable refusal included, falls back the same way, because an error keeps its status rather than being masked behind a 406. The serializer check is defence in depth: the recover around the serialize call returns to this same fallback. */
     serializerInstance, err := serializerManager.ResolveByAcceptHeader(joinedAcceptHeader(request))
-    if true == errors.Is(err, serializer.ErrNotAcceptable) || nil != err || nil == serializerInstance {
+    if nil != err || nil == serializerInstance {
         return jsonErrorResponseFromPayload(statusCode, message, payload)
     }
 
@@ -118,11 +102,9 @@ func jsonErrorResponseFromPayload(statusCode int, message string, payload map[st
     return JsonErrorResponse(statusCode, message)
 }
 
-/* joinedAcceptHeader reads the accept header the way the success path reads it: every line joined
-before parsing, because Get answers only the first line of a repeated field and the accept header is
-list-typed — a refusal the client sent on a second line would otherwise vanish. */
+/* joinedAcceptHeader reads the accept header the way the success path reads it: every line joined, because Get answers only the first line of a repeated field and a refusal on a second line would otherwise vanish. */
 func joinedAcceptHeader(request httpcontract.Request) string {
-    if nil == request {
+    if true == internal.IsNilInterface(request) {
         return ""
     }
 
@@ -135,7 +117,7 @@ func joinedAcceptHeader(request httpcontract.Request) string {
 }
 
 func requestIdFromRequest(request httpcontract.Request) string {
-    if nil == request {
+    if true == internal.IsNilInterface(request) {
         return ""
     }
 

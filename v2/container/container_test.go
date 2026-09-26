@@ -290,7 +290,7 @@ type hasTypeProbe struct {
     value string
 }
 
-/* Has and Get have to agree about the same container. A registration made from a provider returning *T is filed under *T, and GetByType canonicalises before it looks — so asking HasType with the value type was answered "no" for a service the very next GetByType resolves happily. A caller that guards a resolution with HasType then took the branch for a service that is registered. */
+/* Has and Get have to agree about the same container. A registration made from a provider returning *T is filed under *T, and GetByType canonicalises before it looks, so HasType asked with the value type has to answer yes for a service the very next GetByType resolves. */
 func TestHasType_AnswersForTheValueTypeOfAPointerRegistration(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -343,7 +343,7 @@ func TestHasType_AnswersForTheValueTypeOfAScopeOverride(t *testing.T) {
     }
 }
 
-/* a closed container used to accept registrations and overrides silently: the registration named a service no resolution would ever build, and the override landed in a map the teardown had already swept — served by later lookups, closed by nobody. Both refuse now, the way the scoped registrar always has. */
+/* a closed container refuses registrations and overrides, the way the scoped registrar does: a registration would name a service no resolution will ever build, and an override would land in a map the teardown has already swept, served by later lookups and closed by nobody. */
 func TestContainer_RegisterAndOverrideRefusedAfterClose(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -379,7 +379,7 @@ func TestContainer_RegisterAndOverrideRefusedAfterClose(t *testing.T) {
     }
 }
 
-/* the override propagates to every type its name is registered under, and a type-keyed resolution hands out whatever sits there without a re-check — the provider contract's call-time guard never sees overrides. A value the registered type cannot hold used to ride that hole straight through GetByType, poisoning the type cache with it. */
+/* the override propagates to every type its name is registered under, and a type-keyed resolution hands out whatever sits there without a re-check (the provider contract's call-time guard never sees overrides), so a value the registered type cannot hold has to be refused before it reaches GetByType. */
 func TestContainer_OverrideTypeIncompatibleValueRefused(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -408,6 +408,52 @@ func TestContainer_OverrideTypeIncompatibleValueRefused(t *testing.T) {
     }
 }
 
+/* an override of one name answers the types that name is registered under and not another service's type-keyed resolution: the concrete service keeps answering its own type, and the overridden name's own type answers the override. A container type-keyed resolution prefers the name registration at every door, so this pins the contract; the observable half lives on the scope twin, whose own lookup does read the exposed entry. */
+func TestContainer_OverrideOfOneNameDoesNotAnswerAnotherServicesGetByType(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    interfaceRegisterErr := serviceContainer.Register(
+        "app.poison.contract",
+        func(resolver containercontract.Resolver) (testInterface, error) {
+            return &testImplementation{name: "contract owner"}, nil
+        },
+    )
+    if nil != interfaceRegisterErr {
+        t.Fatalf("unexpected register error: %v", interfaceRegisterErr)
+    }
+
+    concreteRegisterErr := serviceContainer.Register(
+        "app.poison.concrete",
+        func(resolver containercontract.Resolver) (*testImplementation, error) {
+            return &testImplementation{name: "concrete owner"}, nil
+        },
+    )
+    if nil != concreteRegisterErr {
+        t.Fatalf("unexpected register error: %v", concreteRegisterErr)
+    }
+
+    overrideErr := serviceContainer.OverrideProtectedInstance("app.poison.contract", &testImplementation{name: "override"})
+    if nil != overrideErr {
+        t.Fatalf("unexpected override error: %v", overrideErr)
+    }
+
+    concreteValue, concreteErr := serviceContainer.GetByType(reflect.TypeOf((*testImplementation)(nil)))
+    if nil != concreteErr {
+        t.Fatalf("unexpected get by type error: %v", concreteErr)
+    }
+    if implementation, isTyped := concreteValue.(*testImplementation); false == isTyped || "concrete owner" != implementation.name {
+        t.Fatalf("expected the concrete service to keep answering its own type, got %#v", concreteValue)
+    }
+
+    contractValue, contractErr := serviceContainer.GetByType(reflect.TypeOf((*testInterface)(nil)).Elem())
+    if nil != contractErr {
+        t.Fatalf("unexpected get by type error: %v", contractErr)
+    }
+    if implementation, isTyped := contractValue.(*testImplementation); false == isTyped || "override" != implementation.name {
+        t.Fatalf("expected the overridden name's own type to answer the override, got %#v", contractValue)
+    }
+}
+
 /* the identity key of a pointer-to-unnamed-composite type drops its package path, so two such types from same-short-named packages share one key — one creation-guard entry and one close node for two distinct types, which read as false cycles at resolution and merged nodes at teardown. The second type is refused at the boot line that declares it. */
 func TestContainer_RegisterTypeIdentityKeyCollisionRefused(t *testing.T) {
     serviceContainer := NewContainer()
@@ -433,7 +479,7 @@ func TestContainer_RegisterTypeIdentityKeyCollisionRefused(t *testing.T) {
     }
 }
 
-/* the panicking by-type door on the container had never been executed: nothing proved it resolves at all, and nothing proved its failure carries the by-type message rather than the by-name one — a caller reading a boot log has only that message to tell which door it came in through. */
+/* the panicking by-type door on the container resolves, and its failure carries the by-type message rather than the by-name one: a caller reading a boot log has only that message to tell which door it came in through. */
 func TestContainer_MustGetByType_AnswersAndNamesItsOwnFailure(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -474,7 +520,8 @@ func TestContainer_MustGetByType_AnswersAndNamesItsOwnFailure(t *testing.T) {
             t.Fatalf("expected the original melody error to travel out whole, got %#v", recoveredValue)
         }
 
-        if "" == melodyErr.Context()["type"] {
+        typeContextValue, hasTypeContextValue := melodyErr.Context()["type"].(string)
+        if false == hasTypeContextValue || "" == typeContextValue {
             t.Fatalf("expected the type written into the original failure's context, got %#v", melodyErr.Context())
         }
     }()
@@ -482,7 +529,7 @@ func TestContainer_MustGetByType_AnswersAndNamesItsOwnFailure(t *testing.T) {
     _ = serviceContainer.MustGetByType(reflect.TypeOf((*testImplementation)(nil)))
 }
 
-/* the panicking override on the container had never been executed either. It has to install the value, and its refusal has to carry its own message rather than the unprotected one it delegates to — the two answer differently and a caller has to be able to tell which verb it called. */
+/* the panicking override on the container installs the value, and its refusal carries its own message rather than the unprotected one it delegates to: the two answer differently and a caller has to be able to tell which verb it called. */
 func TestContainer_MustOverrideInstance_InstallsAndNamesItsOwnFailure(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -697,7 +744,7 @@ func TestContainer_RegisterType_StrictDuplicateTypeRefused(t *testing.T) {
     }
 }
 
-/* Names is what an introspection command prints and what a boot report enumerates, and nothing called it: it could have returned the empty slice for the whole life of the package without a test noticing. It lists the DECLARED container names, sorted so the output is stable between runs, and it must not leak the scoped registrations — those belong to a lifetime the container never resolves. */
+/* Names is what an introspection command prints and what a boot report enumerates. It lists the DECLARED container names, sorted so the output is stable between runs, and it must not leak the scoped registrations, which belong to a lifetime the container never resolves. */
 func TestContainer_Names_ListsTheDeclaredContainerNamesSorted(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -777,7 +824,7 @@ func TestContainer_HasAndHasType_AnswerFalseForTheEmptyNameAndTheNilType(t *test
     }
 }
 
-/* the assignability guard judges the value the way the readers will: a string service is registered under *string, and the values its own provider builds sit raw under that canonical key, so a raw string override occupies exactly the slot a built value occupies — refusing it contradicted the registration's own storage */
+/* the assignability guard judges the value the way the readers will: a string service is registered under *string, and the values its own provider builds sit raw under that canonical key, so a raw string override occupies exactly the slot a built value occupies and refusing it would contradict the registration's own storage */
 func TestContainerOverride_AcceptsAValueTypedOverrideForAValueTypedService(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -882,12 +929,21 @@ func TestServiceDescriptions_DescribesBothLifetimesWithoutBuilding(t *testing.T)
         t.Fatalf("unexpected build error: %v", getErr)
     }
 
+    describedBuiltService := false
     for _, description := range reporter.ServiceDescriptions() {
-        if "described.container" == description.Name {
-            if false == description.IsBuilt || "string" != description.TypeName {
-                t.Fatalf("expected the built service to be described as built, got %+v", description)
-            }
+        if "described.container" != description.Name {
+            continue
         }
+
+        describedBuiltService = true
+        if false == description.IsBuilt || "string" != description.TypeName {
+            t.Fatalf("expected the built service to be described as built, got %+v", description)
+        }
+    }
+
+    /* without this the loop asserts nothing at all when the report loses the service, which is the very failure the assertion inside it exists to catch */
+    if false == describedBuiltService {
+        t.Fatalf("expected the built service to be described at all, got %+v", reporter.ServiceDescriptions())
     }
 }
 

@@ -2,12 +2,15 @@ package storage
 
 import (
     "context"
+    "crypto/sha256"
+    "encoding/hex"
     "errors"
     "io"
     "os"
     "path/filepath"
     "strings"
     "testing"
+    "time"
 
     "github.com/precision-soft/melody/v3/container"
     "github.com/precision-soft/melody/v3/runtime"
@@ -227,6 +230,11 @@ func TestLocalStorage_PutRemovesPartialObjectOnReaderError(t *testing.T) {
         t.Fatalf("expected put to fail when the source reader errors mid-stream")
     }
 
+    /* "copy", not "write": io.Copy answers one error for both sides, and on an upload streamed from a request body the likelier one is the READER dying with the client — a message blaming the storage write sends the operator at the disk when the source connection failed */
+    if false == strings.Contains(putErr.Error(), "could not copy the payload") {
+        t.Fatalf("expected the failure to name the copy, got %v", putErr)
+    }
+
     exists, existsErr := local.Exists(runtimeInstance, key)
     if nil != existsErr {
         t.Fatalf("exists: %v", existsErr)
@@ -236,7 +244,7 @@ func TestLocalStorage_PutRemovesPartialObjectOnReaderError(t *testing.T) {
     }
 }
 
-/* @info a failed overwrite must not destroy the previously stored object (atomic put) */
+/* a failed overwrite must not destroy the object already stored (atomic put) */
 
 func TestLocalStorage_FailedOverwritePreservesPriorObject(t *testing.T) {
     base := t.TempDir()
@@ -268,7 +276,7 @@ func TestLocalStorage_FailedOverwritePreservesPriorObject(t *testing.T) {
 
     entries, _ := os.ReadDir(filepath.Join(base, "labels"))
     for _, entry := range entries {
-        if true == strings.Contains(entry.Name(), ".tmp-") {
+        if "awb-999.txt" != entry.Name() {
             t.Fatalf("a failed overwrite left a temporary object behind: %s", entry.Name())
         }
     }
@@ -358,5 +366,141 @@ func TestLocalStorage_RejectsAbsoluteKeyEscape(t *testing.T) {
 
     if _, getErr := local.Get(testRuntime(), "/etc/passwd"); nil == getErr {
         t.Fatalf("expected an absolute-path key to be confined and rejected")
+    }
+}
+
+func TestLocalStorage_NegativeSizeMeansUnknownAndSkipsTheLengthCheck(t *testing.T) {
+    storage := NewLocalStorage(t.TempDir())
+    runtimeInstance := testRuntime()
+
+    /* the contract's documented convention: a negative size is "length unknown" (the io convention http.Request.ContentLength uses), so the backend stores whatever the reader yields — while a non-negative declaration is verified strictly */
+    if putErr := storage.Put(runtimeInstance, "unknown-size.txt", strings.NewReader("payload"), -1, storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("expected the unknown-size put to succeed, got %v", putErr)
+    }
+
+    if putErr := storage.Put(runtimeInstance, "declared-size.txt", strings.NewReader("payload"), 3, storagecontract.PutOptions{}); nil == putErr {
+        t.Fatalf("expected the mismatched declared size to be refused")
+    }
+}
+
+/* the reserved temp name is spelled here from the digest rather than read from the helper, so a change to the namespace fails this file instead of moving with it */
+func reservedTempName(leaf string, randomPart string) string {
+    digest := sha256.Sum256([]byte(leaf))
+
+    return ".melody-storage-" + hex.EncodeToString(digest[:]) + "." + randomPart + ".tmp"
+}
+
+func TestLocalStorage_PutSweepsStaleTempObjectsAndKeepsLiveOnes(t *testing.T) {
+    baseDirectory := t.TempDir()
+    storage := NewLocalStorage(baseDirectory)
+    runtimeInstance := testRuntime()
+
+    if putErr := storage.Put(runtimeInstance, "report.txt", strings.NewReader("first"), -1, storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("unexpected put error: %v", putErr)
+    }
+
+    staleInstant := time.Now().Add(-2 * time.Hour)
+    plant := func(name string, content string, aged bool) string {
+        planted := filepath.Join(baseDirectory, name)
+        if writeErr := os.WriteFile(planted, []byte(content), 0o640); nil != writeErr {
+            t.Fatalf("could not plant %s: %v", name, writeErr)
+        }
+        if true == aged {
+            if touchErr := os.Chtimes(planted, staleInstant, staleInstant); nil != touchErr {
+                t.Fatalf("could not age %s: %v", name, touchErr)
+            }
+        }
+
+        return planted
+    }
+
+    /* a crash mid-write leaves this shape behind, which nothing sweeps but a later Put of the same key */
+    staleTemp := plant(reservedTempName("report.txt", "00112233445566aa"), "orphan", true)
+    /* a fresh temp is a concurrent writer still at work */
+    freshTemp := plant(reservedTempName("report.txt", "ffeeddccbbaa9988"), "in flight", false)
+    /* a stale temp of another key is that key's to sweep, and only that key's */
+    otherKeyTemp := plant(reservedTempName("invoice.txt", "00112233445566aa"), "orphan of another key", true)
+    /* an ordinary key that reads like a temp name is an object the application stored */
+    lookalikeKey := plant("report.txt.tmp-00112233445566aa", "application data", true)
+    reservedButNotGenerated := plant(reservedTempName("report.txt", "notahexsuffix!!!"), "operator data", true)
+
+    if putErr := storage.Put(runtimeInstance, "invoice.txt", strings.NewReader("invoice"), -1, storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("unexpected put error: %v", putErr)
+    }
+
+    if _, statErr := os.Stat(otherKeyTemp); false == os.IsNotExist(statErr) {
+        t.Fatalf("expected the stale temp of the other key to be swept by its own Put, stat answered %v", statErr)
+    }
+    if _, statErr := os.Stat(staleTemp); nil != statErr {
+        t.Fatalf("expected the stale temp of report.txt to survive a Put of another key: %v", statErr)
+    }
+
+    if putErr := storage.Put(runtimeInstance, "report.txt", strings.NewReader("second"), -1, storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("unexpected put error: %v", putErr)
+    }
+
+    if _, statErr := os.Stat(staleTemp); false == os.IsNotExist(statErr) {
+        t.Fatalf("expected the stale temp to be swept, stat answered %v", statErr)
+    }
+
+    for _, survivor := range []string{freshTemp, lookalikeKey, reservedButNotGenerated} {
+        if _, statErr := os.Stat(survivor); nil != statErr {
+            t.Fatalf("expected %s to survive the sweep: %v", filepath.Base(survivor), statErr)
+        }
+    }
+
+    exists, existsErr := storage.Exists(runtimeInstance, "report.txt.tmp-00112233445566aa")
+    if nil != existsErr || false == exists {
+        t.Fatalf("expected the lookalike key to stay stored, exists %v error %v", exists, existsErr)
+    }
+}
+
+func TestLocalStorage_RefusesAKeySpelledLikeAReservedTempObject(t *testing.T) {
+    storage := NewLocalStorage(t.TempDir())
+    runtimeInstance := testRuntime()
+
+    reservedKey := "sub/" + reservedTempName("report.txt", "00112233445566aa")
+    if putErr := storage.Put(runtimeInstance, reservedKey, strings.NewReader("user data"), -1, storagecontract.PutOptions{}); nil == putErr || false == strings.Contains(putErr.Error(), "reserved .melody-storage- namespace") {
+        t.Fatalf("expected a key spelled like a reserved temp object to be refused, got %v", putErr)
+    }
+    if _, existsErr := storage.Exists(runtimeInstance, reservedKey); nil == existsErr {
+        t.Fatalf("expected Exists to refuse the reserved spelling too")
+    }
+
+    for _, ordinaryKey := range []string{".melody-storage-notes.txt", reservedTempName("report.txt", "notahexsuffix!!!"), "report.txt.tmp-00112233445566aa"} {
+        if putErr := storage.Put(runtimeInstance, ordinaryKey, strings.NewReader("user data"), -1, storagecontract.PutOptions{}); nil != putErr {
+            t.Fatalf("expected the ordinary key %q to be stored, got %v", ordinaryKey, putErr)
+        }
+    }
+}
+
+/* a leaf of 255 bytes is the longest a filesystem component admits; the temp object beside it must fit the same component */
+func TestLocalStorage_PutStoresAKeyWhoseLeafFillsTheFilesystemComponent(t *testing.T) {
+    baseDirectory := t.TempDir()
+    storage := NewLocalStorage(baseDirectory)
+    runtimeInstance := testRuntime()
+
+    key := "exports/" + strings.Repeat("a", 251) + ".csv"
+
+    if putErr := storage.Put(runtimeInstance, key, strings.NewReader("first"), -1, storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("expected a leaf of 255 bytes to be stored, got %v", putErr)
+    }
+    if putErr := storage.Put(runtimeInstance, key, strings.NewReader("second"), -1, storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("expected a leaf of 255 bytes to be replaced, got %v", putErr)
+    }
+
+    reader, getErr := storage.Get(runtimeInstance, key)
+    if nil != getErr {
+        t.Fatalf("get error: %v", getErr)
+    }
+    loaded, _ := io.ReadAll(reader)
+    reader.Close()
+    if "second" != string(loaded) {
+        t.Fatalf("expected the replaced content, got %q", string(loaded))
+    }
+
+    entries, _ := os.ReadDir(filepath.Join(baseDirectory, "exports"))
+    if 1 != len(entries) {
+        t.Fatalf("expected only the stored object in the directory, got %d entries", len(entries))
     }
 }

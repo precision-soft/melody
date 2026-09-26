@@ -335,7 +335,7 @@ func TestConfiguration_UnescapedLiteralPercentFailsTheBootResolveWithAnActionabl
     }
 }
 
-/* the deferral exists for exactly this flow: a .env value referencing a parameter the composition root registers between construction and boot used to kill the process inside the constructor, before the registration it referenced could ever run */
+/* the deferral exists for exactly this flow: a .env value referencing a parameter the composition root registers between construction and boot must survive the constructor, so the registration it references can run */
 func TestConfiguration_AForwardReferenceDefersAndTheBootResolveSettlesIt(t *testing.T) {
     configuration, newConfigurationErr := NewConfiguration(
         &Environment{
@@ -802,7 +802,7 @@ func TestResolveTemplate_EnvPlaceholderWithInnerParenthesisIsRefused(t *testing.
     }
 }
 
-/* a %env( that never closes is an error, not data: the forgotten closing percent left postgres://user:%env(DB_PASS)@db connecting with the literal placeholder as its password, and nothing said so */
+/* a %env( that never closes is an error, not data: with the closing percent forgotten, postgres://user:%env(DB_PASS)@db would connect with the literal placeholder as its password, and nothing would say so */
 func TestResolveTemplate_UnterminatedEnvPlaceholderIsRefused(t *testing.T) {
     configuration := &Configuration{
         environment: &Environment{values: map[string]string{"DB_PASS": "secret"}},
@@ -823,7 +823,7 @@ func TestResolveTemplate_UnterminatedEnvPlaceholderIsRefused(t *testing.T) {
     }
 }
 
-/* a name-shaped run a percent opened and nothing closed is a reference with a typo: %app-name% used to survive as literal text while the contract already demands a literal percent be doubled */
+/* a name-shaped run a percent opened and nothing closed is a reference with a typo, refused rather than surviving as literal text, since the contract already demands a literal percent be doubled */
 func TestResolveTemplate_UnclosedParameterReferenceIsRefused(t *testing.T) {
     configuration := &Configuration{
         environment: &Environment{values: map[string]string{}},
@@ -843,6 +843,68 @@ func TestResolveTemplate_UnclosedParameterReferenceIsRefused(t *testing.T) {
     }
     if false == strings.Contains(resolveErr.Error(), "malformed parameter reference") {
         t.Fatalf("expected the malformed reference report, got: %v", resolveErr)
+    }
+
+    /* the sentence alone does not say WHICH percent the refusal is about: the trailing percent of this same template opens no reference and, with the guard reading the flag the other way round, produces the identical sentence from offset 17 — so the offset of the percent is the observable that tells the two paths apart, and the name-shaped run itself, a slice of the value, is never carried */
+    if 8 != contextOfError(t, resolveErr)["offset"] {
+        t.Fatalf("expected the percent that opened the name-shaped run to be the refused one, got offset %v", contextOfError(t, resolveErr)["offset"])
+    }
+    if _, carried := contextOfError(t, resolveErr)["reference"]; true == carried {
+        t.Fatalf("expected no slice of the value in the context, got reference %v", contextOfError(t, resolveErr)["reference"])
+    }
+}
+
+/* the name-shaped run an unclosed reference opens is a slice of the value by construction — it stops at the first byte outside the name grammar or at the end — so for a password holding a single percent it is the password's tail */
+func TestResolveTemplate_UnclosedReferenceInsideACredentialStaysOutOfTheContext(t *testing.T) {
+    configuration := &Configuration{
+        environment: &Environment{values: map[string]string{}},
+        parameters:  ParameterMap{},
+    }
+
+    _, resolveErr := configuration.resolveTemplate(
+        "Pa%SSword1",
+        "database.password",
+        make(map[string]bool),
+        make(map[string]bool),
+    )
+    if nil == resolveErr {
+        t.Fatalf("expected the unclosed reference to be refused")
+    }
+
+    renderedLogContext := fmt.Sprintf("%v", exception.LogContext(resolveErr, nil))
+    if true == strings.Contains(renderedLogContext, "SSword1") {
+        t.Fatalf("expected the credential's tail to stay out of the rendered log context: %s", renderedLogContext)
+    }
+    if 2 != contextOfError(t, resolveErr)["offset"] {
+        t.Fatalf("expected the offset of the percent, got %v", contextOfError(t, resolveErr)["offset"])
+    }
+}
+
+/* the tail of an unterminated %env( runs to the end of the value, so a tail spelled in key-grammar characters — a password made of letters and digits — is no safer than any other; neither is carried, the offset locates the placeholder */
+func TestResolveTemplate_UnterminatedEnvPlaceholderTailStaysOutOfTheContext(t *testing.T) {
+    configuration := &Configuration{
+        environment: &Environment{values: map[string]string{}},
+        parameters:  ParameterMap{},
+    }
+
+    for _, template := range []string{"x%env(hunter2", "x%env(hunter2@host"} {
+        _, resolveErr := configuration.resolveTemplate(
+            template,
+            "database.password",
+            make(map[string]bool),
+            make(map[string]bool),
+        )
+        if nil == resolveErr {
+            t.Fatalf("%q: expected the unterminated placeholder to be refused", template)
+        }
+
+        renderedLogContext := fmt.Sprintf("%v", exception.LogContext(resolveErr, nil))
+        if true == strings.Contains(renderedLogContext, "hunter2") {
+            t.Fatalf("%q: expected the tail to stay out of the rendered log context: %s", template, renderedLogContext)
+        }
+        if 1 != contextOfError(t, resolveErr)["offset"] {
+            t.Fatalf("%q: expected the offset of the percent, got %v", template, contextOfError(t, resolveErr)["offset"])
+        }
     }
 }
 
@@ -973,5 +1035,80 @@ func TestResolve_TheFailureNamesTheEnvironmentKeyBesideTheInternalAlias(t *testi
 
     if "MELODY_LOG_PATH" != resolutionContext["environmentKey"] {
         t.Fatalf("expected the key the operator actually wrote, got %v", resolutionContext["environmentKey"])
+    }
+}
+
+/* the environment value is scanned under the reading parameter's name, so the offset of a refusal raised inside it indexes a string the record would not name otherwise — offset 2 of APP_DSN is the colon of pg:// while the percent sits at offset 2 of DB_PASSWORD; the key is named beside the offset, once, by the innermost read */
+func TestResolveTemplate_ARefusalInsideAnEnvironmentValueNamesTheEnvironmentKey(t *testing.T) {
+    configuration := &Configuration{
+        environment: &Environment{values: map[string]string{
+            "DB_PASSWORD": "Pa%SSword1",
+            "DB_OUTER":    "outer-%env(DB_PASSWORD)%",
+        }},
+        parameters: ParameterMap{},
+    }
+
+    _, resolveErr := configuration.resolveTemplate(
+        "pg://u:%env(DB_PASSWORD)%@h",
+        "app.dsn",
+        make(map[string]bool),
+        make(map[string]bool),
+    )
+    if nil == resolveErr {
+        t.Fatalf("expected the unclosed reference inside the environment value to be refused")
+    }
+
+    refusalContext := contextOfError(t, resolveErr)
+    if "app.dsn" != refusalContext["parameter"] || 2 != refusalContext["offset"] || "DB_PASSWORD" != refusalContext["environmentKey"] {
+        t.Fatalf("expected the reader, the offset into the environment value and the environment key, got %v", refusalContext)
+    }
+
+    if true == strings.Contains(fmt.Sprintf("%v", exception.LogContext(resolveErr, nil)), "SSword1") {
+        t.Fatalf("expected the credential's tail to stay out of the rendered log context")
+    }
+
+    _, nestedErr := configuration.resolveTemplate(
+        "%env(DB_OUTER)%",
+        "app.nested",
+        make(map[string]bool),
+        make(map[string]bool),
+    )
+    if nil == nestedErr {
+        t.Fatalf("expected the nested environment value to be refused")
+    }
+
+    if "DB_PASSWORD" != contextOfError(t, nestedErr)["environmentKey"] {
+        t.Fatalf("expected the innermost environment key, the one whose value the offset indexes, got %v", contextOfError(t, nestedErr))
+    }
+}
+
+/* a %parameter% reference inside an environment value is scanned under the referenced parameter's own name, and its refusal's offset indexes that parameter's value, so the environment key is not added to it: it would point the operator at a string the offset does not index */
+func TestResolveTemplate_ARefusalInsideAParameterReferencedFromAnEnvironmentValueNamesNoEnvironmentKey(t *testing.T) {
+    configuration := &Configuration{
+        environment: &Environment{values: map[string]string{
+            "REFS_PARAM": "x-%app.inner%",
+        }},
+        parameters: ParameterMap{
+            "app.inner": NewParameter("APP_INNER", "Pa%SSword", nil, false),
+        },
+    }
+
+    _, resolveErr := configuration.resolveTemplate(
+        "%env(REFS_PARAM)%",
+        "app.reader",
+        make(map[string]bool),
+        make(map[string]bool),
+    )
+    if nil == resolveErr {
+        t.Fatalf("expected the unclosed reference inside the referenced parameter to be refused")
+    }
+
+    refusalContext := contextOfError(t, resolveErr)
+    if "app.inner" != refusalContext["parameter"] || 2 != refusalContext["offset"] {
+        t.Fatalf("expected the referenced parameter and the offset into its value, got %v", refusalContext)
+    }
+
+    if _, named := refusalContext["environmentKey"]; true == named {
+        t.Fatalf("expected no environment key on a refusal whose offset indexes a parameter's value, got %v", refusalContext)
     }
 }

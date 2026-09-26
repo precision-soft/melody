@@ -8,9 +8,9 @@ models. Go-native equivalent of a Doctrine unit-of-work audit listener.
 `ChangeSet(before, after)` diffs two struct values by `bun` column name, recording only changed fields (relations and `bun.BaseModel` are skipped; the exported fields of other embedded structs are flattened in, matching how bun promotes their columns). Sensitive fields are recorded as changed but masked to `<redacted>`:
 
 - tag a field `audit:"redact"`, or
-- type it `encrypt.EncryptedString` (auto-redacted).
+- type it as any encrypted column type — `encrypt.EncryptedString`, `encrypt.EncryptedDeterministicString`, or the compartment-bound `encrypt.EncryptedStringFor[R]` / `EncryptedDeterministicStringFor[R]` forms — all recognised through the `encrypt.EncryptedColumn` marker interface (auto-redacted).
 
-Additional fields can be dropped globally or per entity via the `Registry` (see below).
+Additional fields can be dropped globally or per entity via the `Registry` (see below). Ignored fields are matched by **bun column name** (the first tag segment, or the Go field name where no tag names one) — the same name the change-set records.
 
 ## Recording
 
@@ -41,7 +41,9 @@ Pass `""` as the id to let the `Tracker` derive it from the model's bun primary 
 > is never committed without its audit record. The lower-level `Recorder.Record{Insert,Update,Delete}` API
 > is available when you already hold before/after yourself; wrap the context in `audit.WithDatabase(ctx, tx)`
 > to have those calls write the audit entry through your own unit-of-work transaction, keeping it atomic
-> with the data change.
+> with the data change. The two doors are **alternatives**: a `Tracker` refuses a context that carries a
+> caller-made `WithDatabase` binding, because running its own transaction inside yours does not compose —
+> it deadlocks the pool — and the refusal names the `Recorder` path to take instead.
 
 ### Actor
 
@@ -57,13 +59,21 @@ recorder = recorder.WithLogger(logger) // dead-letter: entries that fail to stor
 ```
 
 - `NewBunStorage(db)` — rows in an audit table (default).
-- `NewFileStorage(path)` — JSON-lines append (fsynced per batch).
-- `NewAsyncStorage(delegate, bufferSize)` — wraps any of the above to persist on a background worker so an audited write never blocks the request path; overflow/backend failures dead-letter to the logger and `Close` drains the queue. Wrap a pool-backed store (not a request transaction).
+- `NewFileStorage(path)` — JSON-lines append (fsynced per batch); a context already cancelled is refused before the file is opened.
+- `NewAsyncStorage(delegate, bufferSize)` — wraps any of the above to persist on a background worker so an audited write never waits for the delegate. An entry the queue cannot take — the buffer is full, or the storage is closed — is dead-lettered and reported to the caller as `ErrAsyncStorageQueueFull` or `ErrAsyncStorageClosed`, the refusal naming each entry it dropped under `refused` — its position in the call beside its identity, since two entries of one call can carry the same one — so a caller retries those alone; a save the worker could not complete is dead-lettered on the worker. Dead-letters go to the emergency logger until `WithLogger` installs the application's, so a lost entry is journaled in every assembly; the `Dropped()`/`Failed()` counters keep the tally. A `Save` calls the dead-letter logger after it has released the storage, so a logger that closes the storage from its own failure handling does not wait on the call that journals through it. A save whose context carries a database binding — a `Tracker`'s unit of work, or a `WithDatabase` caller — goes through the delegate **synchronously**, so the atomicity promise above survives the async wrapper; only the unbound path is queued. `Close` drains the queue under a five-second grace, then cancels the worker's context: a delegate that reads it aborts the wedged save and the remainder is dead-lettered; one that does not read it but finishes inside a second grace has stored what it held, and `Close` counts the dead-lettered and the stored apart instead of calling them all dead-lettered; one still parked after the second grace — a write parked in a syscall, a custom `Storage` that ignores its context — is abandoned, with `Close` reporting how many entries stayed behind it. A cancellation of the caller's context landing during either stretch ends it, the way a spent deadline does, and the answer carries the context's error as its cause, so `errors.Is(closeErr, context.Canceled)` holds; the entries still outstanding stay unconfirmed.
 - any custom `Storage` implementation.
+
+A recorder built by hand over an `AsyncStorage` should use `NewRecorderOwningStorage`, whose `Close` closes the storage — the drain goroutine ends nowhere else. The default `NewRecorderWithStorage` does **not** own the storage: on the container path both are registered services and the container closes each one itself.
 
 > Table names registered via `NewRegistry`/`Registry.Register` must be plain SQL identifiers
 > (`^[A-Za-z_][A-Za-z0-9_]*$`) — they flow unquoted through `ModelTableExpr` into DDL/DML, so an invalid
 > name panics at registration.
+
+### Failed saves and transaction outcomes
+
+A dead-letter records an audit entry that was attempted, not one that was committed. On a `Tracker` path the save error is returned into the transaction and rolls the data change back, so the dead-letter can describe a change that never committed; confirm the transaction's outcome before replaying one.
+
+`Storage.Save` promises no atomic batch. An unbound `AsyncStorage.Save` attempts every entry and can queue some while refusing the rest; the refusal names the refused entries under `refused`, so retry those alone, never the whole batch, which would store the queued ones twice. `FileStorage.Save` can fail after it appended the entries before the failing one, so a failed batch is not retried whole there either. An unbound async save confirms the entry was queued, not that it was stored; for a transactional outcome save through a database-bound context.
 
 ## Per-entity tables, ignored fields & transaction grouping
 

@@ -2,10 +2,12 @@ package cache
 
 import (
     "testing"
+    "time"
 
     "github.com/redis/rueidis"
 
     melodycache "github.com/precision-soft/melody/v3/cache"
+    "github.com/precision-soft/melody/v3/container"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
 )
 
@@ -54,5 +56,22 @@ func TestModule_RegisterServices(t *testing.T) {
     NewModule(ModuleConfig{Client: fakeClient{}, Prefix: "cache"}).RegisterServices(registrar)
     if 1 != len(registrar.names) || melodycache.ServiceCacheBackend != registrar.names[0] {
         t.Fatalf("expected the cache backend service, got %v", registrar.names)
+    }
+}
+
+func TestModule_RegisterServicesForwardsTheBackendOptions(t *testing.T) {
+    serviceContainer := container.NewContainer()
+    registrar := &containerRegistrar{target: serviceContainer}
+
+    NewModule(ModuleConfig{
+        Client:         &teardownSpyClient{},
+        Prefix:         "prefix",
+        BackendOptions: []BackendOption{WithCommandTimeout(750 * time.Millisecond)},
+    }).RegisterServices(registrar)
+
+    service := container.MustFromResolver[*BackendService](serviceContainer, melodycache.ServiceCacheBackend)
+
+    if 750*time.Millisecond != service.backend.commandTimeout {
+        t.Fatalf("expected the module to hand its backend options to the registered backend, got %v", service.backend.commandTimeout)
     }
 }

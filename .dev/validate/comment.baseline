@@ -1,0 +1,8 @@
+# The history clauses a file of the third major may still carry in its comments, one line per file.
+#
+#   path ~ count
+#
+# Read by .dev/validate/documentation.sh. The count is a ratchet, not an allowance: a file above its line
+# fails, a file below it fails until the line is lowered, and a line for a file that carries none fails until
+# it is deleted. The list is empty, so a history clause in any comment of the third major fails; a line is
+# added only for a clause a review has read and kept.

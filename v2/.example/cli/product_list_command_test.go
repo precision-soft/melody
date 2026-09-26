@@ -103,7 +103,7 @@ func TestProductListWindowsTheTable(t *testing.T) {
     }
 }
 
-/* the framework printer measures runes, so a non-ascii cell no longer widens or narrows its row: the byte-measuring predecessor rendered a `Café` row one column short of its siblings */
+/* the framework printer measures runes, so a non-ascii cell such as `Café` keeps its row as wide as its siblings */
 func TestProductListMeasuresCellsInRunes(t *testing.T) {
     serviceContainer := newProductListContainerWith(
         t,

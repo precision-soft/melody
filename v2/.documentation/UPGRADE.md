@@ -14,7 +14,7 @@ An upgrader who needs the old behaviour of any entry below pins the previous pat
 
 ## Migrating to v3
 
-v2 is feature-frozen: the major is stabilized, no new feature lands on it, and what still arrives is security work and critical correctness fixes. The recommended move for an application on this major is v3, where development continues.
+v2 is feature-frozen: the major is stabilized, no new feature lands on it, and what still arrives, through 2027-09-08, is patch-level defect fixes and security work. That date is eighteen months from the release of v3, the major that replaced this one. The recommended move for an application on this major is v3, where development continues.
 
 v3 is a separate import path, so an application moves onto it by rewriting its imports rather than by resolving a new version: `github.com/precision-soft/melody/v2` becomes `github.com/precision-soft/melody/v3`, and each integration module trades its `/v2` suffix for `/v3` on its module path — a package inside such a module then carries the major mid-path, as in `integrations/rueidis/v3/cache`. The one rewrite that does not compile afterwards — twelve deprecated validation constants that v3 has never carried — is recorded with its replacements in [`v3/.documentation/UPGRADE.md`](../../v3/.documentation/UPGRADE.md).
 
@@ -22,9 +22,58 @@ From the move on, that document plays this file's role: it records, per v3 relea
 
 ## Unreleased
 
+### Application: the error handler is consulted, and the shutdown drain runs whatever failed before it
+
+**What changed.** An error handler installed after `Application.Boot` returned now takes the framework exception listener's place, as one installed before boot-end already did. The framework listener answers every `kernel.exception` dispatch and the kernel consults the handler only when the dispatch produced no response, so a registered listener takes the handler's place entirely — and the decision was frozen at the end of Boot. An http process now makes that one decision where serving begins; a console process keeps making it at boot-end, so its dispatcher still exposes the listener set a serving process runs. Separately, the http wind-down no longer returns on its first failing phase: the serve result, the server shutdown and the request-scope drain each run, and each failing one contributes its cause.
+
+**Symptom.** An error handler wired between `Boot` and `Run` starts rendering, where it used to be accepted and never called. A shutdown whose serve or server-shutdown phase failed starts reporting the open request scopes as well, joined with the earlier cause; a run that failed for one reason alone reads exactly as it did.
+
+**Remedy.** None. An application that installed its handler before boot-end is unaffected; one that installed it later gets the behaviour its own wiring asked for. Code matching on the run error by string should read it with `errors.Is`, which traverses the join.
+
+### Http: the session-cookie cache guard keeps the rest of `Cache-Control`
+
+**What changed.** The guard that keeps a session-cookie response out of a shared cache reads every `Cache-Control` field line rather than the first, and splits the directive list outside quoted sections rather than on a bare comma.
+
+**Symptom.** A response that carried `Cache-Control` on more than one field line keeps the directives on the lines behind the first, which used to be deleted; a directive carrying a quoted field-name list keeps every name in it, where a name spelled like a directive used to be dropped out of the middle of the list.
+
+**Remedy.** None.
+
+### HTTP: a request path padded with whitespace is refused with 400
+
+**What changed.** The kernel refuses, with `400`, a request path that leading or trailing whitespace would be trimmed from — the decoded form of `/public%20`, `/public%09` or `/public%C2%A0` — and a path that begins with whitespace, which a handler mounted in front of the kernel that rewrites the path (the standard library's `StripPrefix` on `/api%20/public`) can hand it, after the route is matched and before it is authorized or handled, the way it refuses a path carrying `..`, `.` or `//`. The router keeps the whitespace, so `/public%20` reached a catch-all handler as its own spelling, while the access-control matcher trims it and authorized the request under the rule of `/public`: an exact `PUBLIC_ACCESS` rule beside a protected catch-all handler served the protected handler to an anonymous client. Whitespace inside the path (`/a%20b`) is read alike by every consumer and still routes.
+
+**Symptom.** A client that sends a path ending, or beginning after a stripped prefix, in an encoded space, tab or no-break space is answered `400 bad request` where the request was previously routed to a handler.
+
+**Remedy.** Send the path without the padding; nothing legitimate names a resource by a trailing space. There is no opt-out: the previous behaviour let a request reach a handler under an authorization decision made for a different path, which is the defect the refusal closes.
+
+
+### HTTP: a request path carrying an encoded separator is refused with 400
+
+**What changed.** The kernel refuses, with `400`, a request whose path as the client spelled it carries an encoded `/` — `%2F` or `%2f` — after the route is matched and before it is authorized or handled, whatever else the raw spelling carries beside it. net/http decodes the escape into a separator before the kernel reads the path, so `/admin%2Fusers`, which a proxy or a WAF rule written against the raw request line reads as one segment, reached the `/admin/users` handler. Every consumer of the path inside the framework still reads the one decoded path; a literal `%2F` a segment carries once decoded (`%252F`) and `%2F` in the query string are served as before.
+
+**Symptom.** A client that sends a path with an encoded slash is answered `400 bad request` where the request was previously routed to the handler of the decoded path.
+
+**Remedy.** Send the separator unencoded, or carry a value that contains a `/` in the query string. A route that must bind a segment containing a `/` is a v3 capability: the v3 router matches the path as the client spelled it. There is no opt-out: the previous behaviour served a handler to a request a rule in front of the application had judged as a different path, which is the defect the refusal closes.
+
+### Exception: the error types answer a nil receiver
+
+**What changed.** `Error.Unwrap`, `HttpException.Unwrap` and `ExitError.Unwrap` answer nil on a nil receiver; `Error.Error`, `HttpException.Error` and `ExitError.Error` answer a placeholder message (`error carries no value`, `http exception carries no value`, `exit error carries no error value`); and every other accessor of `Error` and `HttpException` answers a nil receiver the way every accessor of `ExitError` does, where each of them dereferenced it. The typed nil that `FromError(nil)` answers is the natural shape of such a receiver once it is stored as another error's cause or held in an `errors.Join`, and `errors.Is`, `errors.As` and `AsHttpException` walk into it.
+
+**Symptom.** A chain carrying a typed-nil link renders the placeholder and is walked past, where it panicked — on the request path, from inside the kernel's recovery.
+
+**Remedy.** None. A caller that stored `FromError(nil)` as a cause keeps a link that says it carries no value; guarding the call is still the cleaner form.
+
 Every entry below is the consequence of fixing a defect, not a preference: each one describes behaviour that was wrong, and the changelog entry for it names the failure it produced. The release train's two data-loss fixes are in the v3-only `awss3` object storage integration and are recorded in [`v3/.documentation/UPGRADE.md`](../../v3/.documentation/UPGRADE.md).
 
-This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
+Every section below shipped in the `[v2.13.0]` block of [`CHANGELOG.md`](../CHANGELOG.md), released as a MINOR. The heading stays `Unreleased` because this guide promotes at a MAJOR boundary, the way [`v3/.documentation/UPGRADE.md`](../../v3/.documentation/UPGRADE.md) carries `v3.0.0`; the entries that have landed since are patch-level defect and security fixes, listed above: the two path refusals ask a client that sends such a path to change it, and the rest ask for no action.
+
+### Logging: the json timestamp is fixed width and rendered in UTC
+
+**What changed.** The `time` field of a json record was formatted with `time.RFC3339Nano`, which trims trailing zeros from the fractional second, and with the instant in the process's own zone. It is now formatted with the nanosecond field written to its full width and the instant put in UTC first.
+
+**Symptom.** The fractional part is always exactly nine digits, and the stamp always ends in `Z` rather than carrying a local offset. The value is the same instant, and it parses under the RFC 3339 layouts a consumer already uses. What it fixes is the ordering the stamp exists for: the stamp is taken under the write mutex so that the order of the stamps is the order of the writes, but a trimmed fraction made the field variable width, so a record landing on a whole second rendered shorter and sorted, as text, after every fractional record of the same second — `.` is `0x2E` and `Z` is `0x5A`. Rendering in UTC closes the same hole for a process whose zone offset moves.
+
+**Remedy.** None for a consumer that parses the field. A test comparing the stamp to a locally-formatted instant by string equality reads UTC instead, and one that asserted a trimmed fraction compares a prefix.
 
 ### Bunorm: the registry refuses new callers while a pool is still closing
 
@@ -48,7 +97,7 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 **Symptom.** A rule declared with `NewAccessControlRule` matches fewer paths than before: a request whose path only shares the prefix text (`/administrator` under a `/admin` rule) is no longer governed by that rule. Where the rule protected such a path and no other rule covers it, the request is now decided by whatever rule does match — a catch-all, or none — which for a protect rule can mean the path is reached under a weaker decision. An empty prefix, previously a catch-all, now refuses at construction.
 
-**Remedy.** A rule that genuinely needs the cross-segment reach — one deliberately governing every path beginning with the text — moves to `NewAccessControlRawPrefixRule` and keeps its old behaviour exactly. A rule that meant a path segment (the common case) needs no change beyond the stricter, intended matching. An empty-prefix catch-all becomes an explicit `"/"` prefix or `NewAccessControlRawPrefixRule("")`. Audit every `NewAccessControlRule` call whose prefix is a bare mount an attacker could extend (`/admin`, `/internal`): under the old raw rule these governed sibling paths by accident, and the bounded rule is what most such rules always meant.
+**Remedy.** A rule that genuinely needs the cross-segment reach — one deliberately governing every path beginning with the text — moves to `NewAccessControlRawPrefixRule` and keeps its old behaviour exactly, unless it carries `PUBLIC_ACCESS`, which a raw prefix rule refuses at construction: such a rule stays segment-bounded, or becomes an exact or regex rule. A rule that meant a path segment (the common case) needs no change beyond the stricter, intended matching. An empty-prefix catch-all becomes an explicit `"/"` prefix or, when it does not grant `PUBLIC_ACCESS`, `NewAccessControlRawPrefixRule("")`. Audit every `NewAccessControlRule` call whose prefix is a bare mount an attacker could extend (`/admin`, `/internal`): under the old raw rule these governed sibling paths by accident, and the bounded rule is what most such rules always meant.
 
 ### Bunorm mysql: the provider negotiates verified TLS by default
 
@@ -60,7 +109,7 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 ### HTTP: a request path that folds to a different spelling is refused with 400
 
-**What changed.** The kernel now refuses, with `400`, a request whose path is not canonical — one carrying a `..` or `.` segment, or an empty `//` segment — before it is routed or authorized. A trailing slash is not a fold and still routes as before (`/admin/` reaches the `/admin` route). The router matched the path as sent while the access-control matcher folds it, so a request routed to a protected handler under one spelling could be authorized against the folded spelling's rule: `GET /admin/x/../../login` reached a catch-all `/admin` handler while `/login`'s public rule granted it. The refusal closes that by keeping the router, the firewall matchers and the access control reading one spelling.
+**What changed.** The kernel now refuses, with `400`, a request whose path is not canonical — one carrying a `..` or `.` segment, or an empty `//` segment — after the route is matched and before it is authorized or handled. A trailing slash is not a fold and still routes as before (`/admin/` reaches the `/admin` route). The router matched the path as sent while the access-control matcher folds it, so a request routed to a protected handler under one spelling could be authorized against the folded spelling's rule: `GET /admin/x/../../login` reached a catch-all `/admin` handler while `/login`'s public rule granted it. The refusal closes that by keeping the router, the firewall matchers and the access control reading one spelling.
 
 **Symptom.** A client — typically a non-browser one, since browsers fold before sending — that sends a path containing `..`, `.` or `//` is answered `400 bad request` where the request was previously routed to a handler.
 
@@ -388,11 +437,11 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 ### Httpclient: two spellings of one header are refused
 
-**What changed.** Client-config and request-option header maps are canonicalized, and a map carrying two spellings that collapse onto one header — `x-api-key` beside `X-Api-Key` — is refused with a named panic at construction.
+**What changed.** Client-config and request-option header maps are canonicalized, and a map carrying two spellings that collapse onto one header — `x-api-key` beside `X-Api-Key` — is refused with a named panic at construction. `RequestOptions.Headers()` and `Query()` hand out copies. (A later patch refines the request-time half: a colliding map handed to `SetHeaders` — through `WithHeaders` — no longer panics on the request path; it writes nothing and the request fails with `request option refused`, naming the index of the option and the collision.)
 
-**Symptom.** A configuration that carried both spellings — and was silently sending a per-request coin flip of the two values until now — fails at the constructor naming the collision.
+**Symptom.** A configuration that carried both spellings — and was silently sending a per-request coin flip of the two values until now — fails at the constructor naming the collision. A request built with such a map fails instead of being sent. Code that wrote into the map returned by `Headers()` or `Query()` no longer reaches the option set.
 
-**Remedy.** Keep one spelling. Sequential `SetHeader` calls stay legal and last-write-wins on the canonical key.
+**Remedy.** Keep one spelling. Sequential `SetHeader` calls stay legal and last-write-wins on the canonical key. Code that mutated the getters' maps moves to `SetHeader`/`SetQuery`, the doors that write.
 
 ### Http: an out-of-range response status code answers 500
 
@@ -486,7 +535,7 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 **What changed.** `EntryConfig.DestinationFile` joins `Command` and `Instances` in `NewRunnerCommand`'s construction refusal: an entry routed to another crontab addresses an external scheduler, and accepted by the runner as well it executed twice whenever the generated manifests were live.
 
-**Symptom.** A boot that used to succeed panics with `cron: the in-process runner supports only name-scheduled single-instance entries; the entry routes to another crontab file`.
+**Symptom.** A boot that used to succeed panics with a message that opens with `cron: the in-process runner supports only name-scheduled single-instance entries; the entry routes to another crontab file`.
 
 **Remedy.** Keep the routed entry out of the runner's `Configuration` (schedule it only for the generator), or drop its `DestinationFile` if in-process execution is the intent.
 
@@ -698,11 +747,11 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 **Remedy.** None; log-volume alerts keyed on error records may need the new entries accounted for.
 
-### Http/Bag: request values are delivered, and a repeated key read as one string is refused
+### Http/Bag: request values are delivered, and a repeated key read as one string answers its first value
 
-**What changed.** The request bags keep the single and the repeated key apart by type: a query or form key that appeared once is stored as the string it is, a genuinely repeated key (`?a=1&a=2`) stays a string slice. `Request.Input` and the lax accessors (`bag.String`, `bag.StringOrDefault`, `bag.HasNonEmptyString`) deliver the single value they used to silently lose — every value was stored as a slice and the lax accessor answered the empty string for it, so `Input("term")` on `?term=melody` returned `""` with nothing said. Reading a repeated key as one string now panics, naming the key and pointing to `bag.StringSlice`/`bag.StringAt` — never an empty-string guess, never the first element silently hiding the rest.
+**What changed.** The request bags keep the single and the repeated key apart by type: a query or form key that appeared once is stored as the string it is, a genuinely repeated key (`?a=1&a=2`) stays a string slice. `Request.Input` and the lax accessors (`bag.String`, `bag.StringOrDefault`, `bag.HasNonEmptyString`) deliver the single value they used to silently lose — every value was stored as a slice and the lax accessor answered the empty string for it, so `Input("term")` on `?term=melody` returned `""` with nothing said. Reading a repeated key as one string answers its first value, the way `url.Values.Get` does (the release refused it with a panic naming the key; the first patch after it answers the first value instead, because the panic reached every documented read through `bag.StringOrDefault` and `bag.HasNonEmptyString` and turned one duplicated query key into a 500 an unauthenticated client could raise). The whole list is read with `bag.StringSlice`/`bag.StringAt`.
 
-**Symptom.** Handlers reading `Input`/`StringOrDefault` start receiving the values clients always sent. A request that repeats a key read as a single string answers 500 through the kernel's recovery instead of an empty field.
+**Symptom.** Handlers reading `Input`/`StringOrDefault` start receiving the values clients always sent. A request that repeats a key read as a single string answers the first value instead of an empty field.
 
 **Remedy.** None for the ordinary handler — this is the behaviour everyone assumed. Code that genuinely reads multi-value keys uses `bag.StringSlice` (the `all()` analogue), or `bag.StringStrict` for an explicit error.
 
@@ -718,7 +767,7 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 **What changed.** Three constructs that survived as literal text now fail the boot with a named error: an `%env(...)%` whose closing `)%` is malformed or missing (`%env(A))%`, `postgres://user:%env(DB_PASS)@db` with the forgotten percent), a `%name` reference a percent opened and nothing closed (`%app-name%`), and — in `.env` values — a braced `${...}` reference whose name breaks the key grammar (`${DB-PASS}`). Each used to keep its literal spelling in the resolved value, so the application connected with `%env(DB_PASS)` as its password and nothing said so. A literal percent is written doubled (`pa%%ss`), a literal dollar as `\$` — both already documented; the bare-dollar grammar (`pa$sword`, `$1.50`) is untouched.
 
-**Symptom.** A boot that used to come up with placeholder text in a value now fails at the line naming the parameter (content is redacted where it may hold a credential).
+**Symptom.** A boot that used to come up with placeholder text in a value now fails at the line naming the parameter (content is redacted where it may hold a credential — and, since the patch that followed this release, the name-shaped run of an unclosed reference and the tail of an unterminated `%env(` are never carried at all, the refusal naming the byte offset of the percent instead: `Pa%SSword1` put `%SSword1` in the boot record).
 
 **Remedy.** Fix the placeholder, or escape the literal percent/dollar as documented.
 
@@ -726,7 +775,7 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 **What changed.** Two divergences from godotenv's own reading are gone. The trailing-comment cut now happens once, by godotenv's countback — the value ends at the LAST whitespace-preceded `#` — where the preprocessor's own first-`#` cut read `GREETING=hello # world # x` as `hello` instead of godotenv's `hello # world`. And the preprocessor walks bytes instead of runes, so a `.env` saved in a non-UTF-8 encoding keeps its bytes exactly — a Latin-1 password was silently re-encoded through U+FFFD and the credential sent to the database differed from the one in the file.
 
-**Symptom.** Values with multiple hash marks or non-UTF-8 bytes read as godotenv alone would read them.
+**Symptom.** Values with multiple hash marks or non-UTF-8 bytes read as godotenv alone would read them. (Since the patch that followed this release, a value that is EMPTY before a trailing comment — `APP_SECRET= # fill this in` — reads as the empty string: the countback skips index zero, so this release loaded the comment as the value and read a `$WORD` inside it as a reference; `KEY=#glued` stays data.)
 
 **Remedy.** None for UTF-8 files with single comments — the overwhelming case is byte-identical.
 
@@ -1056,7 +1105,10 @@ func (instance *TestScope) MustRegisterScoped(
 	provider any,
 	options ...containercontract.RegisterOption,
 ) {
-	exception.Panic(exception.FromError(instance.RegisterScoped(serviceName, provider, options...)))
+	registerErr := instance.RegisterScoped(serviceName, provider, options...)
+	if nil != registerErr {
+		exception.Panic(exception.FromError(registerErr))
+	}
 }
 ```
 
@@ -1100,7 +1152,7 @@ func (instance *CustomSessionManager) RegenerateSession(
 }
 ```
 
-The framework's own `Session` is latched out of use rather than merely cleared, because `Session.Set` lifts the cleared flag and a caller that rotated and then kept writing to the original object would otherwise have the response path re-create the just-deleted id and re-issue it as the cookie. That latch is unexported and no contract method was added for it, so an out-of-tree `Session` implementation is only `Clear()`ed — which a later write still undoes. An application that supplies its own `Session` must therefore not write to the object it rotated away.
+The rotated-away `Session` is cleared, and the framework's own `Clear` latches: a caller that rotated and then kept writing to the original object cannot make it live again, so the response path cannot re-create the just-deleted id and re-issue it as the cookie. An out-of-tree `Session` implementation is cleared through its own `Clear()`, which latches only if that implementation makes it; an application whose `Session` does not latch must therefore not write to the object it rotated away.
 
 See [Versioning policy for breaking changes](#versioning-policy-for-breaking-changes) for why an added contract method ships as a MINOR, and [`package/SESSION.md`](./package/SESSION.md) for what a rotation has to guarantee.
 
@@ -1220,7 +1272,7 @@ func (instance *ExampleHttpMiddlewareModule) RegisterHttpMiddlewares(
 }
 ```
 
-`before`/`after` edges live on [`pipeline.NewHttpMiddlewareDefinition`](../http/middleware/pipeline/definition.go) for a pipeline assembled directly through [`pipeline.NewBuilder`](../http/middleware/pipeline/builder.go); the module registrar exposes priority. [`(*HttpMiddleware).LastBuildReport`](../application/http_middleware.go) reports the order that was built, and `debug:middleware` renders it.
+`before`/`after` edges live on [`pipeline.NewHttpMiddlewareDefinition`](../http/middleware/pipeline/definition.go) for a pipeline assembled directly through [`pipeline.NewBuilder`](../http/middleware/pipeline/builder.go); the module registrar exposes priority. [`(*HttpMiddleware).LastBuildReport`](../application/http_middleware.go) reports the order a serving process actually built; `debug:middleware` lists the pipeline through its own description pass, leaving that report alone.
 
 ### Validation: a nil pointer embed is validated as "nothing was supplied"
 
@@ -1320,7 +1372,7 @@ func (instance *ExampleHttpMiddlewareModule) RegisterHttpMiddlewares(
 
 ### Application: the kernel's default listeners register at the end of `Boot`
 
-**What changed.** The profiler (debug mode), the response normalizer, the terminate access log and the exception listener (when no error handler was installed by boot) register at the end of `Boot` in every process shape, not inside the http run. They are inert where no kernel event is dispatched, and `debug:events` now shows them in a console process.
+**What changed.** The profiler (debug mode), the response normalizer, the terminate access log and the exception listener (when no error handler was installed) register at the end of `Boot` in every process shape, not inside the http run — except that an http process decides the exception listener where serving begins, so a handler installed between `Boot` and `Run` is the one consulted (see the `Unreleased` entry on the error handler above). They are inert where no kernel event is dispatched, and `debug:events` now shows them in a console process.
 
 **Symptom.** A kernel event dispatched between boot and the http run — or from a console process — now reaches the default listeners; `debug:events` output grew the kernel listeners it used to miss.
 

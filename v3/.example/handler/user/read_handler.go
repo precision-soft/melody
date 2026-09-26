@@ -6,48 +6,11 @@ import (
 
     "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/presenter"
-    "github.com/precision-soft/melody/v3/.example/security"
     "github.com/precision-soft/melody/v3/.example/service"
-    melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v3/security"
-    melodysessioncontract "github.com/precision-soft/melody/v3/session/contract"
 )
-
-func ReadCurrentHandler() melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        userId := ""
-        roles := []string{}
-
-        sessionInstance := getSession(request)
-        if nil != sessionInstance {
-            userIdValue, ok := getStringFromSession(sessionInstance, security.SessionKeySecurityUserId)
-            if true == ok {
-                userId = userIdValue
-            }
-
-            rolesValue, ok := getStringSliceFromSession(sessionInstance, security.SessionKeySecurityRoles)
-            if true == ok {
-                roles = rolesValue
-            }
-        }
-
-        if "" == userId {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusUnauthorized, "unauthenticated"), nil
-        }
-
-        return presenter.ApiSuccess(
-            runtimeInstance,
-            request,
-            nethttp.StatusOK,
-            userCurrentResponse{
-                UserId: userId,
-                Roles:  roles,
-            },
-        ), nil
-    }
-}
 
 func ApiReadAllHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
@@ -117,8 +80,10 @@ func ApiReadHandler() melodyhttpcontract.Handler {
     }
 }
 
+/* normalizeRoles answers the roles in the order given, deduplicated. The order matters: the repository stores the list comma-joined, and the audit trail compares stored values, so a reordered set would record a change nobody asked for. */
 func normalizeRoles(roles []string) []string {
-    unique := map[string]struct{}{}
+    seen := map[string]struct{}{}
+    result := make([]string, 0, len(roles))
 
     for _, role := range roles {
         normalized := strings.TrimSpace(role)
@@ -126,12 +91,12 @@ func normalizeRoles(roles []string) []string {
             continue
         }
 
-        unique[normalized] = struct{}{}
-    }
+        if _, exists := seen[normalized]; true == exists {
+            continue
+        }
 
-    result := make([]string, 0, len(unique))
-    for role := range unique {
-        result = append(result, role)
+        seen[normalized] = struct{}{}
+        result = append(result, normalized)
     }
 
     if 0 == len(result) {
@@ -141,55 +106,30 @@ func normalizeRoles(roles []string) []string {
     return result
 }
 
-func getSession(request melodyhttpcontract.Request) melodysessioncontract.Session {
-    if nil == request {
-        return nil
+/* roleOutsideTheVocabulary answers the first role the application does not know, trimmed: the voter compares spellings exactly, so an unknown spelling would be stored and grant nothing. */
+func roleOutsideTheVocabulary(roles []string) (string, bool) {
+    for _, role := range roles {
+        normalized := strings.TrimSpace(role)
+        if "" == normalized {
+            continue
+        }
+
+        if false == entity.IsKnownRole(normalized) {
+            return normalized, true
+        }
     }
 
-    attributes := request.Attributes()
-    if nil == attributes {
-        return nil
-    }
-
-    value, exists := attributes.Get(melodyhttp.RequestAttributeSession)
-    if false == exists {
-        return nil
-    }
-
-    sessionInstance, ok := value.(melodysessioncontract.Session)
-    if false == ok {
-        return nil
-    }
-
-    return sessionInstance
+    return "", false
 }
 
-func getStringFromSession(sessionInstance melodysessioncontract.Session, key string) (string, bool) {
-    if false == sessionInstance.Has(key) {
-        return "", false
+/* roleContainingComma reports the first role carrying a comma: the repository stores the list comma-joined, so such a role would come back as several roles, possibly one nobody granted. */
+func roleContainingComma(roles []string) (string, bool) {
+    for _, role := range roles {
+        if true == strings.Contains(role, ",") {
+            return role, true
+        }
     }
 
-    value := sessionInstance.Get(key)
-
-    typed, ok := value.(string)
-    if false == ok {
-        return "", false
-    }
-
-    return typed, true
+    return "", false
 }
 
-func getStringSliceFromSession(sessionInstance melodysessioncontract.Session, key string) ([]string, bool) {
-    if false == sessionInstance.Has(key) {
-        return nil, false
-    }
-
-    value := sessionInstance.Get(key)
-
-    typed, ok := value.([]string)
-    if false == ok {
-        return nil, false
-    }
-
-    return typed, true
-}

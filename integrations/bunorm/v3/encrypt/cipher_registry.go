@@ -1,12 +1,13 @@
 package encrypt
 
 import (
+    "reflect"
     "sync"
 
     "github.com/precision-soft/melody/v3/exception"
 )
 
-/* CipherRef binds a column type to a named cipher through the type system: a zero-size marker type implements CipherName() and parameterizes EncryptedStringFor / EncryptedDeterministicStringFor, so the binding travels with the Go type — the only channel available, since database/sql gives Value() and Scan() no context. */
+/* CipherRef binds a column type to a named cipher through the type system: a zero-size marker type implementing CipherName parameterizes EncryptedStringFor and EncryptedDeterministicStringFor, since database/sql gives Value and Scan no context. */
 type CipherRef interface {
     CipherName() string
 }
@@ -22,7 +23,7 @@ func UseCipher(cipherInstance Cipher) {
     storeCipher(defaultCipherName, cipherInstance)
 }
 
-/* UseCipherNamed installs a named cipher — one key compartment — for columns bound through a CipherRef marker. Each named cipher owns its KeyProvider, so compartments stay isolated: the "crm" cipher can never decrypt a "billing" ciphertext, unlike merging every key into one provider where either context can read the other's rows. */
+/* UseCipherNamed installs a named cipher — one key compartment — for columns bound through a CipherRef marker. Each named cipher owns its KeyProvider, so compartments are isolated as long as each provider holds keys of its own: the name selects the registry entry and is not bound into the ciphertext, so two compartments holding the same key under the same id decrypt each other. Merging every key into one provider loses even that, since either context can read the other's rows. */
 func UseCipherNamed(name string, cipherInstance Cipher) {
     if "" == name {
         exception.Panic(exception.NewError("named cipher name is empty; use UseCipher for the default cipher", nil, nil))
@@ -31,7 +32,15 @@ func UseCipherNamed(name string, cipherInstance Cipher) {
     storeCipher(name, cipherInstance)
 }
 
+/* storeCipher installs, replaces or, for a bare nil, uninstalls a registry entry. A typed nil is a wiring error and is refused here, since cipherByName would hand it out and database/sql would dereference it at the first column write. */
 func storeCipher(name string, cipherInstance Cipher) {
+    if nil != cipherInstance {
+        reflected := reflect.ValueOf(cipherInstance)
+        if reflect.Pointer == reflected.Kind() && true == reflected.IsNil() {
+            exception.Panic(exception.NewError("cipher instance is a typed nil", map[string]any{"cipherName": name}, nil))
+        }
+    }
+
     cipherRegistryMutex.Lock()
     defer cipherRegistryMutex.Unlock()
 

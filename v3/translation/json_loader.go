@@ -44,7 +44,12 @@ func (instance *JsonDirectoryLoader) Load() ([]translationcontract.Catalog, erro
 
         domain, locale, ok := parseCatalogFileName(name)
         if false == ok {
-            continue
+            /* a hard error, not a skip: a file not named <domain>.<locale>.json is almost always a typo, and skipping it would leave Trans answering raw message ids with nothing pointing at the file */
+            return nil, exception.NewError(
+                "translation file name does not match <domain>.<locale>.json",
+                map[string]any{"file": name, "directory": instance.directory},
+                nil,
+            )
         }
 
         payload, fileErr := os.ReadFile(filepath.Join(instance.directory, name))

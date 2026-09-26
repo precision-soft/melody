@@ -3,11 +3,14 @@ package encrypt
 import (
     "database/sql/driver"
     "encoding/json"
+    "fmt"
     "log/slog"
 )
 
-/* EncryptedDeterministicStringFor is EncryptedDeterministicString bound to the named cipher selected by the CipherRef marker R — the searchable (equality-preserving) variant of EncryptedStringFor; see that type for the compartment semantics. */
+/* EncryptedDeterministicStringFor is EncryptedDeterministicString bound to the named cipher the CipherRef marker R selects; see EncryptedStringFor for the compartment semantics and EncryptedDeterministicString for what the plaintext-derived nonce reveals. */
 type EncryptedDeterministicStringFor[R CipherRef] string
+
+func (instance EncryptedDeterministicStringFor[R]) encryptedColumn() {}
 
 func (instance EncryptedDeterministicStringFor[R]) String() string {
     return redactedPlaceholder
@@ -18,12 +21,22 @@ func (instance EncryptedDeterministicStringFor[R]) GoString() string {
     return redactedPlaceholder
 }
 
+/* Format answers every verb that reaches it, the numeric ones included, with the redacted rendering; its limits are on EncryptedString.Format. */
+func (instance EncryptedDeterministicStringFor[R]) Format(state fmt.State, verb rune) {
+    _, _ = state.Write([]byte(redactedPlaceholder))
+}
+
 func (instance EncryptedDeterministicStringFor[R]) LogValue() slog.Value {
     return slog.StringValue(redactedPlaceholder)
 }
 
 func (instance EncryptedDeterministicStringFor[R]) MarshalJSON() ([]byte, error) {
     return json.Marshal(redactedPlaceholder)
+}
+
+/* UnmarshalJSON refuses the redaction placeholder MarshalJSON writes and decodes any other string, for the reason on EncryptedString.UnmarshalJSON. */
+func (instance *EncryptedDeterministicStringFor[R]) UnmarshalJSON(data []byte) error {
+    return unmarshalEncryptedJson(instance, data)
 }
 
 func (instance EncryptedDeterministicStringFor[R]) Value() (driver.Value, error) {

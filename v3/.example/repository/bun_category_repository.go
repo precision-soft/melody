@@ -11,7 +11,7 @@ import (
     "github.com/uptrace/bun"
 )
 
-/* categoryRow is the nomenclature as the database holds it; the domain entity stays free of storage concerns because it is cached through a gob serializer. */
+/* categoryRow is the nomenclature as the database holds it; the entity stays free of storage concerns because it is cached through a gob serializer. */
 type categoryRow struct {
     bun.BaseModel `bun:"table:melody_example_v3_category,alias:category"`
 
@@ -38,42 +38,16 @@ type bunCategoryRepository struct {
     database *bun.DB
 }
 
-/* EnsureSchema creates the table when it is absent and writes the opening nomenclature into it when it is empty. The seeding insert ignores duplicate keys because several example applications may reach an empty table at the same time, and losing that race is not a failure. */
-func (instance *bunCategoryRepository) EnsureSchema(ctx context.Context) error {
-    _, createErr := instance.database.
-        NewCreateTable().
-        Model((*categoryRow)(nil)).
-        IfNotExists().
-        Exec(ctx)
-    if nil != createErr {
-        return createErr
-    }
+func (instance *bunCategoryRepository) seedIfEmpty(ctx context.Context) error {
+    return seedIfEmptyRows(ctx, instance.database, func() []*categoryRow {
+        seedList := seedCategoryList()
+        rowList := make([]*categoryRow, 0, len(seedList))
+        for _, category := range seedList {
+            rowList = append(rowList, newCategoryRow(category))
+        }
 
-    count, countErr := instance.database.
-        NewSelect().
-        Model((*categoryRow)(nil)).
-        Count(ctx)
-    if nil != countErr {
-        return countErr
-    }
-
-    if 0 < count {
-        return nil
-    }
-
-    seedList := seedCategoryList()
-    rowList := make([]*categoryRow, 0, len(seedList))
-    for _, category := range seedList {
-        rowList = append(rowList, newCategoryRow(category))
-    }
-
-    _, insertErr := instance.database.
-        NewInsert().
-        Model(&rowList).
-        Ignore().
-        Exec(ctx)
-
-    return insertErr
+        return rowList
+    })
 }
 
 func (instance *bunCategoryRepository) All(ctx context.Context) ([]*entity.Category, error) {
@@ -109,7 +83,7 @@ func (instance *bunCategoryRepository) FindById(ctx context.Context, id string) 
     return row.toEntity(), true, nil
 }
 
-/* findRowById separates a row that is not there from a query that could not run: only sql.ErrNoRows is an answer, and every other failure is reported. */
+/* findRowById separates a row that is not there from a query that could not run: only sql.ErrNoRows is an answer. */
 func (instance *bunCategoryRepository) findRowById(ctx context.Context, id string) (*categoryRow, bool, error) {
     row := &categoryRow{}
 

@@ -100,6 +100,13 @@ const (
 )
 
 const (
+    ReportsPrefix = "/reports"
+
+    ReportsApiHistoryName    = "example.reports.api.history"
+    ReportsApiHistoryPattern = ReportsPrefix + "/api/history/"
+)
+
+const (
     AccessTokenPrefix = "/access-token"
 
     AccessTokenIssueName    = "example.access_token.issue"

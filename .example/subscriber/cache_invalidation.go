@@ -6,7 +6,7 @@ import (
     cachecontract "github.com/precision-soft/melody/cache/contract"
 )
 
-/* deleteCacheEntries drops every given key and only then answers, joining the failures: the listeners invalidate several entries per change, and an early return on the first failure used to skip the later deletes — the list entry above all — leaving a ttl-less cache serving a catalogue the database no longer holds. A blank key is skipped rather than refused, so a caller with an optional spelling (an empty normalized username) hands it over as it is. */
+/* deleteCacheEntries drops every given key and only then answers, joining the failures, so one failed delete never leaves the later entries, the list entry among them, serving a catalogue the database has dropped. A blank key is skipped, so a caller hands an optional spelling over as it is. */
 func deleteCacheEntries(cacheInstance cachecontract.Cache, keys ...string) error {
     failures := make([]error, 0)
 

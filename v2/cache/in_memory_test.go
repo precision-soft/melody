@@ -667,7 +667,7 @@ func (instance *cacheTestTicker) Channel() <-chan time.Time {
     return instance.channel
 }
 
-/* the Ticker contract forbids closing the channel on Stop — a consumer selecting on a stopped ticker's channel would spin on the zero value from a closed one — and demands idempotence; the previous close(instance.channel) survived only because the cleanup loop stops reading before Stop runs */
+/* the Ticker contract forbids closing the channel on Stop — a consumer selecting on a stopped ticker's channel would spin on the zero value from a closed one — and demands idempotence, so the double's Stop closes nothing */
 func (instance *cacheTestTicker) Stop() {}
 
 type cacheTestClock struct {

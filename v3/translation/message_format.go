@@ -72,14 +72,14 @@ func evaluateArgument(inner []rune, parameters map[string]any, locale string, po
     trimmedName := strings.TrimSpace(string(name))
 
     if false == hasType {
-        return stringifyParameter(parameters[trimmedName])
+        return stringifyArgument(trimmedName, parameters)
     }
 
     argType, style, hasStyle := splitFirstComma(remainder)
     trimmedType := strings.TrimSpace(string(argType))
 
     if false == hasStyle {
-        return stringifyParameter(parameters[trimmedName])
+        return stringifyArgument(trimmedName, parameters)
     }
 
     switch trimmedType {
@@ -88,14 +88,34 @@ func evaluateArgument(inner []rune, parameters map[string]any, locale string, po
     case "select":
         return evaluateSelect(trimmedName, style, parameters, locale, pound, inPlural, depth)
     default:
-        return stringifyParameter(parameters[trimmedName])
+        return stringifyArgument(trimmedName, parameters)
     }
 }
 
+/* stringifyArgument renders a plain placeholder, keeping an absent parameter visible as the placeholder itself, so a renamed parameter key cannot silently drop a value. A parameter present with a nil value renders empty. */
+func stringifyArgument(name string, parameters map[string]any) string {
+    value, exists := parameters[name]
+    if false == exists {
+        return absentParameterPlaceholder(name)
+    }
+
+    return stringifyParameter(value)
+}
+
+/* absentParameterPlaceholder is the one spelling of an absent parameter, shared by the plain placeholder and the plural and select arguments. */
+func absentParameterPlaceholder(name string) string {
+    return "{" + name + "}"
+}
+
 func evaluateSelect(name string, style []rune, parameters map[string]any, locale string, pound string, inPlural bool, depth int) string {
+    value, exists := parameters[name]
+    if false == exists {
+        return absentParameterPlaceholder(name)
+    }
+
     selectors := parseSelectors(style)
 
-    keyword := stringifyParameter(parameters[name])
+    keyword := stringifyParameter(value)
     block, found := selectors[keyword]
     if false == found {
         block, found = selectors["other"]
@@ -109,9 +129,14 @@ func evaluateSelect(name string, style []rune, parameters map[string]any, locale
 }
 
 func evaluatePlural(name string, style []rune, parameters map[string]any, locale string, depth int) string {
+    value, exists := parameters[name]
+    if false == exists {
+        return absentParameterPlaceholder(name)
+    }
+
     selectors := parseSelectors(style)
 
-    number, hasNumber := toFloat(parameters[name])
+    number, hasNumber := toFloat(value)
     if false == hasNumber {
         if block, found := selectors["other"]; true == found {
             return interpolate(block, parameters, locale, "", true, depth+1)

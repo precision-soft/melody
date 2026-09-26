@@ -53,9 +53,10 @@ func main() {
 }
 ```
 
-Run it, then call the endpoint (the HTTP server listens on `:8080` by default):
+An http process refuses to boot when its `.env` files contributed no key, since every built-in parameter has a development default, so the sample carries a one-line `.env` beside its `go.mod`. Run it, then call the endpoint (the HTTP server listens on `:8080` by default):
 
 ```bash
+echo 'MELODY_ENV=dev' > .env
 go run .
 curl http://localhost:8080/health
 # {"status":"ok"}
@@ -65,7 +66,7 @@ For a realistic, fully wired application — modules, services, security, sessio
 
 ## Project status
 
-v3 is the actively maintained version. All new features land on v3; v1 and v2 are feature-frozen and receive security and critical correctness fixes only. Within v3, APIs that need to change are first marked with a `/* Deprecated: ... */` doc comment and kept working, with a future v4 cut once enough breaking changes accumulate. See the repository [`README.md`](../README.md#versions--project-status) and [`CONTRIBUTING.md`](../CONTRIBUTING.md).
+v3 is the actively maintained version. All new features land on v3; v1 and v2 are feature-frozen and receive patch-level defect and security fixes through 2027-08-17 and 2027-09-08 respectively, eighteen months from the release of the major that replaced each. Within v3, APIs that need to change are first marked with a `/* Deprecated: ... */` doc comment and kept working, with the v4 cut slated for Q4 2026, where the accumulated deprecations are removed. See the repository [`README.md`](../README.md#versions--project-status) and [`CONTRIBUTING.md`](../CONTRIBUTING.md).
 
 ## Why Melody
 
@@ -146,10 +147,10 @@ These are intentionally independent so you can embed one family while keeping th
 
 ```bash
 # filesystem env (default)
-go build -o app ./...
+go build -o app .
 
 # embedded env
-go build -tags melody_env_embedded -o app ./...
+go build -tags melody_env_embedded -o app .
 ```
 
 ---
@@ -172,10 +173,10 @@ go build -tags melody_env_embedded -o app ./...
 
 ```bash
 # filesystem static (default)
-go build -o app ./...
+go build -o app .
 
 # embedded static assets
-go build -tags melody_static_embedded -o app ./...
+go build -tags melody_static_embedded -o app .
 ```
 
 ---
@@ -185,7 +186,7 @@ go build -tags melody_static_embedded -o app ./...
 You can combine the tags to embed both families:
 
 ```bash
-go build -tags "melody_env_embedded melody_static_embedded" -o app ./...
+go build -tags "melody_env_embedded melody_static_embedded" -o app .
 ```
 
 For a complete example that shows the same build-tag matrix applied end-to-end in a userland application, see [`.example/README.md`](./.example/README.md).
@@ -228,7 +229,7 @@ Each package below links to its source folder and its package documentation.
   Dependency injection container, scopes, service factories, and lifecycle.
 
 * **DEBUG** — [code](./debug/) | [docs](.documentation/package/DEBUG.md)  
-  Built-in CLI debug commands (container, events, router, middleware, parameters, versions).
+  Built-in CLI debug commands (container, events, router, middleware, parameters, version).
 
 * **EVENT** — [code](./event/) | [docs](.documentation/package/EVENT.md)  
   Deterministic event dispatching and subscriber/listener contracts.

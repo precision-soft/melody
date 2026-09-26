@@ -446,9 +446,7 @@ func TestSecurityResolutionListener_WhenTokenSourceReturnsNilToken_SetsAnonymous
     }
 }
 
-/* The token source is the application's, so a nil pointer of its own token type reaches the listener as a
-non-nil interface: taken for a live token it is published into the security context, and the first voter to
-call Roles on it panics on the request path. */
+/* The token source is the application's, so a nil pointer of its own token type reaches the listener as a non-nil interface: taken for a live token it is published into the security context, and the first voter to call Roles on it panics on the request path. */
 func TestSecurityResolutionListener_WhenTokenSourceReturnsATypedNilToken_SetsAnonymousToken(t *testing.T) {
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()

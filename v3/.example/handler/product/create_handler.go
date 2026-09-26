@@ -46,18 +46,21 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
     }
 }
 
+/* apiJsonErrorResponder answers through ApiRefusal, so a validation failure is rendered field by field and any other refusal keeps its generic message with the decoder's diagnosis in the debug-gated context. It returns the response: a responder that answers nothing leaves the framework's own refusal standing. */
 func apiJsonErrorResponder(
     runtimeInstance melodyruntimecontract.Runtime,
     request melodyhttpcontract.Request,
     status int,
     message string,
+    cause error,
 ) (melodyhttpcontract.Response, error) {
-    return presenter.ApiError(runtimeInstance, request, status, message), nil
+    return presenter.ApiRefusal(runtimeInstance, request, status, message, cause), nil
 }
 
-/* @important bound by the openapi descriptor in config; keep it exported */
+/* bound by the openapi descriptor in config; keep it exported */
 type CreateRequest struct {
-    Id          string  `json:"id" validate:"max=60"`
+    /* the id becomes a cache key component, whose grammar refuses spaces and newlines, so such a spelling is turned away here. The pattern reaches the published document as an OpenAPI 3.0 pattern facet (ECMA-262, no POSIX class), so \S is written. */
+    Id          string  `json:"id" validate:"max=60,regex=^\\S+$"`
     Name        string  `json:"name" validate:"notBlank,min=2,max=120"`
     Description string  `json:"description" validate:"notBlank,min=1,max=40"`
     CategoryId  string  `json:"categoryId" validate:"notBlank"`

@@ -9,13 +9,15 @@ import (
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     "github.com/precision-soft/melody/v3/http/static"
+    "github.com/precision-soft/melody/v3/internal"
 )
 
 func newStaticFileServerOptions(
     embeddedPublicFiles fs.FS,
     configuration configcontract.Configuration,
 ) *static.Options {
-    if nil == embeddedPublicFiles {
+    /* read through the interface: a typed-nil fs.FS passes the plain comparison and would die later inside fs.Stat instead of in this refusal that names the argument */
+    if true == internal.IsNilInterface(embeddedPublicFiles) {
         exception.Panic(
             exception.NewError(
                 "embedded public files are not provided",

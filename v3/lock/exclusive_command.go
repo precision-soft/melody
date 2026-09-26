@@ -53,7 +53,7 @@ func NewExclusiveCommandWithName(
     }
 }
 
-/* ExclusiveCommand decorates a cli command with RunExclusive, the per-tick dedup for cron-launched commands on a multi-instance deployment: the ttl is crash-safety only (the lease is refreshed while the command runs and released as soon as it returns), so it never has to be tuned against the cron interval or the command duration. */
+/* ExclusiveCommand decorates a cli command with RunExclusive, the per-tick dedup for cron-launched commands on a multi-instance deployment. The ttl is crash-safety only, since the lease is refreshed while the command runs and released when it returns, so it is never tuned against the cron interval. */
 type ExclusiveCommand struct {
     command  clicontract.Command
     locker   lockcontract.Locker
@@ -75,7 +75,7 @@ func (instance *ExclusiveCommand) Flags() []clicontract.Flag {
 
 func (instance *ExclusiveCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
 ) error {
     ran, runErr := RunExclusive(
         runtimeInstance,
@@ -91,11 +91,16 @@ func (instance *ExclusiveCommand) Run(
     }
 
     if false == ran {
-        /* another instance holds the lock for this tick; exit zero so cron stays green everywhere */
         logger := logging.LoggerFromRuntime(runtimeInstance)
-        if nil != logger {
+        if false == internal.IsNilInterface(logger) {
+            /* RunExclusive answers (false, nil) both for a lock held elsewhere and for a shutdown during the acquire, and this log line is the one record of "did not run", so the two get distinct messages */
+            skipMessage := "command skipped: an exclusive run is already in progress on another instance"
+            if nil != runtimeInstance.Context().Err() {
+                skipMessage = "command skipped: shutdown was requested before the lock was acquired"
+            }
+
             logger.Info(
-                "command skipped: an exclusive run is already in progress on another instance",
+                skipMessage,
                 loggingcontract.Context{
                     "command": instance.command.Name(),
                     "lock":    instance.lockName,

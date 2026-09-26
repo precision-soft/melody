@@ -8,7 +8,23 @@ import (
     containercontract "github.com/precision-soft/melody/v3/container/contract"
 )
 
-/* the scoped node keys carry their own prefix so the two levels never share one. The resolution stack detects a cycle by node key, and a scoped service that resolves the container service it replaces must be reported as repeating the scoped node rather than the container one; the container's teardown walks its own dependency graph by the same keys and must never find a node standing for a value it does not hold. */
+/* containerNameNodeKeyPrefix is the one spelling of a container name node's key, so a declared edge and a created node always meet. */
+const containerNameNodeKeyPrefix = "service:"
+
+/* containerNameNodeKey is the key of a container service in the resolution stack, the creation order and the teardown graph. */
+func containerNameNodeKey(serviceName string) string {
+    return containerNameNodeKeyPrefix + serviceName
+}
+
+/* containerTypeNodeKeyPrefix is the one spelling of a container type node's key. */
+const containerTypeNodeKeyPrefix = "type:"
+
+/* containerTypeNodeKey is the key of a container service under its type, canonicalised first since T and *T are one type. */
+func containerTypeNodeKey(targetType reflect.Type) string {
+    return containerTypeNodeKeyPrefix + typeIdentityKey(canonicalServiceType(targetType))
+}
+
+/* scoped node keys carry their own prefix so the two levels never share a key, in the cycle detection or in the teardown graph */
 func scopedNameNodeKey(serviceName string) string {
     return "scope:service:" + serviceName
 }
@@ -17,7 +33,7 @@ func scopedTypeNodeKey(typeKey string) string {
     return "scope:type:" + typeKey
 }
 
-/* scopedProviderCreateFunc runs a scoped provider and names it for the failure reports, exactly as the container path names its own. */
+/* scopedProviderCreateFunc runs a scoped provider and names it for the failure reports. */
 func scopedProviderCreateFunc(provider providerAny) createWithGuardCreateFunc {
     return func(resolver containercontract.Resolver) (any, error, *providerDebugInfo) {
         providerTypeString := reflect.TypeOf(provider).String()
@@ -40,9 +56,7 @@ func scopedProviderCreateFunc(provider providerAny) createWithGuardCreateFunc {
     }
 }
 
-/* scopedServiceByName builds — or hands back — a service this scope owns. Everything about it is the scope's: the provider comes from the scope, the creation guard that serialises concurrent resolutions is the scope's own map, and so is the map the finished value lands in. Two scopes resolving the same name therefore never meet — they contend on nothing, wait on nothing of each other's, and each ends up with the instance that belongs to its own request — while two goroutines of the SAME request still share one instance, because they share one guard.
-
-It runs under the container mutex like every other creation: that is the lock the guard holds and releases around the provider call, and container-then-scope is the only order the two locks are ever taken in. The scope is deliberately left visible for the duration, because a scoped service is the request and may read both levels. */
+/* scopedServiceByName builds or hands back a service this scope owns: the provider, the creation guard and the store are the scope's, so two scopes never meet while goroutines of one request share an instance. It runs under the container mutex, container before scope being the only lock order, with the scope visible. */
 func (instance *resolverContext) scopedServiceByName(
     scopeInstance *scope,
     serviceName string,
@@ -53,6 +67,7 @@ func (instance *resolverContext) scopedServiceByName(
         guardedCreation{
             requestedKey: instance.rootRequestedKey,
             creatingKey:  scopedNameNodeKey(serviceName),
+            ownerNodeKey: scopedNameNodeKey(serviceName),
             getCreatingState: func() (*creationState, bool) {
                 state, exists := scopeInstance.creatingByName[serviceName]
 
@@ -74,7 +89,7 @@ func (instance *resolverContext) scopedServiceByName(
             },
             create: scopedProviderCreateFunc(provider),
             store: instanceStore{
-                keep: func(value any) error {
+                keep: func(value any) (any, bool, error) {
                     return scopeInstance.storeCreatedInstance(serviceName, canonicalType, value)
                 },
             },
@@ -84,7 +99,7 @@ func (instance *resolverContext) scopedServiceByName(
     )
 }
 
-/* scopedServiceByType is scopedServiceByName's counterpart for a scoped registration reached only by its type, with no name to file it under. */
+/* scopedServiceByType is scopedServiceByName for a scoped registration reached only by type. */
 func (instance *resolverContext) scopedServiceByType(
     scopeInstance *scope,
     typeKey string,
@@ -95,6 +110,7 @@ func (instance *resolverContext) scopedServiceByType(
         guardedCreation{
             requestedKey: instance.rootRequestedKey,
             creatingKey:  scopedTypeNodeKey(typeKey),
+            ownerNodeKey: scopedTypeNodeKey(typeKey),
             getCreatingState: func() (*creationState, bool) {
                 state, exists := scopeInstance.creatingByType[typeKey]
 
@@ -116,7 +132,7 @@ func (instance *resolverContext) scopedServiceByType(
             },
             create: scopedProviderCreateFunc(provider),
             store: instanceStore{
-                keep: func(value any) error {
+                keep: func(value any) (any, bool, error) {
                     return scopeInstance.storeCreatedInstance("", canonicalType, value)
                 },
             },
@@ -126,7 +142,7 @@ func (instance *resolverContext) scopedServiceByType(
     )
 }
 
-/* registerScopedDependencyLocked records that one service the scope built depends on another, so the scope's teardown can close dependents before their dependencies. Only edges between two scoped nodes are kept: a container singleton reached from a scoped service is not the scope's to close, and the reverse edge cannot occur at all, since a container provider runs with the scope suspended. */
+/* registerScopedDependencyLocked records that one scoped service depends on another, so the scope closes dependents first; an edge to a container singleton is not the scope's to keep. */
 func registerScopedDependencyLocked(scopeInstance *scope, dependentKey string, dependencyKey string) {
     if "" == dependentKey || "" == dependencyKey {
         return

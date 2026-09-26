@@ -102,3 +102,31 @@ func TestKernel_DebugModeFalseOutsideDevelopment(t *testing.T) {
         t.Fatalf("expected debug mode to be false outside development")
     }
 }
+
+/* the five guards of the constructor are the framework's refusal to be assembled without a collaborator, and every one of them reads a value the composition root hands it: a *config.Configuration a caller left nil, a container a provider answered nil for, are values that are not nil as interfaces. The comparison against nil answered false, a kernel was built over them, and the refusal the operator was meant to read at wiring arrived instead as a bare nil dereference at the first request that asked the kernel for its environment. */
+func TestNewKernel_ATypedNilCollaboratorIsRefusedByName(t *testing.T) {
+    var absentConfiguration *config.Configuration
+
+    clockInstance := clock.NewSystemClock()
+    routeRegistry := http.NewRouteRegistry()
+
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatalf("expected the typed-nil configuration to be refused at construction")
+        }
+
+        recoveredErr, isErr := recovered.(error)
+        if false == isErr || "application configuration is required for new kernel" != recoveredErr.Error() {
+            t.Fatalf("expected the refusal to name the missing collaborator, got %v", recovered)
+        }
+    }()
+
+    NewKernel(
+        absentConfiguration,
+        container.NewContainer(),
+        http.NewRouterWithRouteRegistry(routeRegistry),
+        event.NewEventDispatcher(clockInstance),
+        clockInstance,
+    )
+}

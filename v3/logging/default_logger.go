@@ -5,6 +5,7 @@ import (
     "log"
     "sort"
 
+    "github.com/precision-soft/melody/v3/internal"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
@@ -13,7 +14,8 @@ func NewDefaultLogger() loggingcontract.Logger {
 }
 
 func NewDefaultLoggerWithLabels(labels loggingcontract.LevelLabels) loggingcontract.Logger {
-    return &defaultLogger{levelLabels: labels}
+    /* the labels are copied: the map is read lock-free on every Log call, so a caller mutating the map it still holds would be a fatal concurrent map access */
+    return &defaultLogger{levelLabels: copyLevelLabels(labels)}
 }
 
 type defaultLogger struct {
@@ -25,7 +27,13 @@ func (instance *defaultLogger) Log(level loggingcontract.Level, message string, 
         context = loggingcontract.Context{}
     }
 
-    log.Printf("[%s] %s %s", instance.levelLabels.LabelFor(level), message, instance.formatContext(context))
+    /* one record stays one line: the message and context embed request-derived text, and an unescaped line break would start a forged record at whatever level the payload names */
+    log.Printf(
+        "[%s] %s %s",
+        instance.levelLabels.LabelFor(level),
+        internal.EscapeControlCharacters(message),
+        internal.EscapeControlCharacters(instance.formatContext(context)),
+    )
 }
 
 func (instance *defaultLogger) Debug(message string, context loggingcontract.Context) {
@@ -61,7 +69,7 @@ func (instance *defaultLogger) formatContext(context loggingcontract.Context) st
 
     pairs := make([]string, 0, len(context))
     for _, key := range keys {
-        pairs = append(pairs, fmt.Sprintf("%s=%v", key, context[key]))
+        pairs = append(pairs, key+"="+renderTextValue(context[key]))
     }
 
     return fmt.Sprintf("{%s}", instance.joinPairs(pairs))

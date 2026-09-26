@@ -9,6 +9,9 @@ import (
 type ModuleConfig struct {
     Client rueidis.Client
     Prefix string
+
+    /* BackendOptions are handed to the registered backend as NewBackendService takes them. WithCommandTimeout is the one most compositions want: without it the context-less doors run unbounded, and a store that stops answering holds a request-path read. */
+    BackendOptions []BackendOption
 }
 
 func NewModule(config ModuleConfig) *Module {
@@ -32,7 +35,7 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
         return
     }
 
-    RegisterBackendService(registrar, instance.config.Client, instance.config.Prefix)
+    RegisterBackendServiceWithOptions(registrar, instance.config.Client, instance.config.Prefix, instance.config.BackendOptions...)
 }
 
 var (

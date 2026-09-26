@@ -18,8 +18,7 @@ type inMemoryUserRepository struct {
     users []*entity.User
 }
 
-/* the returned slice is a copy, but a shallow one: the entity pointers stay shared with the
-repository, so a caller that mutates an entity in place bypasses the lock */
+/* the slice is a shallow copy: the entity pointers stay shared with the repository, so a caller that mutates an entity in place bypasses the lock */
 func (instance *inMemoryUserRepository) All(ctx context.Context) ([]*entity.User, error) {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
@@ -43,6 +42,11 @@ func (instance *inMemoryUserRepository) Create(ctx context.Context, user *entity
 
     if "" == strings.TrimSpace(user.Id) {
         user.Id = nextUserId(instance.identifierListLocked())
+    }
+
+    /* an occupied id is refused, as in the sibling repositories, since a second row under it could be neither read nor removed by id */
+    if _, occupied := instance.findByIdLocked(user.Id); true == occupied {
+        return fmt.Errorf("id already exists")
     }
 
     instance.users = append(instance.users, user)

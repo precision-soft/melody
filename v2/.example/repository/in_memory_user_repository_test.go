@@ -95,3 +95,50 @@ func TestInMemoryUserRepositoryFindByUsernameIgnoresCase(t *testing.T) {
         t.Fatalf("expected the seeded admin, got %q", user.Username)
     }
 }
+
+/* an identifier that is already taken is refused, as the three sibling repositories refuse it in both implementations: appended as a SECOND row it would be unreachable, since FindById and DeleteById reach the first, and on the bun implementation the primary key would answer the driver's raw duplicate-key text through a 500 instead of this message. */
+func TestInMemoryUserRepositoryRefusesAnIdentifierThatIsAlreadyTaken(t *testing.T) {
+    ctx := context.Background()
+    repositoryInstance := NewInMemoryUserRepository()
+
+    first := entity.NewUser("user-90", "zz-first", "digest", []string{entity.RoleUser})
+    if createErr := repositoryInstance.Create(ctx, first); nil != createErr {
+        t.Fatalf("expected a free identifier to be accepted, got %v", createErr)
+    }
+
+    createErr := repositoryInstance.Create(ctx, entity.NewUser("user-90", "zz-second", "digest", []string{entity.RoleUser}))
+    if nil == createErr {
+        t.Fatalf("expected the occupied identifier to be refused")
+    }
+
+    if "id already exists" != createErr.Error() {
+        t.Fatalf("expected the refusal the sibling repositories answer, got %q", createErr.Error())
+    }
+
+    /* the assertion that separates a refusal from a message: nothing was stored under the identifier a
+       second time, so the reading and the deleting doors still reach exactly one account. */
+    all, allErr := repositoryInstance.All(ctx)
+    if nil != allErr {
+        t.Fatalf("all: %v", allErr)
+    }
+
+    carrying := 0
+    for _, user := range all {
+        if "user-90" == user.Id {
+            carrying++
+        }
+    }
+
+    if 1 != carrying {
+        t.Fatalf("expected one row to carry the identifier, found %d", carrying)
+    }
+
+    found, exists, findErr := repositoryInstance.FindById(ctx, "user-90")
+    if nil != findErr {
+        t.Fatalf("find by id: %v", findErr)
+    }
+
+    if false == exists || "zz-first" != found.Username {
+        t.Fatalf("expected the identifier to still name the account that took it, got exists=%t user=%v", exists, found)
+    }
+}

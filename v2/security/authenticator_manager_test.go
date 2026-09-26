@@ -149,7 +149,7 @@ func TestNewAuthenticatorManager_NilAuthenticatorPanics(t *testing.T) {
     )
 }
 
-/* a typed-nil authenticator passed the plain nil comparison and was called on the request path; the reflective guard moves the failure to the definition site */
+/* a typed-nil authenticator passes a plain nil comparison and would be called on the request path; the reflective guard moves the failure to the definition site */
 func TestNewAuthenticatorManager_TypedNilAuthenticatorPanics(t *testing.T) {
     var typedNilAuthenticator *ApiKeyHeaderAuthenticator
 
@@ -196,8 +196,7 @@ func TestNewAuthenticatorManager_CopiesTheCallersAuthenticators(t *testing.T) {
     }
 }
 
-/* The authenticator is the application's, and a nil pointer of its own token type is how "no user" gets
-written by hand; boxed in the contract it is not equal to nil. */
+/* The authenticator is the application's, and a nil pointer of its own token type is how "no user" gets written by hand; boxed in the contract it is not equal to nil. */
 func TestAuthenticatorManager_AuthenticateReadsATypedNilTokenAsAbsent(t *testing.T) {
     manager := NewAuthenticatorManager(
         &testAuthenticator{

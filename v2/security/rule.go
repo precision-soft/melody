@@ -44,7 +44,8 @@ func (instance *ApiKeyHeaderRule) Check(request httpcontract.Request) error {
         return nil
     }
 
-    if nil == request {
+    /* IsNilInterface: a custom matcher may claim a request the framework's matcher would refuse, and the header read below dereferences it */
+    if true == internal.IsNilInterface(request) {
         return exception.Forbidden("forbidden")
     }
 

@@ -50,6 +50,8 @@ Retrying is **opt-in**: without a `RetryConfig`, `Open` makes a single attempt.
 - [`Provider.OpenForMigration`](./provider.go) implements [`bunorm.MigrationProvider`](../provider.go) and opens the same database with the read and write deadlines lifted, the connect timeout still armed, over a pool of the two connections a sequential migration run needs and with no connection recycled mid-run.
 - [`Provider.OpenForMigrationContext`](./provider.go) implements [`bunorm.MigrationContextOpener`](../provider.go) — the migration open under the caller's context, the way `OpenContext` is `Open` under it.
 
+The host may be an IPv6 literal, bare (`::1`) or in brackets (`[::1]`), with the port configured separately: a bare literal is bracketed before the port is joined, a bracketed one is kept as written, and a scoped literal such as `fe80::1%eth0` is joined the same way without its zone changing.
+
 ## TLS
 
 Starting with `integrations/bunorm/pgsql v1.1.4` the provider is **secure-by-default**: `pgdriver` negotiates a verified TLS handshake on every Postgres connection. Earlier releases of this module called `pgdriver.WithInsecure(false)`, which — despite the name — negotiated TLS with `InsecureSkipVerify: true`, so the server certificate was never checked.

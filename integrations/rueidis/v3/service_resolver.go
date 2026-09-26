@@ -13,6 +13,7 @@ import (
 
 const (
     ServiceClient     = "service.rueidis.client"
+    ServiceConnection = "service.rueidis.connection"
     ServiceTokenStore = "service.rueidis.token_store"
 )
 
@@ -20,10 +21,29 @@ type ServiceRegistrar interface {
     RegisterService(serviceName string, provider any, options ...containercontract.RegisterOption)
 }
 
+/* RegisterConnectionService registers the Connection that owns the client, so the container's ordered teardown, which closes what answers Close() error and was resolved at least once, closes the client. Every client-backed provider in this package resolves the connection when it is registered, so a run that resolves a locker, a token store or the client closes the connection after them; a run that resolves none leaves it unclosed, as the messagebus transports do. */
+func RegisterConnectionService(registrar ServiceRegistrar, connection *Connection) {
+    registrar.RegisterService(
+        ServiceConnection,
+        func(resolver containercontract.Resolver) (*Connection, error) {
+            return connection, nil
+        },
+    )
+}
+
+/* resolveConnectionEdge records the consumer-to-connection dependency edge when a connection service is registered: resolving it through the resolver building the consumer orders the teardown, consumers first and the connection after. Without a registered connection the edge is skipped. */
+func resolveConnectionEdge(resolver containercontract.Resolver) {
+    if true == resolver.Has(ServiceConnection) {
+        container.MustFromResolver[*Connection](resolver, ServiceConnection)
+    }
+}
+
 func RegisterClientService(registrar ServiceRegistrar, client rueidis.Client) {
     registrar.RegisterService(
         ServiceClient,
         func(resolver containercontract.Resolver) (rueidis.Client, error) {
+            resolveConnectionEdge(resolver)
+
             return client, nil
         },
     )
@@ -38,10 +58,17 @@ func ClientMustFromContainer(serviceContainer containercontract.Container) rueid
 }
 
 func RegisterLockerService(registrar ServiceRegistrar, client rueidis.Client) {
+    RegisterLockerServiceWithOptions(registrar, client)
+}
+
+/* RegisterLockerServiceWithOptions is RegisterLockerService with the options the locker is built with — WithLockerCallTimeout above all; the option-less door registers the locker at its defaults, and ModuleConfig.LockerOptions hands the same options through the module. */
+func RegisterLockerServiceWithOptions(registrar ServiceRegistrar, client rueidis.Client, options ...LockerOption) {
     registrar.RegisterService(
         melodylock.ServiceLocker,
         func(resolver containercontract.Resolver) (lockcontract.Locker, error) {
-            return NewLocker(client), nil
+            resolveConnectionEdge(resolver)
+
+            return NewLockerWithOptions(client, options...), nil
         },
     )
 }
@@ -50,6 +77,8 @@ func RegisterTokenStoreService(registrar ServiceRegistrar, client rueidis.Client
     registrar.RegisterService(
         ServiceTokenStore,
         func(resolver containercontract.Resolver) (securitycontract.RevocableTokenStore, error) {
+            resolveConnectionEdge(resolver)
+
             resolvedOptions := make([]TokenStoreOption, 0, len(options)+1)
 
             if clockInstance, clockErr := container.FromResolver[clockcontract.Clock](resolver, melodyclock.ServiceClock); nil == clockErr {

@@ -4,8 +4,11 @@ import (
     "errors"
     "fmt"
     nethttp "net/http"
+    "strings"
     "sync"
     "testing"
+
+    exceptioncontract "github.com/precision-soft/melody/exception/contract"
 )
 
 func TestHttpException_ErrorIncludesCauseWhenPresent(t *testing.T) {
@@ -207,4 +210,51 @@ func TestAsHttpException_TypedNilIsRefusedInsteadOfDereferenced(t *testing.T) {
     if nil != AsHttpException(errorAsInterface) {
         t.Fatalf("expected a typed-nil *Error to answer no http exception")
     }
+}
+
+/* errors.Is walks through this link on a nil receiver whenever a typed-nil *HttpException sits in a chain as a cause; errors.As with the http target does not, because it finds the typed nil assignable before unwrapping it */
+func TestHttpException_UnwrapOnANilReceiverAnswersNil(t *testing.T) {
+    var typedNil *HttpException
+
+    if nil != typedNil.Unwrap() {
+        t.Fatalf("expected a nil receiver to unwrap to nil")
+    }
+
+    sentinel := errors.New("sentinel")
+    chain := fmt.Errorf("ctx: %w", NewError("outer", nil, typedNil))
+
+    if true == errors.Is(chain, sentinel) {
+        t.Fatalf("expected the walk to end at the typed-nil link without matching")
+    }
+
+    if nil != AsHttpException(chain) {
+        t.Fatalf("expected no http exception past a typed-nil link")
+    }
+}
+
+/* the guard Error.Error carries, on this type: a typed-nil *HttpException stored as a cause is rendered through Error before any caller's guard */
+func TestHttpException_ErrorOnANilReceiverAnswersInsteadOfDereferencing(t *testing.T) {
+    var typedNil *HttpException
+
+    if "http exception carries no value" != typedNil.Error() {
+        t.Fatalf("expected the nil receiver to answer the placeholder message, got %q", typedNil.Error())
+    }
+
+    joined := errors.Join(typedNil, errors.New("other"))
+    if false == strings.Contains(joined.Error(), "other") {
+        t.Fatalf("expected the join holding a typed nil to render, got %q", joined.Error())
+    }
+}
+
+/* every accessor answers the nil receiver, as every accessor of ExitError does. */
+func TestHttpException_EveryAccessorAnswersTheNilReceiver(t *testing.T) {
+    var typedNil *HttpException
+
+    if "" != typedNil.Message() || nil != typedNil.Context() || nil != typedNil.CauseErr() || true == typedNil.AlreadyLogged() || 0 != typedNil.StatusCode() {
+        t.Fatalf("expected the nil receiver answered by every reader")
+    }
+
+    typedNil.SetContext(exceptioncontract.Context{"key": "value"})
+    typedNil.SetContextValue("key", "value")
+    typedNil.MarkAsLogged()
 }

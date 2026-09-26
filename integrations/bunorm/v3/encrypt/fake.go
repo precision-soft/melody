@@ -6,13 +6,14 @@ import (
 
 var fakeCipherSequenceNumber atomic.Uint64
 
+/* NewFakeCipher answers a cipher whose every operation is the identity, for tests and local development. In production it writes plaintext into every encrypted column with no error, where having no cipher fails closed at the first write, so no production wiring path may reach it. */
 func NewFakeCipher() Cipher {
     return &fakeCipher{
         instanceNumber: fakeCipherSequenceNumber.Add(1),
     }
 }
 
-/* the instance number is what keeps two fakes apart: a zero-size struct puts every instance at the same address, so two fakes installed in different registry compartments would compare EQUAL and any assertion that they stayed apart would hold whichever compartment the registry answered from. */
+/* the instance number keeps two fakes apart: a zero-size struct gives every instance the same address, so two fakes would compare equal */
 type fakeCipher struct {
     instanceNumber uint64
 }

@@ -19,10 +19,15 @@ import (
     runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
 )
 
-func newTestRuntime() *testRuntime {
+/* the scope is closed when the TEST ends, not when this constructor returns, so every assertion about scope reporting and the action's teardown half runs against an open scope; the two runtimes the package writes by hand omit that defer on purpose */
+func newTestRuntime(t *testing.T) *testRuntime {
+    t.Helper()
+
     serviceContainer := container.NewContainer()
     scope := serviceContainer.NewScope()
-    defer scope.Close()
+    t.Cleanup(func() {
+        _ = scope.Close()
+    })
 
     return &testRuntime{
         contextValue:   context.Background(),
@@ -89,7 +94,7 @@ func TestNewRootCommand_SetsNameAndUsage(t *testing.T) {
 }
 
 func TestRegister_PanicsOnNilRootCommand(t *testing.T) {
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newTestRuntime(t)
 
     command := &testCommand{
         nameValue:        "test",
@@ -106,7 +111,7 @@ func TestRegister_PanicsOnNilRootCommand(t *testing.T) {
 }
 
 func TestRegister_PanicsOnNilCommand(t *testing.T) {
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newTestRuntime(t)
 
     rootCommand := NewCommandContext("app", "desc")
 
@@ -133,7 +138,7 @@ func TestRegister_PanicsOnNilRuntime(t *testing.T) {
 }
 
 func TestRegister_PanicsOnEmptyCommandName(t *testing.T) {
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newTestRuntime(t)
     rootCommand := NewCommandContext("app", "desc")
 
     command := &testCommand{
@@ -151,7 +156,7 @@ func TestRegister_PanicsOnEmptyCommandName(t *testing.T) {
 }
 
 func TestRegister_AppendsCommandAndBindsFields(t *testing.T) {
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newTestRuntime(t)
 
     rootCommand := NewCommandContext("app", "desc")
 
@@ -198,7 +203,7 @@ func TestRegister_AppendsCommandAndBindsFields(t *testing.T) {
 }
 
 func TestRegister_PanicsOnDuplicateCommandName(t *testing.T) {
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newTestRuntime(t)
     rootCommand := NewCommandContext("app", "desc")
 
     commandA := &testCommand{
@@ -228,7 +233,7 @@ func TestRegister_PanicsOnDuplicateCommandName(t *testing.T) {
 
 /* the duplicate scan walks a list the caller owns, and urfave admits a nil entry into it: read without the guard, the very next registration dereferences that nil while looking for a name clash — a boot that dies inside the framework over a hole somebody else punched in the list */
 func TestRegister_SkipsANilEntryWhenScanningForADuplicateName(t *testing.T) {
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newTestRuntime(t)
     rootCommand := NewCommandContext("app", "desc")
 
     rootCommand.Commands = append(rootCommand.Commands, nil)
@@ -254,7 +259,50 @@ func TestRegister_SkipsANilEntryWhenScanningForADuplicateName(t *testing.T) {
     }
 }
 
-/* the scope close is weighed beside the container close: its failure reached nothing before, so a scoped service whose teardown failed — a transaction left unfinished, a file left unflushed — ended a command that reported success */
+/* the scope close is weighed beside the container close, so a scoped service whose teardown failed, a transaction left unfinished or a file left unflushed, never ends a command that reports success */
+type closeCountingScope struct {
+    containercontract.Scope
+    closeCalls int
+}
+
+func (instance *closeCountingScope) Close() error {
+    instance.closeCalls++
+
+    return instance.Scope.Close()
+}
+
+/* the positive half of the action's teardown: on a fixture that hands the action an open scope, the close is made */
+func TestRegister_ActionClosesTheScopeOnce(t *testing.T) {
+    serviceContainer := container.NewContainer()
+    scope := &closeCountingScope{Scope: serviceContainer.NewScope()}
+
+    command := &testCommand{
+        nameValue:        "hello",
+        descriptionValue: "hello command",
+        flagsValue:       output.DebugFlags(),
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            return nil
+        },
+    }
+
+    _, runErr := runRegisteredCommandWithRuntime(
+        &testRuntime{
+            contextValue:   context.Background(),
+            scopeValue:     scope,
+            containerValue: serviceContainer,
+        },
+        command,
+        []string{"--format=json"},
+    )
+    if nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
+    }
+
+    if 1 != scope.closeCalls {
+        t.Fatalf("expected the action to close the scope once, got %d", scope.closeCalls)
+    }
+}
+
 func TestRegister_ActionReportsAFailingScopeClose(t *testing.T) {
     closeErr := errors.New("scope close failed")
 
@@ -342,7 +390,7 @@ func TestAggregateCliErrors_AnswersThePlainAggregateWhenTheCommandCarriesNoExitC
 }
 
 func TestRegister_ActionCallsRunWithRuntimeInstance(t *testing.T) {
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newTestRuntime(t)
 
     rootCommand := NewCommandContext("app", "desc")
 
@@ -394,7 +442,7 @@ func runRegisteredCommand(
 ) string {
     t.Helper()
 
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newTestRuntime(t)
 
     rootCommand := NewCommandContext("app", "desc")
 
@@ -443,6 +491,71 @@ func TestRegister_ActionEmitsNothingButTheDocumentInJsonFormat(t *testing.T) {
 
     if "{\"meta\":{}}\n" != written {
         t.Fatalf("expected the rendered document alone, got %q", written)
+    }
+}
+
+func runRegisteredStandardFlagsCommand(
+    t *testing.T,
+    arguments []string,
+) string {
+    t.Helper()
+
+    runtimeInstance := newTestRuntime(t)
+
+    rootCommand := NewCommandContext("app", "desc")
+
+    buffer := &bytes.Buffer{}
+
+    command := &testCommand{
+        nameValue:        "hello",
+        descriptionValue: "hello command",
+        flagsValue:       output.StandardFlags(),
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            _, _ = fmt.Fprint(commandContext.Writer, "{\"meta\":{}}\n")
+
+            return nil
+        },
+    }
+
+    Register(rootCommand, command, runtimeInstance)
+
+    rootCommand.Writer = buffer
+    rootCommand.ErrWriter = buffer
+    rootCommand.ExitErrHandler = func(
+        handlerContext context.Context,
+        handlerCommandContext *clicontract.CommandContext,
+        handlerErr error,
+    ) {
+    }
+
+    registered := rootCommand.Commands[0]
+    registered.Writer = buffer
+    registered.ErrWriter = buffer
+
+    commandArguments := make([]string, 0, len(arguments)+2)
+    commandArguments = append(commandArguments, "app", "hello")
+    commandArguments = append(commandArguments, arguments...)
+
+    runErr := rootCommand.Run(context.Background(), commandArguments)
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    return buffer.String()
+}
+
+/* quiet is the documented governor of decoration and the banner is decoration: StandardFlags defaults it to true, so a scripted invocation reads the command's own output alone, and the frame comes back with one explicit --quiet=false */
+func TestRegister_ActionHonoursQuietForTheBanner(t *testing.T) {
+    written := runRegisteredStandardFlagsCommand(t, nil)
+
+    if "{\"meta\":{}}\n" != written {
+        t.Fatalf("expected the command's own output alone under the quiet default, got %q", written)
+    }
+
+    written = runRegisteredStandardFlagsCommand(t, []string{"--quiet=false"})
+
+    if false == strings.Contains(written, "[hello] [started]") || false == strings.Contains(written, "[hello] [finished]") {
+        t.Fatalf("expected the banner back under --quiet=false, got %q", written)
     }
 }
 
@@ -567,7 +680,7 @@ func newEnvelopeErrorCommand() *testCommand {
 
 func TestRegister_ActionKeepsTheJsonDocumentAloneWhenTheEnvelopeCarriesAnError(t *testing.T) {
     written, runErr := runRegisteredCommandWithRuntime(
-        newTestRuntime(),
+        newTestRuntime(t),
         newEnvelopeErrorCommand(),
         []string{"--format=json"},
     )
@@ -648,9 +761,9 @@ func TestRegister_ActionLeavesTheContainerOpenWhenTheCommandSucceeds(t *testing.
     }
 }
 
-/* the finish banner reads commandErr, and a panic in the command leaves the linear path that assigns it: the unwinding used to run the banner defer over a nil commandErr and print [finished] [success] for a command that died. The panic is re-raised unchanged so the recover handler that owns the process boundary still sees it. */
+/* a panic in the command prints the failed banner and is re-raised unchanged, so the recover handler that owns the process boundary still sees it */
 func TestRegister_ActionPrintsTheFailedBannerAndRepanicsWhenTheCommandPanics(t *testing.T) {
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newTestRuntime(t)
 
     rootCommand := NewCommandContext("app", "desc")
 
@@ -697,7 +810,7 @@ func TestRegister_ActionPrintsTheFailedBannerAndRepanicsWhenTheCommandPanics(t *
 
 /* the closes are deliberately left to the outer layers on the panic path: closing the container here would hand the recover handler that resolves the exit logger a closed container, downgrading the fatal record to the emergency fallback */
 func TestRegister_ActionLeavesTheContainerOpenOnThePanicPath(t *testing.T) {
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newTestRuntime(t)
 
     rootCommand := NewCommandContext("app", "desc")
 
@@ -740,9 +853,9 @@ func (instance *typedNilErrorCommandFailure) Error() string {
     return instance.message
 }
 
-/* a command that returns its error through a concrete typed pointer hands over a non-nil interface around a nil value: read as a failure it reached Error() on a nil receiver on the printing line and killed the request with a masked panic in place of the success it meant */
+/* a command that returns its error through a concrete typed pointer hands over a non-nil interface around a nil value, which reads as the success it means rather than reaching Error() on a nil receiver while the status is printed */
 func TestRegister_ActionReadsATypedNilCommandErrorAsSuccess(t *testing.T) {
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newTestRuntime(t)
 
     rootCommand := NewCommandContext("app", "desc")
 
@@ -784,7 +897,7 @@ func (instance *failingCloseService) Close() error {
 
 /* asking before closing mirrors the application teardown: a repeated Close answers the first teardown's memoized error, so a command that already closed the container itself — and folded the failure into its own result — would have that one failure presented again as a fresh shutdown incident */
 func TestRegister_ActionDoesNotReportTheCloseFailureOfAContainerTheCommandAlreadyClosed(t *testing.T) {
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newTestRuntime(t)
 
     container.MustRegister(
         runtimeInstance.Container(),
@@ -826,7 +939,7 @@ func TestRegister_ActionDoesNotReportTheCloseFailureOfAContainerTheCommandAlread
     }
 }
 
-/* the flag promises the absence of ansi sequences, and the banner is written to the same stream the command's own output goes to: a --no-color run redirected into a file used to carry escape codes around an output that honoured the flag */
+/* a --no-color run redirected into a file carries no escape codes in its banner */
 func TestRegister_ActionPrintsThePlainBannerUnderNoColor(t *testing.T) {
     written := runRegisteredCommand(t, []string{"--no-color"})
 
@@ -905,7 +1018,7 @@ func TestAggregateCliErrors_ARealExitLinkKeepsItsCode(t *testing.T) {
 
 /* the no-color run is the clean proof, because the colored branch writes the framework's own ansi codes around the data: under --no-color every escape byte in the output can only have come from the data, and the flag's comment promises a redirected file free of them. The negative assertions are what the eye cannot check — a raw \r and a raw escape byte render invisibly. */
 func TestRegister_ActionEscapesTheCommandErrorInTheStatusLine(t *testing.T) {
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newTestRuntime(t)
 
     command := &testCommand{
         nameValue:        "hello",
@@ -937,7 +1050,7 @@ func TestRegister_ActionEscapesTheCommandErrorInTheStatusLine(t *testing.T) {
 }
 
 func TestRegister_ActionEscapesTheCommandNameInTheStartedBanner(t *testing.T) {
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newTestRuntime(t)
 
     command := &testCommand{
         nameValue:        "hello\x1b[2J",
@@ -962,5 +1075,52 @@ func TestRegister_ActionEscapesTheCommandNameInTheStartedBanner(t *testing.T) {
     }
     if false == strings.Contains(written, `hello\x1b[2J`) {
         t.Fatalf("expected the escaped command name spelling, got %q", written)
+    }
+}
+
+/* the finish banner colours the verdict red on failure after the escaping that keeps client-derived text from repainting the line, so its sequence reaches the terminal raw rather than as the literal text \x1b[31m, and a control character in the data around it, here the command's own name, is still spelled visibly. */
+func TestRegister_ActionColoursTheFailedVerdictAfterEscapingTheBanner(t *testing.T) {
+    command := &testCommand{
+        nameValue:        "bo\rom",
+        descriptionValue: "boom command",
+        flagsValue:       output.DebugFlags(),
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            return errors.New("boom")
+        },
+    }
+
+    written, runErr := runRegisteredCommandWithRuntime(newTestRuntime(t), command, nil)
+    if nil == runErr {
+        t.Fatal("expected the command's failure to be returned")
+    }
+
+    if false == strings.Contains(written, "[finished] \x1b[31m[failed]\x1b[97m [") {
+        t.Fatalf("expected the verdict coloured with a raw escape sequence, got %q", written)
+    }
+
+    if true == strings.Contains(written, `\x1b[31m`) {
+        t.Fatalf("the banner escaped its own colour sequence: %q", written)
+    }
+
+    if false == strings.Contains(written, `[bo\rom] [finished]`) || true == strings.Contains(written, "[bo\rom]") {
+        t.Fatalf("expected the command name escaped on the finish line, got %q", written)
+    }
+}
+
+/* the no-color banner prints the plain verdict, byte for byte */
+func TestRegister_ActionPrintsThePlainFailedVerdictUnderNoColor(t *testing.T) {
+    command := &testCommand{
+        nameValue:        "boom",
+        descriptionValue: "boom command",
+        flagsValue:       output.DebugFlags(),
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            return errors.New("boom")
+        },
+    }
+
+    written, _ := runRegisteredCommandWithRuntime(newTestRuntime(t), command, []string{"--no-color"})
+
+    if false == strings.Contains(written, "[boom] [finished] [failed] [") || true == strings.Contains(written, "\x1b[") {
+        t.Fatalf("expected the plain failed verdict and no escape sequence, got %q", written)
     }
 }

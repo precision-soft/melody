@@ -5,21 +5,22 @@ type Template interface {
     Render(entries []Entry, options RenderOptions) (string, error)
 }
 
-/* OwnedTemplate is the optional capability of naming a line every destination this template renders carries, by which a later run recognizes a file as one of its own. It exists for --prune, which has to answer "did I write this?" about a file it is being asked to empty, and the only honest answer comes from the rendered content itself: the marker cannot be injected by the generator, because Render is userland and a comment prefix that is right for a crontab corrupts a format that has no comments.
-
-A template that implements this must include the exact string it returns in everything Render produces, entries or none. A template that does not implement it is never pruned — a destination whose ownership cannot be proven belongs to the operator, and emptying it on a guess is the one mistake a reconciliation must not make. */
+/* OwnedTemplate is the optional capability of naming a line every destination this template renders carries, by which --prune recognises a file as its own before emptying it; the marker comes from the rendered content because Render is userland and a comment syntax is dialect-specific. A template that implements it renders the exact string it returns as a whole line of its own among the first ten lines of everything Render produces, entries or none, since the reconciliation compares each trimmed leading line for equality. A template that does not implement it is never pruned. The builtin templates render CrontabOwnershipMarker, " for " and the application's cli name; a custom dialect whose directory two applications may share carries the application's name from construction. */
 type OwnedTemplate interface {
     OwnershipMarker() string
 }
 
-/* UserColumnTemplate is the optional capability of answering whether this dialect renders a user column. The generator has to know before it renders, because a heartbeat line placed in a dialect that carries a user column needs a user and one placed in a dialect that carries none never does — so a template that renders no user column is refused for a missing user it could not have used.
+/* applicationOwnedTemplate is the package-internal capability of producing a copy of this template that renders and answers one application's ownership line; the generator uses the copy for the run's rendering and its sweep, so both lines come from one object. The generator derives the copy by each builtin's concrete type rather than through this interface, which an embedding would promote onto a wrapper; the interface is asserted at compile time only, so a builtin that lost the door fails the build. */
+type applicationOwnedTemplate interface {
+    ownedBy(applicationName string) Template
+}
 
-A template that does not implement this is judged by name, which answers only for the builtins: every registered dialect that renders no user column has to say so here, or it is treated as one that does. */
+/* UserColumnTemplate is the optional capability of answering whether this dialect renders a user column, which the generator needs before rendering to decide whether a heartbeat line needs a user. A template that does not implement it is judged by name, which answers only for the builtins, so every registered dialect without a user column says so here. */
 type UserColumnTemplate interface {
     RendersUserColumn() bool
 }
 
-/* templateRendersUserColumn asks the template itself and falls back to the builtin name for one that does not answer. */
+/* templateRendersUserColumn asks the template itself and falls back to the builtin name for one that does not answer: only the crontab-no-user dialect renders no user column. */
 func templateRendersUserColumn(template Template) bool {
     if userColumnTemplate, isUserColumnTemplate := template.(UserColumnTemplate); true == isUserColumnTemplate {
         return userColumnTemplate.RendersUserColumn()

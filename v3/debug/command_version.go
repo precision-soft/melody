@@ -6,9 +6,9 @@ import (
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/cli/output"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
-    melodyversion "github.com/precision-soft/melody/v3/version"
 )
 
+/* VersionCommand answers three rows: the application's version, melody's and the Go runtime's. The application row reads the declaration made through output.SetApplicationVersion, and an explicit ApplicationVersion on the command wins over it. */
 type VersionCommand struct {
     ApplicationVersion string
 }
@@ -27,7 +27,7 @@ func (instance *VersionCommand) Flags() []clicontract.Flag {
 
 func (instance *VersionCommand) Run(
     _ runtimecontract.Runtime,
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
 ) error {
     startedAt := time.Now()
 
@@ -37,13 +37,12 @@ func (instance *VersionCommand) Run(
 
     meta := output.NewMeta(
         instance.Name(),
-        commandContext.Args().Slice(),
+        commandContext.Arguments(),
         option,
         startedAt,
         time.Duration(0),
         output.Version{
             Application: instance.ApplicationVersion,
-            Melody:      melodyversion.BuildVersion(),
         },
     )
 
@@ -59,27 +58,28 @@ func (instance *VersionCommand) Run(
             []string{"component", "version"},
         )
 
-        if "" != instance.ApplicationVersion {
-            block.AddRow("application", instance.ApplicationVersion)
+        /* NewMeta already applied the fallback: the command's value, then the process-wide declaration */
+        if "" != envelope.Meta.Version.Application {
+            block.AddRow("application", envelope.Meta.Version.Application)
         } else {
             block.AddRow("application", "<unknown>")
         }
 
-        block.AddRow("melody", melodyversion.BuildVersion())
+        block.AddRow("melody", envelope.Meta.Version.Melody)
         block.AddRow("go", envelope.Meta.Version.Go)
 
         envelope.Table = builder.Build()
     } else {
         envelope.Data = map[string]string{
-            "application": instance.ApplicationVersion,
-            "melody":      melodyversion.BuildVersion(),
+            "application": envelope.Meta.Version.Application,
+            "melody":      envelope.Meta.Version.Melody,
             "go":          envelope.Meta.Version.Go,
         }
     }
 
     envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
 
-    return output.Render(commandContext.Writer, envelope, option)
+    return output.Render(commandContext.Writer(), envelope, option)
 }
 
 var _ clicontract.Command = (*VersionCommand)(nil)

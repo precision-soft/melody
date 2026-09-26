@@ -1,14 +1,21 @@
 package http
 
 import (
+    "crypto/sha256"
+    "encoding/hex"
     "errors"
+    "fmt"
     "io"
     "io/fs"
     "net"
     nethttp "net/http"
     "net/netip"
+    "net/url"
+    stdpath "path"
     "reflect"
     "strings"
+    "syscall"
+    "unicode"
 
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
@@ -170,26 +177,82 @@ func wrapControllerWithContainer(
 }
 
 func wrapWithMiddlewares(handler httpcontract.Handler, middlewares []httpcontract.Middleware) httpcontract.Handler {
+    return wrapWithMiddlewaresRecording(handler, middlewares, nil)
+}
+
+/* wrapWithMiddlewaresRecording publishes the response each middleware's next() returns to the recorder as the stack unwinds, so the kernel's recovery can close a response in flight when an outer middleware panics after next() returned. A nil recorder builds the plain chain. */
+func wrapWithMiddlewaresRecording(
+    handler httpcontract.Handler,
+    middlewares []httpcontract.Middleware,
+    recordReturnedResponse func(httpcontract.Response),
+) httpcontract.Handler {
     wrapped := handler
     for index := len(middlewares) - 1; 0 <= index; index-- {
+        if nil != recordReturnedResponse {
+            wrapped = recordResponseAfterHandler(wrapped, recordReturnedResponse)
+        }
+
         wrapped = middlewares[index](wrapped)
     }
 
     return wrapped
 }
 
+func recordResponseAfterHandler(
+    handler httpcontract.Handler,
+    recordReturnedResponse func(httpcontract.Response),
+) httpcontract.Handler {
+    return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        response, err := handler(runtimeInstance, writer, request)
+        recordReturnedResponse(response)
+
+        return response, err
+    }
+}
+
 func splitPath(value string) []string {
     return splitNormalizedPath(strings.TrimSpace(value))
 }
 
-/* @important a request path is never trimmed: whitespace is significant to whatever sits in front of the application, so trimming it would let "/admin%20" reach the "/admin" handler through a proxy rule that never saw a match */
+/* a request path is never trimmed, since whitespace is significant to a proxy rule in front of the application. It is split on the separators the client sent and each segment is unescaped on its own, so an encoded separator stays inside its segment; a segment whose escaping is malformed is kept as sent. */
 func splitRequestPath(value string) []string {
-    return splitNormalizedPath(value)
+    segments := splitNormalizedPath(value)
+
+    for index, segment := range segments {
+        unescapedSegment, unescapeErr := url.PathUnescape(segment)
+        if nil != unescapeErr {
+            continue
+        }
+
+        segments[index] = unescapedSegment
+    }
+
+    return segments
+}
+
+/* RequestPathAsRouted answers the request path spelled the way the router reads it, for every other consumer of the path to read the same: each segment unescaped on its own, with a separator encoded inside a segment kept as "%2F". A segment carrying "%252F" and one carrying "%2F" share that spelling, so a rule written with "%2F" names both. A target that does not begin with "/" is returned as it came. */
+func RequestPathAsRouted(escapedPath string) string {
+    if false == strings.HasPrefix(escapedPath, "/") {
+        return escapedPath
+    }
+
+    segments := strings.Split(escapedPath, "/")
+    for index, segment := range segments {
+        unescapedSegment, unescapeErr := url.PathUnescape(segment)
+        if nil != unescapeErr {
+            continue
+        }
+
+        segments[index] = strings.ReplaceAll(unescapedSegment, "/", "%2F")
+    }
+
+    return strings.Join(segments, "/")
 }
 
 func splitNormalizedPath(value string) []string {
+    /* an empty path is the root; answered as no segment at all, the walk would miss a route registered as "/" */
     if "" == value {
-        return []string{""}
+        value = "/"
     }
 
     normalizedPath := value
@@ -207,6 +270,33 @@ func splitNormalizedPath(value string) []string {
     return strings.Split(normalizedPath, "/")
 }
 
+/* requestPathIsCanonical reports whether a request path is spelled the one way the router, the firewall matcher and the access-control matcher read alike. A path that folds through "..", "." or "//", or that carries leading or trailing whitespace, would route to one handler and be authorized against another rule, so it is refused. A trailing slash is normalized away rather than refused, and a target that does not begin with "/" is left to the router unless it begins with whitespace. */
+func requestPathIsCanonical(path string) bool {
+    /* a path that begins with whitespace is refused before the "/" test below would pass it as not path-routed */
+    if "" != path && strings.TrimLeftFunc(path, unicode.IsSpace) != path {
+        return false
+    }
+
+    if false == strings.HasPrefix(path, "/") {
+        return true
+    }
+
+    if strings.TrimSpace(path) != path {
+        return false
+    }
+
+    trimmedPath := path
+    if 1 < len(trimmedPath) {
+        trimmedPath = strings.TrimRight(trimmedPath, "/")
+        if "" == trimmedPath {
+            trimmedPath = "/"
+        }
+    }
+
+    return stdpath.Clean(trimmedPath) == trimmedPath
+}
+
+/* writeResponse persists the session, emits the session cookie and writes the response, and returns the response it actually wrote, which the caller publishes. A session-storage outage on save replaces the response with a fresh empty 500 that carries neither the original headers nor the session cookie. */
 func writeResponse(
     runtimeInstance runtimecontract.Runtime,
     request httpcontract.Request,
@@ -216,8 +306,8 @@ func writeResponse(
     sessionInstance sessioncontract.Session,
     forwardedHeadersPolicy httpcontract.ForwardedHeadersPolicy,
     sessionCookiePolicy httpcontract.SessionCookiePolicy,
-) {
-    if nil == response {
+) httpcontract.Response {
+    if true == internal.IsNilInterface(response) {
         response = &Response{
             statusCode: nethttp.StatusNoContent,
             headers:    make(nethttp.Header),
@@ -225,7 +315,25 @@ func writeResponse(
         }
     }
 
-    /* @info persist the session at most once per request: the panic-recovery path can re-enter writeResponse after the first call already committed the session but then failed while writing the body, and SaveSession does not reset the modified flag, so without this guard the session store would be written twice. The header-commit flag cannot gate this — a handler that streamed its own response still needs its session persisted on that first (already-committed) call. */
+    /* a status outside net/http's [100, 999] would panic inside WriteHeader after the commit flag is raised, so it is refused here and answered as the rendered 500; zero means 200 */
+    if statusCode := response.StatusCode(); 0 != statusCode && (100 > statusCode || 999 < statusCode) {
+        logger := logging.LoggerFromRuntime(runtimeInstance)
+        if nil != logger {
+            logger.Error(
+                "response status code is out of range; answering an internal server error",
+                loggingcontract.Context{
+                    "statusCode": statusCode,
+                },
+            )
+        }
+
+        /* the replaced response owns its body reader and nothing downstream reads it, so it is closed here */
+        closeDiscardedResponseBody(response, logger)
+
+        response = renderErrorResponse(runtimeInstance, request, nethttp.StatusInternalServerError, "internal server error", nil)
+    }
+
+    /* the session is persisted at most once per request: the recovery path can re-enter writeResponse after the first call committed it, and SaveSession does not reset the modified flag */
     persistenceRecorder, isPersistenceRecorder := writer.(sessionPersistenceRecorder)
     sessionAlreadyPersisted := true == isPersistenceRecorder && true == persistenceRecorder.SessionPersisted()
 
@@ -234,52 +342,63 @@ func writeResponse(
 
     sessionInstance = republishedSession(request, sessionInstance)
 
-    if false == sessionAlreadyPersisted && nil != sessionManager && nil != sessionInstance {
+    if false == sessionAlreadyPersisted && false == internal.IsNilInterface(sessionManager) && false == internal.IsNilInterface(sessionInstance) {
         sessionPersistFailed := false
 
-        if true == sessionInstance.IsCleared() {
+        /* one snapshot decides both branches, so a concurrent Clear cannot land between the two flag reads */
+        _, sessionModified, sessionCleared := sessionInstance.Snapshot()
+
+        if true == sessionCleared {
             if err := sessionManager.DeleteSession(sessionInstance.Id()); nil != err {
-                /* @important a session-backend outage on logout must degrade to a logged error but STILL expire the browser cookie: clearing the cookie is independent of and strictly safer than the backend delete (it can only end a session, never resurrect an unpersisted one), so a failed DeleteSession must not leave the client holding a live session cookie while it is told it was logged out. Mark the persistence failed so MarkSessionPersisted is skipped, but emit the clearing cookie below regardless. (This differs from the save path, where a failed SaveSession MUST suppress the cookie so the browser is not pointed at a never-persisted session id.) */
+                /* a failed delete on logout is logged and still expires the cookie, which can only end a session; a failed save, by contrast, suppresses the cookie */
                 sessionPersistFailed = true
 
-                logSessionPersistenceError(runtimeInstance, "failed to delete session", err)
+                logSessionPersistenceEvent(runtimeInstance, loggingcontract.LevelError, "failed to delete session", err, sessionInstance.Id(), request)
             }
 
-            cookie := &nethttp.Cookie{
-                Name:     session.SessionCookieName,
-                Value:    "",
-                Path:     resolveSessionCookiePath(sessionCookiePolicy),
-                Domain:   sessionCookiePolicy.Domain,
-                HttpOnly: true,
-                SameSite: resolveSessionCookieSameSite(sessionCookiePolicy),
-                Secure:   resolveSessionCookieSecure(request, forwardedHeadersPolicy, sessionCookiePolicy),
-                MaxAge:   -1,
-            }
-
-            SetCookie(response, cookie)
-        } else if true == sessionInstance.IsModified() {
-            /* a discarded response carries no Set-Cookie, so storing a session the client does not already hold would write a row nothing can ever reference: a first-time visitor on a streamed response (Server-Sent Events commit the headers before the handler runs) would leave one unreachable session behind per reconnect. A session the request already names is stored as before, since it needs no cookie to be reachable — and the clear path above still destroys a session whatever the response does with it. */
+            setSessionCookie(response, expiringSessionCookie(request, forwardedHeadersPolicy, sessionCookiePolicy))
+        } else if true == sessionModified {
+            /* a discarded response carries no Set-Cookie, so a session the client does not already hold is not stored: nothing could reference it */
             if true == responseIsDiscarded && false == requestNamesSession(request, sessionInstance.Id()) {
+                /* the drop is logged, since a handler that rotated the session on a committed response loses the previous entry and the replacement here */
                 sessionPersistFailed = true
+
+                logger := logging.LoggerFromRuntime(runtimeInstance)
+                if nil != logger {
+                    logSessionPersistenceEvent(
+                        runtimeInstance,
+                        loggingcontract.LevelWarning,
+                        "session not persisted: the response was already committed and the request does not name this session",
+                        nil,
+                        sessionInstance.Id(),
+                        request,
+                    )
+                }
             } else {
                 err := sessionManager.SaveSession(sessionInstance)
-                if nil != err {
-                    /* @important same degradation as the delete path: log once and send the response without the session cookie; the session is intentionally not marked persisted so a later successful write could still commit it */
+                if true == errors.Is(err, session.ErrSessionRotated) {
+                    /* another request rotated this id away: the write is refused so the retired id is not re-created, and the cookie is left alone, since the rotating request hands the client the new id */
                     sessionPersistFailed = true
 
-                    logSessionPersistenceError(runtimeInstance, "failed to save session", err)
-                } else {
-                    cookie := &nethttp.Cookie{
-                        Name:     session.SessionCookieName,
-                        Value:    sessionInstance.Id(),
-                        Path:     resolveSessionCookiePath(sessionCookiePolicy),
-                        Domain:   sessionCookiePolicy.Domain,
-                        HttpOnly: true,
-                        SameSite: resolveSessionCookieSameSite(sessionCookiePolicy),
-                        Secure:   resolveSessionCookieSecure(request, forwardedHeadersPolicy, sessionCookiePolicy),
-                    }
+                    logSessionPersistenceEvent(runtimeInstance, loggingcontract.LevelWarning, "session was rotated away while the request was in flight", err, sessionInstance.Id(), request)
+                } else if true == errors.Is(err, session.ErrSessionDeleted) {
+                    /* another request ended the session: the write is refused so it is not re-created, the cookie is expired, and the handler's response is served unchanged */
+                    sessionPersistFailed = true
 
-                    SetCookie(response, cookie)
+                    logSessionPersistenceEvent(runtimeInstance, loggingcontract.LevelWarning, "session was deleted while the request was in flight", err, sessionInstance.Id(), request)
+
+                    setSessionCookie(response, expiringSessionCookie(request, forwardedHeadersPolicy, sessionCookiePolicy))
+                } else if nil != err {
+                    /* a storage outage on save answers 500 in place of the handler's response, which assumed the write would land; the cookie is suppressed so the browser never holds an id nothing persisted */
+                    sessionPersistFailed = true
+
+                    logSessionPersistenceEvent(runtimeInstance, loggingcontract.LevelError, "failed to save session", err, sessionInstance.Id(), request)
+
+                    closeDiscardedResponseBody(response, logging.LoggerFromRuntime(runtimeInstance))
+
+                    response = EmptyResponse(nethttp.StatusInternalServerError)
+                } else {
+                    setSessionCookie(response, sessionCookie(request, forwardedHeadersPolicy, sessionCookiePolicy, sessionInstance.Id()))
                 }
             }
         }
@@ -289,26 +408,77 @@ func writeResponse(
         }
     }
 
-    /* @info a handler that streamed its own response (for example Server-Sent Events) has already committed the headers; whether it then returned no response or failed after committing, skip writing so we do not emit a superfluous WriteHeader over the in-flight stream. */
+    /* a handler that committed its own response, a stream, is not written over */
     if true == responseIsDiscarded {
         closeDiscardedResponseBody(response, logging.LoggerFromRuntime(runtimeInstance))
-        return
+
+        /* for a stream the status on the connection is the one reported to the terminate event and the access log; a hijacked connection records none and keeps the substitute */
+        if statusRecorder, isStatusRecorder := writer.(committedStatusRecorder); true == isStatusRecorder {
+            if committedStatus := statusRecorder.CommittedStatusCode(); 0 < committedStatus && committedStatus != response.StatusCode() {
+                return EmptyResponse(committedStatus)
+            }
+        }
+
+        return response
     }
 
     err := WriteToHttpResponseWriter(runtimeInstance, request, writer, response)
     if nil != err {
-        /* @important the headers (and part of the body) may already be committed by the failed write, so a panic cannot produce a better response — and on the panic-recovery path it would escape ServeHttp and reset the connection; log and return instead */
+        /* a failed write cannot produce a better response and a panic here would escape ServeHttp, so it is logged: a client abort at warning, anything else at error */
         logger := logging.LoggerFromRuntime(runtimeInstance)
         if nil != logger {
-            logger.Error(
-                "failed to write response",
-                exception.LogContext(err),
-            )
+            writeLogContext := exceptioncontract.Context{}
+            if false == internal.IsNilInterface(request) && nil != request.HttpRequest() {
+                writeLogContext["method"] = request.HttpRequest().Method
+                writeLogContext["path"] = request.HttpRequest().URL.Path
+            }
+
+            if true == isClientAbortWriteError(request, err) {
+                logger.Warning(
+                    "failed to write response; client disconnected",
+                    exception.LogContext(err, writeLogContext),
+                )
+            } else {
+                logger.Error(
+                    "failed to write response",
+                    exception.LogContext(err, writeLogContext),
+                )
+            }
         }
     }
+
+    return response
 }
 
-/* republishedSession prefers the session a handler published on the request over the one the kernel captured before routing, so rotating the session id (the session-fixation defence) reaches the store and the Set-Cookie. */
+/* closeResponseBodySafely contains a Close that panics, since it runs inside the kernel's recovery defer where a second panic would reset the connection. */
+func closeResponseBodySafely(closer io.Closer) (closeErr error) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            return
+        }
+
+        closeErr = exception.NewError(
+            "response body close panicked",
+            exceptioncontract.Context{
+                "value": fmt.Sprintf("%v", recoveredValue),
+            },
+            nil,
+        )
+    }()
+
+    return closer.Close()
+}
+
+func isClientAbortWriteError(request httpcontract.Request, err error) bool {
+    if false == internal.IsNilInterface(request) && nil != request.HttpRequest() && nil != request.HttpRequest().Context().Err() {
+        return true
+    }
+
+    return true == errors.Is(err, syscall.EPIPE) || true == errors.Is(err, syscall.ECONNRESET)
+}
+
+/* republishedSession prefers the session a handler published on the request over the one captured before routing, so a rotated id reaches the store and the Set-Cookie. */
 func republishedSession(
     request httpcontract.Request,
     capturedSession sessioncontract.Session,
@@ -322,7 +492,7 @@ func republishedSession(
 }
 
 func sessionFromRequestAttribute(request httpcontract.Request) sessioncontract.Session {
-    if nil == request {
+    if true == internal.IsNilInterface(request) {
         return nil
     }
 
@@ -345,7 +515,7 @@ func sessionFromRequestAttribute(request httpcontract.Request) sessioncontract.S
 }
 
 func requestNamesSession(request httpcontract.Request, sessionId string) bool {
-    if nil == request || "" == sessionId {
+    if true == internal.IsNilInterface(request) || "" == sessionId {
         return false
     }
 
@@ -362,6 +532,40 @@ func requestNamesSession(request httpcontract.Request, sessionId string) bool {
     return sessionId == cookie.Value
 }
 
+func sessionCookie(
+    request httpcontract.Request,
+    forwardedHeadersPolicy httpcontract.ForwardedHeadersPolicy,
+    sessionCookiePolicy httpcontract.SessionCookiePolicy,
+    sessionId string,
+) *nethttp.Cookie {
+    return &nethttp.Cookie{
+        Name:     session.SessionCookieName,
+        Value:    sessionId,
+        Path:     resolveSessionCookiePath(sessionCookiePolicy),
+        Domain:   sessionCookiePolicy.Domain,
+        HttpOnly: true,
+        SameSite: resolveSessionCookieSameSite(sessionCookiePolicy),
+        Secure:   resolveSessionCookieSecure(request, forwardedHeadersPolicy, sessionCookiePolicy),
+    }
+}
+
+func expiringSessionCookie(
+    request httpcontract.Request,
+    forwardedHeadersPolicy httpcontract.ForwardedHeadersPolicy,
+    sessionCookiePolicy httpcontract.SessionCookiePolicy,
+) *nethttp.Cookie {
+    cookie := sessionCookie(request, forwardedHeadersPolicy, sessionCookiePolicy, "")
+    cookie.MaxAge = -1
+
+    return cookie
+}
+
+/* setSessionCookie writes the session cookie and marks the response private, since a shared cache replaying it would hand one client's session, or its ending, to another. */
+func setSessionCookie(response httpcontract.Response, cookie *nethttp.Cookie) {
+    SetCookie(response, cookie)
+    markResponsePrivateForSessionCookie(response)
+}
+
 func resolveSessionCookiePath(sessionCookiePolicy httpcontract.SessionCookiePolicy) string {
     if "" == sessionCookiePolicy.Path {
         return "/"
@@ -370,7 +574,7 @@ func resolveSessionCookiePath(sessionCookiePolicy httpcontract.SessionCookiePoli
     return sessionCookiePolicy.Path
 }
 
-/* net/http has no name for the zero SameSite, and it emits no attribute for it — which is what an operator who only set Path or Domain would silently get. Treat it as unset and fall back to the framework default; SameSiteDefaultMode remains the way to ask for no attribute on purpose. */
+/* the zero SameSite emits no attribute in net/http, so it reads as unset and falls back to the framework default; SameSiteDefaultMode asks for no attribute on purpose. */
 func resolveSessionCookieSameSite(sessionCookiePolicy httpcontract.SessionCookiePolicy) nethttp.SameSite {
     if sessionCookieSameSiteUnset == sessionCookiePolicy.SameSite {
         return nethttp.SameSiteLaxMode
@@ -392,31 +596,111 @@ func resolveSessionCookieSecure(
         return false
     }
 
-    if nil == request {
+    if true == internal.IsNilInterface(request) {
         return false
     }
 
     return "https" == detectSchemeWithForwardedHeadersPolicy(request.HttpRequest(), forwardedHeadersPolicy)
 }
 
-func logSessionPersistenceError(
+/* logSessionPersistenceEvent logs through the named level methods, the door a substituted logger overrides. A session another request ended is not a failure and is logged at the level the caller passes, below the storage outages. */
+func logSessionPersistenceEvent(
     runtimeInstance runtimecontract.Runtime,
+    level loggingcontract.Level,
     message string,
     err error,
+    sessionId string,
+    request httpcontract.Request,
 ) {
     logger := logging.LoggerFromRuntime(runtimeInstance)
     if nil == logger {
         return
     }
 
-    logger.Error(
-        message,
-        exception.LogContext(err),
-    )
+    recordContext := exceptioncontract.Context{}
+
+    if "" != sessionId {
+        /* the id is a live bearer credential, so only a one-way reference is logged */
+        recordContext["sessionRef"] = sessionIdLogReference(sessionId)
+    }
+
+    if false == internal.IsNilInterface(request) && nil != request.HttpRequest() {
+        recordContext["method"] = request.HttpRequest().Method
+        recordContext["path"] = request.HttpRequest().URL.Path
+    }
+
+    if loggingcontract.LevelWarning == level {
+        logger.Warning(message, exception.LogContext(err, recordContext))
+
+        return
+    }
+
+    logger.Error(message, exception.LogContext(err, recordContext))
+}
+
+func markResponsePrivateForSessionCookie(response httpcontract.Response) {
+    if true == internal.IsNilInterface(response) {
+        return
+    }
+
+    headers := response.Headers()
+    if nil == headers {
+        return
+    }
+
+    /* Cache-Control may span several field lines and the Set below replaces them all, so every line is read */
+    existingLines := headers.Values("Cache-Control")
+    if 0 == len(existingLines) {
+        headers.Set("Cache-Control", "private")
+
+        return
+    }
+
+    rebuilt := make([]string, 0)
+    hasPrivate := false
+    hasNoStore := false
+
+    for _, existing := range existingLines {
+        /* a directive may carry a quoted field-name list, so the value is not cut on a bare comma; the cut past the member cap is not read, since the value merged is the application's own Cache-Control, not a client's negotiation */
+        tokens, _ := internal.SplitOutsideQuotes(existing, ',')
+        for _, token := range tokens {
+            trimmed := strings.TrimSpace(token)
+            if "" == trimmed {
+                continue
+            }
+
+            lower := strings.ToLower(trimmed)
+            if "public" == lower {
+                continue
+            }
+            if "private" == lower {
+                hasPrivate = true
+            }
+            if "no-store" == lower {
+                hasNoStore = true
+            }
+
+            rebuilt = append(rebuilt, trimmed)
+        }
+    }
+
+    if false == hasPrivate && false == hasNoStore {
+        rebuilt = append(rebuilt, "private")
+    }
+
+    headers.Set("Cache-Control", strings.Join(rebuilt, ", "))
+}
+
+/* sessionIdLogReference answers a truncated SHA-256 of a session id: enough to correlate one session's records, not enough to present as a cookie. */
+func sessionIdLogReference(sessionId string) string {
+    digest := sha256.Sum256([]byte(sessionId))
+
+    return hex.EncodeToString(digest[:])[:16]
 }
 
 func closeDiscardedResponseBody(response httpcontract.Response, logger loggingcontract.Logger) {
-    if nil == response {
+    /* the interface is read through, not compared: a typed nil dereferenced here, inside the recovery defer, would panic past recover */
+    if true == internal.IsNilInterface(response) {
         return
     }
 
@@ -430,12 +714,12 @@ func closeDiscardedResponseBody(response httpcontract.Response, logger loggingco
         return
     }
 
-    closeErr := closer.Close()
+    closeErr := closeResponseBodySafely(closer)
     if nil == closeErr || nil == logger {
         return
     }
 
-    /* the response may already have been closed by the writer's own deferred Close, when the panic that discarded it unwound from inside WriteToHttpResponseWriter. Closing an os.File twice is safe and reports this; it is not a failure worth an error line on a path that is already reporting a panic. */
+    /* the writer's own deferred Close may have closed the body already; a second close of an os.File reports it and is not logged */
     if true == errors.Is(closeErr, fs.ErrClosed) {
         return
     }
@@ -456,6 +740,7 @@ func detectScheme(request *nethttp.Request) string {
     )
 }
 
+/* detectSchemeWithForwardedHeadersPolicy believes X-Forwarded-Proto only from a trusted proxy and reads its leftmost entry, so a trusted edge must overwrite the header rather than append to it. */
 func detectSchemeWithForwardedHeadersPolicy(request *nethttp.Request, policy httpcontract.ForwardedHeadersPolicy) string {
     if nil == request {
         return "http"
@@ -479,7 +764,7 @@ func detectSchemeWithForwardedHeadersPolicy(request *nethttp.Request, policy htt
 
     forwardedProto := request.Header.Get("X-Forwarded-Proto")
     if "" != forwardedProto {
-        /* a chain of proxies appends rather than replaces, so the header arrives as "https, http": the client-facing hop is the leftmost entry. Returning the whole list yields a scheme equal to neither "http" nor "https", and every downstream equality test — the Secure attribute on the cookies this response sets, above all — then reads the request as plaintext. */
+        /* proxies append, so the client-facing hop is the leftmost entry */
         if commaIndex := strings.IndexByte(forwardedProto, ','); -1 != commaIndex {
             forwardedProto = forwardedProto[:commaIndex]
         }
@@ -511,7 +796,7 @@ func isRequestFromTrustedProxy(request *nethttp.Request, trustedProxyList []stri
         return false
     }
 
-    /* an IPv4-mapped IPv6 peer (::ffff:10.0.0.1) is the IPv4 address it names, so an IPv4 CIDR in the trusted proxy list must still match it — mirrors the per-address check in http/middleware/client_ip.go */
+    /* an IPv4-mapped IPv6 peer matches an IPv4 CIDR, as in http/middleware/client_ip.go */
     remoteAddress = remoteAddress.Unmap()
 
     for _, trustedProxyString := range trustedProxyList {
@@ -522,7 +807,7 @@ func isRequestFromTrustedProxy(request *nethttp.Request, trustedProxyList []stri
 
         trustedPrefix, trustedPrefixErr := netip.ParsePrefix(trimmedTrustedProxyString)
         if nil == trustedPrefixErr {
-            /* a mapped prefix (::ffff:10.0.0.0/104) names the IPv4 range it embeds; unmap it so it still Contains the unmapped host — netip treats the two address families as unequal otherwise, mirroring http/middleware/client_ip.go */
+            /* a mapped prefix is unmapped so it contains the unmapped host, as in http/middleware/client_ip.go */
             if true == trustedPrefix.Addr().Is4In6() && trustedPrefix.Bits() >= 96 {
                 trustedPrefix = netip.PrefixFrom(trustedPrefix.Addr().Unmap(), trustedPrefix.Bits()-96)
             }
@@ -565,12 +850,39 @@ func matchesMethod(methods []string, method string) bool {
     return false
 }
 
+/* matchesHost compares host names case-insensitively, and the port only when the route named one. Whether it did is read with net.SplitHostPort, so the colons of a bracketed IPv6 literal are not a port. */
 func matchesHost(expectedHost string, actualHost string) bool {
     if "" == expectedHost {
         return true
     }
 
-    return expectedHost == actualHost
+    if true == strings.EqualFold(expectedHost, actualHost) {
+        return true
+    }
+
+    expectedHostWithoutPort, expectedNamedPort := splitHostAndPort(expectedHost)
+
+    if true == expectedNamedPort {
+        return false
+    }
+
+    actualHostWithoutPort, _ := splitHostAndPort(actualHost)
+
+    return strings.EqualFold(expectedHostWithoutPort, actualHostWithoutPort)
+}
+
+/* splitHostAndPort answers the bare host, unbracketed, and whether a port was present, so both sides of a comparison have one shape. */
+func splitHostAndPort(hostValue string) (string, bool) {
+    hostWithoutPort, _, splitErr := net.SplitHostPort(hostValue)
+    if nil == splitErr {
+        return hostWithoutPort, true
+    }
+
+    if true == strings.HasPrefix(hostValue, "[") && true == strings.HasSuffix(hostValue, "]") {
+        return hostValue[1 : len(hostValue)-1], false
+    }
+
+    return hostValue, false
 }
 
 func matchesScheme(schemes []string, scheme string) bool {
@@ -585,6 +897,41 @@ func matchesScheme(schemes []string, scheme string) bool {
     }
 
     return false
+}
+
+/* matchesLocale is read by the matcher and by AllowedMethods alike. A route declaring no locales accepts every one; a route declaring some refuses a path carrying none. */
+func matchesLocale(locales []string, params map[string]string) bool {
+    if 0 == len(locales) {
+        return true
+    }
+
+    localeValue := ""
+    if value, exists := params[RouteAttributeLocale]; true == exists {
+        localeValue = value
+    }
+
+    if "" == localeValue {
+        return false
+    }
+
+    for _, allowedLocale := range locales {
+        if allowedLocale == localeValue {
+            return true
+        }
+    }
+
+    return false
+}
+
+/* joinCatchAllSegments re-escapes a separator inside a segment, so "/files/a%2Fb/c" and "/files/a/b/c" bind different tails; every other escape stays decoded, so a literal "%2F" sent as "%252F" binds the same tail as an encoded separator, the non-injective spelling RequestPathAsRouted shares. */
+func joinCatchAllSegments(pathSegments []string) string {
+    escapedSegments := make([]string, 0, len(pathSegments))
+
+    for _, segment := range pathSegments {
+        escapedSegments = append(escapedSegments, strings.ReplaceAll(segment, "/", "%2F"))
+    }
+
+    return strings.Join(escapedSegments, "/")
 }
 
 func matchPath(
@@ -616,11 +963,11 @@ func matchPath(
             if true == isCatchAll {
                 rest := ""
                 if len(pathSegments) > pathIndex {
-                    rest = strings.Join(pathSegments[pathIndex:], "/")
+                    rest = joinCatchAllSegments(pathSegments[pathIndex:])
                 }
 
                 if "" != wildcardName {
-                    /* a requirement on a catch-all is a whitelist like any other; skipping it here would let the wildcard swallow anything while the single-segment and named-parameter branches below enforce theirs */
+                    /* a requirement on a catch-all is enforced like the other branches enforce theirs */
                     if regex, exists := routeDefinition.requirements[wildcardName]; true == exists {
                         if false == regex.MatchString(rest) {
                             return nil, false
@@ -678,9 +1025,9 @@ func matchPath(
         pathPart := pathSegments[pathIndex]
 
         if true == strings.HasPrefix(routePart, ":") {
-            /* @important an empty segment does not satisfy a named parameter: "/users//profile" would otherwise bind an empty id that a handler cannot tell from a supplied one */
+            /* an empty segment does not satisfy a named parameter: "/users//profile" would otherwise bind an empty id that a handler cannot tell from a supplied one */
             if "" == pathPart {
-                /* a trailing optional reached through the root is omitted rather than refused: "/" is the one path whose trailing slash cannot be trimmed away, so it splits into two empty segments and the optional lands on the second one. UrlGenerator mints exactly "/" for this shape and the openapi document advertises it, so refusing it would 404 a url the framework itself produced. The parameter is left unbound, which is what an omitted optional means everywhere else. */
+                /* an optional reached through the root lands on the second of the two empty segments "/" splits into and is left unbound, since UrlGenerator mints exactly "/" for this shape */
                 if true == isLastPattern && pathIndex == len(pathSegments)-1 && true == strings.HasSuffix(routePart, "?") {
                     pathIndex++
                     patternIndex++
@@ -727,4 +1074,13 @@ func matchPath(
     }
 
     return params, true
+}
+
+/* requestPathIsRoutable reports whether the target is origin-form: the asterisk-form of OPTIONS and an authority-form CONNECT are not path-routed, so "*" never binds a parameter. */
+func requestPathIsRoutable(path string) bool {
+    if "" == path {
+        return true
+    }
+
+    return strings.HasPrefix(path, "/")
 }

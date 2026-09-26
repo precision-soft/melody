@@ -6,30 +6,38 @@ import (
     "errors"
     "fmt"
     "strings"
+    "time"
 
     "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/uptrace/bun"
 )
 
-/* currencyRow is the nomenclature as the database holds it; the domain entity stays free of storage concerns because it is cached through a gob serializer. */
+/* currencyRow is the nomenclature as the database holds it; the entity stays free of storage concerns because it is cached through a gob serializer. */
 type currencyRow struct {
     bun.BaseModel `bun:"table:melody_example_v3_currency,alias:currency"`
 
-    Id   string `bun:"id,pk"`
-    Code string `bun:"code,notnull"`
-    Name string `bun:"name,notnull"`
+    Id               string    `bun:"id,pk"`
+    Code             string    `bun:"code,notnull"`
+    Name             string    `bun:"name,notnull"`
+    Rate             float64   `bun:"rate,notnull"`
+    RateAsOf         time.Time `bun:"rate_as_of,notnull"`
+    ProviderRateAsOf time.Time `bun:"provider_rate_as_of,notnull"`
 }
 
+/* newCurrencyRow is the one place an entity becomes a row, and it moves the instant to UTC: the mysql dialect renders a time.Time in its own location when none is configured while the driver reads the column back as UTC, so an instant with an offset would come back shifted by it. */
 func newCurrencyRow(currency *entity.Currency) *currencyRow {
     return &currencyRow{
-        Id:   currency.Id,
-        Code: currency.Code,
-        Name: currency.Name,
+        Id:               currency.Id,
+        Code:             currency.Code,
+        Name:             currency.Name,
+        Rate:             currency.Rate,
+        RateAsOf:         currency.RateAsOf.UTC(),
+        ProviderRateAsOf: currency.ProviderRateAsOf.UTC(),
     }
 }
 
 func (instance *currencyRow) toEntity() *entity.Currency {
-    return entity.NewCurrency(instance.Id, instance.Code, instance.Name)
+    return entity.NewQuotedCurrency(instance.Id, instance.Code, instance.Name, entity.NewRateQuote(instance.Rate, instance.RateAsOf, instance.ProviderRateAsOf))
 }
 
 func newBunCurrencyRepository(database *bun.DB) *bunCurrencyRepository {
@@ -40,42 +48,16 @@ type bunCurrencyRepository struct {
     database *bun.DB
 }
 
-/* EnsureSchema creates the table when it is absent and writes the opening nomenclature into it when it is empty. The seeding insert ignores duplicate keys because several example applications may reach an empty table at the same time, and losing that race is not a failure. */
-func (instance *bunCurrencyRepository) EnsureSchema(ctx context.Context) error {
-    _, createErr := instance.database.
-        NewCreateTable().
-        Model((*currencyRow)(nil)).
-        IfNotExists().
-        Exec(ctx)
-    if nil != createErr {
-        return createErr
-    }
+func (instance *bunCurrencyRepository) seedIfEmpty(ctx context.Context) error {
+    return seedIfEmptyRows(ctx, instance.database, func() []*currencyRow {
+        seedList := seedCurrencyList()
+        rowList := make([]*currencyRow, 0, len(seedList))
+        for _, currency := range seedList {
+            rowList = append(rowList, newCurrencyRow(currency))
+        }
 
-    count, countErr := instance.database.
-        NewSelect().
-        Model((*currencyRow)(nil)).
-        Count(ctx)
-    if nil != countErr {
-        return countErr
-    }
-
-    if 0 < count {
-        return nil
-    }
-
-    seedList := seedCurrencyList()
-    rowList := make([]*currencyRow, 0, len(seedList))
-    for _, currency := range seedList {
-        rowList = append(rowList, newCurrencyRow(currency))
-    }
-
-    _, insertErr := instance.database.
-        NewInsert().
-        Model(&rowList).
-        Ignore().
-        Exec(ctx)
-
-    return insertErr
+        return rowList
+    })
 }
 
 func (instance *bunCurrencyRepository) All(ctx context.Context) ([]*entity.Currency, error) {
@@ -111,7 +93,7 @@ func (instance *bunCurrencyRepository) FindById(ctx context.Context, id string) 
     return row.toEntity(), true, nil
 }
 
-/* findRowById separates a row that is not there from a query that could not run: only sql.ErrNoRows is an answer, and every other failure is reported. */
+/* findRowById separates a row that is not there from a query that could not run: only sql.ErrNoRows is an answer. */
 func (instance *bunCurrencyRepository) findRowById(ctx context.Context, id string) (*currencyRow, bool, error) {
     row := &currencyRow{}
 
@@ -184,16 +166,51 @@ func (instance *bunCurrencyRepository) Update(ctx context.Context, currency *ent
         return false, nil
     }
 
-    result, updateErr := instance.database.
-        NewUpdate().
-        Model(newCurrencyRow(currency)).
-        WherePK().
-        Exec(ctx)
+    result, updateErr := instance.renameQuery(currency).Exec(ctx)
     if nil != updateErr {
         return false, updateErr
     }
 
     return affectedAtLeastOneRow(result), nil
+}
+
+/* renameQuery writes the code and the name alone: the quote the caller read may be older than the row's by now, and only the conditional write of UpdateQuote judges that. */
+func (instance *bunCurrencyRepository) renameQuery(currency *entity.Currency) *bun.UpdateQuery {
+    return instance.database.
+        NewUpdate().
+        Model(newCurrencyRow(currency)).
+        Column("code", "name").
+        WherePK()
+}
+
+func (instance *bunCurrencyRepository) UpdateQuote(ctx context.Context, id string, quote entity.RateQuote) (bool, error) {
+    normalizedId := strings.TrimSpace(id)
+    if "" == normalizedId {
+        return false, fmt.Errorf("id is required")
+    }
+
+    result, updateErr := instance.updateQuoteQuery(normalizedId, quote).Exec(ctx)
+    if nil != updateErr {
+        return false, updateErr
+    }
+
+    return affectedAtLeastOneRow(result), nil
+}
+
+/* updateQuoteQuery is the conditional write of UpdateQuote in one statement, instants written and compared in UTC. The row is written when it holds no newer reading on this clock, or when it names the same reading the provider re-quotes, and never when it already holds the quote, so two concurrent documents land in reading order whichever process writes last. */
+func (instance *bunCurrencyRepository) updateQuoteQuery(id string, quote entity.RateQuote) *bun.UpdateQuery {
+    asOf := quote.AsOf.UTC()
+    providerAsOf := quote.ProviderAsOf.UTC()
+
+    return instance.database.
+        NewUpdate().
+        Model((*currencyRow)(nil)).
+        Set("rate = ?", quote.Rate).
+        Set("rate_as_of = ?", asOf).
+        Set("provider_rate_as_of = ?", providerAsOf).
+        Where("id = ?", id).
+        Where("(rate_as_of <= ? OR provider_rate_as_of = ?)", asOf, providerAsOf).
+        Where("NOT (rate = ? AND provider_rate_as_of = ?)", quote.Rate, providerAsOf)
 }
 
 func (instance *bunCurrencyRepository) DeleteById(ctx context.Context, id string) (bool, error) {

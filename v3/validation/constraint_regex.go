@@ -1,6 +1,7 @@
 package validation
 
 import (
+    "errors"
     "regexp"
 
     "github.com/precision-soft/melody/v3/exception"
@@ -14,7 +15,18 @@ const (
     ConstraintRegexErrorInvalidPattern = "invalidPattern"
 )
 
+/* the empty pattern would match every string, so it is refused rather than armed */
+var errEmptyRegexPattern = errors.New("the empty pattern matches every string; a pattern meant to match everything says so explicitly")
+
+/* NewRegex keeps a pattern that does not compile, the empty one included, as the constraint's error instead of panicking: Validate refuses every non-empty value with invalidPattern and Error answers why, so a rule declared wrong fails closed where it is used. The tag door (WithParams) refuses the empty pattern before it reaches here. */
 func NewRegex(pattern string) *Regex {
+    if "" == pattern {
+        return &Regex{
+            pattern: pattern,
+            err:     errEmptyRegexPattern,
+        }
+    }
+
     compiled, err := regexp.Compile(pattern)
 
     return &Regex{
@@ -42,7 +54,7 @@ func (instance *Regex) Validate(value any, field string) validationcontract.Vali
 
     stringValue, isString := resolved.(string)
     if false == isString {
-        return nil
+        return NewValidationError(field, "value must be a string", ConstraintRegexErrorMismatch, nil)
     }
 
     if "" == stringValue {
@@ -73,21 +85,33 @@ func (instance *Regex) Error() error {
 }
 
 func (instance *Regex) WithParams(params map[string]string) (validationcontract.Constraint, error) {
-    if patternString, exists := params["pattern"]; true == exists {
-        return NewRegex(patternString), nil
+    patternString, exists := params["pattern"]
+    if false == exists {
+        patternString, exists = params["value"]
     }
 
-    if patternString, exists := params["value"]; true == exists {
-        return NewRegex(patternString), nil
+    if false == exists {
+        return nil, exception.NewError(
+            "regex constraint requires a pattern or value parameter",
+            exceptioncontract.Context{
+                "params": params,
+            },
+            nil,
+        )
     }
 
-    return nil, exception.NewError(
-        "regex constraint requires a pattern or value parameter",
-        exceptioncontract.Context{
-            "params": params,
-        },
-        nil,
-    )
+    /* a tag spelled regex= is refused at the tag door as a declaration error, the reason on errEmptyRegexPattern */
+    if "" == patternString {
+        return nil, exception.NewError(
+            "regex constraint requires a non-empty pattern",
+            exceptioncontract.Context{
+                "params": params,
+            },
+            nil,
+        )
+    }
+
+    return NewRegex(patternString), nil
 }
 
 var _ validationcontract.Constraint = (*Regex)(nil)

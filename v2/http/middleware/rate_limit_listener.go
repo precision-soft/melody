@@ -10,6 +10,7 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
     "github.com/precision-soft/melody/v2/http"
     httpcontract "github.com/precision-soft/melody/v2/http/contract"
+    "github.com/precision-soft/melody/v2/internal"
     kernelcontract "github.com/precision-soft/melody/v2/kernel/contract"
     "github.com/precision-soft/melody/v2/logging"
     runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
@@ -23,7 +24,8 @@ func RegisterRateLimitRequestListener(
     eventDispatcher eventcontract.EventDispatcher,
     config *RateLimitConfig,
 ) {
-    if nil == config || nil == config.Limiter() {
+    /* the limiter is read through the interface, the same refusal the middleware door gives a typed nil */
+    if nil == config || true == internal.IsNilInterface(config.Limiter()) {
         exception.Panic(
             exception.NewError("limiter is required for rate limit request listener", nil, nil),
         )
@@ -43,7 +45,7 @@ func RegisterRateLimitRequestListener(
         kernelcontract.EventKernelRequest,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
             requestEvent, ok := eventValue.Payload().(*http.KernelRequestEvent)
-            if false == ok || nil == requestEvent || nil == requestEvent.Request() {
+            if false == ok || nil == requestEvent || true == internal.IsNilInterface(requestEvent.Request()) {
                 return nil
             }
 
@@ -59,7 +61,7 @@ func RegisterRateLimitRequestListener(
                 var allowErr error
                 allowed, allowErr = runtimeLimiter.AllowWithRuntime(runtimeInstance, key)
                 if nil != allowErr && false == exception.IsAlreadyLogged(allowErr) {
-                    /* the returned allowed value already reflects the limiter's failure policy; the listener only reports the store failure. A failure that is the caller's own cancellation — the client disconnected while the limiter's round trip was in flight — is recorded at warning under its own name, because at error it read as a store outage and paged the operator for a client hanging up. This door meters every request, ahead of authentication, so it sees more of those disconnects than the middleware does. A limiter that filed its own record marks it, and then this is the second copy rather than the only one. */
+                    /* the returned allowed value already reflects the limiter's failure policy; the listener only reports the store failure. The caller's own cancellation is recorded at warning under its own name, since it is a client hanging up and not a store outage; a limiter that filed its own record marks it. */
                     logger := logging.LoggerFromRuntime(runtimeInstance)
                     if nil != logger {
                         if true == errors.Is(allowErr, context.Canceled) {
@@ -104,7 +106,8 @@ func RegisterRateLimitRequestListener(
                 return nil
             }
 
-            if nil != response {
+            /* IsNilInterface and not `nil !=`: OnLimitExceeded is the application's, so a typed nil of its own response type is a non-nil interface a bare check reads as a live response — SetResponse normalizes it to nil, the fallback below never runs, and the refused request is served unmetered. */
+            if false == internal.IsNilInterface(response) {
                 requestEvent.SetResponse(response)
 
                 return nil

@@ -39,7 +39,7 @@ func NewProductService(
     }
 }
 
-/* ProductService stamps every write with the injected clock rather than the wall, which is what makes the stamp assertable: a frozen clock lets a test state the exact instant a product carries, which cannot be written against time.Now. */
+/* ProductService stamps every write with the injected clock rather than the wall, so a frozen clock names the exact instant a product carries. */
 type ProductService struct {
     productRepository repository.ProductRepository
     categoryService   *CategoryService
@@ -72,12 +72,16 @@ func (instance *ProductService) List() ([]*entity.Product, error) {
 }
 
 func (instance *ProductService) FindById(id string) (*entity.Product, bool, error) {
+    /* an identifier no cache key can carry names no row, so it is answered as absent without asking the cache */
+    if false == CacheSafeIdentifier(id) {
+        return nil, false, nil
+    }
+
     cacheKey := CacheKeyProductById(id)
 
-    cached, rememberErr := cache.Remember(
+    cached, rememberErr := rememberEntityOrAbsence(
         instance.cache,
         cacheKey,
-        0,
         func(ctx context.Context) (any, error) {
             product, found, findErr := instance.productRepository.FindById(ctx, id)
             if nil != findErr {
@@ -90,7 +94,6 @@ func (instance *ProductService) FindById(id string) (*entity.Product, bool, erro
 
             return product, nil
         },
-        nil,
     )
     if nil != rememberErr {
         return nil, false, rememberErr
@@ -170,15 +173,17 @@ func (instance *ProductService) Update(
         return nil, false, nil
     }
 
-    product.Name = name
-    product.Description = description
-    product.CategoryId = categoryId
-    product.Price = price
-    product.CurrencyId = currencyId
-    product.Stock = stock
-    product.UpdatedAt = instance.clock.Now()
+    /* under the in-memory configuration the loaded entity is the repository's stored value, shared with concurrent readers, so the changes land on a copy: a refused update leaves it untouched and no reader sees it half-written */
+    modified := *product
+    modified.Name = name
+    modified.Description = description
+    modified.CategoryId = categoryId
+    modified.Price = price
+    modified.CurrencyId = currencyId
+    modified.Stock = stock
+    modified.UpdatedAt = instance.clock.Now()
 
-    updated, updateErr := instance.productRepository.Update(ctx, product)
+    updated, updateErr := instance.productRepository.Update(ctx, &modified)
     if nil != updateErr {
         return nil, false, updateErr
     }
@@ -186,7 +191,7 @@ func (instance *ProductService) Update(
         return nil, false, nil
     }
 
-    productUpdatedEvent := event.NewProductUpdatedEvent(product)
+    productUpdatedEvent := event.NewProductUpdatedEvent(&modified)
 
     _, dispatchErr := instance.eventDispatcher.DispatchName(
         runtimeInstance,
@@ -197,7 +202,7 @@ func (instance *ProductService) Update(
         return nil, true, dispatchErr
     }
 
-    return product, true, nil
+    return &modified, true, nil
 }
 
 func (instance *ProductService) DeleteById(

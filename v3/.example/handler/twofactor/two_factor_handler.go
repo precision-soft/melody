@@ -9,30 +9,24 @@ import (
     store2fa "github.com/precision-soft/melody/v3/.example/twofactor"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
+    examplesecurity "github.com/precision-soft/melody/v3/.example/security"
     melodysecurity "github.com/precision-soft/melody/v3/security"
     "github.com/precision-soft/melody/v3/security/totp"
 )
 
-/* queryString reads a query parameter as a string, handling the bag's []string storage (query values are
-kept as string slices) as well as a plain string, returning "" when absent. */
-func queryString(request melodyhttpcontract.Request, name string) string {
-    value, exists := request.Query().Get(name)
+/* enrolledIdentifier answers the account both doors act on: the authenticated token's identifier, never a name the request chose, so the enrollment door writes the caller's own row and the verification door reads it. */
+func enrolledIdentifier(runtimeInstance melodyruntimecontract.Runtime) (string, bool) {
+    token, exists := examplesecurity.TokenFromRuntime(runtimeInstance)
     if false == exists {
-        return ""
+        return "", false
     }
 
-    switch typed := value.(type) {
-    case string:
-        return typed
-    case []string:
-        if 0 == len(typed) {
-            return ""
-        }
-
-        return typed[0]
-    default:
-        return ""
+    identifier := token.UserIdentifier()
+    if "" == identifier {
+        return "", false
     }
+
+    return identifier, true
 }
 
 type enrollPayload struct {
@@ -42,20 +36,22 @@ type enrollPayload struct {
     RecoveryCodes  []string `json:"recoveryCodes"`
 }
 
-/* EnrollHandler enrolls a user's TOTP second factor: it generates a secret and single-use recovery codes,
-persists them encrypted, and returns the secret + otpauth URI (the QR payload) and the recovery codes to
-show once. An endpoint kept deliberately simple — a production application returns the secret only during enrollment and behind the user's
-authenticated session. */
-func EnrollHandler(store *store2fa.Store) melodyhttpcontract.Handler {
+/* EnrollHandler enrolls the caller's TOTP second factor: it generates a secret and single-use recovery codes, persists them encrypted, and answers the secret, the otpauth URI and the recovery codes once, to the account they belong to. Enrolling again replaces the secret and its unused recovery codes, so an account whose authenticator is lost has a way back. */
+func EnrollHandler(storeSource store2fa.StoreSource) melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        user := queryString(request, "user")
-        if "" == user {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "user query parameter is required"), nil
+        user, authenticated := enrolledIdentifier(runtimeInstance)
+        if false == authenticated {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusUnauthorized, "unauthorized"), nil
+        }
+
+        store, storeErr := storeSource(runtimeInstance)
+        if nil != storeErr {
+            return unavailableStore(runtimeInstance, request, storeErr), nil
         }
 
         secret, uri, recoveryCodes, enrollErr := store.Enroll(runtimeInstance.Context(), user, "Melody Example")
         if nil != enrollErr {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "could not enroll the second factor"), nil
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not enroll the second factor", enrollErr), nil
         }
 
         return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, enrollPayload{
@@ -67,27 +63,25 @@ func EnrollHandler(store *store2fa.Store) melodyhttpcontract.Handler {
     }
 }
 
-/* VerifyHandler verifies a submitted second factor for a user: a TOTP code on the X-2FA-Code header is
-checked against the stored secret, or a single-use recovery code on X-2FA-Recovery-Code is atomically
-redeemed. It reports 200 on success and 401 on a wrong/replayed factor, exercising the same store the
-TotpSecondFactorAuthenticator uses.
-
-An accepted TOTP code stays valid for its whole window, so — exactly as the framework's authenticator does — it is
-burned in a replay guard the moment it is accepted. The nonce is keyed on the NORMALIZED code, because Verify
-normalizes before comparing: keying on the raw code would let "409 643" replay a code already spent as "409643". */
-func VerifyHandler(store *store2fa.Store) melodyhttpcontract.Handler {
+/* VerifyHandler verifies a second factor for the caller's own enrollment: a TOTP code on X-2FA-Code against the stored secret, or a single-use recovery code on X-2FA-Recovery-Code redeemed atomically; 200 on success, 401 on a wrong or replayed factor. An accepted code is burned in a replay guard keyed on the normalized code, since Verify normalizes before comparing. */
+func VerifyHandler(storeSource store2fa.StoreSource) melodyhttpcontract.Handler {
     replayGuard := melodysecurity.NewMemoryNonceGuard()
 
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        user := queryString(request, "user")
-        if "" == user {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "user query parameter is required"), nil
+        user, authenticated := enrolledIdentifier(runtimeInstance)
+        if false == authenticated {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusUnauthorized, "unauthorized"), nil
+        }
+
+        store, storeErr := storeSource(runtimeInstance)
+        if nil != storeErr {
+            return unavailableStore(runtimeInstance, request, storeErr), nil
         }
 
         if recoveryCode := request.Header(melodysecurity.DefaultTotpRecoveryHeaderName); "" != recoveryCode {
             redeemed, redeemErr := store.RedeemRecoveryCode(runtimeInstance, user, recoveryCode)
             if nil != redeemErr {
-                return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "could not redeem the recovery code"), nil
+                return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not redeem the recovery code", redeemErr), nil
             }
 
             if false == redeemed {
@@ -104,7 +98,7 @@ func VerifyHandler(store *store2fa.Store) melodyhttpcontract.Handler {
 
         secret, enrolled, findErr := store.FindTotpSecret(runtimeInstance, user)
         if nil != findErr {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "could not look up the enrollment"), nil
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not look up the enrollment", findErr), nil
         }
 
         if false == enrolled {
@@ -113,7 +107,7 @@ func VerifyHandler(store *store2fa.Store) melodyhttpcontract.Handler {
 
         verified, verifyErr := totp.Verify(secret, code, totp.Config{})
         if nil != verifyErr {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "could not verify the code"), nil
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not verify the code", verifyErr), nil
         }
 
         if false == verified {
@@ -122,7 +116,7 @@ func VerifyHandler(store *store2fa.Store) melodyhttpcontract.Handler {
 
         seen, rememberErr := replayGuard.Remember(runtimeInstance, "2fa:"+user+":"+totp.NormalizeCode(code), totpCodeValidityWindow())
         if nil != rememberErr {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "could not verify the code"), nil
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not verify the code", rememberErr), nil
         }
 
         if true == seen {
@@ -133,8 +127,12 @@ func VerifyHandler(store *store2fa.Store) melodyhttpcontract.Handler {
     }
 }
 
-/* totpCodeValidityWindow is the span an accepted code stays verifiable — (2*skew+1) periods — and therefore how long a
-spent code must stay burned. It resolves through the totp package so it can never drift from what Verify honours. */
+/* unavailableStore answers a door whose store could not be resolved with 503 and the cause journaled; the next request resolves the store again. */
+func unavailableStore(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, storeErr error) melodyhttpcontract.Response {
+    return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusServiceUnavailable, "the second factor is unavailable", storeErr)
+}
+
+/* totpCodeValidityWindow is how long an accepted code stays verifiable, (2*skew+1) periods, and so how long a spent code stays burned; it resolves through the totp package, so it matches what Verify honours. */
 func totpCodeValidityWindow() time.Duration {
     resolved := totp.Config{}.Resolve()
 

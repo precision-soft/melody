@@ -1,7 +1,7 @@
 package validation
 
 import (
-    "fmt"
+    "strconv"
     "strings"
     "sync"
 
@@ -14,7 +14,83 @@ type validationRule struct {
     params map[string]string
 }
 
-/* @important tracks whether the scan is inside a regex character class [...] so the bracket/comma bookkeeping treats ')', ']', '}', '(', '{' and ',' as literal class members. A ']' is a literal (not a close) when it is the class's first content character — and the leading negation '^' does not count as content — mirroring regexp/syntax. A POSIX named class ([:alpha:], [:^digit:], ...) opens on a '[' immediately followed by ':' and only ends on the ':]' pair, so the ']' that terminates the POSIX element is not mistaken for the enclosing class close. */
+func splitByTopLevelComma(valueString string) []string {
+    var parts []string
+
+    bracketsBalanced := hasBalancedBrackets(valueString)
+
+    current := strings.Builder{}
+    parenDepth := 0
+    curlyDepth := 0
+    wasEscaped := false
+    classScanner := charClassScanner{}
+
+    for _, character := range valueString {
+        if true == wasEscaped {
+            current.WriteRune(character)
+            wasEscaped = false
+            classScanner.noteEscaped()
+            continue
+        }
+
+        if '\\' == character {
+            current.WriteRune(character)
+            wasEscaped = true
+            continue
+        }
+
+        if true == bracketsBalanced {
+            if true == classScanner.step(character) {
+                current.WriteRune(character)
+                continue
+            }
+
+            if '(' == character {
+                parenDepth++
+                current.WriteRune(character)
+                continue
+            }
+
+            if ')' == character {
+                if 0 < parenDepth {
+                    parenDepth--
+                }
+                current.WriteRune(character)
+                continue
+            }
+
+            if '{' == character {
+                curlyDepth++
+                current.WriteRune(character)
+                continue
+            }
+
+            if '}' == character {
+                if 0 < curlyDepth {
+                    curlyDepth--
+                }
+                current.WriteRune(character)
+                continue
+            }
+        }
+
+        if ',' == character {
+            if 0 == parenDepth && 0 == curlyDepth {
+                parts = append(parts, current.String())
+                current.Reset()
+                continue
+            }
+        }
+
+        current.WriteRune(character)
+    }
+
+    parts = append(parts, current.String())
+
+    return parts
+}
+
+/* charClassScanner tracks a regex character class so its members read as literals: a ']' first in the class is a literal, and a POSIX class ([:alpha:]) ends only on its ':]' pair. */
 type charClassScanner struct {
     inClass          bool
     contentSeen      bool
@@ -97,82 +173,6 @@ func (instance *charClassScanner) noteEscaped() {
     }
 }
 
-func splitByTopLevelComma(valueString string) []string {
-    var parts []string
-
-    bracketsBalanced := hasBalancedBrackets(valueString)
-
-    current := strings.Builder{}
-    parenDepth := 0
-    curlyDepth := 0
-    wasEscaped := false
-    classScanner := charClassScanner{}
-
-    for _, character := range valueString {
-        if true == wasEscaped {
-            current.WriteRune(character)
-            wasEscaped = false
-            classScanner.noteEscaped()
-            continue
-        }
-
-        if '\\' == character {
-            current.WriteRune(character)
-            wasEscaped = true
-            continue
-        }
-
-        if true == bracketsBalanced {
-            if true == classScanner.step(character) {
-                current.WriteRune(character)
-                continue
-            }
-
-            if '(' == character {
-                parenDepth++
-                current.WriteRune(character)
-                continue
-            }
-
-            if ')' == character {
-                if 0 < parenDepth {
-                    parenDepth--
-                }
-                current.WriteRune(character)
-                continue
-            }
-
-            if '{' == character {
-                curlyDepth++
-                current.WriteRune(character)
-                continue
-            }
-
-            if '}' == character {
-                if 0 < curlyDepth {
-                    curlyDepth--
-                }
-                current.WriteRune(character)
-                continue
-            }
-        }
-
-        if ',' == character {
-            if 0 == parenDepth && 0 == curlyDepth {
-                parts = append(parts, current.String())
-                current.Reset()
-                continue
-            }
-        }
-
-        current.WriteRune(character)
-    }
-
-    parts = append(parts, current.String())
-
-    return parts
-}
-
 func hasBalancedBrackets(valueString string) bool {
     parenDepth := 0
     curlyDepth := 0
@@ -195,7 +195,7 @@ func hasBalancedBrackets(valueString string) bool {
             continue
         }
 
-        /* a ']' that reaches here closes no class: RE2 reads it as a literal, so it must not sink the whole tag (the class scanner above consumes the ones that do close a class) */
+        /* a ']' closing no class is a literal to RE2, so it must not sink the tag */
         switch character {
         case '(':
             parenDepth++
@@ -309,10 +309,10 @@ func splitByCommaOutsideRegexMeta(valueString string) []string {
     return parts
 }
 
-/* @important parseIntStrict reports a parse failure instead of silently falling back to a default, so a malformed numeric constraint parameter (for example minLength=notanumber) is rejected at constraint creation rather than degrading to a default bound the caller never asked for. A valid leading integer is still accepted (Sscanf stops at the first non-digit), so a fractional bound such as 99.5 keeps truncating to 99. */
+/* parseIntStrict accepts only a string that is an integer in its entirety, so a malformed parameter is refused rather than read as another bound, lessThan=-0.5 as 0 or 1e3 as 1. */
 func parseIntStrict(valueString string) (int, bool) {
-    var result int
-    if _, err := fmt.Sscanf(valueString, "%d", &result); nil != err {
+    result, err := strconv.Atoi(valueString)
+    if nil != err {
         return 0, false
     }
 
@@ -324,7 +324,7 @@ type parsedValidationTag struct {
     err   error
 }
 
-/* parsedValidationTagCache memoizes the parse of a validate tag because applyFieldRules re-parses it for every value it reaches — once per element of an array, so a large payload re-scanned the same tag tens of thousands of times. Tags are read from struct tags, which are compile-time constants, so the key space is the program's own set of distinct tags and cannot be grown by a request. The cached rules are shared, so every consumer of a rule's parameter map must copy it before handing it out. */
+/* parsedValidationTagCache memoizes the parse of a validate tag, which applyFieldRules reaches once per element of an array. Tags are compile-time constants, so a request cannot grow the key space; the rules are shared, so every consumer copies a parameter map before handing it out. */
 var parsedValidationTagCache sync.Map
 
 func parseValidationTag(tag string) ([]validationRule, error) {
@@ -336,7 +336,7 @@ func parseValidationTag(tag string) ([]validationRule, error) {
 
     rules, err := parseValidationTagUncached(tag)
 
-    /* LoadOrStore rather than Store so a concurrent first touch settles on ONE parse: the rules and their parameter maps are shared by identity, and a losing caller holding a second copy would defeat the memo it is meant to be reading from */
+    /* LoadOrStore rather than Store, so a concurrent first touch settles on one parse, the rules being shared by identity */
     stored, _ := parsedValidationTagCache.LoadOrStore(tag, parsedValidationTag{rules: rules, err: err})
     parsed := stored.(parsedValidationTag)
 
@@ -490,6 +490,17 @@ func parseValidationTagUncached(tag string) ([]validationRule, error) {
         }
 
         rules = append(rules, rule)
+    }
+
+    /* a tag that parses to no rule at all, a bare comma for example, is malformed, not a request to validate nothing */
+    if 0 == len(rules) {
+        return nil, exception.NewError(
+            "invalid validation tag syntax",
+            exceptioncontract.Context{
+                "tag": tag,
+            },
+            nil,
+        )
     }
 
     return rules, nil

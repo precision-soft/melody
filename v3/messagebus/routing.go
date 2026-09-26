@@ -3,6 +3,8 @@ package messagebus
 import (
     "reflect"
 
+    "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/internal"
     messagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
 )
 
@@ -17,6 +19,11 @@ type Routing struct {
 }
 
 func RouteType[T any](routing *Routing, name string, transport messagebuscontract.Transport) *Routing {
+    /* a nil or typed-nil transport is refused at registration, as RegisterTransports refuses a nil entry, so a mis-wired route fails at boot rather than on its first message */
+    if true == internal.IsNilInterface(transport) {
+        exception.Panic(exception.NewError("messagebus route transport is nil", map[string]any{"name": name}, nil))
+    }
+
     routing.routes[reflect.TypeOf((*T)(nil)).Elem()] = TransportRouting{
         Name:      name,
         Transport: transport,

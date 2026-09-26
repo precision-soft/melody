@@ -29,7 +29,7 @@ func (instance *Alphanumeric) Validate(value any, field string) validationcontra
 
     stringValue, isString := resolved.(string)
     if false == isString {
-        return nil
+        return NewValidationError(field, "value must be a string", ConstraintAlphanumericErrorNotAlphanumeric, nil)
     }
 
     if "" == stringValue {

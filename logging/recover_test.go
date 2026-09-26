@@ -424,6 +424,39 @@ func TestResolveRecoveredExit_TypedNilValuesNormalizeAsPanics(t *testing.T) {
     }
 }
 
+type recoveredMessagePanicsError struct{}
+
+func (instance recoveredMessagePanicsError) Error() string {
+    panic("Error() panics")
+}
+
+/* the recovery defers of the process boundary render the recovered error's message themselves, outside the recover the exception package's doors use, so an Error() that panics — on the nil field that made it panic-worthy — would raise a second panic there, past the teardown and the exit code */
+func TestResolveRecoveredExit_AnErrorWhoseMessagePanicsIsStillResolved(t *testing.T) {
+    err, exitCode, needsLogging := resolveRecoveredExit(recoveredMessagePanicsError{}, 5)
+
+    if nil == err || false == strings.Contains(err.Message(), "error message panicked") {
+        t.Fatalf("expected the recovered rendering as the message, got %v", err)
+    }
+
+    if 5 != exitCode || false == needsLogging {
+        t.Fatalf("expected the caller's exit code and a record, got %d %v", exitCode, needsLogging)
+    }
+}
+
+func TestLogOnRecover_AnErrorWhoseMessagePanicsIsStillRecorded(t *testing.T) {
+    logger := &captureLogger{}
+
+    func() {
+        defer LogOnRecover(logger, false)
+
+        panic(recoveredMessagePanicsError{})
+    }()
+
+    if 1 != logger.calls || false == strings.Contains(logger.lastMessage, "error message panicked") {
+        t.Fatalf("expected one record carrying the recovered rendering, got %d %q", logger.calls, logger.lastMessage)
+    }
+}
+
 func TestResolveRecoveredExit_ForeignErrorCarriesThePanicStack(t *testing.T) {
     err, _, _ := resolveRecoveredExit(errors.New("boom"), 5)
 
@@ -976,7 +1009,7 @@ func TestLogOnRecoverAndExitAfter_WritesTheCertificateForAnAlreadyLoggedError(t 
     }
 }
 
-/* the resolve step runs under its own shield, honouring the comment beside the other steps: a recovered value whose Error() panics used to unwind into main and the process died with the Go runtime's exit code 2 — no record, no certificate, no teardown. The shield answers a generic record under the caller's own code. */
+/* the resolve step runs under its own shield like the other steps: a recovered value whose methods panic would otherwise unwind into main, and the process would die with the Go runtime's exit code 2 — no record, no certificate, no teardown. The shield answers a generic record under the caller's own code. The probe panics in Unwrap, which the already-logged probe calls; an Error() that panics is rendered by the resolve itself and never reaches the shield */
 func TestResolveRecoveredExitShielded_AnswersTheCallersCodeWhenTheValueItselfPanics(t *testing.T) {
     err, resolvedExitCode, needsLogging := resolveRecoveredExitShielded(&panickingResolveError{}, 3)
 
@@ -1000,10 +1033,14 @@ func TestResolveRecoveredExitShielded_AnswersTheCallersCodeWhenTheValueItselfPan
 type panickingResolveError struct{}
 
 func (instance *panickingResolveError) Error() string {
+    return "a value whose Unwrap panics"
+}
+
+func (instance *panickingResolveError) Unwrap() error {
     var m map[string]string
     m["boom"] = "boom"
 
-    return "unreachable"
+    return nil
 }
 
 /* RunShieldedStep answers whether the step finished, which is what lets the clean shutdown tell a teardown that completed from one it had to abandon: the budget exists so a process holding something it cannot release ends anyway, and a caller told nothing would have no reason to exit non-zero */
@@ -1025,5 +1062,138 @@ func TestRunShieldedStep_AnswersWhetherTheStepFinished(t *testing.T) {
         <-release
     }) {
         t.Fatalf("expected a hanging step to be abandoned and reported as unfinished")
+    }
+}
+
+/* a step that panicked did not finish, and answering true for it hands the caller a completion the step never had: the panic is contained on the step's own goroutine, so the shutdown that reads this answer sees neither the panic nor an error and exits as though the teardown had run to the end */
+func TestRunShieldedStep_AnswersFalseForAStepThatPanicked(t *testing.T) {
+    if true == RunShieldedStep("a step that panics", func() {
+        panic("the step exploded")
+    }) {
+        t.Fatalf("expected a panicking step to be reported as unfinished")
+    }
+}
+
+/* the marker tells a re-executed test binary that it is the child whose stderr has nowhere left to go */
+const exitEchoStalledProbeMarker = "MELODY_EXIT_ECHO_STALLED_PROBE"
+
+/* the echo is the last thing between the failure and os.Exit, and it writes to stderr: a stderr that is a pipe nobody drains blocks, and without a bound the process would hang on the line that reports its exit, with the record written and the code resolved. It is bounded rather than shielded, because the shield reports an abandoned step on the very channel that is blocked. */
+func TestLogOnRecoverAndExit_AStalledStderrDoesNotHoldTheExit(t *testing.T) {
+    if "1" == os.Getenv(exitEchoStalledProbeMarker) {
+        exitStepBudget = 200 * time.Millisecond
+
+        /* fill the pipe the parent handed us and never drains, so the echo below has nowhere to go */
+        go func() {
+            _, _ = os.Stderr.Write(make([]byte, 1<<20))
+        }()
+        time.Sleep(200 * time.Millisecond)
+
+        LogOnRecoverAndExit(
+            &captureLogger{},
+            exception.NewError("the process is dying", nil, nil),
+            7,
+        )
+
+        return
+    }
+
+    readEnd, writeEnd, pipeErr := os.Pipe()
+    if nil != pipeErr {
+        t.Fatalf("unexpected pipe error: %v", pipeErr)
+    }
+    defer func() {
+        _ = readEnd.Close()
+    }()
+
+    command := exec.Command(
+        os.Args[0],
+        "-test.run=^TestLogOnRecoverAndExit_AStalledStderrDoesNotHoldTheExit$",
+    )
+    command.Env = append(os.Environ(), exitEchoStalledProbeMarker+"=1")
+    command.Stderr = writeEnd
+
+    if startErr := command.Start(); nil != startErr {
+        t.Fatalf("unexpected start error: %v", startErr)
+    }
+
+    _ = writeEnd.Close()
+
+    waited := make(chan error, 1)
+    go func() {
+        waited <- command.Wait()
+    }()
+
+    select {
+    case runErr := <-waited:
+        var exitErr *exec.ExitError
+        if false == errors.As(runErr, &exitErr) {
+            t.Fatalf("expected the child to exit non-zero, got %v", runErr)
+        }
+
+        if 7 != exitErr.ExitCode() {
+            t.Fatalf("expected the resolved exit code 7, got %d", exitErr.ExitCode())
+        }
+
+    case <-time.After(20 * time.Second):
+        _ = command.Process.Kill()
+
+        t.Fatalf("the process never took its exit: the stderr echo held it")
+    }
+}
+
+/* the exit line carries request-derived text, and a raw escape sequence in it repaints the terminal the operator reads the exit on */
+func TestEchoExitToStderr_EscapesAControlCharacterOfTheErrorText(t *testing.T) {
+    readEnd, writeEnd, pipeErr := os.Pipe()
+    if nil != pipeErr {
+        t.Fatalf("pipe: %v", pipeErr)
+    }
+    savedStandardError := os.Stderr
+    os.Stderr = writeEnd
+
+    echoExitToStderr(errors.New("before"+string(rune(0x1b))+"[31mafter"), 1)
+
+    os.Stderr = savedStandardError
+    _ = writeEnd.Close()
+    written, _ := io.ReadAll(readEnd)
+
+    if true == bytes.ContainsRune(written, 0x1b) || false == strings.Contains(string(written), "[31mafter") {
+        t.Fatalf("expected the escape byte spelled rather than written raw, got %q", written)
+    }
+}
+
+func TestRunExitStepShielded_EscapesAndRendersThePanicValueItReports(t *testing.T) {
+    defer boundTextValueStack()()
+
+    readEnd, writeEnd, pipeErr := os.Pipe()
+    if nil != pipeErr {
+        t.Fatalf("pipe: %v", pipeErr)
+    }
+    savedStandardError := os.Stderr
+    os.Stderr = writeEnd
+
+    cyclic := map[string]any{"text": "before" + string(rune(0x1b)) + "[31mafter"}
+    cyclic["self"] = cyclic
+
+    runExitStepShielded("probing", func() {
+        panic(cyclic)
+    })
+
+    os.Stderr = savedStandardError
+    _ = writeEnd.Close()
+    written, _ := io.ReadAll(readEnd)
+
+    if true == bytes.ContainsRune(written, 0x1b) || false == strings.Contains(string(written), "self:<cycle>") || false == strings.Contains(string(written), "panic while probing during the exit handler") {
+        t.Fatalf("expected the panic value rendered with the cycle marker and its escape byte spelled, got %q", written)
+    }
+}
+
+func TestDescribeRecoveredValue_RendersACyclicPanicValueWithTheCycleMarker(t *testing.T) {
+    defer boundTextValueStack()()
+
+    cyclic := map[string]any{}
+    cyclic["self"] = cyclic
+
+    if "map[self:<cycle>]" != describeRecoveredValue(cyclic) {
+        t.Fatalf("expected the cyclic panic value named with the cycle marker, got %q", describeRecoveredValue(cyclic))
     }
 }

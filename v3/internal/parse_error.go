@@ -1,6 +1,8 @@
 package internal
 
 import (
+    "time"
+
     "github.com/precision-soft/melody/v3/exception"
 )
 
@@ -21,9 +23,12 @@ func ParseError(
         "actualType":    StringifyType(value),
     }
 
-    stringValue, isString := value.(string)
-    if true == isString {
-        context["value"] = stringValue
+    /* the refused value enters the context for the scalar shapes; a secret parameter withholds the whole error from the log on the config path */
+    switch typedValue := value.(type) {
+    case string:
+        context["value"] = typedValue
+    case int, int64, float32, float64, time.Duration:
+        context["value"] = typedValue
     }
 
     return exception.NewError(message, context, causeErr)

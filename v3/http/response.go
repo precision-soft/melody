@@ -7,11 +7,14 @@ import (
     "io"
     "mime"
     nethttp "net/http"
+    "net/textproto"
+    neturl "net/url"
     "os"
     "path/filepath"
     "strings"
     "time"
 
+    "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
 )
 
@@ -33,6 +36,7 @@ func (instance *Response) SetStatusCode(statusCode int) { instance.statusCode = 
 
 func (instance *Response) Headers() nethttp.Header { return instance.headers }
 
+/* SetHeaders stores a copy of the map, or nil when handed nil, so Headers may answer nil; every writer of a response asks before it writes. */
 func (instance *Response) SetHeaders(headers nethttp.Header) {
     if nil == headers {
         instance.headers = nil
@@ -68,15 +72,25 @@ func (instance *Response) Close() error {
 
 var _ httpcontract.Response = (*Response)(nil)
 
-type ErrorResponsePayload struct {
-    Error string `json:"error"`
-    Time  string `json:"time"`
+/* ErrorResponsePayloadDetail is the error object of the standardized error envelope: the message, with the debug-only context and cause beside it. */
+type ErrorResponsePayloadDetail struct {
+    Message string `json:"message"`
 }
 
-func NewErrorResponsePayload(message string, timeString string) *ErrorResponsePayload {
+/* ErrorResponsePayload is the standardized envelope of every framework error body: the status, the moment and the error object. The kernel's error renderer adds requestId and the validation detail where it knows them. */
+type ErrorResponsePayload struct {
+    Status int                        `json:"status"`
+    Time   string                     `json:"time"`
+    Error  ErrorResponsePayloadDetail `json:"error"`
+}
+
+func NewErrorResponsePayload(statusCode int, message string, timeString string) *ErrorResponsePayload {
     return &ErrorResponsePayload{
-        Error: message,
-        Time:  timeString,
+        Status: statusCode,
+        Time:   timeString,
+        Error: ErrorResponsePayloadDetail{
+            Message: message,
+        },
     }
 }
 
@@ -150,16 +164,19 @@ func JsonResponse(statusCode int, payload any) (*Response, error) {
 }
 
 func JsonErrorResponse(statusCode int, message string) *Response {
-    payload := NewErrorResponsePayload(message, time.Now().Format(time.RFC3339))
+    payload := NewErrorResponsePayload(statusCode, message, time.Now().Format(time.RFC3339))
 
     response, jsonResponseErr := JsonResponse(statusCode, payload)
     if nil == jsonResponseErr {
         return response
     }
 
-    fallbackPayload := map[string]string{
-        "error": message,
-        "time":  time.Now().Format(time.RFC3339),
+    fallbackPayload := map[string]any{
+        "status": statusCode,
+        "time":   time.Now().Format(time.RFC3339),
+        "error": map[string]string{
+            "message": message,
+        },
     }
 
     data, marshalErr := json.Marshal(fallbackPayload)
@@ -177,6 +194,7 @@ func JsonErrorResponse(statusCode int, message string) *Response {
     }
 }
 
+/* FileResponse opens path exactly as given and streams it as the body, with no folding, no root and no containment check, so a path built from client input must be confined first; ConfinedFileResponse is the door for that. The body is the open file, which the kernel closes after the response is written. */
 func FileResponse(statusCode int, path string) (*Response, error) {
     file, err := os.Open(path)
     if nil != err {
@@ -200,6 +218,7 @@ func FileResponse(statusCode int, path string) (*Response, error) {
     }, nil
 }
 
+/* AttachmentResponse is FileResponse with a Content-Disposition and inherits its contract: never a path built from client input without confining it first. */
 func AttachmentResponse(statusCode int, path string, filename string) (*Response, error) {
     response, err := FileResponse(statusCode, path)
     if nil != err {
@@ -209,6 +228,114 @@ func AttachmentResponse(statusCode int, path string, filename string) (*Response
     response.headers.Set("Content-Disposition", BuildContentDisposition("attachment", filename))
 
     return response, nil
+}
+
+/* ConfinedFileResponse serves a file selected by a name a client may steer, confined to root: an absolute or climbing name is refused, the joined path is resolved through every symlink and must stay under the resolved root, and only a regular file is answered. What remains is the narrow swap window between the resolution and the open. */
+func ConfinedFileResponse(statusCode int, rootDirectory string, name string) (*Response, error) {
+    resolvedPath, confineErr := confineFileToRoot(rootDirectory, name)
+    if nil != confineErr {
+        return nil, confineErr
+    }
+
+    return FileResponse(statusCode, resolvedPath)
+}
+
+/* ConfinedAttachmentResponse is ConfinedFileResponse with a Content-Disposition. */
+func ConfinedAttachmentResponse(statusCode int, rootDirectory string, name string, filename string) (*Response, error) {
+    response, err := ConfinedFileResponse(statusCode, rootDirectory, name)
+    if nil != err {
+        return nil, err
+    }
+
+    response.headers.Set("Content-Disposition", BuildContentDisposition("attachment", filename))
+
+    return response, nil
+}
+
+/* confineFileToRoot resolves a name under a root and refuses an absolute name, a climb, a symlink resolving outside and anything not a regular file. dirFileSystem.Open in the static package keeps its own containment under a different contract; a change to what "outside the root" means is made in both. */
+func confineFileToRoot(rootDirectory string, name string) (string, error) {
+    if "" == strings.TrimSpace(rootDirectory) {
+        return "", exception.NewError("the file root directory may not be empty", nil, nil)
+    }
+
+    trimmedName := strings.TrimSpace(name)
+    if "" == trimmedName {
+        return "", exception.NewError("the file name may not be empty", nil, nil)
+    }
+
+    if true == filepath.IsAbs(trimmedName) {
+        return "", exception.NewError(
+            "the file name may not be absolute",
+            map[string]any{
+                "name": name,
+            },
+            nil,
+        )
+    }
+
+    /* the climb is refused rather than folded away */
+    cleanedName := filepath.Clean(trimmedName)
+    if ".." == cleanedName || true == strings.HasPrefix(cleanedName, ".."+string(os.PathSeparator)) {
+        return "", exception.NewError(
+            "the file name may not climb out of the root directory",
+            map[string]any{
+                "name": name,
+            },
+            nil,
+        )
+    }
+
+    fullPath := filepath.Join(rootDirectory, cleanedName)
+
+    realPath, evalErr := filepath.EvalSymlinks(fullPath)
+    if nil != evalErr {
+        return "", evalErr
+    }
+
+    realRoot, evalRootErr := filepath.EvalSymlinks(rootDirectory)
+    if nil != evalRootErr {
+        return "", evalRootErr
+    }
+
+    /* both sides are made absolute first: under a relative root a symlink with an absolute target resolves to an absolute path, which filepath.Rel cannot relate to a relative root */
+    absoluteRoot, absoluteRootErr := filepath.Abs(realRoot)
+    if nil != absoluteRootErr {
+        return "", absoluteRootErr
+    }
+    absolutePath, absolutePathErr := filepath.Abs(realPath)
+    if nil != absolutePathErr {
+        return "", absolutePathErr
+    }
+
+    /* the containment is read on the relative path rather than as a textual prefix, since "." resolves names without a "./" and "/" would demand "//" */
+    relativePath, relativeErr := filepath.Rel(absoluteRoot, absolutePath)
+    if nil != relativeErr || ".." == relativePath || true == strings.HasPrefix(relativePath, ".."+string(os.PathSeparator)) {
+        return "", exception.NewError(
+            "the file resolves outside the root directory",
+            map[string]any{
+                "name": name,
+            },
+            nil,
+        )
+    }
+
+    pathInfo, statErr := os.Stat(realPath)
+    if nil != statErr {
+        return "", statErr
+    }
+
+    if false == pathInfo.Mode().IsRegular() {
+        return "", exception.NewError(
+            "the confined file is not a regular file",
+            map[string]any{
+                "name": name,
+                "mode": pathInfo.Mode().String(),
+            },
+            nil,
+        )
+    }
+
+    return realPath, nil
 }
 
 func BuildContentDisposition(disposition string, filename string) string {
@@ -280,7 +407,25 @@ func isRfc5987AttrChar(byteChar byte) bool {
     return false
 }
 
+/* RedirectResponse answers a redirect to a location within this application: an absolute target, a scheme-relative one and one carrying a backslash are refused by panic, since a location built from client input is how an open redirect is minted. A zero status reads as 302. RedirectExternalResponse states a redirect that leaves the application. */
 func RedirectResponse(location string, statusCode int) *Response {
+    if true == isExternalRedirectLocation(location) {
+        exception.Panic(
+            exception.NewError(
+                "the redirect location must be relative; an external target goes through RedirectExternalResponse",
+                map[string]any{
+                    "location": location,
+                },
+                nil,
+            ),
+        )
+    }
+
+    return RedirectExternalResponse(location, statusCode)
+}
+
+/* RedirectExternalResponse answers a redirect to any location, unguarded: calling it asserts the target is trusted, never raw client input. */
+func RedirectExternalResponse(location string, statusCode int) *Response {
     if 0 == statusCode {
         statusCode = nethttp.StatusFound
     }
@@ -293,6 +438,26 @@ func RedirectResponse(location string, statusCode int) *Response {
         headers:    headers,
         bodyReader: nil,
     }
+}
+
+/* isExternalRedirectLocation reads the location as a browser will: a scheme or a leading "//" leaves the origin, and so does a backslash, which several browsers fold to "/". It reads the location with the spaces and tabs net/textproto trims when it writes the field. */
+func isExternalRedirectLocation(location string) bool {
+    emittedLocation := textproto.TrimString(location)
+
+    if true == strings.Contains(emittedLocation, "\\") {
+        return true
+    }
+
+    if true == strings.HasPrefix(emittedLocation, "//") {
+        return true
+    }
+
+    parsedLocation, parseErr := neturl.Parse(emittedLocation)
+    if nil != parseErr {
+        return true
+    }
+
+    return "" != parsedLocation.Scheme
 }
 
 func RedirectFound(location string) *Response { return RedirectResponse(location, nethttp.StatusFound) }

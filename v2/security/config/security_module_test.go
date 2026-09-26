@@ -227,7 +227,7 @@ func TestBuilder_ZeroValueOverrideInheritsGlobalAccessControl(t *testing.T) {
     }
 }
 
-/* a global access control declared without any firewall must still compile into an enforcing configuration; dropping it left every global rule silently unenforced */
+/* a global access control declared without any firewall must still compile into an enforcing configuration; dropping it would leave every global rule silently unenforced */
 func TestBuilder_GlobalAccessControlWithoutFirewallStillCompiles(t *testing.T) {
     builder := NewBuilder()
 
@@ -452,7 +452,7 @@ func TestBuilder_SetGlobal_RefusesASecondDefinition(t *testing.T) {
     )
 }
 
-/* AddStatefulFirewall forces the stateless flag off, so a firewall added through it demands login configuration even when the override it was handed says stateless */
+/* AddStatefulFirewall forces the stateless flag off, so a firewall added through it demands login configuration even when the override it receives says stateless */
 func TestBuilder_AddStatefulFirewall_ForcesTheStatefulShape(t *testing.T) {
     override := NewFirewallOverrideConfiguration()
     override.stateless = true
@@ -527,7 +527,7 @@ func TestBuilder_BuildAndCompile_PanicsOnACompileError(t *testing.T) {
     )
 }
 
-/* a typed nil is not `nil ==`: handed to the builder it passed validation, passed Compile, and was called on the request path outside any recovery. Each of the four interface-typed pieces is pinned separately, and by message, so a guard that fires for the wrong reason cannot pass for the right one. */
+/* a typed nil is not `nil ==`: handed to the builder it would pass validation and Compile and be called on the request path outside any recovery. Each of the four interface-typed pieces is pinned separately, and by message, so a guard that fires for the wrong reason cannot pass for the right one. */
 func TestBuilder_ValidateFirewall_RefusesATypedNilForEachInterfacePiece(t *testing.T) {
     var typedNilMatcher *security.PathPrefixMatcher
     var typedNilTokenSource *anonymousTokenSource
@@ -696,7 +696,7 @@ func TestBuilder_AddStatelessFirewall_ReadsATypedNilHandlerAsAbsent(t *testing.T
     }
 }
 
-/* the builder owns the rule list it was handed: a caller that keeps the slice and edits it after registering the firewall must not be able to swap a rule the compiled firewall enforces */
+/* the builder owns the rule list it receives: a caller that keeps the slice and edits it after registering the firewall must not be able to swap a rule the compiled firewall enforces */
 func TestBuilder_AddFirewall_CopiesTheCallersRules(t *testing.T) {
     originalRule := security.NewApiKeyHeaderRule(
         security.NewPathPrefixMatcher("/"),
@@ -968,5 +968,47 @@ func TestBuilder_SetGlobalAcceptsUndeclaredDependencies(t *testing.T) {
 
     if nil == builder {
         t.Fatalf("expected the builder back")
+    }
+}
+
+/* the remedy for a firewall that wants no global inheritance starts from any override, the zero value included, and holds in either order of its two setters: the firewall enforces its own rules and not the global ones. */
+func TestFirewallOverride_TurningInheritanceOffOnTheZeroValueHoldsInEitherOrder(t *testing.T) {
+    orders := map[string]func(localAccessControl *security.AccessControl) FirewallOverrideConfiguration{
+        "inheritance first": func(localAccessControl *security.AccessControl) FirewallOverrideConfiguration {
+            return FirewallOverrideConfiguration{}.WithInheritGlobalAccessControl(false).WithAccessControl(localAccessControl)
+        },
+        "access control first": func(localAccessControl *security.AccessControl) FirewallOverrideConfiguration {
+            return FirewallOverrideConfiguration{}.WithAccessControl(localAccessControl).WithInheritGlobalAccessControl(false)
+        },
+    }
+
+    for name, build := range orders {
+        t.Run(name, func(t *testing.T) {
+            builder := NewBuilder()
+            builder.SetGlobal(
+                security.NewAccessControl(security.NewAccessControlRule("/admin", "ROLE_ADMIN")),
+                nil,
+                security.NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, security.NewRoleVoter()),
+                nil,
+                nil,
+            )
+
+            builder.AddStatelessFirewall(
+                "api",
+                security.NewPathPrefixMatcher("/"),
+                nil,
+                &anonymousTokenSource{},
+                build(security.NewAccessControl(security.NewAccessControlRule("/local", "ROLE_USER"))),
+            )
+
+            firewall := builder.BuildAndCompile().Firewalls()[0]
+            if _, matched := firewall.AccessControl().Match("/admin"); true == matched {
+                t.Fatalf("expected the firewall to leave the global /admin rule out, but it inherited it")
+            }
+
+            if _, matched := firewall.AccessControl().Match("/local"); false == matched {
+                t.Fatalf("expected the firewall to enforce its own /local rule")
+            }
+        })
     }
 }

@@ -4,7 +4,7 @@ import (
     "github.com/precision-soft/melody/v3/exception"
 )
 
-/* HmacSecretProvider resolves the shared secret for the internal-auth HMAC source. CurrentKeyId names the key a signer should use now; Secret looks up the secret for a key id presented on an incoming envelope; AppForKeyId names the single application a key id is issued to, so the verifier can refuse an envelope whose claimed app does not own the key that signed it. Keeping several keys resolvable at once is what makes rotation seamless: roll a new current key while the previous key stays resolvable until every caller has moved, then drop it. This mirrors the encrypt KeyProvider shape. */
+/* HmacSecretProvider resolves the shared secret for the internal-auth HMAC source. CurrentKeyId names the key a signer uses now, Secret looks up the secret for a presented key id, and AppForKeyId names the one application a key id is issued to. Several resolvable keys allow a rotation without a gap. */
 type HmacSecretProvider interface {
     CurrentKeyId() string
 
@@ -48,7 +48,7 @@ func NewStaticHmacSecretProvider(currentKeyId string, keysByKeyId map[string]Hma
             )
         }
 
-        /* the key-id↔app binding only isolates apps if their secret material is distinct: the key id is attacker-visible, so a secret shared across two apps would let a holder sign under either app's key id and defeat the binding. Reject cross-app secret reuse at construction rather than silently re-opening that escalation. */
+        /* cross-app secret reuse is refused: the key id is attacker-visible, so a shared secret would let its holder sign under either app's key id */
         if owner, reused := appBySecret[string(key.Secret)]; true == reused && owner != key.App {
             exception.Panic(
                 exception.NewError(

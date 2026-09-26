@@ -269,7 +269,7 @@ func TestValidator_MalformedNumericParameterFailsClosed(t *testing.T) {
         }
     }
 
-    /* a fractional bound is refused whole, not truncated: 3.9 read as 3 silently enforced a bound the tag does not declare, and on lessThan a truncated negative bound accepted values the tag as written refuses */
+    /* a fractional bound is refused whole, not truncated: 3.9 read as 3 would enforce a bound the tag does not declare, and on lessThan a truncated negative bound would accept values the tag as written refuses */
     fractionalErrors := requireValidationErrors(t, validatorInstance.Validate(payloadWithFractionalMaxLength{Name: "abc"}))
 
     fractionalError, ok := fractionalErrors[0].(*ValidationError)
@@ -2219,5 +2219,248 @@ func TestValidator_BuildConstraintWithParamsRefusesATypedNilConstruction(t *test
 
     if "constraint construction returned nil" != refusalCause {
         t.Fatalf("expected the typed-nil refusal cause, got %q", refusalCause)
+    }
+}
+
+type sharedSubtreeNode struct {
+    Name  string             `json:"name" validate:"notBlank"`
+    Left  *sharedSubtreeNode `json:"left"`
+    Right *sharedSubtreeNode `json:"right"`
+}
+
+/* buildSharedSubtree builds levels nodes whose two pointer fields both reach the same next node, so every node is reachable through 2^depth paths; the node two levels below the root carries the empty name. */
+func buildSharedSubtree(levels int) *sharedSubtreeNode {
+    node := &sharedSubtreeNode{Name: "leaf"}
+    for level := 0; level < levels; level++ {
+        name := "node"
+        if levels-3 == level {
+            name = ""
+        }
+
+        node = &sharedSubtreeNode{Name: name, Left: node, Right: node}
+    }
+
+    return node
+}
+
+/* Every path to a shared subtree reports it, and the subtree is walked once per depth rather than once per path, which on twenty levels of two pointers each is 2^20 walks. The 500 ms bound sits far above a memoized walk and far below a walk once per path, so a walk that fell back to once per path fails on the clock. */
+func TestValidator_ASharedSubtreeIsWalkedOnceAndReportedUnderEveryPath(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    started := time.Now()
+    validationErrors := requireValidationErrors(t, validatorInstance.Validate(buildSharedSubtree(20)))
+    elapsed := time.Since(started)
+
+    if 500*time.Millisecond < elapsed {
+        t.Fatalf("expected the shared subtree to be walked once per depth, the walk took %s", elapsed)
+    }
+
+    fields := map[string]bool{}
+    for _, validationError := range validationErrors {
+        fields[validationError.Field()] = true
+    }
+
+    expected := []string{"left.left.name", "left.right.name", "right.left.name", "right.right.name"}
+    if len(expected) != len(validationErrors) {
+        t.Fatalf("expected the invalid node under its %d paths, got %d errors: %v", len(expected), len(validationErrors), fields)
+    }
+
+    for _, field := range expected {
+        if false == fields[field] {
+            t.Fatalf("expected an error under %q, got %v", field, fields)
+        }
+    }
+}
+
+type sharedDepthItem struct {
+    Name string `json:"name" validate:"notBlank"`
+}
+
+type sharedDepthHolder struct {
+    Inner *sharedDepthItem `json:"inner"`
+}
+
+type sharedDepthLink struct {
+    Next   *sharedDepthLink   `json:"next"`
+    Holder *sharedDepthHolder `json:"holder"`
+}
+
+type sharedDepthRoot struct {
+    Shallow *sharedDepthHolder `json:"shallow"`
+    Deep    *sharedDepthLink   `json:"deep"`
+}
+
+/* The memo is keyed on the depth a pointer is reached at: the same holder reached shallow is walked whole and reports its inner name, reached just under the cap it is cut and reports the nesting depth instead. A memo keyed on the pointer alone would answer the shallow walk for the deep path and report a constraint the cut never enforced. */
+func TestValidator_ASharedPointerReachedAtTwoDepthsIsWalkedAtEach(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    holder := &sharedDepthHolder{Inner: &sharedDepthItem{Name: ""}}
+
+    /* the holder pointer sits at depth 63 on the deep path: the root struct is depth 0, each link costs a pointer and a struct, and the inner pointer under it is then the first value past the cap */
+    deep := &sharedDepthLink{Holder: holder}
+    for link := 0; link < 30; link++ {
+        deep = &sharedDepthLink{Next: deep}
+    }
+
+    validationErrors := requireValidationErrors(t, validatorInstance.Validate(sharedDepthRoot{Shallow: holder, Deep: deep}))
+
+    codesByPrefix := map[string][]string{}
+    for _, validationError := range validationErrors {
+        prefix := strings.SplitN(validationError.Field(), ".", 2)[0]
+        codesByPrefix[prefix] = append(codesByPrefix[prefix], validationError.Code())
+    }
+
+    if 1 != len(codesByPrefix["shallow"]) || ConstraintNotBlankErrorIsBlank != codesByPrefix["shallow"][0] {
+        t.Fatalf("expected the shallow path to report the blank inner name, got %v", codesByPrefix)
+    }
+
+    if 1 != len(codesByPrefix["deep"]) || ErrorNestingDepthExceeded != codesByPrefix["deep"][0] {
+        t.Fatalf("expected the deep path to be cut at the cap instead of answering the shallow walk, got %v", codesByPrefix)
+    }
+}
+
+/* a constraint that answers an error under a field of its own — the door validateRule keeps open by returning such an error verbatim — is answered verbatim under every path that reaches the shared pointer, and a constraint that answers an error TYPE of its own keeps that type under every path: the memo neither glues the later path onto the field nor replaces the type with this package's. */
+type ownFieldConstraintError struct {
+    field string
+}
+
+func (instance *ownFieldConstraintError) Field() string          { return instance.field }
+func (instance *ownFieldConstraintError) Message() string        { return "own message" }
+func (instance *ownFieldConstraintError) Code() string           { return "own_code" }
+func (instance *ownFieldConstraintError) Context() map[string]any { return nil }
+func (instance *ownFieldConstraintError) Error() string          { return instance.field + ": own message" }
+
+type ownFieldConstraint struct{}
+
+func (instance *ownFieldConstraint) Validate(value any, field string) validationcontract.ValidationError {
+    return &ownFieldConstraintError{field: "custom"}
+}
+
+type ownTypeConstraint struct{}
+
+func (instance *ownTypeConstraint) Validate(value any, field string) validationcontract.ValidationError {
+    return &ownFieldConstraintError{field: field}
+}
+
+type ownFieldPackageTypeConstraint struct{}
+
+func (instance *ownFieldPackageTypeConstraint) Validate(value any, field string) validationcontract.ValidationError {
+    return NewValidationError("custom", "own message", "own_code", nil)
+}
+
+func TestValidator_AConstraintErrorWithItsOwnFieldIsAnsweredVerbatimUnderEveryPath(t *testing.T) {
+    type sharedAddress struct {
+        Zip string `validate:"ownField"`
+    }
+    type order struct {
+        Billing  *sharedAddress
+        Shipping *sharedAddress
+    }
+
+    validator := NewValidator()
+    validator.RegisterConstraint("ownField", &ownFieldConstraint{})
+
+    shared := &sharedAddress{}
+    errors := requireValidationErrors(t, validator.Validate(&order{Billing: shared, Shipping: shared}))
+
+    if 2 != len(errors) {
+        t.Fatalf("expected the shared pointer reported under both paths, got %v", errors)
+    }
+
+    for _, validationError := range errors {
+        if "custom" != validationError.Field() {
+            t.Fatalf("expected the constraint's own field kept verbatim, got %q", validationError.Field())
+        }
+
+        if _, ownType := validationError.(*ownFieldConstraintError); false == ownType {
+            t.Fatalf("expected the constraint's own error type kept under every path, got %T", validationError)
+        }
+    }
+}
+
+func TestValidator_AConstraintErrorOfItsOwnTypeKeepsItsTypeAndItsPathUnderEveryPath(t *testing.T) {
+    type sharedAddress struct {
+        Zip string `validate:"ownType"`
+    }
+    type order struct {
+        Billing  *sharedAddress
+        Shipping *sharedAddress
+    }
+
+    validator := NewValidator()
+    validator.RegisterConstraint("ownType", &ownTypeConstraint{})
+
+    shared := &sharedAddress{}
+    errors := requireValidationErrors(t, validator.Validate(&order{Billing: shared, Shipping: shared}))
+
+    if 2 != len(errors) {
+        t.Fatalf("expected the shared pointer reported under both paths, got %v", errors)
+    }
+
+    fields := []string{errors[0].Field(), errors[1].Field()}
+    if "Billing.Zip" != fields[0] || "Shipping.Zip" != fields[1] {
+        t.Fatalf("expected the constraint to spell each path itself, got %v", fields)
+    }
+
+    for _, validationError := range errors {
+        if _, ownType := validationError.(*ownFieldConstraintError); false == ownType {
+            t.Fatalf("expected the constraint's own error type kept under every path, got %T", validationError)
+        }
+    }
+}
+
+type pathPrefixedOwnFieldConstraint struct{}
+
+/* the own field begins with the text of the walked path — BillingLine under Billing — without lying under it in the walk's grammar */
+func (instance *pathPrefixedOwnFieldConstraint) Validate(value any, field string) validationcontract.ValidationError {
+    return NewValidationError("BillingLine", "own message", "own_code", nil)
+}
+
+/* "under the walked path" is a question of the walk's grammar — a member or an element of the path — not of text: an own field that merely begins with the path's spelling, memoized as its textual remainder, would be recalled glued onto the sibling path, naming a field that does not exist */
+func TestValidator_AnOwnFieldThatOnlyBeginsWithThePathTextIsAnsweredVerbatimUnderEveryPath(t *testing.T) {
+    type sharedAddress struct {
+        Zip string `validate:"pathPrefixedOwnField"`
+    }
+    type order struct {
+        Billing  *sharedAddress
+        Shipping *sharedAddress
+    }
+
+    validator := NewValidator()
+    validator.RegisterConstraint("pathPrefixedOwnField", &pathPrefixedOwnFieldConstraint{})
+
+    shared := &sharedAddress{}
+    errors := requireValidationErrors(t, validator.Validate(&order{Billing: shared, Shipping: shared}))
+
+    if 2 != len(errors) || "BillingLine" != errors[0].Field() || "BillingLine" != errors[1].Field() {
+        t.Fatalf("expected the constraint's own field kept verbatim under both paths, got %v", errors)
+    }
+}
+
+func TestFieldLiesUnderPath_ReadsTheWalksGrammarNotTheText(t *testing.T) {
+    for field, expected := range map[string]bool{"Billing": true, "Billing.Zip": true, "Billing[0]": true, "BillingLine": false, "Bill": false, "Shipping.Zip": false} {
+        if expected != fieldLiesUnderPath(field, "Billing") {
+            t.Fatalf("expected %q under Billing to answer %v", field, expected)
+        }
+    }
+}
+
+func TestValidator_APackageErrorUnderAFieldOfItsOwnIsAnsweredVerbatimUnderEveryPath(t *testing.T) {
+    type sharedAddress struct {
+        Zip string `validate:"ownFieldPackageType"`
+    }
+    type order struct {
+        Billing  *sharedAddress
+        Shipping *sharedAddress
+    }
+
+    validator := NewValidator()
+    validator.RegisterConstraint("ownFieldPackageType", &ownFieldPackageTypeConstraint{})
+
+    shared := &sharedAddress{}
+    errors := requireValidationErrors(t, validator.Validate(&order{Billing: shared, Shipping: shared}))
+
+    if 2 != len(errors) || "custom" != errors[0].Field() || "custom" != errors[1].Field() {
+        t.Fatalf("expected the constraint's own field kept verbatim under both paths, got %v", errors)
     }
 }

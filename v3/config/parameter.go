@@ -2,8 +2,6 @@ package config
 
 import (
     "fmt"
-    "strconv"
-    "strings"
     "sync"
     "sync/atomic"
     "time"
@@ -27,15 +25,60 @@ func NewParameter(environmentKey string, environmentValue any, value any, isDefa
 type Parameter struct {
     environmentKey   string
     environmentValue any
-    /* @important valueMutex guards value on its own, because the configuration lock does not reach the readers: a service handed the *Parameter reads it through the accessors below without ever touching the configuration, while Resolve rewrites every parameter under the configuration write lock. Two different locks around the same field are no lock at all, so the write side goes through storeValue and every read through loadValue. */
+    /* the registration name, which identifies a parameter that has no environment key in an error */
+    name string
+    /* valueMutex guards value on its own: a service holding the *Parameter reads it without the configuration lock, while Resolve rewrites it under that lock, so writes go through storeValue and reads through loadValue */
     valueMutex sync.RWMutex
     value      any
     isDefault  bool
-    /* @important atomic because MarkSecret may mark a parameter under the configuration lock while a consumer that already holds the pointer asks IsSecret without it */
+    /* atomic because MarkSecret marks under the configuration lock while a consumer holding the pointer asks IsSecret without it */
     isSecret atomic.Bool
+    /* deferred marks a parameter whose template referenced a name not yet defined when the constructor resolved placeholders, left for the boot resolution. Atomic because the boot clears it under the configuration write lock while a consumer reads through loadValue without it. */
+    deferred atomic.Bool
+}
+
+func (instance *Parameter) diagnosticContext() map[string]any {
+    context := map[string]any{
+        "environmentKey": instance.environmentKey,
+    }
+
+    if "" != instance.name {
+        context["parameterName"] = instance.name
+    }
+
+    return context
+}
+
+/* conversionName is the identity the shared parsers stamp into their error context: the environment key where one exists, the registration name otherwise. */
+func (instance *Parameter) conversionName() string {
+    if "" != instance.environmentKey {
+        return instance.environmentKey
+    }
+
+    return instance.name
+}
+
+/* conversionCause hands the parse failure through for an ordinary parameter and withholds it for a secret one, since the parse errors quote the value they refused. */
+func (instance *Parameter) conversionCause(causeErr error) error {
+    if true == instance.isSecret.Load() {
+        return nil
+    }
+
+    return causeErr
 }
 
 func (instance *Parameter) loadValue() any {
+    /* a deferred parameter still holds its raw template, so every accessor refuses until the boot resolution settles the reference or fails the boot naming it */
+    if true == instance.deferred.Load() {
+        exception.Panic(
+            exception.NewError(
+                "cannot read a parameter whose resolution was deferred to boot; its value carries a template the boot resolution has not settled yet — a reference to a parameter that was not defined at construction, or a runtime registration made before boot",
+                instance.diagnosticContext(),
+                nil,
+            ),
+        )
+    }
+
     instance.valueMutex.RLock()
     defer instance.valueMutex.RUnlock()
 
@@ -90,10 +133,7 @@ func (instance *Parameter) MustString() string {
     exception.Panic(
         exception.NewError(
             "cannot convert parameter value to string",
-            map[string]any{
-                "environmentKey": instance.environmentKey,
-                "valueType":      fmt.Sprintf("%T", value),
-            },
+            mustStringContext(instance, value),
             nil,
         ),
     )
@@ -101,81 +141,49 @@ func (instance *Parameter) MustString() string {
     return ""
 }
 
+/* Bool reads the value through internal.Bool, the parser its sibling accessors use, so a refusal is a ParseError naming the parameter, the target type and the value. */
 func (instance *Parameter) Bool() (bool, error) {
-    value := instance.loadValue()
-
-    boolValue, ok := value.(bool)
-    if true == ok {
-        return boolValue, nil
+    boolValue, isSet, boolErr := internal.Bool(instance.loadValue(), instance.conversionName())
+    if nil != boolErr || false == isSet {
+        return false, exception.NewError(
+            "cannot convert parameter value to bool",
+            instance.diagnosticContext(),
+            instance.conversionCause(boolErr),
+        )
     }
 
-    stringValue, ok := value.(string)
-    if true == ok {
-        parsedValue, boolFromStringErr := internal.BoolFromString(stringValue)
-        if nil != boolFromStringErr {
-            return false, exception.NewError(
-                "cannot convert parameter value to bool",
-                map[string]any{
-                    "environmentKey": instance.environmentKey,
-                },
-                boolFromStringErr,
-            )
-        }
-
-        return parsedValue, nil
-    }
-
-    return false, exception.NewError(
-        "cannot convert parameter value to bool",
-        map[string]any{
-            "environmentKey": instance.environmentKey,
-        },
-        nil,
-    )
+    return boolValue, nil
 }
 
+/* Int reads the value through internal.Int, the parser its sibling accessors use, and narrows it: a value outside the int range is refused by name rather than truncated. */
 func (instance *Parameter) Int() (int, error) {
-    value := instance.loadValue()
-
-    intValue, ok := value.(int)
-    if true == ok {
-        return intValue, nil
+    intValue, isSet, intErr := internal.Int(instance.loadValue(), instance.conversionName())
+    if nil != intErr || false == isSet {
+        return 0, exception.NewError(
+            "cannot convert parameter value to int",
+            instance.diagnosticContext(),
+            instance.conversionCause(intErr),
+        )
     }
 
-    stringValue, ok := value.(string)
-    if true == ok {
-        parsedValue, atoiErr := strconv.Atoi(strings.TrimSpace(stringValue))
-        if nil != atoiErr {
-            return 0, exception.NewError(
-                "cannot convert parameter value to int",
-                map[string]any{
-                    "environmentKey": instance.environmentKey,
-                },
-                atoiErr,
-            )
-        }
-
-        return parsedValue, nil
+    if int64(int(intValue)) != intValue {
+        return 0, exception.NewError(
+            "parameter value does not fit an int on this platform",
+            instance.diagnosticContext(),
+            nil,
+        )
     }
 
-    return 0, exception.NewError(
-        "cannot convert parameter value to int",
-        map[string]any{
-            "environmentKey": instance.environmentKey,
-        },
-        nil,
-    )
+    return int(intValue), nil
 }
 
 func (instance *Parameter) Float() (float64, error) {
-    floatValue, isSet, floatErr := internal.Float64(instance.loadValue(), instance.environmentKey)
+    floatValue, isSet, floatErr := internal.Float64(instance.loadValue(), instance.conversionName())
     if nil != floatErr || false == isSet {
         return 0, exception.NewError(
             "cannot convert parameter value to float",
-            map[string]any{
-                "environmentKey": instance.environmentKey,
-            },
-            floatErr,
+            instance.diagnosticContext(),
+            instance.conversionCause(floatErr),
         )
     }
 
@@ -183,18 +191,23 @@ func (instance *Parameter) Float() (float64, error) {
 }
 
 func (instance *Parameter) Duration() (time.Duration, error) {
-    durationValue, isSet, durationErr := internal.Duration(instance.loadValue(), instance.environmentKey)
+    durationValue, isSet, durationErr := internal.Duration(instance.loadValue(), instance.conversionName())
     if nil != durationErr || false == isSet {
         return 0, exception.NewError(
             "cannot convert parameter value to duration",
-            map[string]any{
-                "environmentKey": instance.environmentKey,
-            },
-            durationErr,
+            instance.diagnosticContext(),
+            instance.conversionCause(durationErr),
         )
     }
 
     return durationValue, nil
+}
+
+func mustStringContext(instance *Parameter, value any) map[string]any {
+    context := instance.diagnosticContext()
+    context["valueType"] = fmt.Sprintf("%T", value)
+
+    return context
 }
 
 var _ configcontract.Parameter = (*Parameter)(nil)

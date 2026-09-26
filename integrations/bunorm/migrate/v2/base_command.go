@@ -10,6 +10,11 @@ import (
     "github.com/precision-soft/melody/v2/cli/output"
     "github.com/precision-soft/melody/v2/container"
     containercontract "github.com/precision-soft/melody/v2/container/contract"
+    "github.com/precision-soft/melody/v2/exception"
+    exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
+    "github.com/precision-soft/melody/v2/logging"
+    loggingcontract "github.com/precision-soft/melody/v2/logging/contract"
+    "github.com/precision-soft/melody/v2/runtime"
     runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/migrate"
@@ -22,15 +27,24 @@ type migrationUnlocker interface {
     Unlock(ctx context.Context) error
 }
 
-/* unlockMigrations reports the failed release through both channels: printed for the operator, returned for the exit code — a lock row that survives refuses every later migration on every replica, and a command that exits 0 over it tells the calling deploy script the opposite of the truth */
-func unlockMigrations(ctx context.Context, unlocker migrationUnlocker, outputInstance *commandOutput) error {
+/* unlockMigrations reports a failed release both printed and returned, since a surviving lock row refuses every later migration and a command exiting 0 over it misleads the deploy script. The wrap names that the lock row stays held, its table and the unlock command that clears it; the bun error stays the cause, so errors.Is still reaches it. */
+func unlockMigrations(ctx context.Context, unlocker migrationUnlocker, outputInstance *commandOutput, unlockCommand string) error {
     unlockContext, cancelUnlock := context.WithTimeout(context.WithoutCancel(ctx), migrationUnlockTimeout)
     defer cancelUnlock()
 
     if unlockErr := unlocker.Unlock(unlockContext); nil != unlockErr {
-        outputInstance.printError(unlockErr)
+        heldLock := exception.NewError(
+            "migrate: the migration lock could not be released and stays held in "+migrationLocksTable+", refusing every later migration on every replica until "+unlockCommand+" clears it: "+unlockErr.Error(),
+            exceptioncontract.Context{
+                "locksTable":    migrationLocksTable,
+                "unlockCommand": unlockCommand,
+            },
+            unlockErr,
+        )
 
-        return unlockErr
+        outputInstance.printError(heldLock)
+
+        return heldLock
     }
 
     return nil
@@ -118,4 +132,37 @@ func (instance *baseCommand) newMigrator(db *bun.DB) (*migrate.Migrator, error) 
         instance.migrations,
         migrate.WithMarkAppliedOnSuccess(true),
     ), nil
+}
+
+/* managerLabel answers the name the output labels a manager by, the --manager flag, else the pinned manager, else "<default>", the label resolveDatabase answers for a run that opens the connection. The label is not checked against the registry, which on this major has no door that answers a name without opening, so a misspelt --manager is refused at the first db:migrate. */
+func (instance *baseCommand) managerLabel(commandContext *clicontract.CommandContext) string {
+    managerName := commandContext.String(instance.options.ManagerFlagName)
+    if "" == managerName {
+        managerName = instance.options.ManagerName
+    }
+
+    if "" == managerName {
+        return "<default>"
+    }
+
+    return managerName
+}
+
+/* journal answers the application's logger, resolved through the runtime so the scope's logger wins over the root's, and the emergency logger when the runtime carries none — a process that runs migrations without wiring a logger still has a journal of last resort. It resolves for itself rather than through the framework's LoggerFromRuntime, which files an emergency record of its own and answers nil where this door wants a fallback. */
+func (instance *baseCommand) journal(runtimeInstance runtimecontract.Runtime) loggingcontract.Logger {
+    logger, resolveErr := runtime.FromRuntime[loggingcontract.Logger](runtimeInstance, logging.ServiceLogger)
+    if nil != resolveErr || nil == logger || true == isNilInterface(logger) {
+        return logging.EmergencyLogger()
+    }
+
+    return logger
+}
+
+/* newFileMigrator is the migrator of a command that only writes a migration file: bun's generator never touches the database it is handed, so none is opened. */
+func (instance *baseCommand) newFileMigrator() (*migrate.Migrator, error) {
+    if nil == instance.migrations {
+        return nil, errors.New("migrations collection is nil")
+    }
+
+    return migrate.NewMigrator(nil, instance.migrations), nil
 }

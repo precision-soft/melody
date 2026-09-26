@@ -35,7 +35,7 @@ type EventDispatcherAdapter struct {
     eventDispatcher         eventcontract.EventDispatcher
     listenerRegistrations   map[string][]adapterListenerRegistration
     subscriberRegistrations map[subscriberIdentity][]eventcontract.ListenerRegistration
-    /* subscriberMutex serializes whole subscriber installations and removals against each other; it is always taken before mutex and never inside it. The per-step mutex keeps each individual record consistent, but a subscriber spans several of them: without this outer section, two concurrent AddSubscriber calls for one identity both pass the duplicate refusal and install every listener twice, and a RemoveSubscriber interleaved with an AddSubscriber removes the half already installed while the rest keeps arriving under a record the remover was just told is gone. */
+    /* subscriberMutex serializes whole subscriber installations and removals against each other; it is always taken before mutex and never inside it, so a removal never interleaves with the installation it undoes. */
     subscriberMutex sync.Mutex
 }
 
@@ -70,7 +70,7 @@ func (instance *EventDispatcherAdapter) AddListener(eventName string, listener e
 func (instance *EventDispatcherAdapter) RemoveListener(registration eventcontract.ListenerRegistration) bool {
     removed := instance.eventDispatcher.RemoveListener(registration)
 
-    /* the bookkeeping is scrubbed whether or not the wrapped dispatcher still held the listener. Returning early on false left the adapter's own record of a listener that no longer exists — reported by RegisteredEvents forever and removable by nothing, since every retry takes the same early return */
+    /* the bookkeeping is scrubbed whether or not the wrapped dispatcher still held the listener, so no record outlives it */
     instance.mutex.Lock()
     listenerList, exists := instance.listenerRegistrations[registration.EventName]
     if true == exists {
@@ -189,7 +189,7 @@ func (instance *EventDispatcherAdapter) DispatchName(runtimeInstance runtimecont
     return instance.eventDispatcher.DispatchName(runtimeInstance, eventName, payload)
 }
 
-/* MarkListenerRequired forwards to the wrapped dispatcher and records the mark for inspection. A wrapped dispatcher that cannot mark required listeners is refused rather than absorbed: callers probe for RequiredListenerRegistrar precisely to learn whether the guarantee is available, and the adapter satisfies that probe on its own behalf, so swallowing the mark here would answer the probe yes and leave the fail-closed guarantee unarmed. */
+/* MarkListenerRequired forwards to the wrapped dispatcher and records the mark for inspection. A wrapped dispatcher that cannot mark required listeners is refused, since the adapter answers the RequiredListenerRegistrar probe itself and an absorbed mark would leave the guarantee unarmed. */
 func (instance *EventDispatcherAdapter) MarkListenerRequired(registration eventcontract.ListenerRegistration) {
     instance.requireRegistrar().MarkListenerRequired(registration)
 
@@ -247,9 +247,7 @@ func (instance *EventDispatcherAdapter) markListenerRegistration(
     }
 }
 
-/* RegisteredEvents reports a point-in-time view: a registration or removal running concurrently is observed mid-step — a listener already live in the wrapped dispatcher whose record here is not written yet, or the reverse during removal. The view settles the moment the concurrent (un)installation finishes; dispatch correctness never depends on it.
-
-The view covers what was registered THROUGH the adapter: a listener added directly on the wrapped dispatcher is live for dispatch but absent here, and a mark applied through the adapter for such a registration arms the wrapped dispatcher's guarantee while this bookkeeping — inspection only — has nothing to record it on. One registration surface per dispatcher keeps the inspection truthful. */
+/* RegisteredEvents reports a point-in-time view, which a concurrent registration or removal is observed mid-step in; dispatch never depends on it. It covers what was registered through the adapter: a listener added directly on the wrapped dispatcher is live but absent here. */
 func (instance *EventDispatcherAdapter) RegisteredEvents() []eventcontract.RegisteredEvent {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
@@ -264,12 +262,12 @@ func (instance *EventDispatcherAdapter) RegisteredEvents() []eventcontract.Regis
     registeredEvents := make([]eventcontract.RegisteredEvent, 0, len(eventNameList))
 
     for _, eventName := range eventNameList {
-        /* sort a copy: the map-owned slice is shared, and RLock permits concurrent readers that would otherwise race sorting the same backing array */
+        /* a copy is sorted, since the map-owned slice is shared by concurrent readers under RLock */
         registeredSlice := instance.listenerRegistrations[eventName]
         listenerList := make([]adapterListenerRegistration, len(registeredSlice))
         copy(listenerList, registeredSlice)
 
-        /* equal priorities break the tie by the wrapped dispatcher's listener id, the same tiebreak dispatch uses: any adapter-side counter is issued under a different lock than the id, so two concurrent registrations can receive two counters in opposite orders and the inspector would report an execution order the dispatch never uses — permanently. */
+        /* equal priorities break the tie by the wrapped dispatcher's listener id, as dispatch does; an adapter-side counter is issued under another lock and could report an order dispatch never uses */
         sort.SliceStable(
             listenerList,
             func(i int, j int) bool {
@@ -327,16 +325,9 @@ func (instance *EventDispatcherAdapter) addListenerRegistration(
 ) eventcontract.ListenerRegistration {
     listenerProgramCounter := reflect.ValueOf(listener).Pointer()
 
+    /* the listener receives the dispatched event itself, as from the plain dispatcher, so a custom event type stays type-assertable and a field a listener writes reaches the caller; the wrapper only carries the inspection metadata */
     wrappedListener := func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
-        contractEvent := NewEventFromEvent(eventValue)
-
-        listenerErr := listener(runtimeInstance, contractEvent)
-
-        if true == contractEvent.IsPropagationStopped() {
-            eventValue.StopPropagation()
-        }
-
-        return listenerErr
+        return listener(runtimeInstance, eventValue)
     }
 
     registration := instance.eventDispatcher.AddListener(

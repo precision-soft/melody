@@ -7,8 +7,12 @@ import (
     "strings"
 
     exampleurl "github.com/precision-soft/melody/v3/.example/url"
+    melodyexception "github.com/precision-soft/melody/v3/exception"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
+    examplejournal "github.com/precision-soft/melody/v3/.example/journal"
+    melodylogging "github.com/precision-soft/melody/v3/logging"
+    melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
@@ -33,19 +37,22 @@ func Load(fileName string) (string, error) {
 }
 
 func Html(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, statusCode int, fileName string) melodyhttpcontract.Response {
-    _ = request
-
     htmlString, err := Load(fileName)
     if nil != err {
         return melodyhttp.JsonErrorResponse(nethttp.StatusInternalServerError, "failed to load page")
     }
 
-    routesJson, routesJsonErr := exampleurl.RoutesJsonFromContainer(runtimeInstance.Container())
+    /* a page without its manifest still renders, since a page that fails to load is worse than one whose links fail, but the loss is journaled rather than carried to the browser in silence */
+    routesJson, routesJsonErr := exampleurl.RoutesJsonFromRuntime(runtimeInstance)
     if nil != routesJsonErr {
-        routesJson = `{"routes":[]}`
+        routesJson = exampleurl.EmptyRoutesJson
+        examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Warning(
+            "page rendered without its route manifest",
+            melodyexception.LogContext(routesJsonErr, melodyloggingcontract.Context{"page": fileName}),
+        )
     }
 
-    /* @important the manifest is embedded inside a single-quoted JS string literal (window.melodyRoutes = JSON.parse('...')), so a backslash or single quote in the JSON must be escaped for that context or a crafted route name/pattern would break out of the string; json.Marshal already escapes < > & and the line separators, so escaping \ and ' is sufficient (backslash first so the quote escape is not re-escaped). */
+    /* the manifest is embedded inside a single-quoted JS string literal (window.melodyRoutes = JSON.parse('...')), so a backslash or single quote in the JSON must be escaped for that context or a crafted route name/pattern would break out of the string; json.Marshal already escapes < > & and the line separators, so escaping \ and ' is sufficient (backslash first so the quote escape is not re-escaped). */
     routesJson = strings.ReplaceAll(routesJson, `\`, `\\`)
     routesJson = strings.ReplaceAll(routesJson, `'`, `\'`)
 

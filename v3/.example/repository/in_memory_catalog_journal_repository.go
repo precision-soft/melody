@@ -8,23 +8,19 @@ import (
     "time"
 )
 
-/* inMemoryJournalCapacity is how many entries the process-local journal keeps. It is bounded because nothing ever removes an entry: an application left running without a database would otherwise grow one allocation per write for as long as it lives. */
+/* inMemoryJournalCapacity bounds the process-local journal, since nothing removes an entry. */
 const inMemoryJournalCapacity = 200
 
 func newInMemoryCatalogJournalRepository() CatalogJournalRepository {
     return &inMemoryCatalogJournalRepository{}
 }
 
-/* inMemoryCatalogJournalRepository keeps the record of what changed inside the process, for an example booted without a database. It is a real journal for as long as the process lives and it is gone with it, which is the honest thing to offer when there is nowhere to write. */
+/* inMemoryCatalogJournalRepository keeps the journal inside the process, for an application booted without a database. */
 type inMemoryCatalogJournalRepository struct {
     mutex      sync.RWMutex
     entries    []*CatalogJournalEntry
     nextId     int64
     totalCount int
-}
-
-func (instance *inMemoryCatalogJournalRepository) EnsureSchema(ctx context.Context) error {
-    return nil
 }
 
 func (instance *inMemoryCatalogJournalRepository) Append(ctx context.Context, entry *CatalogJournalEntry) (*CatalogJournalEntry, error) {
@@ -39,7 +35,7 @@ func (instance *inMemoryCatalogJournalRepository) Append(ctx context.Context, en
     return instance.appendLocked(entry), nil
 }
 
-/* AppendBatch takes the whole batch under one lock, so a request's entries land next to each other rather than interleaved with another request's. Every entry is validated before anything is stored, which is the same order the database-backed journal uses. */
+/* AppendBatch stores the whole batch under one lock, so a request's entries are not interleaved with another's; every entry is validated before anything is stored. */
 func (instance *inMemoryCatalogJournalRepository) AppendBatch(ctx context.Context, entryList []*CatalogJournalEntry) error {
     if 0 == len(entryList) {
         return nil
@@ -87,7 +83,7 @@ func (instance *inMemoryCatalogJournalRepository) appendLocked(entry *CatalogJou
     instance.entries = append(instance.entries, stored)
     instance.totalCount = instance.totalCount + 1
 
-    /* the oldest entries are dropped rather than the newest refused: a journal that stopped accepting writes would change what the application does, and this one is only meant to show what has just happened */
+    /* the oldest entries are dropped rather than the newest refused, so a full journal never changes what the application does */
     if inMemoryJournalCapacity < len(instance.entries) {
         instance.entries = instance.entries[len(instance.entries)-inMemoryJournalCapacity:]
     }
@@ -132,7 +128,7 @@ func (instance *inMemoryCatalogJournalRepository) Latest(ctx context.Context, li
     return entries, nil
 }
 
-/* Count reports every entry the process has recorded, including the ones the bound has since dropped: the report is about how much has happened, not about how much is still readable. */
+/* Count reports every entry the process has recorded, including the ones the bound has dropped. */
 func (instance *inMemoryCatalogJournalRepository) Count(ctx context.Context) (int, error) {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()

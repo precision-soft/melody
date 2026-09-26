@@ -45,7 +45,7 @@ func (instance *Module) registerCorsListeners(kernelInstance melodykernelcontrac
     melodyhttpcors.RegisterListeners(kernelInstance.EventDispatcher(), corsService)
 }
 
-/* corsServiceFromOrigins folds the comma-separated env value into the declared origins, dropping the empty entries a trailing comma leaves, and answers nil when none survive: handing cors.NewService an empty list would deny every origin, which is a different statement than "no cors at all" — the empty value keeps the door unwired, like every other switch of the example. */
+/* corsServiceFromOrigins folds the comma-separated env value into the declared origins, dropping empty entries, and answers nil when none survive: an empty list handed to cors.NewService would deny every origin, while the empty value means no cors at all. */
 func corsServiceFromOrigins(value string) *melodyhttpcors.Service {
     originList := make([]string, 0)
 

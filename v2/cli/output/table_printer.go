@@ -11,7 +11,7 @@ import (
     "github.com/precision-soft/melody/v2/internal"
 )
 
-/* escapeLine keeps a single-line channel single-line and inert on a terminal: the summary lines, titles, warnings and error texts carry values an http client may have written earlier, and an embedded carriage return or escape sequence would repaint or forge what the report appears to say. The escaping is visible rather than silent — the operator reads \x1b where the terminal would have obeyed it. */
+/* escapeLine keeps a single-line channel single-line and inert on a terminal: summaries, titles, warnings and error texts may carry client-written values, and an embedded carriage return or escape sequence would forge what the report says. The escaping is visible, \x1b where the terminal would have obeyed it. */
 func escapeLine(value string) string {
     return internal.EscapeControlCharacters(value)
 }
@@ -41,7 +41,7 @@ type TablePrinter struct {
     tableMaxWidth int
 }
 
-/* errorTrackingWriter remembers the first write failure and swallows the rest: the table is printed through dozens of small writes, and threading every result through the row and cell helpers would bury the layout code. A report truncated by a full disk used to end with a success banner and exit zero; the remembered failure is what lets Print refuse instead. */
+/* errorTrackingWriter remembers the first write failure and swallows the rest, so Print can refuse a truncated report without threading every result through the layout helpers. The sink is the application's, so a short write without an error is remembered as io.ErrShortWrite, as io.Copy reads it; a negative count reads as short. */
 type errorTrackingWriter struct {
     writer   io.Writer
     firstErr error
@@ -52,9 +52,11 @@ func (instance *errorTrackingWriter) Write(payload []byte) (int, error) {
         return len(payload), nil
     }
 
-    _, writeErr := instance.writer.Write(payload)
+    written, writeErr := instance.writer.Write(payload)
     if nil != writeErr {
         instance.firstErr = writeErr
+    } else if written < len(payload) {
+        instance.firstErr = io.ErrShortWrite
     }
 
     return len(payload), nil
@@ -108,7 +110,7 @@ func (instance *TablePrinter) Print(
         }
     }
 
-    /* the warnings are printed under quiet as well: quiet suppresses the decorative headers, and a warning is the one thing a command said beside its result — swallowed by a default, it never reached anyone rendering the default table. Only the warning details stay behind the verbose flag. */
+    /* the warnings are printed under quiet too: quiet suppresses decoration, and a warning is what the command said beside its result; only the warning details stay behind verbose */
     if 0 != len(envelope.Warnings) {
         _, _ = fmt.Fprintln(writer, "WARNINGS:")
         for _, warning := range envelope.Warnings {
@@ -128,7 +130,7 @@ func (instance *TablePrinter) Print(
         }
     }
 
-    /* the error is rendered whole, and regardless of quiet: this printer is the only presentation the default format has, and an envelope failure that renders nowhere leaves the red one-line echo as the entire report — the code, the details and the cause existed only here */
+    /* the error is rendered whole regardless of quiet: this printer is the only presentation the default format has */
     if nil != envelope.Error {
         _, _ = fmt.Fprintf(writer, "ERROR: %s\n", escapeLine(envelope.Error.Message))
 
@@ -194,7 +196,7 @@ func (instance *TablePrinter) printTableBlock(writer io.Writer, block TableBlock
     }
 }
 
-/* sanitizeTableBlock escapes the control characters of every column and cell before the widths are measured, so the escaped spelling is the one the width arithmetic counts and the one the wrap slices — escaping at print time instead would render wider than it measured. A newline stays a real line break, because a cell renders multi-line on purpose, and a separator row keeps its token so the separator detection still recognizes it. */
+/* sanitizeTableBlock escapes the control characters of every column and cell before the widths are computed, so the escaped spelling is the one counted and wrapped. A newline stays a real line break, and a separator row keeps its token. */
 func sanitizeTableBlock(block TableBlock) TableBlock {
     sanitizedColumns := make([]string, len(block.Columns))
     for index, column := range block.Columns {

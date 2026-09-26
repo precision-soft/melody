@@ -16,7 +16,7 @@ type RegisteredListener struct {
     ListenerId   string `json:"listenerId"`
     ListenerName string `json:"listenerName"`
 
-    /* Required and MaySkipRequiredListeners report the RequiredListenerRegistrar marks the listener carries. Without them an unarmed fail-closed guarantee is invisible to inspection: the listener that is supposed to be required looks exactly like one that is not. */
+    /* Required and MaySkipRequiredListeners report the RequiredListenerRegistrar marks the listener carries, so an armed fail-closed guarantee is visible to inspection. */
     Required                 bool `json:"required"`
     MaySkipRequiredListeners bool `json:"maySkipRequiredListeners"`
 }

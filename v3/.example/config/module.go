@@ -1,13 +1,14 @@
 package config
 
 import (
+    "context"
     nethttp "net/http"
 
     minio "github.com/minio/minio-go/v7"
     melodyawss3 "github.com/precision-soft/melody/integrations/awss3/v3"
+    melodybunorm "github.com/precision-soft/melody/integrations/bunorm/v3"
     melodyencrypt "github.com/precision-soft/melody/integrations/bunorm/v3/encrypt"
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
-    "github.com/precision-soft/melody/v3/.example/twofactor"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     melodyconfigcontract "github.com/precision-soft/melody/v3/config/contract"
     melodyhttp "github.com/precision-soft/melody/v3/http"
@@ -39,12 +40,9 @@ type Module struct {
 
     impersonatedUsers melodysecuritycontract.ImpersonatedUserResolver
 
-    twoFactorStore *twofactor.Store
-
     translator melodytranslationcontract.Translator
 
     serverSentEventHub       *melodyhttp.ServerSentEventHub
-    serverSentEventBackplane *melodyrueidis.ServerSentEventBackplane
 
     openApiInfo     melodyopenapi.Info
     openApiRegistry *melodyopenapi.Registry
@@ -56,6 +54,9 @@ type Module struct {
 
     redisClient rueidis.Client
 
+    /* redisConnection owns the eagerly opened client; registered through the rueidis module, it is what lets the container teardown close the connection the raw client cannot answer for */
+    redisConnection *melodyrueidis.Connection
+
     /* catalogWriteThrottle is nil when the environment gave the example no redis: there is then no shared counter, and the nomenclature's writes go through unthrottled rather than being refused. */
     catalogWriteThrottle melodyhttpcontract.Middleware
 
@@ -63,12 +64,29 @@ type Module struct {
     storageBucket string
     storage       *melodyawss3.Storage
 
-    database *bun.DB
-    cipher   melodyencrypt.Cipher
+    /* the registry is the one door onto both connections, and the catalogue handle is its default manager. The catalogue is opened eagerly because everything reads it; the archive is opened at its first resolution, so a process that never takes a reading pays no second handshake. */
+    databaseRegistry *melodybunorm.ManagerRegistry
+    database         *bun.DB
+
+    /* processContext is what the registry's lazy opens are bound to: the archive is opened at the first resolution of the service that publishes it, on a request or a command, and an open that outlives the process's signal is an open the teardown waits for */
+    processContext context.Context
+
+    /* trustedProxyResolver is the one client resolver both budgets read the client through; the list it resolves is re-read on a schedule, so a balancer restarted onto a new address is trusted again within the interval */
+    trustedProxyResolver *trustedProxyResolver
+
+    /* archiveWired is what the environment armed, kept as an answer rather than re-derived: the services, the migration context and the reset command each ask it, and asking the registry instead would open the connection to find out. */
+    archiveWired bool
+
+    /* the two databases as their connections were declared — host:port/schema — carried to the handles the reset prints before it destroys anything; the registry knows them, but only by the manager's name, which is not what an operator reads a plan for */
+    catalogLocation string
+    archiveLocation string
+    cipher           melodyencrypt.Cipher
 }
 
-func NewExampleModule(configuration melodyconfigcontract.Configuration) *Module {
-    moduleInstance := &Module{configuration: configuration}
+/* NewExampleModule builds the eager half of the wiring. The context is the process's: a signal cancels it, and the database registry binds its lazy opens to it — an open in flight when the process is asked to stop ends with the signal rather than with its retry budget, so a teardown has nothing to wait behind. */
+func NewExampleModule(ctx context.Context, configuration melodyconfigcontract.Configuration) *Module {
+    moduleInstance := &Module{processContext: ctx, configuration: configuration}
+    moduleInstance.buildTrustedProxyResolver()
     moduleInstance.buildServerSentEvent()
     moduleInstance.buildObservability()
     moduleInstance.buildEncrypt()
@@ -79,7 +97,6 @@ func NewExampleModule(configuration melodyconfigcontract.Configuration) *Module 
     moduleInstance.buildTokenAuth()
     moduleInstance.buildInternalAuth()
     moduleInstance.buildImpersonation()
-    moduleInstance.buildTwoFactor()
     moduleInstance.buildTranslation()
     moduleInstance.buildOpenApi()
     moduleInstance.buildMailer()
@@ -87,15 +104,24 @@ func NewExampleModule(configuration melodyconfigcontract.Configuration) *Module 
     return moduleInstance
 }
 
-/* env-key constants for the example's opt-in live integrations. melody auto-registers
-   every .env key as a same-named parameter, so these double as the parameter names the
-   eager build steps read through environmentValue. */
+/* env-key constants for the example's opt-in live integrations. melody auto-registers every .env key as a same-named parameter, so these double as the parameter names the eager build steps read through environmentValue. */
 const (
     environmentKeyMysqlHost     = "MYSQL_HOST"
     environmentKeyMysqlPort     = "MYSQL_PORT"
     environmentKeyMysqlDatabase = "MYSQL_DATABASE"
     environmentKeyMysqlUser     = "MYSQL_USER"
     environmentKeyMysqlPassword = "MYSQL_PASSWORD"
+    environmentKeyMysqlInsecure = "MYSQL_INSECURE"
+
+    /* the archive connection is the example's SECOND database, on postgres, and it carries a switch of
+       its own: the catalogue on mysql and the reading archive on postgres are independently wired, so
+       every combination boots — both live, either one alone, or neither. */
+    environmentKeyPgsqlHost     = "PGSQL_HOST"
+    environmentKeyPgsqlPort     = "PGSQL_PORT"
+    environmentKeyPgsqlDatabase = "PGSQL_DATABASE"
+    environmentKeyPgsqlUser     = "PGSQL_USER"
+    environmentKeyPgsqlPassword = "PGSQL_PASSWORD"
+    environmentKeyPgsqlInsecure = "PGSQL_INSECURE"
 
     environmentKeyRedisAddress = "REDIS_ADDRESS"
 
@@ -111,13 +137,33 @@ const (
     environmentKeySmtpAddress = "SMTP_ADDRESS"
 
     environmentKeyOtelExporterEndpoint = "OTEL_EXPORTER_OTLP_ENDPOINT"
+
+    environmentKeyCorsAllowOrigins     = "APP_CORS_ALLOW_ORIGINS"
+    environmentKeyRequestBudgetPerHour = "APP_REQUEST_BUDGET_PER_HOUR"
+    environmentKeyTrustedProxyList     = "APP_TRUSTED_PROXY_LIST"
+    environmentKeyRatesBaseUrl         = "RATES_BASE_URL"
+    environmentKeyRatesBaseCurrency    = "RATES_BASE_CURRENCY"
+    environmentKeyReportExportEndpoint = "APP_REPORTING_EXPORT_ENDPOINT"
+
 )
 
-/* environmentValue reads a value melody auto-registered from the .env files (every env key becomes a
-   same-named parameter). The values are already fully resolved here — NewConfiguration (called in
-   NewApplication, before this composition root runs) applies applyEnvironmentOverrides + resolvePlaceholders,
-   which expand %env(X)%/%name% indirection and unescape %% — so a plain String() read is correct. Returns ""
-   when the key is absent so the eager build steps keep their "unset means skip this integration" behaviour. */
+/* the two outbound endpoints are read through parameters rather than raw .env keys: a bound constructor argument is read with MustGet, and an auto-registered key vanishes with its .env line, while a parameter declared with an empty-string fallback answers "", which means the door is unwired. */
+const (
+    parameterRatesBaseUrl        = "app.rates.base_url"
+    parameterReportExportEndpoint = "app.reporting.export_endpoint"
+)
+
+/* the base every rate of the catalogue is quoted against, which the refresh refuses a provider's document
+   for not sharing. The seed quotes against the euro, so the default is EUR and a deployment names another
+   only when it reseeds against another; it is a parameter with a defaulted key for the same reason the two
+   endpoints are — a bound constructor argument is read with MustGet. */
+const (
+    parameterRatesBaseCurrency        = "app.rates.base_currency"
+    parameterRatesDefaultBaseCurrency = "app.rates.default_base_currency"
+    defaultRatesBaseCurrency          = "EUR"
+)
+
+/* environmentValue reads a value melody auto-registered from the .env files. NewConfiguration has already resolved the env and placeholder indirection, so a plain String() read is correct; an absent key answers "", which leaves its integration unwired. */
 func (instance *Module) environmentValue(key string) string {
     parameter := instance.configuration.Get(key)
     if nil == parameter {

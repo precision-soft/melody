@@ -2,8 +2,18 @@ package http
 
 import (
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
+
+/* normalizedEventResponse stores a typed-nil response as nil, since every reader of these events asks `nil == Response()`. */
+func normalizedEventResponse(response httpcontract.Response) httpcontract.Response {
+    if true == internal.IsNilInterface(response) {
+        return nil
+    }
+
+    return response
+}
 
 func NewKernelRequestEvent(
     runtimeInstance runtimecontract.Runtime,
@@ -35,7 +45,7 @@ func (instance *KernelRequestEvent) Response() httpcontract.Response {
 }
 
 func (instance *KernelRequestEvent) SetResponse(response httpcontract.Response) {
-    instance.response = response
+    instance.response = normalizedEventResponse(response)
 }
 
 func NewKernelControllerEvent(
@@ -68,13 +78,13 @@ func (instance *KernelControllerEvent) Response() httpcontract.Response {
 }
 
 func (instance *KernelControllerEvent) SetResponse(response httpcontract.Response) {
-    instance.response = response
+    instance.response = normalizedEventResponse(response)
 }
 
 func NewKernelResponseEvent(request httpcontract.Request, response httpcontract.Response) *KernelResponseEvent {
     return &KernelResponseEvent{
         request:  request,
-        response: response,
+        response: normalizedEventResponse(response),
     }
 }
 
@@ -92,7 +102,7 @@ func (instance *KernelResponseEvent) Response() httpcontract.Response {
 }
 
 func (instance *KernelResponseEvent) SetResponse(response httpcontract.Response) {
-    instance.response = response
+    instance.response = normalizedEventResponse(response)
 }
 
 func NewKernelTerminateEvent(
@@ -103,7 +113,7 @@ func NewKernelTerminateEvent(
     return &KernelTerminateEvent{
         runtime:  runtimeInstance,
         request:  request,
-        response: response,
+        response: normalizedEventResponse(response),
     }
 }
 
@@ -162,5 +172,5 @@ func (instance *KernelExceptionEvent) Response() httpcontract.Response {
 }
 
 func (instance *KernelExceptionEvent) SetResponse(response httpcontract.Response) {
-    instance.response = response
+    instance.response = normalizedEventResponse(response)
 }

@@ -1,0 +1,158 @@
+package contract
+
+import (
+    "errors"
+    "fmt"
+)
+
+/* ErrFlagValueTypeMismatch is the cause of a validation refusal when the value handed to a flag's neutral validator is not of the type its kind names. The shipped flags never produce it; it reports a wiring mistake in an adapter or a hand-written flag type. */
+var ErrFlagValueTypeMismatch = errors.New("cli flag value type does not match the flag kind")
+
+/* FlagKind names the value a flag carries. It is the whole vocabulary the engine adapter switches on, so a flag type melody does not ship can describe itself with one of these kinds. */
+type FlagKind string
+
+const (
+    FlagKindString      FlagKind = "string"
+    FlagKindBool        FlagKind = "bool"
+    FlagKindInt         FlagKind = "int"
+    FlagKindStringSlice FlagKind = "stringSlice"
+)
+
+/* FlagDefinition is how a flag describes itself to the engine adapter. Value carries the default in the Go type the kind names, and Validator is the neutral form of the typed validators the four shipped flags declare — a nil validator means the flag declares none, which is not the same as one that accepts everything. */
+type FlagDefinition struct {
+    Kind      FlagKind
+    Name      string
+    Usage     string
+    Value     any
+    Validator func(value any) error
+    /* Required refuses an invocation that leaves the flag out, naming it, before the command runs */
+    Required bool
+    /* Aliases are further spellings the flag is parsed and listed under; each is refused at registration when it repeats a spelling the command already declares */
+    Aliases []string
+    /* Hidden keeps the flag out of the help output while it still parses */
+    Hidden bool
+}
+
+/* Flag is a command line flag a command declares. The single method is the description the engine adapter reads: melody ships the four kinds below, and a package that needs its own flag type — a port number that validates its range, a path that must exist — implements this interface over one of the kinds instead of asking melody for a new one. */
+type Flag interface {
+    Definition() FlagDefinition
+}
+
+var _ Flag = (*StringFlag)(nil)
+var _ Flag = (*BoolFlag)(nil)
+var _ Flag = (*IntFlag)(nil)
+var _ Flag = (*StringSliceFlag)(nil)
+
+type StringFlag struct {
+    Name      string
+    Usage     string
+    Value     string
+    Validator func(value string) error
+    Required  bool
+    Aliases   []string
+    Hidden    bool
+}
+
+func (instance *StringFlag) Definition() FlagDefinition {
+    return FlagDefinition{
+        Kind:      FlagKindString,
+        Name:      instance.Name,
+        Usage:     instance.Usage,
+        Value:     instance.Value,
+        Validator: neutralValidator(FlagKindString, instance.Name, instance.Validator),
+        Required:  instance.Required,
+        Aliases:   append([]string(nil), instance.Aliases...),
+        Hidden:    instance.Hidden,
+    }
+}
+
+type BoolFlag struct {
+    Name      string
+    Usage     string
+    Value     bool
+    Validator func(value bool) error
+    Required  bool
+    Aliases   []string
+    Hidden    bool
+}
+
+func (instance *BoolFlag) Definition() FlagDefinition {
+    return FlagDefinition{
+        Kind:      FlagKindBool,
+        Name:      instance.Name,
+        Usage:     instance.Usage,
+        Value:     instance.Value,
+        Validator: neutralValidator(FlagKindBool, instance.Name, instance.Validator),
+        Required:  instance.Required,
+        Aliases:   append([]string(nil), instance.Aliases...),
+        Hidden:    instance.Hidden,
+    }
+}
+
+type IntFlag struct {
+    Name      string
+    Usage     string
+    Value     int
+    Validator func(value int) error
+    Required  bool
+    Aliases   []string
+    Hidden    bool
+}
+
+func (instance *IntFlag) Definition() FlagDefinition {
+    return FlagDefinition{
+        Kind:      FlagKindInt,
+        Name:      instance.Name,
+        Usage:     instance.Usage,
+        Value:     instance.Value,
+        Validator: neutralValidator(FlagKindInt, instance.Name, instance.Validator),
+        Required:  instance.Required,
+        Aliases:   append([]string(nil), instance.Aliases...),
+        Hidden:    instance.Hidden,
+    }
+}
+
+type StringSliceFlag struct {
+    Name      string
+    Usage     string
+    Value     []string
+    Validator func(value []string) error
+    Required  bool
+    Aliases   []string
+    Hidden    bool
+}
+
+func (instance *StringSliceFlag) Definition() FlagDefinition {
+    return FlagDefinition{
+        Kind:      FlagKindStringSlice,
+        Name:      instance.Name,
+        Usage:     instance.Usage,
+        Value:     instance.Value,
+        Validator: neutralValidator(FlagKindStringSlice, instance.Name, instance.Validator),
+        Required:  instance.Required,
+        Aliases:   append([]string(nil), instance.Aliases...),
+        Hidden:    instance.Hidden,
+    }
+}
+
+/* neutralValidator wraps a typed validator into the neutral form. A flag with no validator answers nil, not a function that accepts everything, since the engine tells the two apart; the type assertion refuses a mismatched value naming the flag and the kind (ErrFlagValueTypeMismatch). */
+func neutralValidator[T any](kind FlagKind, flagName string, validator func(value T) error) func(value any) error {
+    if nil == validator {
+        return nil
+    }
+
+    return func(value any) error {
+        typedValue, ok := value.(T)
+        if false == ok {
+            return fmt.Errorf(
+                "%w: flag %q of kind %q received %T",
+                ErrFlagValueTypeMismatch,
+                flagName,
+                kind,
+                value,
+            )
+        }
+
+        return validator(typedValue)
+    }
+}

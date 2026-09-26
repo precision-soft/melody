@@ -1,6 +1,8 @@
 package container
 
 import (
+    "context"
+    "fmt"
     "reflect"
     "sort"
     "strings"
@@ -24,15 +26,19 @@ func newScope(containerInstance *container, plan *scopePlan) containercontract.S
         typeInstances:        make(map[reflect.Type]any),
         createdInstances:     make(map[string]any),
         createdTypeInstances: make(map[reflect.Type]any),
+        createdAliasNodeKeys: make(map[string]string),
 
         ownProviders:                   make(map[string]providerAny),
         ownTypeProviders:               make(map[reflect.Type]providerAny),
         ownTypeRegistrationNamesByType: make(map[reflect.Type][]string),
         ownReplacesContainerService:    make(map[string]bool),
+        ownCollectionPriorityByName:    make(map[string]int),
 
         creatingByName:  make(map[string]*creationState),
         creatingByType:  make(map[string]*creationState),
         dependencyGraph: make(map[string]map[string]struct{}),
+
+        creationOrderByNodeKey: make(map[string]int),
     }
     scopeInstance.container.Store(containerInstance)
 
@@ -42,22 +48,40 @@ func newScope(containerInstance *container, plan *scopePlan) containercontract.S
 type scope struct {
     mutex     sync.RWMutex
     container atomic.Pointer[container]
-    /* the immutable plan this scope was created against, shared by reference with every other scope of the same generation and never written to. Holding a reference rather than a copy is what keeps creating a scope O(1) whatever the size of the plan. */
+    /* the immutable plan this scope was created against, shared by reference so creating a scope is O(1) */
     plan          *scopePlan
     instances     map[string]any
     typeInstances map[reflect.Type]any
-    /* the services built through this scope are kept apart from the overrides installed into it: an override belongs to whoever installed it and outlives the scope, while a service created from one holds that request's substitutes and must not survive it. Keeping them in their own maps is what lets the scope be emptied of the second kind without touching the first. */
+    /* the services built through this scope, apart from the overrides installed into it, which outlive the scope */
     createdInstances     map[string]any
     createdTypeInstances map[reflect.Type]any
-    /* registrations made on this scope itself, layered over the plan. They are the rare case: the declared plan is where a scoped service normally comes from. */
+    /* the type→name link of an instance filed under both, written at the dual filing; the teardown collapses along it so the instance closes once, after its dependents */
+    createdAliasNodeKeys map[string]string
+    /* a created instance evicted by a ClosedWithScope override is still the scope's to close, after the ordered walk */
+    evictedCreatedInstances []any
+    /* registrations made on this scope itself, layered over the plan */
     ownProviders                   map[string]providerAny
     ownTypeProviders               map[reflect.Type]providerAny
     ownTypeRegistrationNamesByType map[reflect.Type][]string
     ownReplacesContainerService    map[string]bool
-    /* @important creatingByName, creatingByType and dependencyGraph are guarded by the CONTAINER mutex, not by this scope's. The creation guard that reads and writes them runs with the container lock held and releases it only around the provider call, so that is the only lock they are ever touched under. Close() must therefore never nil them: it holds the scope lock alone, and emptying a map a guard is writing to would be a data race with no lock in common. They die with the scope instead. */
+    ownCollectionPriorityByName    map[string]int
+    /* creatingByName, creatingByType and dependencyGraph are guarded by the container mutex, not this scope's; Close must never nil them */
     creatingByName  map[string]*creationState
     creatingByType  map[string]*creationState
     dependencyGraph map[string]map[string]struct{}
+    /* the order this scope's teardown nodes came into being, written under the scope mutex */
+    creationOrderByNodeKey map[string]int
+    creationOrderCounter   int
+}
+
+/* recordCreationOrderLocked stamps a teardown node the first time only; the scope mutex is held. */
+func (instance *scope) recordCreationOrderLocked(nodeKey string) {
+    if _, stamped := instance.creationOrderByNodeKey[nodeKey]; true == stamped {
+        return
+    }
+
+    instance.creationOrderCounter = instance.creationOrderCounter + 1
+    instance.creationOrderByNodeKey[nodeKey] = instance.creationOrderCounter
 }
 
 func (instance *scope) Get(serviceName string) (any, error) {
@@ -71,11 +95,11 @@ func (instance *scope) Get(serviceName string) (any, error) {
 
     containerInstance := instance.container.Load()
     if nil == containerInstance {
-        /* @important return the closed-scope error instead of panicking: error-returning methods follow the Must/non-Must convention (Must* wrappers keep panicking), and a panic here is fatal in handler-spawned goroutines that outlive the request — the kernel closes the scope when ServeHttp returns and no recover covers those goroutines */
+        /* a closed scope answers an error, not a panic: a goroutine outliving its request has no recover; the Must wrappers still panic */
         return nil, exception.NewError(
             "scope is closed",
             nil,
-            nil,
+            ErrScopeClosed,
         )
     }
 
@@ -112,11 +136,11 @@ func (instance *scope) GetByType(targetType reflect.Type) (any, error) {
 
     containerInstance := instance.container.Load()
     if nil == containerInstance {
-        /* @important mirror Get: closed scope yields an error, not a panic; MustGetByType keeps the panic */
+        /* a closed scope answers an error, as in Get */
         return nil, exception.NewError(
             "scope is closed",
             nil,
-            nil,
+            ErrScopeClosed,
         )
     }
 
@@ -128,7 +152,7 @@ func (instance *scope) GetByType(targetType reflect.Type) (any, error) {
 func (instance *scope) MustGetByType(targetType reflect.Type) any {
     value, getByTypeErr := instance.GetByType(targetType)
     if nil != getByTypeErr {
-        /* @important a nil targetType yields a clean GetByType error, so guard the type string here too rather than dereferencing a nil reflect.Type (whose String() panics with an obscure nil-pointer error and discards the wrapped cause), matching resolverContext.MustGetByType */
+        /* a nil targetType answers a clean error rather than a nil reflect.Type panic */
         targetTypeString := ""
         if nil != targetType {
             targetTypeString = targetType.String()
@@ -158,7 +182,7 @@ func (instance *scope) Has(serviceName string) bool {
         return false
     }
 
-    /* @important the scope's own answer is read and the lock released before the container is asked, because the container asks the scope back the other way round: a created service is stored into the scope while the container lock is held, so holding the scope lock across a container call is the one ordering that can deadlock */
+    /* the scope's answer is read and its lock released before the container is asked, since the container reaches into the scope under its own lock */
     instance.mutex.RLock()
     _, exists := instance.instances[serviceName]
     if false == exists {
@@ -173,7 +197,7 @@ func (instance *scope) Has(serviceName string) bool {
         return true
     }
 
-    /* a scoped registration answers before it is built: Has reports what the scope can produce, not what it happens to hold already. The plan is immutable and shared, so it needs no lock. */
+    /* a scoped registration answers before it is built; the plan is immutable and needs no lock */
     if _, planned := instance.plan.providers[serviceName]; true == planned {
         return true
     }
@@ -191,13 +215,13 @@ func (instance *scope) HasType(targetType reflect.Type) bool {
         return false
     }
 
-    /* @important every lookup is canonical, because that is the key both the overrides and the registrations are filed under: an override is stored under canonicalServiceType of the value's type, and GetByType canonicalises before it looks. Asking with the value type was answered "no" for a service the very next GetByType resolves. */
+    /* every lookup is canonical, as the overrides and registrations are filed */
     canonicalType := canonicalServiceType(targetType)
     if nil == canonicalType {
         return false
     }
 
-    /* @important the same ordering as Has: the scope answers first and lets its lock go before the container is asked, since the container reaches into the scope while holding its own lock */
+    /* the scope answers first and releases its lock before the container is asked */
     instance.mutex.RLock()
     _, exists := instance.typeInstances[canonicalType]
     if false == exists {
@@ -348,25 +372,6 @@ func (instance *scope) OverrideProtectedInstanceWithOptions(
         )
     }
 
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    if nil == instance.container.Load() {
-        /* @important mirror Get: closed scope yields an error, not a panic; MustOverrideProtectedInstance keeps the panic */
-        return exception.NewError(
-            "scope is closed",
-            nil,
-            nil,
-        )
-    }
-
-    instance.instances[serviceName] = value
-
-    /* an override declared as closed with the scope is filed into the created maps as well, which is the whole of the mechanism: the teardown already walks exactly those, so nothing about closing has to learn about overrides. */
-    if true == overrideOption.ClosedWithScope {
-        instance.createdInstances[serviceName] = value
-    }
-
     valueType := reflect.TypeOf(value)
     if nil == valueType {
         return exception.NewError(
@@ -390,10 +395,123 @@ func (instance *scope) OverrideProtectedInstanceWithOptions(
         )
     }
 
-    instance.typeInstances[canonicalType] = value
+    /* the container's registered types are read before the scope lock, container before scope being the only lock order */
+    containerInstance := instance.container.Load()
+    if nil == containerInstance {
+        return exception.NewError(
+            "scope is closed",
+            map[string]any{
+                "refusedAt": "entry",
+            },
+            ErrScopeClosed,
+        )
+    }
 
+    propagatedTypes := containerInstance.registeredTypesForServiceName(serviceName)
+
+    /* the override is exposed under its own canonical type only when no service anywhere registered that type */
+    canonicalTypeClaimed := 0 < len(containerInstance.serviceNamesForRegisteredType(canonicalType))
+    if false == canonicalTypeClaimed {
+        if planNames, exists := instance.plan.typeRegistrationNamesByType[canonicalType]; true == exists && 0 < len(planNames) {
+            canonicalTypeClaimed = true
+        }
+    }
+
+    for registeredType, registeredServiceNames := range instance.plan.typeRegistrationNamesByType {
+        for _, registeredServiceName := range registeredServiceNames {
+            if serviceName == registeredServiceName {
+                propagatedTypes = append(propagatedTypes, registeredType)
+                break
+            }
+        }
+    }
+
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    if nil == instance.container.Load() {
+        /* a closed scope answers an error, as in Get; the stage tells this refusal from the entry one */
+        return exception.NewError(
+            "scope is closed",
+            map[string]any{
+                "refusedAt": "lockHandOff",
+            },
+            ErrScopeClosed,
+        )
+    }
+
+    if false == canonicalTypeClaimed {
+        if ownNames, exists := instance.ownTypeRegistrationNamesByType[canonicalType]; true == exists && 0 < len(ownNames) {
+            canonicalTypeClaimed = true
+        }
+    }
+
+    for registeredType, registeredServiceNames := range instance.ownTypeRegistrationNamesByType {
+        for _, registeredServiceName := range registeredServiceNames {
+            if serviceName == registeredServiceName {
+                propagatedTypes = append(propagatedTypes, registeredType)
+                break
+            }
+        }
+    }
+
+    /* the override reaches every type this name is registered under, and a value a registered type cannot hold is refused before anything is written */
+    for _, registeredType := range propagatedTypes {
+        if false == overrideValueFitsRegisteredType(valueType, registeredType) {
+            return exception.NewError(
+                "override value is not assignable to the registered service type",
+                map[string]any{
+                    "serviceName":    serviceName,
+                    "registeredType": registeredType.String(),
+                    "valueType":      valueType.String(),
+                },
+                nil,
+            )
+        }
+    }
+
+    instance.instances[serviceName] = value
+
+    /* an override closed with the scope is filed into the created maps, which the teardown walks; a created instance it evicts goes to the graveyard */
     if true == overrideOption.ClosedWithScope {
-        instance.createdTypeInstances[canonicalType] = value
+        if evictedValue, evicted := instance.createdInstances[serviceName]; true == evicted {
+            instance.evictedCreatedInstances = append(instance.evictedCreatedInstances, evictedValue)
+        }
+
+        instance.createdInstances[serviceName] = value
+        instance.recordCreationOrderLocked(scopedNameNodeKey(serviceName))
+    }
+
+    /* exposed under the value's own canonical type only when that type is free */
+    overriddenTypes := make([]reflect.Type, 0, 1+len(propagatedTypes))
+    seenTypes := map[reflect.Type]struct{}{}
+
+    if false == canonicalTypeClaimed {
+        overriddenTypes = append(overriddenTypes, canonicalType)
+        seenTypes[canonicalType] = struct{}{}
+    }
+
+    for _, registeredType := range propagatedTypes {
+        if _, seen := seenTypes[registeredType]; true == seen {
+            continue
+        }
+
+        seenTypes[registeredType] = struct{}{}
+        overriddenTypes = append(overriddenTypes, registeredType)
+    }
+
+    for _, overriddenType := range overriddenTypes {
+        instance.typeInstances[overriddenType] = value
+
+        if true == overrideOption.ClosedWithScope {
+            if evictedValue, evicted := instance.createdTypeInstances[overriddenType]; true == evicted {
+                instance.evictedCreatedInstances = append(instance.evictedCreatedInstances, evictedValue)
+            }
+
+            instance.createdTypeInstances[overriddenType] = value
+            instance.recordCreationOrderLocked(scopedTypeNodeKey(typeIdentityKey(overriddenType)))
+            instance.createdAliasNodeKeys[scopedTypeNodeKey(typeIdentityKey(overriddenType))] = scopedNameNodeKey(serviceName)
+        }
     }
 
     return nil
@@ -414,9 +532,19 @@ func (instance *scope) MustOverrideProtectedInstance(serviceName string, value a
     }
 }
 
-/* Close ends the request the scope stands for and closes the services the scope itself built. Only those: an override was installed from outside and belongs to whoever installed it, and a singleton reached through the scope belongs to the root container, which closes it when the process ends — closing either here would tear down, once per request, something the next request still needs. What the scope built is exactly what a service which read one of those entries turned into, so it holds that request and has nobody else to close it. */
+/* Closed reports whether Close has ended the request this scope stood for, so a lazy handle stops serving its memoized value. It is on the concrete scope, asked through a type assertion. */
+func (instance *scope) Closed() bool {
+    return nil == instance.container.Load()
+}
+
+/* Close ends the request the scope stands for and closes only the services the scope built: overrides belong to their installers and singletons to the root container. It is CloseWithContext with no deadline. */
 func (instance *scope) Close() error {
-    /* @important the dependency graph lives on the scope but is guarded by the CONTAINER mutex, because the resolver writes it with that lock held and never takes the scope's for it. The snapshot is therefore taken container first, scope second — the one order the two locks are ever taken in. A creation racing this Close either has its edge in the snapshot or does not, and a missing edge degrades to the descending-name order; that is the same window the created instances themselves already have. */
+    return instance.CloseWithContext(context.Background())
+}
+
+/* CloseWithContext is Close under the caller's deadline, handed to every scoped service carrying CloseWithContext. It is on the concrete scope, reached through a type assertion. */
+func (instance *scope) CloseWithContext(closeContext context.Context) error {
+    /* the dependency graph is guarded by the container mutex, so the snapshot takes the container lock first; an edge a racing creation misses degrades to creation order */
     dependencyGraph := map[string]map[string]struct{}(nil)
 
     containerInstance := instance.container.Load()
@@ -438,26 +566,34 @@ func (instance *scope) Close() error {
 
     createdInstances := instance.createdInstances
     createdTypeInstances := instance.createdTypeInstances
+    createdAliasNodeKeys := instance.createdAliasNodeKeys
+    evictedCreatedInstances := instance.evictedCreatedInstances
+    creationOrderByNodeKey := instance.creationOrderByNodeKey
 
     instance.instances = nil
     instance.typeInstances = nil
     instance.createdInstances = nil
     instance.createdTypeInstances = nil
+    instance.createdAliasNodeKeys = nil
+    instance.evictedCreatedInstances = nil
+    instance.creationOrderByNodeKey = nil
     instance.container.Store(nil)
 
-    /* the lock is released before anything is closed, and the scope is already marked closed above: a Close() that reaches back into the scope then reads a closed scope instead of deadlocking on a mutex its own caller holds, which is the ordering the container's own teardown uses */
+    /* the lock is released before anything is closed, with the scope already marked closed, so a Close reaching back reads a closed scope */
     instance.mutex.Unlock()
 
-    return closeCreatedScopeInstances(createdInstances, createdTypeInstances, dependencyGraph)
+    return closeCreatedScopeInstances(closeContext, createdInstances, createdTypeInstances, createdAliasNodeKeys, dependencyGraph, evictedCreatedInstances, creationOrderByNodeKey)
 }
 
-/* closeCreatedScopeInstances closes each service the scope built, once. The same instance is filed under its name and under its type whenever both were known, so the aliases are collapsed the way the container's teardown collapses them — by pointer identity, or by value for a comparable non-pointer — before Close is called. A panicking or failing Close is recorded and the loop carries on, because a request scope closes on the way out of a handler and one bad service must not keep the rest of that request's services alive.
-
-The order is the scope's own dependency graph, dependents before their dependencies: a scoped repository holding a scoped transaction is the ordinary case now that a scope owns registrations, and closing the two by name would be a coin flip. Nodes the graph says nothing about, and nodes left over by a cycle, fall back to the sorted node key descending — stable, and the order this walk used before there was a graph at all. */
+/* closeCreatedScopeInstances closes each service the scope built once, through CloseWithContext when the value carries it and Close otherwise, dependents before dependencies, creation order latest first as the tie-break. An instance filed under name and type is collapsed onto its name node first. A failing or panicking Close is recorded and the loop carries on. The evicted instances close after the ordered walk. */
 func closeCreatedScopeInstances(
+    closeContext context.Context,
     createdInstances map[string]any,
     createdTypeInstances map[reflect.Type]any,
+    createdAliasNodeKeys map[string]string,
     dependencyGraph map[string]map[string]struct{},
+    evictedCreatedInstances []any,
+    creationOrderByNodeKey map[string]int,
 ) error {
     type closer interface {
         Close() error
@@ -478,19 +614,84 @@ func closeCreatedScopeInstances(
         valueOfNodeKey[nodeKey] = value
     }
 
-    closeOrder, cycleNodeKeys := teardownCloseOrder(nodeKeys, dependencyGraph)
+    /* the type alias collapses onto its name node only while both still hold the same filing */
+    representativeOf := make(map[string]string, len(nodeKeys))
+    for _, nodeKey := range nodeKeys {
+        representativeOf[nodeKey] = nodeKey
+    }
+
+    for typeNodeKey, nameNodeKey := range createdAliasNodeKeys {
+        typeValue, typeExists := valueOfNodeKey[typeNodeKey]
+        nameValue, nameExists := valueOfNodeKey[nameNodeKey]
+        if false == typeExists || false == nameExists {
+            continue
+        }
+
+        if false == sameServiceValue(typeValue, nameValue) {
+            continue
+        }
+
+        representativeOf[typeNodeKey] = nameNodeKey
+    }
+
+    canonicalNodeKeys := make([]string, 0, len(nodeKeys))
+    for _, nodeKey := range nodeKeys {
+        if nodeKey == representativeOf[nodeKey] {
+            canonicalNodeKeys = append(canonicalNodeKeys, nodeKey)
+        }
+    }
+
+    canonicalEdges := make(map[string]map[string]struct{}, len(canonicalNodeKeys))
+    for dependentKey, dependencySet := range dependencyGraph {
+        canonicalDependent, dependentExists := representativeOf[dependentKey]
+        if false == dependentExists {
+            continue
+        }
+
+        for dependencyKey := range dependencySet {
+            canonicalDependency, dependencyExists := representativeOf[dependencyKey]
+            if false == dependencyExists {
+                continue
+            }
+
+            dependencies, exists := canonicalEdges[canonicalDependent]
+            if false == exists {
+                dependencies = make(map[string]struct{})
+                canonicalEdges[canonicalDependent] = dependencies
+            }
+
+            dependencies[canonicalDependency] = struct{}{}
+        }
+    }
+
+    /* an alias group is as old as its oldest member */
+    canonicalCreationOrder := make(map[string]int, len(canonicalNodeKeys))
+
+    for nodeKey, canonicalKey := range representativeOf {
+        nodeOrder, stamped := creationOrderByNodeKey[nodeKey]
+        if false == stamped {
+            continue
+        }
+
+        existingOrder, hasExisting := canonicalCreationOrder[canonicalKey]
+        if false == hasExisting || nodeOrder < existingOrder {
+            canonicalCreationOrder[canonicalKey] = nodeOrder
+        }
+    }
+
+    /* a scope closes serially; the waves the shared drain computes are dropped */
+    closeOrder, _, cycleNodeKeys := teardownCloseOrder(canonicalNodeKeys, canonicalEdges, canonicalCreationOrder)
 
     closedPointers := make(map[pointerIdentity]struct{})
     closedValues := make(map[any]struct{})
     failures := make(map[string]string)
+    failureDetails := make(map[string]exceptioncontract.Context)
 
     if 0 < len(cycleNodeKeys) {
-        failures["scope.dependencyCycle"] = "dependency cycle detected"
+        failures["scope.dependencyCycle"] = "dependency cycle detected: " + strings.Join(cycleNodeKeys, ", ")
     }
 
-    for _, nodeKey := range closeOrder {
-        value := valueOfNodeKey[nodeKey]
-
+    closeCandidateValue := func(nodeKey string, value any) {
         pointerKey, hasPointer := pointerKeyOf(value)
         if true == hasPointer && true == isZeroSizePointerIdentity(pointerKey) {
             hasPointer = false
@@ -500,27 +701,38 @@ func closeCreatedScopeInstances(
 
         if true == hasPointer {
             if _, alreadyClosed := closedPointers[pointerKey]; true == alreadyClosed {
-                continue
+                return
             }
 
             closedPointers[pointerKey] = struct{}{}
         } else if true == comparableValue {
             if _, alreadyClosed := closedValues[value]; true == alreadyClosed {
-                continue
+                return
             }
 
             closedValues[value] = struct{}{}
         }
 
-        closeable, isCloseable := value.(closer)
-        if false == isCloseable {
-            continue
+        closeable, contextCloseable, carriesADoor := closeDoorsOf(value)
+        if false == carriesADoor {
+            return
         }
 
-        closeErr := closeServiceValue(closeable)
+        closeErr := closeServiceValueWithin(closeContext, closeable, contextCloseable)
         if nil != closeErr {
-            failures[nodeKey] = errorText(closeErr)
+            failureLine := errorText(closeErr)
+            failures[nodeKey] = failureLine
+            recordCloseFailureDetails(failureDetails, nodeKey, closeErr, failureLine)
         }
+    }
+
+    for _, nodeKey := range closeOrder {
+        closeCandidateValue(nodeKey, valueOfNodeKey[nodeKey])
+    }
+
+    /* keyed by position, since the evicted instances carry no node key */
+    for evictedIndex, evictedValue := range evictedCreatedInstances {
+        closeCandidateValue(fmt.Sprintf("scope.evictedInstance[%d]", evictedIndex), evictedValue)
     }
 
     if 0 == len(failures) {
@@ -529,14 +741,34 @@ func closeCreatedScopeInstances(
 
     return exception.NewError(
         "failed to close scope services",
-        exceptioncontract.Context{
+        withCloseFailureDetails(exceptioncontract.Context{
             "failures": failures,
-        },
+        }, failureDetails),
         nil,
     )
 }
 
-/* TypesImplementing lists what a collection gathered on this scope may hold: the container's type registrations and the scope's own, merged. A scoped registration missing here would be a handler that is simply never dispatched to — no error anywhere, just a message nothing answers — which is why the merge is not an optimisation. A closed scope enumerates nothing, mirroring Has. */
+/* sameServiceValue reports whether two filings hold one instance: pointer identity, then equality for comparable values; otherwise the caller relies on the alias link. */
+func sameServiceValue(leftValue any, rightValue any) bool {
+    leftPointer, leftHasPointer := pointerKeyOf(leftValue)
+    rightPointer, rightHasPointer := pointerKeyOf(rightValue)
+
+    if leftHasPointer != rightHasPointer {
+        return false
+    }
+
+    if true == leftHasPointer {
+        return leftPointer == rightPointer
+    }
+
+    if true == isComparableValue(leftValue) && true == isComparableValue(rightValue) {
+        return leftValue == rightValue
+    }
+
+    return true
+}
+
+/* TypesImplementing lists the container's type registrations and the scope's own, merged; a closed scope enumerates nothing. */
 func (instance *scope) TypesImplementing(interfaceType reflect.Type) []reflect.Type {
     containerInstance := instance.container.Load()
     if nil == containerInstance {
@@ -574,7 +806,7 @@ func (instance *scope) TypesImplementing(interfaceType reflect.Type) []reflect.T
     return matches
 }
 
-/* ReferencesImplementing lists every registration a collection gathered on this scope may reach, the scope's own before the container's. A name the scope registers answers for that name inside the scope, so the container's registration under the same name is left out rather than listed twice; everything else is merged and ordered by the one shared rule. */
+/* ReferencesImplementing lists every registration a collection on this scope may reach, the scope's own first; a name the scope registers hides the container's registration of it. */
 func (instance *scope) ReferencesImplementing(interfaceType reflect.Type) []containercontract.ServiceReference {
     containerInstance := instance.container.Load()
     if nil == containerInstance {
@@ -656,7 +888,7 @@ func (instance *scope) scopedPrioritizedReferences(interfaceType reflect.Type) [
     instance.mutex.RLock()
     for registeredType, registeredServiceNames := range instance.ownTypeRegistrationNamesByType {
         appendReferences(registeredType, registeredServiceNames, func(serviceName string) int {
-            return 0
+            return instance.ownCollectionPriorityByName[serviceName]
         })
     }
     instance.mutex.RUnlock()
@@ -704,7 +936,7 @@ func (instance *scope) lookupInstanceByName(serviceName string) (any, bool, erro
         return nil, false, exception.NewError(
             "scope is closed",
             nil,
-            nil,
+            ErrScopeClosed,
         )
     }
 
@@ -734,7 +966,7 @@ func (instance *scope) lookupInstanceByType(canonicalType reflect.Type) (any, bo
         return nil, false, exception.NewError(
             "scope is closed",
             nil,
-            nil,
+            ErrScopeClosed,
         )
     }
 
@@ -748,35 +980,58 @@ func (instance *scope) lookupInstanceByType(canonicalType reflect.Type) (any, bo
     return value, exists, nil
 }
 
-/* storeCreatedInstance keeps a service the resolver built out of this scope's entries. It belongs to the request the scope stands for: the value holds the per-request logger, the request context or whatever else was overridden, and the root container would hand that same instance — carrying one request's identity — to every request for the rest of the process. It is filed under the name, the type, or both, exactly as the root container would have filed it, and it is gone when the scope closes. */
+/* storeCreatedInstance keeps a service built from this scope's entries, filed as the root container would file it and gone when the scope closes. An override installed while the provider ran wins, and the beaten value is handed back to be closed. A dual filing records its type→name alias link. */
 func (instance *scope) storeCreatedInstance(
     serviceName string,
     canonicalType reflect.Type,
     value any,
-) error {
+) (any, bool, error) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
     if nil == instance.container.Load() {
-        return exception.NewError(
+        return nil, false, exception.NewError(
             "scope is closed",
             map[string]any{
                 "serviceName": serviceName,
             },
-            nil,
+            ErrScopeClosed,
         )
     }
 
     if "" != serviceName {
+        if existingValue, exists := instance.instances[serviceName]; true == exists {
+            return existingValue, true, nil
+        }
+
         instance.createdInstances[serviceName] = value
+        instance.recordCreationOrderLocked(scopedNameNodeKey(serviceName))
+
+        if nil != canonicalType {
+            instance.createdTypeInstances[canonicalType] = value
+            instance.recordCreationOrderLocked(scopedTypeNodeKey(typeIdentityKey(canonicalType)))
+            instance.createdAliasNodeKeys[scopedTypeNodeKey(typeIdentityKey(canonicalType))] = scopedNameNodeKey(serviceName)
+        }
+
+        return value, false, nil
     }
 
     if nil != canonicalType {
+        if existingValue, exists := instance.typeInstances[canonicalType]; true == exists {
+            return existingValue, true, nil
+        }
+
         instance.createdTypeInstances[canonicalType] = value
+        instance.recordCreationOrderLocked(scopedTypeNodeKey(typeIdentityKey(canonicalType)))
     }
 
-    return nil
+    return value, false, nil
 }
 
-var _ containercontract.Scope = (*scope)(nil)
-var _ containercontract.TypeLister = (*scope)(nil)
+var (
+    _ containercontract.Scope                      = (*scope)(nil)
+    _ containercontract.ScopedRegistrar            = (*scope)(nil)
+    _ containercontract.OverrideServiceWithOptions = (*scope)(nil)
+    _ containercontract.TypeLister                 = (*scope)(nil)
+    _ closedScopeChecker                           = (*scope)(nil)
+)

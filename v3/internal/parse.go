@@ -17,10 +17,14 @@ func Duration(value any, name string) (time.Duration, bool, error) {
     switch typedValue := value.(type) {
     case time.Duration:
         return typedValue, true, nil
-    case int64:
-        return time.Duration(typedValue), true, nil
-    case int:
-        return time.Duration(typedValue), true, nil
+    case int64, int:
+        /* a bare integer carries no unit and is refused, as time.ParseDuration refuses the same value spelled as a string */
+        return 0, true, ParseError(
+            name,
+            "duration",
+            value,
+            exception.NewError("a bare integer carries no unit", map[string]any{"hint": "pass a time.Duration or a string with a unit, for example \"30s\""}, nil),
+        )
     case string:
         trimmedValue := strings.TrimSpace(typedValue)
         parsedValue, err := time.ParseDuration(trimmedValue)
@@ -45,13 +49,17 @@ func Int(value any, name string) (int64, bool, error) {
     case int64:
         return typedValue, true, nil
     case float64:
-        if typedValue != math.Trunc(typedValue) {
-            return 0, true, ParseError(name, "int", typedValue, nil)
+        if true == math.IsNaN(typedValue) || true == math.IsInf(typedValue, 0) {
+            return 0, true, ParseError(name, "int", typedValue, exception.NewError("value is not finite", nil, nil))
         }
 
-        /* a float64 outside the int64 range converts to the "indefinite" value (-9223372036854775808) with no signal at all, so range-check before the conversion; the upper bound is written as a float because math.MaxInt64 is not representable as one */
+        if typedValue != math.Trunc(typedValue) {
+            return 0, true, ParseError(name, "int", typedValue, exception.NewError("value is not an integral number", nil, nil))
+        }
+
+        /* a float64 outside the int64 range converts to the indefinite value with no signal, so the range is checked first */
         if typedValue < math.MinInt64 || typedValue >= 9223372036854775808.0 {
-            return 0, true, ParseError(name, "int", typedValue, nil)
+            return 0, true, ParseError(name, "int", typedValue, exception.NewError("value is outside the int64 range", nil, nil))
         }
 
         return int64(typedValue), true, nil
@@ -108,23 +116,79 @@ func Float64(value any, name string) (float64, bool, error) {
 
     switch typedValue := value.(type) {
     case float64:
-        return typedValue, true, nil
+        return refuseNonFinite(typedValue, name)
     case float32:
-        return float64(typedValue), true, nil
+        return refuseNonFinite(float64(typedValue), name)
     case int:
         return float64(typedValue), true, nil
     case int64:
         return float64(typedValue), true, nil
     case string:
-        parsedValue, err := strconv.ParseFloat(strings.TrimSpace(typedValue), 64)
+        trimmedValue := strings.TrimSpace(typedValue)
+        if false == isDecimalFloatSpelling(trimmedValue) {
+            return 0, true, ParseError(
+                name,
+                "float64",
+                typedValue,
+                exception.NewError("the float grammar is decimal: an optional sign, digits and at most one decimal point", nil, nil),
+            )
+        }
+
+        parsedValue, err := strconv.ParseFloat(trimmedValue, 64)
         if nil != err {
             return 0, true, ParseError(name, "float64", typedValue, err)
         }
 
-        return parsedValue, true, nil
+        return refuseNonFinite(parsedValue, name)
     default:
         return 0, true, ParseError(name, "float64", value, nil)
     }
+}
+
+/* isDecimalFloatSpelling admits a plain decimal only — an optional sign, digits and at most one decimal point — where strconv.ParseFloat also reads underscores, hexadecimal floats and exponents. */
+func isDecimalFloatSpelling(value string) bool {
+    if "" == value {
+        return false
+    }
+
+    remainder := value
+    if '+' == remainder[0] || '-' == remainder[0] {
+        remainder = remainder[1:]
+    }
+
+    digitSeen := false
+    pointSeen := false
+
+    for _, character := range remainder {
+        if '0' <= character && '9' >= character {
+            digitSeen = true
+
+            continue
+        }
+
+        if '.' == character {
+            if true == pointSeen {
+                return false
+            }
+
+            pointSeen = true
+
+            continue
+        }
+
+        return false
+    }
+
+    return digitSeen
+}
+
+/* refuseNonFinite rejects NaN and the infinities, which strconv.ParseFloat parses without an error and which disarm every ordered comparison. */
+func refuseNonFinite(value float64, name string) (float64, bool, error) {
+    if true == math.IsNaN(value) || true == math.IsInf(value, 0) {
+        return 0, true, ParseError(name, "float64", value, exception.NewError("value is not finite", nil, nil))
+    }
+
+    return value, true, nil
 }
 
 func MapStringString(value any, name string) (map[string]string, bool, error) {
@@ -134,6 +198,11 @@ func MapStringString(value any, name string) (map[string]string, bool, error) {
 
     switch typedValue := value.(type) {
     case map[string]string:
+        /* a typed-nil map reads as absent, as the strict accessors answer it */
+        if nil == typedValue {
+            return nil, false, nil
+        }
+
         return CopyStringMap[string](typedValue), true, nil
     default:
         return nil, true, ParseError(name, "map[string]string", value, nil)

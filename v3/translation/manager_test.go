@@ -3,6 +3,8 @@ package translation
 import (
     "strings"
     "testing"
+
+    "github.com/precision-soft/melody/v3/internal/testhelper"
 )
 
 func newTestManager() *Manager {
@@ -15,6 +17,42 @@ func newTestManager() *Manager {
     romanian.Add("messages", "greeting", "Salut, {name}!")
 
     return NewManager("en", []string{"en"}, english, romanian)
+}
+
+/* verbatimDomainCatalog answers exactly the domain it is asked for, which the contract permits: the coercion of the empty domain is the manager door's to make, not an obligation of every catalog. */
+type verbatimDomainCatalog struct {
+    locale            string
+    messagesByDomain  map[string]map[string]string
+}
+
+func (instance *verbatimDomainCatalog) Locale() string {
+    return instance.locale
+}
+
+func (instance *verbatimDomainCatalog) Get(messageId string, domain string) (string, bool) {
+    messages, exists := instance.messagesByDomain[domain]
+    if false == exists {
+        return "", false
+    }
+
+    message, found := messages[messageId]
+    return message, found
+}
+
+/* the empty domain resolves at the one door every catalog is asked through: a catalog that takes the contract at its word and answers the asked-for domain verbatim is still asked for the default, rather than for "" */
+func TestTrans_EmptyDomainResolvesToTheDefaultAtTheManagerDoor(t *testing.T) {
+    catalog := &verbatimDomainCatalog{
+        locale: "en",
+        messagesByDomain: map[string]map[string]string{
+            DefaultDomain: {"greeting": "Hello!"},
+        },
+    }
+
+    manager := NewManager("en", []string{"en"}, catalog)
+
+    if "Hello!" != manager.Trans("greeting", nil, "", "en") {
+        t.Fatalf("expected the empty domain resolved to the default before the catalog was asked")
+    }
 }
 
 func TestTrans_InterpolatesPlaceholder(t *testing.T) {
@@ -152,12 +190,32 @@ func TestTrans_PathologicallyNestedPluralDoesNotOverflow(t *testing.T) {
     }
 }
 
-func TestTrans_PluralWithMissingArgumentFallsBackToOther(t *testing.T) {
+/* a missing plural argument stays visible as its placeholder, as the plain placeholder does */
+func TestTrans_PluralWithMissingArgumentRendersTheVisiblePlaceholder(t *testing.T) {
     manager := newTestManager()
 
     result := manager.Trans("inbox", map[string]any{}, "messages", "en")
+    if "{count}" != result {
+        t.Fatalf("expected the absent count to stay visible, got: %q", result)
+    }
+}
+
+/* a parameter present with a nil value is the caller saying so explicitly: the plural keeps rendering its other branch with an empty pound, only the ABSENT key renders as the placeholder */
+func TestTrans_PluralWithAPresentNilArgumentFallsBackToOther(t *testing.T) {
+    manager := newTestManager()
+
+    result := manager.Trans("inbox", map[string]any{"count": nil}, "messages", "en")
     if " messages" != result {
         t.Fatalf("expected the other branch with an empty pound, got: %q", result)
+    }
+}
+
+func TestTrans_SelectWithMissingArgumentRendersTheVisiblePlaceholder(t *testing.T) {
+    manager := newTestManager()
+
+    result := manager.Trans("invite", map[string]any{}, "messages", "en")
+    if "{gender}" != result {
+        t.Fatalf("expected the absent keyword to stay visible, got: %q", result)
     }
 }
 
@@ -171,4 +229,43 @@ func TestHasMessage(t *testing.T) {
     if true == manager.HasMessage("nope", "messages", "en") {
         t.Fatalf("did not expect nope to exist")
     }
+}
+
+func TestNewManager_RefusesANilCatalog(t *testing.T) {
+    /* a nil catalog is refused, since it would build a translator answering raw ids for a whole locale */
+    testhelper.AssertPanicsWithError(t, func() {
+        NewManager("en", nil, nil)
+    }, "translation catalog is nil")
+}
+
+/* the catalogs of a locale are asked in the order given, the first to answer winning */
+func TestNewManager_TwoCatalogsOfOneLocaleAreAskedInOrder(t *testing.T) {
+    first := NewMapCatalog("en")
+    first.Add("messages", "greeting", "Hello")
+    first.Add("messages", "shared", "from the first")
+
+    second := NewMapCatalog("en")
+    second.Add("messages", "farewell", "Bye")
+    second.Add("messages", "shared", "from the second")
+
+    manager := NewManager("en", nil, first, second)
+
+    if "Hello" != manager.Trans("greeting", nil, "messages", "en") {
+        t.Fatalf("expected the first catalog to keep answering, got %q", manager.Trans("greeting", nil, "messages", "en"))
+    }
+
+    if "Bye" != manager.Trans("farewell", nil, "messages", "en") {
+        t.Fatalf("expected the second catalog to answer what the first does not hold, got %q", manager.Trans("farewell", nil, "messages", "en"))
+    }
+
+    if "from the first" != manager.Trans("shared", nil, "messages", "en") {
+        t.Fatalf("expected the first catalog to win a message both hold, got %q", manager.Trans("shared", nil, "messages", "en"))
+    }
+}
+
+/* the locale chain never asks for the empty locale, so a catalog whose Locale is empty could never be found: it is refused as the nil one is, instead of being stored under a key nothing reads */
+func TestNewManager_RefusesACatalogWithoutALocale(t *testing.T) {
+    testhelper.AssertPanicsWithError(t, func() {
+        NewManager("en", nil, NewMapCatalog(""))
+    }, "translation catalog carries no locale")
 }

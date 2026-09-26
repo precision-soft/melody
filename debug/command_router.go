@@ -86,7 +86,7 @@ func (instance *RouterCommand) Run(
                 Methods: methods,
                 Pattern: routeDefinition.Pattern(),
                 Name:    name,
-                /* the two discriminators the dispatch actually uses: the higher priority wins, and among equals the lower registration order does — without them two overlapping routes rendered identically and the command could not answer which one answers */
+                /* the two discriminators the dispatch uses: the higher priority wins, then the lower registration order */
                 Priority:     routeDefinition.Priority(),
                 Order:        index + 1,
                 Host:         host,
@@ -99,7 +99,7 @@ func (instance *RouterCommand) Run(
         )
     }
 
-    /* the registration order makes the comparator total: two routes may share pattern and methods and still be distinct at dispatch — differing in host, priority or requirements — and under an unstable sort a partial comparator flips their rows between runs of the very command that exists to show which of them answers */
+    /* the registration order makes the comparator total over routes sharing pattern and methods */
     sort.Slice(items, func(leftIndex int, rightIndex int) bool {
         left := items[leftIndex]
         right := items[rightIndex]
@@ -201,7 +201,7 @@ type routeListItem struct {
     Attributes   map[string]any    `json:"attributes"`
 }
 
-/* renderCompactStringMap folds a discriminator map into one sorted k=v cell, so the verbose table stays one row per route */
+/* renderCompactStringMap folds a discriminator map into one sorted k=v cell. */
 func renderCompactStringMap(values map[string]string) string {
     if 0 == len(values) {
         return "-"
@@ -222,9 +222,7 @@ func renderCompactStringMap(values map[string]string) string {
     return strings.Join(pairs, ",")
 }
 
-/* serializableRouteAttributes keeps the document producible whatever userland hung on a route. A route attribute is arbitrary any — the framework contributes only serializable values, but the attributes argument of http.NewRouteOptions takes whatever the application hands it, and one closure among them made json.Marshal fail on the whole envelope, so the command answered ZERO bytes and the printer had no fallback to write anything else. A value that marshals is kept exactly as it is, because folding everything to text would turn the methods attribute from a list into a string; only the value that cannot be represented degrades to the same %v rendering the verbose table prints, which names the attribute instead of losing the document.
-
-The cycle-guarded walk runs FIRST, for the reason its own file states: json.Marshal answers a cycle with an error, which routed the value straight into the %v fallback — and fmt has no cycle detection, so a route carrying `meta["self"] = meta` recursed until the goroutine stack was gone. A stack overflow is a fatal error that no recover turns into a reported failure, so the document was not degraded but the process killed. The walk replaces the cycle with a marker and the fallback below stays what it is for everything else. It is asked to keep the noise keys, unlike the error-context caller: dropping a route attribute named stack or trace is redaction that belongs to an error context and to nothing else. */
+/* serializableRouteAttributes keeps the document producible whatever a route carries: a value that marshals is kept as it is, and one that cannot is rendered as the %v text the verbose table prints. The cycle-guarded walk runs first, keeping the noise keys, so a self-referencing attribute becomes a marker instead of recursing through fmt. */
 func serializableRouteAttributes(values map[string]any) map[string]any {
     if 0 == len(values) {
         return values

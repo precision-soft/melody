@@ -49,27 +49,27 @@ type container struct {
     resolverContextIdCounter    atomic.Uint64
     resolverWaitGraph           map[uint64]map[uint64]struct{}
     typeRegistrationNamesByType map[reflect.Type][]string
-    /* the identity key is a string, and distinct types CAN share it — pointer-to-unnamed-composite types drop their package path, so *[]alpha.Bus and *[]beta.Bus of two same-short-named packages read identically. The string keys the creation guard and the teardown; two types behind one key mean false cycles at resolution and merged nodes at close. Every type registration therefore records its key here and a second, DIFFERENT type arriving under the same key is refused at the boot line that declares it. */
+    /* distinct types can share an identity key string (pointer-to-unnamed-composite types drop their package path), and two types behind one key mean false cycles at resolution and merged nodes at close, so every type registration records its key here and a second, different type under the same key is refused at the registration that declares it. */
     typeIdentityKeyToType map[string]reflect.Type
     dependencyGraph       map[string]map[string]struct{}
-    /* builtServiceNames marks the name-keyed instances the container itself created, as opposed to installed overrides: an override replacing a built instance orphans a value only the container ever held, and the teardown closes what this set points at even after the maps stopped naming it (via replacedBuiltInstances). An installed override evicted by a later override is NOT the container's to close — it belongs to whoever installed it. */
+    /* the name-keyed instances the container itself built, as opposed to installed overrides: an override replacing one of them leaves a value only the container holds, so the teardown closes it through replacedBuiltInstances. An evicted installed override belongs to whoever installed it. */
     builtServiceNames      map[string]struct{}
     replacedBuiltInstances []any
-    /* the order in which the teardown nodes came into being, which is what breaks a tie the dependency graph leaves open. It is written wherever a value enters the instance maps — a creation or an installed override — and read only by the teardown; see closesBefore for why creation order and not the node key. */
+    /* the order the teardown nodes came into being, written wherever a value enters the instance maps and read only by the teardown, to break the ties the dependency graph leaves open (see closesBefore). */
     creationOrderByNodeKey map[string]int
     creationOrderCounter   int
-    /* the scoped registrations: providers of services the SCOPES of this container own, kept apart from the container's own so nothing resolved against the container can reach them. They are the source the immutable plan below is built from, never read on the request path. */
+    /* the scoped registrations, kept apart from the container's own so nothing resolved against the container reaches them; the immutable scope plan is built from them, and they are never read on the request path. */
     scopedProviders                   map[string]providerAny
     scopedTypeProviders               map[reflect.Type]providerAny
     scopedTypeRegistrationNamesByType map[reflect.Type][]string
     scopedReplacesContainerService    map[string]bool
-    /* the declared return type of each provider, kept beside it for introspection: the wrapped provider erases the signature, and a description without a type would send the operator to build a service the listing exists not to build */
+    /* the declared return type of each provider, for introspection: the wrapped provider erases the signature. */
     providerServiceTypeByName       map[string]reflect.Type
     scopedProviderServiceTypeByName map[string]reflect.Type
     /* the published plan every new scope is bound to by reference. A registration clears it and the next scope rebuilds it, so creating a scope costs one atomic load once boot has settled. */
     scopePlanPointer atomic.Pointer[scopePlan]
     isClosed         bool
-    /* teardownFinished is the SECOND of the two closing states, and the pair is what lets a service's own Close still resolve what it depends on. isClosed is set before the first service Close runs and refuses every new CREATION for the whole teardown; teardownFinished is set after the last one returns and refuses every RESOLUTION from then on. Between them the memoized instances are still served, because a worker reporting its drain at Close is entitled to the logger it reports through — which is the whole reason the logger is closed last — while after them a resolution used to answer a closed instance with a nil error, so a caller that kept a resolver got a handle to a dead service and no way to know it. */
+    /* teardownFinished is the second closing state. isClosed is set before the first service Close runs and refuses every new creation; teardownFinished is set after the last Close returns and refuses every resolution. Between the two the memoized instances are still served, so a service's own Close can resolve what it depends on, the logger among them. */
     teardownFinished bool
     closeErr         error
     closeOnce        sync.Once
@@ -81,7 +81,7 @@ func (instance *container) Get(serviceName string) (any, error) {
     return resolver.Get(serviceName)
 }
 
-/* MustGet delegates to the resolver context the way MustGetByType always has, so the two doors dress a failure identically: a melody error panics out whole with the service name written into its context, keeping the log level, the already-logged mark and the capture stack a rebuilt wrapper would shed. */
+/* MustGet resolves serviceName and panics on failure: a melody error panics out whole with the service name written into its context, so it keeps its log level, its already-logged mark and its capture stack. */
 func (instance *container) MustGet(serviceName string) any {
     resolver := newResolverContext(instance)
 
@@ -124,7 +124,7 @@ func (instance *container) HasType(targetType reflect.Type) bool {
         return false
     }
 
-    /* the lookup is canonical because the registrations are: a service registered from a provider returning *T is filed under *T, and GetByType canonicalises before it looks. Asking with the value type therefore used to be answered "no" for a service GetByType resolves happily, so Has and Get disagreed about the same container. */
+    /* the lookup is canonical because the registrations are: a provider returning *T is filed under *T and GetByType canonicalises before it looks, so Has and Get agree. */
     canonicalType := canonicalServiceType(targetType)
     if nil == canonicalType {
         return false
@@ -151,9 +151,7 @@ func (instance *container) HasType(targetType reflect.Type) bool {
     return false
 }
 
-/* OverrideInstance installs a value under a registered name, and the container CLOSES what was installed into it — unlike a scope, whose overrides belong to whoever installed them unless the installer says otherwise with ClosedWithScope. The two defaults are opposite because the two lifetimes are: a scope ends while its installer goes on running, and the http kernel that installs the request logger keeps using it to report the scope's own close failure, so a scope closing its overrides would close them under their owner. A container ends when the process does, and there is nobody left to hand the value to.
-
-The one case where that reasoning does not hold is a value shared with a SECOND container in the same process — a test suite that boots the application repeatedly and reuses one client across every boot, or a host embedding melody that closes its own handles. There this container's teardown closes it for all of them, and there is no opt-out. Install a wrapper whose Close does nothing, and keep the real handle where it belongs. */
+/* OverrideInstance installs a value under a registered name, and the container closes the installed value at its teardown, unlike a scope, whose overrides belong to their installer unless ClosedWithScope says otherwise. A value shared with a second container in the same process is therefore closed by the first teardown; install a wrapper whose Close does nothing and keep the real handle where it belongs. */
 func (instance *container) OverrideInstance(serviceName string, value any) error {
     if "" == serviceName {
         return exception.NewError(
@@ -213,7 +211,7 @@ func (instance *container) OverrideProtectedInstance(serviceName string, value a
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    /* an override landing after Close has enumerated the instances is stored into a map no teardown will ever read again — it is served by later lookups and closed by nobody. Refused, like the scoped registrar refuses; the read paths keep serving what was built, so a shutdown-racing request degrades gracefully instead of half-working. */
+    /* an override landing after Close has enumerated the instances would be served and closed by nobody, so it is refused; the read paths keep serving what was built. */
     if true == instance.isClosed {
         return newContainerClosedError(serviceName)
     }
@@ -251,7 +249,7 @@ func (instance *container) OverrideProtectedInstance(serviceName string, value a
         )
     }
 
-    /* the override propagates to every type this name is registered under, and a type-keyed resolution hands out whatever sits there with no re-check — the call-time assignability guard of the provider contract does not see overrides. A value the registered type cannot hold is refused before anything is written, so GetByType keeps its contract and the name/type maps never learn two different answers. */
+    /* the override propagates to every type this name is registered under, and a type-keyed resolution serves it without a re-check, so a value a registered type cannot hold is refused before anything is written. */
     for registeredType, registeredServiceNames := range instance.typeRegistrationNamesByType {
         for _, registeredServiceName := range registeredServiceNames {
             if serviceName != registeredServiceName {
@@ -274,7 +272,7 @@ func (instance *container) OverrideProtectedInstance(serviceName string, value a
         }
     }
 
-    /* the instance being replaced is closed by the teardown if the container built it: it was evicted from the only maps the close sweep reads, and nothing else holds it. An evicted override stays its installer's. The graveyard — not an inline Close — because a provider may hand the same pointer to several names, and the teardown's identity marks are what guarantee one Close per instance, after everything that still uses it. */
+    /* a replaced instance the container built is closed by the teardown, through the graveyard rather than inline: a provider may hand the same pointer to several names, and the teardown's identity marks close each instance once, after everything that still uses it. An evicted override stays its installer's. */
     if replacedValue, replacedExists := instance.instances[serviceName]; true == replacedExists {
         if _, wasBuilt := instance.builtServiceNames[serviceName]; true == wasBuilt {
             instance.replacedBuiltInstances = append(instance.replacedBuiltInstances, replacedValue)
@@ -285,11 +283,7 @@ func (instance *container) OverrideProtectedInstance(serviceName string, value a
     instance.instances[serviceName] = value
     instance.recordCreationOrderLocked("service:" + serviceName)
 
-    if _, typeRegistered := instance.typeRegistrationNamesByType[canonicalType]; true == typeRegistered {
-        instance.typeInstances[canonicalType] = value
-        instance.recordCreationOrderLocked("type:" + typeIdentityKey(canonicalType))
-    }
-
+    /* the override propagates only to the types this name is registered under: a type another service owns must not learn it, and a free type is left out (unlike the scope, which exposes it) because a value-type service filed under a second, uncollapsed node would close twice at teardown. */
     for registeredType, registeredServiceNames := range instance.typeRegistrationNamesByType {
         for _, registeredServiceName := range registeredServiceNames {
             if serviceName == registeredServiceName {
@@ -320,6 +314,14 @@ func (instance *container) MustOverrideProtectedInstance(serviceName string, val
 
 func (instance *container) NewScope() containercontract.Scope {
     return newScope(instance, instance.scopePlanForNewScope())
+}
+
+/* serviceNamesForRegisteredType lists the service names a type is registered under, so a caller deciding whether a type is free can see who, if anyone, already claims it. */
+func (instance *container) serviceNamesForRegisteredType(canonicalType reflect.Type) []string {
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
+
+    return instance.typeRegistrationNamesByType[canonicalType]
 }
 
 /* registeredTypesForServiceName answers every type the name is registered under, for the scope override that propagates to them; the scope calls it before taking its own lock, container-then-scope being the only order the two locks are ever taken in. */
@@ -355,7 +357,7 @@ func (instance *container) Names() []string {
     return serviceNames
 }
 
-/* ServiceDescriptions answers what the container can say WITHOUT running a provider: every name either lifetime knows — the container's own registrations and the scoped ones Names() cannot see — with the type read from the built instance when one exists and from the provider's declared return type otherwise. The instances map is walked beside the providers although every override requires a registration, so a name only ever built or replaced stays described through the same door. It is what the introspection command lists through, so listing a container stops meaning building it. */
+/* ServiceDescriptions describes every name either lifetime knows without running a provider: the container's registrations and the scoped ones Names() cannot see, with the type read from the built instance when one exists and from the provider's declared return type otherwise. The introspection command lists through it, so listing a container does not build it. */
 func (instance *container) ServiceDescriptions() []containercontract.ServiceDescription {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
@@ -453,7 +455,7 @@ func (instance *container) register(
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    /* the scoped registrar already refuses a closed container; the plain one accepted silently, reporting success for a service whose every resolution the creation guard then refuses. Same condition, same answer. */
+    /* a closed container refuses a registration, as the scoped registrar does: the creation guard would refuse every resolution of it. */
     if true == instance.isClosed {
         return newContainerClosedError(serviceName)
     }
@@ -566,7 +568,7 @@ func (instance *container) registerType(
     return nil
 }
 
-/* recordTypeIdentityKeyLocked refuses the registration of a type whose identity key another, DIFFERENT type already claimed. The colliding pair would share a creation-guard key and a close node while holding two instances — a resolution of one reads as a cycle through the other, and the teardown merges what it should order. The refusal lands at the boot line that declares the second type, where the wiring mistake is. */
+/* recordTypeIdentityKeyLocked refuses a type whose identity key a different type already claimed: the pair would share a creation-guard key and a close node while holding two instances. The refusal lands at the registration that declares the second type. */
 func (instance *container) recordTypeIdentityKeyLocked(serviceName string, canonicalType reflect.Type) error {
     identityKey := typeIdentityKey(canonicalType)
 

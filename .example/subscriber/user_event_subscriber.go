@@ -86,7 +86,7 @@ func (instance *UserEventSubscriber) onUserUpdated() melodyeventcontract.EventLi
 
         cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Container())
 
-        /* the previous spelling travels in the event precisely for this delete: a rename leaves the ttl-less by-username entry behind under the old spelling, and the updated entity no longer knows it */
+        /* the previous spelling travels in the event for this delete: a rename leaves the ttl-less by-username entry behind under that spelling, which the updated entity cannot name */
         invalidateErr := deleteCacheEntries(
             cacheInstance,
             service.CacheKeyUserById(payloadInstance.User().Id),

@@ -3,6 +3,8 @@ package wiring
 import (
     "go/token"
     "sort"
+    "strconv"
+    "strings"
 
     "github.com/precision-soft/melody/v3/exception"
 )
@@ -47,6 +49,10 @@ type GenerateReport struct {
     ExcludedFiles   []string
     UnusedBinds     []string
     GlobalBindReach map[string][]string
+    /* UnusedExcludes names the exclude patterns that matched no constructor, each prefixed with its package's import path. An exclusion that stopped matching silently registers the constructor it was declared to keep out, so strict fails on it. */
+    UnusedExcludes []string
+    /* BindTargetsUnchecked reports that a bind resolved while DeclaredParameters was empty, so its target could not be checked. The command always hands over the running configuration; a direct Generate caller can trip it. */
+    BindTargetsUnchecked bool
 }
 
 /* Generate scans every declared package and renders the registration source. It fails on the first constructor whose scalar argument no bind covers: an unfilled scalar has no safe default, and letting it through would move the failure to a runtime far from its cause. */
@@ -71,14 +77,15 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
         ExcludedFiles:            make([]string, 0),
         UnusedBinds:              make([]string, 0),
         GlobalBindReach:          make(map[string][]string),
+        UnusedExcludes:           make([]string, 0),
     }
 
     usedBinds := make(map[string]bool)
 
-    /* every fixed alias is reserved before any scanned type can claim its name: a scanned argument living in one of these packages then renders through the same alias the emitted bodies use, instead of racing them for it */
+    /* every fixed alias is reserved before any scanned type can claim its name, so a scanned argument from one of these packages renders through the alias the emitted bodies use */
     importAliases := newImportAliasTable()
 
-    /* both names land verbatim in the generated source, so anything the file cannot carry fails here, at its cause: a non-identifier (keywords included) does not parse — or splices arbitrary tokens into the file — while the blank identifier and init are identifiers the spec still refuses in these positions (an unusable package name, an unreferenceable function, an init that must not have a signature) */
+    /* both names land verbatim in the generated source: a non-identifier, a keyword, the blank identifier or init would not compile or would splice arbitrary tokens into the file */
     if false == token.IsIdentifier(functionName) || "_" == functionName || "init" == functionName {
         return "", nil, exception.NewError(
             "the generated function name cannot be declared and referenced in the generated file",
@@ -99,7 +106,7 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
         )
     }
 
-    /* the two functions share one file, so one name cannot serve both: the second declaration would not compile, and which of the two lifetimes survived would be a coin flip */
+    /* the two functions share one file, so one name cannot serve both */
     if functionName == scopedFunctionName {
         return "", nil, exception.NewError(
             "the generated function names must differ, or the file declares the same function twice",
@@ -120,7 +127,7 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
         )
     }
 
-    /* the generated function shares its file with the fixed import aliases and the identifiers the provider bodies spell; a name claiming one of them cannot compile, so it fails here, at its cause */
+    /* the generated function shares its file with the fixed import aliases and the identifiers the provider bodies spell, so a name claiming one of them cannot compile */
     if true == importAliases.takenAlias[functionName] ||
         containerContractImportAlias == functionName ||
         containerImportAlias == functionName ||
@@ -163,7 +170,26 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
     scopedProviderBlocks := make([]string, 0)
     unusedDirectiveBinds := make([]string, 0)
 
+    /* two constructors registering under one container key would panic at the first boot of the generated file, so the collision is keyed as the emitted registration keys it, a named registration claiming its constant and the returned type, and fails at generation naming both sites. A constant's value is not read, so two constants holding one value stay out of reach. */
+    registrationSites := make(map[string]*Constructor)
+
+    /* every identity of every container registration, so a scoped registration that shares one is emitted with WithReplacesContainerService, which the container requires for a deliberate scoped shadow; the scoped render is deferred until the whole set is known */
+    containerIdentityKeys := make(map[string]bool)
+    pendingScoped := make([]pendingScopedProvider, 0)
+
     for _, packageBinding := range request.BindSet.Packages() {
+        /* an empty import path renders an import of "", and an empty directory scans the whole project tree as one package */
+        if "" == packageBinding.ImportPath() || "" == packageBinding.Directory() {
+            return "", nil, exception.NewError(
+                "a package binding must declare both an import path and a directory",
+                map[string]any{
+                    "importPath": packageBinding.ImportPath(),
+                    "directory":  packageBinding.Directory(),
+                },
+                nil,
+            )
+        }
+
         scanResult, scanErr := Scan(request.ProjectDirectory, packageBinding, request.BuildTags)
         if nil != scanErr {
             return "", nil, scanErr
@@ -173,7 +199,32 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
         report.SkippedVendorDirectories = append(report.SkippedVendorDirectories, scanResult.SkippedVendorDirectories...)
         report.ExcludedFiles = append(report.ExcludedFiles, scanResult.ExcludedFiles...)
 
+        for _, pattern := range scanResult.UnusedExcludes {
+            report.UnusedExcludes = append(report.UnusedExcludes, packageBinding.ImportPath()+"."+pattern)
+        }
+
         for _, constructor := range scanResult.Constructors {
+            registrationKeys := registrationKeysFor(constructor)
+            for _, registrationKey := range registrationKeys {
+                existing, taken := registrationSites[registrationKey]
+                if false == taken {
+                    continue
+                }
+
+                return "", nil, exception.NewError(
+                    "two constructors register the same service",
+                    map[string]any{
+                        "first":  existing.Name + " (" + existing.File + ":" + strconv.Itoa(existing.Line) + ")",
+                        "second": constructor.Name + " (" + constructor.File + ":" + strconv.Itoa(constructor.Line) + ")",
+                    },
+                    nil,
+                )
+            }
+
+            for _, registrationKey := range registrationKeys {
+                registrationSites[registrationKey] = constructor
+            }
+
             resolvedArguments, constructorUnusedDirectiveBinds, resolveErr := resolveArguments(
                 constructor,
                 packageBinding,
@@ -188,9 +239,13 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
             unusedDirectiveBinds = append(unusedDirectiveBinds, constructorUnusedDirectiveBinds...)
 
             if true == constructor.IsScoped {
-                scopedProviderBlocks = append(
-                    scopedProviderBlocks,
-                    renderProvider(constructor, resolvedArguments, importAliases),
+                /* deferred until every container identity is known */
+                pendingScoped = append(
+                    pendingScoped,
+                    pendingScopedProvider{
+                        constructor:       constructor,
+                        resolvedArguments: resolvedArguments,
+                    },
                 )
 
                 report.ScopedConstructorCount = report.ScopedConstructorCount + 1
@@ -198,13 +253,34 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
                 continue
             }
 
+            for _, identityKey := range serviceIdentityKeys(constructor) {
+                containerIdentityKeys[identityKey] = true
+            }
+
             providerBlocks = append(
                 providerBlocks,
-                renderProvider(constructor, resolvedArguments, importAliases),
+                renderProvider(constructor, resolvedArguments, importAliases, false),
             )
 
             report.ConstructorCount = report.ConstructorCount + 1
         }
+    }
+
+    /* a scoped registration whose name or type the container also claims is emitted with WithReplacesContainerService */
+    for _, pending := range pendingScoped {
+        replacesContainerService := false
+        for _, identityKey := range serviceIdentityKeys(pending.constructor) {
+            if true == containerIdentityKeys[identityKey] {
+                replacesContainerService = true
+
+                break
+            }
+        }
+
+        scopedProviderBlocks = append(
+            scopedProviderBlocks,
+            renderProvider(pending.constructor, pending.resolvedArguments, importAliases, replacesContainerService),
+        )
     }
 
     report.UnusedBinds = collectUnusedBinds(request.BindSet, usedBinds, unusedDirectiveBinds)
@@ -221,10 +297,57 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
     return source, report, nil
 }
 
+/* registrationKeysFor derives every key the emitted registration claims in the container, each with its lifetime, so two constructors claiming one key fail at generation. The two lifetimes do not collide: a scoped registration deliberately shadows the container one and is emitted with WithReplacesContainerService. */
+func registrationKeysFor(constructor *Constructor) []string {
+    lifetime := "container"
+    if true == constructor.IsScoped {
+        lifetime = "scoped"
+    }
+
+    keys := serviceIdentityKeys(constructor)
+    for index, identityKey := range keys {
+        keys[index] = lifetime + " " + identityKey
+    }
+
+    return keys
+}
+
+/* serviceIdentityKeys are the identities a registration claims without its lifetime, what the container refuses a duplicate on. The returned type is always among them, since the container's default option registers the type strictly as well, so a named registration claims its constant and its type. A type registration's derived name is not keyed, since a constant's value is not read from the source. */
+func serviceIdentityKeys(constructor *Constructor) []string {
+    keys := make([]string, 0, 2)
+
+    if "" != constructor.ServiceNameIdentifier {
+        keys = append(keys, "name "+constructor.ImportPath+"."+constructor.ServiceNameIdentifier)
+    }
+
+    return append(keys, serviceTypeIdentityKey(constructor))
+}
+
+/* serviceTypeIdentityKey keys the returned type, import path and bare name, canonicalized as the container's canonicalServiceType does: T and *T both register as *T, so a package declaring `func() Foo` and `func() *Foo` fails at generation. */
+func serviceTypeIdentityKey(constructor *Constructor) string {
+    typeName := constructor.ReturnType.Expression
+
+    for true == strings.HasPrefix(typeName, "*") {
+        typeName = strings.TrimPrefix(typeName, "*")
+    }
+
+    if separatorIndex := strings.Index(typeName, "."); 0 <= separatorIndex {
+        typeName = typeName[separatorIndex+1:]
+    }
+
+    /* the single star is the canonical form, for a value type and its pointer alike */
+    return "type *" + constructor.ReturnType.ImportPath + "." + typeName
+}
+
 type resolvedArgument struct {
     argument      *Argument
     parameterName string
     variableName  string
+}
+
+type pendingScopedProvider struct {
+    constructor       *Constructor
+    resolvedArguments []*resolvedArgument
 }
 
 func resolveArguments(
@@ -264,6 +387,11 @@ func resolveArguments(
             )
         }
 
+        /* an empty declared-parameter set disables this check, which the result reports; the flag is raised only when a bind actually went unchecked */
+        if 0 == len(request.DeclaredParameters) {
+            report.BindTargetsUnchecked = true
+        }
+
         if 0 < len(request.DeclaredParameters) && false == request.DeclaredParameters[parameterName] {
             return nil, nil, exception.NewError(
                 "a bind points at a parameter the application does not declare",
@@ -300,7 +428,7 @@ func resolveArguments(
         resolvedArguments = append(resolvedArguments, resolved)
     }
 
-    /* a directive bind naming an argument the constructor does not have — or one that is a service rather than a scalar — otherwise vanishes without a trace, and it sits right next to the constructor it fails to affect */
+    /* a directive bind naming an argument the constructor does not have, or a service argument, is reported rather than vanishing */
     unusedDirectiveBinds := make([]string, 0)
     for bindName := range constructor.DirectiveBinds {
         if false == matchedDirectiveBinds[bindName] {

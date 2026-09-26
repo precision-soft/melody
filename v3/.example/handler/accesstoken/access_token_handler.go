@@ -12,7 +12,6 @@ import (
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
-    melodysecurity "github.com/precision-soft/melody/v3/security"
     melodysecuritycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
@@ -44,7 +43,7 @@ type revokeUserRequest struct {
 
 func IssueHandler() melodyhttpcontract.Handler {
     return melodyhttp.JsonHandler(func(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, body issueRequest) (melodyhttpcontract.Response, error) {
-        securityContext, exists := melodysecurity.SecurityContextFromRuntime(runtimeInstance)
+        principal, exists := examplesecurity.TokenFromRuntime(runtimeInstance)
         if false == exists {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusUnauthorized, "unauthorized"), nil
         }
@@ -52,8 +51,6 @@ func IssueHandler() melodyhttpcontract.Handler {
         if "" == body.DeviceIdentifier {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "deviceIdentifier is required"), nil
         }
-
-        principal := securityContext.Token()
         store := examplesecurity.TokenStoreFromResolver(runtimeInstance.Container())
 
         tokenString, tokenErr := newOpaqueToken()
@@ -89,7 +86,7 @@ func IssueHandler() melodyhttpcontract.Handler {
 
 func RevokeDeviceHandler() melodyhttpcontract.Handler {
     return melodyhttp.JsonHandler(func(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, body revokeDeviceRequest) (melodyhttpcontract.Response, error) {
-        securityContext, exists := melodysecurity.SecurityContextFromRuntime(runtimeInstance)
+        token, exists := examplesecurity.TokenFromRuntime(runtimeInstance)
         if false == exists {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusUnauthorized, "unauthorized"), nil
         }
@@ -98,7 +95,7 @@ func RevokeDeviceHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "deviceIdentifier is required"), nil
         }
 
-        userIdentifier := securityContext.Token().UserIdentifier()
+        userIdentifier := token.UserIdentifier()
 
         return publishBoundary(runtimeInstance, userIdentifier, body.DeviceIdentifier)
     })

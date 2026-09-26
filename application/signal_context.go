@@ -13,14 +13,10 @@ import (
 /* signalContextExit terminates the process when a second interrupt signal arrives while the graceful shutdown triggered by the first is still running; tests replace it to observe the exit code without stopping the test binary */
 var signalContextExit = os.Exit
 
-/* signalContextForceExitDebounce is how long after the first signal a second one is still treated as a duplicate delivery of the same logical shutdown request — a supervisor and a terminal each forwarding one interrupt land within milliseconds of each other — and absorbed, rather than read as an operator's escalation; tests replace it to drive both paths without real waits */
+/* signalContextForceExitDebounce is how long after the first signal a second one is absorbed as a duplicate delivery of the same shutdown, a supervisor and a terminal each forwarding one, rather than read as an escalation; tests replace it */
 var signalContextForceExitDebounce = 500 * time.Millisecond
 
-/*
-NewSignalContext returns a context that is cancelled by the first SIGINT or SIGTERM, giving the application a graceful shutdown window. A second SIGINT or SIGTERM received while that shutdown is still running prints one line to stderr and forces the process to exit with the conventional 128+signal code, so an operator facing a hung shutdown is never reduced to SIGKILL; a second signal landing within half a second of the first is absorbed as a duplicate delivery of the same shutdown request, so a supervisor and a terminal both forwarding one interrupt do not skip the graceful shutdown. The forced exit deliberately runs no teardown: it exists for the shutdown that is already hung, and a teardown on its path could hang the same way — the escalation is the operator's demand for a process that is gone now, at the acknowledged price of whatever a Close would have flushed.
-
-The returned stop function unregisters the signal notifications, cancels the context, and releases the watcher goroutine; it is safe to call more than once and from concurrent goroutines.
-*/
+/* NewSignalContext returns a context cancelled by the first SIGINT or SIGTERM. A second one while that shutdown runs prints one line to stderr and exits with 128+signal, running no teardown, since the shutdown it escalates is the one that hung; a second signal within half a second of the first is absorbed as a duplicate delivery. The returned stop function unregisters the notifications, cancels the context and releases the watcher; it is safe to call more than once and concurrently. */
 func NewSignalContext() (context.Context, context.CancelFunc) {
     signalChannel := make(chan os.Signal, 2)
     signal.Notify(signalChannel, os.Interrupt, syscall.SIGTERM)
@@ -35,7 +31,7 @@ func NewSignalContext() (context.Context, context.CancelFunc) {
     var stopOnce sync.Once
     stop := func() {
         stopOnce.Do(func() {
-            /* the stop channel closes before the notifications unregister: the watcher's guards key on it, so any signal still buffered from before the unregistration is provably stale by the time the watcher could act on it */
+            /* the stop channel closes before the notifications unregister, so a signal still buffered from before is stale by the time the watcher could act on it */
             close(stopChannel)
             signal.Stop(signalChannel)
             <-doneChannel
@@ -46,7 +42,7 @@ func NewSignalContext() (context.Context, context.CancelFunc) {
     return signalContext, stop
 }
 
-/* watchSignals cancels the context on the first received signal and forces the process down on a second one, unless that second delivery lands inside the debounce window of the first — a near-simultaneous duplicate of the same shutdown request — in which case it is absorbed and the watcher keeps waiting; a requested stop always wins over a signal that is merely buffered, so a caller that has unregistered can never be taken down by a stale delivery */
+/* watchSignals cancels the context on the first signal and forces the process down on a second one outside the debounce window; a requested stop always wins over a buffered signal */
 func watchSignals(
     signalChannel <-chan os.Signal,
     cancel context.CancelFunc,

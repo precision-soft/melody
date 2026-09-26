@@ -20,7 +20,7 @@ import (
 )
 
 func NewEventDispatcher(clock clockcontract.Clock) *EventDispatcher {
-    if nil == clock {
+    if true == internal.IsNilInterface(clock) {
         exception.Panic(
             exception.NewError("clock may not be nil", nil, nil),
         )
@@ -28,7 +28,7 @@ func NewEventDispatcher(clock clockcontract.Clock) *EventDispatcher {
 
     return &EventDispatcher{
         listeners:               make(map[string][]listenerWithPriority),
-        subscriberRegistrations: make(map[subscriberIdentity][]subscriberRegistration),
+        subscriberRegistrations: make(map[uint64][]subscriberRegistration),
         clock:                   clock,
     }
 }
@@ -36,9 +36,14 @@ func NewEventDispatcher(clock clockcontract.Clock) *EventDispatcher {
 type EventDispatcher struct {
     mutex                   sync.RWMutex
     listeners               map[string][]listenerWithPriority
-    subscriberRegistrations map[subscriberIdentity][]subscriberRegistration
+    subscriberRegistrations map[uint64][]subscriberRegistration
+
+    /* nextSubscriberId issues the identity AddSubscriber answers with. It is monotonic and never reused, so a registration held past its removal names a removal that already happened. */
+    nextSubscriberId uint64
     clock                   clockcontract.Clock
     nextListenerId          uint64
+    /* subscriberMutex serializes whole subscriber installations and removals against each other; it is always taken before mutex and never inside it, so a removal never interleaves with the installation it undoes. */
+    subscriberMutex sync.Mutex
 }
 
 func (instance *EventDispatcher) AddListener(
@@ -96,7 +101,7 @@ func (instance *EventDispatcher) AddListener(
     }
 }
 
-/* MarkListenerRequired flags the registered listener so that if another listener stops event propagation before it runs, dispatch returns an error and the caller can fail closed. A no-op if the registration is unknown (for example already removed). */
+/* MarkListenerRequired flags the registered listener so that, if another listener stops propagation before it runs, dispatch returns a RequiredListenerSkippedError and the caller can fail closed. An unknown registration is refused. The mark follows the registration, so a dispatch between the two sees the listener unmarked; register at boot, or do not dispatch the event until the mark is applied. */
 func (instance *EventDispatcher) MarkListenerRequired(registration eventcontract.ListenerRegistration) {
     instance.markListenerFlag(registration, func(entry *listenerWithPriority) {
         entry.required = true
@@ -145,6 +150,17 @@ func (instance *EventDispatcher) markListenerFlag(
             return
         }
     }
+
+    exception.Panic(
+        exception.NewError(
+            "event listener registration is not registered",
+            exceptioncontract.Context{
+                "eventName":  eventName,
+                "listenerId": listenerId,
+            },
+            nil,
+        ),
+    )
 }
 
 func (instance *EventDispatcher) RemoveListener(registration eventcontract.ListenerRegistration) bool {
@@ -177,7 +193,7 @@ func (instance *EventDispatcher) RemoveListener(registration eventcontract.Liste
     }
 
     instance.mutex.Lock()
-    for subscriberIdentityValue, registrationList := range instance.subscriberRegistrations {
+    for subscriberId, registrationList := range instance.subscriberRegistrations {
         filtered := make([]subscriberRegistration, 0, len(registrationList))
         for _, registrationEntry := range registrationList {
             if eventName == registrationEntry.eventName && listenerId == registrationEntry.listenerId {
@@ -188,155 +204,79 @@ func (instance *EventDispatcher) RemoveListener(registration eventcontract.Liste
         }
 
         if 0 == len(filtered) {
-            delete(instance.subscriberRegistrations, subscriberIdentityValue)
+            delete(instance.subscriberRegistrations, subscriberId)
             continue
         }
 
-        instance.subscriberRegistrations[subscriberIdentityValue] = filtered
+        instance.subscriberRegistrations[subscriberId] = filtered
     }
     instance.mutex.Unlock()
 
     return true
 }
 
-func (instance *EventDispatcher) AddSubscriber(subscriber eventcontract.EventSubscriber) {
-    if nil == subscriber {
-        exception.Panic(
-            exception.NewError("event subscriber may not be nil", nil, nil),
-        )
-    }
+/* AddSubscriber installs the subscriber's listeners and answers the registration that owns them, the only handle on that installation. Registering one subscriber twice produces two independent installations. */
+func (instance *EventDispatcher) AddSubscriber(subscriber eventcontract.EventSubscriber) eventcontract.SubscriberRegistration {
+    subscriberType := requireEventSubscriber(
+        subscriber,
+        "add a subscriber",
+    )
 
-    subscribedEvents := subscriber.SubscribedEvents()
-    if nil == subscribedEvents {
-        exception.Panic(
-            exception.NewError("subscribed events may not be nil", nil, nil),
-        )
-    }
+    /* every subscribed event is validated before a single listener is registered, so a malformed subscriber is never half-installed */
+    plannedList := planSubscriberRegistrations(subscriber)
 
-    subscriberIdentityValue := eventSubscriberIdentity(subscriber)
-    if 0 == subscriberIdentityValue.pointer {
-        exception.Panic(
-            exception.NewError(
-                "event subscriber pointer is required to add a subscriber",
-                exceptioncontract.Context{
-                    "subscriberType": reflect.TypeOf(subscriber).String(),
-                },
-                nil,
-            ),
-        )
-    }
-
-    eventNameList := make([]string, 0, len(subscribedEvents))
-    for eventName := range subscribedEvents {
-        if "" == eventName {
-            exception.Panic(
-                exception.NewError("event name may not be empty", nil, nil),
-            )
-        }
-
-        eventNameList = append(eventNameList, eventName)
-    }
-
-    sort.Strings(eventNameList)
-
-    for _, eventName := range eventNameList {
-        subscribedEventList := subscribedEvents[eventName]
-        if nil == subscribedEventList {
-            exception.Panic(
-                exception.NewError(
-                    "subscribed event list may not be nil",
-                    exceptioncontract.Context{"eventName": eventName},
-                    nil,
-                ),
-            )
-        }
-
-        for index, subscribedEvent := range subscribedEventList {
-            if nil == subscribedEvent {
-                exception.Panic(
-                    exception.NewError(
-                        "subscribed event may not be nil",
-                        exceptioncontract.Context{
-                            "eventName": eventName,
-                            "index":     index,
-                        },
-                        nil,
-                    ),
-                )
-            }
-
-            listener := subscribedEvent.Listener()
-            if nil == listener {
-                exception.Panic(
-                    exception.NewError(
-                        "subscribed event listener is required",
-                        exceptioncontract.Context{
-                            "eventName": eventName,
-                            "index":     index,
-                        },
-                        nil,
-                    ),
-                )
-            }
-
-            registration := instance.AddListener(
-                eventName,
-                listener,
-                subscribedEvent.Priority(),
-            )
-
-            subscriberType := reflect.TypeOf(subscriber).String()
-
-            instance.mutex.Lock()
-            instance.subscriberRegistrations[subscriberIdentityValue] = append(
-                instance.subscriberRegistrations[subscriberIdentityValue],
-                subscriberRegistration{
-                    eventName:      eventName,
-                    listenerId:     registration.ListenerId,
-                    subscriberType: subscriberType,
-                },
-            )
-            instance.mutex.Unlock()
-        }
-    }
-}
-
-func (instance *EventDispatcher) RemoveSubscriber(subscriber eventcontract.EventSubscriber) int {
-    if nil == subscriber {
-        exception.Panic(
-            exception.NewError("event subscriber may not be nil", nil, nil),
-        )
-    }
-
-    subscriberIdentityValue := eventSubscriberIdentity(subscriber)
-    if 0 == subscriberIdentityValue.pointer {
-        exception.Panic(
-            exception.NewError(
-                "event subscriber pointer is required to remove a subscriber",
-                exceptioncontract.Context{
-                    "subscriberType": reflect.TypeOf(subscriber).String(),
-                },
-                nil,
-            ),
-        )
-    }
+    instance.subscriberMutex.Lock()
+    defer instance.subscriberMutex.Unlock()
 
     instance.mutex.Lock()
-    registrationList := instance.subscriberRegistrations[subscriberIdentityValue]
-    delete(instance.subscriberRegistrations, subscriberIdentityValue)
+    instance.nextSubscriberId++
+    subscriberId := instance.nextSubscriberId
+    instance.mutex.Unlock()
+
+    for _, planned := range plannedList {
+        registration := instance.AddListener(
+            planned.eventName,
+            planned.listener,
+            planned.priority,
+        )
+
+        instance.mutex.Lock()
+        instance.subscriberRegistrations[subscriberId] = append(
+            instance.subscriberRegistrations[subscriberId],
+            subscriberRegistration{
+                eventName:      planned.eventName,
+                listenerId:     registration.ListenerId,
+                subscriberType: subscriberType,
+            },
+        )
+        instance.mutex.Unlock()
+    }
+
+    return eventcontract.SubscriberRegistration{SubscriberId: subscriberId}
+}
+
+/* RemoveSubscriber removes the listeners one AddSubscriber call installed. An unknown registration, one already removed or the zero value, removes nothing and answers zero. */
+func (instance *EventDispatcher) RemoveSubscriber(registration eventcontract.SubscriberRegistration) int {
+    instance.subscriberMutex.Lock()
+    defer instance.subscriberMutex.Unlock()
+
+    instance.mutex.Lock()
+    registrationList := instance.subscriberRegistrations[registration.SubscriberId]
+    delete(instance.subscriberRegistrations, registration.SubscriberId)
     instance.mutex.Unlock()
 
     removedCount := 0
-    for _, registration := range registrationList {
+    for _, entry := range registrationList {
         removedCount = removedCount + instance.removeListenerById(
-            registration.eventName,
-            registration.listenerId,
+            entry.eventName,
+            entry.listenerId,
         )
     }
 
     return removedCount
 }
 
+/* Dispatch runs the listeners of the event's name in priority order and stops at the first that fails: the failure, or the refusal of a required listener it skipped, is returned beside the partially dispatched event. The order of subscribers on one event therefore decides what runs: a release that must happen belongs in the store, a cascade or a transaction, or ahead of every subscriber that may fail. */
 func (instance *EventDispatcher) Dispatch(runtimeInstance runtimecontract.Runtime, event eventcontract.Event) (eventcontract.Event, error) {
     return instance.dispatchSafely(
         runtimeInstance,
@@ -357,6 +297,7 @@ func (instance *EventDispatcher) DispatchName(runtimeInstance runtimecontract.Ru
     )
 }
 
+/* RegisteredEvents reports a point-in-time view: a listener of an installation still running answers with no owner until it finishes. Dispatch never depends on it. */
 func (instance *EventDispatcher) RegisteredEvents() []eventcontract.RegisteredEvent {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
@@ -404,21 +345,18 @@ func (instance *EventDispatcher) RegisteredEvents() []eventcontract.RegisteredEv
 
             listenerId := fmt.Sprintf("%d", entry.listenerId)
 
-            listenerName := "-"
-            listenerProgramCounter := reflect.ValueOf(entry.listener).Pointer()
-            function := runtime.FuncForPC(listenerProgramCounter)
-            if nil != function {
-                listenerName = function.Name()
-            }
+            listenerName := listenerNameOf(entry.listener)
 
             registeredListenerList = append(
                 registeredListenerList,
                 eventcontract.RegisteredListener{
-                    Priority:     entry.priority,
-                    Source:       source,
-                    Owner:        owner,
-                    ListenerId:   listenerId,
-                    ListenerName: listenerName,
+                    Priority:                 entry.priority,
+                    Source:                   source,
+                    Owner:                    owner,
+                    ListenerId:               listenerId,
+                    ListenerName:             listenerName,
+                    Required:                 entry.required,
+                    MaySkipRequiredListeners: entry.maySkipRequiredListeners,
                 },
             )
         }
@@ -442,6 +380,11 @@ func (instance *EventDispatcher) dispatchSafely(runtimeInstance runtimecontract.
             return
         }
 
+        /* an exit carries its code on the wrapper, so it passes through unwrapped, as logging.LogOnRecover passes it */
+        if exitValue, isExit := internal.RecoveredExitError(recoveredValue); true == isExit {
+            exception.Exit(exitValue)
+        }
+
         exceptionValue, ok := recoveredValue.(*exception.Error)
         if true == ok && nil != exceptionValue {
             exception.Panic(exceptionValue)
@@ -450,7 +393,8 @@ func (instance *EventDispatcher) dispatchSafely(runtimeInstance runtimecontract.
         eventName := "-"
         eventType := "-"
 
-        if nil != eventValue {
+        /* the test reads through the interface, since a typed nil would dereference on Name() below, a second panic inside the recovery */
+        if false == internal.IsNilInterface(eventValue) {
             eventName = eventValue.Name()
 
             eventTypeValue := reflect.TypeOf(eventValue)
@@ -480,7 +424,7 @@ func (instance *EventDispatcher) dispatchSafely(runtimeInstance runtimecontract.
 }
 
 func (instance *EventDispatcher) dispatch(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) (eventcontract.Event, error) {
-    if nil == eventValue {
+    if true == internal.IsNilInterface(eventValue) {
         exception.Panic(
             exception.NewError("event may not be nil", nil, nil),
         )
@@ -502,86 +446,150 @@ func (instance *EventDispatcher) dispatch(runtimeInstance runtimecontract.Runtim
 
     logger := logging.LoggerMustFromRuntime(runtimeInstance)
 
+    /* asked once per dispatch: the debug records below assemble a context map a journal above debug discards, and the listener name is resolved through listenerNameOf only where used. A logger that cannot answer reports enabled. */
+    debugEnabled := logging.LevelEnabled(logger, loggingcontract.LevelDebug)
+
     dispatchStartedAt := time.Now()
 
-    logger.Debug(
-        "event dispatch started",
-        loggingcontract.Context{
-            "eventName":      eventName,
-            "listenersCount": len(listenerList),
-        },
-    )
-
-    for index, entry := range listenerList {
-        listenerStartedAt := time.Now()
-
-        listenerName := "-"
-        listenerProgramCounter := reflect.ValueOf(entry.listener).Pointer()
-        function := runtime.FuncForPC(listenerProgramCounter)
-        if nil != function {
-            listenerName = function.Name()
-        }
-
+    if true == debugEnabled {
         logger.Debug(
-            "event listener started",
+            "event dispatch started",
             loggingcontract.Context{
-                "eventName":        eventName,
-                "listenerName":     listenerName,
-                "listenerPriority": entry.priority,
+                "eventName":      eventName,
+                "listenersCount": len(listenerList),
             },
         )
+    }
+
+    listenerIndex := 0
+    stoppedByListener := eventcontract.EventListener(nil)
+    stoppedByListenerMaySkip := false
+
+    for listenerIndex = 0; listenerIndex < len(listenerList); listenerIndex++ {
+        /* propagation is tested before each listener runs, so an event that arrives already stopped runs none of them */
+        if true == eventValue.IsPropagationStopped() {
+            break
+        }
+
+        entry := listenerList[listenerIndex]
+
+        listenerStartedAt := time.Now()
+
+        if true == debugEnabled {
+            logger.Debug(
+                "event listener started",
+                loggingcontract.Context{
+                    "eventName":        eventName,
+                    "listenerName":     listenerNameOf(entry.listener),
+                    "listenerPriority": entry.priority,
+                },
+            )
+        }
 
         err := instance.callListenerSafely(
             runtimeInstance,
             eventName,
             eventValue,
             entry.listener,
-            listenerName,
             entry.priority,
             listenerStartedAt,
             logger,
         )
         if nil != err {
+            listenerName := listenerNameOf(entry.listener)
+
+            /* a failing listener ends the dispatch as decisively as a stop, so a required listener behind it is reported skipped ahead of the failure, which travels as the cause on both branches, or a response set by the failing listener would be served with access control never consulted. The opt-out is not read here: MarkListenerMaySkipRequiredListeners licenses a chosen short-circuit, a failure is not one, and the kernel tells the two apart by the type of the error. */
+            requiredErr := refuseSkippedRequiredListeners(
+                eventName,
+                listenerList[listenerIndex+1:],
+                listenerName,
+                false,
+            )
+            if nil != requiredErr {
+                if true == eventValue.IsPropagationStopped() {
+                    return eventValue, NewRequiredListenerSkippedErrorWithStoppedListenerFailure(eventName, listenerName, err)
+                }
+
+                return eventValue, NewRequiredListenerSkippedErrorWithCause(eventName, listenerName, err)
+            }
+
             return eventValue, err
         }
 
-        if true == eventValue.IsPropagationStopped() {
-            /* @important a listener that stops propagation before a required listener behind it has run would silently skip that listener (for example the security access-control listener), so the caller would proceed as if it had run — fail closed by returning an error instead, unless the stopping listener is explicitly allowed to skip required listeners. Both marks default off, so an unmarked dispatch behaves exactly as before. */
-            if false == entry.maySkipRequiredListeners {
-                for _, laterEntry := range listenerList[index+1:] {
-                    if true == laterEntry.required {
-                        return eventValue, exception.NewError(
-                            "event propagation stopped before a required listener ran",
-                            exceptioncontract.Context{
-                                "eventName":         eventName,
-                                "stoppedByListener": listenerName,
-                            },
-                            nil,
-                        )
-                    }
-                }
-            }
+        /* the listener travels rather than its name, which only the refusal below reads */
+        stoppedByListener = entry.listener
+        stoppedByListenerMaySkip = entry.maySkipRequiredListeners
+    }
 
+    if true == eventValue.IsPropagationStopped() {
+        requiredErr := refuseSkippedRequiredListeners(
+            eventName,
+            listenerList[listenerIndex:],
+            listenerNameOf(stoppedByListener),
+            stoppedByListenerMaySkip,
+        )
+        if nil != requiredErr {
+            return eventValue, requiredErr
+        }
+
+        if true == debugEnabled {
             logger.Debug(
                 "event dispatch propagation stopped",
                 loggingcontract.Context{
                     "eventName": eventName,
                 },
             )
-
-            break
         }
     }
 
-    logger.Debug(
-        "event dispatch finished",
-        loggingcontract.Context{
-            "eventName":  eventName,
-            "durationMs": time.Since(dispatchStartedAt).Milliseconds(),
-        },
-    )
+    if true == debugEnabled {
+        logger.Debug(
+            "event dispatch finished",
+            loggingcontract.Context{
+                "eventName":  eventName,
+                "durationMs": time.Since(dispatchStartedAt).Milliseconds(),
+            },
+        )
+    }
 
     return eventValue, nil
+}
+
+/* listenerNameOf answers the qualified function name of a listener, and the dash for one the runtime cannot name or for nil. It is called only where the name is used, since the reflection behind it runs per listener per dispatch. */
+func listenerNameOf(listener eventcontract.EventListener) string {
+    if nil == listener {
+        return "-"
+    }
+
+    function := runtime.FuncForPC(reflect.ValueOf(listener).Pointer())
+    if nil == function {
+        return "-"
+    }
+
+    return function.Name()
+}
+
+/* refuseSkippedRequiredListeners answers the error an early end of the dispatch owes, by a stop or a failure alike, when a required listener sits among those it skipped, so the dispatch fails closed; the listener that ended it may be explicitly allowed to skip them. */
+func refuseSkippedRequiredListeners(
+    eventName string,
+    skippedListenerList []listenerWithPriority,
+    stoppedByListenerName string,
+    stoppedByListenerMaySkip bool,
+) error {
+    if true == stoppedByListenerMaySkip {
+        return nil
+    }
+
+    for _, skippedEntry := range skippedListenerList {
+        if true == skippedEntry.required {
+            return NewRequiredListenerSkippedError(
+                eventName,
+                stoppedByListenerName,
+            )
+        }
+    }
+
+    return nil
 }
 
 func (instance *EventDispatcher) callListenerSafely(
@@ -589,7 +597,6 @@ func (instance *EventDispatcher) callListenerSafely(
     eventName string,
     eventValue eventcontract.Event,
     listener eventcontract.EventListener,
-    listenerName string,
     priority int,
     listenerStartedAt time.Time,
     logger loggingcontract.Logger,
@@ -603,12 +610,17 @@ func (instance *EventDispatcher) callListenerSafely(
             return
         }
 
+        /* the exit code lives on the wrapper, so an exit is not folded into a listener error */
+        if exitValue, isExit := internal.RecoveredExitError(recoveredValue); true == isExit {
+            exception.Exit(exitValue)
+        }
+
         durationMs := time.Since(listenerStartedAt).Milliseconds()
 
         baseContext := internal.NewEventListenerContext(
             eventName,
             eventType,
-            listenerName,
+            listenerNameOf(listener),
             listenerType,
             priority,
             durationMs,
@@ -621,23 +633,32 @@ func (instance *EventDispatcher) callListenerSafely(
             string(debug.Stack()),
         )
 
+        /* an error-shaped panic value travels as the cause, so its context and chain reach the record; a typed nil reads as no cause */
+        var panicCause error
+        recoveredErr, isRecoveredError := recoveredValue.(error)
+        if true == isRecoveredError && false == internal.IsNilInterface(recoveredErr) {
+            panicCause = recoveredErr
+        }
+
         exceptionErr := exception.NewError(
             "event listener panicked",
             exceptionContext,
-            nil,
+            panicCause,
         )
-        _ = exception.MarkLogged(exceptionErr)
 
-        logger.Error(
-            "event listener panicked",
-            exceptionContext,
-        )
+        /* a panic value already logged by whoever raised it is not logged twice; the record goes through LogError, and the wrapper is marked only after it is written */
+        if false == recoveredValueIsAlreadyLogged(recoveredValue) {
+            logging.LogError(logger, exceptionErr)
+        }
+        _ = exception.MarkLogged(exceptionErr)
 
         returnedErr = exceptionErr
     }()
 
     listenerErr := listener(runtimeInstance, eventValue)
-    if nil == listenerErr {
+
+    /* the test reads through the interface, since a typed-nil error from a listener reports success, and reading it as a failure would fail the request closed */
+    if true == internal.IsNilInterface(listenerErr) {
         return nil
     }
 
@@ -646,25 +667,39 @@ func (instance *EventDispatcher) callListenerSafely(
     exceptionContext := internal.NewEventListenerContext(
         eventName,
         eventType,
-        listenerName,
+        listenerNameOf(listener),
         listenerType,
         priority,
         durationMs,
     )
 
-    exceptionErr := exception.NewError(
+    /* the failure travels unlogged and unmarked by this site, so the caller's single record, which renders the cause chain, names it; the context rides on the error. A failure its producer already logged passes the mark to the wrapper. */
+    wrapperErr := exception.NewError(
         "event listener returned error",
         exceptionContext,
         listenerErr,
     )
-    _ = exception.MarkLogged(exceptionErr)
 
-    logger.Error(
-        "event listener error",
-        exceptionContext,
-    )
+    if true == exception.IsAlreadyLogged(listenerErr) {
+        _ = exception.MarkLogged(wrapperErr)
+    }
 
-    return exceptionErr
+    return wrapperErr
+}
+
+/* recoveredValueIsAlreadyLogged reads the mark at the depth MarkLogged writes it, as the returned-error path and the logging package's recover helpers do. */
+func recoveredValueIsAlreadyLogged(recoveredValue any) bool {
+    recoveredErr, isError := recoveredValue.(error)
+    if true == isError && false == internal.IsNilInterface(recoveredErr) {
+        return exception.IsAlreadyLogged(recoveredErr)
+    }
+
+    alreadyLogged, ok := recoveredValue.(exceptioncontract.AlreadyLogged)
+    if false == ok || true == internal.IsNilInterface(alreadyLogged) {
+        return false
+    }
+
+    return alreadyLogged.AlreadyLogged()
 }
 
 func (instance *EventDispatcher) removeListenerById(eventName string, listenerId uint64) int {
@@ -712,27 +747,139 @@ type subscriberRegistration struct {
     subscriberType string
 }
 
-type subscriberIdentity struct {
-    pointer        uintptr
-    subscriberType reflect.Type
-}
-
 var _ eventcontract.EventDispatcher = (*EventDispatcher)(nil)
 var _ eventcontract.EventDispatcherInspector = (*EventDispatcher)(nil)
 var _ eventcontract.RequiredListenerRegistrar = (*EventDispatcher)(nil)
 
-func eventSubscriberIdentity(subscriber eventcontract.EventSubscriber) subscriberIdentity {
-    if nil == subscriber {
-        return subscriberIdentity{}
+/* requireEventSubscriber refuses a subscriber that cannot be installed and answers the type name its installation is filed under, for inspection. The nil test reads through the interface, since SubscribedEvents would dereference a typed nil. A value subscriber is installable, since the installation is filed under an id the dispatcher issues. */
+func requireEventSubscriber(
+    subscriber eventcontract.EventSubscriber,
+    action string,
+) string {
+    if true == internal.IsNilInterface(subscriber) {
+        exception.Panic(
+            exception.NewError(
+                "event subscriber may not be nil",
+                exceptioncontract.Context{
+                    "action": action,
+                },
+                nil,
+            ),
+        )
     }
 
-    subscriberValue := reflect.ValueOf(subscriber)
-    if reflect.Ptr != subscriberValue.Kind() {
-        return subscriberIdentity{}
-    }
-
-    return subscriberIdentity{
-        pointer:        subscriberValue.Pointer(),
-        subscriberType: subscriberValue.Type(),
-    }
+    return reflect.TypeOf(subscriber).String()
 }
+
+/* planSubscriberRegistrations validates every subscribed event and answers the registrations to install, so that a malformed entry is refused before any listener of the same subscriber is live. */
+func planSubscriberRegistrations(subscriber eventcontract.EventSubscriber) []plannedSubscriberRegistration {
+    subscribedEvents := subscriber.SubscribedEvents()
+    if nil == subscribedEvents {
+        exception.Panic(
+            exception.NewError("subscribed events may not be nil", nil, nil),
+        )
+    }
+
+    subscriberType := reflect.TypeOf(subscriber).String()
+
+    if 0 == len(subscribedEvents) {
+        exception.Panic(
+            exception.NewError(
+                "event subscriber declares no subscribed events",
+                exceptioncontract.Context{
+                    "subscriberType": subscriberType,
+                },
+                nil,
+            ),
+        )
+    }
+
+    eventNameList := make([]string, 0, len(subscribedEvents))
+    for eventName := range subscribedEvents {
+        if "" == eventName {
+            exception.Panic(
+                exception.NewError("event name may not be empty", nil, nil),
+            )
+        }
+
+        eventNameList = append(eventNameList, eventName)
+    }
+
+    sort.Strings(eventNameList)
+
+    plannedList := make([]plannedSubscriberRegistration, 0, len(eventNameList))
+
+    for _, eventName := range eventNameList {
+        subscribedEventList := subscribedEvents[eventName]
+        if nil == subscribedEventList {
+            exception.Panic(
+                exception.NewError(
+                    "subscribed event list may not be nil",
+                    exceptioncontract.Context{"eventName": eventName},
+                    nil,
+                ),
+            )
+        }
+
+        /* an event name mapped to no subscribed events would register nothing while reporting success */
+        if 0 == len(subscribedEventList) {
+            exception.Panic(
+                exception.NewError(
+                    "subscribed event list may not be empty",
+                    exceptioncontract.Context{
+                        "eventName":      eventName,
+                        "subscriberType": subscriberType,
+                    },
+                    nil,
+                ),
+            )
+        }
+
+        for index, subscribedEvent := range subscribedEventList {
+            if true == internal.IsNilInterface(subscribedEvent) {
+                exception.Panic(
+                    exception.NewError(
+                        "subscribed event may not be nil",
+                        exceptioncontract.Context{
+                            "eventName": eventName,
+                            "index":     index,
+                        },
+                        nil,
+                    ),
+                )
+            }
+
+            listener := subscribedEvent.Listener()
+            if nil == listener {
+                exception.Panic(
+                    exception.NewError(
+                        "subscribed event listener is required",
+                        exceptioncontract.Context{
+                            "eventName": eventName,
+                            "index":     index,
+                        },
+                        nil,
+                    ),
+                )
+            }
+
+            plannedList = append(
+                plannedList,
+                plannedSubscriberRegistration{
+                    eventName: eventName,
+                    listener:  listener,
+                    priority:  subscribedEvent.Priority(),
+                },
+            )
+        }
+    }
+
+    return plannedList
+}
+
+type plannedSubscriberRegistration struct {
+    eventName string
+    listener  eventcontract.EventListener
+    priority  int
+}
+

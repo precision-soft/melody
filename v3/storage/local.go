@@ -2,6 +2,7 @@ package storage
 
 import (
     "crypto/rand"
+    "crypto/sha256"
     "encoding/hex"
     "io"
     "os"
@@ -40,7 +41,7 @@ func (instance *LocalStorage) Put(
         return keyErr
     }
 
-    /* @important the base directory is created lazily on first write; os.OpenRoot then pins it so every key operation is confined to it, with each path component checked against symlink escape */
+    /* the base directory is created on first write; os.OpenRoot then confines every key operation to it, each path component checked against symlink escape */
     if mkdirErr := os.MkdirAll(instance.baseDirectory, 0o750); nil != mkdirErr {
         return exception.NewError("could not create the storage directory", map[string]any{"key": key}, mkdirErr)
     }
@@ -57,12 +58,12 @@ func (instance *LocalStorage) Put(
         }
     }
 
-    /* @important reject a key whose leaf is an existing symlink rather than replacing it through the rename below; os.Root never traverses the link so nothing escapes, but refusing keeps the backend's no-symlink contract explicit, matching the prior O_CREATE-on-Root behavior */
+    /* a key whose leaf is an existing symlink is refused rather than replaced by the rename below */
     if info, lstatErr := root.Lstat(relativeKey); nil == lstatErr && 0 != info.Mode()&os.ModeSymlink {
         return exception.NewError("storage key resolves to a symlink", map[string]any{"key": key}, nil)
     }
 
-    /* @important write to a temporary object first and rename it over the key only once it is fully flushed, so a failed or partial write never destroys or truncates a previously stored object; the rename is atomic within the pinned root, matching the awss3 backend's all-or-nothing Put */
+    /* written to a temporary object and renamed over the key once flushed, so a failed write never destroys the stored object; the rename is atomic within the pinned root */
     tempKey, file, createErr := createStorageTempFile(root, relativeKey)
     if nil != createErr {
         return exception.NewError("could not create the storage object", map[string]any{"key": key}, createErr)
@@ -72,7 +73,8 @@ func (instance *LocalStorage) Put(
     if nil != copyErr {
         _ = file.Close()
         _ = root.Remove(tempKey)
-        return exception.NewError("could not write the storage object", map[string]any{"key": key}, copyErr)
+        /* "copy", not "write": io.Copy answers one error for both sides, and the cause names which */
+        return exception.NewError("could not copy the payload into the storage object", map[string]any{"key": key}, copyErr)
     }
 
     if 0 <= size && written != size {
@@ -97,13 +99,83 @@ func (instance *LocalStorage) Put(
         return exception.NewError("could not store the storage object", map[string]any{"key": key}, renameErr)
     }
 
+    sweepStaleTempObjects(root, relativeKey)
+
     return nil
 }
 
-/* @important allocate a uniquely named temporary object in the same directory as the target so the final rename stays within the pinned root and on the same filesystem; O_EXCL guarantees we never clobber a concurrent writer's temp or the live key */
+/* storageTempStaleAge is the age past which a later Put sweeps a leftover temp object a crash mid-write left; an in-flight Put refreshes its temp's mtime with every write. */
+const storageTempStaleAge = 1 * time.Hour
+
+/* storageTempObjectSuffix closes the name of every temp object; the random part sits between the reserved prefix and it. */
+const storageTempObjectSuffix = ".tmp"
+
+/* storageTempPrefix names the reserved namespace of a key's temp objects: a hidden name carrying the digest of the key's leaf, so no ordinary key shares it by accident, and a leaf of any length leaves room for the random part within one path component. */
+func storageTempPrefix(relativeKey string) string {
+    digest := sha256.Sum256([]byte(filepath.Base(relativeKey)))
+
+    return ".melody-storage-" + hex.EncodeToString(digest[:]) + "."
+}
+
+/* sweepStaleTempObjects removes abandoned temp objects for this key after a successful Put, best-effort: a failure is retried by the next Put. */
+func sweepStaleTempObjects(root *os.Root, relativeKey string) {
+    directory := filepath.Dir(relativeKey)
+    prefix := storageTempPrefix(relativeKey)
+
+    directoryFile, openErr := root.Open(directory)
+    if nil != openErr {
+        return
+    }
+    defer directoryFile.Close()
+
+    names, readErr := directoryFile.Readdirnames(-1)
+    if nil != readErr {
+        return
+    }
+
+    for _, name := range names {
+        if false == strings.HasPrefix(name, prefix) || false == strings.HasSuffix(name, storageTempObjectSuffix) {
+            continue
+        }
+
+        if false == isStorageTempRandomPart(strings.TrimSuffix(name[len(prefix):], storageTempObjectSuffix)) {
+            continue
+        }
+
+        candidate := filepath.Join(directory, name)
+
+        info, statErr := root.Lstat(candidate)
+        if nil != statErr || false == info.Mode().IsRegular() {
+            continue
+        }
+
+        if storageTempStaleAge > time.Since(info.ModTime()) {
+            continue
+        }
+
+        _ = root.Remove(candidate)
+    }
+}
+
+/* isStorageTempRandomPart matches exactly the sixteen lowercase hex characters createStorageTempFile generates. */
+func isStorageTempRandomPart(randomPart string) bool {
+    if 16 != len(randomPart) {
+        return false
+    }
+
+    for _, character := range randomPart {
+        if ('0' > character || '9' < character) && ('a' > character || 'f' < character) {
+            return false
+        }
+    }
+
+    return true
+}
+
+/* createStorageTempFile creates a uniquely named temp object beside the target, so the rename stays within the pinned root; O_EXCL never clobbers another writer's temp or the live key. */
 func createStorageTempFile(root *os.Root, relativeKey string) (string, *os.File, error) {
     directory := filepath.Dir(relativeKey)
-    base := filepath.Base(relativeKey)
+    prefix := storageTempPrefix(relativeKey)
 
     for attempt := 0; attempt < 10; attempt++ {
         suffix := make([]byte, 8)
@@ -111,7 +183,7 @@ func createStorageTempFile(root *os.Root, relativeKey string) (string, *os.File,
             return "", nil, randErr
         }
 
-        tempKey := filepath.Join(directory, base+".tmp-"+hex.EncodeToString(suffix))
+        tempKey := filepath.Join(directory, prefix+hex.EncodeToString(suffix)+storageTempObjectSuffix)
 
         file, openErr := root.OpenFile(tempKey, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o640)
         if nil == openErr {
@@ -200,7 +272,7 @@ func (instance *LocalStorage) Exists(
     }
     defer root.Close()
 
-    /* @important Root.Stat cannot escape the base: a missing key reports absent, while a symlink pointing outside is rejected with an error that never leaks the external target (consistent with Get and Delete) */
+    /* a symlink pointing outside is refused with an error that does not leak its target, as in Get and Delete */
     info, statErr := root.Stat(relativeKey)
     if nil == statErr {
         if true == info.IsDir() {
@@ -233,7 +305,34 @@ func storageRelativeKey(key string) (string, error) {
         return "", exception.NewError("storage key is empty or invalid", map[string]any{"key": key}, nil)
     }
 
+    /* a key spelled exactly like a temp object would be swept by a later Put of the key whose digest it carries, so the reserved namespace is refused at every door */
+    if true == isStorageTempObjectName(filepath.Base(cleaned)) {
+        return "", exception.NewError("storage key names a temp object of the reserved .melody-storage- namespace", map[string]any{"key": key}, nil)
+    }
+
     return cleaned, nil
+}
+
+/* isStorageTempObjectName matches exactly the names createStorageTempFile gives: the reserved prefix, a sha256 in lowercase hex, a dot, the random part and the suffix. */
+func isStorageTempObjectName(name string) bool {
+    const reservedPrefix = ".melody-storage-"
+
+    if false == strings.HasPrefix(name, reservedPrefix) || false == strings.HasSuffix(name, storageTempObjectSuffix) {
+        return false
+    }
+
+    body := strings.TrimSuffix(strings.TrimPrefix(name, reservedPrefix), storageTempObjectSuffix)
+    if 64+1+16 != len(body) || '.' != body[64] {
+        return false
+    }
+
+    for _, character := range body[:64] {
+        if ('0' > character || '9' < character) && ('a' > character || 'f' < character) {
+            return false
+        }
+    }
+
+    return isStorageTempRandomPart(body[65:])
 }
 
 var _ storagecontract.Storage = (*LocalStorage)(nil)

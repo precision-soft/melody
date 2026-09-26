@@ -1,5 +1,10 @@
 package output
 
+import (
+    "github.com/precision-soft/melody/v3/exception"
+)
+
+/* TableBuilder is not safe for concurrent use: a command that assembles its table from parallel work funnels the rows through one goroutine — a channel the workers send to — rather than sharing the builder between them. */
 type TableBuilder struct {
     table TableData
 }
@@ -30,7 +35,7 @@ func (instance *TableBuilder) AddBlock(
 
     instance.table.Blocks = append(instance.table.Blocks, block)
 
-    /* hold the owner and the index, never a pointer into the slice: a later AddBlock can reallocate Blocks, and a builder pointing at the old backing array would silently write its rows into memory nobody reads */
+    /* the owner and the index, never a pointer into the slice: a later AddBlock can reallocate Blocks */
     return &TableBlockBuilder{
         owner: instance,
         index: len(instance.table.Blocks) - 1,
@@ -48,7 +53,31 @@ type TableBlockBuilder struct {
 
 func (instance *TableBlockBuilder) AddRow(cells ...string) *TableBlockBuilder {
     block := &instance.owner.table.Blocks[instance.index]
+
+    /* a row whose cell count disagrees with the declared columns is refused, since the printer sizes by the columns alone and would drop or blank a cell silently; the separator row is a single-token marker the printer expands */
+    if len(cells) != len(block.Columns) && false == isSeparatorCells(cells) {
+        exception.Panic(
+            exception.NewError(
+                "table row cell count does not match the block columns",
+                map[string]any{
+                    "blockTitle":  block.Title,
+                    "columnCount": len(block.Columns),
+                    "cellCount":   len(cells),
+                },
+                nil,
+            ),
+        )
+    }
+
     block.Rows = append(block.Rows, cells)
 
     return instance
+}
+
+func isSeparatorCells(cells []string) bool {
+    if 1 != len(cells) {
+        return false
+    }
+
+    return TableRowSeparatorToken == cells[0]
 }

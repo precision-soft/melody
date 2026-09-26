@@ -2,12 +2,14 @@ package security
 
 import (
     "fmt"
+    nethttp "net/http"
     "runtime/debug"
 
     eventcontract "github.com/precision-soft/melody/v3/event/contract"
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     "github.com/precision-soft/melody/v3/http"
+    "github.com/precision-soft/melody/v3/internal"
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     "github.com/precision-soft/melody/v3/logging"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -29,7 +31,8 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
                 return nil
             }
 
-            if nil == requestEvent || nil == requestEvent.Request() {
+            /* IsNilInterface: a nil pointer of a request type is a non-nil interface, and the firewall walk below dereferences it */
+            if nil == requestEvent || true == internal.IsNilInterface(requestEvent.Request()) {
                 return nil
             }
 
@@ -56,7 +59,7 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
                         return dispatchErr
                     }
 
-                    requestEvent.SetResponse(exceptionEvent.Response())
+                    requestEvent.SetResponse(exceptionResponseOrFailClosed(exceptionEvent))
                     return nil
                 }
             }
@@ -66,12 +69,38 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
             if nil != resolveErr {
                 setSecurityContextOnRuntime(runtimeInstance, firewall, NewAnonymousToken())
 
+                /* normalized before the record is written, so the logged mark sticks to the error and the kernel exception listener does not file the same failure again */
+                resolveErr = exception.FromError(resolveErr)
+
                 logger := logging.LoggerFromRuntime(runtimeInstance)
                 if nil != logger {
-                    logger.Error(
-                        "security token source resolution failed",
-                        exception.LogContext(resolveErr),
+                    method := ""
+                    path := ""
+                    if nil != requestEvent.Request().HttpRequest() {
+                        method = requestEvent.Request().HttpRequest().Method
+                        if nil != requestEvent.Request().HttpRequest().URL {
+                            path = requestEvent.Request().HttpRequest().URL.Path
+                        }
+                    }
+
+                    /* a token the client got wrong surfaces as a sub-500 HttpException and is recorded at warning, like its api-key sibling; a backend that is down, or any error that is not a deliberate 4xx, keeps the error level. The switch calls the named level methods, so a logger that overrides only one of them is honoured. */
+                    resolutionMessage := "security token source resolution failed"
+                    resolutionContext := exception.LogContext(
+                        resolveErr,
+                        exceptioncontract.Context{
+                            "method": method,
+                            "path":   path,
+                        },
                     )
+
+                    httpException := exception.AsHttpException(resolveErr)
+                    if nil != httpException && nethttp.StatusInternalServerError > httpException.StatusCode() {
+                        logger.Warning(resolutionMessage, resolutionContext)
+                    } else {
+                        logger.Error(resolutionMessage, resolutionContext)
+                    }
+
+                    _ = exception.MarkLogged(resolveErr)
                 }
 
                 exceptionEvent := http.NewKernelExceptionEvent(runtimeInstance, requestEvent.Request(), resolveErr)
@@ -81,11 +110,12 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
                     return dispatchErr
                 }
 
-                requestEvent.SetResponse(exceptionEvent.Response())
+                requestEvent.SetResponse(exceptionResponseOrFailClosed(exceptionEvent))
                 return nil
             }
 
-            if nil == token {
+            /* a typed nil token from the application's source is the nil it means, not a live token published into the security context */
+            if true == internal.IsNilInterface(token) {
                 token = NewAnonymousToken()
             }
 
@@ -112,6 +142,8 @@ func resolveTokenSourceSafely(
     runtimeInstance runtimecontract.Runtime,
     requestEvent *http.KernelRequestEvent,
 ) (token securitycontract.Token, resolveErr error) {
+    tokenSource := firewall.TokenSource()
+
     defer func() {
         recoveredValue := recover()
         if nil == recoveredValue {
@@ -123,11 +155,17 @@ func resolveTokenSourceSafely(
             recoveredErr = err
         }
 
+        /* the recovered value may be a nil token source panicking on Resolve: its name is read only when it is present, or the deferred function would panic again after recover */
+        tokenSourceName := ""
+        if false == internal.IsNilInterface(tokenSource) {
+            tokenSourceName = tokenSource.Name()
+        }
+
         resolveErr = exception.NewError(
             "security token source panicked during resolution",
             exceptioncontract.Context{
                 "firewallName":    firewall.Name(),
-                "tokenSourceName": firewall.TokenSource().Name(),
+                "tokenSourceName": tokenSourceName,
                 "panicType":       fmt.Sprintf("%T", recoveredValue),
                 "panicValue":      fmt.Sprintf("%v", recoveredValue),
                 "panicStack":      string(debug.Stack()),
@@ -136,7 +174,7 @@ func resolveTokenSourceSafely(
         )
     }()
 
-    token, resolveErr = firewall.TokenSource().Resolve(runtimeInstance, requestEvent.Request())
+    token, resolveErr = tokenSource.Resolve(runtimeInstance, requestEvent.Request())
 
     return token, resolveErr
 }

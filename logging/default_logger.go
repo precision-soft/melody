@@ -14,7 +14,7 @@ func NewDefaultLogger() loggingcontract.Logger {
 }
 
 func NewDefaultLoggerWithLabels(labels loggingcontract.LevelLabels) loggingcontract.Logger {
-    /* the labels are copied for the reason the json logger and the logging configuration name at their own doors: the map is read lock-free on every Log call, so a caller mutating the map it still holds is a fatal concurrent map access no recover reaches */
+    /* the labels are copied: the map is read lock-free on every Log call, so a caller mutating the map it still holds would be a fatal concurrent map access no recover reaches */
     copiedLabels := make(loggingcontract.LevelLabels, len(labels))
     for level, label := range labels {
         copiedLabels[level] = label
@@ -32,7 +32,7 @@ func (instance *defaultLogger) Log(level loggingcontract.Level, message string, 
         context = loggingcontract.Context{}
     }
 
-    /* one record stays one line: the message and the context values regularly embed request-derived text, and an unescaped line break would end this record and start a fully-formed fake one at whatever level the payload names — the json sibling gets the same guarantee from its encoder */
+    /* one record stays one line: the message and context embed request-derived text, and an unescaped line break would start a forged record at whatever level the payload names */
     log.Printf(
         "[%s] %s %s",
         instance.levelLabels.LabelFor(level),
@@ -74,7 +74,7 @@ func (instance *defaultLogger) formatContext(context loggingcontract.Context) st
 
     pairs := make([]string, 0, len(context))
     for _, key := range keys {
-        pairs = append(pairs, fmt.Sprintf("%s=%v", key, context[key]))
+        pairs = append(pairs, key+"="+renderTextValue(context[key]))
     }
 
     return fmt.Sprintf("{%s}", instance.joinPairs(pairs))

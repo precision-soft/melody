@@ -65,6 +65,18 @@ var environmentKeyAliasMap = map[string][]string{
         HttpSessionTtlKey,
         KernelHttpSessionTtl,
     },
+    HttpSessionTombstoneRetentionKey: {
+        HttpSessionTombstoneRetentionKey,
+        KernelHttpSessionTombstoneRetention,
+    },
+    HttpShutdownTimeoutKey: {
+        HttpShutdownTimeoutKey,
+        KernelHttpShutdownTimeout,
+    },
+    TeardownTimeoutKey: {
+        TeardownTimeoutKey,
+        KernelTeardownTimeout,
+    },
 }
 
 func (instance *Configuration) addAliasedParameterFromEnvironment(
@@ -105,4 +117,17 @@ func (instance *Configuration) mapEnvironmentKeyToParameterNames(
     return []string{
         environmentKey,
     }
+}
+
+/* aliasesOfName lists every name the parameter behind this one answers to: a kernel-aliased key is one *Parameter stored under its MELODY_* key and its kernel.* spelling, and a template may read either, so the secret propagation scans both. A name in no alias group answers only to itself. */
+func aliasesOfName(name string) []string {
+    for _, group := range environmentKeyAliasMap {
+        for _, aliasName := range group {
+            if name == aliasName {
+                return group
+            }
+        }
+    }
+
+    return []string{name}
 }

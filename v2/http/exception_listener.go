@@ -7,6 +7,7 @@ import (
     eventcontract "github.com/precision-soft/melody/v2/event/contract"
     "github.com/precision-soft/melody/v2/exception"
     exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
+    "github.com/precision-soft/melody/v2/internal"
     kernelcontract "github.com/precision-soft/melody/v2/kernel/contract"
     "github.com/precision-soft/melody/v2/logging"
     runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
@@ -38,7 +39,7 @@ func RegisterKernelExceptionListener(eventDispatcher eventcontract.EventDispatch
                 return nil
             }
 
-            /* the search goes through the door of the package, which refuses the typed nil the raw errors.As matches and reports as found: a handler returning an unassigned *HttpException as its error made StatusCode() dereference nil here, and the same value reaching the kernel's recovery instead panicked inside the handler that had already recovered. The two branches this replaces asked the same question twice, one of them without the guard. */
+            /* the search goes through the package's door, which refuses the typed nil the raw errors.As matches and reports as found, so a handler returning an unassigned *HttpException does not make StatusCode() dereference nil here. */
             httpException := exception.AsHttpException(exceptionEvent.Err())
 
             if nil != runtimeInstance {
@@ -48,11 +49,11 @@ func RegisterKernelExceptionListener(eventDispatcher eventcontract.EventDispatch
                     path := ""
                     method := ""
 
-                    if nil != exceptionEvent.Request() && nil != exceptionEvent.Request().RequestContext() {
+                    if false == internal.IsNilInterface(exceptionEvent.Request()) && nil != exceptionEvent.Request().RequestContext() {
                         requestId = exceptionEvent.Request().RequestContext().RequestId()
                     }
 
-                    if nil != exceptionEvent.Request() && nil != exceptionEvent.Request().HttpRequest() {
+                    if false == internal.IsNilInterface(exceptionEvent.Request()) && nil != exceptionEvent.Request().HttpRequest() {
                         method = exceptionEvent.Request().HttpRequest().Method
                         if nil != exceptionEvent.Request().HttpRequest().URL {
                             path = exceptionEvent.Request().HttpRequest().URL.Path
@@ -74,7 +75,7 @@ func RegisterKernelExceptionListener(eventDispatcher eventcontract.EventDispatch
                             },
                         )
 
-                        /* a deliberate 4xx a handler returned is a refusal, not an incident: it is recorded at warning, while a 5xx and every non-http error keep the error level. A 4xx whose validation errors blame the DECLARATION is the exception, because the deliberation is exactly what is missing: a struct tag naming a rule that does not exist refuses every request that route will ever serve, with a body naming the client's field, and at warning it sat in the dashboard among the users who mistyped their address while the route stayed permanently broken. */
+                        /* a deliberate 4xx a handler returned is a refusal, recorded at warning; a 5xx and every non-http error keep the error level. A 4xx whose validation errors blame the DECLARATION is an error: a struct tag naming a rule that does not exist refuses every request the route will ever serve. */
                         if nil != httpException && nethttp.StatusInternalServerError > httpException.StatusCode() && false == carriesRuleWiringError(httpException) {
                             loggerInstance.Warning("unhandled exception", recordContext)
                         } else {
@@ -96,9 +97,7 @@ func RegisterKernelExceptionListener(eventDispatcher eventcontract.EventDispatch
 
             payloadExtras := map[string]any{}
 
-            /* the errors context key is the public half of an http exception's context: BindJsonAndValidate attaches the per-field validation errors under it, and without this the detail the validator computed reached neither the client nor, structured, anything else.
-
-               Public is the operative word. An entry blaming the declaration rather than the value carries the developer's own typo, the parameters the constraint refused and its reason, and those belong to the operator reading the record, not to whoever sent the request. The projection is taken here and only here: the record is rendered from the exception's own context, which keeps everything — the marshaler the two renderings share is the same one, and it stays the one that says the same thing in both places. */
+            /* the errors context key is the public half of an http exception's context: BindJsonAndValidate attaches the per-field validation errors under it, and they reach the client here. Only the public projection is sent: an entry blaming the declaration carries the developer's typo and the constraint's parameters, which belong to the record, and the record is rendered from the exception's full context. */
             if nil != httpException {
                 if errorsValue, exists := httpException.Context()["errors"]; true == exists {
                     payloadExtras["errors"] = clientVisibleValidationErrors(errorsValue)

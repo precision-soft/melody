@@ -101,7 +101,7 @@ func (instance *Builder) Describe(
             continue
         }
 
-        /* the nil-factory refusal is Build's own third refusal, mirrored here so a described pipeline is one the serving boot accepts: without it the listing reports as healthy a definition the build refuses */
+        /* the nil-factory refusal is Build's own, mirrored here so a described pipeline is one the serving boot accepts */
         if nil == definition.factory {
             return nil, report, exception.NewError(
                 "middleware factory is nil",
@@ -275,17 +275,13 @@ func isEnabledForGroup(definition *HttpMiddlewareDefinition, group string) bool 
     return false
 }
 
-/* validateReferenceGating refuses a before or after reference whose target is not active everywhere the referring definition is active. selectDefinitions drops a definition whose environment or group gating does not match; orderDefinitions then sees the surviving reference as a name no node carries and reports it as missing, and Build turns that into the error the application boots on. A pipeline where an always-on middleware orders itself against a dev-only one therefore starts in dev and refuses to start in prod, which is the one place the failure must not be discovered.
-
-The declared sets are compared, never the environment being booted, so the same reference is refused in every environment rather than only in the one that happens to drop the target. An empty set is the universal one — a definition that names no environments runs in all of them — so an always-on definition may only reference another always-on definition, while a dev-only definition may reference a dev-only or an always-on one. Groups are not compared as sets: they pre-filter which definitions this build weighs at all, so only the environment gating can make a reference unsatisfiable.
-
-A name no definition carries at all is left alone: that is an ordinary missing reference, and the ordering pass reports every one of them together. */
+/* validateReferenceGating refuses a before or after reference whose target is not active everywhere the referring definition is active: the dropped target would read as a missing reference, so a pipeline where an always-on middleware orders itself against a dev-only one would start in dev and refuse to start in prod. The declared environment sets are compared, never the environment being booted, so the refusal is the same in every environment; an empty set is the universal one. Groups are not compared, since they pre-filter what a build weighs, and a name no definition carries is left to the ordering pass as an ordinary missing reference. */
 func validateReferenceGating(definitions []*HttpMiddlewareDefinition, group string) error {
     if 0 == len(definitions) {
         return nil
     }
 
-    /* only what this build carries is weighed, which is what the paragraph above says and what the pass did not do: it was handed every definition the builder holds, so building the `web` group reported an unsatisfiable reference between two definitions confined to `api` — a pair `web` never assembles and whose gating says nothing about it. Several groups are built in one process, and a group that refuses to build because of another group's declarations refuses for a reason no request to it could ever reach. */
+    /* only what this build carries is weighed: several groups are built in one process, and a reference between two definitions another group assembles says nothing about this one. */
     definitions = definitionsEnabledForGroup(definitions, group)
     if 0 == len(definitions) {
         return nil
@@ -374,8 +370,7 @@ func referencedNames(definition *HttpMiddlewareDefinition) []string {
     return names
 }
 
-/* gatingReason explains why none of the definitions registered under the referenced name is active everywhere the referrer is, and returns an empty string when one of them is. Duplicates registered under one name are each a candidate: a single one that covers the referrer is enough, because that one is selected wherever the referrer is. */
-/* gatingReason weighs the environment gating alone. An environment is a property of the running process, so a reference that survives one environment and vanishes in another is a defect the declared sets can settle once, at every boot. A group is a property of the build being asked for: several groups are built in one process, each from its own selection, so a reference unsatisfiable in some other group says nothing about this one — the selection has already dropped what this group does not carry, and a target missing from it is reported as a missing reference like any other. */
+/* gatingReason explains why none of the definitions registered under the referenced name is active everywhere the referrer is, and returns an empty string when one of them is: one registration that covers the referrer is enough. Only the environment gating is weighed; a group is a property of the build being asked for, and its selection has already dropped what the group does not carry. */
 func gatingReason(referrer *HttpMiddlewareDefinition, targets []*HttpMiddlewareDefinition) string {
     for _, target := range targets {
         if true == coversDeclaredSet(target.enabledEnvironments, referrer.enabledEnvironments) {
@@ -399,9 +394,7 @@ func gatingReason(referrer *HttpMiddlewareDefinition, targets []*HttpMiddlewareD
     )
 }
 
-/* unionOfDeclaredSets merges the environment sets of every registration under one name, and reports the merge as universal — the empty slice the rest of this file reads as "everywhere" — when it names every environment a melody process is allowed to run in.
-
-That last step is what makes the union answer an always-on referrer at all. The environment is not free-form: config.validateEnvironment refuses to boot on anything that is not `dev` or `prod`, so a name registered for both is registered for every environment that can exist, and treating the merge as merely `{dev, prod}` would refuse a configuration no process can ever fall outside of. The list is duplicated here rather than imported to keep the pipeline free of a dependency on config; supportedEnvironments carries the guard against the two drifting apart. */
+/* unionOfDeclaredSets merges the environment sets of every registration under one name, and reports the merge as universal (the empty slice) when it names every environment a melody process may run in: config.validateEnvironment admits only dev and prod, so a name registered for both is registered everywhere. The list is duplicated rather than imported, and supportedEnvironments carries the guard against drift. */
 func unionOfDeclaredSets(definitions []*HttpMiddlewareDefinition) []string {
     merged := make([]string, 0, len(definitions))
     seen := make(map[string]bool, len(definitions))
@@ -484,7 +477,7 @@ func describeDeclaredSet(dimension string, values []string) string {
 }
 
 type definitionNode struct {
-    /* definition drives ordering (priority, before/after edges); duplicates share a name and therefore a node, so every one of them is kept here and emitted together at the node's position — keying the map on the name alone silently dropped all but the last, defeating allowDuplicates */
+    /* definition drives ordering (priority, before/after edges); duplicates share a name and therefore a node, so every one of them is kept here and emitted together at the node's position, which is what allowDuplicates relies on */
     definition *HttpMiddlewareDefinition
     duplicates []*HttpMiddlewareDefinition
     inDegree   int

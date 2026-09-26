@@ -5,12 +5,13 @@ import (
     "strconv"
 
     "github.com/precision-soft/melody/v3/.example/presenter"
+    melodybag "github.com/precision-soft/melody/v3/bag"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     melodytranslation "github.com/precision-soft/melody/v3/translation"
 )
 
-/* @important bound by the openapi descriptor in config; keep it exported */
+/* bound by the openapi descriptor in config; keep it exported */
 type GreetingResponse struct {
     Locale   string `json:"locale"`
     Greeting string `json:"greeting"`
@@ -21,12 +22,12 @@ func GreetingHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         translator := melodytranslation.TranslatorMustFromContainer(runtimeInstance.Container())
 
-        locale := queryString(request, "locale")
+        locale := melodybag.StringOrDefault(request.Query(), "locale", "")
         if "" == locale {
             locale = "en"
         }
 
-        name := queryString(request, "name")
+        name := melodybag.StringOrDefault(request.Query(), "name", "")
         if "" == name {
             name = "world"
         }
@@ -41,27 +42,9 @@ func GreetingHandler() melodyhttpcontract.Handler {
     }
 }
 
-func queryString(request melodyhttpcontract.Request, name string) string {
-    value, exists := request.Query().Get(name)
-    if false == exists {
-        return ""
-    }
-
-    switch typed := value.(type) {
-    case string:
-        return typed
-    case []string:
-        if 0 == len(typed) {
-            return ""
-        }
-        return typed[0]
-    default:
-        return ""
-    }
-}
-
+/* queryInt reads the count through StringOrDefault, which answers the first value of a repeated key, where bag.Int refuses a repeated key. */
 func queryInt(request melodyhttpcontract.Request, name string) int {
-    parsed, parseErr := strconv.Atoi(queryString(request, name))
+    parsed, parseErr := strconv.Atoi(melodybag.StringOrDefault(request.Query(), name, ""))
     if nil != parseErr {
         return 0
     }

@@ -57,7 +57,7 @@ var _ securitycontract.AccessDeniedHandler = (*accessControlListenerTestAccessDe
 
 func TestMatchAccessControlRule_RegexRuleIsHonoredAndNotShadowedByEarlierRegex(t *testing.T) {
     accessControl := NewAccessControl(
-        NewAccessControlRegexRule("^/health", securitycontract.AttributePublicAccess),
+        NewAccessControlRegexRule("^/health(/|$)", securitycontract.AttributePublicAccess),
         NewAccessControlRegexRule("^/admin", "ROLE_ADMIN"),
     )
 
@@ -514,6 +514,57 @@ func TestAccessControlListener_WhenEntryPointReturnsNoResponse_FailsClosed(t *te
     }
 }
 
+/* the entry point is the application's, so a typed nil of a concrete response type is the shape a hand-written "no response" takes; carried through a bare nil check it is normalized back to nil by SetResponse and the unauthenticated request is served — the guard must read it through IsNilInterface and fall through to the fail-closed 401 */
+func TestAccessControlListener_WhenTheEntryPointAnswersATypedNilResponse_FailsClosed(t *testing.T) {
+    kernel := newTestKernel()
+    runtimeInstance := newTestRuntime()
+
+    entryPoint := &accessControlListenerTestEntryPoint{response: (*httpPkg.Response)(nil), err: nil}
+
+    firewall := NewCompiledFirewall(
+        "main",
+        nil,
+        "m",
+        nil,
+        nil,
+        NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN")),
+        &accessControlListenerTestAccessDecisionManager{decideAllErr: nil},
+        nil,
+        entryPoint,
+        nil,
+        "/admin/login",
+        "/admin/logout",
+        nil,
+        nil,
+        SourceFirewall,
+        SourceFirewall,
+        SourceFirewall,
+        SourceFirewall,
+        SourceNone,
+    )
+
+    SecurityContextSetOnRuntime(runtimeInstance, NewSecurityContext(firewall, NewAnonymousToken()))
+
+    registry := NewFirewallRegistry(NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil))
+
+    RegisterKernelAccessControlListener(kernel, registry)
+
+    request := newSecurityTestRequest("GET", "/admin", nil, runtimeInstance)
+    requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, request)
+
+    _, err := kernel.EventDispatcher().DispatchName(runtimeInstance, "kernel.request", requestEvent)
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if 1 != entryPoint.calls {
+        t.Fatalf("expected the entry point to be called once")
+    }
+    if nil == requestEvent.Response() || 401 != requestEvent.Response().StatusCode() {
+        t.Fatalf("expected the typed-nil entry point response to fail closed with 401, got %#v", requestEvent.Response())
+    }
+}
+
 /* when the kernel.exception dispatch produces no response (no exception listener registered, or propagation stopped) the listener must still write a fail-closed response rather than a nil the kernel serves the handler for */
 func TestAccessControlListener_WhenExceptionProducesNoResponse_FailsClosed(t *testing.T) {
     kernel := newTestKernel()
@@ -626,7 +677,7 @@ func TestAccessControlListener_WhenDeniedHandlerFails_KeepsDecisionAsCause(t *te
     }
 }
 
-/* the direct 401 leaves one warning naming its reason: it used to complete with no trace at all, while the byte-identical-looking 403 filed a warning — whether the token was absent, unauthenticated, or the security context missing entirely was indistinguishable from the journal. */
+/* the direct 401 leaves one warning naming its reason, as the 403 does, so the journal tells an absent token from an unauthenticated one and from a missing security context. */
 func TestAccessControlListener_ADirect401LeavesOneWarningNamingItsReason(t *testing.T) {
     kernel := newTestKernel()
 
@@ -738,7 +789,7 @@ func dispatchRefusal(t *testing.T, runtimeInstance runtimecontract.Runtime, fire
     return requestEvent
 }
 
-/* a real denial leaves one warning naming the branch, the firewall and the matched rule; it used to leave only the exception listener's generic "unhandled exception" carrying the word forbidden and nothing else */
+/* a real denial leaves one warning naming the branch, the firewall and the matched rule, not the exception listener's generic "unhandled exception" carrying the word forbidden and nothing else */
 func TestAccessControlListener_A403LeavesOneWarningNamingItsBranch(t *testing.T) {
     runtimeInstance, capture := newRefusalCaptureRuntime(t)
 
@@ -790,7 +841,7 @@ func TestAccessControlListener_TheWiringFault403IsRecordedAtError(t *testing.T) 
     }
 }
 
-/* an access denied handler that answers the request returns before any kernel.exception dispatch, so its exit used to leave no trace of the refusal it had just answered */
+/* an access denied handler that answers the request returns before any kernel.exception dispatch, so its exit must file the record of the refusal it has just answered */
 func TestAccessControlListener_ADeniedHandlerThatAnswersStillLeavesOneRecord(t *testing.T) {
     runtimeInstance, capture := newRefusalCaptureRuntime(t)
 
@@ -838,7 +889,7 @@ func TestAccessControlListener_ARefusalCarryingNoHttpExceptionStillFilesOneRecor
     }
 }
 
-/* a denied handler that FAILS leaves the one record it always left, but at error and naming its own failure: the record used to be filed above the handler call with the DECISION's reason and the mark set below suppressed the exception listener that carried the wrap, so a permanently broken refusal page reached no channel at all */
+/* a denied handler that FAILS leaves the one record at error, naming its own failure: the mark set below suppresses the exception listener that carries the wrap, so a record filed above the handler call with the decision's reason would leave a permanently broken refusal page on no channel at all */
 func TestAccessControlListener_AFailingDeniedHandlerIsNamedInTheOneRecord(t *testing.T) {
     runtimeInstance, capture := newRefusalCaptureRuntime(t)
 
@@ -923,7 +974,44 @@ func TestAccessControlListener_ADeniedHandlerAnsweringNilIsNamedInTheOneRecord(t
     }
 }
 
-/* a handler that answers the request keeps the refusal at the level the DECISION earned, and keeps carrying no handler outcome: the record moved below the call, and moving it must not change what a working handler files */
+/* the handler is the application's, so a typed nil of a concrete response type is the shape a hand-written "no response" takes; through a bare nil check it reads as a live response, SetResponse normalizes it to nil, and the DENIED request is served as granted — the guard must read it through IsNilInterface and land in the same nil-response refusal the interface nil earns */
+func TestAccessControlListener_ADeniedHandlerAnsweringATypedNilIsRefusedNotServed(t *testing.T) {
+    runtimeInstance, capture := newRefusalCaptureRuntime(t)
+
+    firewall := NewCompiledFirewall(
+        "admin-area",
+        nil,
+        "m",
+        nil,
+        nil,
+        NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN")),
+        NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, NewRoleVoter()),
+        nil,
+        nil,
+        &accessControlListenerTestAccessDeniedHandler{response: (*httpPkg.Response)(nil), err: nil},
+        "",
+        "",
+        nil,
+        nil,
+        SourceFirewall,
+        SourceFirewall,
+        SourceFirewall,
+        SourceNone,
+        SourceFirewall,
+    )
+
+    dispatchRefusal(t, runtimeInstance, firewall)
+
+    if 1 != len(capture.errorRecords) || 0 != len(capture.warningRecords) {
+        t.Fatalf("expected exactly one error and no warning, got %v and %v", capture.errorRecords, capture.warningRecords)
+    }
+
+    if "nil_response" != capture.errorRecords[0].context["deniedHandlerOutcome"] {
+        t.Fatalf("expected the typed-nil answer to be refused as a nil response, got %+v", capture.errorRecords[0].context)
+    }
+}
+
+/* a handler that answers the request keeps the refusal at the level the DECISION earned, and carries no handler outcome: the record is filed after the call, and that placement must not change what a working handler files */
 func TestAccessControlListener_AnAnsweringDeniedHandlerKeepsTheDecisionLevel(t *testing.T) {
     runtimeInstance, capture := newRefusalCaptureRuntime(t)
 
@@ -976,7 +1064,7 @@ func (instance *accessControlListenerTestTypedNilManager) DecideAny(token securi
     return instance.DecideAll(token, attributes, subject)
 }
 
-/* a firewall assembled through NewCompiledFirewall never passes the compile step that refuses a typed nil, so the listener judges the interface rather than comparing it: the plain comparison let a manager holding nothing reach DecideAll, where it dereferenced its own nil receiver and answered every request behind the firewall with a recovered panic */
+/* a firewall assembled through NewCompiledFirewall never passes the compile step that refuses a typed nil, so the listener judges the interface rather than comparing it: a plain comparison would let a manager holding nothing reach DecideAll, where it dereferences its own nil receiver and answers every request behind the firewall with a recovered panic */
 func TestAccessControlListener_ATypedNilDecisionManagerAnswersTheMissingManagerBranch(t *testing.T) {
     runtimeInstance, _ := newRefusalCaptureRuntime(t)
 
@@ -1015,16 +1103,7 @@ func TestAccessControlListener_ATypedNilDecisionManagerAnswersTheMissingManagerB
     }
 }
 
-/*
-TestRegisterKernelAccessControlListener_ADispatcherWithoutTheCapabilityIsNamed
-pins the branch that used to be silent. The required-listener mark is what makes
-a listener stopping propagation ahead of access control fail the dispatch closed
-instead of letting the request reach its handler unchecked; a dispatcher that
-cannot take the mark disarms that guarantee for the whole process, and the
-framework's own event adapter refuses the very same condition with a panic
-rather than swallowing it. The record goes to the emergency channel because this
-runs at boot, before the configured logger is resolvable.
-*/
+/* TestRegisterKernelAccessControlListener_ADispatcherWithoutTheCapabilityIsNamed pins the record a dispatcher without the capability earns. The required-listener mark is what makes a listener stopping propagation ahead of access control fail the dispatch closed instead of letting the request reach its handler unchecked; a dispatcher that cannot take the mark disarms that guarantee for the whole process, and the framework's own event adapter refuses the very same condition with a panic rather than swallowing it. The record goes to the emergency channel because this runs at boot, before the configured logger is resolvable. */
 func TestRegisterKernelAccessControlListener_ADispatcherWithoutTheCapabilityIsNamed(t *testing.T) {
     readEnd, writeEnd, pipeErr := os.Pipe()
     if nil != pipeErr {
@@ -1068,4 +1147,33 @@ func TestRegisterKernelAccessControlListener_ADispatcherWithoutTheCapabilityIsNa
 /* capabilitylessDispatcher is a dispatcher of the application's own: it forwards every dispatch through the published contract and carries no MarkListenerRequired, which is exactly what an implementation written against the contract looks like */
 type capabilitylessDispatcher struct {
     eventcontract.EventDispatcher
+}
+
+/* A nil pointer of a request type is a non-nil interface, so a bare comparison would carry it past the gate and into the path read below, which dereferences it — inside a kernel listener, where no recover covers it. The listener must leave such an event alone, not crash the request. */
+func TestAccessControlListener_ATypedNilRequestIsLeftAlone(t *testing.T) {
+    kernel := newTestKernel()
+    runtimeInstance := newTestRuntime()
+
+    registry := NewFirewallRegistry(
+        NewCompiledConfiguration(nil, NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN"))),
+    )
+
+    RegisterKernelAccessControlListener(kernel, registry)
+
+    var unassignedRequest *httpPkg.Request
+
+    requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, unassignedRequest)
+
+    _, err := kernel.EventDispatcher().DispatchName(
+        runtimeInstance,
+        "kernel.request",
+        requestEvent,
+    )
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if nil != requestEvent.Response() {
+        t.Fatalf("expected no response for a request the listener cannot read")
+    }
 }

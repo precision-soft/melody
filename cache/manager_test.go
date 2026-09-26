@@ -261,6 +261,103 @@ func TestManager_Many_SkipsCorruptEntriesAndNamesThem(t *testing.T) {
     }
 }
 
+/* the items come as a map, so a refusal that stopped at the first entry the iteration reached would name a different key on every call; fifty rounds leave a "first refusal wins" a chance of about 0.9^50 to hide */
+func TestManager_SetMultipleNamesTheRefusedKeysDeterministically(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+
+    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    defer backend.Close()
+
+    manager := NewManager(backend, NewJsonSerializer())
+
+    for round := 0; round < 50; round++ {
+        setErr := manager.SetMultiple(map[string]any{"b.bad": make(chan int), "a.bad": make(chan int), "good": "kept"}, 0)
+        if nil == setErr {
+            t.Fatalf("expected a serialization error from SetMultiple")
+        }
+
+        var exceptionErr *exception.Error
+        if false == errors.As(setErr, &exceptionErr) {
+            t.Fatalf("expected an exception error, got: %v", setErr)
+        }
+
+        if "a.bad" != exceptionErr.Context()["key"] {
+            t.Fatalf("round %d: expected the first refused key in order, got: %v", round, exceptionErr.Context()["key"])
+        }
+
+        keys, isSlice := exceptionErr.Context()["keys"].([]string)
+        if false == isSlice || 2 != len(keys) || "a.bad" != keys[0] || "b.bad" != keys[1] {
+            t.Fatalf("round %d: expected every refused key in order, got: %v", round, exceptionErr.Context()["keys"])
+        }
+    }
+
+    if _, exists, _ := backend.Get("good"); true == exists {
+        t.Fatalf("expected a refused SetMultiple to write nothing")
+    }
+}
+
+/* Serializer is a PUBLIC contract, so the refusal SetMultiple reads to build its per-key reasons is the application's error. Read bare, its text would turn a failure this door ANSWERS into a panic nothing on the request path contains, where the sibling Set, which hands the same error to NewError without reading it, answers an error. The text is read the way the repository reads every foreign error's text, under a recover, and the marker takes the place of the reason. */
+func TestManager_SetMultipleAnswersARefusalWhenTheSerializersErrorTextPanics(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+
+    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    defer backend.Close()
+
+    manager := NewManager(backend, &panickingTextSerializer{})
+
+    var recoveredValue any
+    var setErr error
+
+    func() {
+        defer func() {
+            recoveredValue = recover()
+        }()
+
+        setErr = manager.SetMultiple(map[string]any{"a.bad": "first", "b.bad": "second"}, 0)
+    }()
+
+    if nil != recoveredValue {
+        t.Fatalf("expected a refusal; the door panicked with the serializer's own error text: %v", recoveredValue)
+    }
+
+    if nil == setErr {
+        t.Fatalf("expected a serialization error from SetMultiple")
+    }
+
+    var exceptionErr *exception.Error
+    if false == errors.As(setErr, &exceptionErr) {
+        t.Fatalf("expected an exception error, got: %v", setErr)
+    }
+
+    causeByKey, isMap := exceptionErr.Context()["causeByKey"].(map[string]string)
+    if false == isMap || 2 != len(causeByKey) {
+        t.Fatalf("expected a reason for each refused key, got: %v", exceptionErr.Context()["causeByKey"])
+    }
+
+    for _, refusedKey := range []string{"a.bad", "b.bad"} {
+        if "serialization error message panicked: the serializer's error text panicked" != causeByKey[refusedKey] {
+            t.Fatalf("expected %s to carry the panic in place of its reason, got: %q", refusedKey, causeByKey[refusedKey])
+        }
+    }
+}
+
+/* an error of the application's whose Error() panics — typically on the very field that made the
+   serialization fail — is the value this whole class is about; it is not producible through any shipped
+   serializer, so the double is what makes the guard observable */
+type panickingTextError struct{}
+
+func (instance *panickingTextError) Error() string {
+    panic("the serializer's error text panicked")
+}
+
+type panickingTextSerializer struct {
+    cachecontract.Serializer
+}
+
+func (instance *panickingTextSerializer) Serialize(value any) ([]byte, error) {
+    return nil, &panickingTextError{}
+}
+
 func TestManager_Set_NamesTheKeyOnSerializationFailure(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -574,4 +671,37 @@ func (instance *cacheTestCountingSerializer) Deserialize(payload []byte) (any, e
     instance.deserializeCallCount = instance.deserializeCallCount + 1
 
     return instance.inner.Deserialize(payload)
+}
+
+/* the reasons are as many as the refused keys, and one of them can be the error's: a batch refused for several reasons must not report one cause under a list of keys, leaving the operator to say which key it belonged to. The empty key is the one the sorted list names first whenever the batch carries it, which is a key the backend contract calls malformed — so "key" alone is not the whole answer. */
+func TestManager_SetMultipleCarriesTheReasonOfEveryRefusedKey(t *testing.T) {
+    backend := NewInMemoryBackend(10, time.Hour, &cacheTestClock{now: time.Unix(10, 0)})
+    defer backend.Close()
+
+    manager := NewManager(backend, NewJsonSerializer())
+
+    setErr := manager.SetMultiple(map[string]any{
+        "":     make(chan int),
+        "mmm":  func() {},
+        "fine": "value",
+    }, time.Minute)
+
+    if nil == setErr {
+        t.Fatalf("expected the unserializable entries to be refused")
+    }
+
+    context := exception.LogContext(setErr)
+
+    causeByKey, hasCauses := context["causeByKey"].(map[string]string)
+    if false == hasCauses || 2 != len(causeByKey) {
+        t.Fatalf("expected a reason per refused key, got %v", context["causeByKey"])
+    }
+
+    if "" == causeByKey[""] || "" == causeByKey["mmm"] {
+        t.Fatalf("expected both refused keys to carry their own reason, got %v", causeByKey)
+    }
+
+    if causeByKey[""] == causeByKey["mmm"] {
+        t.Fatalf("expected the two reasons to be the ones their own keys raised, got %v", causeByKey)
+    }
 }

@@ -7,7 +7,7 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
 )
 
-/* newLimitedStreamBody bounds a streaming body at the size the caller asked for. The buffered path reads one byte past its cap to tell a body that ends exactly at the limit from one that runs past it; a stream cannot be read ahead without handing the caller bytes it may never want, so the probe is made only once the allowance is spent. */
+/* newLimitedStreamBody bounds a streaming body at the size the caller asked for. A stream cannot read ahead, so the one-byte probe past the cap is made only once the allowance is spent. */
 func newLimitedStreamBody(body io.ReadCloser, limit int, method string, sanitizedUrl string) *limitedStreamBody {
     return &limitedStreamBody{
         body:         body,
@@ -39,7 +39,7 @@ func (instance *limitedStreamBody) Read(target []byte) (int, error) {
             return 0, err
         }
 
-        /* a reader that answered with neither a byte nor an error has said nothing about whether the body is over; the cap is not spent by a read that produced nothing. */
+        /* a read that produced neither a byte nor an error does not spend the cap */
         return 0, nil
     }
 

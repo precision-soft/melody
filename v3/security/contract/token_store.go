@@ -10,6 +10,7 @@ type TokenStore interface {
     Lookup(runtimeInstance runtimecontract.Runtime, tokenString string) (Claims, bool, error)
 }
 
+/* RevocableTokenStore stores tokens that can be individually withdrawn. Put stores with no expiry; PutWithTtl requires a positive ttl and refuses zero and negative values, since a lapsed remaining lifetime must not become forever. */
 type RevocableTokenStore interface {
     TokenStore
     Put(tokenString string, claims Claims)

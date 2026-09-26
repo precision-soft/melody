@@ -4,6 +4,7 @@ import (
     "path/filepath"
 
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/internal"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
@@ -21,8 +22,14 @@ func (instance *Configuration) registerDefaultParameters(
     instance.setDefaultParameter(HttpAddressKey, ":8080")
     instance.setDefaultParameter(HttpMaxRequestBodyBytesKey, 1048576)
 
-    /* a bounded lifetime is what an application gets by not choosing one, because the unbounded storage it would otherwise fill is also what it gets by not choosing one; zero stays available as the explicit way to ask for no expiry */
+    /* zero, no expiry; the reasoning is on DefaultSessionTtl */
     instance.setDefaultParameter(HttpSessionTtlKey, DefaultSessionTtl.String())
+
+    instance.setDefaultParameter(HttpSessionTombstoneRetentionKey, DefaultSessionTombstoneRetention.String())
+
+    instance.setDefaultParameter(HttpShutdownTimeoutKey, DefaultHttpShutdownTimeout.String())
+
+    instance.setDefaultParameter(TeardownTimeoutKey, DefaultTeardownTimeout.String())
 
     instance.setDefaultParameter(CliNameKey, "melody")
 
@@ -39,7 +46,7 @@ func (instance *Configuration) registerDefaultParameters(
     instance.setDefaultParameter(StaticEnableCacheKey, true)
     instance.setDefaultParameter(StaticCacheMaxAgeKey, 3600)
 
-    /* an empty list keeps the built-in file server answering for every path it recognizes, which is what melody has always served */
+    /* an empty list keeps the built-in file server answering for every path it recognizes */
     instance.setDefaultParameter(StaticExcludedPathsKey, "")
 }
 
@@ -65,7 +72,7 @@ func (instance *Configuration) setDefaultParameter(
         }
 
         existingParameter := instance.Get(name)
-        if nil != existingParameter {
+        if false == internal.IsNilInterface(existingParameter) {
             exception.Panic(
                 exception.NewError(
                     "duplicate parameter name when setting defaults",

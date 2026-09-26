@@ -91,7 +91,7 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
                     writer = io.Discard
                 }
 
-                /* in json mode the command writes one machine-readable document to this same stream, so the banner would make it unparseable from the first byte; nothing is lost because output.Meta already carries the command, arguments, start time and duration. The final status is the exit code, not the document: the scope and container are closed after the document was written, so a shutdown failure discovered there can no longer enter it. */
+                /* in json mode the command writes one machine-readable document to this stream, so there is no banner; output.Meta carries the command, arguments, start time and duration. The final status is the exit code, since a shutdown failure found after the document was written cannot enter it. */
                 resolvedOption := output.NormalizeOption(
                     output.ParseOptionFromCommand(commandContext),
                 )
@@ -105,6 +105,9 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
 
                 /* the flag promises the absence of ansi sequences, and the banner is written to the same stream the command's own output goes to: a --no-color run redirected into a file must not carry escape codes around an output that honoured the flag */
                 noColor := resolvedOption.NoColor
+
+                /* the banner is decoration, which quiet governs: StandardFlags defaults it to true, DebugFlags to false, and a command declaring neither reads false */
+                quiet := resolvedOption.Quiet
 
                 printGreenFullLine := func(writer io.Writer) {
                     if true == noColor {
@@ -141,6 +144,35 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
                     )
                 }
 
+                /* printGreenVerdictLine is the finish form of printGreenStatusLine: the text on either side of the verdict is escaped as data and the verdict is coloured after, since a sanitiser handed an already coloured line cannot tell the author's escape sequence from the client's bytes. */
+                printGreenVerdictLine := func(writer io.Writer, textBeforeVerdict string, verdict string, failed bool, textAfterVerdict string) {
+                    escapedBefore := internal.EscapeControlCharacters(textBeforeVerdict)
+                    escapedAfter := internal.EscapeControlCharacters(textAfterVerdict)
+
+                    if true == noColor {
+                        _, _ = fmt.Fprintf(writer, "%s%s%s\n", escapedBefore, verdict, escapedAfter)
+
+                        return
+                    }
+
+                    colouredVerdict := verdict
+                    if true == failed {
+                        colouredVerdict = AnsiRed + verdict + AnsiWhite
+                    }
+
+                    _, _ = fmt.Fprintf(
+                        writer,
+                        "%s%s\r%s%s%s%s%s\n",
+                        AnsiBackgroundGreen,
+                        AnsiEraseLine,
+                        AnsiWhite,
+                        escapedBefore,
+                        colouredVerdict,
+                        escapedAfter,
+                        AnsiReset,
+                    )
+                }
+
                 printRedStatusLine := func(writer io.Writer, text string) {
                     text = internal.EscapeControlCharacters(text)
 
@@ -161,24 +193,30 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
                     )
                 }
 
-                printGreenFullLine(writer)
+                if false == quiet {
+                    printGreenFullLine(writer)
 
-                printGreenStatusLine(
-                    writer,
-                    fmt.Sprintf(
-                        "%s [%s] [started] [%s] %s",
-                        logFiller,
-                        normalizedCommandName,
-                        startedAt.Format(time.DateTime),
-                        logFiller,
-                    ),
-                )
+                    printGreenStatusLine(
+                        writer,
+                        fmt.Sprintf(
+                            "%s [%s] [started] [%s] %s",
+                            logFiller,
+                            normalizedCommandName,
+                            startedAt.Format(time.DateTime),
+                            logFiller,
+                        ),
+                    )
 
-                printGreenFullLine(writer)
+                    printGreenFullLine(writer)
+                }
 
                 var commandErr error
 
                 defer func() {
+                    if true == quiet {
+                        return
+                    }
+
                     finishedAt := time.Now()
                     duration := finishedAt.Sub(startedAt)
 
@@ -186,31 +224,24 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
 
                     printGreenFullLine(writer)
 
-                    statusText := "[success]"
-                    if nil != commandErr {
-                        statusText = "[failed]"
-                        if false == noColor {
-                            statusText = fmt.Sprintf("%s[failed]%s", AnsiRed, AnsiWhite)
-                        }
+                    verdict := "[success]"
+                    failed := nil != commandErr
+                    if true == failed {
+                        verdict = "[failed]"
                     }
 
-                    printGreenStatusLine(
+                    printGreenVerdictLine(
                         writer,
-                        fmt.Sprintf(
-                            "%s [%s] [finished] %s [%s] [duration=%s] %s",
-                            logFiller,
-                            normalizedCommandName,
-                            statusText,
-                            finishedAt.Format(time.DateTime),
-                            durationSecondsString,
-                            logFiller,
-                        ),
+                        fmt.Sprintf("%s [%s] [finished] ", logFiller, normalizedCommandName),
+                        verdict,
+                        failed,
+                        fmt.Sprintf(" [%s] [duration=%s] %s", finishedAt.Format(time.DateTime), durationSecondsString, logFiller),
                     )
 
                     printGreenFullLine(writer)
                 }()
 
-                /* the finish banner reads commandErr, and a panic in the command leaves the linear path that assigns it: without this the unwinding ran the banner defer over a nil commandErr and printed [finished] [success] for a command that died. The panic itself is re-raised unchanged — an *exception.ExitError keeps its exit code — and the closes are deliberately NOT performed here on this path: the scope is closed by the caller's defer, and the container — on every path — by the recover handler that owns the exit, after it resolved the logger; closing the container here would hand that handler a closed logger and downgrade the fatal record to the emergency fallback. */
+                /* a panic in the command leaves the path that assigns commandErr, so the finish banner reads it here; the panic is re-raised unchanged, keeping an *exception.ExitError's code. Nothing is closed on this path: the caller's defer closes the scope, and the recover handler that owns the exit closes the container after resolving its logger. */
                 defer func() {
                     recoveredValue := recover()
                     if nil == recoveredValue {
@@ -228,12 +259,12 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
                     panic(recoveredValue)
                 }()
 
-                /* a command that returns its error through a concrete typed pointer hands over a non-nil interface around a nil value: read as a failure it reaches Error() on a nil receiver on the printing line below. The same normalization guards the scope's Close result, which crosses the substitutable runtime contract. */
+                /* normalized through the interface: a command returning a concrete typed nil pointer hands over a non-nil interface; the scope's Close result, from the substitutable runtime contract, gets the same reading */
                 runErr := normalizeCliError(copied.Run(runtimeInstance, commandContext))
 
                 closeErrorByName := map[string]error{}
 
-                /* the container is deliberately not closed here, on either outcome — the reading the panic path above already had is the linear path's too: the recover handler that owns the process exit resolves the final record's logger through the container and closes it between the record and os.Exit, so a close here would downgrade a failed command's final record to the stderr fallback. The scope stays this action's to close, and its failure this action's to report. */
+                /* the container is not closed here on either outcome: the recover handler that owns the exit resolves the final record's logger through it and closes it between the record and os.Exit. The scope is this action's to close and report. */
                 scopeCloseErr := normalizeCliError(runtimeInstance.Scope().Close())
                 if nil != scopeCloseErr {
                     closeErrorByName["scope"] = scopeCloseErr
@@ -252,7 +283,7 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
     )
 }
 
-/* normalizeCliError reads the error through the interface: a command or a substituted runtime declared with a concrete error type hands back a typed nil boxed into a non-nil interface, which would be treated as the failure it is not — and would panic the first line that renders it. */
+/* normalizeCliError reads the error through the interface: a command or a substituted runtime declared with a concrete error type hands back a typed nil in a non-nil interface, which is not a failure. */
 func normalizeCliError(err error) error {
     if true == internal.IsNilInterface(err) {
         return nil

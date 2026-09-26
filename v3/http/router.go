@@ -4,9 +4,11 @@ import (
     "regexp"
     "sort"
     "strings"
+    "sync/atomic"
 
     "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal"
 )
 
 func NewRouter() *Router {
@@ -23,6 +25,8 @@ func NewRouterWithRouteRegistry(routeRegistry *RouteRegistry) *Router {
 type Router struct {
     routeRegistry *RouteRegistry
     routeTreeRoot *routeTreeNode
+    /* raised by the kernel when it builds its handler; the registration doors read it and refuse. */
+    serving atomic.Bool
 }
 
 func (instance *Router) RouteRegistry() httpcontract.RouteRegistry {
@@ -89,6 +93,8 @@ func (instance *Router) HandleWithOptions(pattern string, handler httpcontract.H
 }
 
 func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, options httpcontract.RouteOptions) {
+    instance.refuseRegistrationWhileServing(pattern)
+
     if nil == handler {
         exception.Panic(
             exception.NewError(
@@ -105,13 +111,12 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
         options = &RouteOptions{}
     }
 
+    /* an empty pattern, which JoinPaths produces under a root group, splits as "/" does and registers the root route */
     parts := splitPath(pattern)
     normalizedPattern := strings.Join(parts, "/")
-    if "" == normalizedPattern {
-        normalizedPattern = "/"
-    }
 
     requirements := make(map[string]*regexp.Regexp)
+    requirementSources := map[string]string{}
     for key, value := range options.Requirements() {
         if "" == key {
             continue
@@ -120,7 +125,7 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
             continue
         }
 
-        /* the requirement must match the WHOLE parameter value, so it is wrapped in a non-capturing group before it is anchored: alternation binds looser than the anchors, and concatenating them onto "en|de|fr" would compile "^en|de|fr$" — read by the engine as (^en)|(de)|(fr$) — which matches "aden" and "en'; DROP TABLE users--" alike, turning a whitelist into a prefix/suffix test. A caller's own anchors survive the wrapping unharmed. */
+        /* the requirement must match the whole value, so it is wrapped in a non-capturing group before it is anchored: alternation binds looser than the anchors */
         patternValue := "^(?:" + value + ")$"
 
         requiredRegex, compileErr := regexp.Compile(patternValue)
@@ -139,6 +144,7 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
         }
 
         requirements[key] = requiredRegex
+        requirementSources[key] = value
     }
 
     defaults := map[string]string{}
@@ -151,6 +157,10 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
     }
 
     rejectNonTrailingOptionalParameter(parts, normalizedPattern, defaults)
+    rejectDuplicateParameterName(parts, normalizedPattern)
+    rejectForeignParameterSyntax(parts, normalizedPattern)
+    rejectIncoherentLocaleDeclaration(parts, normalizedPattern, options.Locales(), defaults)
+    rejectMalformedExposureAttributes(options.Attributes(), options.Name(), normalizedPattern)
 
     attributes := map[string]any{}
     for key, value := range options.Attributes() {
@@ -178,22 +188,28 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
         attributes[RouteAttributeLocales] = append([]string{}, options.Locales()...)
     }
 
-    instance.routeRegistry.registerRoute(
+    routeStored := instance.routeRegistry.registerRoute(
         route{
-            name:         options.Name(),
-            pattern:      normalizedPattern,
-            parts:        parts,
-            handler:      handler,
-            methods:      append([]string{}, options.Methods()...),
-            host:         options.Host(),
-            schemes:      append([]string{}, options.Schemes()...),
-            requirements: requirements,
-            defaults:     defaults,
-            locales:      append([]string{}, options.Locales()...),
-            priority:     options.Priority(),
-            attributes:   attributes,
+            name:               options.Name(),
+            pattern:            normalizedPattern,
+            parts:              parts,
+            handler:            handler,
+            methods:            append([]string{}, options.Methods()...),
+            host:               options.Host(),
+            schemes:            append([]string{}, options.Schemes()...),
+            requirements:       requirements,
+            requirementSources: requirementSources,
+            defaults:           defaults,
+            locales:            append([]string{}, options.Locales()...),
+            priority:           options.Priority(),
+            attributes:         attributes,
         },
     )
+
+    /* a route the registry declined is not put in the matching tree, whose entries must name their own stored route */
+    if false == routeStored {
+        return
+    }
 
     routeIndex := len(instance.routeRegistry.routesInternal()) - 1
 
@@ -209,7 +225,204 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
     instance.registerRouteInTree(instance.routeTreeRoot, patternSegments, routeIndex)
 }
 
-/* an omitted optional parameter is dropped wherever it sits in the pattern, while a match only ever ends early at the tail: a pattern like "/blog/:locale?/posts" therefore lets the url generator mint "/blog/posts", which this router answers with a 404. Only a trailing optional keeps the two sides in agreement, so anything else is refused at the definition site instead of shipping links nothing serves. */
+/* rejectDuplicateParameterName refuses a pattern that names one parameter twice, since the handler could read only one of the two values, and a parameter with no name, which would bind nothing. */
+func rejectDuplicateParameterName(parts []string, normalizedPattern string) {
+    seenParameterNames := map[string]struct{}{}
+
+    for _, part := range parts {
+        parameterName := ""
+
+        if true == strings.HasPrefix(part, ":") {
+            parameterName = strings.TrimSuffix(strings.TrimPrefix(part, ":"), "?")
+        } else if true == strings.HasPrefix(part, "*") {
+            parameterName = strings.TrimSuffix(strings.TrimPrefix(part, "*"), "...")
+        } else {
+            continue
+        }
+
+        if "" == parameterName {
+            if true == strings.HasPrefix(part, "*") {
+                /* an unnamed catch-all is the deliberate spelling of "swallow the rest and bind nothing" */
+                continue
+            }
+
+            exception.Panic(
+                exception.NewError(
+                    "route parameter must be named",
+                    map[string]any{
+                        "pattern": normalizedPattern,
+                        "segment": part,
+                    },
+                    nil,
+                ),
+            )
+        }
+
+        if _, exists := seenParameterNames[parameterName]; true == exists {
+            exception.Panic(
+                exception.NewError(
+                    "route parameter name is declared twice in one pattern",
+                    map[string]any{
+                        "pattern":       normalizedPattern,
+                        "parameterName": parameterName,
+                    },
+                    nil,
+                ),
+            )
+        }
+
+        seenParameterNames[parameterName] = struct{}{}
+    }
+}
+
+/* rejectForeignParameterSyntax refuses a segment in a parameter syntax this router does not speak, such as "/users/{id}": the router binds ":name" and "*name...", and such a segment would be a literal that no real request matches. */
+func rejectForeignParameterSyntax(parts []string, normalizedPattern string) {
+    for _, part := range parts {
+        if false == strings.HasPrefix(part, "{") {
+            continue
+        }
+
+        if false == strings.HasSuffix(part, "}") {
+            continue
+        }
+
+        exception.Panic(
+            exception.NewError(
+                "route parameter must be written as :name, not {name}",
+                map[string]any{
+                    "pattern": normalizedPattern,
+                    "segment": part,
+                },
+                nil,
+            ),
+        )
+    }
+}
+
+/* rejectIncoherentLocaleDeclaration refuses a route that declares Locales while neither its pattern nor its defaults carry "_locale", which could never match, and a pattern carrying ":_locale" with no Locales list, which would publish a client-chosen locale unvalidated. */
+func rejectIncoherentLocaleDeclaration(
+    parts []string,
+    normalizedPattern string,
+    locales []string,
+    defaults map[string]string,
+) {
+    patternCarriesLocale := false
+
+    for _, part := range parts {
+        parameterName := ""
+
+        if true == strings.HasPrefix(part, ":") {
+            parameterName = strings.TrimSuffix(strings.TrimPrefix(part, ":"), "?")
+        } else if true == strings.HasPrefix(part, "*") {
+            parameterName = strings.TrimSuffix(strings.TrimPrefix(part, "*"), "...")
+        } else {
+            continue
+        }
+
+        if RouteAttributeLocale == parameterName {
+            patternCarriesLocale = true
+
+            break
+        }
+    }
+
+    _, defaultCarriesLocale := defaults[RouteAttributeLocale]
+
+    if 0 < len(locales) && false == patternCarriesLocale && false == defaultCarriesLocale {
+        exception.Panic(
+            exception.NewError(
+                "route declares locales but neither its pattern nor its defaults supply "+RouteAttributeLocale,
+                map[string]any{
+                    "pattern": normalizedPattern,
+                    "locales": append([]string{}, locales...),
+                },
+                nil,
+            ),
+        )
+    }
+
+    if 0 == len(locales) && true == patternCarriesLocale {
+        exception.Panic(
+            exception.NewError(
+                "route pattern carries "+RouteAttributeLocale+" but declares no locales to validate it against",
+                map[string]any{
+                    "pattern": normalizedPattern,
+                },
+                nil,
+            ),
+        )
+    }
+}
+/* rejectMalformedExposureAttributes refuses an exposure attribute that is not a bool, a zone that is not a string and an exposed route with no name, each of which would drop the route from the manifest it opted into. */
+func rejectMalformedExposureAttributes(attributes map[string]any, routeName string, normalizedPattern string) {
+    exposeValue, hasExpose := attributes[RouteAttributeExpose]
+    if false == hasExpose {
+        return
+    }
+
+    exposed, isBool := exposeValue.(bool)
+    if false == isBool {
+        exception.Panic(
+            exception.NewError(
+                "route expose attribute must be a bool",
+                map[string]any{
+                    "pattern": normalizedPattern,
+                },
+                nil,
+            ),
+        )
+    }
+
+    if false == exposed {
+        return
+    }
+
+    if "" == routeName {
+        exception.Panic(
+            exception.NewError(
+                "an exposed route must be named, since the manifest references it by name",
+                map[string]any{
+                    "pattern": normalizedPattern,
+                },
+                nil,
+            ),
+        )
+    }
+
+    zoneValue, hasZone := attributes[RouteAttributeZone]
+    if false == hasZone {
+        return
+    }
+
+    zone, isString := zoneValue.(string)
+    if false == isString {
+        exception.Panic(
+            exception.NewError(
+                "route zone attribute must be a string",
+                map[string]any{
+                    "pattern": normalizedPattern,
+                },
+                nil,
+            ),
+        )
+    }
+
+    if "" != zone && false == IsRouteZone(zone) {
+        exception.Panic(
+            exception.NewError(
+                "route zone is not one of the declared zones",
+                map[string]any{
+                    "pattern":       normalizedPattern,
+                    "zone":          zone,
+                    "declaredZones": RouteZones(),
+                },
+                nil,
+            ),
+        )
+    }
+}
+
+/* only a trailing optional parameter is allowed: an omitted optional elsewhere would let the url generator mint a path this router answers with 404 */
 func rejectNonTrailingOptionalParameter(parts []string, normalizedPattern string, defaults map[string]string) {
     for index, part := range parts {
         if false == strings.HasPrefix(part, ":") {
@@ -226,7 +439,7 @@ func rejectNonTrailingOptionalParameter(parts []string, normalizedPattern string
 
         parameterName := strings.TrimSuffix(strings.TrimPrefix(part, ":"), "?")
 
-        /* a non-empty default keeps the segment in every path the generator mints — GeneratePath substitutes it both for an absent parameter and for one supplied empty — so the pattern stays matchable. An empty default cannot: it leaves nothing to emit, and an empty segment satisfies no parameter. */
+        /* a non-empty default keeps the segment in every path the generator mints; an empty default leaves nothing to emit */
         if "" != defaults[parameterName] {
             continue
         }
@@ -360,6 +573,10 @@ func (instance *Router) routeMayEndHere(remainingSegments []string) bool {
 }
 
 func (instance *Router) match(method string, path string, host string, scheme string) (httpcontract.Handler, map[string]string, map[string]any) {
+    if false == requestPathIsRoutable(path) {
+        return nil, nil, map[string]any{}
+    }
+
     pathParts := splitRequestPath(path)
 
     pathSegments := pathParts
@@ -404,33 +621,20 @@ func (instance *Router) match(method string, path string, host string, scheme st
             continue
         }
 
-        if 0 != len(routeDefinition.locales) {
-            localeValue := ""
-            if value, exists := params[RouteAttributeLocale]; true == exists {
-                localeValue = value
+        /* the defaults are merged before the locale gate reads them, since a default is how a route supplies a locale its url does not carry; the kernel reads the same merged map */
+        for key, defaultValue := range routeDefinition.defaults {
+            if _, exists := params[key]; false == exists {
+                params[key] = defaultValue
             }
+        }
 
-            if "" == localeValue {
-                continue
-            }
-
-            allowed := false
-            for _, allowedLocale := range routeDefinition.locales {
-                if allowedLocale == localeValue {
-                    allowed = true
-
-                    break
-                }
-            }
-
-            if false == allowed {
-                continue
-            }
+        if false == matchesLocale(routeDefinition.locales, params) {
+            continue
         }
 
         if false == matchesMethod(routeDefinition.methods, method) {
             for _, allowedMethod := range routeDefinition.methods {
-                /* an empty method never matches, so advertising it would put a bare comma in the Allow header, which is not a valid method token */
+                /* an empty method never matches and is not a valid Allow token */
                 if "" == allowedMethod {
                     continue
                 }
@@ -440,12 +644,7 @@ func (instance *Router) match(method string, path string, host string, scheme st
             continue
         }
 
-        for key, defaultValue := range routeDefinition.defaults {
-            if _, exists := params[key]; false == exists {
-                params[key] = defaultValue
-            }
-        }
-
+        /* priority first, then registration order; specificity is deliberately not a factor, as the RouteHandler contract states */
         if false == hasBest ||
             routeDefinition.priority > bestPriority ||
             (routeDefinition.priority == bestPriority && (0 > bestIndex || index < bestIndex)) {
@@ -475,7 +674,8 @@ func (instance *Router) match(method string, path string, host string, scheme st
         return nil, nil, map[string]any{}
     }
 
-    return bestHandler, bestParams, bestAttributes
+    /* the attributes are deep-copied, since the registry's map lives for the process; a pointer or struct inside stays shared */
+    return bestHandler, bestParams, internal.CopyAnyMap(bestAttributes)
 }
 
 func (instance *Router) findRouteCandidates(pathSegments []string) []int {
@@ -534,3 +734,34 @@ func (instance *routeTreeNode) collectCandidates(
 }
 
 var _ httpcontract.Router = (*Router)(nil)
+
+/* freezeRouterForServing closes a router's registration doors once the kernel built its handler, through an unexported method, so only a router of this package can be frozen. */
+func freezeRouterForServing(router httpcontract.Router) {
+    freezable, isFreezable := router.(interface{ freezeForServing() })
+    if false == isFreezable {
+        return
+    }
+
+    freezable.freezeForServing()
+}
+
+func (instance *Router) freezeForServing() {
+    instance.serving.Store(true)
+}
+
+/* refuseRegistrationWhileServing refuses a route registered after the kernel started serving, since a concurrent write to the route tree's maps is a fatal error. Routes are declared at boot. */
+func (instance *Router) refuseRegistrationWhileServing(pattern string) {
+    if false == instance.serving.Load() {
+        return
+    }
+
+    exception.Panic(
+        exception.NewError(
+            "may not register a route after the http kernel started serving",
+            map[string]any{
+                "pattern": pattern,
+            },
+            nil,
+        ),
+    )
+}

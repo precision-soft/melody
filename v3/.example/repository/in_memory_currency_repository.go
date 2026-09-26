@@ -18,8 +18,7 @@ type inMemoryCurrencyRepository struct {
     currencies []*entity.Currency
 }
 
-/* @info the returned slice is a copy, but a shallow one: the entity pointers stay shared with the
-repository, so a caller that mutates an entity in place bypasses the lock */
+/* the slice is a shallow copy: the entity pointers stay shared with the repository, so a caller that mutates an entity in place bypasses the lock */
 func (instance *inMemoryCurrencyRepository) All(ctx context.Context) ([]*entity.Currency, error) {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
@@ -95,7 +94,47 @@ func (instance *inMemoryCurrencyRepository) Update(ctx context.Context, currency
             continue
         }
 
-        instance.currencies[index] = currency
+        renamed := *existing
+        renamed.Code = currency.Code
+        renamed.Name = currency.Name
+        instance.currencies[index] = &renamed
+
+        return true, nil
+    }
+
+    return false, nil
+}
+
+func (instance *inMemoryCurrencyRepository) UpdateQuote(ctx context.Context, id string, quote entity.RateQuote) (bool, error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    normalizedId := strings.TrimSpace(id)
+    if "" == normalizedId {
+        return false, fmt.Errorf("id is required")
+    }
+
+    for index, existing := range instance.currencies {
+        if nil == existing || normalizedId != existing.Id {
+            continue
+        }
+
+        /* the judgement and the write are one step under the lock, as the database's conditional statement is one */
+        held := existing.Quote()
+        if true == quote.NamesTheSameReadingAs(held) {
+            return false, nil
+        }
+
+        if false == quote.ProviderAsOf.Equal(held.ProviderAsOf) && true == held.AsOf.After(quote.AsOf) {
+            return false, nil
+        }
+
+        quoted := *existing
+        quoted.Rate = quote.Rate
+        quoted.RateAsOf = quote.AsOf
+        quoted.ProviderRateAsOf = quote.ProviderAsOf
+        instance.currencies[index] = &quoted
+
         return true, nil
     }
 

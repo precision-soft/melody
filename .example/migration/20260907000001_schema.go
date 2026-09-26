@@ -1,0 +1,95 @@
+package migration
+
+import (
+    "context"
+
+    "github.com/uptrace/bun"
+)
+
+func init() {
+    Migrations.MustRegister(upSchema, downSchema)
+}
+
+/* upSchema creates the four catalog tables in one step: the example has a single state, the present one, and its schema is the statement of that state; a volume in an older shape is brought to it by example:db:reset. Every statement tolerates a volume provisioned before the set and several processes applying it at once. */
+func upSchema(ctx context.Context, database *bun.DB) error {
+    for _, statement := range schemaUpStatementList {
+        if _, execErr := database.ExecContext(ctx, statement); nil != execErr {
+            return execErr
+        }
+    }
+
+    return nil
+}
+
+/* downSchema drops what upSchema created, in reverse order, so the step stays correct once a foreign key is added. */
+func downSchema(ctx context.Context, database *bun.DB) error {
+    for _, statement := range schemaDownStatementList {
+        if _, execErr := database.ExecContext(ctx, statement); nil != execErr {
+            return execErr
+        }
+    }
+
+    return nil
+}
+
+/* the column definitions are those of a live SHOW CREATE TABLE of the bun-built tables, so a volume provisioned before the set and one provisioned by it hold the same schema, with one departure: every column holding an entity identifier is compared under utf8mb4_bin, because an id's identity is exact everywhere else in this application, in the in-memory repositories and in the cache keys, while the default collation folds case and accents. A volume provisioned before this collation keeps its own, since the tables are created IF NOT EXISTS; example:db:reset brings it here. */
+const createCategoryTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v1_category` (" +
+    "`id` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
+    "`name` VARCHAR(255) NOT NULL, " +
+    "PRIMARY KEY (`id`))"
+
+const createCurrencyTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v1_currency` (" +
+    "`id` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
+    "`code` VARCHAR(255) NOT NULL, " +
+    "`name` VARCHAR(255) NOT NULL, " +
+    "PRIMARY KEY (`id`))"
+
+/* the timestamps are DATETIME(6) so the microsecond half of a Go time survives the round trip; DATETIME would silently floor it and the update stamp could compare equal to the creation stamp */
+const createProductTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v1_product` (" +
+    "`id` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
+    "`name` VARCHAR(255) NOT NULL, " +
+    "`description` VARCHAR(255) NOT NULL, " +
+    "`category_id` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
+    "`price` DOUBLE NOT NULL, " +
+    "`currency_id` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
+    "`stock` BIGINT NOT NULL, " +
+    "`created_at` DATETIME(6) NOT NULL, " +
+    "`updated_at` DATETIME(6) NOT NULL, " +
+    "PRIMARY KEY (`id`))"
+
+/* the roles column holds the comma-joined role list the user repository writes; it is a single VARCHAR on purpose, the example having no role table to normalize into */
+const createUserTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v1_user` (" +
+    "`id` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
+    "`username` VARCHAR(255) NOT NULL, " +
+    "`password` VARCHAR(255) NOT NULL, " +
+    "`roles` VARCHAR(255) NOT NULL, " +
+    "PRIMARY KEY (`id`))"
+
+var schemaUpStatementList = []string{
+    createCategoryTableSql,
+    createCurrencyTableSql,
+    createProductTableSql,
+    createUserTableSql,
+}
+
+/* schemaTableNameList names the tables this migration owns, in the order it drops them — the reverse of
+   the order it creates them in. The drop statements are DERIVED from it, so a table added to the schema
+   cannot be left standing by a down that forgot it, and the reset command names the same list to the
+   operator rather than a second copy of it. */
+var schemaTableNameList = []string{
+    "melody_example_v1_user",
+    "melody_example_v1_product",
+    "melody_example_v1_currency",
+    "melody_example_v1_category",
+}
+
+var schemaDownStatementList = dropStatementList(schemaTableNameList)
+
+func dropStatementList(tableNameList []string) []string {
+    statementList := make([]string, 0, len(tableNameList))
+    for _, table := range tableNameList {
+        statementList = append(statementList, "DROP TABLE IF EXISTS `"+table+"`")
+    }
+
+    return statementList
+}

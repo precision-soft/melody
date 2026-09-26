@@ -27,7 +27,12 @@ func (instance *OpaqueTokenValidator) Validate(
 ) (securitycontract.Claims, error) {
     claims, found, lookupErr := instance.store.Lookup(runtimeInstance, tokenString)
     if nil != lookupErr {
-        return securitycontract.Claims{}, lookupErr
+        /* a store that cannot answer is the platform's failure, marked so the bearer source logs it as an incident */
+        return securitycontract.Claims{}, exception.NewError(
+            "opaque token lookup failed",
+            nil,
+            markInfrastructureFailure(lookupErr),
+        )
     }
 
     if false == found {

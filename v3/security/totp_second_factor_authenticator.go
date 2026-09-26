@@ -4,6 +4,8 @@ import (
     "math"
     "time"
 
+    "github.com/precision-soft/melody/v3/clock"
+    clockcontract "github.com/precision-soft/melody/v3/clock/contract"
     "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/internal"
@@ -14,14 +16,10 @@ import (
 /* DefaultTotpCodeHeaderName is the request header the TOTP code is read from unless overridden. */
 const DefaultTotpCodeHeaderName = "X-2FA-Code"
 
-/* DefaultTotpRecoveryHeaderName is the request header a single-use recovery code is read from unless overridden. It is deliberately distinct from the TOTP code header so the two never collide — a TOTP code is 6 to 8 digits, a recovery code is the xxxxx-xxxxx form. */
+/* DefaultTotpRecoveryHeaderName is the request header a single-use recovery code is read from unless overridden; it is distinct from the TOTP code header so the two never collide. */
 const DefaultTotpRecoveryHeaderName = "X-2FA-Recovery-Code"
 
-/* TotpSecondFactorAuthenticatorConfig composes a primary authenticator with a TOTP second factor into a single Authenticator, so it slots into the existing AuthenticatorManager without changing the manager's first-match flow. When the primary credential is accepted and the user has a TOTP enrollment, a valid code header is additionally required; otherwise the result is a non-authenticated TwoFactorPendingToken the application uses to prompt for a code.
-
-The ReplayGuard blocks reuse of an *accepted* code within its validity window, but this authenticator intentionally does NOT rate-limit *failed* code attempts: an unthrottled stream of distinct wrong guesses against a 6-digit code (with skew, a handful of codes are valid at any instant) can brute-force the second factor once the primary credential is known. The same caveat covers recovery codes — their larger space makes guessing far less feasible, but nothing here throttles wrong recovery guesses either. Throttling and per-user lockout are the application's responsibility and MUST front this authenticator — enforce them at the transport/middleware layer (an attempt counter with exponential backoff or a temporary lockout keyed on the authenticating user), the same layer that should already rate-limit primary-credential attempts.
-
-When the configured Enrollments store also implements TwoFactorRecoveryStore, a single-use recovery code supplied on RecoveryHeaderName is accepted as an alternative to a TOTP code: the store atomically verifies and consumes it, so each recovery code authenticates at most once. A store that does not implement that interface simply makes recovery codes unavailable. */
+/* TotpSecondFactorAuthenticatorConfig composes a primary authenticator with a TOTP second factor into one Authenticator. When the primary credential is accepted and the user has a TOTP enrollment, a valid code header is also required; otherwise the result is a non-authenticated TwoFactorPendingToken the application uses to prompt for a code. When Enrollments also implements TwoFactorRecoveryStore, a single-use recovery code on RecoveryHeaderName is accepted instead of a TOTP code. The ReplayGuard blocks reuse of an accepted code, but failed attempts are NOT rate-limited: throttling and per-user lockout are the application's and MUST front this authenticator, or a 6-digit code can be brute-forced once the primary credential is known. */
 type TotpSecondFactorAuthenticatorConfig struct {
     Primary securitycontract.Authenticator
 
@@ -37,6 +35,9 @@ type TotpSecondFactorAuthenticatorConfig struct {
 
     /* ReplayGuard enforces single use of an accepted code within its validity window (the same NonceGuard contract the HMAC source uses). Optional: defaults to an in-process guard, so supply a shared one for multi-instance deployments. */
     ReplayGuard securitycontract.NonceGuard
+
+    /* Clock is the clock the code is verified against; nil uses the system clock. Inject a frozen clock for deterministic tests. */
+    Clock clockcontract.Clock
 }
 
 func NewTotpSecondFactorAuthenticator(config TotpSecondFactorAuthenticatorConfig) *TotpSecondFactorAuthenticator {
@@ -58,10 +59,14 @@ func NewTotpSecondFactorAuthenticator(config TotpSecondFactorAuthenticatorConfig
         recoveryHeaderName = DefaultTotpRecoveryHeaderName
     }
 
-    /* default to an in-process replay guard (as the HMAC source does) so an accepted code cannot be replayed within its validity window out of the box; multi-instance deployments supply a shared guard. */
+    clockInstance := config.Clock
+    if true == internal.IsNilInterface(clockInstance) {
+        clockInstance = clock.NewSystemClock()
+    }
+
     var replayGuard securitycontract.NonceGuard = config.ReplayGuard
     if true == internal.IsNilInterface(replayGuard) {
-        replayGuard = NewMemoryNonceGuard()
+        replayGuard = NewMemoryNonceGuardWithClock(clockInstance)
     }
 
     return &TotpSecondFactorAuthenticator{
@@ -71,6 +76,7 @@ func NewTotpSecondFactorAuthenticator(config TotpSecondFactorAuthenticatorConfig
         recoveryHeaderName: recoveryHeaderName,
         totpConfig:         config.Totp,
         replayGuard:        replayGuard,
+        clock:              clockInstance,
     }
 }
 
@@ -81,6 +87,7 @@ type TotpSecondFactorAuthenticator struct {
     recoveryHeaderName string
     totpConfig         totp.Config
     replayGuard        securitycontract.NonceGuard
+    clock              clockcontract.Clock
 }
 
 func (instance *TotpSecondFactorAuthenticator) Supports(request httpcontract.Request) bool {
@@ -119,7 +126,7 @@ func (instance *TotpSecondFactorAuthenticator) Authenticate(request httpcontract
         return token, nil
     }
 
-    /* no TOTP code and no accepted recovery code: the second factor is still outstanding, so surface a pending token the application uses to prompt for one rather than letting the primary credential stand on its own. */
+    /* no TOTP code and no accepted recovery code: the second factor is outstanding, so the primary credential does not stand on its own */
     return NewTwoFactorPendingToken(token), nil
 }
 
@@ -130,7 +137,7 @@ func (instance *TotpSecondFactorAuthenticator) authenticateWithTotpCode(
     secret string,
     code string,
 ) (securitycontract.Token, error) {
-    verified, verifyErr := totp.Verify(secret, code, instance.totpConfig)
+    verified, verifyErr := totp.VerifyAt(secret, code, instance.clock.Now(), instance.totpConfig)
     if nil != verifyErr {
         return nil, exception.NewError("could not verify the two-factor code", nil, verifyErr)
     }
@@ -148,7 +155,7 @@ func (instance *TotpSecondFactorAuthenticator) authenticateWithTotpCode(
     return token, nil
 }
 
-/* tryRecoveryCode redeems a single-use recovery code when one is supplied on the recovery header and the enrollment store implements TwoFactorRecoveryStore. It reports whether a code was accepted (and thereby consumed): a false with a nil error means no recovery code was supplied, the store does not support recovery, or the supplied code was not a currently-unused one. Single use is enforced atomically by the store, so no replay-guard entry is recorded here. */
+/* tryRecoveryCode redeems a single-use recovery code supplied on the recovery header when the enrollment store implements TwoFactorRecoveryStore, and reports whether one was accepted and consumed. The store enforces single use atomically, so no replay-guard entry is recorded. */
 func (instance *TotpSecondFactorAuthenticator) tryRecoveryCode(
     request httpcontract.Request,
     token securitycontract.Token,
@@ -175,9 +182,7 @@ func (instance *TotpSecondFactorAuthenticator) tryRecoveryCode(
     return redeemed, nil
 }
 
-/* codeAlreadyUsed records an accepted code through the replay guard and reports whether it had already been used within its validity window. The constructor always installs a guard (an in-process one by default), so this relies on that invariant rather than tolerating a nil guard — a struct built by literal without one would fail loudly here instead of silently disabling replay protection.
-
-The nonce keys on the NORMALIZED code, exactly as Verify compared it: "123 456" and "123456" are the same code to Verify, so keying on the raw header value would let a captured code be replayed by re-spacing it. */
+/* codeAlreadyUsed records an accepted code through the replay guard and reports whether it was already used within its validity window. It relies on the constructor always installing a guard, so a literal without one fails loudly instead of disabling replay protection. The nonce keys on the normalized code, as Verify compares it, so a captured code cannot be replayed by re-spacing it. */
 func (instance *TotpSecondFactorAuthenticator) codeAlreadyUsed(
     request httpcontract.Request,
     userIdentifier string,
@@ -194,13 +199,13 @@ func (instance *TotpSecondFactorAuthenticator) codeAlreadyUsed(
 }
 
 func (instance *TotpSecondFactorAuthenticator) codeValidityWindow() time.Duration {
-    /* resolve through the totp package so period and skew match exactly the values Verify accepts — in particular the maxSkew clamp: a raw read of a misconfigured (large) skew would remember an accepted code for far longer than it stays verifiable, pinning the entry in an in-process guard effectively forever while Verify only honors the clamped window. */
+    /* resolved through the totp package so period and skew match what Verify accepts, the skew clamp included; a raw large skew would pin the entry far longer than the code verifies */
     resolved := instance.totpConfig.Resolve()
 
     period := uint64(resolved.Period)
     skew := uint64(resolved.Skew)
 
-    /* the window must cover the whole span a code verifies — (2*skew+1) periods — so a replayed code stays blocked for as long as it would still be accepted. Compute in uint64 and saturate to the maximum duration on any overflow: a pathological period that wrapped time.Duration to a non-positive value would make the replay guard skip recording (a NonceGuard ignores a ttl <= 0) and silently disable replay protection. */
+    /* the window covers every span a code verifies, (2*skew+1) periods, computed in uint64 and saturated: a period that wrapped time.Duration to a non-positive value would make the guard skip recording and disable replay protection */
     const maxSeconds = uint64(math.MaxInt64 / int64(time.Second))
     if skew > (maxSeconds-1)/2 {
         return time.Duration(math.MaxInt64)

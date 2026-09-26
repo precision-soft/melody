@@ -9,7 +9,7 @@ import (
     "github.com/precision-soft/melody/version"
 )
 
-/* the header is a comma-separated list and a proxy may weaken a strong tag; an exact string comparison silently re-sent the whole body for both shapes */
+/* the header is a comma-separated list and a proxy may weaken a strong tag; an exact string comparison would re-send the whole body for both shapes */
 func TestEtagMatchesIfNoneMatch(t *testing.T) {
     etag := `"1024-1717000000"`
 
@@ -40,7 +40,7 @@ func TestEtagMatchesIfNoneMatch(t *testing.T) {
     }
 }
 
-/* GenerateEtag is what makes a conditional request answerable at all, and its nil branch had no test: a nil FileInfo has to produce the empty string rather than an entity tag built from a dereference, because the caller reaches here on the path where a stat failed and a panic there runs outside anything that could answer the request. */
+/* GenerateEtag is what makes a conditional request answerable at all: a nil FileInfo has to produce the empty string rather than an entity tag built from a dereference, because the caller reaches here on the path where a stat failed and a panic there runs outside anything that could answer the request. */
 
 func TestGenerateEtag_ANilFileInfoProducesNoTag(t *testing.T) {
     if "" != GenerateEtag(nil, false) {
@@ -89,9 +89,7 @@ func TestGenerateEtag_ChangesWithEitherTheSizeOrTheModificationTime(t *testing.T
     }
 }
 
-/* two rewrites within the same second that keep the same length must still produce different tags:
-at whole-second resolution they did not, so a deploy that swapped a bundle for one of the same size
-revalidated 304 and stayed served stale until its length or its second changed */
+/* two rewrites within the same second that keep the same length must still produce different tags: at whole-second resolution they would not, and a deploy that swapped a bundle for one of the same size would revalidate 304 and stay served stale until its length or its second changed */
 func TestGenerateEtag_ChangesWithinTheSameSecond(t *testing.T) {
     earlier := GenerateEtag(&staticEtagFileInfo{size: 1024, modTime: time.Unix(1754049600, 100000000)}, false)
     later := GenerateEtag(&staticEtagFileInfo{size: 1024, modTime: time.Unix(1754049600, 900000000)}, false)
@@ -101,7 +99,7 @@ func TestGenerateEtag_ChangesWithinTheSameSecond(t *testing.T) {
     }
 }
 
-/* a filesystem that reports no modification time — every embedded one — used to make the tag degenerate into size alone, identical across rebuilds, so a redeployed asset that kept its length revalidated 304 and stayed served stale. The build version stands in for the timestamp there. */
+/* a filesystem that reports no modification time, every embedded one, would make the tag degenerate into size alone, identical across rebuilds, so a redeployed asset that kept its length would revalidate 304 and stay served stale. The build version stands in for the timestamp there. */
 func TestGenerateEtag_AZeroModificationTimeCarriesTheBuildVersionInsteadOfTheTimestamp(t *testing.T) {
     zeroTimed := GenerateEtag(&staticEtagFileInfo{size: 1024}, false)
 

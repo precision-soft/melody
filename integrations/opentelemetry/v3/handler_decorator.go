@@ -2,6 +2,7 @@ package opentelemetry
 
 import (
     "bufio"
+    "errors"
     "io"
     "net"
     nethttp "net/http"
@@ -23,11 +24,11 @@ type HandlerDecoratorConfig struct {
 
     Propagator propagation.TextMapPropagator
 
-    /* Meter is optional: when set, every request — including short-circuited ones — is counted and timed under the lifecycle instrument names (distinct from the middleware's handled-request instruments, so routed requests are not double-counted under one name). */
+    /* Meter is optional: when set, every request, short-circuited ones included, is counted and timed under the lifecycle instrument names, distinct from the middleware's handled-request instruments so routed requests are not double-counted. */
     Meter metric.Meter
 }
 
-/* NewHandlerDecorator builds the outermost observability seam: it wraps the full nethttp.Handler the http kernel produces (register it through Application.RegisterHttpHandlerDecorator or the module), so requests the middlewares never see — security denials and other kernel.request short-circuits, listener-written responses, the panic-recovery path — still produce a span and a metric. The tracing middleware keeps instrumenting the routed slice; its span becomes a child of the lifecycle span through the context this decorator injects, giving denied requests one span and routed requests a parent/child pair. */
+/* NewHandlerDecorator builds the outermost observability seam: it wraps the full nethttp.Handler the http kernel produces (register it through Application.RegisterHttpHandlerDecorator or the module), so requests the middlewares never see, security denials and other kernel.request short-circuits, listener-written responses and the panic-recovery path, still produce a span and a metric. The tracing middleware's span becomes a child of the lifecycle span through the context this decorator injects. */
 func NewHandlerDecorator(config HandlerDecoratorConfig) (applicationcontract.HttpHandlerDecorator, error) {
     if nil == config.Tracer {
         return nil, exception.NewError("handler decorator tracer is nil", nil, nil)
@@ -67,7 +68,7 @@ func NewHandlerDecorator(config HandlerDecoratorConfig) (applicationcontract.Htt
         return nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
             parentContext := propagator.Extract(request.Context(), propagation.HeaderCarrier(request.Header))
 
-            /* the route is not resolved yet at this seam, so the span name follows the OTel semantic convention for an unmatched route: the method alone; the path travels as an attribute instead of the name to keep cardinality bounded */
+            /* the route is not resolved yet at this seam, so the span is named by the method alone, the OTel convention for an unmatched route, and the path travels as an attribute to keep cardinality bounded */
             spanContext, span := config.Tracer.Start(
                 parentContext,
                 normalizedMethod(request.Method),
@@ -85,12 +86,7 @@ func NewHandlerDecorator(config HandlerDecoratorConfig) (applicationcontract.Htt
             defer func() {
                 recoveredValue := recover()
 
-                statusCode := recorder.statusCode
-
-                /* @important a hijacked connection left the request/response model at the upgrade, so recording it as the constructor's default 200 puts a connection that lives for hours in the same duration series as an ordinary request and destroys the latency distribution */
-                if true == recorder.hijacked {
-                    statusCode = nethttp.StatusSwitchingProtocols
-                }
+                statusCode := recorder.observedStatusCode()
 
                 if nil != recoveredValue {
                     statusCode = nethttp.StatusInternalServerError
@@ -122,7 +118,7 @@ func NewHandlerDecorator(config HandlerDecoratorConfig) (applicationcontract.Htt
     }, nil
 }
 
-/* statusRecordingResponseWriter captures the committed status code while optimistically forwarding the streaming/upgrade capabilities, mirroring the http kernel's recording writer: the kernel probes its raw writer for Flusher/Hijacker, so this wrapper must keep satisfying them and delegate with a runtime probe of its own. */
+/* statusRecordingResponseWriter captures the committed status code while forwarding the streaming and upgrade capabilities, as the http kernel's recording writer does, since the kernel probes its raw writer for Flusher and Hijacker. */
 type statusRecordingResponseWriter struct {
     nethttp.ResponseWriter
     statusCode  int
@@ -130,8 +126,9 @@ type statusRecordingResponseWriter struct {
     hijacked    bool
 }
 
+/* WriteHeader records the first final status: an informational 1xx header other than 101 (103 Early Hints) is forwarded without being recorded, since net/http sends it ahead of the final header the handler still writes. */
 func (instance *statusRecordingResponseWriter) WriteHeader(statusCode int) {
-    if false == instance.wroteHeader {
+    if false == instance.wroteHeader && (nethttp.StatusOK <= statusCode || nethttp.StatusSwitchingProtocols == statusCode) {
         instance.statusCode = statusCode
         instance.wroteHeader = true
     }
@@ -145,22 +142,20 @@ func (instance *statusRecordingResponseWriter) Write(payload []byte) (int, error
     return instance.ResponseWriter.Write(payload)
 }
 
+/* Flush goes through http.ResponseController, which follows Unwrap down the chain, so it reaches a flusher behind a middleware wrapper that forwards Unwrap alone. A flush that reached a flusher commits the header even when it fails, so only a writer with no flusher leaves the header unwritten, and a status set after a failed flush is not the one the connection carried. */
 func (instance *statusRecordingResponseWriter) Flush() {
-    flusher, isFlusher := instance.ResponseWriter.(nethttp.Flusher)
-    if true == isFlusher {
+    flushErr := nethttp.NewResponseController(instance.ResponseWriter).Flush()
+    if false == errors.Is(flushErr, nethttp.ErrNotSupported) {
         instance.wroteHeader = true
-
-        flusher.Flush()
     }
 }
 
 func (instance *statusRecordingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-    hijacker, isHijacker := instance.ResponseWriter.(nethttp.Hijacker)
-    if false == isHijacker {
+    /* through http.ResponseController for the reason Flush gives: a wrapper between this one and the connection that forwards Unwrap alone still reaches the hijacker behind it */
+    connection, readWriter, hijackErr := nethttp.NewResponseController(instance.ResponseWriter).Hijack()
+    if true == errors.Is(hijackErr, nethttp.ErrNotSupported) {
         return nil, nil, exception.NewError("the underlying response writer does not support hijacking", nil, nil)
     }
-
-    connection, readWriter, hijackErr := hijacker.Hijack()
     if nil == hijackErr {
         instance.hijacked = true
         instance.wroteHeader = true
@@ -169,14 +164,23 @@ func (instance *statusRecordingResponseWriter) Hijack() (net.Conn, *bufio.ReadWr
     return connection, readWriter, hijackErr
 }
 
-/* @info ReadFrom is forwarded so the wrapper keeps satisfying io.ReaderFrom, preserving the underlying writer's sendfile fast path for file responses. */
+/* ReadFrom is forwarded so the wrapper keeps satisfying io.ReaderFrom, preserving the underlying writer's sendfile fast path for file responses. */
 func (instance *statusRecordingResponseWriter) ReadFrom(reader io.Reader) (int64, error) {
     instance.wroteHeader = true
 
     return io.Copy(instance.ResponseWriter, reader)
 }
 
-/* @info Unwrap exposes the underlying writer so http.ResponseController can reach its flush/hijack/deadline support through the wrapper, mirroring the http kernel's recording writer. */
+/* observedStatusCode is the status the connection carried as far as the writer saw it. A hijacked connection left the request/response model at the upgrade, so it is not recorded as the default 200, which would put an hours-long connection in the request duration series. */
+func (instance *statusRecordingResponseWriter) observedStatusCode() int {
+    if true == instance.hijacked {
+        return nethttp.StatusSwitchingProtocols
+    }
+
+    return instance.statusCode
+}
+
+/* Unwrap exposes the underlying writer so http.ResponseController can reach its flush/hijack/deadline support through the wrapper, mirroring the http kernel's recording writer. */
 func (instance *statusRecordingResponseWriter) Unwrap() nethttp.ResponseWriter {
     return instance.ResponseWriter
 }

@@ -33,8 +33,115 @@ func (instance *Builder) Build(
     kernelInstance kernelcontract.Kernel,
     group string,
 ) ([]httpcontract.Middleware, *MiddlewareBuildReport, error) {
-    environment := kernelInstance.Environment()
+    ordered, report, selectionErr := instance.selectAndOrder(kernelInstance.Environment(), group)
+    if nil != selectionErr {
+        return nil, report, selectionErr
+    }
 
+    middlewares := make([]httpcontract.Middleware, 0, len(ordered))
+    for _, definition := range ordered {
+        if "" == definition.name {
+            continue
+        }
+
+        /* the report travels with the refusal, so a boot can explain why the pipeline could not be built */
+        if nil == definition.factory {
+            return nil, report, exception.NewError(
+                "middleware factory is nil",
+                exceptioncontract.Context{
+                    "middlewareName": definition.name,
+                },
+                nil,
+            )
+        }
+
+        middlewareValue, factoryErr := definition.factory(kernelInstance)
+        if nil != factoryErr {
+            return nil, report, exception.NewError(
+                "could not build middleware",
+                exceptioncontract.Context{
+                    "middlewareName": definition.name,
+                },
+                factoryErr,
+            )
+        }
+
+        /* a factory that succeeds and returns nothing is recorded as inactive with its reason */
+        if nil == middlewareValue {
+            report.SetInactive(
+                append(
+                    report.Inactive(),
+                    NewInactiveMiddleware(definition.name, "factory returned no middleware"),
+                ),
+            )
+
+            continue
+        }
+
+        middlewares = append(middlewares, middlewareValue)
+        report.SetSelectedNames(append(report.SelectedNames(), definition.name))
+    }
+
+    return middlewares, report, nil
+}
+
+/* MiddlewareDescription is one pipeline entry as the selection and the ordering see it, with no factory run: the name, the priority and the function captured at registration, the middleware itself or its factory. */
+type MiddlewareDescription struct {
+    Name         string
+    Priority     int
+    FunctionName string
+}
+
+/* Describe answers what Build would run without running it: the same selection, gating, ordering and refusals, with no factory invoked. */
+func (instance *Builder) Describe(
+    environment string,
+    group string,
+) ([]MiddlewareDescription, *MiddlewareBuildReport, error) {
+    ordered, report, selectionErr := instance.selectAndOrder(environment, group)
+    if nil != selectionErr {
+        return nil, report, selectionErr
+    }
+
+    descriptions := make([]MiddlewareDescription, 0, len(ordered))
+    selectedNames := make([]string, 0, len(ordered))
+
+    for _, definition := range ordered {
+        if "" == definition.name {
+            continue
+        }
+
+        /* Build's nil-factory refusal is mirrored here, so a described pipeline is one the boot accepts */
+        if nil == definition.factory {
+            return nil, report, exception.NewError(
+                "middleware factory is nil",
+                exceptioncontract.Context{
+                    "middlewareName": definition.name,
+                },
+                nil,
+            )
+        }
+
+        descriptions = append(
+            descriptions,
+            MiddlewareDescription{
+                Name:         definition.name,
+                Priority:     definition.priority,
+                FunctionName: definition.functionName,
+            },
+        )
+        selectedNames = append(selectedNames, definition.name)
+    }
+
+    report.SetSelectedNames(selectedNames)
+
+    return descriptions, report, nil
+}
+
+/* selectAndOrder answers which definitions the environment and the group admit, and in what order, with Build's refusals. */
+func (instance *Builder) selectAndOrder(
+    environment string,
+    group string,
+) ([]*HttpMiddlewareDefinition, *MiddlewareBuildReport, error) {
     report := &MiddlewareBuildReport{
         requestedGroup: group,
         kernelEnv:      environment,
@@ -74,42 +181,7 @@ func (instance *Builder) Build(
         )
     }
 
-    middlewares := make([]httpcontract.Middleware, 0, len(ordered))
-    for _, definition := range ordered {
-        if "" == definition.name {
-            continue
-        }
-
-        if nil == definition.factory {
-            return nil, nil, exception.NewError(
-                "middleware factory is nil",
-                exceptioncontract.Context{
-                    "middlewareName": definition.name,
-                },
-                nil,
-            )
-        }
-
-        middlewareValue, factoryErr := definition.factory(kernelInstance)
-        if nil != factoryErr {
-            return nil, nil, exception.NewError(
-                "could not build middleware",
-                exceptioncontract.Context{
-                    "middlewareName": definition.name,
-                },
-                factoryErr,
-            )
-        }
-
-        if nil == middlewareValue {
-            continue
-        }
-
-        middlewares = append(middlewares, middlewareValue)
-        report.SetSelectedNames(append(report.SelectedNames(), definition.name))
-    }
-
-    return middlewares, report, nil
+    return ordered, report, nil
 }
 
 func (instance *Builder) selectDefinitions(
@@ -212,17 +284,13 @@ func isEnabledForGroup(definition *HttpMiddlewareDefinition, group string) bool 
     return false
 }
 
-/* validateReferenceGating refuses a before or after reference whose target is not active everywhere the referring definition is active. selectDefinitions drops a definition whose environment or group gating does not match; orderDefinitions then sees the surviving reference as a name no node carries and reports it as missing, and Build turns that into the error the application boots on. A pipeline where an always-on middleware orders itself against a dev-only one therefore starts in dev and refuses to start in prod, which is the one place the failure must not be discovered.
-
-The declared sets are compared, never the environment being booted, so the same reference is refused in every environment rather than only in the one that happens to drop the target. An empty set is the universal one — a definition that names no environments runs in all of them — so an always-on definition may only reference another always-on definition, while a dev-only definition may reference a dev-only or an always-on one. Groups carry the same meaning and are checked the same way.
-
-A name no definition carries at all is left alone: that is an ordinary missing reference, and the ordering pass reports every one of them together. */
+/* validateReferenceGating refuses a before or after reference whose target is not active everywhere the referring definition is, so a pipeline that boots in dev cannot refuse to boot in prod. The declared environment sets are compared, never the booted environment; an empty set is universal. A name no definition carries is left to the ordering pass, which reports every missing reference together. */
 func validateReferenceGating(definitions []*HttpMiddlewareDefinition, group string) error {
     if 0 == len(definitions) {
         return nil
     }
 
-    /* only what this build carries is weighed, which is what the paragraph above says and what the pass did not do: it was handed every definition the builder holds, so building the `web` group reported an unsatisfiable reference between two definitions confined to `api` — a pair `web` never assembles and whose gating says nothing about it. Several groups are built in one process, and a group that refuses to build because of another group's declarations refuses for a reason no request to it could ever reach. */
+    /* only the definitions this build carries are weighed; another group's declarations cannot refuse this one */
     definitions = definitionsEnabledForGroup(definitions, group)
     if 0 == len(definitions) {
         return nil
@@ -253,7 +321,7 @@ func validateReferenceGating(definitions []*HttpMiddlewareDefinition, group stri
                 continue
             }
 
-            /* the reason belongs in the message, not only in the context: an application boots on this error and the operator reading the panic has to be told which two definitions and which gating are at fault without unwrapping anything */
+            /* the reason is in the message, since an application boots on this error */
             return exception.NewError(
                 fmt.Sprintf("middleware pipeline has an unsatisfiable reference: %s", reason),
                 exceptioncontract.Context{
@@ -270,7 +338,7 @@ func validateReferenceGating(definitions []*HttpMiddlewareDefinition, group stri
     return nil
 }
 
-/* definitionsEnabledForGroup keeps the definitions the named group assembles. The environment is deliberately not applied: an environment is a property of the running process and the whole point of the check is to settle, at every boot, a reference that would survive one environment and vanish in another. */
+/* definitionsEnabledForGroup keeps the definitions the named group assembles; the environment is deliberately not applied. */
 func definitionsEnabledForGroup(definitions []*HttpMiddlewareDefinition, group string) []*HttpMiddlewareDefinition {
     enabled := make([]*HttpMiddlewareDefinition, 0, len(definitions))
 
@@ -285,10 +353,10 @@ func definitionsEnabledForGroup(definitions []*HttpMiddlewareDefinition, group s
     return enabled
 }
 
-/* supportedEnvironments lists every value config.validateEnvironment admits. A name registered across all of them is registered everywhere, which is what lets the union of same-named definitions answer a reference from an always-on one. It is a copy, deliberately: importing config here would tie the middleware pipeline to the configuration package for one slice. TestSupportedEnvironments_MatchesTheConfigurationPackage fails if the two ever diverge. */
+/* supportedEnvironments lists every value config.validateEnvironment admits, copied to keep the pipeline free of the config package; TestSupportedEnvironments_MatchesTheConfigurationPackage fails if they diverge. */
 var supportedEnvironments = []string{"dev", "prod"}
 
-/* referencedNames lists the definitions this one orders itself against, in the order the edges are added, so the first unsatisfiable reference reported is stable across builds. */
+/* referencedNames lists the definitions this one orders itself against, in edge order, so the first unsatisfiable reference reported is stable. */
 func referencedNames(definition *HttpMiddlewareDefinition) []string {
     names := make([]string, 0, len(definition.after)+len(definition.before))
 
@@ -311,8 +379,7 @@ func referencedNames(definition *HttpMiddlewareDefinition) []string {
     return names
 }
 
-/* gatingReason explains why none of the definitions registered under the referenced name is active everywhere the referrer is, and returns an empty string when one of them is. Duplicates registered under one name are each a candidate: a single one that covers the referrer is enough, because that one is selected wherever the referrer is. */
-/* gatingReason weighs the environment gating alone. An environment is a property of the running process, so a reference that survives one environment and vanishes in another is a defect the declared sets can settle once, at every boot. A group is a property of the build being asked for: several groups are built in one process, each from its own selection, so a reference unsatisfiable in some other group says nothing about this one — the selection has already dropped what this group does not carry, and a target missing from it is reported as a missing reference like any other. */
+/* gatingReason explains why no registration under the referenced name is active everywhere the referrer is, and answers "" when one is or when their union covers it. Only the environment gating is weighed; a group is a property of the build, whose selection already dropped what it does not carry. */
 func gatingReason(referrer *HttpMiddlewareDefinition, targets []*HttpMiddlewareDefinition) string {
     for _, target := range targets {
         if true == coversDeclaredSet(target.enabledEnvironments, referrer.enabledEnvironments) {
@@ -320,7 +387,7 @@ func gatingReason(referrer *HttpMiddlewareDefinition, targets []*HttpMiddlewareD
         }
     }
 
-    /* no single registration covers the referrer, but the referenced NAME is what the edge orders against and every registration under it answers to that name: what has to be present wherever the referrer runs is one of them, not one particular one. Splitting a middleware across environments is the ordinary way to write it — an `auth` for development beside an `auth` for production — and requiring either alone to cover an always-on referrer refuses a configuration that boots correctly in both. */
+    /* the edge orders against the name, so the union of its registrations may cover the referrer, as an `auth` for dev beside an `auth` for prod does */
     if true == coversDeclaredSet(unionOfDeclaredSets(targets), referrer.enabledEnvironments) {
         return ""
     }
@@ -336,9 +403,7 @@ func gatingReason(referrer *HttpMiddlewareDefinition, targets []*HttpMiddlewareD
     )
 }
 
-/* unionOfDeclaredSets merges the environment sets of every registration under one name, and reports the merge as universal — the empty slice the rest of this file reads as "everywhere" — when it names every environment a melody process is allowed to run in.
-
-That last step is what makes the union answer an always-on referrer at all. The environment is not free-form: config.validateEnvironment refuses to boot on anything that is not `dev` or `prod`, so a name registered for both is registered for every environment that can exist, and treating the merge as merely `{dev, prod}` would refuse a configuration no process can ever fall outside of. The list is duplicated here rather than imported to keep the pipeline free of a dependency on config; supportedEnvironments carries the guard against the two drifting apart. */
+/* unionOfDeclaredSets merges the environment sets registered under one name and answers the universal empty slice when the merge names every environment config.validateEnvironment admits. */
 func unionOfDeclaredSets(definitions []*HttpMiddlewareDefinition) []string {
     merged := make([]string, 0, len(definitions))
     seen := make(map[string]bool, len(definitions))
@@ -367,7 +432,7 @@ func unionOfDeclaredSets(definitions []*HttpMiddlewareDefinition) []string {
     return nil
 }
 
-/* coversDeclaredSet reports whether the declared set admits at least everything the other one admits. An empty slice is the universal set, so it covers anything and is covered only by another universal set. */
+/* coversDeclaredSet reports whether the declared set admits everything the other admits; an empty slice is universal. */
 func coversDeclaredSet(superset []string, subset []string) bool {
     if 0 == len(superset) {
         return true
@@ -421,12 +486,12 @@ func describeDeclaredSet(dimension string, values []string) string {
 }
 
 type definitionNode struct {
-    /* definition drives ordering (priority, before/after edges); duplicates share a name and therefore a node, so every one of them is kept here and emitted together at the node's position — keying the map on the name alone silently dropped all but the last, defeating allowDuplicates */
+    /* duplicates share a name and therefore a node, so every one is kept and emitted together at the node's position */
     definition *HttpMiddlewareDefinition
     duplicates []*HttpMiddlewareDefinition
     inDegree   int
     out        []string
-    /* registration rank, so equal-priority definitions keep the order the application registered them in; the generated names carry that order as a decimal counter, which a lexicographic tie-break reads as 1, 10, 11, 2 and which sorts every factory ahead of every middleware */
+    /* registration rank, so equal-priority definitions keep registration order; the generated names would sort 1, 10, 2 */
     order int
 }
 
@@ -461,7 +526,7 @@ func orderDefinitions(definitions []*HttpMiddlewareDefinition) ([]*HttpMiddlewar
         orderedNodes = append(orderedNodes, node)
     }
 
-    /* every edge has the iterated definition on one of its two ends, and that end was given a node above, so at most one end can be missing and the missing one is always the name the definition referenced */
+    /* at most one end of an edge can be missing, and it is always the name the definition referenced */
     addEdge := func(from string, to string) {
         fromNode, fromExists := nodes[from]
         toNode, toExists := nodes[to]
@@ -548,7 +613,7 @@ func orderDefinitions(definitions []*HttpMiddlewareDefinition) ([]*HttpMiddlewar
     }
 
     cycleDetected := false
-    /* count the NODES drained, not the definitions emitted: a node carries every duplicate of its name, so comparing the emitted definitions against the name-keyed node map reports a cycle for the duplicates allowDuplicates exists to permit */
+    /* count the nodes drained, not the definitions emitted, since a node carries every duplicate of its name */
     if processedNodes != len(nodes) {
         cycleDetected = true
 

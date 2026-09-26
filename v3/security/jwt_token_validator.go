@@ -9,6 +9,8 @@ import (
     "strings"
     "time"
 
+    "github.com/precision-soft/melody/v3/clock"
+    clockcontract "github.com/precision-soft/melody/v3/clock/contract"
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/internal"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -44,6 +46,15 @@ func newJwtTokenValidator(config JwtConfig, epochStore securitycontract.Revocati
         exception.Panic(exception.NewError("jwt secret is empty", nil, nil))
     }
 
+    /* a negative skew is refused: it would move the revocation boundary backwards, and tokens issued before the revocation would verify again */
+    if 0 > config.RevocationEpochSkew {
+        exception.Panic(exception.NewError(
+            "jwt revocation epoch skew may not be negative",
+            map[string]any{"skew": config.RevocationEpochSkew.String()},
+            nil,
+        ))
+    }
+
     subjectClaim := config.SubjectClaim
     if "" == subjectClaim {
         subjectClaim = jwtDefaultSubject
@@ -54,8 +65,15 @@ func newJwtTokenValidator(config JwtConfig, epochStore securitycontract.Revocati
         rolesClaim = jwtDefaultRoles
     }
 
+    clockInstance := config.Clock
+    if true == internal.IsNilInterface(clockInstance) {
+        clockInstance = clock.NewSystemClock()
+    }
+
     return &JwtTokenValidator{
-        secret:               config.Secret,
+        /* the secret is copied on the way in, so the caller's slice cannot change it under a later signature check */
+        secret:               append([]byte{}, config.Secret...),
+        clock:                clockInstance,
         subjectClaim:         subjectClaim,
         rolesClaim:           rolesClaim,
         scopeClaim:           config.ScopeClaim,
@@ -77,6 +95,9 @@ type JwtConfig struct {
     ScopeClaim   string
     DeviceClaim  string
 
+    /* Clock is the clock the time claims are verified against; nil uses the system clock. Inject a frozen clock for deterministic tests. */
+    Clock clockcontract.Clock
+
     RevocationEpochSkew time.Duration
 
     Leeway               time.Duration
@@ -88,6 +109,7 @@ type JwtConfig struct {
 
 type JwtTokenValidator struct {
     secret               []byte
+    clock                clockcontract.Clock
     subjectClaim         string
     rolesClaim           string
     scopeClaim           string
@@ -117,6 +139,7 @@ func (instance *JwtTokenValidator) Validate(
 
     var header struct {
         Algorithm string `json:"alg"`
+        Type      string `json:"typ"`
     }
     if unmarshalErr := json.Unmarshal(headerBytes, &header); nil != unmarshalErr {
         return securitycontract.Claims{}, exception.NewError("jwt header is not valid json", nil, unmarshalErr)
@@ -126,6 +149,15 @@ func (instance *JwtTokenValidator) Validate(
         return securitycontract.Claims{}, exception.NewError(
             "jwt algorithm is not supported",
             map[string]any{"algorithm": header.Algorithm},
+            nil,
+        )
+    }
+
+    /* domain separation from every other HS256 credential melody mints, the internal-auth envelope above all: an absent typ is accepted, as RFC 7519 makes it optional, and "JWT" is compared case-insensitively; any other typ is refused, so a credential of another type cannot be replayed here under a shared secret */
+    if "" != header.Type && false == strings.EqualFold("JWT", header.Type) {
+        return securitycontract.Claims{}, exception.NewError(
+            "jwt type is not accepted",
+            map[string]any{"type": header.Type},
             nil,
         )
     }
@@ -150,7 +182,7 @@ func (instance *JwtTokenValidator) Validate(
         return securitycontract.Claims{}, exception.NewError("jwt payload is not valid json", nil, unmarshalErr)
     }
 
-    issuedAt, expiryErr := instance.verifyTimeClaims(rawClaims, time.Now())
+    issuedAt, expiryErr := instance.verifyTimeClaims(rawClaims, instance.clock.Now())
     if nil != expiryErr {
         return securitycontract.Claims{}, expiryErr
     }
@@ -200,10 +232,11 @@ func (instance *JwtTokenValidator) verifyRevocationEpoch(
 
     epoch, epochErr := instance.epochStore.RevocationEpoch(runtimeInstance, claims.UserIdentifier, claims.DeviceIdentifier)
     if nil != epochErr {
+        /* the store failing to answer is the platform's failure, marked so the bearer source logs it as an incident; the request fails closed either way */
         return exception.NewError(
             "jwt revocation epoch is unavailable",
             map[string]any{"user": claims.UserIdentifier},
-            epochErr,
+            markInfrastructureFailure(epochErr),
         )
     }
 

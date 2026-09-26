@@ -1,6 +1,8 @@
 package http
 
 import (
+    "github.com/precision-soft/melody/v3/internal"
+
     "time"
 
     eventcontract "github.com/precision-soft/melody/v3/event/contract"
@@ -27,7 +29,7 @@ func RegisterKernelHttpProfilerListener(eventDispatcher eventcontract.EventDispa
                 return nil
             }
 
-            if nil == responseEvent.Request() {
+            if true == internal.IsNilInterface(responseEvent.Request()) {
                 return nil
             }
 
@@ -39,7 +41,8 @@ func RegisterKernelHttpProfilerListener(eventDispatcher eventcontract.EventDispa
             routeName := ""
             routePattern := ""
 
-            if nil != responseEvent.Request().Attributes() {
+            /* the application's attribute bag may be a typed nil, read through the interface as router_utility reads it */
+            if false == internal.IsNilInterface(responseEvent.Request().Attributes()) {
                 routeNameValue, exists := responseEvent.Request().Attributes().Get(RouteAttributeName)
                 if true == exists {
                     routeName, _ = routeNameValue.(string)

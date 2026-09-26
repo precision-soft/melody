@@ -8,11 +8,7 @@ import (
     "github.com/precision-soft/melody/v2/internal"
 )
 
-/* LazyService defers resolving a container service until its first use and memoizes success only — a failed or nil resolution is retried on the next call, mirroring the container's own resolver. A component assembled during the boot phase — a cli command, an http middleware — can hold a service whose provider is registered but not yet safe to resolve at that phase, without hand-rolling a deferred-resolution proxy for each one. A genuinely app-specific proxy over the app's own interface is still built on this handle.
-
-A handle built over the resolver a provider was handed records the dependency when it finally resolves, so the teardown closes the service holding the handle before the service the handle produced — the ordering is the same one construction-time resolution gets, and it holds however late the first use is. A handle built over the CONTAINER itself has no such owner: nothing says which service it belongs to, so what it resolves is ordered against the holder by name like any unrelated pair, and a holder that drains through a handle at Close may find it already ended. Build the handle over the provider's resolver where the ordering matters.
-
-A handle follows the scope of the resolver it was built over: the memoized value is served for as long as that scope lives, and once the scope reports itself closed the handle answers the scope-is-closed error and drops the value, the closure and the resolver, keeping no path to the dead request's state. The resolver is captured at construction, so one handle never answers for two scopes: code shared across requests resolves per call through FromResolver with the current request's resolver — the value is then keyed to the right scope by the scope's own instance map. */
+/* LazyService defers resolving a container service until its first use and memoizes success only, so a failed or nil resolution is retried on the next call. A handle built over a provider's resolver records the dependency when it resolves, so the teardown closes its holder first; a handle built over the container has no owner and is ordered against its holder like any unrelated pair. A handle follows the scope of the resolver it was built over: once that scope reports closed, it answers the scope-is-closed error and drops the value, the closure and the resolver. */
 type LazyService[T any] struct {
     resolve func() (T, error)
     /* the resolver the closure captured, held apart so the liveness question can be asked of it and so both can be dropped together when the answer is closed */
@@ -57,7 +53,7 @@ func (instance *LazyService[T]) Get() T {
     return value
 }
 
-/* Resolve resolves the service and memoizes success only: a successfully resolved non-nil value is returned on every later call without re-running the resolver, while a failed resolution returns the error without memoizing it and a nil yield is likewise passed through unmemoized, so the next call retries either — a transient outage at first use does not poison the handle; use Get for the panic-on-failure path. The memoization holds only while the resolver's scope lives: a resolver that can answer the liveness question and reports itself closed turns the handle terminal — the scope-is-closed error on this and every later call, with the value, the closure and the resolver dropped — because the memoized value is that dead request's state and the alternative was serving it to every later caller forever. A resolver that cannot answer the question is read as open, exactly as the exit handler reads a logger that cannot. The resolver runs outside the handle's lock, so a resolver that reaches back into this same handle does not deadlock against the handle's own synchronization: given a handle built over a live resolver context, the re-entry reaches the container's cycle detection and surfaces as a circular-dependency error. A handle built over the container itself (the resolver argument being the container rather than a provider's resolver context) is a different matter — every container.Get mints a fresh resolution context, so a re-entrant chain through such a handle blocks on the container's own creation wait rather than being reported as a cycle; that is a property of the container's resolution, not of this handle, and it is unchanged by the lock scope. When several first uses race, each may run the resolver and the first to store wins; the container's own memoization makes the duplicates converge for shared services. */
+/* Resolve resolves the service and memoizes a non-nil success; a failure or a nil yield is returned unmemoized, so the next call retries. Once the resolver's scope reports itself closed the handle is terminal: it answers the scope-is-closed error and drops the value, the closure and the resolver, and a resolver that cannot answer is read as open. The resolver runs outside the handle's lock, so a re-entrant resolution does not deadlock on the handle, and when first uses race the first to store wins. */
 func (instance *LazyService[T]) Resolve() (T, error) {
     instance.mutex.Lock()
     if true == instance.sourceIsClosedLocked() {
@@ -113,12 +109,7 @@ func (instance *LazyService[T]) sourceIsClosedLocked() bool {
         return true
     }
 
-    closedChecker, isChecker := instance.source.(interface{ Closed() bool })
-    if false == isChecker {
-        return false
-    }
-
-    if false == closedChecker.Closed() {
+    if false == sourceReportsClosed(instance.source) {
         return false
     }
 
@@ -130,4 +121,26 @@ func (instance *LazyService[T]) sourceIsClosedLocked() bool {
     instance.sourceClosed = true
 
     return true
+}
+
+/* resolutionRefusingSource is answered by the resolvers this package owns: would a resolution asked of this source right now be refused? The container's IsClosed flag rises at the start of the teardown while resolutions are answered until the last Close returns, so a handle asks this instead. The scope implements nothing here, because it stops answering the moment it is marked closed. */
+type resolutionRefusingSource interface {
+    resolutionsRefused() bool
+}
+
+/* sourceReportsClosed asks the resolver whether the scope it reads has ended, through Closed() (a scope, a provider's resolver context) or IsClosed() (the container). A resolver that carries neither is read as open, as the exit handler reads a logger that cannot answer. */
+func sourceReportsClosed(source any) bool {
+    if refusingSource, isRefusing := source.(resolutionRefusingSource); true == isRefusing {
+        return refusingSource.resolutionsRefused()
+    }
+
+    if closedChecker, isChecker := source.(interface{ Closed() bool }); true == isChecker {
+        return closedChecker.Closed()
+    }
+
+    if isClosedChecker, isChecker := source.(interface{ IsClosed() bool }); true == isChecker {
+        return isClosedChecker.IsClosed()
+    }
+
+    return false
 }

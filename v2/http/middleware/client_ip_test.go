@@ -179,7 +179,7 @@ func TestForwardedClientIpResolver_MatchesMappedTrustedPrefix(t *testing.T) {
     }
 }
 
-/* A trusted edge may write an IPv6 hop as a bracketed literal with no port. net.SplitHostPort rejects that shape and netip.ParseAddr rejects the brackets it still carries, so the hop read as garbage and the resolver fell back to the direct peer — every IPv6 client behind such an edge collapsed onto the proxy's single rate limit bucket while IPv4 clients kept their own. */
+/* A trusted edge may write an IPv6 hop as a bracketed literal with no port. net.SplitHostPort rejects that shape and netip.ParseAddr rejects the brackets it still carries, so unstripped the hop would read as garbage and the resolver would fall back to the direct peer, collapsing every IPv6 client behind such an edge onto the proxy's single rate limit bucket while IPv4 clients keep their own. */
 func TestForwardedClientIpResolver_ResolvesBracketedIpv6HopWithoutPort(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
 
@@ -215,7 +215,7 @@ func TestForwardedClientIpResolver_BracketedAndBareIpv6KeyTheSameClient(t *testi
     }
 }
 
-/* the closure reads the trusted list on every request: retained live, a caller reusing its slice rewrote the trust decision mid-serving — the same rule Kernel.SetForwardedHeadersPolicy applies to the same list. */
+/* the closure reads the trusted list on every request: retained live, a caller reusing its slice would rewrite the trust decision mid-serving, which is the rule Kernel.SetForwardedHeadersPolicy applies to the same list. */
 func TestForwardedClientIpResolver_CopiesTheTrustedProxyListAtConstruction(t *testing.T) {
     trustedProxyList := []string{"10.0.0.0/8"}
     resolver := NewForwardedClientIpResolver(httpcontract.ForwardedHeadersPolicy{
@@ -228,5 +228,20 @@ func TestForwardedClientIpResolver_CopiesTheTrustedProxyListAtConstruction(t *te
     clientIp := resolver(forwardedRequest("10.0.0.1:4711", "203.0.113.9"))
     if "203.0.113.9" != clientIp {
         t.Fatalf("expected the construction-time trusted list to keep deciding, got %q", clientIp)
+    }
+}
+
+/* net/http keeps a repeated field as separate values, and that is the shape the chain arrives in when a client sent its own X-Forwarded-For and the trusted edge appended the peer it saw as a new line instead of extending the first one. Reading only the first line ends the right-to-left walk inside the half the client wrote, so the limiter keys on whatever address the client chose to put there and every such client shares one bucket with the victim it names. */
+func TestForwardedClientIpResolver_ReadsEveryForwardedForLine(t *testing.T) {
+    resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    request.RemoteAddr = "10.0.0.1:5555"
+    request.Header.Add("X-Forwarded-For", "198.51.100.99")
+    request.Header.Add("X-Forwarded-For", "203.0.113.7")
+
+    ip := resolver(testhelper.NewHttpTestRequestFromHttpRequest(request))
+    if "203.0.113.7" != ip {
+        t.Fatalf("expected the client the trusted edge attested on the second line, got: %s", ip)
     }
 }

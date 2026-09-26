@@ -8,9 +8,7 @@ import (
     "github.com/precision-soft/melody/v3/.example/entity"
 )
 
-/* @info every repository is a process-wide singleton and net/http serves each request on its own
-goroutine, so a listing request and a deleting request overlap; the writer here always removes a
-non-terminal element, which is what makes DeleteById compact the backing array under the reader */
+/* every repository is a process-wide singleton and net/http serves each request on its own goroutine, so a listing request and a deleting request overlap; the writer here always removes a non-terminal element, which is what makes DeleteById compact the backing array under the reader */
 
 func TestInMemoryUserRepositoryConcurrentReadAndDelete(t *testing.T) {
     ctx := context.Background()
@@ -81,8 +79,7 @@ func TestInMemoryUserRepositoryConcurrentReadAndDelete(t *testing.T) {
     }
 }
 
-/* @info usernames are matched without regard to case in both implementations, so the comparison is
-normalised in the example rather than left to a database collation */
+/* usernames are matched without regard to case in both implementations, so the comparison is normalised in the example rather than left to a database collation */
 
 func TestInMemoryUserRepositoryFindByUsernameIgnoresCase(t *testing.T) {
     ctx := context.Background()
@@ -99,5 +96,94 @@ func TestInMemoryUserRepositoryFindByUsernameIgnoresCase(t *testing.T) {
 
     if "admin" != user.Username {
         t.Fatalf("expected the seeded admin, got %q", user.Username)
+    }
+}
+
+/* the three sibling repositories, products, categories and currencies, refuse an identifier that is already taken, and so does the user repository: an occupied id appended as a second row could be reached by no door that goes through the id, since FindById and DeleteById find the first. The refusal carries the message the identifier ceiling's rationale promises the caller. */
+func TestInMemoryUserRepositoryRefusesAnIdentifierThatIsAlreadyTaken(t *testing.T) {
+    ctx := context.Background()
+    repositoryInstance := newInMemoryUserRepository()
+
+    first := entity.NewUser("user-90", "zz-first", "digest", []string{entity.RoleUser})
+    if createErr := repositoryInstance.Create(ctx, first); nil != createErr {
+        t.Fatalf("expected a free identifier to be accepted, got %v", createErr)
+    }
+
+    createErr := repositoryInstance.Create(ctx, entity.NewUser("user-90", "zz-second", "digest", []string{entity.RoleUser}))
+    if nil == createErr {
+        t.Fatalf("expected the occupied identifier to be refused")
+    }
+
+    if "id already exists" != createErr.Error() {
+        t.Fatalf("expected the refusal the sibling repositories answer, got %q", createErr.Error())
+    }
+
+    /* the assertion that separates a refusal from a message: nothing was stored under the identifier a
+       second time, so the reading and the deleting doors still reach exactly one account. */
+    all, allErr := repositoryInstance.All(ctx)
+    if nil != allErr {
+        t.Fatalf("all: %v", allErr)
+    }
+
+    carrying := 0
+    for _, user := range all {
+        if "user-90" == user.Id {
+            carrying++
+        }
+    }
+
+    if 1 != carrying {
+        t.Fatalf("expected one row to carry the identifier, found %d", carrying)
+    }
+
+    found, exists, findErr := repositoryInstance.FindById(ctx, "user-90")
+    if nil != findErr {
+        t.Fatalf("find by id: %v", findErr)
+    }
+
+    if false == exists || "zz-first" != found.Username {
+        t.Fatalf("expected the identifier to still name the account that took it, got exists=%t user=%v", exists, found)
+    }
+}
+
+/* GrantRole answers what it did — granted, already held, or no such account — and appends onto a copy, so a
+   reader holding the previous value is not handed a set that grows under it */
+func TestInMemoryUserRepositoryGrantRoleAppendsOnceOntoACopy(t *testing.T) {
+    ctx := context.Background()
+    repositoryInstance := newInMemoryUserRepository()
+
+    before, _, _ := repositoryInstance.FindByUsername(ctx, "user")
+
+    granted, outcome, grantErr := repositoryInstance.GrantRole(ctx, before.Id, entity.RoleEditor)
+    if nil != grantErr || GrantRoleGranted != outcome {
+        t.Fatalf("the grant answered %d, %v; wanted GrantRoleGranted", outcome, grantErr)
+    }
+
+    if 1 != len(before.Roles) {
+        t.Fatalf("the value read before the grant now holds %v: the roles were appended in place", before.Roles)
+    }
+
+    /* the door hands back the account it wrote, widened — a copy of its own, so a caller mutating it does not reach the stored value */
+    if nil == granted || 2 != len(granted.Roles) || entity.RoleEditor != granted.Roles[1] {
+        t.Fatalf("the grant handed back %v, wanted the widened account", granted)
+    }
+    granted.Roles[0] = "mutated"
+    if stored, _, _ := repositoryInstance.FindById(ctx, before.Id); "mutated" == stored.Roles[0] {
+        t.Fatal("the account handed back is the stored value")
+    }
+
+    _, outcome, grantErr = repositoryInstance.GrantRole(ctx, before.Id, entity.RoleEditor)
+    if nil != grantErr || GrantRoleAlreadyHeld != outcome {
+        t.Fatalf("a second grant answered %d, %v; wanted GrantRoleAlreadyHeld", outcome, grantErr)
+    }
+
+    after, _, _ := repositoryInstance.FindById(ctx, before.Id)
+    if 2 != len(after.Roles) || entity.RoleEditor != after.Roles[1] {
+        t.Fatalf("two grants of one role stored %v, wanted it once", after.Roles)
+    }
+
+    _, outcome, grantErr = repositoryInstance.GrantRole(ctx, "user-none", entity.RoleEditor)
+    if nil != grantErr || GrantRoleAccountAbsent != outcome {
+        t.Fatalf("a grant on a missing account answered %d, %v; wanted GrantRoleAccountAbsent", outcome, grantErr)
     }
 }

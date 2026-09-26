@@ -13,7 +13,7 @@ func String(parameterBag bagcontract.ParameterBag, name string) (string, bool) {
         return "", false
     }
 
-    /* @important a present-but-nil value reports as unset, matching what the typed accessors report for the same state; otherwise Has and String would agree while String and Int contradicted each other */
+    /* a present nil value reports unset, as the typed accessors report it */
     if nil == value {
         return "", false
     }
@@ -23,7 +23,17 @@ func String(parameterBag bagcontract.ParameterBag, name string) (string, bool) {
         return stringValue, true
     }
 
-    return "", true
+    /* a []string is a repeated key and answers its first value, as Input and url.Values.Get do; an empty list reports unset */
+    if sliceValue, isSlice := value.([]string); true == isSlice {
+        if 0 == len(sliceValue) {
+            return "", false
+        }
+
+        return sliceValue[0], true
+    }
+
+    /* a value that is neither a string nor a string slice reports absent, so StringOrDefault substitutes its default */
+    return "", false
 }
 
 func StringOrDefault(parameterBag bagcontract.ParameterBag, name string, defaultValue string) string {

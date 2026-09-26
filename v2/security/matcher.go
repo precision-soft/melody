@@ -4,6 +4,7 @@ import (
     "strings"
 
     httpcontract "github.com/precision-soft/melody/v2/http/contract"
+    "github.com/precision-soft/melody/v2/internal"
     securitycontract "github.com/precision-soft/melody/v2/security/contract"
 )
 
@@ -18,7 +19,8 @@ type PathPrefixMatcher struct {
 }
 
 func (instance *PathPrefixMatcher) Matches(request httpcontract.Request) bool {
-    if nil == request {
+    /* IsNilInterface: the request is an application-implementable contract, and the next line dereferences it */
+    if true == internal.IsNilInterface(request) {
         return false
     }
 

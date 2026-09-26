@@ -43,14 +43,18 @@ func (instance *MigrateCommand) Flags() []clicontract.Flag {
 
 func (instance *MigrateCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) (runErr error) {
     option := instance.base.optionFromCommand(commandContext)
-    outputInstance := newCommandOutput(commandContext.Writer, option)
+    outputInstance := newCommandOutput(commandContext.Writer, commandContext.Args().Slice(), option)
 
     startedAt := time.Now()
     defer func() {
-        runErr = outputInstance.finish(instance.Name(), startedAt, runErr)
+        runErr = outputInstance.finishRun(instance.Name(), startedAt, runErr, recover())
     }()
 
-    SetDefaultRunnerOption(runnerOptionForCommand(commandContext.Writer, option))
+    /* the per-query lines print through the command output's writer, so a write the report lost there is remembered by finish too */
+    runnerOption := runnerOptionForCommand(outputInstance.writer, option)
+    ctx := withRunnerOption(runtimeInstance.Context(), runnerOption)
+    /* the parsed posture reaches the migrations through the context the migrator hands them, so this run's writer and colour choice belong to this run alone; the process-wide fallback is installed only for the length of the run, for a migration that drops the context it receives, and put back on the way out */
+    defer restoreDefaultRunnerOption(swapDefaultRunnerOption(runnerOption))
 
     db, managerName, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext)
     if nil != dbErr {
@@ -63,8 +67,8 @@ func (instance *MigrateCommand) Run(runtimeInstance runtimecontract.Runtime, com
     }
 
     /* take the bun migration lock so two replicas running the migrate command during a rolling deploy cannot both compute the same pending set and double-apply a migration. */
-    if lockErr := migrator.Lock(runtimeInstance.Context()); nil != lockErr {
-        /* the refusal names the resource and the remedy, the way the unknown-manager refusal three lines away already does. On its own bun's error states that a lock exists and nothing else: not which database it belongs to, and not that this command set ships db:unlock to clear a lock a crashed process left behind — the whole distance between knowing what happened and knowing what to do. The bun error stays the cause, so errors.Is still reaches it. */
+    if lockErr := migrator.Lock(ctx); nil != lockErr {
+        /* the refusal names the database and db:unlock, which clears a lock a crashed process left behind; the bun error stays the cause, so errors.Is still reaches it */
         return exception.NewError(
             "migrate: the migration lock is held; another migration is running, or a crashed one left it behind",
             exceptioncontract.Context{
@@ -77,14 +81,14 @@ func (instance *MigrateCommand) Run(runtimeInstance runtimecontract.Runtime, com
     }
     /* the unlock failure becomes the command's verdict only when the migration itself succeeded: a failed migration keeps its own error, with the unlock failure printed beside it */
     defer func() {
-        unlockErr := unlockMigrations(runtimeInstance.Context(), migrator, outputInstance)
+        unlockErr := unlockMigrations(ctx, migrator, outputInstance, instance.base.options.CommandPrefix+":unlock")
         if nil == runErr && nil != unlockErr {
             runErr = unlockErr
         }
     }()
 
     if true == outputInstance.wantsDetail() {
-        identity, identityErr := fetchDatabaseIdentity(runtimeInstance.Context(), db)
+        identity, identityErr := fetchDatabaseIdentity(ctx, db)
         if nil != identityErr {
             return identityErr
         }
@@ -94,9 +98,9 @@ func (instance *MigrateCommand) Run(runtimeInstance runtimecontract.Runtime, com
         }
     }
 
-    group, migrateErr := migrator.Migrate(runtimeInstance.Context())
+    group, migrateErr := migrator.Migrate(ctx)
     if nil != migrateErr {
-        /* a group that fails part way through has already applied — and recorded as applied — everything before the one that broke, and bun returns those beside the failure. Thrown away here, the operator was told which migration failed and nothing about which had landed, so the choice between re-running (safe) and rolling back (which would take the landed ones with it) could not be made without inspecting the database by hand. The cron generator reports its own writes beside its failure for the same reason. */
+        /* a group that fails part way has already applied everything before the migration that broke, and those are reported beside the failure, so the operator can choose between re-running and rolling back */
         printAppliedGroup(outputInstance, managerName, group)
 
         return migrateErr
@@ -117,7 +121,7 @@ func (instance *MigrateCommand) Run(runtimeInstance runtimecontract.Runtime, com
         groupString = group.String()
     }
 
-    /* the run that changed the schema says so on the plain text, the way the rollback sibling always has. The line lived inside wantsDetail(), so a deploy log captured a warning for the run that did nothing and not one byte for the run that applied five migrations — the operator reading it at three in the morning could not tell which of the two had happened. The manager label is the one resolveDatabase already computed and this branch used to throw away outside the detail block. */
+    /* a run that changed the schema says so on the plain text too, not only under the detail posture, labelled with the manager resolveDatabase computed */
     outputInstance.printTextSuccess(
         fmt.Sprintf(
             "applied %s to %s (group %s)",
@@ -177,7 +181,7 @@ func printAppliedGroup(outputInstance *commandOutput, managerName string, group 
     outputInstance.printMigrationsBlock("applied", "APPLIED MIGRATIONS", names)
 }
 
-/* appliedNamesOnFailure answers the migrations of a broken run that actually landed, which is every one of the group except the last. Bun fixes the group to the slice up to and including the migration it is about to attempt, before running it, so on a failure the final entry is the one that broke rather than one that succeeded — reporting the group verbatim would tell the operator that the migration which just failed had been applied. The migrator is built with WithMarkAppliedOnSuccess, so a migration is recorded only once its Up returns: the names left here are exactly the ones the migrations table now carries, and a run that failed while recording an otherwise successful migration is counted out for the same reason — the table does not have it, so the next run will attempt it again. */
+/* appliedNamesOnFailure answers the migrations of a broken run that landed, every one of the group but the last, since bun fixes the group up to and including the migration it attempts. The migrator is built WithMarkAppliedOnSuccess, so these are exactly the names the migrations table carries. */
 func appliedNamesOnFailure(group *migrate.MigrationGroup) []string {
     names := migrationNamesOf(group)
     if 0 == len(names) {

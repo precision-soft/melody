@@ -4,6 +4,7 @@ import (
     "bufio"
     "bytes"
     "encoding/json"
+    "fmt"
     "errors"
     "io"
     "os"
@@ -26,6 +27,20 @@ func testNewJsonLoggerWithMinLevel(minLevel loggingcontract.Level) (loggingcontr
 
     return NewJsonLogger(buffer, minLevel), buffer
 }
+
+
+/* the encoder escapes the angle brackets the markers are spelled with, so an assertion written against the marker's own text never matches the record. Asking the encoder for its rendering keeps the assertion honest whichever way the escaping is configured. */
+func testEncodedJsonString(t *testing.T, value string) string {
+    t.Helper()
+
+    encoded, err := json.Marshal(value)
+    if nil != err {
+        t.Fatalf("could not encode %q: %v", value, err)
+    }
+
+    return string(encoded)
+}
+
 
 func TestJsonLogger_WritesJsonLine(t *testing.T) {
     logger, buffer := testNewJsonLogger()
@@ -489,7 +504,7 @@ func TestJsonLogger_ClosedReportsOnlyAReallyClosedWriter(t *testing.T) {
     }
 }
 
-/* a typed nil stored under a context key matched the error assertion and Error() dereferenced the nil receiver inside Log — a panic on the logging path, reachable from the exit handler; it renders as null, the nil its producer meant */
+/* a typed nil stored under a context key matches the error assertion, and its Error() would dereference the nil receiver inside Log, a panic on the logging path reachable from the exit handler; it renders as null, the nil its producer meant */
 func TestJsonLogger_NormalizesTypedNilErrorToNull(t *testing.T) {
     logger, buffer := testNewJsonLogger()
 
@@ -513,7 +528,7 @@ func TestJsonLogger_NormalizesTypedNilErrorToNull(t *testing.T) {
     }
 }
 
-/* an error one level down used to reach the encoder unnormalized and marshal as an empty object — every field unexported, no marshaler — so the diagnostic survived at the top level and vanished one level below it */
+/* an error one level down is normalized too: left to the encoder it marshals as an empty object — every field unexported, no marshaler — so the diagnostic would survive at the top level and vanish one level below it */
 func TestJsonLogger_NormalizesNestedErrors(t *testing.T) {
     logger, buffer := testNewJsonLogger()
 
@@ -548,7 +563,7 @@ func TestJsonLogger_NormalizesNestedErrors(t *testing.T) {
     }
 }
 
-/* one unmarshalable value used to cost every other key of the record: the fallback now carries the whole context as text, so the service name and the cause survive next to the marshal error */
+/* one unmarshalable value costs that value alone: the fallback carries the whole context as text, so the service name and the cause survive next to the marshal error */
 func TestJsonLogger_FallbackKeepsTheContextAsText(t *testing.T) {
     logger, buffer := testNewJsonLoggerWithMinLevel(loggingcontract.LevelInfo)
 
@@ -584,7 +599,7 @@ func (instance *gatedProbeWriter) Write(payload []byte) (int, error) {
     return len(payload), nil
 }
 
-/* Closed is asked by the process-boundary exit handler; an answer serialized behind an in-flight Write into a stalled pipe used to hang the one handler that must reach os.Exit — the probe is held open inside Write while Closed is required to answer */
+/* Closed is asked by the process-boundary exit handler, so it must answer while a Write into a stalled pipe is in flight, or it would hang the one handler that must reach os.Exit — the probe is held open inside Write while Closed is required to answer */
 func TestJsonLogger_ClosedAnswersWhileAWriteIsInFlight(t *testing.T) {
     writer := &gatedProbeWriter{
         entered: make(chan struct{}),
@@ -618,7 +633,7 @@ func TestJsonLogger_ClosedAnswersWhileAWriteIsInFlight(t *testing.T) {
     close(writer.release)
 }
 
-/* the console is recognized by identity — the os.Stdout and os.Stderr values themselves — not by name: a file the caller opened on the "/dev/stdout" path is a descriptor this logger owns, and the name check skipped the close it owed and leaked it once per boot */
+/* the console is recognized by identity — the os.Stdout and os.Stderr values themselves — not by name: a file the caller opened on the "/dev/stdout" path is a descriptor this logger owns, and a name check would skip the close it owes and leak it once per boot */
 func TestJsonLogger_CloseClosesAFileOpenedOnTheConsolePath(t *testing.T) {
     file, openErr := os.OpenFile("/dev/stdout", os.O_WRONLY|os.O_APPEND, 0644)
     if nil != openErr {
@@ -638,7 +653,7 @@ func TestJsonLogger_CloseClosesAFileOpenedOnTheConsolePath(t *testing.T) {
     }
 }
 
-/* the labels are read lock-free on every Log call while the caller keeps its reference: without the copy, a later write into that map raced the reads fatally; with it, the logger keeps rendering the labels it was built with */
+/* the labels are read lock-free on every Log call while the caller keeps its reference: without the copy, a later write into that map would race the reads fatally; with it, the logger keeps rendering the labels it was built with */
 func TestNewJsonLoggerWithLabels_CopiesTheLabels(t *testing.T) {
     labels := loggingcontract.LevelLabels{
         loggingcontract.LevelError: loggingcontract.LevelLabelFromString("custom-error"),
@@ -697,7 +712,7 @@ func TestJsonLogger_ErrorImplementingMarshalerRendersStructurally(t *testing.T) 
     }
 }
 
-/* a level outside the five known ones weighs as error instead of debug — the unknown level is the case that least deserves silence, and the zero-value exception carries an empty one; the label keeps the raw level so the record says what it was handed */
+/* a level outside the five known ones weighs as error instead of debug — the unknown level is the case that least deserves silence, and the zero-value exception carries an empty one; the label keeps the raw level so the record says what it received */
 func TestJsonLogger_UnknownLevelIsWeighedAsError(t *testing.T) {
     logger, buffer := testNewJsonLoggerWithMinLevel(loggingcontract.LevelInfo)
 
@@ -842,7 +857,7 @@ func TestJsonLogger_NilContextValue_RendersAsNull(t *testing.T) {
     }
 }
 
-/* the descent is bounded: a context that nests deeper than the bound is handed to the encoder as it is instead of recursing without end, which is what keeps a pathological self-referencing structure from taking the process down inside the logger. The assertion is written at the boundary itself — one level above it the error still renders as its message, one level below it reaches the encoder unconverted and marshals as an empty object — because a bound asserted from far away survives being moved by one */
+/* the descent is bounded so that a context which is merely very deep cannot walk until the stack is gone. The assertion is written at the boundary itself — one level above it the error still renders as its message, one level below it the container is replaced by the depth marker — because a bound asserted from far away survives being moved by one. The container may not be handed on raw: nothing has walked what it holds, and a cycle closing below the bound would reach the encoder and from there the fmt fallback. */
 func TestJsonLogger_ContextDepthBound_IsAppliedExactlyWhereItIsDeclared(t *testing.T) {
     buildNestedContext := func(depth int) loggingcontract.Context {
         nested := any(map[string]any{"cause": errors.New("at the bound")})
@@ -862,11 +877,98 @@ func TestJsonLogger_ContextDepthBound_IsAppliedExactlyWhereItIsDeclared(t *testi
         t.Fatalf("expected the error just above the bound to render as its message, got %q", buffer.String())
     }
 
+    /* the floor bounds the DESCENT, not the scalar conversion: an error handed to the walk at the floor still renders as its message */
     logger, buffer = testNewJsonLogger()
     logger.Error("message", buildNestedContext(normalizeJsonContextMaxDepth-1))
 
-    if false == strings.Contains(buffer.String(), `"cause":{}`) {
-        t.Fatalf("expected the error below the bound to reach the encoder unconverted, got %q", buffer.String())
+    if false == strings.Contains(buffer.String(), `"cause":"at the bound"`) {
+        t.Fatalf("expected the error at the floor to render as its message, got %q", buffer.String())
+    }
+
+    logger, buffer = testNewJsonLogger()
+    logger.Error("message", buildNestedContext(normalizeJsonContextMaxDepth))
+
+    if false == strings.Contains(buffer.String(), `"level":`+testEncodedJsonString(t, normalizeJsonContextDepthMarker)) {
+        t.Fatalf("expected the container below the bound to be replaced by the depth marker, got %q", buffer.String())
+    }
+
+    if true == strings.Contains(buffer.String(), `"cause":{}`) {
+        t.Fatalf("expected no unwalked container to reach the encoder, got %q", buffer.String())
+    }
+}
+
+/* the two shapes an application declares for itself: neither has a case in the walk, so both reach the cycle keying only through the conversion */
+type testForeignContext map[string]any
+
+type testForeignList []any
+
+/* a context that closes on itself is renderable, and rendering it is the whole point: without the cycle keying the walk hands the loop to json.Marshal, whose cycle ERROR routes the record into the fmt fallback — and fmt recurses on a cyclic map until the goroutine stack is gone. That failure is `fatal error: stack overflow`, which no recover reaches, so the record written to report a failure kills the process instead, holding the write mutex as it goes. The three shapes are the three a producer can actually build: the plain map, the defined context type the framework itself nests, and the slice. */
+func TestJsonLogger_ACyclicContextRendersTheCycleMarkerInsteadOfTakingTheProcessDown(t *testing.T) {
+    selfNamingMap := map[string]any{"name": "outer"}
+    selfNamingMap["self"] = selfNamingMap
+
+    selfNamingContext := loggingcontract.Context{"name": "typed"}
+    selfNamingContext["self"] = selfNamingContext
+
+    selfNamingSlice := make([]any, 2)
+    selfNamingSlice[0] = "first"
+    selfNamingSlice[1] = selfNamingSlice
+
+    /* a defined type the walk has no case for reaches the keying only through the conversion, and an application is free to declare one */
+    selfNamingForeignMap := testForeignContext{"name": "foreign"}
+    selfNamingForeignMap["self"] = selfNamingForeignMap
+
+    selfNamingForeignSlice := make(testForeignList, 2)
+    selfNamingForeignSlice[0] = "first"
+    selfNamingForeignSlice[1] = selfNamingForeignSlice
+
+    testCases := []struct {
+        name  string
+        value any
+    }{
+        {name: "a plain map holding itself", value: selfNamingMap},
+        {name: "a defined context type holding itself", value: selfNamingContext},
+        {name: "a slice holding itself", value: selfNamingSlice},
+        {name: "a foreign defined map type holding itself", value: selfNamingForeignMap},
+        {name: "a foreign defined slice type holding itself", value: selfNamingForeignSlice},
+    }
+
+    for _, testCase := range testCases {
+        t.Run(testCase.name, func(t *testing.T) {
+            logger, buffer := testNewJsonLogger()
+            logger.Error("failure", loggingcontract.Context{"detail": testCase.value})
+
+            rendered := buffer.String()
+            if false == strings.Contains(rendered, testEncodedJsonString(t, normalizeJsonContextCycleMarker)) {
+                t.Fatalf("expected the cycle to render as the marker, got %q", rendered)
+            }
+
+            /* the record has to survive whole: the marker replaces the loop, not the keys beside it, and the fallback must not have been reached at all */
+            if false == strings.Contains(rendered, `"message":"failure"`) {
+                t.Fatalf("expected the record to keep its message, got %q", rendered)
+            }
+
+            if true == strings.Contains(rendered, "marshalError") {
+                t.Fatalf("expected the encoder to succeed rather than fall back, got %q", rendered)
+            }
+        })
+    }
+}
+
+/* the keying follows the current path rather than every container the walk has seen, so a context naming one map from two sibling keys is a lattice and renders whole. Keyed on every visit instead, the second sibling would read as a cycle and the record would lose data that is plainly there. */
+func TestJsonLogger_AContextNamingOneMapTwiceRendersItBothTimes(t *testing.T) {
+    shared := map[string]any{"shared": "value"}
+
+    logger, buffer := testNewJsonLogger()
+    logger.Error("message", loggingcontract.Context{"first": shared, "second": shared})
+
+    rendered := buffer.String()
+    if true == strings.Contains(rendered, testEncodedJsonString(t, normalizeJsonContextCycleMarker)) {
+        t.Fatalf("expected two sibling references to render whole, got %q", rendered)
+    }
+
+    if 2 != strings.Count(rendered, `"shared":"value"`) {
+        t.Fatalf("expected the shared map to render under both keys, got %q", rendered)
     }
 }
 
@@ -970,16 +1072,7 @@ func (instance *blockingOrderedWriter) Write(payload []byte) (int, error) {
     return len(payload), nil
 }
 
-/*
-TestJsonLogger_TheStampOrderIsTheWriteOrder pins a guard against a RACE, so it
-is proven by construction rather than by a mutant: one write is held open while
-a second record is asked for, and the second record's stamp cannot precede the
-first write's completion unless the stamp is taken outside the lock. It was:
-the stamp said when the record was FORMED and the encoding happened between the
-stamp and the write, so at eight goroutines 484 records of 1600 reached the
-file out of stamp order while LOGGING.md promised the write order stays
-reconstructible from them.
-*/
+/* TestJsonLogger_TheStampOrderIsTheWriteOrder pins a guard against a RACE, so it is proven by construction rather than by a mutant: one write is held open while a second record is asked for, and the second record's stamp cannot precede the first write's completion unless the stamp is taken outside the lock, where it would say when the record was formed rather than when it was written. */
 func TestJsonLogger_TheStampOrderIsTheWriteOrder(t *testing.T) {
     writer := &blockingOrderedWriter{
         firstWriteAt: make(chan struct{}),
@@ -1108,5 +1201,318 @@ func TestJsonLogger_EnabledReportsNothingOnceClosed(t *testing.T) {
 
     if true == levelReporter.Enabled(loggingcontract.LevelEmergency) {
         t.Fatalf("expected a closed logger to report nothing enabled")
+    }
+}
+
+/* a context value renders through the caller's own MarshalJSON, and application code may log: under the write lock that value's record would deadlock the journal on itself, and every other writer behind it. The encoding of the caller's context is therefore done above the lock, where re-entering Log is merely a second record. */
+func TestJsonLogger_AContextValueThatLogsWhileItRendersDoesNotDeadlockTheLogger(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    logger := NewJsonLogger(buffer, loggingcontract.LevelInfo)
+
+    done := make(chan struct{})
+
+    go func() {
+        defer close(done)
+
+        logger.Info("outer", loggingcontract.Context{"value": &loggingReentrantValue{logger: logger}})
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatalf("the logger deadlocked on a context value that logs while it renders")
+    }
+
+    if false == strings.Contains(buffer.String(), "from inside the marshaller") {
+        t.Fatalf("expected the re-entrant record, got %q", buffer.String())
+    }
+
+    if false == strings.Contains(buffer.String(), "outer") {
+        t.Fatalf("expected the outer record, got %q", buffer.String())
+    }
+}
+
+/* loggingReentrantValue is the application value the test above is about: it logs from inside the rendering the logger asked it for */
+type loggingReentrantValue struct {
+    logger loggingcontract.Logger
+}
+
+func (instance *loggingReentrantValue) MarshalJSON() ([]byte, error) {
+    instance.logger.Info("from inside the marshaller", nil)
+
+    return []byte(`"rendered"`), nil
+}
+
+/* the echo of a failed write goes to stderr, and a stderr nobody drains blocks: taken under the write lock it would park every goroutine that logs, and Close with them, on the one channel whose whole purpose is to report that the journal has stopped writing. */
+func TestJsonLogger_AStalledStderrEchoDoesNotHoldTheWriteLock(t *testing.T) {
+    readEnd, writeEnd, pipeErr := os.Pipe()
+    if nil != pipeErr {
+        t.Fatalf("unexpected pipe error: %v", pipeErr)
+    }
+
+    originalStderr := os.Stderr
+    os.Stderr = writeEnd
+
+    filled := make(chan struct{})
+    echoed := make(chan struct{})
+
+    /* every writer parked on the pipe is unblocked and JOINED before the process stderr is put back: leaving one of them alive would have it reading the global this line writes */
+    defer func() {
+        _ = readEnd.Close()
+
+        <-filled
+        <-echoed
+
+        os.Stderr = originalStderr
+        _ = writeEnd.Close()
+    }()
+
+    /* fill the pipe so the echo below has nowhere to go */
+    go func() {
+        defer close(filled)
+
+        _, _ = writeEnd.Write(make([]byte, 1<<20))
+    }()
+
+    time.Sleep(50 * time.Millisecond)
+
+    logger := NewJsonLogger(&refusingWriter{}, loggingcontract.LevelInfo)
+
+    go func() {
+        defer close(echoed)
+
+        logger.Info("the record whose write fails", nil)
+    }()
+
+    time.Sleep(50 * time.Millisecond)
+
+    closer, isCloser := logger.(io.Closer)
+    if false == isCloser {
+        t.Fatalf("expected the json logger to be closeable")
+    }
+
+    closed := make(chan struct{})
+    go func() {
+        defer close(closed)
+
+        _ = closer.Close()
+    }()
+
+    select {
+    case <-closed:
+    case <-time.After(5 * time.Second):
+        t.Fatalf("Close waited on the write lock while the stderr echo was stalled")
+    }
+}
+
+/* refusingWriter is the journal destination that has stopped accepting records — a full disk, a vanished mount — which is the only condition the stderr echo exists for */
+type refusingWriter struct {
+}
+
+func (instance *refusingWriter) Write(payload []byte) (int, error) {
+    return 0, errors.New("the journal destination refuses every record")
+}
+
+
+/* the encoder leaves the C1 block raw in every field it writes, so a message carrying U+009B would repaint the terminal the file is tailed on and a NEL in a context value would end the record for a reader splitting on Unicode line boundaries; the record spells the block as json escapes in the message and in the context alike, and decodes to the values it was given */
+func TestJsonLogger_SpellsTheC1BlockAsJsonEscapes(t *testing.T) {
+    logger, buffer := testNewJsonLogger()
+
+    logger.Info("hi\xc2\x9bthere", map[string]any{"k": "v\xc2\x85w"})
+
+    line := buffer.Bytes()
+
+    for _, continuation := range []byte{0x85, 0x9b} {
+        if true == bytes.Contains(line, []byte{0xc2, continuation}) {
+            t.Fatalf("a raw C1 rune c2 %02x survived in %q", continuation, line)
+        }
+
+        spelling := "\\" + "u00" + fmt.Sprintf("%02x", continuation)
+        if false == bytes.Contains(line, []byte(spelling)) {
+            t.Fatalf("expected the spelling %s in %q", spelling, line)
+        }
+    }
+
+    var payload map[string]any
+    if decodeErr := json.Unmarshal(line, &payload); nil != decodeErr {
+        t.Fatalf("invalid json: %v for %q", decodeErr, line)
+    }
+
+    if "hi\xc2\x9bthere" != payload["message"] {
+        t.Fatalf("expected the message decoded to the value given, got %#v", payload["message"])
+    }
+
+    context, isMap := payload["context"].(map[string]any)
+    if false == isMap || "v\xc2\x85w" != context["k"] {
+        t.Fatalf("expected the context decoded to the value given, got %#v", payload["context"])
+    }
+}
+
+/* panickingJsonMarshaler is a context value whose own encoding raises */
+type panickingJsonMarshaler struct{}
+
+func (instance panickingJsonMarshaler) MarshalJSON() ([]byte, error) {
+    panic("the value's encoding dereferences a nil field")
+}
+
+/* a record is written from the recovery defers that report a failure, where the context carries whatever the panic carried: an error whose own Error() raises would send a second panic past the recovery, and on a worker's goroutine with nothing above it that ends the process. The message is rendered under a recover, the rest of the record kept. */
+func TestJsonLogger_ContainsAContextErrorWhoseErrorPanics(t *testing.T) {
+    logger, buffer := testNewJsonLogger()
+
+    logger.Error("the worker recovered a panic", map[string]any{"panic": &panickingMessageError{}, "worker": "audit"})
+
+    record := buffer.String()
+    if false == strings.Contains(record, "error message panicked") || false == strings.Contains(record, `"worker":"audit"`) {
+        t.Fatalf("expected the record written with the panicking message named and the rest kept, got %q", record)
+    }
+}
+
+/* the encoder hands back as a panic anything a value's MarshalJSON raises that is not its own error: the record falls back to the text it keeps for a context the encoder refuses and names why, and in that text the value whose encoding panicked is the one key that says so — the worker beside it keeps its value */
+func TestJsonLogger_ContainsAContextValueWhoseEncodingPanics(t *testing.T) {
+    logger, buffer := testNewJsonLogger()
+
+    logger.Error("the worker recovered a panic", map[string]any{"value": panickingJsonMarshaler{}, "worker": "audit"})
+
+    fallbackContext := fallbackContextOf(t, buffer.String())
+    if "audit" != fallbackContext["worker"] || false == strings.HasPrefix(fmt.Sprint(fallbackContext["value"]), "<unencodable: encoding the context panicked: the value's encoding dereferences a nil field") {
+        t.Fatalf("expected the worker kept and the panicking value named in the fallback, got %v", fallbackContext)
+    }
+}
+
+/* fallbackContextOf reads a fallback record's context text back as the object it spells */
+func fallbackContextOf(t *testing.T, line string) map[string]any {
+    t.Helper()
+
+    data := decodeJsonLine(t, strings.TrimSpace(line))
+    if nil == data["marshalError"] {
+        t.Fatalf("expected a fallback record, got %s", line)
+    }
+
+    contextText, isString := data["context"].(string)
+    if false == isString {
+        t.Fatalf("expected the fallback context as text, got %T", data["context"])
+    }
+
+    fallbackContext := map[string]any{}
+    if decodeErr := json.Unmarshal([]byte(contextText), &fallbackContext); nil != decodeErr {
+        t.Fatalf("expected the fallback context to spell one object, got %q: %v", contextText, decodeErr)
+    }
+
+    return fallbackContext
+}
+
+/* cyclicThroughAField holds a map through a struct field, the one shape of cycle the normalization does not
+   walk into */
+type cyclicThroughAField struct {
+    Held map[string]any
+}
+
+/* fmt has no cycle detection, so a context the encoder refuses is not handed to it whole: a map that closes on itself through a struct field would recurse until the goroutine stack is gone, a fatal error no recover turns into a record. Rendered key by key, the encoder detects the cycle and the one key that carries it says so; the service beside it keeps its value. */
+func TestJsonLogger_FallbackSurvivesACycleHeldThroughAStructField(t *testing.T) {
+    logger, buffer := testNewJsonLogger()
+
+    held := map[string]any{}
+    held["self"] = cyclicThroughAField{Held: held}
+
+    logger.Error("record", map[string]any{"cycle": held, "service": "the-culprit"})
+
+    fallbackContext := fallbackContextOf(t, buffer.String())
+    if "the-culprit" != fallbackContext["service"] || false == strings.HasPrefix(fmt.Sprint(fallbackContext["cycle"]), "<unencodable: ") {
+        t.Fatalf("expected the service kept and the cycle named in the fallback, got %v", fallbackContext)
+    }
+}
+
+/* selfPanickingError panics with itself when asked its message */
+type selfPanickingError struct{}
+
+func (instance selfPanickingError) Error() string {
+    panic(instance)
+}
+
+/* selfPanickingJsonMarshaler raises, from its encoding, a value that panics with itself when named */
+type selfPanickingJsonMarshaler struct{}
+
+func (instance selfPanickingJsonMarshaler) MarshalJSON() ([]byte, error) {
+    panic(selfPanickingError{})
+}
+
+/* the containment names what it caught through the caught value's own Error, and fmt contains one panic there but re-raises one raised while it prints the first: a value that panics with itself when named would go past the recover that named it, out of the record and out of the recovery that was writing it. Named by its type instead, the record is written — for a context error whose message panics that way, and for an encoding that raises such a value. */
+func TestJsonLogger_NamesAPanicWhoseNamingPanicsByItsType(t *testing.T) {
+    for _, context := range []map[string]any{
+        {"panic": selfPanickingError{}, "worker": "audit"},
+        {"value": selfPanickingJsonMarshaler{}, "worker": "audit"},
+    } {
+        logger, buffer := testNewJsonLogger()
+
+        written := func() (escaped any) {
+            defer func() {
+                escaped = recover()
+            }()
+
+            logger.Error("the worker recovered a panic", context)
+
+            return nil
+        }()
+
+        record := buffer.String()
+        if nil != written || false == strings.Contains(record, "selfPanickingError whose rendering panicked") || false == strings.Contains(record, "audit") {
+            t.Fatalf("expected the record written with the panic named by its type, escaped %v, got %q", written, record)
+        }
+    }
+}
+
+/* the floor renders an error as its message too, and under the same recover: an error whose Error() panics nested as
+   deep as the walk descends is where a second panic would still escape */
+func TestJsonLogger_ContainsAContextErrorWhoseErrorPanicsAtTheDepthFloor(t *testing.T) {
+    nested := any(map[string]any{"cause": &panickingMessageError{}})
+    for level := 0; level < normalizeJsonContextMaxDepth-1; level++ {
+        nested = map[string]any{"level": nested}
+    }
+
+    logger, buffer := testNewJsonLogger()
+    logger.Error("message", loggingcontract.Context{"root": nested})
+
+    if false == strings.Contains(buffer.String(), `"cause":"error message panicked`) {
+        t.Fatalf("expected the error at the floor rendered as panicked, got a record of %d bytes", buffer.Len())
+    }
+}
+
+/* a map type that marshals itself — a masking one above all — said how it renders, and the normalization hands it to the encoder as it is */
+type maskingContextMap map[string]any
+
+func (instance maskingContextMap) MarshalJSON() ([]byte, error) {
+    return []byte(`{"masked":true}`), nil
+}
+
+type labelContextSlice []any
+
+func (instance labelContextSlice) MarshalText() ([]byte, error) {
+    return []byte("labels"), nil
+}
+
+func TestJsonLogger_ADefinedMapTypeRendersThroughItsOwnMarshaler(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    NewJsonLogger(buffer, loggingcontract.LevelDebug).Info("probe", map[string]any{"k": maskingContextMap{"secret": "x"}})
+
+    if false == strings.Contains(buffer.String(), `"k":{"masked":true}`) || true == strings.Contains(buffer.String(), "secret") {
+        t.Fatalf("expected the map rendered through its own MarshalJSON, got %s", buffer.String())
+    }
+}
+
+func TestJsonLogger_ADefinedSliceTypeRendersThroughItsOwnTextMarshaler(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    NewJsonLogger(buffer, loggingcontract.LevelDebug).Info("probe", map[string]any{"k": labelContextSlice{"a", "b"}})
+
+    if false == strings.Contains(buffer.String(), `"k":"labels"`) {
+        t.Fatalf("expected the slice rendered through its own MarshalText, got %s", buffer.String())
+    }
+}
+
+/* at the depth floor a container is replaced by the marker because nothing walked it; a value that marshals itself is not a container the walk descends into, and passes the floor as it is */
+func TestNormalizeJsonValue_AMarshalerAtTheDepthFloorPassesAsItIs(t *testing.T) {
+    normalized := normalizeJsonValue(maskingContextMap{"secret": "x"}, 0, map[jsonContextVisitKey]struct{}{})
+
+    if _, kept := normalized.(maskingContextMap); false == kept {
+        t.Fatalf("expected the marshaler handed on at the floor, got %#v", normalized)
     }
 }

@@ -1,8 +1,9 @@
 package debug
 
 import (
+    "bytes"
+    "encoding"
     "encoding/json"
-    "errors"
     "fmt"
     "reflect"
     "sort"
@@ -14,7 +15,6 @@ import (
     "github.com/precision-soft/melody/cli/output"
     containercontract "github.com/precision-soft/melody/container/contract"
     "github.com/precision-soft/melody/exception"
-    exceptioncontract "github.com/precision-soft/melody/exception/contract"
     "github.com/precision-soft/melody/internal"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
@@ -43,7 +43,7 @@ func (instance *ContainerCommand) Flags() []clicontract.Flag {
     )
 }
 
-/* serviceDescriptionReporter is the door the listing asks for descriptions — asked, not required, so a substituted container that does not implement it keeps a name-only listing instead of failing the command */
+/* serviceDescriptionReporter is asked for, not required: a container without it is listed by name alone. */
 type serviceDescriptionReporter interface {
     ServiceDescriptions() []containercontract.ServiceDescription
 }
@@ -117,7 +117,7 @@ type containerServiceDescriptionItem struct {
     TypeName string `json:"typeName"`
 }
 
-/* describeServiceList is the default listing: it runs no provider. The descriptions carry both lifetimes; a container without the descriptions door is listed by name alone, with a warning naming the limitation instead of a silent narrower answer. */
+/* describeServiceList is the default listing and runs no provider; a container without the descriptions door is listed by name with a warning. */
 func (instance *ContainerCommand) describeServiceList(
     serviceContainer containercontract.Container,
     option output.Option,
@@ -251,25 +251,23 @@ type containerServiceDetails struct {
     ErrorContextJson string   `json:"errorContextJson"`
 }
 
+/* errorCauseChainDepth bounds the links the report walks, for the cause chain and its context alike. */
+const errorCauseChainDepth = 9
+
 func resolveErrorContextJson(resolveErr error, option output.Option) string {
     if nil == resolveErr {
         return emptyErrorContextJsonForFormat(option)
     }
 
-    /* the context is read through the ContextProvider contract rather than the concrete *exception.Error: an HttpException — or any userland error carrying a context — in the resolution chain used to contribute nothing, so its context was silently absent from the one report built to show it */
-    var provider exceptioncontract.ContextProvider
-    if false == errors.As(resolveErr, &provider) || true == internal.IsNilInterface(provider) {
-        return emptyErrorContextJsonForFormat(option)
-    }
-
-    contextValue := provider.Context()
+    /* the context is read through the ContextProvider contract from the first link that has one, breadth-first over the chain and bounded like it: a provider without a context answers an empty map */
+    contextValue := firstErrorContextInChain(resolveErr)
     if nil == contextValue {
         return emptyErrorContextJsonForFormat(option)
     }
 
-    /* sanitize BEFORE marshalling: both fallbacks below print the value they were handed, so walking only the happy path would leak exactly the stack and trace entries the noise filter strips whenever json.Marshal or json.Unmarshal fails. The defined exceptioncontract.Context type is converted to its plain map[string]any underlying because the walk matches via value.(map[string]any) first; nested named types are converted inside the tracked walk itself. */
+    /* sanitized before marshalling, because both fallbacks below print the value they were handed */
     keepNoiseKeys := 3 <= option.VerbosityLevel
-    redactedContext := sanitizeErrorContextValueTracked(map[string]any(contextValue), map[errorContextVisitKey]struct{}{}, 0, keepNoiseKeys)
+    redactedContext := sanitizeErrorContextValueTracked(contextValue, map[errorContextVisitKey]struct{}{}, 0, keepNoiseKeys)
 
     normalizedContextBytes, normalizeMarshalErr := json.Marshal(redactedContext)
     if nil != normalizeMarshalErr {
@@ -294,7 +292,18 @@ func resolveErrorContextJson(resolveErr error, option output.Option) string {
     return truncateErrorContextForFormat(string(contextJsonBytes), option)
 }
 
-/* emptyErrorContextJsonForFormat answers "nothing to report" in the grammar of the format asking. The json document declares a string of json, so the absence has to be a parseable one: `.errorContextJson | fromjson` died with "Cannot parse ''" on every healthy row of the very sweep built to be read by a machine, and a field whose type changes with the value of the row cannot be consumed at all. The table keeps the empty cell, where a literal {} would be noise in a column read by a person. */
+/* firstErrorContextInChain answers the context of the first link that carries one, within the cause chain's depth bound, and nil when none does. */
+func firstErrorContextInChain(resolveErr error) map[string]any {
+    for _, linkContext := range exception.BuildCauseContextChain(resolveErr, errorCauseChainDepth) {
+        if 0 < len(linkContext) {
+            return linkContext
+        }
+    }
+
+    return nil
+}
+
+/* emptyErrorContextJsonForFormat answers the absence of a context in the format's grammar: "{}" in json, so the field always parses, and an empty cell in the table. */
 func emptyErrorContextJsonForFormat(option output.Option) string {
     if output.FormatTable == option.Format {
         return ""
@@ -303,7 +312,7 @@ func emptyErrorContextJsonForFormat(option output.Option) string {
     return "{}"
 }
 
-/* unrepresentableErrorContextForFormat answers a context json.Marshal refuses — a chan, a func, a complex, a MarshalJSON that fails — in the grammar of the format asking, the same split emptyErrorContextJsonForFormat makes. The sanitizing walk passes an unrecognised scalar through untouched, so this is reachable from any provider that puts one in a context, and the %v rendering it used to answer is Go syntax: `"errorContextJson": "map[listener:0x5f8e40]"`, on which the `.errorContextJson | fromjson` this line documents dies for that row alone. Wrapping it in an object keeps the field parseable on every row and keeps the rendering, which names the culprit, under a key that says what it is. The table keeps the bare rendering, where a person reads the value rather than parses it. */
+/* unrepresentableErrorContextForFormat answers a context json.Marshal refuses in the format's grammar: in json an object carrying the rendering under a key, so the field always parses; in the table the bare rendering. */
 func unrepresentableErrorContextForFormat(contextValue any, option output.Option) string {
     rendered := fmt.Sprintf("%v", contextValue)
 
@@ -323,7 +332,7 @@ func unrepresentableErrorContextForFormat(contextValue any, option output.Option
     return string(rawBytes)
 }
 
-/* normalizeErrorCauseChain answers an empty list rather than a nil one, so the field stays an array in every row of one document — `jq '.data.items[].errorCauseChain[]'` used to die with "Cannot iterate over null" at the first service that resolved. It is the convention the envelope factory already applies to Warnings. The table renders both spellings identically. */
+/* normalizeErrorCauseChain answers an empty list rather than nil, so the field is an array on every row. */
 func normalizeErrorCauseChain(causeChain []string) []string {
     if nil == causeChain {
         return []string{}
@@ -332,7 +341,7 @@ func normalizeErrorCauseChain(causeChain []string) []string {
     return causeChain
 }
 
-/* truncateErrorContextForFormat applies the table-cell truncation to the table format alone: the json envelope is a machine document, and cutting a json fragment at a display width handed the consumer an unparseable value with no sign anything was dropped */
+/* truncateErrorContextForFormat truncates the table cell only: a cut json fragment would not parse. */
 func truncateErrorContextForFormat(value string, option output.Option) string {
     if output.FormatTable != option.Format {
         return value
@@ -341,16 +350,22 @@ func truncateErrorContextForFormat(value string, option output.Option) string {
     return truncateTableCellValueByVerbosity(value, option.VerbosityLevel)
 }
 
-/* resolveErrorCauseChain walks the causes below the resolution error's own message, so the report names why the build failed and not only that it did: the error string of a melody error is its message alone, and the dial refusal, the missing file, the refused credential all live below it — the one detail the operator runs the command to learn used to reach neither the table nor the json */
+/* resolveErrorCauseChain walks the causes below the resolution error's own message, so the report names why the build failed. */
 func resolveErrorCauseChain(resolveErr error) []string {
     if nil == resolveErr {
         return nil
     }
 
-    return exception.BuildCauseChain(errors.Unwrap(resolveErr), 8)
+    /* built from the failure with the head dropped, since BuildCauseChain walks both unwrap shapes */
+    chain := exception.BuildCauseChain(resolveErr, errorCauseChainDepth)
+    if 1 >= len(chain) {
+        return nil
+    }
+
+    return chain[1:]
 }
 
-/* populateServiceList is the --build sweep: every windowed service is resolved and the failures report their causes. A scoped registration resolves through the run's own scope — the scope a console command's services live in — never through the container that refuses it. */
+/* populateServiceList is the --build sweep: every windowed service is resolved and each failure reports its causes. A scoped registration resolves through the run's own scope. */
 func (instance *ContainerCommand) populateServiceList(
     serviceContainer containercontract.Container,
     runScope containercontract.Scope,
@@ -430,7 +445,7 @@ func (instance *ContainerCommand) populateServiceList(
             total,
         )
 
-        /* the shown count precedes the ok/error split so the split reads as scoped to it: only the windowed services are resolved, and an unqualified "8 ok | 2 error" beside a larger total implied the rest were neither instead of unprobed */
+        /* the shown count precedes the ok/error split, which covers the windowed services only */
         if shown != total {
             summary = fmt.Sprintf(
                 "%s | %d shown",
@@ -491,8 +506,7 @@ func (instance *ContainerCommand) populateServiceList(
                 for _, item := range errorItems {
                     errorBlock.AddRow(output.TableRowSeparatorToken)
 
-                    errorLines := buildContainerServiceErrorLines(item)
-                    errorLines = limitLinesByVerbosity(errorLines, option.VerbosityLevel)
+                    errorLines := buildContainerServiceErrorLines(item, option.VerbosityLevel)
 
                     for index := 0; index < len(errorLines); index++ {
                         nameCell := ""
@@ -525,7 +539,7 @@ func (instance *ContainerCommand) populateServiceList(
     )
 }
 
-/* reportServiceSweepFailures puts the sweep's failures where the exit code reads them. Render turns an envelope carrying an error into a non-zero exit, which is the whole reason the envelope contract exists: `app debug:container --build --format=json || exit 1` is a deployment gate, and a sweep whose declared purpose is "build everything and report the failures with their causes" used to answer `"error": null` and exit 0 over every one of them, leaving the failures reachable only as data.items[].error for a consumer nobody told to read them. The single-name door and the middleware sibling have reported theirs all along. */
+/* reportServiceSweepFailures carries the sweep's failures on the envelope, so the command exits non-zero over them and can gate a deployment. */
 func reportServiceSweepFailures(
     errorItems []containerServiceListItem,
     envelope *output.Envelope,
@@ -556,7 +570,7 @@ func reportServiceSweepFailures(
     )
 }
 
-/* resolveServiceForLifetime routes a build to the owner of the name: the container for its own services, the run's scope for a scoped registration — the same resolution a scoped service gets everywhere else in a console process */
+/* resolveServiceForLifetime resolves through the owner of the registration: the container, or the run's scope for a scoped one. */
 func resolveServiceForLifetime(
     serviceContainer containercontract.Container,
     runScope containercontract.Scope,
@@ -570,18 +584,19 @@ func resolveServiceForLifetime(
     return serviceContainer.Get(serviceName)
 }
 
-/* the placeholder a container that contains itself is rendered as, so the operator sees where the loop closed instead of a truncated blob or nothing at all */
+/* errorContextCycleMarker stands in for a container the walk meets on its own path. */
 const errorContextCycleMarker = "<cycle>"
 
-/* errorContextDepthMarker stands in for a subtree the walk refused to descend into. It reads differently from the cycle marker because the two say different things to whoever is looking at the rendered context: a cycle is a structure that closes on itself, this is a structure that simply goes deeper than anything worth printing. */
+/* errorContextDepthMarker stands in for a subtree past maximumErrorContextDepth. */
 const errorContextDepthMarker = "<depth limit>"
 
-/* maximumErrorContextDepth bounds the descent. The cycle guard above answers the context that holds itself; it says nothing about one that is merely very deep, and nothing else did either — a deep enough acyclic context walked until the goroutine stack was gone. That failure is `fatal error: stack overflow`, which no recover reaches, so the command layer cannot report it and the process dies rendering a debug page. Measured with the stack capped at 16 MiB it took some five hundred thousand levels, which the production cap of one gigabyte scales up rather than removes.
+/* errorContextMarshalFailureMarker stands in for a self-rendering value whose rendering failed; none of it is shown. */
+const errorContextMarshalFailureMarker = "<marshal failed>"
 
-The bound is far above anything a real error context reaches: these are producer-supplied maps describing a failure, and a hand-built one nests a handful of levels. It matches the bound internal/copy.go puts on the same shape of walk for the same reason. */
+/* maximumErrorContextDepth bounds the descent, since a deep enough acyclic context would overflow the stack, a fatal error no recover reaches. It matches the bound internal/copy.go puts on the same walk. */
 const maximumErrorContextDepth = 10000
 
-/* the walk records the containers on the current path only, and drops each one again on the way out. An error context may legitimately hand the same map or slice to two sibling keys, and rendering the second one as a cycle would be a silent wrong answer; a container is only a cycle when it is its own ancestor. A slice is keyed on its backing pointer together with its length, so two views of the same array are told apart rather than collapsed. */
+/* errorContextVisitKey keys the containers on the current path only: the same map under two sibling keys is not a cycle. A slice is keyed on its backing pointer and length. */
 type errorContextVisitKey struct {
     pointer uintptr
     length  uintptr
@@ -591,8 +606,7 @@ func sanitizeErrorContextValue(value any) any {
     return sanitizeErrorContextValueTracked(value, map[errorContextVisitKey]struct{}{}, 0, false)
 }
 
-/* the context handed in at the top of resolveErrorContextJson is the caller's own map, redacted before it reaches json.Marshal so the fallbacks cannot print what the redaction exists to strip. That ordering puts this walk ahead of encoding/json's cycle detector, so the walk carries its own: a context holding itself — `context["self"] = context`, which any producer can build — would otherwise recurse until the stack is gone, and a stack overflow is a fatal error that no recover in the command layer turns into a reported failure. */
-/* the plain shapes the tracked walk descends into; a defined type sharing their underlying type is converted to them below, which keeps the backing pointer and so the cycle keying */
+/* the plain shapes the walk descends into; a defined type over them is converted, which keeps the backing pointer and so the cycle keying */
 var plainContextMapType = reflect.TypeOf(map[string]any(nil))
 var plainContextSliceType = reflect.TypeOf([]any(nil))
 
@@ -605,9 +619,14 @@ func sanitizeErrorContextValueTracked(value any, seen map[errorContextVisitKey]s
         return errorContextDepthMarker
     }
 
+    /* a map or slice type that renders itself is rendered through its own method and the result walked, since the conversion below strips that method */
+    if rendered, isRendered := renderedThroughItsOwnJson(value); true == isRendered {
+        value = rendered
+    }
+
     mapValue, isMap := value.(map[string]any)
     if false == isMap {
-        /* a defined type whose underlying type is map[string]any — the framework's own exceptioncontract.Context is one, and it is exactly what a producer reaches for when nesting structured data — fails the assertion above while carrying the same shape. Left unconverted it rode past all three guards at once: a cycle survived into json.Marshal, whose cycle error routed it to the fmt fallback that has no cycle detection of its own — a fatal stack overflow no recover reaches — a depth past the bound recursed inside the encoder, and a dropped key inside it reached the fallbacks in the clear. */
+        /* a defined type over map[string]any, such as exceptioncontract.Context, is converted so the cycle, depth and noise guards apply to it */
         reflectedValue := reflect.ValueOf(value)
         if reflect.Map == reflectedValue.Kind() && true == reflectedValue.Type().ConvertibleTo(plainContextMapType) {
             mapValue = reflectedValue.Convert(plainContextMapType).Interface().(map[string]any)
@@ -627,7 +646,7 @@ func sanitizeErrorContextValueTracked(value any, seen map[errorContextVisitKey]s
 
     sliceValue, isSlice := value.([]any)
     if false == isSlice {
-        /* a defined slice type with underlying []any is converted for the reason the map conversion documents */
+        /* a defined type over []any is converted for the same reason */
         reflectedValue := reflect.ValueOf(value)
         if reflect.Slice == reflectedValue.Kind() && true == reflectedValue.Type().ConvertibleTo(plainContextSliceType) {
             sliceValue = reflectedValue.Convert(plainContextSliceType).Interface().([]any)
@@ -649,6 +668,40 @@ func sanitizeErrorContextValueTracked(value any, seen map[errorContextVisitKey]s
     }
 
     return value
+}
+
+/* renderedThroughItsOwnJson renders a self-marshaling map or slice through its own method and decodes the result into the plain shapes, numbers kept as written. A failing or panicking method renders as the failure marker, never as the plain shape its method masks. */
+func renderedThroughItsOwnJson(value any) (rendered any, isRendered bool) {
+    /* only the shapes the walk would otherwise convert; any other self-marshaling value reaches the encoder as it is */
+    if kind := reflect.ValueOf(value).Kind(); reflect.Map != kind && reflect.Slice != kind {
+        return nil, false
+    }
+
+    _, isMarshaler := value.(json.Marshaler)
+    _, isTextMarshaler := value.(encoding.TextMarshaler)
+    if false == isMarshaler && false == isTextMarshaler {
+        return nil, false
+    }
+
+    defer func() {
+        if nil != recover() {
+            rendered = errorContextMarshalFailureMarker
+            isRendered = true
+        }
+    }()
+
+    encoded, marshalErr := json.Marshal(value)
+    if nil != marshalErr {
+        return errorContextMarshalFailureMarker, true
+    }
+
+    decoder := json.NewDecoder(bytes.NewReader(encoded))
+    decoder.UseNumber()
+    if decodeErr := decoder.Decode(&rendered); nil != decodeErr {
+        return errorContextMarshalFailureMarker, true
+    }
+
+    return rendered, true
 }
 
 func sanitizeErrorContextMap(value map[string]any, seen map[errorContextVisitKey]struct{}, depth int, keepNoiseKeys bool) map[string]any {
@@ -693,7 +746,7 @@ func toLowerAscii(value string) string {
     return string(bytesValue)
 }
 
-/* shouldDropErrorContextKey names DIAGNOSTIC NOISE, not secrets: a stack or trace entry floods the table with screens of frames, so it is dropped below full verbosity — and only there, since -vvv shows the context whole. The filter deliberately redacts nothing else: the command prints what a producer put in its context, and a producer that parks a credential there owns that choice, exactly as every producer in this tree already refuses to. */
+/* shouldDropErrorContextKey names diagnostic noise, not secrets: stack and trace entries are dropped below full verbosity. Nothing else is redacted. */
 func shouldDropErrorContextKey(key string) bool {
     if "trace" == key {
         return true
@@ -759,7 +812,7 @@ func truncateTableCellValue(value string) string {
     return value[:runeAwareByteLimit(value, maxLength-3)] + "..."
 }
 
-/* runeAwareByteLimit returns the largest byte offset that is not greater than limit and lands on a UTF-8 rune boundary, so slicing at it never splits a multibyte rune into invalid bytes */
+/* runeAwareByteLimit returns the largest byte offset not above limit that lands on a UTF-8 rune boundary. */
 func runeAwareByteLimit(value string, limit int) int {
     if 0 >= limit {
         return 0
@@ -805,8 +858,7 @@ func buildContainerServiceTableRows(
         }
     }
 
-    errorLines := buildContainerServiceErrorLines(item)
-    errorLines = limitLinesByVerbosity(errorLines, option.VerbosityLevel)
+    errorLines := buildContainerServiceErrorLines(item, option.VerbosityLevel)
 
     rowCount := len(errorLines)
     if 1 > rowCount {
@@ -834,28 +886,56 @@ func buildContainerServiceTableRows(
     return rows
 }
 
-func buildContainerServiceErrorLines(item containerServiceListItem) []string {
-    lines := make([]string, 0, 8)
-
+/* buildContainerServiceErrorLines renders one failed service's error cell: the verbosity ladder cuts the message and the context json, never the causes. */
+func buildContainerServiceErrorLines(item containerServiceListItem, verbosityLevel int) []string {
+    messageLines := []string{}
     if "" != item.ErrorString {
-        lines = append(lines, splitLines(item.ErrorString)...)
+        messageLines = splitLines(item.ErrorString)
     }
 
-    /* the causes explain the message above them: without these lines the table said a build failed and withheld the dial refusal or missing credential that failed it */
+    causeLines := make([]string, 0, len(item.ErrorCauseChain))
     for _, causeEntry := range item.ErrorCauseChain {
-        causeLines := splitLines("caused by: " + causeEntry)
-        lines = append(lines, causeLines...)
+        causeLines = append(causeLines, splitLines("caused by: "+causeEntry)...)
     }
 
+    contextLines := []string{}
     if "" != item.ErrorContextJson {
-        contextLines := wrapFixedWidth(item.ErrorContextJson, 80)
-        for _, contextLine := range contextLines {
-            lines = append(lines, contextLine)
-        }
+        contextLines = wrapFixedWidth(item.ErrorContextJson, 80)
     }
+
+    lines := limitErrorLinesByVerbosity(messageLines, causeLines, contextLines, verbosityLevel)
 
     if 0 == len(lines) {
         return []string{""}
+    }
+
+    return lines
+}
+
+/* limitErrorLinesByVerbosity applies the ladder to the message and the context as one budget and splices the cause lines whole between them; the cut marker stays on the last rendered line. */
+func limitErrorLinesByVerbosity(messageLines []string, causeLines []string, contextLines []string, verbosityLevel int) []string {
+    budgeted := make([]string, 0, len(messageLines)+len(contextLines))
+    budgeted = append(budgeted, messageLines...)
+    budgeted = append(budgeted, contextLines...)
+
+    limited := limitLinesByVerbosity(budgeted, verbosityLevel)
+    cut := len(limited) < len(budgeted)
+    if true == cut && 0 < len(limited) {
+        limited[len(limited)-1] = strings.TrimSuffix(limited[len(limited)-1], verbosityCutMarker)
+    }
+
+    messageShown := len(messageLines)
+    if messageShown > len(limited) {
+        messageShown = len(limited)
+    }
+
+    lines := make([]string, 0, len(limited)+len(causeLines))
+    lines = append(lines, limited[:messageShown]...)
+    lines = append(lines, causeLines...)
+    lines = append(lines, limited[messageShown:]...)
+
+    if true == cut && 0 < len(lines) {
+        lines[len(lines)-1] = lines[len(lines)-1] + verbosityCutMarker
     }
 
     return lines
@@ -879,7 +959,7 @@ func wrapFixedWidth(value string, width int) []string {
 
         cut := runeAwareByteLimit(value, width)
         if 0 == cut {
-            /* the next rune is wider than the wrap width, so keep it whole rather than splitting its bytes into invalid UTF-8 */
+            /* a rune wider than the wrap width is kept whole */
             _, size := utf8.DecodeRuneInString(value)
             cut = size
         }
@@ -923,11 +1003,14 @@ func limitLinesByVerbosity(lines []string, verbosityLevel int) []string {
     }
 
     if 0 < len(limited) {
-        limited[len(limited)-1] = limited[len(limited)-1] + " ..."
+        limited[len(limited)-1] = limited[len(limited)-1] + verbosityCutMarker
     }
 
     return limited
 }
+
+/* verbosityCutMarker is the suffix of a line the ladder left lines out below. */
+const verbosityCutMarker = " ..."
 
 func errorMaxLinesForVerbosityLevel(verbosityLevel int) int {
     if 3 <= verbosityLevel {
@@ -973,7 +1056,7 @@ func (instance *ContainerCommand) populateSingleService(
         errorCauseChain = normalizeErrorCauseChain(resolveErrorCauseChain(getErr))
         errorContextJson = resolveErrorContextJson(getErr, option)
 
-        /* a registered service that fails to build is a wiring problem inside the provider, not a missing registration; reporting both as notFound sends the operator after a registration that is in fact present — and a registration either lifetime knows counts as present */
+        /* a registered service that fails to build is a wiring error, not notFound; a registration of either lifetime counts as present */
         errorCode := "debug.buildFailed"
         errorMessage := "service failed to build"
 

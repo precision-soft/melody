@@ -275,7 +275,32 @@ func TestNewAccessControlRegexRule_InvalidPatternPanics(t *testing.T) {
         }
     }()
 
-    _ = NewAccessControlRegexRule("(", "PUBLIC_ACCESS")
+    /* a non-public attribute, so the compile failure is what panics rather than the unanchored-public refusal that would fire first for PUBLIC_ACCESS */
+    _ = NewAccessControlRegexRule("(", "ROLE_ADMIN")
+}
+
+func TestNewAccessControlRegexRule_UnanchoredPublicPatternPanics(t *testing.T) {
+    defer func() {
+        if nil == recover() {
+            t.Fatalf("expected an unanchored public regex rule to be refused at construction")
+        }
+    }()
+
+    _ = NewAccessControlRegexRule("/status", "PUBLIC_ACCESS")
+}
+
+func TestNewAccessControlRegexRule_AnchoredPublicPatternIsAllowed(t *testing.T) {
+    accessControl := NewAccessControl(
+        NewAccessControlRegexRule("^/status(/|$)", "PUBLIC_ACCESS"),
+    )
+
+    attributes, matched := accessControl.Match("/status")
+    if false == matched {
+        t.Fatalf("expected the anchored public rule to match")
+    }
+    if 1 != len(attributes) || "PUBLIC_ACCESS" != attributes[0] {
+        t.Fatalf("expected PUBLIC_ACCESS, got %v", attributes)
+    }
 }
 
 func TestNewAccessControlExactRule_EmptyPathPanics(t *testing.T) {
@@ -336,7 +361,7 @@ func TestNewAccessControlRule_LonePublicAccessIsAllowedOnBoundedRules(t *testing
     }
 }
 
-/* a rule whose attributes all normalize away still matches its path, so it granted every authenticated principal and shadowed any longer-prefixed rule that would have denied; the blank attribute is refused at construction instead */
+/* a rule whose attributes all normalize away would still match its path, grant every authenticated principal and shadow any longer-prefixed rule that denies; the blank attribute is refused at construction instead */
 func TestAccessControlRule_RejectsAnAttributeListThatNormalizesToEmpty(t *testing.T) {
     for _, attributes := range [][]string{
         {},
@@ -367,8 +392,7 @@ func TestAccessControlRule_RejectsAnAttributeListThatNormalizesToEmpty(t *testin
     }
 }
 
-/* A route ending in a catch-all parameter accepts the spellings net/http hands through unfolded, so a rule
-that only matches the folded one is a rule the request walks past — and no rule matched means granted. */
+/* A route ending in a catch-all parameter accepts the spellings net/http hands through unfolded, so a rule that only matches the folded one is a rule the request walks past — and no rule matched means granted. */
 func TestAccessControl_MatchFoldsTheSpellingsACatchAllRouteAccepts(t *testing.T) {
     control := NewAccessControl(
         NewAccessControlRawPrefixRule("/admin", "ROLE_ADMIN"),
@@ -471,5 +495,64 @@ func TestNewAccessControlRule_LonePublicAccessAllowed(t *testing.T) {
     }
     if 1 != len(rule.attributes) || "PUBLIC_ACCESS" != rule.attributes[0] {
         t.Fatalf("expected exactly one PUBLIC_ACCESS attribute, got %v", rule.attributes)
+    }
+}
+
+func TestAccessControlRegexPatternIsAnchored(t *testing.T) {
+    for _, testCase := range []struct {
+        pattern  string
+        anchored bool
+    }{
+        {"^/public", true},
+        {"^/public(/|$)", true},
+        {"(?i)^/public(/|$)", true},
+        {`\A/public`, true},
+        {"^/public|^/status", true},
+        {"^(/public|/status)", true},
+        {"^(?:/public|/status)(/|$)", true},
+        {"^/public$|^/status$", true},
+        {"^/a+", true},
+        {"(^/public)+", true},
+        {"(?:)^/public", true},
+        {"()^/public", true},
+
+        {"/status", false},
+        {"^/public|/status", false},
+        {"/status|^/public", false},
+        {"^/a|/b|^/c", false},
+        {"(?m)^/public", false},
+        {"(^/public)?", false},
+    } {
+        if testCase.anchored != accessControlRegexPatternIsAnchored(testCase.pattern) {
+            t.Fatalf("expected %q to read as anchored=%v", testCase.pattern, testCase.anchored)
+        }
+    }
+}
+
+func TestNewAccessControlRegexRule_RequiresEveryPublicBranchToBeAnchored(t *testing.T) {
+    for _, pattern := range []string{"^/public|/status", "(?m)^/public", "(^/public)?"} {
+        t.Run(pattern, func(t *testing.T) {
+            defer func() {
+                if nil == recover() {
+                    t.Fatalf("expected the public pattern %q to be refused", pattern)
+                }
+            }()
+
+            _ = NewAccessControlRegexRule(pattern, "PUBLIC_ACCESS")
+        })
+    }
+}
+
+func TestNewAccessControlRegexRule_AcceptsGroupedAndFlaggedPublicPatterns(t *testing.T) {
+    for _, pattern := range []string{"(?i)^/public(/|$)", `\A/public(/|$)`, "^(?:/public|/status)(/|$)", "^/public$|^/status$"} {
+        t.Run(pattern, func(t *testing.T) {
+            control := NewAccessControl(NewAccessControlRegexRule(pattern, "PUBLIC_ACCESS"))
+            if _, matched := control.Match("/public"); false == matched {
+                t.Fatalf("expected %q to match /public", pattern)
+            }
+            if _, matched := control.Match("/admin/status-board"); true == matched {
+                t.Fatalf("expected %q not to match inside a protected path", pattern)
+            }
+        })
     }
 }

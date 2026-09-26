@@ -61,12 +61,16 @@ func (instance *CategoryService) List() ([]*entity.Category, error) {
 }
 
 func (instance *CategoryService) FindById(id string) (*entity.Category, bool, error) {
+    /* an identifier no cache key can carry names no row, so it is answered as absent without asking the cache */
+    if false == CacheSafeIdentifier(id) {
+        return nil, false, nil
+    }
+
     cacheKey := CacheKeyCategoryById(id)
 
-    cached, rememberErr := melodycache.Remember(
+    cached, rememberErr := rememberEntityOrAbsence(
         instance.cache,
         cacheKey,
-        0,
         func(ctx context.Context) (any, error) {
             category, found, findErr := instance.categoryRepository.FindById(ctx, id)
             if nil != findErr {
@@ -79,7 +83,6 @@ func (instance *CategoryService) FindById(id string) (*entity.Category, bool, er
 
             return category, nil
         },
-        nil,
     )
     if nil != rememberErr {
         return nil, false, rememberErr
@@ -138,9 +141,11 @@ func (instance *CategoryService) Update(
         return nil, false, nil
     }
 
-    category.Name = name
+    /* under the in-memory configuration the loaded entity is the repository's stored value, shared with concurrent readers, so the change lands on a copy and a refused update leaves the stored entity untouched */
+    modified := *category
+    modified.Name = name
 
-    updated, updateErr := instance.categoryRepository.Update(ctx, category)
+    updated, updateErr := instance.categoryRepository.Update(ctx, &modified)
     if nil != updateErr {
         return nil, false, updateErr
     }
@@ -148,7 +153,7 @@ func (instance *CategoryService) Update(
         return nil, false, nil
     }
 
-    updatedEvent := event.NewCategoryUpdatedEvent(category)
+    updatedEvent := event.NewCategoryUpdatedEvent(&modified)
     _, dispatchErr := instance.eventDispatcher.DispatchName(
         runtimeInstance,
         event.CategoryUpdatedEventName,
@@ -158,7 +163,7 @@ func (instance *CategoryService) Update(
         return nil, true, dispatchErr
     }
 
-    return category, true, nil
+    return &modified, true, nil
 }
 
 func (instance *CategoryService) DeleteById(

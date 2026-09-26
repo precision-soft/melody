@@ -2,6 +2,8 @@ package messagebus
 
 import (
     "testing"
+
+    "github.com/precision-soft/melody/v3/internal/testhelper"
 )
 
 func TestRouting_RouteTypeDispatchesToTransport(t *testing.T) {
@@ -41,4 +43,18 @@ func TestRouting_BuildSnapshotIgnoresRoutesAddedAfterBuild(t *testing.T) {
     if _, hasSentStamp := LastStampOfType[SentStamp](sentEnvelope); true == hasSentStamp {
         t.Fatalf("middleware routed a message via a route registered after the middleware was built; build() must take a snapshot")
     }
+}
+
+func TestRouteType_RefusesANilTransportAtRegistration(t *testing.T) {
+    testhelper.AssertPanicsWithError(t, func() {
+        RouteType[taskCreated](NewRouting(), "async", nil)
+    }, "messagebus route transport is nil")
+}
+
+func TestRouteType_RefusesATypedNilTransportAtRegistration(t *testing.T) {
+    var typedNil *InMemoryTransport
+
+    testhelper.AssertPanicsWithError(t, func() {
+        RouteType[taskCreated](NewRouting(), "async", typedNil)
+    }, "messagebus route transport is nil")
 }

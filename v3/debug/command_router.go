@@ -1,6 +1,7 @@
 package debug
 
 import (
+    "encoding/json"
     "fmt"
     "sort"
     "strings"
@@ -29,7 +30,7 @@ func (instance *RouterCommand) Flags() []clicontract.Flag {
 
 func (instance *RouterCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
 ) error {
     startedAt := time.Now()
 
@@ -39,7 +40,7 @@ func (instance *RouterCommand) Run(
 
     meta := output.NewMeta(
         instance.Name(),
-        commandContext.Args().Slice(),
+        commandContext.Arguments(),
         option,
         startedAt,
         time.Duration(0),
@@ -53,7 +54,7 @@ func (instance *RouterCommand) Run(
 
     items := make([]routeListItem, 0, len(routes))
 
-    for _, routeDefinition := range routes {
+    for index, routeDefinition := range routes {
         methods := strings.Join(routeDefinition.Methods(), ",")
         if "" == methods {
             methods = "ANY"
@@ -85,18 +86,29 @@ func (instance *RouterCommand) Run(
                 Methods: methods,
                 Pattern: routeDefinition.Pattern(),
                 Name:    name,
-                Host:    host,
-                Schemes: schemes,
-                Locales: locales,
+                /* the two discriminators the dispatch uses: the higher priority wins, then the lower registration order */
+                Priority:     routeDefinition.Priority(),
+                Order:        index + 1,
+                Host:         host,
+                Schemes:      schemes,
+                Locales:      locales,
+                Requirements: routeDefinition.Requirements(),
+                Defaults:     routeDefinition.Defaults(),
+                Attributes:   serializableRouteAttributes(routeDefinition.Attributes()),
             },
         )
     }
 
+    /* the registration order makes the comparator total over routes sharing pattern and methods */
     sort.Slice(items, func(leftIndex int, rightIndex int) bool {
         left := items[leftIndex]
         right := items[rightIndex]
 
         if left.Pattern == right.Pattern {
+            if left.Methods == right.Methods {
+                return left.Order < right.Order
+            }
+
             return left.Methods < right.Methods
         }
 
@@ -126,20 +138,38 @@ func (instance *RouterCommand) Run(
 
         builder.AddSummaryLine(summary)
 
+        columns := []string{"methods", "pattern", "name", "priority", "order", "host", "schemes", "locales"}
+        if true == option.Verbose {
+            columns = append(columns, "requirements", "defaults", "attributes")
+        }
+
         block := builder.AddBlock(
             "ROUTES",
-            []string{"methods", "pattern", "name", "host", "schemes", "locales"},
+            columns,
         )
 
         for _, item := range items {
-            block.AddRow(
+            cells := []string{
                 item.Methods,
                 item.Pattern,
                 item.Name,
+                fmt.Sprintf("%d", item.Priority),
+                fmt.Sprintf("%d", item.Order),
                 item.Host,
                 item.Schemes,
                 item.Locales,
-            )
+            }
+
+            if true == option.Verbose {
+                cells = append(
+                    cells,
+                    renderCompactStringMap(item.Requirements),
+                    renderCompactStringMap(item.Defaults),
+                    renderCompactAnyMap(item.Attributes),
+                )
+            }
+
+            block.AddRow(cells...)
         }
 
         envelope.Table = builder.Build()
@@ -154,16 +184,82 @@ func (instance *RouterCommand) Run(
 
     envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
 
-    return output.Render(commandContext.Writer, envelope, option)
+    return output.Render(commandContext.Writer(), envelope, option)
 }
 
 type routeListItem struct {
-    Methods string `json:"methods"`
-    Pattern string `json:"pattern"`
-    Name    string `json:"name"`
-    Host    string `json:"host"`
-    Schemes string `json:"schemes"`
-    Locales string `json:"locales"`
+    Methods      string            `json:"methods"`
+    Pattern      string            `json:"pattern"`
+    Name         string            `json:"name"`
+    Priority     int               `json:"priority"`
+    Order        int               `json:"order"`
+    Host         string            `json:"host"`
+    Schemes      string            `json:"schemes"`
+    Locales      string            `json:"locales"`
+    Requirements map[string]string `json:"requirements"`
+    Defaults     map[string]string `json:"defaults"`
+    Attributes   map[string]any    `json:"attributes"`
+}
+
+/* renderCompactStringMap folds a discriminator map into one sorted k=v cell. */
+func renderCompactStringMap(values map[string]string) string {
+    if 0 == len(values) {
+        return "-"
+    }
+
+    keys := make([]string, 0, len(values))
+    for key := range values {
+        keys = append(keys, key)
+    }
+
+    sort.Strings(keys)
+
+    pairs := make([]string, 0, len(keys))
+    for _, key := range keys {
+        pairs = append(pairs, key+"="+values[key])
+    }
+
+    return strings.Join(pairs, ",")
+}
+
+/* serializableRouteAttributes keeps the document producible whatever a route carries: a value that marshals is kept as it is, and one that cannot is rendered as the %v text the verbose table prints. The cycle-guarded walk runs first, keeping the noise keys, so a self-referencing attribute becomes a marker instead of recursing through fmt. */
+func serializableRouteAttributes(values map[string]any) map[string]any {
+    if 0 == len(values) {
+        return values
+    }
+
+    projected := make(map[string]any, len(values))
+    for key, value := range values {
+        cycleSafeValue := sanitizeErrorContextValueTracked(
+            value,
+            map[errorContextVisitKey]struct{}{},
+            0,
+            true,
+        )
+
+        if _, marshalErr := json.Marshal(cycleSafeValue); nil != marshalErr {
+            projected[key] = fmt.Sprintf("%v", cycleSafeValue)
+
+            continue
+        }
+
+        projected[key] = cycleSafeValue
+    }
+
+    return projected
+}
+
+func renderCompactAnyMap(values map[string]any) string {
+    if 0 == len(values) {
+        return "-"
+    }
+
+    stringValues := make(map[string]string, len(values))
+    for key, value := range values {
+        stringValues[key] = fmt.Sprintf("%v", value)
+    }
+
+    return renderCompactStringMap(stringValues)
 }
 
 var _ clicontract.Command = (*RouterCommand)(nil)

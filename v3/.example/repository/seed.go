@@ -1,13 +1,13 @@
 package repository
 
 import (
+    "context"
     "time"
 
     "github.com/precision-soft/melody/v3/.example/entity"
+    "github.com/precision-soft/melody/v3/.example/persistence"
     "github.com/precision-soft/melody/v3/.example/security"
 )
-
-/* The catalogue the example opens with. Both implementations start from it: the in-memory one holds it for the life of the process, and the database-backed one writes it once into an empty table, so the application shows the same nomenclature whichever way it was configured. */
 
 func seedProductList(now time.Time) []*entity.Product {
     return []*entity.Product{
@@ -78,18 +78,40 @@ func seedCategoryList() []*entity.Category {
     }
 }
 
+/* seedRateAsOf is the instant the opening rates carry, a fixed past moment rather than the boot instant: the seeded rates are the state the application ships with, so a refresh is visible as a change in both the number and the instant. */
+var seedRateAsOf = time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+
+/* the rates are quoted against the euro, one euro costing this many units of the currency; the refresh refuses a document quoted against any base but RATES_BASE_CURRENCY, EUR by default to match this seed */
 func seedCurrencyList() []*entity.Currency {
     return []*entity.Currency{
-        entity.NewCurrency("cur-eur", "EUR", "Euro"),
-        entity.NewCurrency("cur-usd", "USD", "US Dollar"),
-        entity.NewCurrency("cur-ron", "RON", "Romanian Leu"),
+        entity.NewCurrency("cur-eur", "EUR", "Euro", 1, seedRateAsOf),
+        entity.NewCurrency("cur-usd", "USD", "US Dollar", 1.1, seedRateAsOf),
+        entity.NewCurrency("cur-ron", "RON", "Romanian Leu", 5.05, seedRateAsOf),
     }
 }
 
 func seedUserList() []*entity.User {
     return []*entity.User{
-        entity.NewUser("user-1", "user", security.Sha256Hex("user"), []string{entity.RoleUser}),
-        entity.NewUser("user-2", "editor", security.Sha256Hex("editor"), []string{entity.RoleUser, entity.RoleEditor}),
-        entity.NewUser("user-3", "admin", security.Sha256Hex("admin"), []string{entity.RoleUser, entity.RoleEditor, entity.RoleAdmin}),
+        entity.NewUser("user-1", "user", security.MustHashPassword("user"), []string{entity.RoleUser}),
+        entity.NewUser("user-2", "editor", security.MustHashPassword("editor"), []string{entity.RoleUser, entity.RoleEditor}),
+        entity.NewUser("user-3", "admin", security.MustHashPassword("admin"), []string{entity.RoleUser, entity.RoleEditor, entity.RoleAdmin}),
     }
+}
+
+/* SeedAll writes the opening state of every nomenclature over a database just brought to the schema, the door example:db:reset uses. It runs the same seedIfEmpty over the same four repositories as their constructors, so a reset leaves the state of a fresh volume; over tables that hold rows it changes nothing. */
+func SeedAll(ctx context.Context, storage *persistence.CatalogStorage) error {
+    seedList := []func(ctx context.Context) error{
+        newBunCategoryRepository(storage.Database()).seedIfEmpty,
+        newBunCurrencyRepository(storage.Database()).seedIfEmpty,
+        newBunProductRepository(storage).seedIfEmpty,
+        newBunUserRepository(storage).seedIfEmpty,
+    }
+
+    for _, seed := range seedList {
+        if seedErr := seed(ctx); nil != seedErr {
+            return seedErr
+        }
+    }
+
+    return nil
 }

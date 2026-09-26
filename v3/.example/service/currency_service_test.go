@@ -1,0 +1,482 @@
+package service
+
+import (
+    "context"
+    "encoding/json"
+    "errors"
+    "math"
+    "reflect"
+    "testing"
+    "time"
+
+    "github.com/precision-soft/melody/v3/.example/entity"
+    "github.com/precision-soft/melody/v3/.example/event"
+    "github.com/precision-soft/melody/v3/.example/persistence"
+    "github.com/precision-soft/melody/v3/.example/repository"
+    melodyeventcontract "github.com/precision-soft/melody/v3/event/contract"
+    melodyexception "github.com/precision-soft/melody/v3/exception"
+    melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
+)
+
+func TestCurrencyServiceUpdateRate_WritesTheQuoteAndTellsTheListeners(t *testing.T) {
+    currencyService, dispatcher, runtimeInstance := currencyServiceUnderTest(t)
+
+    quotedAt := time.Date(2026, time.September, 7, 9, 30, 0, 0, time.UTC)
+
+    updated, outcome, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", entity.NewRateQuote(1.0842, quotedAt, quotedAt))
+    if nil != err {
+        t.Fatalf("the update failed: %v", err)
+    }
+
+    if RateUpdateWritten != outcome {
+        t.Fatalf("the door answered outcome %d for a moved quote, wanted RateUpdateWritten", outcome)
+    }
+
+    if 1.0842 != updated.Rate {
+        t.Errorf("cur-usd came back quoted at %v, wanted 1.0842", updated.Rate)
+    }
+
+    if quotedAt != updated.RateAsOf.UTC() {
+        t.Errorf("cur-usd is stamped %s, wanted the instant the quote was taken at", updated.RateAsOf.UTC())
+    }
+
+    /* the listener is what drops the cached list and the cached currency, so a write that skipped the dispatch would leave every reader on the rate it replaced */
+    dispatched := dispatcher.names()
+    if 1 != len(dispatched) || event.CurrencyUpdatedEventName != dispatched[0] {
+        t.Errorf("the update dispatched %v, wanted one %s", dispatched, event.CurrencyUpdatedEventName)
+    }
+
+    stored, storedFound, storedErr := currencyService.FindById("cur-usd")
+    if nil != storedErr || false == storedFound {
+        t.Fatalf("reading the currency back failed: %v", storedErr)
+    }
+
+    if 1.0842 != stored.Rate {
+        t.Errorf("the stored currency is quoted at %v, wanted 1.0842", stored.Rate)
+    }
+}
+
+/* the refusal comes before anything is written, which is what the second half asserts: a guard that refused
+   after the write would leave the catalogue holding a rate it had just called impossible */
+func TestCurrencyServiceUpdateRate_RefusesAQuoteThatIsNotAUsablePrice(t *testing.T) {
+    for _, rate := range []float64{0, -1.0842, math.Inf(1), math.NaN(), math.MaxFloat64, 5e-324, 1e-7, 1e10} {
+        currencyService, dispatcher, runtimeInstance := currencyServiceUnderTest(t)
+
+        before, _, _ := currencyService.FindById("cur-usd")
+
+        _, _, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", entity.NewRateQuote(rate, currencyQuoteInstant, currencyQuoteInstant))
+        if nil == err {
+            t.Fatalf("a rate of %v was accepted", rate)
+        }
+
+        after, _, _ := currencyService.FindById("cur-usd")
+        if before.Rate != after.Rate {
+            t.Errorf("a refused rate of %v still moved the stored quote from %v to %v", rate, before.Rate, after.Rate)
+        }
+
+        if 0 != len(dispatcher.names()) {
+            t.Errorf("a refused rate of %v dispatched %v", rate, dispatcher.names())
+        }
+    }
+}
+
+func TestCurrencyServiceUpdateRate_AnswersNotFoundForACurrencyTheCatalogueDoesNotCarry(t *testing.T) {
+    currencyService, _, runtimeInstance := currencyServiceUnderTest(t)
+
+    _, outcome, err := currencyService.UpdateRate(runtimeInstance, "cur-nope", entity.NewRateQuote(1.0842, currencyQuoteInstant, currencyQuoteInstant))
+    if nil != err {
+        t.Fatalf("updating a missing currency failed instead of reporting it missing: %v", err)
+    }
+
+    if RateUpdateAbsent != outcome {
+        t.Errorf("a currency the catalogue does not carry was answered with outcome %d, wanted RateUpdateAbsent", outcome)
+    }
+}
+
+/* a quote older than the one stored is a replay, and the catalogue keeps its newer reading: nothing is
+   written and nothing is dispatched, and the door says which of the two it did */
+func TestCurrencyServiceUpdateRate_KeepsTheNewerReadingOverAStaleQuote(t *testing.T) {
+    currencyService, dispatcher, runtimeInstance := currencyServiceUnderTest(t)
+
+    before, _, _ := currencyService.FindById("cur-usd")
+    olderInstant := before.RateAsOf.Add(-time.Hour)
+
+    _, outcome, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", entity.NewRateQuote(9.99, olderInstant, olderInstant))
+    if nil != err {
+        t.Fatalf("a stale quote failed instead of being kept out: %v", err)
+    }
+
+    if RateUpdateStale != outcome {
+        t.Fatalf("a stale quote was answered with outcome %d, wanted RateUpdateStale", outcome)
+    }
+
+    after, _, _ := currencyService.FindById("cur-usd")
+    if before.Rate != after.Rate || false == before.RateAsOf.Equal(after.RateAsOf) {
+        t.Errorf("a stale quote moved cur-usd from %v@%s to %v@%s", before.Rate, before.RateAsOf, after.Rate, after.RateAsOf)
+    }
+
+    if 0 != len(dispatcher.names()) {
+        t.Errorf("a stale quote dispatched %v", dispatcher.names())
+    }
+}
+
+/* the quote the catalogue already holds, at the instant it already holds it, is not written again and dispatches nothing, since on mysql a full-row UPDATE that changes nothing affects zero rows and reads as a vanished currency; a cache that kept an earlier rate after a failed invalidation has its two entries of the currency dropped, so it is healed by the tick that finds nothing to write */
+func TestCurrencyServiceUpdateRate_AnswersUnchangedWithoutWritingAndDropsTheCachedCurrency(t *testing.T) {
+    currencyService, dispatcher, runtimeInstance := currencyServiceUnderTest(t)
+
+    quotedAt := currencyQuoteInstant.Add(time.Hour)
+    if _, _, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", entity.NewRateQuote(1.0842, quotedAt, quotedAt)); nil != err {
+        t.Fatalf("the first update failed: %v", err)
+    }
+
+    /* the first write dispatched once and the listener is not wired here, so the invalidation it stands for
+       never ran: both entries are planted holding the quote from BEFORE that write, which is the state the
+       heal exists for, and must be dropped by the second call, not by an event */
+    stale := entity.NewCurrency("cur-usd", "USD", "US Dollar", 1.08, currencyQuoteInstant)
+    if setErr := currencyService.cache.Set(CacheKeyCurrencyById("cur-usd"), stale, time.Hour); nil != setErr {
+        t.Fatalf("planting the stale by-id entry failed: %v", setErr)
+    }
+    if setErr := currencyService.cache.Set(CacheKeyCurrencyList, []*entity.Currency{stale}, time.Hour); nil != setErr {
+        t.Fatalf("planting the stale list failed: %v", setErr)
+    }
+
+    recordingRepository := &updateCountingCurrencyRepository{CurrencyRepository: currencyService.currencyRepository}
+    currencyService.currencyRepository = recordingRepository
+
+    cacheInstance := currencyService.cache.(*ttlRecordingCache)
+    deletesBefore := cacheInstance.deleteCount()
+
+    _, outcome, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", entity.NewRateQuote(1.0842, quotedAt, quotedAt))
+    if nil != err {
+        t.Fatalf("the unchanged update failed: %v", err)
+    }
+
+    if RateUpdateUnchanged != outcome {
+        t.Fatalf("an unchanged quote was answered with outcome %d, wanted RateUpdateUnchanged", outcome)
+    }
+
+    if 0 != recordingRepository.updates.Load() {
+        t.Errorf("an unchanged quote issued %d UPDATE statements, wanted none", recordingRepository.updates.Load())
+    }
+
+    if 1 != len(dispatcher.names()) {
+        t.Errorf("an unchanged quote dispatched %v beyond the first write's one event", dispatcher.names())
+    }
+
+    if 2 != cacheInstance.deleteCount()-deletesBefore {
+        t.Errorf("an unchanged quote dropped %d cache entries, wanted the currency's two", cacheInstance.deleteCount()-deletesBefore)
+    }
+
+    /* the two are the currency's OWN entries — the heal is pinned on which keys, not on how many */
+    dropped := cacheInstance.deletedKeyList()
+    dropped = dropped[len(dropped)-2:]
+    if CacheKeyCurrencyById("cur-usd") != dropped[0] || CacheKeyCurrencyList != dropped[1] {
+        t.Errorf("an unchanged quote dropped %v, wanted the by-id entry of cur-usd and the list", dropped)
+    }
+}
+
+/* a cache that already serves the quote the row holds is left as it is, so an unchanged tick costs the server no read from the database and no write into the cache */
+func TestCurrencyServiceUpdateRate_KeepsACacheThatAlreadyServesTheQuote(t *testing.T) {
+    currencyService, _, runtimeInstance := currencyServiceUnderTest(t)
+
+    quotedAt := currencyQuoteInstant.Add(time.Hour)
+    if _, _, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", entity.NewRateQuote(1.0842, quotedAt, quotedAt)); nil != err {
+        t.Fatalf("the first update failed: %v", err)
+    }
+
+    /* the listener is not wired here, so the reads below plant both entries holding the row as it now is */
+    if _, _, err := currencyService.FindById("cur-usd"); nil != err {
+        t.Fatalf("reading the currency back failed: %v", err)
+    }
+    if _, err := currencyService.List(); nil != err {
+        t.Fatalf("reading the list back failed: %v", err)
+    }
+
+    cacheInstance := currencyService.cache.(*ttlRecordingCache)
+    deletesBefore := cacheInstance.deleteCount()
+
+    if _, outcome, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", entity.NewRateQuote(1.0842, quotedAt, quotedAt)); nil != err || RateUpdateUnchanged != outcome {
+        t.Fatalf("the unchanged update answered %d, %v; wanted RateUpdateUnchanged", outcome, err)
+    }
+
+    if dropped := cacheInstance.deleteCount() - deletesBefore; 0 != dropped {
+        t.Errorf("an unchanged quote over a cache that serves it dropped %d entries, wanted none: %v", dropped, cacheInstance.deletedKeyList())
+    }
+}
+
+/* the heal stands in for every invalidation that may have failed before it, the rename's included: an entry at the row's quote under a name the row does not carry is dropped, since a heal that compared the quote alone would keep it, and the entries of a currency carry no expiry */
+func TestCurrencyServiceUpdateRate_DropsACachedEntryAtTheQuoteThatIsNotTheRow(t *testing.T) {
+    currencyService, _, runtimeInstance := currencyServiceUnderTest(t)
+
+    quotedAt := currencyQuoteInstant.Add(time.Hour)
+    if _, _, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", entity.NewRateQuote(1.0842, quotedAt, quotedAt)); nil != err {
+        t.Fatalf("the first update failed: %v", err)
+    }
+
+    renamed := entity.NewCurrency("cur-usd", "USD", "Old Dollar Name", 1.0842, quotedAt)
+    if setErr := currencyService.cache.Set(CacheKeyCurrencyById("cur-usd"), renamed, time.Hour); nil != setErr {
+        t.Fatalf("planting the by-id entry failed: %v", setErr)
+    }
+    if setErr := currencyService.cache.Set(CacheKeyCurrencyList, []*entity.Currency{renamed}, time.Hour); nil != setErr {
+        t.Fatalf("planting the list failed: %v", setErr)
+    }
+
+    if _, outcome, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", entity.NewRateQuote(1.0842, quotedAt, quotedAt)); nil != err || RateUpdateUnchanged != outcome {
+        t.Fatalf("the unchanged update answered %d, %v; wanted RateUpdateUnchanged", outcome, err)
+    }
+
+    served, _, _ := currencyService.FindById("cur-usd")
+    if "US Dollar" != served.Name {
+        t.Errorf("the heal kept an entry naming %q at the row's quote, wanted the row's %q", served.Name, "US Dollar")
+    }
+}
+
+/* the provider may re-quote the reading the catalogue holds at another rate; its instant on this clock is taken again on the arrival, to the second the provider's date is read to, and may land a little before the first arrival's; the re-quote is the same reading and is written, not kept out as older */
+func TestCurrencyServiceUpdateRate_WritesAReQuoteOfTheHeldReadingMeasuredALittleEarlier(t *testing.T) {
+    currencyService, _, runtimeInstance := currencyServiceUnderTest(t)
+
+    stamped := currencyQuoteInstant.Add(time.Hour)
+    onThisClock := stamped.Add(-4 * time.Minute)
+
+    if _, _, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", entity.NewRateQuote(1.2, onThisClock, stamped)); nil != err {
+        t.Fatalf("the reading failed: %v", err)
+    }
+
+    updated, outcome, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", entity.NewRateQuote(1.25, onThisClock.Add(-700*time.Millisecond), stamped))
+    if nil != err || RateUpdateWritten != outcome || 1.25 != updated.Rate {
+        t.Fatalf("the re-quote answered %d, %v, %v; wanted it written at 1.25", outcome, updated, err)
+    }
+}
+
+/* Create stamps the instant from the injected clock, which is the half a wall-clock read could not be
+   asserted on at all */
+func TestCurrencyServiceCreate_StampsTheQuoteWithTheInjectedClock(t *testing.T) {
+    currencyService, _, runtimeInstance := currencyServiceUnderTest(t)
+
+    created, err := currencyService.Create(runtimeInstance, "cur-gbp", "GBP", "Pound Sterling", 0.8412)
+    if nil != err {
+        t.Fatalf("the create failed: %v", err)
+    }
+
+    if currencyQuoteInstant != created.RateAsOf.UTC() {
+        t.Errorf("the new currency is stamped %s, wanted the clock's instant", created.RateAsOf.UTC())
+    }
+
+    if 0.8412 != created.Rate {
+        t.Errorf("the new currency is quoted at %v, wanted 0.8412", created.Rate)
+    }
+}
+
+func TestCurrencyServiceCreate_RefusesAQuoteThatIsNotAUsablePrice(t *testing.T) {
+    currencyService, _, runtimeInstance := currencyServiceUnderTest(t)
+
+    for _, rate := range []float64{0, math.Inf(1), 1e308} {
+        if _, err := currencyService.Create(runtimeInstance, "cur-gbp", "GBP", "Pound Sterling", rate); nil == err {
+            t.Fatalf("a currency quoted at %v was created", rate)
+        }
+    }
+
+    if _, found, _ := currencyService.FindById("cur-gbp"); true == found {
+        t.Error("a refused create left the currency in the catalogue")
+    }
+}
+
+/* staleReadCurrencyRepository serves one FindById from a snapshot taken earlier — the row as a concurrent
+   process read it before another process wrote a newer quote over it */
+type staleReadCurrencyRepository struct {
+    repository.CurrencyRepository
+    snapshot *entity.Currency
+}
+
+func (instance *staleReadCurrencyRepository) FindById(ctx context.Context, id string) (*entity.Currency, bool, error) {
+    if nil != instance.snapshot && instance.snapshot.Id == id {
+        snapshot := instance.snapshot
+        instance.snapshot = nil
+
+        return snapshot, true, nil
+    }
+
+    return instance.CurrencyRepository.FindById(ctx, id)
+}
+
+/* two processes on one schedule, no lock between them: both read the row, both judge their document newer than it, and the one holding the older document writes last. The write is conditional on the row at the moment of the write, so the older document is refused and answered as stale, and the row keeps the newer quote */
+func TestCurrencyServiceUpdateRate_RefusesAnOlderDocumentThatReadTheRowBeforeANewerOneWroteIt(t *testing.T) {
+    currencyService, dispatcher, runtimeInstance := currencyServiceUnderTest(t)
+
+    before, _, _ := currencyService.currencyRepository.FindById(context.Background(), "cur-usd")
+    stale := &staleReadCurrencyRepository{CurrencyRepository: currencyService.currencyRepository, snapshot: before}
+    currencyService.currencyRepository = stale
+
+    newer := currencyQuoteInstant.Add(2 * time.Hour)
+    older := currencyQuoteInstant.Add(time.Hour)
+
+    /* the newer document lands first, through the real read */
+    stale.snapshot = nil
+    if _, outcome, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", entity.NewRateQuote(1.2, newer, newer)); nil != err || RateUpdateWritten != outcome {
+        t.Fatalf("the newer document was not written: %d, %v", outcome, err)
+    }
+
+    /* the older document judges itself against the row as it read it BEFORE the newer write */
+    stale.snapshot = before
+    _, outcome, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", entity.NewRateQuote(1.1, older, older))
+    if nil != err || RateUpdateStale != outcome {
+        t.Fatalf("the older document answered %d, %v; wanted stale", outcome, err)
+    }
+
+    stored, _, _ := currencyService.currencyRepository.FindById(context.Background(), "cur-usd")
+    if 1.2 != stored.Rate || false == stored.RateAsOf.Equal(newer) {
+        t.Fatalf("the older document landed over the newer one: %v at %v", stored.Rate, stored.RateAsOf)
+    }
+
+    if 1 != len(dispatcher.names()) {
+        t.Fatalf("the refused older document dispatched an event: %v", dispatcher.names())
+    }
+}
+
+/* the refusal of a rate that is not a finite number carries that rate in its context, and encoding/json refuses NaN and both infinities, so the json journal would render the whole context as one text and the currency and the bounds beside the rate would lose their structure. A non-finite rate travels as its text. */
+func TestRefuseUnusableRate_CarriesANonFiniteRateAsText(t *testing.T) {
+    for rate, spelled := range map[float64]string{math.Inf(1): "+Inf", math.Inf(-1): "-Inf"} {
+        assertRefusalContextEncodes(t, refuseUnusableRate("cur-usd", rate), spelled)
+    }
+
+    assertRefusalContextEncodes(t, refuseUnusableRate("cur-usd", math.NaN()), "NaN")
+}
+
+func assertRefusalContextEncodes(t *testing.T, refusal error, spelled string) {
+    t.Helper()
+
+    logContext := melodyexception.LogContext(refusal)
+    if _, marshalErr := json.Marshal(logContext); nil != marshalErr {
+        t.Fatalf("the refusal's context does not encode: %v", marshalErr)
+    }
+
+    if spelled != logContext["rate"] {
+        t.Errorf("the refused rate travels as %#v, wanted %q", logContext["rate"], spelled)
+    }
+}
+
+/* the heal stands in for every invalidation that may have failed before it, so an entry is the row only when EVERY
+   field is: each field of the entity is changed in turn, and the entry carrying the change must not read as the
+   row. A field of a kind this pin does not know how to change fails it, so a field added to the entity is added to
+   the comparison by the same change that teaches the pin to change it */
+func TestCachedCurrencyIsRow_ComparesEveryFieldOfTheEntity(t *testing.T) {
+    quotedAt := currencyQuoteInstant.Add(time.Hour)
+    row := entity.NewQuotedCurrency("cur-usd", "USD", "US Dollar", entity.NewRateQuote(1.0842, quotedAt, quotedAt.Add(time.Minute)))
+
+    if false == cachedCurrencyIsRow(row, row) || false == cachedListCarriesRow([]*entity.Currency{row}, row) {
+        t.Fatal("the row itself did not read as the row")
+    }
+
+    rowType := reflect.TypeOf(*row)
+    for fieldIndex := 0; fieldIndex < rowType.NumField(); fieldIndex++ {
+        changed := *row
+        field := reflect.ValueOf(&changed).Elem().Field(fieldIndex)
+
+        switch value := field.Interface().(type) {
+        case string:
+            field.SetString(value + "-changed")
+        case float64:
+            field.SetFloat(value + 1)
+        case time.Time:
+            field.Set(reflect.ValueOf(value.Add(time.Second)))
+        default:
+            t.Fatalf("the entity carries %s of type %s, which this pin does not know how to change: teach it, and have the heal compare it", rowType.Field(fieldIndex).Name, field.Type())
+        }
+
+        if true == cachedCurrencyIsRow(&changed, row) {
+            t.Errorf("an entry whose %s differs from the row read as the row", rowType.Field(fieldIndex).Name)
+        }
+
+        if true == cachedListCarriesRow([]*entity.Currency{&changed}, row) {
+            t.Errorf("a list whose entry's %s differs from the row read as carrying the row", rowType.Field(fieldIndex).Name)
+        }
+    }
+}
+
+/* quoteBeforeRenameRepository lands a refresh's quote between the rename's read and its write */
+type quoteBeforeRenameRepository struct {
+    repository.CurrencyRepository
+    quote entity.RateQuote
+}
+
+func (instance *quoteBeforeRenameRepository) Update(ctx context.Context, currency *entity.Currency) (bool, error) {
+    if _, quoteErr := instance.CurrencyRepository.UpdateQuote(ctx, currency.Id, instance.quote); nil != quoteErr {
+        return false, quoteErr
+    }
+
+    return instance.CurrencyRepository.Update(ctx, currency)
+}
+
+/* the rename writes the code and the name alone, so a refresh landing between its read and its write keeps its quote in the row, and the currency the door answers and publishes is that row, read back, not the copy read before the write, which carries the quote the refresh replaced */
+func TestCurrencyServiceUpdate_AnswersAndPublishesTheRowAsWrittenAfterAConcurrentQuote(t *testing.T) {
+    currencyService, dispatcher, runtimeInstance := currencyServiceUnderTest(t)
+
+    later := currencyQuoteInstant.Add(time.Hour)
+    currencyService.currencyRepository = &quoteBeforeRenameRepository{
+        CurrencyRepository: currencyService.currencyRepository,
+        quote:              entity.NewRateQuote(9.9, later, later),
+    }
+
+    var published *entity.Currency
+    dispatcher.dispatcher.AddListener(
+        event.CurrencyUpdatedEventName,
+        func(listenerRuntime melodyruntimecontract.Runtime, eventValue melodyeventcontract.Event) error {
+            if updatedEvent, isUpdated := eventValue.Payload().(*event.CurrencyUpdatedEvent); true == isUpdated {
+                published = updatedEvent.Currency()
+            }
+
+            return nil
+        },
+        0,
+    )
+
+    renamed, found, err := currencyService.Update(runtimeInstance, "cur-usd", "USD", "Dollar")
+    if nil != err || false == found {
+        t.Fatalf("the rename answered %v, %v", found, err)
+    }
+
+    if "Dollar" != renamed.Name || 9.9 != renamed.Rate || false == renamed.RateAsOf.Equal(later) {
+        t.Fatalf("expected the renamed row at the refresh's quote, got %s at %v, %s", renamed.Name, renamed.Rate, renamed.RateAsOf)
+    }
+
+    if nil == published || "Dollar" != published.Name || 9.9 != published.Rate {
+        t.Fatalf("expected the published currency to be the row as written, got %+v", published)
+    }
+}
+
+/* a repository whose read of the row fails after the first: the row the rename wrote cannot be read back */
+type rereadRefusingCurrencyRepository struct {
+    repository.CurrencyRepository
+    reads int
+}
+
+func (instance *rereadRefusingCurrencyRepository) FindById(ctx context.Context, id string) (*entity.Currency, bool, error) {
+    instance.reads++
+    if 1 < instance.reads {
+        return nil, false, errors.New("the read-back could not complete")
+    }
+
+    return instance.CurrencyRepository.FindById(ctx, id)
+}
+
+/* the rename is written, and the caches that serve its earlier code and name never expire: a read-back that fails still dispatches the event, carrying the fields as written, and answers the failure */
+func TestCurrencyServiceUpdate_AFailedReadBackAfterTheWriteStillDispatchesTheEvent(t *testing.T) {
+    _, dispatcher, runtimeInstance := currencyServiceUnderTest(t)
+
+    currencyRepository, repositoryErr := repository.NewCurrencyRepository(persistence.NewCatalogStorage(nil))
+    if nil != repositoryErr {
+        t.Fatalf("building the repository failed: %v", repositoryErr)
+    }
+
+    refusing := &rereadRefusingCurrencyRepository{CurrencyRepository: currencyRepository}
+    currencyService := NewCurrencyService(refusing, newTtlRecordingCache(), dispatcher.dispatcher, &frozenClock{instant: currencyQuoteInstant})
+
+    _, found, updateErr := currencyService.Update(runtimeInstance, "cur-usd", "USD", "US dollar renamed")
+    if nil == updateErr || false == found {
+        t.Fatalf("expected the read-back failure answered over a written row, got found %v and %v", found, updateErr)
+    }
+
+    if 1 != len(dispatcher.names()) || event.CurrencyUpdatedEventName != dispatcher.names()[0] {
+        t.Fatalf("expected the update event dispatched once despite the failed read-back, got %v", dispatcher.names())
+    }
+}

@@ -4,26 +4,39 @@ import (
     "encoding/json"
     "errors"
     "io"
+    "math"
     nethttp "net/http"
 
     "github.com/precision-soft/melody/v3/config"
     "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     "github.com/precision-soft/melody/v3/validation"
 )
 
 func (instance *Request) BindJson(target any) error {
+    return bindJsonBody(instance, target)
+}
+
+/* bindJsonBody is the json-reading half Request.BindJson and JsonHandler share: the configured limit with its 413, the decoder's diagnosis as the refusal's cause, and the empty-body refusal. */
+func bindJsonBody(instance httpcontract.Request, target any) error {
     if nil == target {
         return exception.NewError("bind target is nil", map[string]any{}, nil)
     }
 
-    if nil == instance.httpRequest.Body {
+    if nil == instance.HttpRequest() || nil == instance.HttpRequest().Body {
         return exception.NewHttpException(400, "invalid request body")
     }
 
     maxBytes := maxRequestBodyBytes(instance)
 
-    limitedReader := io.LimitReader(instance.httpRequest.Body, int64(maxBytes)+1)
+    /* one byte past the limit tells an at-limit body from an oversized one; the allowance saturates at the top of the int64 range */
+    overLimitAllowance := int64(maxBytes)
+    if overLimitAllowance < math.MaxInt64 {
+        overLimitAllowance++
+    }
+
+    limitedReader := io.LimitReader(instance.HttpRequest().Body, overLimitAllowance)
     bodyBytes, err := io.ReadAll(limitedReader)
     if nil != err {
         var maxBytesError *nethttp.MaxBytesError
@@ -31,7 +44,8 @@ func (instance *Request) BindJson(target any) error {
             return exception.NewHttpException(nethttp.StatusRequestEntityTooLarge, "payload too large")
         }
 
-        return exception.NewHttpException(nethttp.StatusBadRequest, "bad request")
+        /* the cause tells a body that stopped arriving from one that never parsed; the response is the same */
+        return exception.NewHttpExceptionWithCause(nethttp.StatusBadRequest, "bad request", err)
     }
 
     if 0 == len(bodyBytes) {
@@ -44,7 +58,8 @@ func (instance *Request) BindJson(target any) error {
 
     err = json.Unmarshal(bodyBytes, target)
     if nil != err {
-        return exception.NewHttpException(400, "invalid json")
+        /* the cause carries the decoder's diagnosis: offset, field and type */
+        return exception.NewHttpExceptionWithCause(400, "invalid json", err)
     }
 
     return nil
@@ -56,7 +71,12 @@ func (instance *Request) BindJsonAndValidate(target any) error {
         return bindJsonErr
     }
 
-    validatorInstance := validation.ValidatorMustFromContainer(instance.runtimeInstance.Container())
+    return validateBoundBody(instance.runtimeInstance, target)
+}
+
+/* validateBoundBody is the validation half every json-binding door shares, so each attaches the collection under the validationErrors key. */
+func validateBoundBody(runtimeInstance runtimecontract.Runtime, target any) error {
+    validatorInstance := validation.ValidatorMustFromContainer(runtimeInstance.Container())
 
     validationError := validatorInstance.Validate(target)
     if nil == validationError {
@@ -74,9 +94,11 @@ func (instance *Request) BindJsonAndValidate(target any) error {
     }
 
     httpException := exception.BadRequest("validation failed")
+
+    /* the validationErrors key is the public half of the exception's context, which the exception listener projects into the response body */
     httpException.SetContext(
         map[string]any{
-            "errors": validationErrors,
+            "validationErrors": validationErrors,
         },
     )
 

@@ -72,7 +72,7 @@ This subpackage provides shared helpers that commands can use for consistent out
 
 - Printing and rendering:
     - [`output.Printer`](../../cli/output/printer.go) — the interface `SelectPrinter` answers with, exported so a caller can hold what it returns. **The set of formats is closed**: `table`, `json` and `json-pretty`, decided by [`isFormatSupported`](../../cli/output/format.go) and [`SelectPrinter`](../../cli/output/printer_selector.go), with no registration door. Implementing `Printer` in userland therefore gets a type that nothing dispatches to — `--format` refuses any value the two functions above do not know, before a command runs. This is deliberate for now, and it is the one exported interface of the framework that is not an extension point: the envelope, the flag set and the two renderings are the contract every melody command shares, and a fourth rendering chosen by an operator would make `--format=json` mean something different per application. A command that needs its own rendering writes it inside the command, from the envelope it already holds.
-    - [`output.Render(...)`](../../cli/output/renderer.go) — prints the envelope and then returns an **exit-coded error** when the envelope carries an error, so a failing command leaves the process with a non-zero status and a shell gate such as `app debug:container app.missing || exit 1` holds. The error travels **unmarked**, so the exit path also writes it to the application log — the rendered report lives only on the output streams. A printing failure is returned with the envelope's own failure preserved as its cause, never in its place.
+    - [`output.Render(...)`](../../cli/output/renderer.go) — prints the envelope and then returns an **exit-coded error** when the envelope carries an error, so a failing command leaves the process with a non-zero status and a shell gate such as `app debug:container app.missing || exit 1` holds. The error travels **unmarked**, so the exit path also writes it to the application log — the rendered report lives only on the output streams. A printing failure is returned with the envelope's own failure preserved as its cause, never in its place; a write the sink accepted only in part, with no error, is a printing failure too, remembered as `io.ErrShortWrite` — the sink is the application's, and a report it truncated must not end under a success banner.
     - [`output.SelectPrinter(option output.Option) output.Printer`](../../cli/output/printer_selector.go)
 
 - List payloads:
@@ -168,6 +168,11 @@ func main() {
 	ctx := context.Background()
 
 	serviceContainer := container.NewContainer()
+	/* a container built by hand is closed by the hand that built it: there is no exit handler here to close it */
+	defer func() {
+		_ = serviceContainer.Close()
+	}()
+
 	scope := serviceContainer.NewScope()
 
 	runtimeInstance := runtime.New(
@@ -203,4 +208,4 @@ func main() {
 - Registered command execution closes `runtimeInstance.Scope()` after `Run(...)` and may fold that close's failure into the command's result; the container is deliberately left open on either outcome — the recover handler that owns the exit resolves the final record's logger through it and closes it between the record and `os.Exit`. On a panic the finish banner reports `[failed]` before the panic is re-raised unchanged.
 - A table row must match its block: `AddRow(...)` panics on a row whose cell count disagrees with the block's declared columns; the single-token separator row (`TableRowSeparatorToken`) is the one exception.
 - The table builder and the envelope are not safe for concurrent use: a command assembling its table or warnings from parallel work funnels them through one goroutine.
-- The banners honour `--no-color`, but not uniformly: the status lines degrade to plain text, while the full-width coloured rules that frame them are **omitted entirely** — they are nothing but colour, so there is no plain text for them to become. A `--no-color` run therefore shows the status lines alone, without the frame. Under `--format=json` the whole banner is suppressed so the document stays parseable.
+- The banners honour `--no-color`, but not uniformly: the status lines degrade to plain text, while the full-width coloured rules that frame them are **omitted entirely** — they are nothing but colour, so there is no plain text for them to become. A `--no-color` run therefore shows the status lines alone, without the frame. Under `--format=json` the whole banner is suppressed so the document stays parseable. The banner is decoration under the `--quiet` contract as well: quiet suppresses it entirely, so a `StandardFlags` command's default invocation prints its own output alone and `--quiet=false` brings the frame back, while a `DebugFlags` command keeps its banner by default.

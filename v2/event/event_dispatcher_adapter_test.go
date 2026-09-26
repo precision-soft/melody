@@ -295,7 +295,7 @@ func TestEventDispatcherAdapter_RemoveSubscriber_DistinctZeroSizeSubscribersKeep
     }
 }
 
-/* the bookkeeping is scrubbed whether or not the wrapped dispatcher still held the listener: returning early on false left the adapter's own record of a listener that no longer exists, reported by RegisteredEvents forever and removable by nothing, since every retry took the same early return */
+/* the bookkeeping is scrubbed whether or not the wrapped dispatcher still held the listener, so no record outlives it */
 func TestEventDispatcherAdapter_RemoveListener_ScrubsItsRecordForAListenerTheWrappedDispatcherNoLongerHolds(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
     adapter := NewEventDispatcherAdapter(dispatcher)
@@ -321,7 +321,7 @@ func TestEventDispatcherAdapter_RemoveListener_ScrubsItsRecordForAListenerTheWra
     }
 }
 
-/* callers probe for RequiredListenerRegistrar to learn whether the fail-closed guarantee is available, and the adapter satisfies that probe on its own behalf: swallowing the mark answered the probe yes and left the guarantee unarmed */
+/* callers probe for RequiredListenerRegistrar to learn whether the fail-closed guarantee is available, and the adapter satisfies that probe on its own behalf, so an absorbed mark would answer the probe yes and leave the guarantee unarmed */
 func TestEventDispatcherAdapter_MarkListenerRequired_RefusesADispatcherThatCannotMarkRequiredListeners(t *testing.T) {
     adapter := NewEventDispatcherAdapter(&testPlainEventDispatcher{})
 
@@ -339,7 +339,7 @@ func TestEventDispatcherAdapter_MarkListenerRequired_RefusesADispatcherThatCanno
     )
 }
 
-/* the same refusal for the opt-out, which is just as silently absorbed */
+/* the same refusal for the opt-out, which would otherwise be absorbed just as silently */
 func TestEventDispatcherAdapter_MarkListenerMaySkipRequiredListeners_RefusesADispatcherThatCannotMarkRequiredListeners(t *testing.T) {
     adapter := NewEventDispatcherAdapter(&testPlainEventDispatcher{})
 
@@ -381,7 +381,7 @@ func TestEventDispatcherAdapter_RegisteredEvents_ReportsTheRequiredListenerMarks
     }
 }
 
-/* a typed nil dispatcher passed the plain guard and dereferenced on the first use, blaming the dispatch instead of the wiring */
+/* a typed nil dispatcher is refused at the wiring, since it passes a plain guard and would dereference on the first use, blaming the dispatch */
 func TestNewEventDispatcherAdapter_RefusesATypedNilDispatcher(t *testing.T) {
     var dispatcher *EventDispatcher
 
@@ -535,7 +535,7 @@ func TestEventDispatcherAdapter_RemoveListener_DropsTheSubscriberKeyWithItsLastR
     adapter.AddSubscriber(subscriber)
 }
 
-/* the opt-out mark is recorded on the adapter's own entry, not only forwarded: the adapter is what an inspection reads, so a mark that reached the dispatcher alone left `debug:events --verbose` reporting a guarantee still armed for a listener that had opted out of it */
+/* the opt-out mark is recorded on the adapter's own entry, not only forwarded: the adapter is what an inspection reads, so a mark that reached the dispatcher alone would leave `debug:events --verbose` reporting a guarantee still armed for a listener that opted out of it */
 func TestEventDispatcherAdapter_MarkListenerMaySkipRequiredListeners_RecordsTheMarkForInspection(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
     adapter := NewEventDispatcherAdapter(dispatcher)
@@ -703,5 +703,41 @@ func TestEventDispatcherAdapter_InspectorTiebreakFollowsTheDispatchOrder(t *test
     expectedFirst := fmt.Sprintf("%d", firstRegistration.ListenerId)
     if expectedFirst != registered[0].Listeners[0].ListenerId {
         t.Fatalf("expected the inspector to rank listener id %s first, got %s", expectedFirst, registered[0].Listeners[0].ListenerId)
+    }
+}
+
+type adapterIdentityProbeEvent struct {
+    *Event
+    marker int
+}
+
+func TestEventDispatcherAdapter_HandsListenersTheOriginalEvent(t *testing.T) {
+    dispatcher, clockInstance := testNewEventDispatcher()
+    adapter := NewEventDispatcherAdapter(dispatcher)
+
+    seenMarker := 0
+    _ = adapter.AddListener(
+        "identity.probe",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            if probe, ok := eventValue.(*adapterIdentityProbeEvent); true == ok {
+                seenMarker = probe.marker
+            }
+            return nil
+        },
+        0,
+    )
+
+    runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
+
+    _, err := adapter.Dispatch(
+        runtimeInstance,
+        &adapterIdentityProbeEvent{Event: NewEvent("identity.probe", nil, clockInstance), marker: 42},
+    )
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if 42 != seenMarker {
+        t.Fatalf("expected the adapter to hand the listener the original custom event (marker 42), got %d", seenMarker)
     }
 }

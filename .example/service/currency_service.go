@@ -66,10 +66,9 @@ func (instance *CurrencyService) FindById(id string) (*entity.Currency, bool, er
 
     cacheKey := CacheKeyCurrencyById(id)
 
-    cached, rememberErr := melodycache.Remember(
+    cached, rememberErr := rememberEntityOrAbsence(
         instance.cache,
         cacheKey,
-        0,
         func(ctx context.Context) (any, error) {
             currency, found, findErr := instance.currencyRepository.FindById(ctx, id)
             if nil != findErr {
@@ -82,7 +81,6 @@ func (instance *CurrencyService) FindById(id string) (*entity.Currency, bool, er
 
             return currency, nil
         },
-        nil,
     )
     if nil != rememberErr {
         return nil, false, rememberErr

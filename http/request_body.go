@@ -52,7 +52,7 @@ func (instance *Request) BindJson(target any) error {
 
     err = json.Unmarshal(bodyBytes, target)
     if nil != err {
-        /* the cause carries the decoder's own diagnosis — offending offset, field, type — which the flat message denied the log */
+        /* the cause carries the decoder's own diagnosis (offending offset, field, type) into the log */
         return exception.NewHttpExceptionWithCause(400, "invalid json", err)
     }
 

@@ -1,6 +1,7 @@
 package http
 
 import (
+    "errors"
     nethttp "net/http"
     "net/http/httptest"
     "strings"
@@ -85,8 +86,7 @@ func TestRecordingResponseWriter_UnwrapReturnsUnderlying(t *testing.T) {
     }
 }
 
-/* WriteToHttpResponseWriter is a public door, so a nil pointer of a response type boxed into the contract
-reaches it and passes a plain comparison. */
+/* WriteToHttpResponseWriter is a public door, so a nil pointer of a response type boxed into the contract reaches it and passes a plain comparison. */
 func TestWriteToHttpResponseWriter_ReadsATypedNilResponseAsAbsent(t *testing.T) {
     var unassignedResponse *Response
 
@@ -146,7 +146,7 @@ func TestRecordingResponseWriter_APanickingDelegateLeavesTheCommitFlagFalse(t *t
     }
 }
 
-/* the guard of the ReadFrom convention: a source that fails before the first byte has committed nothing, and a flag raised anyway classified exactly that failure as a committed stream — the recovery skipped its 500 and the client received an implicit empty 200. */
+/* the guard of the ReadFrom convention: a source that fails before the first byte has committed nothing, and a flag raised anyway would classify that failure as a committed stream, so the recovery would skip its 500 and the client would receive an implicit empty 200. */
 func TestRecordingResponseWriter_ReadFromLeavesTheCommitFlagFalseWhenTheSourceFailsBeforeTheFirstByte(t *testing.T) {
     recorder := httptest.NewRecorder()
     writer := newRecordingResponseWriter(recorder)
@@ -237,7 +237,7 @@ func TestWriteToHttpResponseWriter_RefusesAStatusOutsideTheWritableRangeByName(t
     }
 }
 
-/* the refusal runs ahead of the first mutation, headers included: the response's headers used to be copied onto the writer before the status was judged, so a caller that handled the returned error and wrote its own response sent it carrying the refused response's Set-Cookie on top of its own. */
+/* the refusal runs ahead of the first mutation, headers included, so a caller that handles the returned error and writes its own response does not send the refused response's Set-Cookie on top of its own. */
 func TestWriteToHttpResponseWriter_ARefusedStatusLeavesNoHeaderOnTheWriter(t *testing.T) {
     recorder := httptest.NewRecorder()
 
@@ -276,7 +276,7 @@ func TestWriteToHttpResponseWriter_RefusesAStatusBelowTheWritableRange(t *testin
     }
 }
 
-/* an accepted status still carries its headers to the writer: the refusal moved ahead of the copy, it did not replace it */
+/* an accepted status still carries its headers to the writer: the refusal runs ahead of the copy and does not replace it */
 func TestWriteToHttpResponseWriter_AnAcceptedStatusStillCarriesItsHeaders(t *testing.T) {
     recorder := httptest.NewRecorder()
 
@@ -294,5 +294,141 @@ func TestWriteToHttpResponseWriter_AnAcceptedStatusStillCarriesItsHeaders(t *tes
 
     if nethttp.StatusCreated != recorder.Code {
         t.Fatalf("expected the accepted status on the connection, got %d", recorder.Code)
+    }
+}
+
+/* Set-Cookie is the one field the response cannot own: its lines are separate cookies, so replacing the writer's values with the response's would delete the cookie the handler wrote on the writer its own contract hands it, and the client would never receive it */
+func TestWriteToHttpResponseWriter_KeepsACookieTheHandlerWroteOnTheWriter(t *testing.T) {
+    recorder := httptest.NewRecorder()
+    nethttp.SetCookie(recorder, &nethttp.Cookie{Name: "handler_cookie", Value: "kept", Path: "/"})
+
+    response := NewResponse(nethttp.StatusOK, []byte("body"))
+    SetCookie(response, &nethttp.Cookie{Name: "melody_session", Value: "abc", Path: "/"})
+
+    writeErr := WriteToHttpResponseWriter(nil, nil, recorder, response)
+    if nil != writeErr {
+        t.Fatalf("unexpected error: %v", writeErr)
+    }
+
+    emitted := recorder.Header().Values("Set-Cookie")
+    if 2 != len(emitted) {
+        t.Fatalf("expected both cookies on the wire, got %v", emitted)
+    }
+
+    handlerCookieEmitted := false
+    responseCookieEmitted := false
+    for _, cookieLine := range emitted {
+        if true == strings.HasPrefix(cookieLine, "handler_cookie=kept") {
+            handlerCookieEmitted = true
+        }
+        if true == strings.HasPrefix(cookieLine, "melody_session=abc") {
+            responseCookieEmitted = true
+        }
+    }
+
+    if false == handlerCookieEmitted {
+        t.Fatalf("expected the handler's own cookie to survive, got %v", emitted)
+    }
+
+    if false == responseCookieEmitted {
+        t.Fatalf("expected the response's cookie to be emitted, got %v", emitted)
+    }
+}
+
+/* a key the response does name is still owned by it, so the request id the kernel puts on the raw writer reaches the client once */
+func TestWriteToHttpResponseWriter_StillReplacesANonCookieHeaderTheResponseNames(t *testing.T) {
+    recorder := httptest.NewRecorder()
+    recorder.Header().Set(HeaderRequestId, "from-the-writer")
+
+    response := NewResponse(nethttp.StatusOK, []byte("body"))
+    response.Headers().Set(HeaderRequestId, "from-the-response")
+
+    writeErr := WriteToHttpResponseWriter(nil, nil, recorder, response)
+    if nil != writeErr {
+        t.Fatalf("unexpected error: %v", writeErr)
+    }
+
+    emitted := recorder.Header().Values(HeaderRequestId)
+    if 1 != len(emitted) || "from-the-response" != emitted[0] {
+        t.Fatalf("expected the response to own the header it names, got %v", emitted)
+    }
+}
+
+/* the shape an operator's own net/http middleware takes when it wraps the writer for ResponseController compatibility and forwards no Flush of its own */
+type intermediateResponseWriterWrapper struct {
+    nethttp.ResponseWriter
+}
+
+func (instance *intermediateResponseWriterWrapper) Unwrap() nethttp.ResponseWriter {
+    return instance.ResponseWriter
+}
+
+type flushCountingResponseRecorder struct {
+    *httptest.ResponseRecorder
+    flushes int
+}
+
+func (instance *flushCountingResponseRecorder) Flush() {
+    instance.flushes++
+    instance.ResponseRecorder.Flush()
+}
+
+/* the flush is forwarded through the whole wrapper chain, not to the immediate delegate: a wrapper between the kernel's recorder and the connection that carries Unwrap but no Flush would turn every flush a streaming handler issues into a silent no-op, with the frames sitting in the buffer and no error anywhere */
+func TestRecordingResponseWriter_FlushReachesTheConnectionThroughAnIntermediateWrapper(t *testing.T) {
+    connection := &flushCountingResponseRecorder{ResponseRecorder: httptest.NewRecorder()}
+    writer := newRecordingResponseWriter(&intermediateResponseWriterWrapper{ResponseWriter: connection})
+
+    writer.Flush()
+    writer.Flush()
+
+    if 2 != connection.flushes {
+        t.Fatalf("expected both flushes to reach the connection, got %d", connection.flushes)
+    }
+
+    if false == writer.HeadersWritten() {
+        t.Fatal("expected the flush that reached the connection to record the commit")
+    }
+}
+
+/* a flush that reached the connection and failed under a departed client has still committed the header: read as uncommitted, the kernel would write its 500 over the status on the wire and log the 500 */
+func TestRecordingResponseWriter_AFailedFlushStillRecordsTheCommit(t *testing.T) {
+    writer := newRecordingResponseWriter(&failingFlushResponseWriter{httptest.NewRecorder()})
+
+    writer.Flush()
+
+    if false == writer.HeadersWritten() {
+        t.Fatal("expected a flush that reached a flusher to record the commit even though it failed")
+    }
+
+    if nethttp.StatusOK != writer.CommittedStatusCode() {
+        t.Fatalf("expected the implicit 200 to be recorded, got %d", writer.CommittedStatusCode())
+    }
+}
+
+type failingFlushResponseWriter struct {
+    *httptest.ResponseRecorder
+}
+
+func (instance *failingFlushResponseWriter) FlushError() error {
+    return errors.New("write tcp 127.0.0.1:8080->127.0.0.1:51234: write: broken pipe")
+}
+
+func TestRecordingResponseWriter_AnEarlyHintCommitsNothing(t *testing.T) {
+    writer := newRecordingResponseWriter(httptest.NewRecorder())
+
+    writer.WriteHeader(nethttp.StatusEarlyHints)
+
+    if true == writer.HeadersWritten() || 0 != writer.CommittedStatusCode() {
+        t.Fatalf("expected an early hint to commit nothing, got committed %v with status %d", writer.HeadersWritten(), writer.CommittedStatusCode())
+    }
+}
+
+func TestRecordingResponseWriter_SwitchingProtocolsCommits(t *testing.T) {
+    writer := newRecordingResponseWriter(httptest.NewRecorder())
+
+    writer.WriteHeader(nethttp.StatusSwitchingProtocols)
+
+    if false == writer.HeadersWritten() || nethttp.StatusSwitchingProtocols != writer.CommittedStatusCode() {
+        t.Fatalf("expected 101 to commit, got committed %v with status %d", writer.HeadersWritten(), writer.CommittedStatusCode())
     }
 }

@@ -16,7 +16,7 @@ func Configure(app *melodyapplication.Application) {
         RunnerCommands:       cronRunnerCommands(),
     }))
 
-    /* registered whether or not a database is configured, so the command surface does not change between environments — the same rule catalog:journal follows; without one every db:* command fails at Run with the container refusal naming the registry service. No context family is declared: this major keeps its journal on the same connection as the catalogue, so one set covers the whole schema and the registry has a single manager for the unprefixed commands to reach. */
+    /* registered whether or not a database is configured, so the command surface does not change between environments; without one every db:* command fails at Run naming the registry service. No context family is declared: this major keeps the journal on the catalogue's connection, so one set covers the whole schema and the registry has a single manager. */
     app.RegisterModule(bunormmigrate.NewModule(bunormmigrate.ModuleConfig{
         Migrations: migration.Migrations,
         Options: bunormmigrate.Options{

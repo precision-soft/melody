@@ -120,7 +120,7 @@ func (instance *Module) RegisterServices(kernelInstance melodykernelcontract.Ker
 
 var _ melodyapplicationcontract.ServiceModule = (*Module)(nil)
 
-/* registerSessionStorage swaps the framework's in-memory default for the file-backed storage when the environment names a file, so a signed-in session survives a process restart. The registration wins because module services land before the framework's own has-guarded fallback; an empty value keeps the default, like every other switch of the example. */
+/* registerSessionStorage swaps the framework's in-memory default for the file-backed storage when the environment names a file, so a signed-in session survives a restart; the module registration lands before the framework's has-guarded fallback. An empty value keeps the default. */
 func (instance *Module) registerSessionStorage(kernelInstance melodykernelcontract.Kernel, registrar melodyapplicationcontract.ServiceRegistrar) {
     sessionFilePath := resolvedSessionFilePath(
         parameterValue(kernelInstance, ParameterSessionFile),
@@ -151,7 +151,7 @@ func resolvedSessionFilePath(sessionFilePath string, projectDirectory string) st
     return sessionFilePath
 }
 
-/* registerCatalogJournalService wires the journal against whatever the environment gave the example. Without a journal database there is nowhere to keep a record of the changes, and the service is registered all the same with nothing behind it: the writes still succeed, and the report shows a journal of zero rather than the application refusing to change anything. */
+/* registerCatalogJournalService wires the journal against whatever the environment gave the example; without a journal database the service is registered with nothing behind it, so the writes still succeed and the report shows a journal of zero. */
 func (instance *Module) registerCatalogJournalService(registrar melodyapplicationcontract.ServiceRegistrar) {
     hasJournal := instance.databaseWiring.journal
 

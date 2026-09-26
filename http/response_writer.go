@@ -2,6 +2,7 @@ package http
 
 import (
     "bufio"
+    "errors"
     "io"
     "net"
     nethttp "net/http"
@@ -42,13 +43,12 @@ func WriteToHttpResponseWriter(
 
     headers := response.Headers()
     if nil != headers {
-        /* a key the response names is owned by the response: the writer's values for it are
-           replaced rather than appended to, so a header both sides set — the request id the kernel
-           puts on the raw writer, and any header a kernel.response listener sets on the response —
-           reaches the client once instead of twice. Keys the response does not name keep whatever
-           the writer already carries. */
+        /* a key the response names is owned by the response: the writer's values for it are replaced rather than appended to, so a header both sides set reaches the client once. Set-Cookie is the exception: each line is a separate cookie, so the handler's cookies on the writer and the session cookie on the response are both sent. */
         for key, values := range headers {
-            responseWriter.Header().Del(key)
+            if "Set-Cookie" != nethttp.CanonicalHeaderKey(key) {
+                responseWriter.Header().Del(key)
+            }
+
             for _, value := range values {
                 responseWriter.Header().Add(key, value)
             }
@@ -77,7 +77,7 @@ func WriteToHttpResponseWriter(
         }(closer)
     }
 
-    if nil != request && nil != request.HttpRequest() && nethttp.MethodHead == request.HttpRequest().Method {
+    if false == internal.IsNilInterface(request) && nil != request.HttpRequest() && nethttp.MethodHead == request.HttpRequest().Method {
         return nil
     }
 
@@ -119,9 +119,13 @@ func newRecordingResponseWriter(responseWriter nethttp.ResponseWriter) *recordin
     }
 }
 
-/* WriteHeader raises the commit flag only after the delegate returns: the delegate panics on a status code outside [100, 999] before anything reaches the connection, and a flag raised first recorded a commit that never happened — the recovery then read the response as a committed stream, skipped writing its 500, and the client received an implicit empty 200 for a handler bug. */
+/* WriteHeader raises the commit flag only after the delegate returns: the delegate panics on a status outside [100, 999] before anything reaches the connection, and a flag raised first would make the recovery skip its 500. An informational status other than 101 (103 Early Hints) commits nothing: net/http sends it ahead of the final header, which is still to be written. */
 func (instance *recordingResponseWriter) WriteHeader(statusCode int) {
     instance.ResponseWriter.WriteHeader(statusCode)
+    if nethttp.StatusOK > statusCode && nethttp.StatusSwitchingProtocols != statusCode {
+        return
+    }
+
     instance.wroteHeader = true
     instance.statusCode = statusCode
 }
@@ -134,11 +138,11 @@ func (instance *recordingResponseWriter) Write(data []byte) (int, error) {
     return written, writeErr
 }
 
-/* Flush is forwarded so the wrapper keeps satisfying http.Flusher, which streaming handlers rely on; a flush commits the response, so it also records that the headers were written — after the delegate returns, the convention every commit recording in this type follows. */
+/* Flush is forwarded so the wrapper keeps satisfying http.Flusher, and it records the commit after the delegate returns. It goes through a ResponseController rather than an assertion on the immediate delegate, so the flush reaches the connection through any wrapper that implements Unwrap without forwarding Flush. */
 func (instance *recordingResponseWriter) Flush() {
-    flusher, isFlusher := instance.ResponseWriter.(nethttp.Flusher)
-    if true == isFlusher {
-        flusher.Flush()
+    /* a flush that reached a flusher has committed the header even when the write under it failed, so the commit is recorded and the recovery does not write a 500 over it; only ErrNotSupported means nothing was flushed. */
+    flushErr := nethttp.NewResponseController(instance.ResponseWriter).Flush()
+    if false == errors.Is(flushErr, nethttp.ErrNotSupported) {
         instance.recordImplicitCommit()
     }
 }
@@ -184,7 +188,7 @@ func (instance *recordingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, 
     return connection, readWriter, hijackErr
 }
 
-/* ReadFrom is forwarded so the wrapper keeps satisfying io.ReaderFrom, preserving the underlying writer's sendfile fast path for file responses. The commit is recorded only after the copy and only when a byte actually reached the delegate: a source that fails before the first byte has committed nothing, and a flag raised ahead of the copy classified exactly that failure as a committed stream, so the recovery skipped its 500 and the client received an implicit empty 200. The recording rides a defer so a source that panics mid-copy unwinds through it; the copy's own count is then still zero, and the recovery's rewrite over the partially committed stream is absorbed by the delegate's superfluous-WriteHeader guard. */
+/* ReadFrom is forwarded so the wrapper keeps the underlying writer's sendfile fast path. The commit is recorded only after the copy and only when a byte reached the delegate, so a source failing before the first byte leaves the recovery its 500; the recording rides a defer, so a panic mid-copy unwinds through it. */
 func (instance *recordingResponseWriter) ReadFrom(reader io.Reader) (written int64, copyErr error) {
     defer func() {
         if 0 < written {
