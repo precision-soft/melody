@@ -55,7 +55,7 @@ func TestRollbackCommand_RollsBackLastGroupUnderLock(t *testing.T) {
     }
 }
 
-/* a rollback that fails part way names the group it was walking on the way out: bun hands the group back beside the failure, and reporting nothing left the operator with only the failing migration — which schema changes were already undone could only be reconstructed from the migrations table by hand */
+/* bun hands the group back beside the failure, so a rollback that fails part way names the group it walks on the way out: with only the failing migration, which schema changes are already undone could only be reconstructed from the migrations table by hand */
 func TestRollbackCommand_AFailedRollbackNamesTheGroupItWasWalking(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = appliedMigrationRowsHook("20240101000000")

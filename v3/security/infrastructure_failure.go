@@ -17,7 +17,6 @@ func (instance *infrastructureFailure) Unwrap() error {
     return instance.cause
 }
 
-/* markInfrastructureFailure marks err as an infrastructure failure; a nil error stays nil. */
 func markInfrastructureFailure(err error) error {
     if nil == err {
         return nil
@@ -26,7 +25,6 @@ func markInfrastructureFailure(err error) error {
     return &infrastructureFailure{cause: err}
 }
 
-/* isInfrastructureFailure reports whether the chain of err carries the infrastructure mark. */
 func isInfrastructureFailure(err error) bool {
     var marker *infrastructureFailure
 

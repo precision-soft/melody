@@ -923,7 +923,7 @@ func matchesLocale(locales []string, params map[string]string) bool {
     return false
 }
 
-/* joinCatchAllSegments re-escapes a separator inside a segment, so "/files/a%2Fb/c" and "/files/a/b/c" bind different tails; every other escape stays decoded. */
+/* joinCatchAllSegments re-escapes a separator inside a segment, so "/files/a%2Fb/c" and "/files/a/b/c" bind different tails; every other escape stays decoded, so a literal "%2F" sent as "%252F" binds the same tail as an encoded separator, the non-injective spelling RequestPathAsRouted shares. */
 func joinCatchAllSegments(pathSegments []string) string {
     escapedSegments := make([]string, 0, len(pathSegments))
 

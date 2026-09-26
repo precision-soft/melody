@@ -313,3 +313,46 @@ func TestDirFileSystem_OpenServesANameUnderTheCurrentDirectoryAndUnderTheFilesys
         t.Fatalf("expected a symlink escaping the current directory to be refused by the containment, got %v", refuseErr)
     }
 }
+
+func TestDirFileSystem_OpenServesASymlinkWithAnAbsoluteTargetInsideARelativeBase(t *testing.T) {
+    directory := t.TempDir()
+
+    workingDirectory, getwdErr := os.Getwd()
+    if nil != getwdErr {
+        t.Fatalf("getwd error: %v", getwdErr)
+    }
+    if chdirErr := os.Chdir(directory); nil != chdirErr {
+        t.Fatalf("chdir error: %v", chdirErr)
+    }
+    t.Cleanup(func() {
+        _ = os.Chdir(workingDirectory)
+    })
+
+    if mkdirErr := os.Mkdir("sub", 0o755); nil != mkdirErr {
+        t.Fatalf("mkdir error: %v", mkdirErr)
+    }
+    if writeErr := os.WriteFile(filepath.Join("sub", "file.txt"), []byte("hello"), 0o644); nil != writeErr {
+        t.Fatalf("write error: %v", writeErr)
+    }
+    absoluteTarget, absoluteErr := filepath.Abs(filepath.Join("sub", "file.txt"))
+    if nil != absoluteErr {
+        t.Fatalf("abs error: %v", absoluteErr)
+    }
+    if symlinkErr := os.Symlink(absoluteTarget, filepath.Join("sub", "link.txt")); nil != symlinkErr {
+        t.Fatalf("symlink error: %v", symlinkErr)
+    }
+
+    for _, testCase := range []struct {
+        base string
+        name string
+    }{
+        {"sub", "link.txt"},
+        {".", "sub/link.txt"},
+    } {
+        file, openErr := osDirFileSystem(testCase.base).Open(testCase.name)
+        if nil != openErr {
+            t.Fatalf("expected %q under the relative base %q to open, got %v", testCase.name, testCase.base, openErr)
+        }
+        _ = file.Close()
+    }
+}

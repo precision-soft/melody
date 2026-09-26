@@ -23,7 +23,7 @@ func UseCipher(cipherInstance Cipher) {
     storeCipher(defaultCipherName, cipherInstance)
 }
 
-/* UseCipherNamed installs a named cipher — one key compartment — for columns bound through a CipherRef marker. Each named cipher owns its KeyProvider, so compartments stay isolated: the "crm" cipher can never decrypt a "billing" ciphertext, unlike merging every key into one provider where either context can read the other's rows. */
+/* UseCipherNamed installs a named cipher — one key compartment — for columns bound through a CipherRef marker. Each named cipher owns its KeyProvider, so compartments are isolated as long as each provider holds keys of its own: the name selects the registry entry and is not bound into the ciphertext, so two compartments holding the same key under the same id decrypt each other. Merging every key into one provider loses even that, since either context can read the other's rows. */
 func UseCipherNamed(name string, cipherInstance Cipher) {
     if "" == name {
         exception.Panic(exception.NewError("named cipher name is empty; use UseCipher for the default cipher", nil, nil))

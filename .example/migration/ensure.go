@@ -158,7 +158,7 @@ func migrateWhileLocked(ctx context.Context, migrator *migrate.Migrator, unlockC
     return migrateErr
 }
 
-/* Reset brings a database back to the schema this application declares, whatever shape it was left in: the tables the set owns are dropped, the bookkeeping is dropped and recreated with them, the single migration is applied again, and this package's memo for the handle is cleared. It is how a volume in an older shape reaches the present one, the bookkeeping drop removing the rows of steps this schema does not have. No migration lock is taken: the reset drops the very table the lock lives in, so it is an operator command over a development volume, serialized by its caller. */
+/* Reset brings a database back to the schema this application declares, whatever shape it was left in: the tables the set owns are dropped, the bookkeeping is dropped and recreated with them, the single migration is applied again, and this package's memo for the handle is cleared before the first of them, so a reset that fails half way leaves the handle to be migrated again rather than answered as migrated. It is how a volume in an older shape reaches the present one, the bookkeeping drop removing the rows of steps this schema does not have. No migration lock is taken: the reset drops the very table the lock lives in, so it is an operator command over a development volume, serialized by its caller. */
 func Reset(ctx context.Context, database *bun.DB) error {
     return resetSet(ctx, database, Migrations)
 }
@@ -175,6 +175,8 @@ func resetSet(ctx context.Context, database *bun.DB, migrationSet *migrate.Migra
 
     ensureMutex.Lock()
     defer ensureMutex.Unlock()
+
+    delete(migratedDatabaseList, migratedSetKey{database: database, migrationSet: migrationSet})
 
     migrator := migrate.NewMigrator(database, migrationSet, migrate.WithMarkAppliedOnSuccess(true))
 
@@ -200,8 +202,6 @@ func resetSet(ctx context.Context, database *bun.DB, migrationSet *migrate.Migra
     if _, migrateErr := migrator.Migrate(ctx); nil != migrateErr {
         return migrateErr
     }
-
-    delete(migratedDatabaseList, migratedSetKey{database: database, migrationSet: migrationSet})
 
     return nil
 }

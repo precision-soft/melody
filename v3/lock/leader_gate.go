@@ -236,7 +236,6 @@ func (instance *LeaderGate) reportCampaignError(runtimeInstance runtimecontract.
     )
 }
 
-/* reportLost mirrors reportCampaignError for a term lost to a failed renewal. */
 func (instance *LeaderGate) reportLost(runtimeInstance runtimecontract.Runtime, cause error) {
     if nil != instance.options.OnLost {
         instance.runHookShielded(runtimeInstance, "OnLost", func() {

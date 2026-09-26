@@ -1,6 +1,7 @@
 package encrypt
 
 import (
+    "bytes"
     "database/sql/driver"
     "encoding/json"
     "fmt"
@@ -123,7 +124,8 @@ func columnTypeOf(column any) string {
 
 /* decodeEncryptedJson answers the decoded plaintext and whether one was present, a json null carrying none. The redaction placeholder is refused, naming the column type. */
 func decodeEncryptedJson(data []byte, column any) (string, bool, error) {
-    if "null" == string(data) {
+    /* a json null is read as the absent value whatever whitespace surrounds it, as encoding/json reads it; handed to Unmarshal padded, it would decode into an empty string and clear the column */
+    if "null" == string(bytes.TrimSpace(data)) {
         return "", false, nil
     }
 

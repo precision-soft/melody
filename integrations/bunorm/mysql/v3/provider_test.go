@@ -616,7 +616,7 @@ func TestProviderOpenForMigrationContextCancelsTheRetrySleep(t *testing.T) {
         t.Fatalf("expected the cancellation to cut the retry sleep, took %v", elapsed)
     }
 
-    /* the cause stays the cancellation, but the outage that was being retried arrives STRUCTURED beside it. Flattened into openErr.Error() it handed the operator a sentence and nothing to act on, while the retry warning one branch above lifted the same failure's context and cause chain — one record shape for the same failure, decided by whether the caller happened to cancel. */
+    /* the cause stays the cancellation, and the outage being retried arrives STRUCTURED beside it — the attempt and the failed attempt's connection diagnostics in the context — so the operator gets something to act on rather than a flattened sentence, whether or not the caller cancels. */
     var melodyErr *exception.Error
     if false == errors.As(openErr, &melodyErr) {
         t.Fatalf("expected a melody error carrying the failed attempt, got %T", openErr)
@@ -693,7 +693,7 @@ func TestProviderOpenContextCancelsTheRetrySleep(t *testing.T) {
         t.Fatalf("expected the cancellation to cut the retry sleep, took %v", elapsed)
     }
 
-    /* the cause stays the cancellation, but the outage that was being retried arrives STRUCTURED beside it. Flattened into openErr.Error() it handed the operator a sentence and nothing to act on, while the retry warning one branch above lifted the same failure's context and cause chain — one record shape for the same failure, decided by whether the caller happened to cancel. */
+    /* the cause stays the cancellation, and the outage being retried arrives STRUCTURED beside it — the attempt and the failed attempt's connection diagnostics in the context — so the operator gets something to act on rather than a flattened sentence, whether or not the caller cancels. */
     var melodyErr *exception.Error
     if false == errors.As(openErr, &melodyErr) {
         t.Fatalf("expected a melody error carrying the failed attempt, got %T", openErr)
@@ -991,7 +991,7 @@ func TestIsTransientError_TheMarkersThemselvesStillMatch(t *testing.T) {
     }
 }
 
-/* the TLS posture is read where the DRIVER receives it, not only from the helper that computes it. The helper has its own test, but nothing observed that its answer reaches the connector, and the wiring is what decides whether a session is encrypted — a deleted assignment would have left every default connection in plaintext with the helper's test still green. The post-build hook is handed the very configuration the connector is built from, so it is the seam; it refuses afterwards, which stops the attempt before any dial. */
+/* the TLS posture is read where the DRIVER receives it, not only from the helper that computes it: the wiring decides whether a session is encrypted, and a deleted assignment leaves every default connection in plaintext with the helper's own test still green. The post-build hook is handed the very configuration the connector is built from, so it is the seam; it refuses afterwards, which stops the attempt before any dial. */
 func openObservingTheTlsPosture(t *testing.T, providerOptions ...ProviderOption) *tls.Config {
     t.Helper()
 

@@ -54,8 +54,15 @@ func (instance *dirFileSystem) Open(name string) (fs.File, error) {
         realBase = instance.basePath
     }
 
+    /* both sides are made absolute first: under a relative base a symlink with an absolute target resolves to an absolute path, which filepath.Rel cannot relate to a relative base */
+    absoluteBase, absoluteBaseErr := filepath.Abs(realBase)
+    absolutePath, absolutePathErr := filepath.Abs(realPath)
+    if nil != absoluteBaseErr || nil != absolutePathErr {
+        return nil, fs.ErrPermission
+    }
+
     /* the containment is read on the relative path rather than as a textual prefix, since "." resolves names without a "./" and "/" would demand "//" */
-    relativePath, relativeErr := filepath.Rel(realBase, realPath)
+    relativePath, relativeErr := filepath.Rel(absoluteBase, absolutePath)
     if nil != relativeErr || ".." == relativePath || true == strings.HasPrefix(relativePath, ".."+string(os.PathSeparator)) {
         return nil, fs.ErrPermission
     }

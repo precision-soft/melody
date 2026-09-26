@@ -9,7 +9,7 @@ import (
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
 )
 
-/* the three Must resolvers are how the framework and an application reach the routing services out of the container; two of them had never been entered. Each is bound to a service name, and a resolver reading the wrong name would hand back a service of the wrong kind — the failure surfaces as a type assertion deep inside url generation rather than at the wiring mistake. */
+/* the three Must resolvers are how the framework and an application reach the routing services out of the container. Each is bound to a service name, and a resolver reading the wrong name would hand back a service of the wrong kind — the failure surfaces as a type assertion deep inside url generation rather than at the wiring mistake. */
 
 func newRoutingServiceContainer() (containercontract.Container, *RouteRegistry, *Router) {
     serviceContainer := container.NewContainer()

@@ -818,7 +818,7 @@ func (instance *contextHonouringStorage) Save(ctx context.Context, table string,
     }
 }
 
-/* a spent budget gives the save in hand no grace to react to its cancellation, so whether it IGNORED it is not measurable — and it was claimed anyway, over a delegate that honoured the cancellation within microseconds. The answer says what a spent budget can say: cancelled, and not confirmed stored, the save in hand counted. */
+/* a spent budget gives the save in hand no grace to react to its cancellation, so whether it IGNORED it is not measurable; the delegate here honours the cancellation, and the answer says only what a spent budget can say: cancelled, and not confirmed stored, the save in hand counted. */
 func TestAsyncStorage_CloseWithASpentDeadlineOverAnHonouringSaveDoesNotClaimItWasIgnored(t *testing.T) {
     honouring := &contextHonouringStorage{entered: make(chan struct{}), release: make(chan struct{})}
     storage := NewAsyncStorage(honouring, 4)
@@ -1156,6 +1156,9 @@ func TestAsyncStorage_CloseWithContext_ACancellationDuringTheDrainEndsIt(t *test
     if nil == closeErr || false == strings.Contains(closeErr.Error(), "cancelled by its caller during the drain") {
         t.Fatalf("expected the close to say its caller cancelled it during the drain, got: %v", closeErr)
     }
+    if false == errors.Is(closeErr, context.Canceled) {
+        t.Fatalf("expected the close to carry the caller's cancellation as its cause, got: %v", closeErr)
+    }
 
     var reported *exception.Error
     if false == errors.As(closeErr, &reported) || int64(1) != reported.Context()["outstanding"] {
@@ -1202,6 +1205,9 @@ func TestAsyncStorage_CloseWithContext_ACancellationDuringTheCancellationGraceEn
     closeErr := closeWithin(t, storage, closeContext, 2*time.Second)
     if nil == closeErr || false == strings.Contains(closeErr.Error(), "while it waited for the save in hand to react") {
         t.Fatalf("expected the close to say its caller cancelled it during the cancellation grace, got: %v", closeErr)
+    }
+    if false == errors.Is(closeErr, context.Canceled) {
+        t.Fatalf("expected the close to carry the caller's cancellation as its cause, got: %v", closeErr)
     }
 }
 
@@ -1541,5 +1547,85 @@ func TestAsyncStorage_DeadLettersAReturnedErrorWhoseUnwrapPanicsUnderItsOwnMessa
 
     if "a delegate failure whose Unwrap panics" != logger.contexts[0]["error"] {
         t.Fatalf("expected the delegate's own failure in the record, got %#v", logger.contexts[0]["error"])
+    }
+}
+
+/* reenteringLogger calls back into the storage from its Error, the shape of a dead-letter journal whose own failure handling closes the storage it journals for. */
+type reenteringLogger struct {
+    *capturingLogger
+    onError func()
+}
+
+func (instance *reenteringLogger) Error(message string, context loggingcontract.Context) {
+    instance.onError()
+    instance.capturingLogger.Error(message, context)
+}
+
+func TestAsyncStorage_ADeadLetterLoggerOnAClosedStorageCanReenterClose(t *testing.T) {
+    delegate := newRecordingStorage()
+    close(delegate.release)
+    storage := NewAsyncStorage(delegate, 1)
+    closeErr := storage.Close()
+    if nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    logger := &reenteringLogger{capturingLogger: &capturingLogger{}, onError: func() { _ = storage.Close() }}
+    storage.WithLogger(logger)
+
+    done := make(chan error, 1)
+    go func() {
+        done <- storage.Save(context.Background(), DefaultTable, Entry{Entity: "late"})
+    }()
+
+    select {
+    case saveErr := <-done:
+        if false == errors.Is(saveErr, ErrAsyncStorageClosed) || 1 != logger.count() || 1 != storage.Dropped() {
+            t.Fatalf("expected the closed refusal with one dead-letter, got %v, %d dead-letters, %d dropped", saveErr, logger.count(), storage.Dropped())
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatalf("expected the dead-letter logger to reenter Close, the save did not return")
+    }
+}
+
+func TestAsyncStorage_ADeadLetterLoggerOnAFullQueueCanCloseAndDrain(t *testing.T) {
+    delegate := newRecordingStorage()
+    storage := NewAsyncStorage(delegate, 1)
+    var releaseOnce sync.Once
+    unblock := func() { releaseOnce.Do(func() { close(delegate.release) }) }
+    t.Cleanup(unblock)
+
+    logger := &reenteringLogger{capturingLogger: &capturingLogger{}, onError: func() {
+        unblock()
+        _ = storage.Close()
+    }}
+    storage.WithLogger(logger)
+
+    firstErr := storage.Save(context.Background(), DefaultTable, Entry{Entity: "in flight"})
+    if nil != firstErr {
+        t.Fatalf("first save: %v", firstErr)
+    }
+    select {
+    case <-delegate.entered:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("expected the delegate to receive the first entry")
+    }
+    secondErr := storage.Save(context.Background(), DefaultTable, Entry{Entity: "queued"})
+    if nil != secondErr {
+        t.Fatalf("second save: %v", secondErr)
+    }
+
+    done := make(chan error, 1)
+    go func() {
+        done <- storage.Save(context.Background(), DefaultTable, Entry{Entity: "refused"})
+    }()
+
+    select {
+    case saveErr := <-done:
+        if false == errors.Is(saveErr, ErrAsyncStorageQueueFull) || 2 != delegate.count() || 1 != logger.count() || 1 != storage.Dropped() {
+            t.Fatalf("expected the queue-full refusal after a drain of two, got %v, %d saved, %d dead-letters, %d dropped", saveErr, delegate.count(), logger.count(), storage.Dropped())
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatalf("expected the dead-letter logger to close and drain the storage, the save did not return")
     }
 }

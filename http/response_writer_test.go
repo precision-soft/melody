@@ -412,3 +412,23 @@ type failingFlushResponseWriter struct {
 func (instance *failingFlushResponseWriter) FlushError() error {
     return errors.New("write tcp 127.0.0.1:8080->127.0.0.1:51234: write: broken pipe")
 }
+
+func TestRecordingResponseWriter_AnEarlyHintCommitsNothing(t *testing.T) {
+    writer := newRecordingResponseWriter(httptest.NewRecorder())
+
+    writer.WriteHeader(nethttp.StatusEarlyHints)
+
+    if true == writer.HeadersWritten() || 0 != writer.CommittedStatusCode() {
+        t.Fatalf("expected an early hint to commit nothing, got committed %v with status %d", writer.HeadersWritten(), writer.CommittedStatusCode())
+    }
+}
+
+func TestRecordingResponseWriter_SwitchingProtocolsCommits(t *testing.T) {
+    writer := newRecordingResponseWriter(httptest.NewRecorder())
+
+    writer.WriteHeader(nethttp.StatusSwitchingProtocols)
+
+    if false == writer.HeadersWritten() || nethttp.StatusSwitchingProtocols != writer.CommittedStatusCode() {
+        t.Fatalf("expected 101 to commit, got committed %v with status %d", writer.HeadersWritten(), writer.CommittedStatusCode())
+    }
+}

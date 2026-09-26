@@ -228,7 +228,7 @@ func (instance *compiledFirewallFailingLoginHandler) Login(
 
 var _ securitycontract.LoginHandler = (*compiledFirewallFailingLoginHandler)(nil)
 
-/* the dispatch failure travels as an error rather than as its own rendered text: the dispatcher answers a wrapper whose Error() is the bare "event listener returned error", while the listener's name, the event and the listener's own cause all live in that error's CONTEXT. Flattened into a context slot, the record named neither the broken listener nor why it broke. */
+/* the dispatch failure travels as an error rather than as its own rendered text: the dispatcher answers a wrapper whose Error() is the bare "event listener returned error", while the listener's name, the event and the listener's own cause all live in that error's CONTEXT. Flattened into a context slot, the record would name neither the broken listener nor why it broke. */
 func TestCompiledFirewall_Login_ADispatchFailureNamesTheBrokenListener(t *testing.T) {
     firewall := NewCompiledFirewall(
         "main",

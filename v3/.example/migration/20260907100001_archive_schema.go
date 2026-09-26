@@ -33,7 +33,6 @@ func upArchiveSchema(ctx context.Context, database *bun.DB) error {
     return sealSchemaSet(ctx, database, archiveSchemaSetRecord)
 }
 
-/* downArchiveSchema reverses upArchiveSchema. */
 func downArchiveSchema(ctx context.Context, database *bun.DB) error {
     for _, statement := range archiveDownStatementList {
         if _, execErr := database.ExecContext(ctx, statement); nil != execErr {

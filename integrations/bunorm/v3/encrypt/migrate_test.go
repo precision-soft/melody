@@ -766,7 +766,7 @@ type normalisingCipher struct {
     updateErr   error
 }
 
-/* the seam fires only for the ROW's value: MigrateEncrypt now runs its own capacity check first, whose width probe seals filler strings through this same Encrypt — an unconditional trigger normalised the row BEFORE the run's SELECT, the run then read the already-normalised value, and the guard had no race left to catch. The race this test builds is the one between the run's SELECT and its guarded UPDATE, and only the row's own encrypt call sits in that window. */
+/* the seam fires only for the ROW's value: MigrateEncrypt runs its own capacity check first, whose width probe seals filler strings through this same Encrypt, so an unconditional trigger would normalise the row BEFORE the run's SELECT, the run would read the already-normalised value, and the guard would have no race left to catch. The race this test builds is the one between the run's SELECT and its guarded UPDATE, and only the row's own encrypt call sits in that window. */
 func (instance *normalisingCipher) Encrypt(plaintext string) (string, error) {
     if plaintext == instance.stored {
         _, execErr := instance.database.ExecContext(

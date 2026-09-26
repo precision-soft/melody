@@ -48,7 +48,7 @@ func TestMinLength_WithParamsRefusesNegativeBound(t *testing.T) {
     }
 }
 
-/* the constructor refuses what the tag door beside it has always refused: a negative minimum built a constraint that accepted every value in silence — a declaration that reads as enforced, validates nothing, and leaves no record anywhere that it does not */
+/* the constructor refuses what the tag door beside it refuses: a negative minimum would build a constraint that accepts every value in silence — a declaration that reads as enforced, validates nothing, and leaves no record anywhere that it does not */
 func TestMinLength_TheConstructorRefusesANegativeBound(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,

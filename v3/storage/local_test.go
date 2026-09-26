@@ -455,6 +455,25 @@ func TestLocalStorage_PutSweepsStaleTempObjectsAndKeepsLiveOnes(t *testing.T) {
     }
 }
 
+func TestLocalStorage_RefusesAKeySpelledLikeAReservedTempObject(t *testing.T) {
+    storage := NewLocalStorage(t.TempDir())
+    runtimeInstance := testRuntime()
+
+    reservedKey := "sub/" + reservedTempName("report.txt", "00112233445566aa")
+    if putErr := storage.Put(runtimeInstance, reservedKey, strings.NewReader("user data"), -1, storagecontract.PutOptions{}); nil == putErr || false == strings.Contains(putErr.Error(), "reserved .melody-storage- namespace") {
+        t.Fatalf("expected a key spelled like a reserved temp object to be refused, got %v", putErr)
+    }
+    if _, existsErr := storage.Exists(runtimeInstance, reservedKey); nil == existsErr {
+        t.Fatalf("expected Exists to refuse the reserved spelling too")
+    }
+
+    for _, ordinaryKey := range []string{".melody-storage-notes.txt", reservedTempName("report.txt", "notahexsuffix!!!"), "report.txt.tmp-00112233445566aa"} {
+        if putErr := storage.Put(runtimeInstance, ordinaryKey, strings.NewReader("user data"), -1, storagecontract.PutOptions{}); nil != putErr {
+            t.Fatalf("expected the ordinary key %q to be stored, got %v", ordinaryKey, putErr)
+        }
+    }
+}
+
 /* a leaf of 255 bytes is the longest a filesystem component admits; the temp object beside it must fit the same component */
 func TestLocalStorage_PutStoresAKeyWhoseLeafFillsTheFilesystemComponent(t *testing.T) {
     baseDirectory := t.TempDir()

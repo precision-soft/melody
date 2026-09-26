@@ -164,7 +164,6 @@ func (instance *InMemoryTransport) requeueAfter(
     }
 }
 
-/* resolveLogger prefers the runtime's logger — present in every framework-assembled scope — and falls back to the one configured through WithLogger. */
 func (instance *InMemoryTransport) resolveLogger(runtimeInstance runtimecontract.Runtime) loggingcontract.Logger {
     /* resolved without logging.LoggerFromRuntime, which writes an emergency line per runtime without a logger; this runs on every delayed Nack, and a line is owed only for a drop */
     if logger, resolveErr := runtime.FromRuntime[loggingcontract.Logger](runtimeInstance, logging.ServiceLogger); nil == resolveErr && false == internal.IsNilInterface(logger) {

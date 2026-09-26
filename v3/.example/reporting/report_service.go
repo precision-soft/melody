@@ -86,17 +86,13 @@ type CatalogReading struct {
 
 /* Reading yields the current reading, from the cache when the scheduled refresh left one there; a cached reading keeps the instant it was taken at, so the caller can tell how old the answer is. */
 func (instance *CatalogReportService) Reading(ctx context.Context) (*CatalogReading, error) {
-    cached, existsErr := instance.cache.Has(catalogReadingCacheKey)
-    if nil != existsErr {
-        return nil, existsErr
+    /* one round trip: Get answers presence and value together, so no entry can expire between two reads */
+    stored, cached, getErr := instance.cache.Get(catalogReadingCacheKey)
+    if nil != getErr {
+        return nil, getErr
     }
 
     if true == cached {
-        stored, _, getErr := instance.cache.Get(catalogReadingCacheKey)
-        if nil != getErr {
-            return nil, getErr
-        }
-
         payload, ok := stored.(string)
         if true == ok {
             /* the stamp comes out of the payload, not off the clock, so RecordedAt is the age of the reading; a payload whose stamp cannot be read back falls through to Refresh */
@@ -237,7 +233,6 @@ func payloadCountOf(payload string, field string) (int, bool) {
     return count, true
 }
 
-/* recordedAtOf reads back the instant Refresh wrote into the payload, and says whether it found one. */
 func recordedAtOf(payload string) (time.Time, bool) {
     value, found := payloadFieldOf(payload, catalogReadingRecordedAtField)
     if false == found {
@@ -306,7 +301,7 @@ func (instance *RequestReportTrail) Record(actor string, action string, subject 
     })
 }
 
-/* Flush writes what the request accumulated and empties the trail. The trail is emptied only after the write succeeds, so a failed flush leaves the entries for Close to retry; a batch is one statement that fails whole, so a retry cannot duplicate. An empty trail touches nothing, so a second call after a successful one is a no-op. */
+/* Flush writes what the request accumulated and empties the trail. The trail is emptied only after the write succeeds, so a failed flush leaves the entries for Close to retry; a batch is one statement that fails whole, so only a commit whose acknowledgement was lost can make Close's retry write it twice. An empty trail touches nothing, so a second call after a successful one is a no-op. */
 func (instance *RequestReportTrail) Flush(ctx context.Context) error {
     if 0 == len(instance.entries) {
         return nil

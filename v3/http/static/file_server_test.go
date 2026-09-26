@@ -1613,7 +1613,7 @@ func newRefusingFileServer(openErr error) *FileServer {
     }
 }
 
-/* A path whose symlinks resolve outside the served directory comes back from resolveAndOpen as fs.ErrPermission, and it is the only thing here that does. Recorded at debug it was byte-identical to a mistyped stylesheet href — the very indistinguishability the logging on this path exists to end — so the level is what carries the distinction and is what this pins. */
+/* A path whose symlinks resolve outside the served directory comes back from resolveAndOpen as fs.ErrPermission, and it is the only thing here that does. Recorded at debug it would be byte-identical to a mistyped stylesheet href — the very indistinguishability the logging on this path exists to end — so the level is what carries the distinction and is what this pins. */
 func TestFileServer_AnEscapeRefusalIsRecordedAtWarningRatherThanDebug(t *testing.T) {
     logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
 

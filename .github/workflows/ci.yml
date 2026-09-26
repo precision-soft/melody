@@ -203,6 +203,11 @@ jobs:
                             (cd "${MODULE_DIRECTORY}" && go test -race -count=1 ./...)
                             echo "::endgroup::"
                         done
+                    # the v3 example's bookkeeping init against the live postgres, named
+                    # because the example is not an integration module
+                    echo "::group::live v3/.example migration bookkeeping"
+                    (cd v3/.example && go test -race -count=1 -run TestInitializeMigrationBookkeepingSurvivesConcurrentCreatorsOnPostgres ./migration)
+                    echo "::endgroup::"
 
     # govulncheck over every module, gated on the REACHABLE findings against
     # `.dev/validate/vulncheck.baseline`. No other job reads a security advisory, so a vulnerable function

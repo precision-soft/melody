@@ -220,7 +220,7 @@ func TestEscapeControlCharactersKeepingNewlines_EscapesARawByteAndKeepsTheLineBr
     }
 }
 
-/* encoding/json escapes the C0 block and the two Unicode line separators and emits the C1 block raw, so a document carrying U+009B repainted the terminal it was printed to. The rewrite spells the rune as the escape the encoder uses for its own set — in a value, in a key and at both ends of the block — and the decoded document is the one the encoder was given. */
+/* encoding/json escapes the C0 block and the two Unicode line separators and emits the C1 block raw, so a document carrying U+009B would repaint the terminal it is printed to. The rewrite spells the rune as the escape the encoder uses for its own set — in a value, in a key and at both ends of the block — and the decoded document is the one the encoder is given. */
 func TestEscapeJsonC1Block_SpellsEveryC1RuneAsAJsonEscape(t *testing.T) {
     original := map[string]string{
         "k\xc2\x9dey": "a\xc2\x9bb",

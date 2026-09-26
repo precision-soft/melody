@@ -961,7 +961,7 @@ func TestHmacTokenSource_AnEnvelopePastTheDeadlineIsRefusedByTheTimeWindow(t *te
     }
 }
 
-/* the not-yet-valid refusal had no test of any kind: an envelope stamped in the future validated, which is the half of the window that stops a caller minting credentials ahead of a rotation. */
+/* an envelope stamped in the future is refused: that is the half of the window that stops a caller minting credentials ahead of a rotation. */
 func TestHmacTokenSource_AnEnvelopeIssuedInTheFutureIsRefused(t *testing.T) {
     source := hmacTestSource(NewMemoryNonceGuard())
 

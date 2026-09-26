@@ -415,6 +415,33 @@ func TestRestoreDefaultRunnerOption_KeepsAValueTheHostInstalledWhileACommandRan(
 }
 
 /* three overlapping commands leaving out of order — the second, then the third, then the first — leave the second command's value live under nobody's name at the last restore: a compare-and-swap on the last command's own value would leave it there for the life of the process, which is why the restore asks whether the live value was installed by ANY command of the group */
+func TestRestoreDefaultRunnerOption_ARestoreStopsAtAValueWhoseCommandStillRuns(t *testing.T) {
+    t.Cleanup(func() {
+        processRunnerOption.Store(nil)
+        commandRunnerOptions.depth = 0
+        commandRunnerOptions.host = nil
+        commandRunnerOptions.installed = nil
+    })
+
+    var host, first, second, third bytes.Buffer
+    SetDefaultRunnerOption(RunnerOption{Writer: &host, NoColor: true})
+
+    firstInstalled, firstPrevious := swapDefaultRunnerOption(RunnerOption{Writer: &first, NoColor: true})
+    secondInstalled, secondPrevious := swapDefaultRunnerOption(RunnerOption{Writer: &second, NoColor: true})
+    thirdInstalled, thirdPrevious := swapDefaultRunnerOption(RunnerOption{Writer: &third, NoColor: true})
+
+    restoreDefaultRunnerOption(firstInstalled, firstPrevious)
+    restoreDefaultRunnerOption(thirdInstalled, thirdPrevious)
+    if &second != resolveDefaultRunnerOption().Writer {
+        t.Fatalf("expected the third command's restore to put the still-running second command's value back, got %v", resolveDefaultRunnerOption().Writer)
+    }
+
+    restoreDefaultRunnerOption(secondInstalled, secondPrevious)
+    if &host != resolveDefaultRunnerOption().Writer {
+        t.Fatalf("expected the host's own value back once the last command restored, got %v", resolveDefaultRunnerOption().Writer)
+    }
+}
+
 func TestRestoreDefaultRunnerOption_ThreeOverlappingCommandsLeavingOutOfOrderStillPutTheHostsValueBack(t *testing.T) {
     t.Cleanup(func() {
         processRunnerOption.Store(nil)
@@ -432,8 +459,8 @@ func TestRestoreDefaultRunnerOption_ThreeOverlappingCommandsLeavingOutOfOrderSti
 
     restoreDefaultRunnerOption(secondInstalled, secondPrevious)
     restoreDefaultRunnerOption(thirdInstalled, thirdPrevious)
-    if &second != resolveDefaultRunnerOption().Writer {
-        t.Fatalf("expected the third command's restore to put the second command's value back while the first still runs, got %v", resolveDefaultRunnerOption().Writer)
+    if &first != resolveDefaultRunnerOption().Writer {
+        t.Fatalf("expected the third command's restore to put the still-running first command's value back rather than the finished second's, got %v", resolveDefaultRunnerOption().Writer)
     }
 
     restoreDefaultRunnerOption(firstInstalled, firstPrevious)

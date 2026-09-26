@@ -159,7 +159,6 @@ func (instance *Recorder) record(
     return nil
 }
 
-/* deadLetterLogger reads the logger a dead-letter goes through, under the lock WithLogger writes it under */
 func (instance *Recorder) deadLetterLogger() loggingcontract.Logger {
     instance.loggerMutex.RLock()
     defer instance.loggerMutex.RUnlock()

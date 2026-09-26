@@ -465,7 +465,7 @@ func TestResolveDatabase_TheReleaseEndsTheDedicatedMigrationConnection(t *testin
     }
 }
 
-/* a release that FAILS must reach a channel. The registry forgets the handle before it closes it and its own teardown snapshots the map, so nothing downstream covers what this close leaves behind; a release that swallowed the failure reported it nowhere at all. The record is a warning rather than the command's verdict, and it belongs in the json document as much as on the terminal — the release is deferred after finish and defers are last-in-first-out, so it runs while the document is still being assembled. */
+/* a release that FAILS must reach a channel: the registry forgets the handle before it closes it and its own teardown snapshots the map, so nothing downstream covers what this close leaves behind. The record is a warning rather than the command's verdict, and it belongs in the json document as much as on the terminal. */
 func TestResolveDatabase_TheReleaseReportsAFailedClose(t *testing.T) {
     ordinaryDatabase, _ := newFakeBunDatabase()
     migrationDatabase, _ := newFakeBunDatabase()

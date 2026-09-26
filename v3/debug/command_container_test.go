@@ -520,7 +520,7 @@ func newCyclicNamedMapErrorContext() exceptioncontract.Context {
     }
 }
 
-/* a cycle carried by a nested defined-type map must terminate exactly like one carried by a plain map: pre-guard it was a fatal stack overflow inside the fmt fallback, which no recover reaches */
+/* a cycle carried by a nested defined-type map must terminate exactly like one carried by a plain map: unguarded, it is a fatal stack overflow inside the fmt fallback, which no recover reaches */
 func TestResolveErrorContextJson_SelfReferentialNamedMapContextTerminates(t *testing.T) {
     assertErrorContextProbeExitsCleanly(t, "cyclicNamedMapContext", 30*time.Second)
 }
@@ -777,7 +777,7 @@ func TestResolveErrorContextJson_RendersTheNamedSliceCycleAsAMarker(t *testing.T
     }
 }
 
-/* the row builder is what turns one failing service into the lines an operator reads, and no test had entered it. A service that built fine occupies exactly one row; a failing one spreads its error over as many rows as the verbosity allows, with the name and the type printed once so the block reads as one service rather than as several */
+/* the row builder is what turns one failing service into the lines an operator reads. A service that built fine occupies exactly one row; a failing one spreads its error over as many rows as the verbosity allows, with the name and the type printed once so the block reads as one service rather than as several */
 func TestBuildContainerServiceTableRows_HealthyService_OccupiesOneRow(t *testing.T) {
     rows := buildContainerServiceTableRows(
         containerServiceListItem{
@@ -1780,7 +1780,7 @@ type containerCommandAliasTestEnvelope struct {
     } `json:"data"`
 }
 
-/* a name the plan folded onto another — two names handed one pointer — answers with the item of the node it was collapsed onto, in the json document and in a listing windowed on that name alone: without it the alias carried no teardown key, which the document reserves for a service never built, and a window on the alias rendered no block at all */
+/* a name the plan folded onto another — two names handed one pointer — answers with the item of the node it is collapsed onto, in the json document and in a listing windowed on that name alone: an alias with no teardown key would read as a service never built, which is what the document reserves that absence for, and a window on the alias would render no block at all */
 func TestContainerCommand_AnAliasOfOneInstanceCarriesTheTeardownOfTheNodeItWasCollapsedOnto(t *testing.T) {
     serviceContainer := container.NewContainer()
 

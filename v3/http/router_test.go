@@ -765,7 +765,7 @@ func TestRouterRegistration_RefusesADuplicateParameterName(t *testing.T) {
     )
 }
 
-/* a bare ":" binds nothing, so the segment it occupies was matched and then discarded in silence */
+/* a bare ":" binds nothing, so the segment it occupies would be matched and then discarded in silence */
 func TestRouterRegistration_RefusesAParameterWithNoName(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,

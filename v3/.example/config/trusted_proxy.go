@@ -173,7 +173,6 @@ func (instance *Module) trustedProxyList() []string {
     return instance.trustedProxyResolver.resolvedList(trustedProxyWarningLogger())
 }
 
-/* forwardedClientIpResolver is the middleware's resolver over one resolved list. */
 func forwardedClientIpResolver(trustedProxyList []string) melodyhttpmiddleware.ClientIpResolver {
     return melodyhttpmiddleware.NewForwardedClientIpResolver(melodyhttpcontract.ForwardedHeadersPolicy{
         TrustForwardedHeaders: 0 < len(trustedProxyList),

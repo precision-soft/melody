@@ -475,16 +475,21 @@ func (instance *ManagerRegistry) currentLogger() loggingcontract.Logger {
     return instance.logger
 }
 
-/* SetLogger replaces the logger this registry reports through and routes bun's diagnostic channel with it, so the two cannot drift apart. It serves a registry built before the application logger exists, on the emergency logger; a nil or typed-nil logger is refused. */
+/* SetLogger replaces the logger this registry reports through and routes bun's diagnostic channel with it, so the two cannot drift apart. It serves a registry built before the application logger exists, on the emergency logger; a nil or typed-nil logger is refused, and so is any logger once the registry is closed, since its Close has handed bun's channel back and a late SetLogger would take it again. */
 func (instance *ManagerRegistry) SetLogger(logger loggingcontract.Logger) error {
     if true == isNilInterface(logger) {
         return ErrLoggerIsRequired
     }
 
     instance.lock.Lock()
+    defer instance.lock.Unlock()
+
+    if true == instance.closed {
+        return ErrManagerRegistryClosed
+    }
+
     instance.logger = logger
     instance.routedDiagnostics = routeDiagnosticsTo(logger)
-    instance.lock.Unlock()
 
     return nil
 }

@@ -3,6 +3,7 @@ package container
 import (
     "context"
     "fmt"
+    "math/rand"
     "reflect"
     "runtime"
     "strings"
@@ -13,52 +14,6 @@ import (
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
 )
-
-/* capturingHolder is the shape the reflection walk exists for: a service that HOLDS a collaborator it never resolved, because its provider closed over a value built before it. Nothing about it writes an edge. */
-type capturingHolder struct {
-    recorder *closeOrderRecorder
-    held     *closeOrderServiceB
-}
-
-func (instance *capturingHolder) Close() error {
-    instance.recorder.record("holder")
-
-    return nil
-}
-
-func registerCapturingPair(t *testing.T, serviceContainer containercontract.Container, recorder *closeOrderRecorder) {
-    t.Helper()
-
-    /* built before the container, the way a composition root builds what it then publishes: the provider below has nothing to resolve and hands it back */
-    captured := &closeOrderServiceB{recorder: recorder}
-
-    if registerErr := serviceContainer.Register(
-        "app.storage",
-        func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
-            return captured, nil
-        },
-    ); nil != registerErr {
-        t.Fatalf("unexpected register error: %v", registerErr)
-    }
-
-    if registerErr := serviceContainer.Register(
-        "app.holder",
-        func(resolver containercontract.Resolver) (*capturingHolder, error) {
-            return &capturingHolder{recorder: recorder, held: captured}, nil
-        },
-    ); nil != registerErr {
-        t.Fatalf("unexpected register error: %v", registerErr)
-    }
-
-    /* the holder is built FIRST, so the creation stamp alone closes the storage before it — which is the wrong order, and the accident the walk has to correct */
-    if _, getErr := FromResolver[*capturingHolder](serviceContainer, "app.holder"); nil != getErr {
-        t.Fatalf("unexpected get error: %v", getErr)
-    }
-
-    if _, getErr := FromResolver[*closeOrderServiceB](serviceContainer, "app.storage"); nil != getErr {
-        t.Fatalf("unexpected get error: %v", getErr)
-    }
-}
 
 /* the holder captured its collaborator instead of resolving it, so no edge was ever written and the creation order alone closes the collaborator FIRST — under the holder that is still using it. Armed, the walk sees what the holder holds and the graph gains the edge the provider did not write. */
 func TestContainer_Close_ArmedAHeldCollaboratorIsClosedAfterTheServiceHoldingIt(t *testing.T) {
@@ -322,7 +277,7 @@ func (instance *plainPointerHolder) Close() error {
     return nil
 }
 
-/* the hub is named by a pointer the walk reads whole; what the hub holds through an INTERFACE is two words somebody else is replacing, and the walk does not read them. Run under -race, the earlier walk that did reported the race on every run; this one reports none, and the assertion below is what pins the same thing without the detector. */
+/* the hub is named by a pointer the walk reads whole; what the hub holds through an INTERFACE is two words somebody else is replacing, and the walk does not read them. Run under -race, a walk that reads them reports the race on every run; the assertion below pins the same thing without the detector. */
 func TestHeldPointerIdentities_DoesNotReadAnInterfaceFieldOfForeignMemory(t *testing.T) {
     hub := &foreignHub{backplane: &foreignBackplane{label: "first"}}
     stop := make(chan struct{})
@@ -804,7 +759,7 @@ type handedSliceHolder struct {
 
 func (instance *handedSliceHolder) Close() error { return nil }
 
-/* the slice a provider stores is the header a registry handed it, whose first element the registry rewrites under its own mutex while the walk reads it: walked as the holder's own memory that read reported the race under the detector on every run. The proof is the race detector, so this test says nothing without -race; the deterministic pin is the one above. */
+/* the slice a provider stores is the header a registry handed it, whose first element the registry rewrites under its own mutex while the walk reads it: walked as the holder's own memory, that read reports the race under the detector on every run. The proof is the race detector, so this test says nothing without -race; the deterministic pin is the one above. */
 func TestHeldPointerIdentities_DoesNotReadASliceHandedToTheValueByAnotherOwner(t *testing.T) {
     registry := &rewritingRegistry{items: []*closeOrderServiceB{{}}}
 
@@ -945,7 +900,7 @@ func TestContainer_Close_ArmedAHeldEdgeBesideAMutualPairIsStillWritten(t *testin
     }
 }
 
-/* what arming walks has been published — it is in use, its owner may be writing it — so it is walked as foreign memory, its own interface fields included: a hub built BEFORE arming, whose backplane its owner swaps under its own mutex, is named by its pointer and what its interface field holds stays unread. The walk that read it as the value's own memory reported the race under the detector on every run, and the example application arms after a boot that has built services by then. */
+/* what arming walks has been published — it is in use, its owner may be writing it — so it is walked as foreign memory, its own interface fields included: a hub built BEFORE arming, whose backplane its owner swaps under its own mutex, is named by its pointer and what its interface field holds stays unread. Walked as the value's own memory, it reports the race under the detector on every run, and the example application arms after a boot that has built services by then. */
 func TestContainer_ArmParallelTeardown_WalksAlreadyBuiltServicesAsPublishedMemory(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1019,7 +974,7 @@ func (instance *aliasedCapturingService) Close() error {
     return nil
 }
 
-/* the ring an inferred edge would close has to be looked for in the CANONICAL key space, where a service filed under its name and under its type is one node: asked on the raw keys, the resolved edge from the type node and the held edge onto the name node never met, the held edge was written, and the drain — which folds the aliases first — reported a cycle over a teardown in which both services closed, 29 times out of 200, by map order. Fifty rounds here, because a defect that appears one time in seven does not show in one. */
+/* the ring an inferred edge would close has to be looked for in the CANONICAL key space, where a service filed under its name and under its type is one node: asked on the raw keys, the resolved edge from the type node and the held edge onto the name node never meet, the held edge is written, and the drain — which folds the aliases first — reports a cycle over a teardown in which both services close, by map order, about one run in seven. Fifty rounds here, because a defect that appears one time in seven does not show in one. */
 func TestContainer_Close_ArmedAHeldEdgeAgainstAResolvedEdgeThroughATypeAliasIsNotWritten(t *testing.T) {
     for round := 0; round < 50; round = round + 1 {
         serviceContainer := NewContainer()
@@ -1177,7 +1132,7 @@ func TestContainer_TeardownPlan_DoesNotWriteAnInferredEdgeIntoTheGraph(t *testin
     }
 }
 
-/* the way back that decides whether an inference would close a ring runs through the nodes the drain will read — the CREATED ones — so a declared edge towards a service nobody built is not a way back: it dropped a true inference and left the pair in one wave. */
+/* the way back that decides whether an inference would close a ring runs through the nodes the drain will read — the CREATED ones — so a declared edge towards a service nobody built is not a way back: read as one, it would drop a true inference and leave the pair in one wave. */
 func TestContainer_ArmParallelTeardown_AnUnbuiltDeclaredDependencyIsNotAWayBack(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1322,7 +1277,7 @@ type peerFirstCodec struct {
 
 func (instance *peerFirstCodec) Close() error { return nil }
 
-/* an inline table of sixty-four kibibytes cost one budget unit per byte, which is the whole budget, so a pointer field declared after it was never reached; an array whose element type cannot name anything is one node */
+/* an inline table of sixty-four kibibytes, charged one budget unit per byte, is the whole budget, so a pointer field declared after it would go unreached; an array whose element type cannot name anything is one node */
 func TestHeldPointerIdentities_CountsAnArrayOfScalarsAsOneNode(t *testing.T) {
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
@@ -1357,7 +1312,7 @@ func reflectStructFieldName(prefix string, index int) string {
     return prefix + string(rune('A'+index/26)) + string(rune('A'+index%26))
 }
 
-/* a struct of scalars was charged field by field where an array of scalars is one node: a struct as wide as the budget spent all of it, and the held service one level below it was never queued */
+/* a struct of scalars is one node, as an array of scalars is: charged field by field, a struct as wide as the budget would spend all of it, and the held service one level below it would not be queued */
 func TestHeldPointerIdentities_CountsAStructOfScalarsAsOneNode(t *testing.T) {
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
@@ -1534,7 +1489,7 @@ func newCrossEdgeShape(held *closeOrderServiceB) (chain *crossEdgeNode, holderOf
     return chain, holderOfMember
 }
 
-/* a holder of a ring member through a plain forward edge, with the held service past the limit through the chain and inside it through the holder: found — the depth-first walk recorded the holder as whole while the ring was being cut, refused it from the short path that had room, and lost the service */
+/* a holder of a ring member through a plain forward edge, with the held service past the limit through the chain and inside it through the holder: found — a depth-first walk that records the holder as whole while the ring is being cut refuses it from the short path that has room, and loses the service */
 func TestHeldPointerIdentities_FindsAHeldServiceBehindARingHeldThroughAForwardEdgeFromTheShortPath(t *testing.T) {
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
@@ -1560,7 +1515,7 @@ type sliceTableFirstCodec struct {
 
 func (instance *sliceTableFirstCodec) Close() error { return nil }
 
-/* an inline table of interfaces or slices is one node too: the walk enters neither, so counting each cell of it spent the whole budget before the pointer field declared after the table, exactly as a table of scalars did before it was counted as one node */
+/* an inline table of interfaces or slices is one node too: the walk enters neither, so counting each cell of it would spend the whole budget before the pointer field declared after the table */
 func TestHeldPointerIdentities_CountsAnArrayOfWhatItDoesNotReadAsOneNode(t *testing.T) {
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
@@ -1839,5 +1794,55 @@ func TestTypeCanHoldIdentity_AnswersTrueForAStructPointingAtItselfWithoutRecursi
 
     if true == typeCanHoldIdentity(reflect.TypeOf([3]struct{ count int }{})) {
         t.Fatalf("expected an array of scalar structs to hold no identity")
+    }
+}
+
+func TestHeldPointerIdentities_MatchesTheBoundedReachabilityOfARandomGraph(t *testing.T) {
+    const nodeCount = 18
+
+    random := rand.New(rand.NewSource(20260911))
+
+    for sample := 0; sample < 500; sample++ {
+        nodes := make([]*reflectionGraphNode, nodeCount)
+        for index := range nodes {
+            nodes[index] = &reflectionGraphNode{value: index}
+        }
+
+        edges := make([][2]int, nodeCount)
+        for index, node := range nodes {
+            edges[index] = [2]int{random.Intn(nodeCount+1) - 1, random.Intn(nodeCount+1) - 1}
+            if 0 <= edges[index][0] {
+                node.left = nodes[edges[index][0]]
+            }
+            if 0 <= edges[index][1] {
+                node.right = nodes[edges[index][1]]
+            }
+        }
+
+        distances := make([]int, nodeCount)
+        for index := range distances {
+            distances[index] = -1
+        }
+        distances[0] = 0
+        pending := []int{0}
+        for head := 0; head < len(pending); head++ {
+            current := pending[head]
+            for _, next := range edges[current] {
+                if 0 <= next && 0 > distances[next] {
+                    distances[next] = distances[current] + 1
+                    pending = append(pending, next)
+                }
+            }
+        }
+
+        held := heldPointerIdentities(nodes[0])
+        for index, node := range nodes {
+            identity, _ := pointerKeyOf(node)
+            /* each link is a pointer and a struct, two levels of the walk */
+            wanted := 0 <= distances[index] && 2*distances[index] <= teardownWalkDepthLimit
+            if wanted != holdsIdentity(held, identity) {
+                t.Fatalf("sample %d node %d at distance %d: expected held=%v over the edges %v", sample, index, distances[index], wanted, edges)
+            }
+        }
     }
 }

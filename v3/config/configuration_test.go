@@ -756,7 +756,7 @@ func TestRegisterRuntime_RefusesWhitespaceNames(t *testing.T) {
     }()
 }
 
-/* a runtime parameter is named in its conversion errors: identified only by its empty environmentKey it was anonymous, and "cannot convert" named nothing an operator could find */
+/* a runtime parameter carries an empty environmentKey, so its conversion error names the parameter itself, or "cannot convert" names nothing an operator can find */
 func TestRuntimeParameter_ConversionErrorNamesTheParameter(t *testing.T) {
     environment := &Environment{values: map[string]string{}}
 

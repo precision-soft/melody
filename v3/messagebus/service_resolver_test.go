@@ -299,8 +299,8 @@ func TestTransportsCloser_ANilTransportDoesNotStrandTheOthers(t *testing.T) {
 }
 
 /* A transport whose Close panics must not abandon the loop either: the container's recovery sits
-   around the CLOSER, so before this containment everything sorted later went unclosed in silence
-   while one record blamed a single service. */
+   around the CLOSER, so without a containment per transport everything sorted later would go unclosed
+   in silence while one record blamed a single service. The panicking transport sorts first. */
 func TestTransportsCloser_APanickingCloseDoesNotStrandTheOthers(t *testing.T) {
     healthy := &recordingCloseTransport{}
 

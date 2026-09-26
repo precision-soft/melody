@@ -92,7 +92,7 @@ func ensureMigratedSet(ctx context.Context, database *bun.DB, migrationSet *migr
     )
 
     /* every failure of the set is handed back as this application's exception naming the set and the step, with bun's error as the cause: a raw driver error travelling up through a by-type resolution is wrapped by the container under its own title, "service resolution failed in resolver", a headline about the wiring for a database that refused. errors.Is still reaches the cause. */
-    if initErr := migrator.Init(ctx); nil != initErr {
+    if initErr := initializeMigrationBookkeeping(ctx, migrator); nil != initErr {
         return migrationStepFailure(setName, "initialising the bookkeeping", unlockCommand, initErr)
     }
 
@@ -227,7 +227,7 @@ func migrateWhileLocked(ctx context.Context, migrator *migrate.Migrator, unlockC
     return migrateErr
 }
 
-/* Reset brings the database back to the schema this application declares, whatever shape it is in: the tables the set owns are dropped, the bookkeeping is dropped and recreated, the single migration is applied again, and this package's memo for the handle is cleared. Dropping the bookkeeping is what brings a volume migrated by an older set to the present one, since its rows name steps this schema does not have. No migration lock is taken, because the reset drops the table the lock lives in; it is a deliberate operator command, and the caller serializes it. */
+/* Reset brings the database back to the schema this application declares, whatever shape it is in: the tables the set owns are dropped, the bookkeeping is dropped and recreated, the single migration is applied again, and this package's memo for the handle is cleared before the first of them, so a reset that fails half way leaves the handle to be migrated again rather than answered as migrated. Dropping the bookkeeping is what brings a volume migrated by an older set to the present one, since its rows name steps this schema does not have. No migration lock is taken, because the reset drops the table the lock lives in; it is a deliberate operator command, and the caller serializes it. */
 func Reset(ctx context.Context, database *bun.DB) error {
     return resetSet(ctx, database, Migrations)
 }
@@ -245,9 +245,13 @@ func resetSet(ctx context.Context, database *bun.DB, migrationSet *migrate.Migra
     ensureMutex.Lock()
     defer ensureMutex.Unlock()
 
+    memoizationKey := migratedSetKey{database: database, migrationSet: migrationSet}
+    delete(migratedDatabaseList, memoizationKey)
+    delete(refusedDatabaseList, memoizationKey)
+
     migrator := migrate.NewMigrator(database, migrationSet, migrate.WithMarkAppliedOnSuccess(true))
 
-    if initErr := migrator.Init(ctx); nil != initErr {
+    if initErr := initializeMigrationBookkeeping(ctx, migrator); nil != initErr {
         return initErr
     }
 
@@ -270,9 +274,41 @@ func resetSet(ctx context.Context, database *bun.DB, migrationSet *migrate.Migra
         return migrateErr
     }
 
-    memoizationKey := migratedSetKey{database: database, migrationSet: migrationSet}
-    delete(migratedDatabaseList, memoizationKey)
-    delete(refusedDatabaseList, memoizationKey)
-
     return nil
+}
+
+/* migrationBookkeepingInitAttempts bounds the retries of a bookkeeping init that lost a race to another process creating the same tables */
+const migrationBookkeepingInitAttempts = 4
+
+/* initializeMigrationBookkeeping runs bun's Init, retrying it when postgres answers that a concurrent creator of the same bookkeeping table won the race. CREATE TABLE IF NOT EXISTS is not atomic there: two replicas booting at once can both find the table absent, and the second fails on the catalog's unique index (23505 on pg_class_relname_nsp_index or pg_type_typname_nsp_index), with 42P07 for the table or with 42710 for its row type. The table exists afterwards, so the retry succeeds; every other failure is answered at once. MySQL's IF NOT EXISTS runs under its metadata lock and answers none of these codes. */
+func initializeMigrationBookkeeping(ctx context.Context, migrator *migrate.Migrator) error {
+    for attempt := 1; ; attempt++ {
+        initErr := migrator.Init(ctx)
+        if nil == initErr || migrationBookkeepingInitAttempts <= attempt || false == isConcurrentBookkeepingCreation(initErr) {
+            return initErr
+        }
+
+        if nil != ctx.Err() {
+            return ctx.Err()
+        }
+    }
+}
+
+/* isConcurrentBookkeepingCreation reads the SQLSTATE and the constraint off a postgres error through the Field method pgdriver.Error carries, so the package takes no driver import for it */
+func isConcurrentBookkeepingCreation(initErr error) bool {
+    var postgresErr interface{ Field(field byte) string }
+    if false == errors.As(initErr, &postgresErr) {
+        return false
+    }
+
+    switch postgresErr.Field('C') {
+    case "42P07", "42710":
+        return true
+    case "23505":
+        constraint := postgresErr.Field('n')
+
+        return "pg_class_relname_nsp_index" == constraint || "pg_type_typname_nsp_index" == constraint
+    }
+
+    return false
 }

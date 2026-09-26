@@ -289,3 +289,38 @@ func TestResetClearsTheMemoForTheHandle(t *testing.T) {
         t.Fatalf("expected the reset to clear the migrated memo for the handle")
     }
 }
+
+func TestResetThatFailsHalfWayLeavesTheHandleToBeMigratedAgain(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    memoizationKey := database
+
+    ensureMutex.Lock()
+    migratedDatabaseList[memoizationKey] = struct{}{}
+    ensureMutex.Unlock()
+    defer func() {
+        ensureMutex.Lock()
+        delete(migratedDatabaseList, memoizationKey)
+        ensureMutex.Unlock()
+    }()
+
+    dropRefused := errors.New("drop refused")
+    recorder.execHook = func(query string) error {
+        if "DROP TABLE" == query[:min(len(query), len("DROP TABLE"))] {
+            return dropRefused
+        }
+
+        return nil
+    }
+
+    if resetErr := Reset(context.Background(), database); false == errors.Is(resetErr, dropRefused) {
+        t.Fatalf("expected the reset to fail on the refused drop, got %v", resetErr)
+    }
+
+    ensureMutex.Lock()
+    _, stillMigrated := migratedDatabaseList[memoizationKey]
+    ensureMutex.Unlock()
+
+    if true == stillMigrated {
+        t.Fatalf("expected a reset that failed half way to clear the migrated memo for the handle")
+    }
+}

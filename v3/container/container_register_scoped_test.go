@@ -7,14 +7,6 @@ import (
     containercontract "github.com/precision-soft/melody/v3/container/contract"
 )
 
-type registerScopedProbe struct {
-    value string
-}
-
-type registerScopedOtherProbe struct {
-    value string
-}
-
 func TestRegisterScopedGeneric_RegistersAServiceEveryScopeBuildsOnItsOwn(t *testing.T) {
     serviceContainer := NewContainer()
 

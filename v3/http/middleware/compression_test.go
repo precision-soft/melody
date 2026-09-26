@@ -622,7 +622,7 @@ func TestCompressionMiddleware_NegativeMinSizeIsNormalized(t *testing.T) {
     }
 }
 
-/* A response another layer already encoded is one of several encodings of its URL just as a gzip one is, so a shared cache that stored it under the URL alone would replay a brotli body to a client that never asked for brotli. The already-encoded early return sat above the Vary helper, which is exactly the negotiated case where the header decides correctness. */
+/* A response another layer already encoded is one of several encodings of its URL just as a gzip one is, so a shared cache that stored it under the URL alone would replay a brotli body to a client that never asked for brotli. The already-encoded response is exactly the negotiated case where the Vary header decides correctness. */
 func TestCompressionMiddleware_AddsVaryWhenResponseIsAlreadyEncoded(t *testing.T) {
     config := NewCompressionConfig(6, 10, nil, nil)
     middleware := CompressionMiddleware(config)
@@ -916,7 +916,7 @@ func TestDefaultCompressionConfig_ExcludesTheAlreadyCompressedMediaTypes(t *test
     }
 }
 
-/* DefaultCompressionMiddleware is the one-call front door and had no test. It has to be the default configuration wired through — a middleware that compressed nothing, or one that ignored the shipped minimum size, would read as working on every response large enough to compress. */
+/* DefaultCompressionMiddleware is the one-call front door, and it has to be the default configuration wired through — a middleware that compressed nothing, or one that ignored the shipped minimum size, would read as working on every response large enough to compress. */
 
 func TestDefaultCompressionMiddleware_CompressesAboveTheDefaultMinimumSize(t *testing.T) {
     middleware := DefaultCompressionMiddleware()
@@ -1121,7 +1121,7 @@ func TestCompressionMiddleware_TheGrowingPeekStillCompressesABodyAtTheThreshold(
     }
 }
 
-/* nil reads as the default configuration, the way the cors middleware and the route group read their absent options: the nil dereference answered a wiring shorthand with a raw panic. */
+/* nil reads as the default configuration, the way the cors middleware and the route group read their absent options, rather than answering a wiring shorthand with a raw panic. */
 func TestCompressionMiddleware_NilConfigReadsAsTheDefaultConfiguration(t *testing.T) {
     resultResponse := func() httpcontract.Response {
         middleware := CompressionMiddleware(nil)

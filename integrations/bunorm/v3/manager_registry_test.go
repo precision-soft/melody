@@ -2410,6 +2410,36 @@ func (instance funcCarryingLogger) Warning(message string, context loggingcontra
 func (instance funcCarryingLogger) Error(message string, context loggingcontract.Context)     { instance.sink(message) }
 func (instance funcCarryingLogger) Emergency(message string, context loggingcontract.Context) { instance.sink(message) }
 
+func TestManagerRegistry_SetLoggerOnAClosedRegistryIsRefusedAndLeavesBunsChannelAlone(t *testing.T) {
+    t.Cleanup(ResetDiagnostics)
+
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{Name: "main", Provider: &fakeProvider{}, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    closeErr := registry.Close()
+    if nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+    routedBefore := bunDiagnosticsTarget.Load()
+
+    lateLogger := &capturingDiagnosticLogger{}
+    if setErr := registry.SetLogger(lateLogger); false == errors.Is(setErr, ErrManagerRegistryClosed) {
+        t.Fatalf("expected ErrManagerRegistryClosed for a logger set after the close, got %v", setErr)
+    }
+
+    if routedBefore != bunDiagnosticsTarget.Load() {
+        t.Fatal("expected the refused SetLogger to leave bun's diagnostic channel where the close left it")
+    }
+    if lateLogger == registry.currentLogger() {
+        t.Fatal("expected the refused SetLogger to leave the registry's logger unchanged")
+    }
+}
+
 /* a nil logger, and a typed nil holding no value, are refused: they are the absence this package reads as a wiring mistake everywhere else, and installing one would silence the registry's only channel. */
 func TestManagerRegistry_SetLoggerRefusesTheAbsentLogger(t *testing.T) {
     provider := &loggerRecordingProvider{}

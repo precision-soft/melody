@@ -194,7 +194,6 @@ func newConnectionLiveness() *connectionLiveness {
     return &connectionLiveness{base: time.Now()}
 }
 
-/* elapsed reports the monotonic time since the connection was accepted. */
 func (instance *connectionLiveness) elapsed() time.Duration {
     return time.Since(instance.base)
 }

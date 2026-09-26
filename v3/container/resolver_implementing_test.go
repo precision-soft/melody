@@ -9,49 +9,7 @@ import (
 
 var errFailingProvider = errors.New("the provider failed")
 
-type collectableHandler interface {
-    Handle() string
-}
-
-type unrelatedContract interface {
-    Unrelated()
-}
-
-type invoiceHandler struct {
-}
-
-func (instance *invoiceHandler) Handle() string {
-    return "invoice"
-}
-
-type auditHandler struct {
-}
-
-func (instance *auditHandler) Handle() string {
-    return "audit"
-}
-
 type plainService struct {
-}
-
-func newCollectionContainer(t *testing.T) containercontract.Container {
-    t.Helper()
-
-    serviceContainer := NewContainer()
-
-    MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*invoiceHandler, error) {
-        return &invoiceHandler{}, nil
-    })
-
-    MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*auditHandler, error) {
-        return &auditHandler{}, nil
-    })
-
-    MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*plainService, error) {
-        return &plainService{}, nil
-    })
-
-    return serviceContainer
 }
 
 func TestAllImplementing_CollectsOnlyTheServicesSatisfyingTheInterface(t *testing.T) {

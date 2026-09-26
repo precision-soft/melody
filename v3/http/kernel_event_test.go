@@ -9,7 +9,7 @@ import (
     "github.com/precision-soft/melody/v3/internal/testhelper"
 )
 
-/* the four kernel events are how every listener in the framework and in an application reaches the request, the runtime and the response. Their accessors sat at zero coverage: an event that handed back the wrong one of its three fields would send a listener the request of one hop and the response of another, and nothing in the dispatch would notice. Each event is asserted to report the very instances it was constructed with. */
+/* the four kernel events are how every listener in the framework and in an application reaches the request, the runtime and the response: an event that hands back the wrong one of its three fields would send a listener the request of one hop and the response of another, and nothing in the dispatch would notice. Each event is asserted to report the very instances it is constructed with. */
 
 func TestKernelEvents_ReportTheInstancesTheyWereBuiltWith(t *testing.T) {
     runtimeInstance := newTestRuntime()

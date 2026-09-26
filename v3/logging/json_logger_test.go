@@ -633,7 +633,7 @@ func TestJsonLogger_ClosedAnswersWhileAWriteIsInFlight(t *testing.T) {
     close(writer.release)
 }
 
-/* the console is recognized by identity — the os.Stdout and os.Stderr values themselves — not by name: a file the caller opened on the "/dev/stdout" path is a descriptor this logger owns, and the name check skipped the close it owed and leaked it once per boot */
+/* the console is recognized by identity — the os.Stdout and os.Stderr values themselves — not by name: a file the caller opens on the "/dev/stdout" path is a descriptor this logger owns, so a name check would skip the close it owes and leak it once per boot */
 func TestJsonLogger_CloseClosesAFileOpenedOnTheConsolePath(t *testing.T) {
     file, openErr := os.OpenFile("/dev/stdout", os.O_WRONLY|os.O_APPEND, 0644)
     if nil != openErr {
@@ -1090,7 +1090,7 @@ func (instance *blockingOrderedWriter) Write(payload []byte) (int, error) {
     return len(payload), nil
 }
 
-/* TestJsonLogger_TheStampOrderIsTheWriteOrder pins a guard against a RACE, so it is proven by construction rather than by a mutant: one write is held open while a second record is asked for, and the second record's stamp cannot precede the first write's completion unless the stamp is taken outside the lock. It was: the stamp said when the record was FORMED and the encoding happened between the stamp and the write, so at eight goroutines 484 records of 1600 reached the file out of stamp order while LOGGING.md promised the write order stays reconstructible from them. */
+/* this test pins a guard against a RACE, so it is proven by construction rather than by a mutant: one write is held open while a second record is asked for, and the second record's stamp cannot precede the first write's completion unless the stamp is taken outside the lock. Taken outside, the stamp says when the record is FORMED, the encoding happens between the stamp and the write, and records reach the file out of stamp order while LOGGING.md promises the write order stays reconstructible from them. */
 func TestJsonLogger_TheStampOrderIsTheWriteOrder(t *testing.T) {
     writer := &blockingOrderedWriter{
         firstWriteAt: make(chan struct{}),
@@ -1423,7 +1423,7 @@ func (instance *refusingWriter) Write(payload []byte) (int, error) {
     return 0, errors.New("the journal destination refuses every record")
 }
 
-/* the encoder leaves the C1 block raw in every field it writes, so a message carrying U+009B repainted the terminal the file was tailed on and a NEL in a context value ended the record for a reader splitting on Unicode line boundaries; the record spells the block as json escapes in the message and in the context alike, and decodes to the values it was given */
+/* the encoder leaves the C1 block raw in every field it writes, so a message carrying U+009B would repaint the terminal the file is tailed on and a NEL in a context value would end the record for a reader splitting on Unicode line boundaries; the record spells the block as json escapes in the message and in the context alike, and decodes to the values it is given */
 func TestJsonLogger_SpellsTheC1BlockAsJsonEscapes(t *testing.T) {
     logger, buffer := testNewJsonLogger()
 

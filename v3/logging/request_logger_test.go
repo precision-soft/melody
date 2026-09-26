@@ -162,7 +162,7 @@ func TestRequestLogger_ClosedForwardsToTheBase(t *testing.T) {
     }
 }
 
-/* all six methods of the decorator merge the id, and each is its own delegation: only Info had ever been entered, so a method wired to the wrong base call — or forgetting the merge — would drop the correlation of every record written through it. The level the base receives says which delegation ran */
+/* all six methods of the decorator merge the id, and each is its own delegation: a method wired to the wrong base call — or forgetting the merge — would drop the correlation of every record written through it. The level the base receives says which delegation ran */
 func TestRequestLogger_EveryMethodMergesTheRequestIdAndKeepsTheLevel(t *testing.T) {
     base := &captureLogger{}
 

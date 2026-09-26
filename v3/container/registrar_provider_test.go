@@ -6,10 +6,6 @@ import (
     containercontract "github.com/precision-soft/melody/v3/container/contract"
 )
 
-type providerContractProbe struct {
-    value string
-}
-
 type providerConcreteError struct {
     detail string
 }

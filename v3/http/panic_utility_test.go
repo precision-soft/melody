@@ -8,7 +8,7 @@ import (
     "github.com/precision-soft/melody/v3/exception"
 )
 
-/* every recovery boundary of the request path funnels its recovered value through here, and nothing had ever called it: a nil that did not read as nil would turn a clean return into a fabricated failure, and a value dropped instead of described would leave an operator with a 500 and nothing to look at. A recovered error travels UNCHANGED — wrapping it would bury the level, the context and the already-logged mark the exception package carries. */
+/* every recovery boundary of the request path funnels its recovered value through here: a nil that did not read as nil would turn a clean return into a fabricated failure, and a value dropped instead of described would leave an operator with a 500 and nothing to look at. A recovered error travels UNCHANGED — wrapping it would bury the level, the context and the already-logged mark the exception package carries. */
 func TestRecoverToError_ANilRecoveryIsNotAFailure(t *testing.T) {
     if nil != RecoverToError(nil) {
         t.Fatalf("expected a nil recovery to yield no error")

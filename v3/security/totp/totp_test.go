@@ -52,7 +52,7 @@ func TestVerifyAt_AcceptsCodeWithinSkew(t *testing.T) {
     }
 }
 
-/* the negative control sits on the boundary, at two steps: the default window is one step either way, so two is the FIRST offset that must be refused. Probing at three left a window one step too wide indistinguishable from the right one — a loop bound written Skew+1 accepts the two-step code and this test never noticed. Both directions, because the loop is symmetric and a bound wrong on one side only would otherwise hide. */
+/* the negative control sits on the boundary, at two steps: the default window is one step either way, so two is the FIRST offset that must be refused. Probing at three would leave a window one step too wide indistinguishable from the right one — a loop bound written Skew+1 accepts the two-step code. Both directions, because the loop is symmetric and a bound wrong on one side only would otherwise hide. */
 func TestVerifyAt_RejectsCodeOutsideSkew(t *testing.T) {
     secret, _ := GenerateSecret()
     now := time.Unix(1_700_000_000, 0)

@@ -305,7 +305,34 @@ func storageRelativeKey(key string) (string, error) {
         return "", exception.NewError("storage key is empty or invalid", map[string]any{"key": key}, nil)
     }
 
+    /* a key spelled exactly like a temp object would be swept by a later Put of the key whose digest it carries, so the reserved namespace is refused at every door */
+    if true == isStorageTempObjectName(filepath.Base(cleaned)) {
+        return "", exception.NewError("storage key names a temp object of the reserved .melody-storage- namespace", map[string]any{"key": key}, nil)
+    }
+
     return cleaned, nil
+}
+
+/* isStorageTempObjectName matches exactly the names createStorageTempFile gives: the reserved prefix, a sha256 in lowercase hex, a dot, the random part and the suffix. */
+func isStorageTempObjectName(name string) bool {
+    const reservedPrefix = ".melody-storage-"
+
+    if false == strings.HasPrefix(name, reservedPrefix) || false == strings.HasSuffix(name, storageTempObjectSuffix) {
+        return false
+    }
+
+    body := strings.TrimSuffix(strings.TrimPrefix(name, reservedPrefix), storageTempObjectSuffix)
+    if 64+1+16 != len(body) || '.' != body[64] {
+        return false
+    }
+
+    for _, character := range body[:64] {
+        if ('0' > character || '9' < character) && ('a' > character || 'f' < character) {
+            return false
+        }
+    }
+
+    return isStorageTempRandomPart(body[65:])
 }
 
 var _ storagecontract.Storage = (*LocalStorage)(nil)

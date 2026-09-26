@@ -172,3 +172,13 @@ func TestCurrencyRefreshRatesCommandNamesTheCacheDropThatFailedOverAnUnchangedQu
         t.Fatalf("expected the table with none written and the one unchanged quote before the cache drop failed, got %v", cells)
     }
 }
+
+func TestCurrencyRefreshRatesCommandHandsBackATableTheWriterRefused(t *testing.T) {
+    runtimeInstance := rateRefreshCommandRuntime(t, `{"base":"EUR","asOf":"2026-09-08T09:00:00Z","rates":{"EUR":1,"USD":1.0842,"RON":4.9761}}`, nil, nil)
+    writeRefusal := errors.New("the pipe was closed")
+
+    runErr := NewCurrencyRefreshRatesCommand().Run(runtimeInstance, newBoolFlagContext("unused", false, &refusingWriter{refusal: writeRefusal}))
+    if false == errors.Is(runErr, writeRefusal) {
+        t.Fatalf("expected the refused table to take the exit code, got %v", runErr)
+    }
+}

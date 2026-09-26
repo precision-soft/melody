@@ -144,7 +144,7 @@ func TestRouteManifestCommand_RefusesToOverwriteAForeignFile(t *testing.T) {
     }
 }
 
-/* an unrecognised zone matched nothing, so the command wrote an empty manifest over the good one and reported success; the frontend then failed to resolve every route it asked for, with the build green */
+/* an unrecognised zone matches nothing, so writing would put an empty manifest over the good one and report success, and the frontend would fail to resolve every route it asks for with the build green; the probe seeds a good manifest and misspells the zone */
 func TestRouteManifestCommand_RefusesAZoneThatIsNotDeclared(t *testing.T) {
     projectDirectory := t.TempDir()
     runtimeInstance := newManifestCommandRuntime(t, projectDirectory)

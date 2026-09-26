@@ -79,7 +79,7 @@ func TestDatabaseFromContext_TrackerBindingIsIgnoredByAnotherDatabase(t *testing
     }
 }
 
-/* Save is a public door and the table flows unquoted through ModelTableExpr as raw SQL; a direct caller bypasses the Registry's validation entirely, and the silent ""-to-default substitution hid the caller that forgot which table it was writing */
+/* Save is a public door and the table flows unquoted through ModelTableExpr as raw SQL; a direct caller bypasses the Registry's validation entirely, so the grammar is checked here, and an empty table is refused like any other invalid one rather than read as the default */
 func TestBunStorage_SaveRefusesATableTheGrammarDoesNotAllow(t *testing.T) {
     storage := NewBunStorage(newTestDatabase())
 

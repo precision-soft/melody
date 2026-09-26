@@ -724,7 +724,7 @@ func TestCipher_OpensUnderTheRotatedKeyWhenTheProviderChangesTheBytesUnderOneId(
 
 /* the key material is memoised on the cipher, which every column type of a process shares, so the memo
    is read and written from the goroutines of concurrent requests. A guard against a race is proved under
-   -race, repeatedly, not by a mutant (§5.11) — and a sequential suite would leave it green by construction. */
+   -race, repeatedly, not by a mutant — and a sequential suite would leave it green by construction. */
 func TestCipher_ConcurrentSealsAndOpensShareTheKeyMaterial(t *testing.T) {
     cipherInstance := NewCipher(NewStaticKeyProvider("v2", map[string][]byte{
         "v1": newKey(1),

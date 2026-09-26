@@ -601,3 +601,48 @@ func TestConfinedAttachmentResponse_CarriesTheDispositionOverTheConfinedFile(t *
         t.Fatalf("expected the content disposition header")
     }
 }
+
+func TestConfinedFileResponse_ServesASymlinkWithAnAbsoluteTargetInsideARelativeRoot(t *testing.T) {
+    directory := t.TempDir()
+
+    workingDirectory, getwdErr := os.Getwd()
+    if nil != getwdErr {
+        t.Fatalf("getwd error: %v", getwdErr)
+    }
+    if chdirErr := os.Chdir(directory); nil != chdirErr {
+        t.Fatalf("chdir error: %v", chdirErr)
+    }
+    t.Cleanup(func() {
+        _ = os.Chdir(workingDirectory)
+    })
+
+    if mkdirErr := os.Mkdir("sub", 0o755); nil != mkdirErr {
+        t.Fatalf("mkdir error: %v", mkdirErr)
+    }
+    if writeErr := os.WriteFile(filepath.Join("sub", "file.txt"), []byte("hello"), 0o644); nil != writeErr {
+        t.Fatalf("write error: %v", writeErr)
+    }
+    absoluteTarget, absoluteErr := filepath.Abs(filepath.Join("sub", "file.txt"))
+    if nil != absoluteErr {
+        t.Fatalf("abs error: %v", absoluteErr)
+    }
+    if symlinkErr := os.Symlink(absoluteTarget, filepath.Join("sub", "link.txt")); nil != symlinkErr {
+        t.Fatalf("symlink error: %v", symlinkErr)
+    }
+
+    for _, testCase := range []struct {
+        root string
+        name string
+    }{
+        {"sub", "link.txt"},
+        {".", filepath.Join("sub", "link.txt")},
+    } {
+        response, serveErr := ConfinedFileResponse(200, testCase.root, testCase.name)
+        if nil != serveErr {
+            t.Fatalf("expected %q under the relative root %q to be served, got %v", testCase.name, testCase.root, serveErr)
+        }
+        if closer, isCloser := response.BodyReader().(io.Closer); true == isCloser {
+            _ = closer.Close()
+        }
+    }
+}

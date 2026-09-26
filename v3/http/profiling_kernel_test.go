@@ -95,8 +95,8 @@ func (instance *staticRequestContext) RequestId() string { return instance.reque
 func (instance *staticRequestContext) StartedAt() time.Time { return instance.startedAt }
 
 /* The request is the application's and Attributes() returns an interface, so a nil pointer of the
-application's own bag type arrives as a non-nil interface. Read with a bare comparison it was taken for a
-live bag and Get dereferenced the nil receiver inside a response listener, where no recover covers it. */
+application's own bag type arrives as a non-nil interface. Read with a bare comparison it would be taken for a
+live bag and Get would dereference the nil receiver inside a response listener, where no recover covers it. */
 func TestKernelHttpProfilerListener_EmitsProfileWhenAttributesAreATypedNil(t *testing.T) {
     clockInstance := clock.NewSystemClock()
     dispatcher := event.NewEventDispatcher(clockInstance)

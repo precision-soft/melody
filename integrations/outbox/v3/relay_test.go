@@ -495,7 +495,7 @@ func TestRelay_NextBackoffDoesNotOverflowWithLargeMax(t *testing.T) {
     }
 }
 
-/* a batch that outlives the lock ttl refreshes the lease as it works; when the refresh fails (lease lost), the claimed rows are still this run's — fenced by their claim token, invisible to the new holder — so the batch is drained to its end, the refresh is not tried again, and the failure is reported after the batch. The earlier form returned at the failed refresh and left every unreached row claimed for the whole visibility timeout. */
+/* a batch that outlives the lock ttl refreshes the lease as it works; when the refresh fails (lease lost), the claimed rows are still this run's — fenced by their claim token, invisible to the new holder — so the batch is drained to its end, the refresh is not tried again, and the failure is reported after the batch. */
 func TestRelay_ALostLeaseDrainsTheClaimedBatchThenReportsTheFailure(t *testing.T) {
     refreshFailure := errors.New("lease lost")
 

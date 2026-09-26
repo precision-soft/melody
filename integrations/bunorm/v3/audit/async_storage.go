@@ -117,12 +117,13 @@ func (instance *AsyncStorage) Save(ctx context.Context, table string, entries ..
     }
 
     instance.mutex.RLock()
-    defer instance.mutex.RUnlock()
 
     /* read once for the whole call, so the dead-letter and the refusal name the same logger */
     logger := instance.deadLetterLogger()
 
     if true == instance.closed {
+        instance.mutex.RUnlock()
+
         var refused []map[string]any
         for index, entry := range entries {
             refused = append(refused, entryIdentity(index, entry))
@@ -139,15 +140,23 @@ func (instance *AsyncStorage) Save(ctx context.Context, table string, entries ..
 
     /* the refusal names each dropped entry, not a count: one call can be split between the queue and the journal, and a retry of the whole batch would store the admitted entries twice */
     var refused []map[string]any
+    var refusedEntries []Entry
     for index, entry := range entries {
         select {
         case instance.queue <- asyncEntry{table: table, entry: entry}:
             instance.admitEntry()
         default:
             refused = append(refused, entryIdentity(index, entry))
+            refusedEntries = append(refusedEntries, entry)
             instance.dropped.Add(1)
-            instance.deadLetterThrough(logger, table, entry, exception.NewError("async audit queue is full, dropped the entry", map[string]any{"table": table}, ErrAsyncStorageQueueFull))
         }
+    }
+
+    /* the dead-letter logger runs after the read lock is released, since a logger that re-enters the storage, closing it, would otherwise wait on the lock this call holds */
+    instance.mutex.RUnlock()
+
+    for _, entry := range refusedEntries {
+        instance.deadLetterThrough(logger, table, entry, exception.NewError("async audit queue is full, dropped the entry", map[string]any{"table": table}, ErrAsyncStorageQueueFull))
     }
 
     if 0 == len(refused) {
@@ -251,12 +260,12 @@ func (instance *AsyncStorage) CloseWithContext(closeContext context.Context) err
     instance.workerCancel()
 
     if true == budgetWithdrawn {
-        return instance.cancelledWithoutAGraceVerdict("async audit storage had its close cancelled by its caller during the drain; the save in hand was cancelled without a grace to observe its reaction, and the entries still outstanding were not confirmed stored")
+        return instance.cancelledWithoutAGraceVerdict(closeContext.Err(), "async audit storage had its close cancelled by its caller during the drain; the save in hand was cancelled without a grace to observe its reaction, and the entries still outstanding were not confirmed stored")
     }
 
     /* with a zero grace no reaction can be observed, so the answer names the spent budget and the entries not confirmed stored; this is decided before any timer, since a timer of zero is not "now" */
     if 0 >= cancellationGrace {
-        return instance.cancelledWithoutAGraceVerdict("async audit storage was closed with its budget already spent, or with less of it left than a grace is measured against; the save in hand was cancelled without a grace to observe its reaction, and the entries still outstanding were not confirmed stored")
+        return instance.cancelledWithoutAGraceVerdict(nil, "async audit storage was closed with its budget already spent, or with less of it left than a grace is measured against; the save in hand was cancelled without a grace to observe its reaction, and the entries still outstanding were not confirmed stored")
     }
 
     /* the answer past this wait is still not nil when the worker DID react: the saves it reacted to were dead-lettered, which is what the counted verdict below says */
@@ -266,7 +275,7 @@ func (instance *AsyncStorage) CloseWithContext(closeContext context.Context) err
     case drainedInTime:
         drainedAfterCancellation = true
     case drainBudgetWithdrawn:
-        return instance.cancelledWithoutAGraceVerdict("async audit storage had its close cancelled by its caller while it waited for the save in hand to react to its cancellation; the entries still outstanding were not confirmed stored")
+        return instance.cancelledWithoutAGraceVerdict(closeContext.Err(), "async audit storage had its close cancelled by its caller while it waited for the save in hand to react to its cancellation; the entries still outstanding were not confirmed stored")
     }
 
     if false == drainedAfterCancellation {
@@ -326,9 +335,9 @@ func awaitDrain(drained <-chan struct{}, done <-chan struct{}, grace time.Durati
     }
 }
 
-/* cancelledWithoutAGraceVerdict is the answer of a close that cancelled the worker with no stretch left to observe a reaction in — the budget spent before the storage was reached, or withdrawn by the caller during a stretch — and it counts what was outstanding rather than claiming anything about what the delegate did with it. */
-func (instance *AsyncStorage) cancelledWithoutAGraceVerdict(message string) error {
-    return exception.NewError(message, map[string]any{"outstanding": instance.outstandingEntries(), "queued": len(instance.queue)}, nil)
+/* cancelledWithoutAGraceVerdict is the answer of a close that cancelled the worker with no stretch left to observe a reaction in — the budget spent before the storage was reached, or withdrawn by the caller during a stretch — and it counts what was outstanding rather than claiming anything about what the delegate did with it. A withdrawal carries the caller's context error as its cause, so errors.Is reads context.Canceled or context.DeadlineExceeded off the answer; a budget spent at entry carries none. */
+func (instance *AsyncStorage) cancelledWithoutAGraceVerdict(cause error, message string) error {
+    return exception.NewError(message, map[string]any{"outstanding": instance.outstandingEntries(), "queued": len(instance.queue)}, cause)
 }
 
 func (instance *AsyncStorage) outstandingEntries() int64 {
@@ -370,7 +379,6 @@ func (instance *AsyncStorage) saveItem(item asyncEntry) (failed bool) {
     return false
 }
 
-/* deadLetterLogger reads the logger a dead-letter goes through, under the lock WithLogger writes it under */
 func (instance *AsyncStorage) deadLetterLogger() loggingcontract.Logger {
     instance.loggerMutex.RLock()
     defer instance.loggerMutex.RUnlock()

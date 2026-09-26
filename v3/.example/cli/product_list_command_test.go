@@ -74,8 +74,18 @@ func TestProductListCommandJournalsANomenclatureItCouldNotRead(t *testing.T) {
 
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 
-    if runErr := NewProductListCommand().Run(runtimeInstance, newBoolFlagContext("unused", false, &bytes.Buffer{})); nil != runErr {
+    output := &bytes.Buffer{}
+    if runErr := NewProductListCommand().Run(runtimeInstance, newBoolFlagContext("unused", false, output)); nil != runErr {
         t.Fatalf("expected the listing to render over an unreadable nomenclature, got %v", runErr)
+    }
+
+    if false == strings.Contains(output.String(), "product list: limit=") || false == strings.Contains(output.String(), "--+--") {
+        t.Errorf("expected the limit line and the table in the command's writer, got %q", output.String())
+    }
+
+    writeRefusal := errors.New("the pipe was closed")
+    if runErr := NewProductListCommand().Run(runtimeInstance, newBoolFlagContext("unused", false, &refusingWriter{refusal: writeRefusal})); false == errors.Is(runErr, writeRefusal) {
+        t.Errorf("expected a table the writer refused to take the exit code, got %v", runErr)
     }
 
     if false == strings.Contains(journal.String(), "\"nomenclature\":\"category\"") || false == strings.Contains(journal.String(), "zz category table unreachable") {

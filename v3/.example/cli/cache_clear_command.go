@@ -37,14 +37,23 @@ func (instance *CacheClearCommand) Run(runtimeInstance melodyruntimecontract.Run
 
 /* clearCache empties the cache and says so, the one spelling of the clear for this command and for example:db:reset after it reseeds, naming the caller in a failure. On redis the clear is a SCAN of the whole keyspace filtered on this application's prefix, under the backend's one-second command budget. A reset writes through no door that dispatches a write event, so without the clear an account it removed would keep authenticating from the cache; on the in-process fallback the clear reaches this process alone, which the line says, and a failed clear takes the exit code. */
 func clearCache(runtimeInstance melodyruntimecontract.Runtime, writer io.Writer, caller string) error {
-    cacheInstance, cacheErr := melodycontainer.FromResolver[melodycachecontract.Cache](
-        runtimeInstance.Container(),
-        melodycache.ServiceCache,
-    )
+    cacheInstance, cacheErr := resolveCache(runtimeInstance)
     if nil != cacheErr {
         return cacheErr
     }
 
+    return clearResolvedCache(runtimeInstance, cacheInstance, writer, caller)
+}
+
+func resolveCache(runtimeInstance melodyruntimecontract.Runtime) (melodycachecontract.Cache, error) {
+    return melodycontainer.FromResolver[melodycachecontract.Cache](
+        runtimeInstance.Container(),
+        melodycache.ServiceCache,
+    )
+}
+
+/* clearResolvedCache is the clear over a cache already resolved, for example:db:reset, which resolves it before its first drop so a cache it cannot reach refuses the reset before anything is touched. */
+func clearResolvedCache(runtimeInstance melodyruntimecontract.Runtime, cacheInstance melodycachecontract.Cache, writer io.Writer, caller string) error {
     if clearErr := cacheInstance.Clear(); nil != clearErr {
         return exception.NewError(caller+": clearing the cache did not complete", nil, clearErr)
     }

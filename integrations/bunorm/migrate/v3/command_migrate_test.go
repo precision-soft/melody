@@ -9,6 +9,8 @@ import (
     "strings"
     "testing"
 
+    melodycli "github.com/precision-soft/melody/v3/cli"
+    clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     "github.com/uptrace/bun/migrate"
@@ -299,7 +301,7 @@ func TestMigrateCommand_JsonCarriesTheDetailAtTheDefaultVerbosity(t *testing.T) 
     }
 }
 
-/* TestMigrateCommand_ARunThatChangedTheSchemaSaysSoOnTheText pins the line a deploy log captures. The success line lived inside wantsDetail(), so a plain run — the shape a deploy script invokes — printed a warning for the run that did nothing and not one byte for the run that applied migrations: the log was empty exactly when something had happened, and the operator reading it could not tell the two apart. The rollback sibling has always printed its line. */
+/* a plain run is the shape a deploy script invokes, so the text a deploy log captures names a run that applied migrations and tells it apart from a run that did nothing. */
 func TestMigrateCommand_ARunThatChangedTheSchemaSaysSoOnTheText(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = appliedMigrationRowsHook()
@@ -647,5 +649,69 @@ func TestMigrateCommand_AReportCutShortIsRefusedInsteadOfExitingZero(t *testing.
     var whole bytes.Buffer
     if runErr = runMigrationCommandTo(t, &whole, runtimeInstance, NewMigrateCommand(migrations, DefaultOptions()), "--no-color"); nil != runErr {
         t.Fatalf("expected a report written whole to pass, got %v", runErr)
+    }
+}
+
+func TestMigrationCommands_APanicKeepsPrecedenceOverAFailedUnlock(t *testing.T) {
+    for _, rollback := range []bool{false, true} {
+        name := "migrate"
+        if true == rollback {
+            name = "rollback"
+        }
+
+        t.Run(name, func(t *testing.T) {
+            database, recorder := newFakeBunDatabase()
+            recorder.execHook = func(query string) error {
+                if true == isUnlockDelete(query) {
+                    return errors.New("unlock failed after panic")
+                }
+
+                return nil
+            }
+            if true == rollback {
+                recorder.queryHook = appliedMigrationRowsHook("20240101000000")
+            }
+
+            panicValue := errors.New("migration body panicked")
+            panicking := func(context.Context, *migrate.Migrator, *migrate.Migration) error {
+                panic(panicValue)
+            }
+            migrations := migrate.NewMigrations()
+            migrations.Add(migrate.Migration{Name: "20240101000000", Comment: "panic_probe", Up: panicking, Down: panicking})
+
+            var command clicontract.Command = NewMigrateCommand(migrations, DefaultOptions())
+            if true == rollback {
+                command = NewRollbackCommand(migrations, DefaultOptions())
+            }
+
+            runtimeInstance := newRuntimeWithDatabase(t, database)
+            buffer := &bytes.Buffer{}
+
+            var recovered any
+            func() {
+                defer func() { recovered = recover() }()
+
+                if dispatchErr := melodycli.DispatchCommand(context.Background(), command, runtimeInstance, []string{command.Name(), "--format=json"}, buffer); nil != dispatchErr {
+                    t.Errorf("expected the command to panic before it returned, got %v", dispatchErr)
+                }
+            }()
+
+            if panicValue != recovered {
+                t.Fatalf("expected the migration's own panic to reach the caller, got %v", recovered)
+            }
+
+            var document map[string]any
+            if unmarshalErr := json.Unmarshal(buffer.Bytes(), &document); nil != unmarshalErr {
+                t.Fatalf("expected one json document, got %v: %s", unmarshalErr, buffer.String())
+            }
+
+            rendered := buffer.String()
+            if false == strings.Contains(rendered, command.Name()+" panicked") || false == strings.Contains(rendered, panicValue.Error()) {
+                t.Fatalf("expected the document to name the panic, got %s", rendered)
+            }
+            if false == strings.Contains(rendered, "unlock failed after panic") || 0 > recorder.firstIndexMatching(isUnlockDelete) {
+                t.Fatalf("expected the unlock failure kept beside the panic, got %s", rendered)
+            }
+        })
     }
 }

@@ -25,7 +25,6 @@ func cacheIsProcessLocal(runtimeInstance melodyruntimecontract.Runtime) bool {
 /* processLocalCacheNotice is the sentence a writing command adds when the cache is this process's own: a running server on the same fallback will not see the write until it restarts. */
 const processLocalCacheNotice = "the cache is this process's own (no REDIS_ADDRESS): a running server keeps what it cached until it restarts"
 
-/* cacheClearedScope says what a clear of the cache reached. */
 func cacheClearedScope(runtimeInstance melodyruntimecontract.Runtime) string {
     if true == cacheIsProcessLocal(runtimeInstance) {
         return "this process's own entries; " + processLocalCacheNotice

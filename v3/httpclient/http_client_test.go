@@ -1002,7 +1002,7 @@ func TestHttpClient_NilRequestOptionIsRefused(t *testing.T) {
     }
 }
 
-/* The sibling resolveTransportConfig handles its nil argument explicitly and NewHttpClientConfig tolerates nil headers; the constructor dereferenced its own argument, so a wiring mistake died on an anonymous nil dereference instead of naming what was missing. */
+/* The sibling resolveTransportConfig handles its nil argument explicitly and NewHttpClientConfig tolerates nil headers; the constructor names a missing configuration rather than dying on an anonymous nil dereference. */
 func TestNewHttpClient_NilConfigurationIsRefusedByName(t *testing.T) {
     defer func() {
         recovered := recover()
@@ -1330,7 +1330,7 @@ func TestHttpClient_ReusesPooledConnectionsAcrossConcurrentWaves(t *testing.T) {
     }
 }
 
-/* the constructor an application reaches for when it has nothing to configure had never been executed: the whole of what "default" means — a thirty-second whole-request timeout, no base url, no configured headers, and a real transport under it — went unproven, and a default drifting to zero would have made every request unbounded without a single test noticing. */
+/* the constructor an application reaches for when it has nothing to configure: "default" means a thirty-second whole-request timeout, no base url, no configured headers, and a real transport under it, and a default drifting to zero would make every request unbounded. */
 func TestNewDefaultHttpClient_CarriesTheDocumentedDefaults(t *testing.T) {
     client := NewDefaultHttpClient()
     defer client.Close()
@@ -1360,7 +1360,7 @@ func TestNewDefaultHttpClient_CarriesTheDocumentedDefaults(t *testing.T) {
     }
 }
 
-/* Put, Patch and Delete had never been executed. The first two are Post's siblings and carry the same two obligations — the method on the wire and the json encoding of the body — and the third carries neither a body nor a content type; a verb wired to the wrong method would send a create where an update was meant, which no status code distinguishes. */
+/* Put and Patch are Post's siblings and carry the same two obligations — the method on the wire and the json encoding of the body — and Delete carries neither a body nor a content type; a verb wired to the wrong method would send a create where an update is meant, which no status code distinguishes. */
 func TestHttpClient_PutPatchAndDeleteSendTheirOwnMethods(t *testing.T) {
     type recordedRequest struct {
         method      string
@@ -1526,7 +1526,7 @@ func TestHttpClient_StripsABearerTokenOnCrossOriginRedirect(t *testing.T) {
     }
 }
 
-/* the textual fallback is what sanitizes a url net/url refused to parse, which is exactly the url a caller built by hand and the one most likely to carry a secret. Only one of its shapes had ever been entered — the one with userinfo and no query — so three branches were blind: the query cut, the early return for a string with no scheme separator, and the early return for an authority with no userinfo. Each is asserted on its own shape, because they all answer with a string and a shared assertion would let any of them fall through. */
+/* the textual fallback is what sanitizes a url net/url refuses to parse, which is exactly the url a caller builds by hand and the one most likely to carry a secret. Its shapes — userinfo with no query, the query cut, the early return for a string with no scheme separator, and the early return for an authority with no userinfo — are each asserted on their own, because they all answer with a string and a shared assertion would let any of them fall through. */
 func TestSanitizeUrlTextually_CutsTheQueryWholeWhateverFollowsIt(t *testing.T) {
     sanitized := sanitizeUrlTextually("http://host/path\x7f?token=SECRET&page=2")
 
@@ -1582,7 +1582,7 @@ func TestSanitizeUrlTextually_AnAuthorityEndingTheStringStillLosesItsUserinfo(t 
     }
 }
 
-/* every case pinned so far handed the sanitizer a url net/url REFUSES, so the parsed branches — the userinfo replacement and the fragment cut — had never run: a perfectly ordinary url with a password in it went through code no test had entered. The fragment matters because net/http does not send it, so a secret placed there reaches the log without ever reaching the wire. */
+/* a perfectly ordinary url with a password in it goes through the parsed branches — the userinfo replacement and the fragment cut — rather than the textual fallback, so this probe hands the sanitizer a url net/url ACCEPTS. The fragment matters because net/http does not send it, so a secret placed there reaches the log without ever reaching the wire. */
 func TestSanitizeUrlForDiagnostics_ParsedUrlsLoseTheirUserinfoAndFragment(t *testing.T) {
     sanitized := sanitizeUrlForDiagnostics("https://user:SECRET@example.com/path?token=ALSOSECRET#fragment-SECRET")
 
@@ -1631,7 +1631,7 @@ func TestHttpClient_StopsAfterTooManyRedirects(t *testing.T) {
     }
 }
 
-/* the redirect policy strips three headers by name beyond the ones it learned from the client and from the request, and neither Cookie nor Proxy-Authorization had ever been proven. Both deletions are SHADOWED for anything this API can produce: a caller sets them through WithHeader, which puts their names on the request context, and the per-request stripping above removes them first. They are belt-and-braces against a channel that does not exist today — a cookie jar, a transport-level proxy credential — so this test pins the verdict, that neither reaches a host the first server chose, and not the position of the guard. The bearer-token test below is the one that proves the by-name deletion on its own. */
+/* the redirect policy strips three headers by name beyond the ones it learns from the client and from the request. For Cookie and Proxy-Authorization both deletions are SHADOWED for anything this API can produce: a caller sets them through WithHeader, which puts their names on the request context, and the per-request stripping above removes them first. They are belt-and-braces against a channel that does not exist today — a cookie jar, a transport-level proxy credential — so this test pins the verdict, that neither reaches a host the first server chose, and not the position of the guard. The bearer-token test below is the one that proves the by-name deletion on its own. */
 func TestHttpClient_StripsCookieAndProxyAuthorizationOnCrossOriginRedirect(t *testing.T) {
     receivedCookie := ""
     receivedProxyAuthorization := ""
@@ -1759,7 +1759,7 @@ func TestHttpClient_AJsonBodyThatCannotBeEncodedIsRefusedBeforeDialling(t *testi
     }
 }
 
-/* a string body is sent verbatim, with no content type invented for it — the branch is what lets a caller send xml, form-encoded text or a pre-rendered json document under a content type it names itself, and nothing had ever entered it: a string falling through to the unsupported-type refusal would have been discovered by an application, not by the suite. */
+/* a string body is sent verbatim, with no content type invented for it — the branch is what lets a caller send xml, form-encoded text or a pre-rendered json document under a content type it names itself. */
 func TestHttpClient_AStringBodyIsSentVerbatimWithoutAnInventedContentType(t *testing.T) {
     receivedBody := ""
     receivedContentType := ""
@@ -1879,7 +1879,7 @@ func TestHttpClient_AnUnparsableAbsoluteTargetIsNamedAsTheRequestUrl(t *testing.
     }
 }
 
-/* the buffered path reads one byte past the cap precisely so a body ending EXACTLY at it is delivered rather than refused; the streaming sibling has carried that proof since the httpclient session and the buffered one had not, so an off-by-one there would have refused every response that filled its budget exactly. */
+/* the buffered path reads one byte past the cap precisely so a body ending EXACTLY at it is delivered rather than refused; the probe's body is ten bytes against a ten-byte cap, so an off-by-one would refuse every response that fills its budget exactly. */
 func TestHttpClient_ABufferedBodyEndingExactlyAtTheCapIsDelivered(t *testing.T) {
     server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
         writer.WriteHeader(http.StatusOK)
@@ -2178,7 +2178,7 @@ func TestSanitizeUrlForDiagnostics_KeepsTheQueryOrderAndTheRepetitionAndRedactsA
     }
 }
 
-/* a scheme-relative url net/url accepts is redacted by the parsed branch and must stay that way: it is the one spelling of this shape that was never a leak, and a repair reaching for the textual side could only make it worse. */
+/* a scheme-relative url net/url accepts is redacted in place by the parsed branch; the textual side, which exists for the urls net/url refuses, has nothing to add for this shape. */
 func TestSanitizeUrlForDiagnostics_AParsableSchemeRelativeUrlKeepsItsRedaction(t *testing.T) {
     sanitized := sanitizeUrlForDiagnostics("//user:SECRET@host/path")
 

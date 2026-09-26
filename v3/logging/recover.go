@@ -221,7 +221,7 @@ func exitPathStepBudget(declaredBudget time.Duration) time.Duration {
     return exitStepBudget
 }
 
-/* RunShieldedStep runs a step under the exit handler's shield, containing a panic, echoing it to stderr best-effort, and abandoning a step that outlasts the budget. It answers whether the step ran to its end; false means the process holds something it cannot release and should end. The step keeps running after abandonment, and it is handed a context carrying its deadline. */
+/* RunShieldedStep runs a step under the exit handler's shield, containing a panic, echoing it to stderr best-effort, and abandoning a step that outlasts the budget. It answers whether the step ran to its end; false means the process holds something it cannot release and should end. The step keeps running after abandonment, and it is handed a context whose deadline falls at half the budget, so it can report before the shield abandons it. */
 func RunShieldedStep(stepName string, step func(stepContext context.Context)) bool {
     return runExitStepShielded(stepName, step)
 }

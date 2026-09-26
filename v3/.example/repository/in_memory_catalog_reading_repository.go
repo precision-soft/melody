@@ -26,11 +26,13 @@ func (instance *inMemoryCatalogReadingRepository) Append(ctx context.Context, re
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    if _, recorded := instance.readingByInstant[reading.TakenAt]; true == recorded {
+    /* the instant is keyed in UTC, which also strips the monotonic reading: a time.Time map key compares location and monotonic clock too, so one instant spelled in two zones would otherwise be two readings, where the postgres sister's key column holds one */
+    instant := reading.TakenAt.UTC()
+    if _, recorded := instance.readingByInstant[instant]; true == recorded {
         return fmt.Errorf("reading already recorded")
     }
 
-    instance.readingByInstant[reading.TakenAt] = copyOfReading(reading)
+    instance.readingByInstant[instant] = copyOfReading(reading)
 
     return nil
 }

@@ -552,3 +552,13 @@ func TestCatalogReportRefreshCommandDoesNotClaimAnExportThatDidNotHappen(t *test
         t.Fatalf("expected the console to say no sink is configured, got %q", output)
     }
 }
+
+func TestCatalogReportRefreshCommandHandsBackATableTheWriterRefused(t *testing.T) {
+    fixture := newRefreshFixture(t, refreshFixtureOption{})
+    writeRefusal := errors.New("the pipe was closed")
+
+    runErr := NewCatalogReportRefreshCommand().Run(fixture.runtime, newBoolFlagContext("none", false, &refusingWriter{refusal: writeRefusal}))
+    if false == errors.Is(runErr, writeRefusal) {
+        t.Fatalf("expected the refused table to take the exit code, got %v", runErr)
+    }
+}

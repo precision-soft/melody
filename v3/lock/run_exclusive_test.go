@@ -666,7 +666,7 @@ func (instance *slowAcquireCountingLock) Refresh(runtimeInstance runtimecontract
 }
 
 func TestRunExclusive_LeaseIsDatedFromTheAcquireIssueInstant(t *testing.T) {
-    /* the acquire answers 600ms after it was issued, against a 400ms ttl: the lease the store wrote has already lapsed by the time callback starts. Dated from the ISSUE instant, the very first failed renewal finds the lease beyond recovery and demotes; dated from the ANSWER — the defect — the believed lease ran a further 600ms past the real one, the first failure was read as survivable, and the callback kept running through a window in which a second instance could legally acquire. The refresh count at demotion is the observable that separates the two datings. */
+    /* the acquire answers 600ms after it is issued, against a 400ms ttl: the lease the store wrote has already lapsed by the time callback starts. Dated from the ISSUE instant, the very first failed renewal finds the lease beyond recovery and demotes; dated from the ANSWER, the believed lease would run a further 600ms past the real one, the first failure would be read as survivable, and the callback would keep running through a window in which a second instance can legally acquire. The refresh count at demotion is the observable that separates the two datings. */
     locker := &slowAcquireCountingLocker{acquireDelay: 600 * time.Millisecond}
 
     ran, runErr := RunExclusive(
@@ -866,7 +866,7 @@ func (instance *slowThenFailingRefreshLock) Refresh(runtimeInstance runtimecontr
 }
 
 func TestRunExclusive_RenewalLeaseIsDatedFromTheRenewalIssueInstant(t *testing.T) {
-    /* the first renewal is issued at 200ms and answers at 500ms; dated from the ISSUE, the lease it wrote lapses at 600ms, so the failure right behind it (issued at 500ms, inside the 100ms recovery margin of that lease) demotes at the SECOND call. Dated from the answer — the defect — the believed lease ran to 900ms and two more failures were read as survivable first. */
+    /* the first renewal is issued at 200ms and answers at 500ms; dated from the ISSUE, the lease it wrote lapses at 600ms, so the failure right behind it (issued at 500ms, inside the 100ms recovery margin of that lease) demotes at the SECOND call. Dated from the answer, the believed lease would run to 900ms and two more failures would be read as survivable first. */
     locker := &slowThenFailingRefreshLocker{firstDelay: 300 * time.Millisecond}
 
     _, runErr := RunExclusive(

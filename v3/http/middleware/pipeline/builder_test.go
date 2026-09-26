@@ -390,7 +390,7 @@ func TestBuilder_KeepsTheReportWhenAFactoryFails(t *testing.T) {
         t.Fatalf("expected the factory failure to surface")
     }
 
-    /* dropped for the refusal, the caller reporting the failure had the name of the offending middleware and nothing about the selection, the gating or the cycle detection around it — while Describe, the same selection without the factories, has always returned it */
+    /* the report travels with the refusal, so the caller reporting the failure has the selection, the gating and the cycle detection around the offending middleware, as Describe — the same selection without the factories — returns them */
     if nil == report {
         t.Fatalf("expected the report to travel with the refusal")
     }

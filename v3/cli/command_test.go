@@ -957,7 +957,7 @@ func TestRegister_ActionEscapesTheCommandNameInTheStartedBanner(t *testing.T) {
     }
 }
 
-/* the finish banner colours the verdict red on failure, and it built the coloured verdict before the escaping that keeps client-derived text from repainting the line — so every failed run with colour on, the default, printed the banner's own escape sequence as the literal text \x1b[31m around [failed], while --no-color, which never coloured the verdict, printed it right. The verdict is coloured after the escaping: its sequence reaches the terminal raw, and a control character in the data around it — here the command's own name — is still spelled visibly. */
+/* the finish banner colours the verdict red on failure, after the escaping that keeps client-derived text from repainting the line: the verdict's own sequence reaches the terminal raw, and a control character in the data around it — here the command's own name — is still spelled visibly. Colour is on by default, so this is the banner of every failed run. */
 func TestRegister_ActionColoursTheFailedVerdictAfterEscapingTheBanner(t *testing.T) {
     command := &testCommand{
         nameValue:        "bo\rom",
@@ -1008,7 +1008,6 @@ func TestRegister_ActionPrintsTheErrorLineOnTheRedBackground(t *testing.T) {
     }
 }
 
-/* the no-color banner never coloured the verdict and always printed it right; the split keeps that line byte for byte */
 func TestRegister_ActionPrintsThePlainFailedVerdictUnderNoColor(t *testing.T) {
     command := &testCommand{
         nameValue:        "boom",

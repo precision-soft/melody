@@ -309,7 +309,7 @@ func TestServerSentEventHub_CloseIsShutdownUnderTheNameTheContainerRecognises(t 
     backplane := &closeRecordingBackplane{}
     hub.SetBackplane(backplane)
 
-    /* the container closes a service by asserting Close() error on it; named only Shutdown, the hub was skipped by the framework's own ordered teardown in silence */
+    /* the container closes a service by asserting Close() error on it, so a hub reachable only as Shutdown would be skipped by the framework's own ordered teardown in silence */
     if closeErr := hub.Close(); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
@@ -584,7 +584,7 @@ func TestServerSentEventHub_ShutdownWaitsForAnInFlightPublishBeforeClosingTheBac
     }
 }
 
-/* the deadline bounds the CALLER's wait, not the fate of what the hub owns. On the branch where it runs out the hub is still the only holder of the backplane and has already set the flag that makes every later close answer nil, so a return that neither closed it nor handed it on put its connection, its channels and its listen goroutine beyond every door in the process — and reported success from then on. The two assertions are ordered: it must NOT be closed while the publish is inside it, which is the rationale the branch was written for, and it must be closed once the publish ends, which is what nobody was doing. */
+/* the deadline bounds the CALLER's wait, not the fate of what the hub owns. On the branch where it runs out the hub is still the only holder of the backplane and has already set the flag that makes every later close answer nil, so a return that neither closes it nor hands it on would put its connection, its channels and its listen goroutine beyond every door in the process — and report success from then on. The two assertions are ordered: it must NOT be closed while the publish is inside it, and it must be closed once the publish ends. */
 func TestServerSentEventHub_ASpentCloseDeadlineHandsTheBackplaneToADetachedCloser(t *testing.T) {
     hub := NewServerSentEventHub()
     backplane := newGatedBackplane()

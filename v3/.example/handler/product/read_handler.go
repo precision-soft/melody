@@ -18,7 +18,6 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/* the query parameter a caller names the currency they want the price in */
 const convertedCurrencyQueryParameter = "currency"
 
 func ApiReadAllHandler() melodyhttpcontract.Handler {
@@ -124,7 +123,7 @@ type readResponse struct {
     Converted *ConvertedPriceResponse `json:"converted,omitempty"`
 }
 
-/* ConvertedPriceResponse is the product's price restated in the currency the caller named, with the instant of the quote it was computed from. */
+/* ConvertedPriceResponse is the product's price restated in the currency the caller named. RateAsOf is the older of the two quotes the conversion reads, the product's own currency and the one named, so the price is never presented as fresher than either. */
 type ConvertedPriceResponse struct {
     CurrencyId string  `json:"currencyId"`
     Code       string  `json:"code"`
@@ -163,11 +162,16 @@ func convertedPriceFor(
         return nil, &conversionRefusal{cause: convertErr}
     }
 
+    rateAsOf := target.RateAsOf
+    if true == source.RateAsOf.Before(rateAsOf) {
+        rateAsOf = source.RateAsOf
+    }
+
     return &ConvertedPriceResponse{
         CurrencyId: target.Id,
         Code:       target.Code,
         Price:      price,
-        RateAsOf:   target.RateAsOf.UTC().Format(time.RFC3339),
+        RateAsOf:   rateAsOf.UTC().Format(time.RFC3339),
     }, nil
 }
 

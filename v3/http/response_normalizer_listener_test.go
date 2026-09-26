@@ -97,7 +97,7 @@ func captureResponseNormalizerListener(t *testing.T) eventcontract.EventListener
     return dispatcher.listener
 }
 
-/* A nil response has to leave the normalizer as nil. The kernel already replaces a handler's nil with an empty 204 before it dispatches this event, and writeResponse answers a nil the same way, so a synthesis here would be a second place deciding what "no response" means — and the two can then disagree. Nothing covered this: putting the synthesis back left every package under ./http/... green. */
+/* A nil response has to leave the normalizer as nil. The kernel already replaces a handler's nil with an empty 204 before it dispatches this event, and writeResponse answers a nil the same way, so a synthesis here would be a second place deciding what "no response" means — and the two can then disagree. */
 func TestKernelResponseNormalizerListener_LeavesANilResponseAlone(t *testing.T) {
     listener := captureResponseNormalizerListener(t)
 

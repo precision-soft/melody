@@ -893,7 +893,7 @@ func TestIpRateLimitWithResolver_ChargesTheForwardedClient(t *testing.T) {
     }
 }
 
-/* The direct-peer behaviour of the original helper is correct without a proxy in front and stays exactly as it was, so an application that upgrades keeps compiling and keeps its semantics. */
+/* The direct-peer behaviour of the helper without a resolver is correct without a proxy in front, so an application that upgrades keeps compiling and keeps its semantics. */
 func TestIpRateLimit_StillChargesTheDirectPeer(t *testing.T) {
     handler := IpRateLimit(1)(allowingNext())
 
@@ -1014,7 +1014,7 @@ func TestSlidingWindowLimiter_MaxDurationWindowSurvivesIdlePrune(t *testing.T) {
     }
 }
 
-/* SimpleRateLimit is one of the three helpers an application actually calls, and no test entered it. Its documented semantics are the direct peer — the resolver cannot be set afterwards because the helper builds its config internally — so two clients behind one proxy sharing a budget is the correct behaviour here, and the sentence that says so needs a test that fails if the helper starts reading a forwarded header. */
+/* SimpleRateLimit is one of the three helpers an application actually calls. Its documented semantics are the direct peer — the resolver cannot be set afterwards because the helper builds its config internally — so two clients behind one proxy sharing a budget is the correct behaviour here, and this test fails if the helper starts reading a forwarded header. */
 
 func TestSimpleRateLimit_ChargesTheDirectPeer(t *testing.T) {
     handler := SimpleRateLimit(1)(allowingNext())
@@ -1084,7 +1084,7 @@ func TestUserRateLimit_RefusesANilUserIdCallbackAtConstruction(t *testing.T) {
     }
 }
 
-/* UserRateLimit keys on the identity rather than the address, which is the whole point of it: one user must carry one budget across every address they arrive from, and two users sharing an address must not share one. Neither direction had a test on the helper itself. */
+/* UserRateLimit keys on the identity rather than the address, which is the whole point of it: one user must carry one budget across every address they arrive from, and two users sharing an address must not share one. */
 
 func TestUserRateLimit_KeysOnTheIdentityRatherThanTheAddress(t *testing.T) {
     identity := "alice"
@@ -1133,7 +1133,7 @@ func TestUserRateLimit_FallsBackToTheAddressWhenAnonymous(t *testing.T) {
     }
 }
 
-/* the resolver accessor is what makes SetClientIpResolver verifiable from outside; it had no test at all, so a setter that stored nowhere would have read as working through every path that only exercises the default. */
+/* the resolver accessor is what makes SetClientIpResolver verifiable from outside: a setter that stored nowhere would read as working through every path that only exercises the default. */
 
 func TestRateLimitConfig_ClientIpResolverAccessorReportsWhatWasSet(t *testing.T) {
     config := NewRateLimitConfig(NewFixedWindowLimiter(1, time.Minute), nil, nil)

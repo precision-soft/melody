@@ -50,6 +50,8 @@ All three configurations fill in **field by field**: a supplied `PoolConfig` or 
 - [`Provider.OpenForMigration`](./provider.go) implements [`bunorm.MigrationProvider`](../../v3/provider.go) and opens the same database with the read and write deadlines lifted, the connect timeout still armed, over a pool of the two connections a sequential migration run needs and with no connection recycled mid-run.
 - [`Provider.OpenForMigrationContext`](./provider.go) implements [`bunorm.MigrationContextOpener`](../../v3/provider.go) — the migration open under the caller's context, the way `OpenContext` is `Open` under it.
 
+The host may be an IPv6 literal, bare (`::1`) or in brackets (`[::1]`), with the port configured separately: a bare literal is bracketed before the port is joined, a bracketed one is kept as written, and a scoped literal such as `fe80::1%eth0` is joined the same way without its zone changing.
+
 ## TLS
 
 The provider is **secure-by-default**: `pgdriver` negotiates a TLS handshake on every Postgres connection.

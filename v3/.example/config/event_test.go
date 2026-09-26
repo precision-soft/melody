@@ -2,8 +2,6 @@ package config
 
 import (
     "fmt"
-    nethttp "net/http"
-    "net/http/httptest"
     "strings"
     "testing"
     "time"
@@ -11,37 +9,7 @@ import (
     "github.com/precision-soft/melody/v3/.example/event"
     melodyclock "github.com/precision-soft/melody/v3/clock"
     melodyevent "github.com/precision-soft/melody/v3/event"
-    melodyhttp "github.com/precision-soft/melody/v3/http"
-    melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
 )
-
-/* the compose balancer as the shipped .env names it, already resolved: the tests below hand the list in resolved form because what they assert is what the resolver does with a peer and a chain, not what the name resolves to. */
-const balancerAddress = "172.18.0.9"
-
-/* a request as a proxy delivers it: the peer is the given address and the client it forwarded is named in the header. */
-func requestForwardedBy(t *testing.T, peer string, forwardedFor string) melodyhttpcontract.Request {
-    t.Helper()
-
-    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/products/", nil)
-    httpRequest.RemoteAddr = peer + ":41234"
-    if "" != forwardedFor {
-        httpRequest.Header.Set("X-Forwarded-For", forwardedFor)
-    }
-
-    return melodyhttp.NewRequest(httpRequest, nil, nil, melodyhttp.NewRequestContext("budget-test", time.Now()))
-}
-
-/* resolvedBudgetKey reads the key the budget charges, over a resolver whose entries are the given list — addresses and prefixes taken as written, so no name is looked up here; what these tests assert is what the resolver does with a peer and a header, not how a name resolves */
-func resolvedBudgetKey(t *testing.T, trustedProxyList []string, peer string, forwardedFor string) string {
-    t.Helper()
-
-    resolver := requestBudgetConfig(100, newTrustedProxyResolver(strings.Join(trustedProxyList, ","), time.Now)).ClientIpResolver()
-    if nil == resolver {
-        t.Fatal("expected the request budget to resolve the client address rather than fall back to the peer")
-    }
-
-    return resolver(requestForwardedBy(t, peer, forwardedFor))
-}
 
 /* the budget is per client, as its own comment and the shipped .env promise; read from the peer address it would be per proxy, so one script could spend the hour of everyone behind the balancer, and this listener runs ahead of authentication, so what it spends is everyone's ability to log in. */
 func TestRequestBudgetConfig_ChargesTheForwardedClientRatherThanTheProxy(t *testing.T) {

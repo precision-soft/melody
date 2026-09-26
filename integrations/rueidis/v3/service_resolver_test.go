@@ -85,7 +85,7 @@ func (instance *containerRegistrar) MustRegister(serviceName string, provider an
     instance.target.MustRegister(serviceName, provider, options...)
 }
 
-/* E6-15: the raw client's Close returns nothing, so registered alone it could never join the container's teardown and the connection lived exactly as long as the process; through the owning Connection and the dependency edge, whichever run resolves a client-backed service closes the connection after it */
+/* the raw client's Close returns nothing, so registered alone it could never join the container's teardown and the connection lived exactly as long as the process; through the owning Connection and the dependency edge, whichever run resolves a client-backed service closes the connection after it */
 func TestRegisterConnectionService_TeardownClosesTheClientOnceTheClientWasResolved(t *testing.T) {
     client := &closeSpyClient{}
     serviceContainer := container.NewContainer()

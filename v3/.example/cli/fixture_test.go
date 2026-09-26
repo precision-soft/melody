@@ -208,6 +208,15 @@ func (instance *flagContext) Writer() io.Writer {
 
 var _ melodyclicontract.Context = (*flagContext)(nil)
 
+/* refusingWriter refuses every write, the shape of a closed pipe the operator's shell stopped reading */
+type refusingWriter struct {
+    refusal error
+}
+
+func (instance *refusingWriter) Write(payload []byte) (int, error) {
+    return 0, instance.refusal
+}
+
 /* refusingDispatcher refuses every dispatch, the way a listener whose backend is gone would; the write it
    follows has already landed. */
 type refusingDispatcher struct {

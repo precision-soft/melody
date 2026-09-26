@@ -2,12 +2,15 @@ package application
 
 import (
     "context"
+    "errors"
     nethttp "net/http"
     "os"
     "os/exec"
     "path/filepath"
     "strings"
+    "sync/atomic"
     "testing"
+    "testing/fstest"
     "time"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
@@ -99,7 +102,7 @@ func (instance *servingProbeApplicationCommand) Run(
     return nil
 }
 
-/* Run must tell the configuration the wiring phase is over before it dispatches anything, or a late Resolve silently rewrites parameters under services that already read them. The config package tests what MarkServing does; nothing tested that Run calls it, so deleting the call left both ./application/... and ./config/... green. This drives the real Run in cli mode and asks the configuration from inside the command. */
+/* Run must tell the configuration the wiring phase is over before it dispatches anything, or a late Resolve silently rewrites parameters under services that already read them. The config package tests what MarkServing does, and deleting the call from Run leaves those tests green, so this drives the real Run in cli mode and asks the configuration from inside the command. */
 func TestRun_MarksTheConfigurationServingBeforeItDispatches(t *testing.T) {
     originalArguments := os.Args
     os.Args = []string{"probe", "probe:serving"}
@@ -1161,5 +1164,135 @@ func TestCloseAndExitOnFailure_AnOverrunAloneExitsZero(t *testing.T) {
 
     if false == strings.Contains(written, "overran its deadline") {
         t.Fatalf("expected the overrun in the journal, got %q", written)
+    }
+}
+
+type contextClosingApplicationProbe struct {
+    close func(closeContext context.Context) error
+}
+
+func (instance *contextClosingApplicationProbe) Close() error {
+    return errors.New("the plain Close was chosen over CloseWithContext")
+}
+
+func (instance *contextClosingApplicationProbe) CloseWithContext(closeContext context.Context) error {
+    return instance.close(closeContext)
+}
+
+func TestRun_ClosesArmedDependentsTogetherUnderTheConfiguredBudget(t *testing.T) {
+    originalArguments := os.Args
+    os.Args = []string{"probe", "probe:serving"}
+    t.Cleanup(func() { os.Args = originalArguments })
+
+    originalExit := applicationExit
+    var exitCode atomic.Int32
+    applicationExit = func(code int) { exitCode.Store(int32(code)) }
+    t.Cleanup(func() { applicationExit = originalExit })
+
+    directory := t.TempDir()
+    environment := []byte("MELODY_TEARDOWN_TIMEOUT=3s\n")
+    writeErr := os.WriteFile(filepath.Join(directory, ".env"), environment, 0o600)
+    if nil != writeErr {
+        t.Fatalf("write .env: %v", writeErr)
+    }
+    previousDirectory, getwdErr := os.Getwd()
+    if nil != getwdErr {
+        t.Fatalf("getwd: %v", getwdErr)
+    }
+    chdirErr := os.Chdir(directory)
+    if nil != chdirErr {
+        t.Fatalf("chdir: %v", chdirErr)
+    }
+    t.Cleanup(func() { _ = os.Chdir(previousDirectory) })
+
+    app := NewApplication(context.Background(), fstest.MapFS{".env": &fstest.MapFile{Data: environment}}, testhelper.NewEmbeddedStaticFs())
+    command := &servingProbeApplicationCommand{}
+    app.RegisterCliCommand(command)
+
+    entered := make(chan context.Context, 2)
+    release := make(chan struct{})
+    var completed atomic.Int32
+    var dependencyClosed atomic.Bool
+
+    dependency := &contextClosingApplicationProbe{close: func(closeContext context.Context) error {
+        if 2 != completed.Load() {
+            return errors.New("the dependency closed before its dependents finished")
+        }
+        dependencyClosed.Store(true)
+
+        return nil
+    }}
+    app.RegisterService("probe.dependency", func(containercontract.Resolver) (*contextClosingApplicationProbe, error) {
+        return dependency, nil
+    }, container.WithoutTypeRegistration())
+
+    for _, name := range []string{"probe.first", "probe.second"} {
+        dependent := &contextClosingApplicationProbe{close: func(closeContext context.Context) error {
+            entered <- closeContext
+            select {
+            case <-release:
+                completed.Add(1)
+
+                return nil
+            case <-closeContext.Done():
+                return closeContext.Err()
+            }
+        }}
+        app.RegisterService(name, func(containercontract.Resolver) (*contextClosingApplicationProbe, error) {
+            return dependent, nil
+        }, container.WithoutTypeRegistration(), container.WithTeardownDependency("probe.dependency"))
+    }
+
+    serviceContainer := app.Boot().ServiceContainer()
+    for _, name := range []string{"probe.dependency", "probe.first", "probe.second"} {
+        _, resolveErr := serviceContainer.Get(name)
+        if nil != resolveErr {
+            t.Fatalf("resolve %s: %v", name, resolveErr)
+        }
+    }
+    armErr := serviceContainer.(interface{ ArmParallelTeardown() error }).ArmParallelTeardown()
+    if nil != armErr {
+        t.Fatalf("arm: %v", armErr)
+    }
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        app.Run()
+    }()
+
+    timer := time.NewTimer(5 * time.Second)
+    defer timer.Stop()
+
+    contexts := make([]context.Context, 0, 2)
+    for 2 > len(contexts) {
+        select {
+        case closeContext := <-entered:
+            contexts = append(contexts, closeContext)
+        case <-timer.C:
+            close(release)
+            <-done
+            t.Fatalf("expected both independent dependents to start closing before either was released")
+        }
+    }
+    close(release)
+
+    select {
+    case <-done:
+    case <-timer.C:
+        t.Fatalf("expected the application teardown to finish")
+    }
+
+    if false == command.ran || 0 != exitCode.Load() || false == dependencyClosed.Load() {
+        t.Fatalf("expected the command to run, exit 0 and the dependency to close last, got ran=%v exit=%d dependencyClosed=%v", command.ran, exitCode.Load(), dependencyClosed.Load())
+    }
+
+    firstDeadline, firstHasDeadline := contexts[0].Deadline()
+    secondDeadline, secondHasDeadline := contexts[1].Deadline()
+    if false == firstHasDeadline || false == secondHasDeadline || false == firstDeadline.Equal(secondDeadline) {
+        t.Fatalf("expected the two dependents to share one deadline, got %v/%v and %v/%v", firstDeadline, firstHasDeadline, secondDeadline, secondHasDeadline)
+    }
+    if remaining := time.Until(firstDeadline); 0 >= remaining || 3*time.Second < remaining {
+        t.Fatalf("expected a deadline inside the configured three-second budget, got %v", remaining)
     }
 }

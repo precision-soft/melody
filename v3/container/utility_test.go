@@ -14,7 +14,7 @@ type utilityProbeInterface interface {
     Probe()
 }
 
-/* every registration and every by-type lookup goes through this canonicalisation, and it had no mirror: a service declared from a provider returning *T is filed under *T, so asking with T has to reach the same entry or Has and Get disagree about the same container. An interface is its own canonical form — wrapping it in a pointer would file it under a type no caller ever asks with. */
+/* every registration and every by-type lookup goes through this canonicalisation: a service declared from a provider returning *T is filed under *T, so asking with T has to reach the same entry or Has and Get disagree about the same container. An interface is its own canonical form — wrapping it in a pointer would file it under a type no caller ever asks with. */
 func TestCanonicalServiceType_FilesValuesUnderTheirPointerAndLeavesInterfacesAlone(t *testing.T) {
     valueType := reflect.TypeOf(utilityProbe{})
     pointerType := reflect.TypeOf(&utilityProbe{})
@@ -122,16 +122,6 @@ func TestIsAnyType_CatchesTheEmptyInterfaceAndNothingElse(t *testing.T) {
     if true == isAnyType(nil) {
         t.Fatalf("expected a nil type not to be read as any")
     }
-}
-
-type fitsProbeGreeter interface {
-    Greet() string
-}
-
-type fitsProbeImplementer struct{}
-
-func (instance *fitsProbeImplementer) Greet() string {
-    return "fits"
 }
 
 type fitsProbeOutsider struct{}

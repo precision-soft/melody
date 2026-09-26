@@ -57,12 +57,14 @@ func SetDefaultRunnerOption(option RunnerOption) {
     processRunnerOption.Store(&option)
 }
 
-/* commandRunnerOptions is the bookkeeping of the commands holding the process-wide fallback at once: how many run, the host's value saved by the first and restored by the last, and every pointer the group installed. The installed set lets the last restore leave a value the host installed meanwhile, and keeps the restore exact for commands that overlap in any order. */
+/* commandRunnerOptions is the bookkeeping of the commands holding the process-wide fallback at once: how many run, the host's value saved by the first and restored by the last, every pointer the group installed, the ones whose command still runs, and what each displaced. The installed set lets the last restore leave a value the host installed meanwhile; the running set and the displaced chain let a restore that is not the last put back a value whose command still runs, never one that already left. */
 var commandRunnerOptions struct {
-    mutex     sync.Mutex
-    depth     int
-    host      *RunnerOption
-    installed map[*RunnerOption]struct{}
+    mutex      sync.Mutex
+    depth      int
+    host       *RunnerOption
+    installed  map[*RunnerOption]struct{}
+    running    map[*RunnerOption]struct{}
+    previousOf map[*RunnerOption]*RunnerOption
 }
 
 /* swapDefaultRunnerOption installs the fallback for the length of a command and answers the pointer it installed and the one that was live before, for restoreDefaultRunnerOption. The fallback is what a migration that drops its context sees, and under --format=json that migration would otherwise print its per-query lines into the document. The first command to install saves the host's own value. */
@@ -73,13 +75,17 @@ func swapDefaultRunnerOption(option RunnerOption) (installed *RunnerOption, prev
     if 0 == commandRunnerOptions.depth {
         commandRunnerOptions.host = processRunnerOption.Load()
         commandRunnerOptions.installed = make(map[*RunnerOption]struct{})
+        commandRunnerOptions.running = make(map[*RunnerOption]struct{})
+        commandRunnerOptions.previousOf = make(map[*RunnerOption]*RunnerOption)
     }
     commandRunnerOptions.depth++
 
     installed = &option
     commandRunnerOptions.installed[installed] = struct{}{}
+    commandRunnerOptions.running[installed] = struct{}{}
 
     previous = processRunnerOption.Swap(installed)
+    commandRunnerOptions.previousOf[installed] = previous
 
     /* a command that displaces a value no command of the group installed has displaced one the host installed while the group ran; that newer value is what the last restore puts back */
     if _, installedByACommand := commandRunnerOptions.installed[previous]; false == installedByACommand {
@@ -89,7 +95,7 @@ func swapDefaultRunnerOption(option RunnerOption) (installed *RunnerOption, prev
     return installed, previous
 }
 
-/* restoreDefaultRunnerOption puts back what the command's swap displaced, in whichever order the commands finish: the last to leave puts the host's value back, and one leaving while others run restores only when its own value is live. A value the host installed meanwhile is left where it is, and the put-back is a compare-and-swap, since SetDefaultRunnerOption takes no lock of this bookkeeping. */
+/* restoreDefaultRunnerOption puts back what the command's swap displaced, in whichever order the commands finish: the last to leave puts the host's value back, and one leaving while others run restores only when its own value is live, walking past the values of commands that already left to one whose command still runs, or to a value no command installed. A value the host installed meanwhile is left where it is, and the put-back is a compare-and-swap, since SetDefaultRunnerOption takes no lock of this bookkeeping. */
 func restoreDefaultRunnerOption(installed *RunnerOption, previous *RunnerOption) {
     commandRunnerOptions.mutex.Lock()
     defer commandRunnerOptions.mutex.Unlock()
@@ -106,11 +112,27 @@ func restoreDefaultRunnerOption(installed *RunnerOption, previous *RunnerOption)
 
         commandRunnerOptions.host = nil
         commandRunnerOptions.installed = nil
+        commandRunnerOptions.running = nil
+        commandRunnerOptions.previousOf = nil
 
         return
     }
 
-    processRunnerOption.CompareAndSwap(installed, previous)
+    delete(commandRunnerOptions.running, installed)
+
+    putBack := previous
+    for {
+        if _, installedByACommand := commandRunnerOptions.installed[putBack]; false == installedByACommand {
+            break
+        }
+        if _, stillRunning := commandRunnerOptions.running[putBack]; true == stillRunning {
+            break
+        }
+
+        putBack = commandRunnerOptions.previousOf[putBack]
+    }
+
+    processRunnerOption.CompareAndSwap(installed, putBack)
 }
 
 func resolveDefaultRunnerOption() RunnerOption {
@@ -159,7 +181,7 @@ func RunQueriesWithOption(ctx context.Context, db *bun.DB, direction string, mig
 
     for index, query := range queries {
         step := index + 1
-        prefix := fmt.Sprintf("[migration:%s] %s [%d/%d]", direction, escapedMigrationName, step, total)
+        prefix := fmt.Sprintf("[migration:%s] %s [%d/%d]", escapeControlCharacters(direction, false), escapedMigrationName, step, total)
 
         printer.printExecuting(prefix, query.Name)
 
@@ -248,7 +270,7 @@ func (instance *migrationPrinter) printFailed(prefix string, queryName string, e
 }
 
 func (instance *migrationPrinter) printEmpty(direction string, migrationName string) {
-    message := fmt.Sprintf("[migration:%s] %s: WARNING no queries to execute; the migration is marked applied without running anything", direction, escapeControlCharacters(migrationName, false))
+    message := fmt.Sprintf("[migration:%s] %s: WARNING no queries to execute; the migration is marked applied without running anything", escapeControlCharacters(direction, false), escapeControlCharacters(migrationName, false))
 
     if instance.noColor {
         _, _ = fmt.Fprintf(instance.writer, "%s\n", message)
@@ -259,7 +281,7 @@ func (instance *migrationPrinter) printEmpty(direction string, migrationName str
 }
 
 func (instance *migrationPrinter) printSuccess(direction string, migrationName string, total int) {
-    message := fmt.Sprintf("[migration:%s] %s: all %d queries executed successfully", direction, escapeControlCharacters(migrationName, false), total)
+    message := fmt.Sprintf("[migration:%s] %s: all %d queries executed successfully", escapeControlCharacters(direction, false), escapeControlCharacters(migrationName, false), total)
 
     if instance.noColor {
         _, _ = fmt.Fprintf(instance.writer, "%s\n", message)

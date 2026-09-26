@@ -546,7 +546,7 @@ func TestMiddlewareCommand_SameNameInactiveEntriesKeepTheReasonOrder(t *testing.
     }
 }
 
-/* the reason appeared and disappeared with the row: omitempty dropped it from every active middleware, so a consumer keying on it could not tell an active entry from a malformed document, and the three shapes this one struct serves — described-active, described-inactive, built — differed in their key set as well as their values. */
+/* the reason key is present on every row, active ones included, so a consumer keying on it can tell an active entry from a malformed document, and the three shapes this one struct serves — described-active, described-inactive, built — share one key set and differ only in their values. */
 func TestMiddlewareCommand_TheReasonKeyIsPresentOnEveryRow(t *testing.T) {
     rendered, runErr := runDebugCommand(
         NewMiddlewareCommand(

@@ -172,7 +172,6 @@ func isSameOrigin(origin *url.URL, target *url.URL) bool {
     return effectivePort(origin) == effectivePort(target)
 }
 
-/* effectivePort resolves the port a url reaches, spelled out or implied by its scheme. */
 func effectivePort(value *url.URL) string {
     if port := value.Port(); "" != port {
         return port

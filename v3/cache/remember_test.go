@@ -857,7 +857,7 @@ func TestRemember_RecomputesOverACorruptPayload(t *testing.T) {
     }
 }
 
-/* a typed-nil error from the callback reads as the success it means: boxed into a non-nil interface it was memoized as the flight's failure, handed to every waiter, and panicked the first one that rendered it */
+/* a typed-nil error from the callback reads as the success it means: boxed into a non-nil interface it would be memoized as the flight's failure and handed to every waiter */
 func TestRemember_CallbackTypedNilErrorIsSuccess(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -1217,7 +1217,7 @@ func TestRemember_ACacheFailureThatIsNotACorruptPayloadEndsThere(t *testing.T) {
     }
 }
 
-/* the leader re-reads the key before computing, and a value that appeared meanwhile is served instead of recomputed — that re-read is the whole point of the single flight, and it had no test that made it FIND something. The scripted cache makes the caller miss and the leader hit, which is the real interleaving: another process wrote the key between the two reads. */
+/* the leader re-reads the key before computing, and a value that appears meanwhile is served instead of recomputed — that re-read is the whole point of the single flight. The scripted cache makes the caller miss and the leader hit, which is the real interleaving: another process writes the key between the two reads. */
 func TestRemember_TheLeaderServesAValueThatAppearedBetweenTheTwoReads(t *testing.T) {
     scriptedCache := &testScriptedCache{
         getResults: []testScriptedGetResult{

@@ -321,7 +321,7 @@ func TestEventDispatcherAdapter_RemoveListener_ScrubsItsRecordForAListenerTheWra
     }
 }
 
-/* callers probe for RequiredListenerRegistrar to learn whether the fail-closed guarantee is available, and the adapter satisfies that probe on its own behalf: swallowing the mark answered the probe yes and left the guarantee unarmed */
+/* callers probe for RequiredListenerRegistrar to learn whether the fail-closed guarantee is available, and the adapter satisfies that probe on its own behalf, so swallowing the mark would answer the probe yes and leave the guarantee unarmed */
 func TestEventDispatcherAdapter_MarkListenerRequired_RefusesADispatcherThatCannotMarkRequiredListeners(t *testing.T) {
     adapter := NewEventDispatcherAdapter(&testPlainEventDispatcher{})
 

@@ -690,7 +690,7 @@ func (instance *countedFailureLock) Refresh(runtimeInstance runtimecontract.Runt
     return instance.inner.Refresh(runtimeInstance, ttl)
 }
 
-/* A store that drops a connection and reconnects must not cost a term. The lease the gate last wrote is the store's own promise that nobody else gets this lock until it lapses — which is exactly why the cadence is half the lease — so a renewal lost while the lease runs has cost nothing, and the one behind it lands. Leaving on the first failure turned an eight-second failover into a cancelled term, a re-election, and leader work restarted from the beginning for a lock that was never in danger. */
+/* A store that drops a connection and reconnects must not cost a term. The lease the gate last wrote is the store's own promise that nobody else gets this lock until it lapses — which is exactly why the cadence is half the lease — so a renewal lost while the lease runs costs nothing, and the one behind it lands. Leaving on the first failure would turn an eight-second failover into a cancelled term, a re-election, and leader work restarted from the beginning for a lock that is not in danger. */
 func TestLeaderGate_ASingleFailedRenewalDoesNotCostTheTerm(t *testing.T) {
     failing := &countedFailureLocker{inner: NewInMemoryLocker(clock.NewSystemClock()), failureCount: 1}
 

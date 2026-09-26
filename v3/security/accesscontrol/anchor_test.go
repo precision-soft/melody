@@ -4,7 +4,7 @@ import (
     "testing"
 )
 
-/* the guard asks the PARSED expression, not the spelling, because the two disagree exactly where it matters: "^/public|/status" begins with "^" and is read by Go as (^/public)|(/status), whose second branch floats anywhere. Each unanchored case below is one a public rule must not be declared on; each anchored case is one the previous textual test refused by mistake. */
+/* the guard asks the PARSED expression, not the spelling, because the two disagree exactly where it matters: "^/public|/status" begins with "^" and is read by Go as (^/public)|(/status), whose second branch floats anywhere. Each unanchored case below is one a public rule must not be declared on; each anchored case is one it may be declared on. */
 func TestPatternIsAnchoredToPathStart(t *testing.T) {
     for _, testCase := range []struct {
         pattern  string

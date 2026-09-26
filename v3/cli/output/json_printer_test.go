@@ -131,7 +131,7 @@ func TestJsonPrinter_AWriteFailureIsReportedRatherThanSwallowed(t *testing.T) {
 
 var errFailingOutputWriter = errors.New("the writer refused")
 
-/* the encoder emits the C1 block raw, so a document carrying U+009B repainted the terminal it was printed to and a NEL ended the record for a reader splitting on Unicode line boundaries; the printer spells the block as json escapes on the way out — in the data, in a key, in a warning, in the one-line and in the pretty form alike — and the decoded document is the one the command gave. The spelling is asked of the encoder's own vocabulary rather than typed, so the assertion follows the encoder if it ever changes. */
+/* the encoder emits the C1 block raw, so a document carrying U+009B would repaint the terminal it is printed to and a NEL would end the record for a reader splitting on Unicode line boundaries; the printer spells the block as json escapes on the way out — in the data, in a key, in a warning, in the one-line and in the pretty form alike — and the decoded document is the one the command gave. The spelling is asked of the encoder's own vocabulary rather than typed, so the assertion follows the encoder if it ever changes. */
 func TestJsonPrinter_SpellsTheC1BlockAsJsonEscapes(t *testing.T) {
     for _, format := range []Format{FormatJson, FormatJsonPretty} {
         envelope := Envelope{Data: map[string]any{"name": "a\xc2\x9bb", "k\xc2\x9dey": "value"}}

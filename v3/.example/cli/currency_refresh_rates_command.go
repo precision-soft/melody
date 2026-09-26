@@ -1,6 +1,7 @@
 package cli
 
 import (
+    "errors"
     "fmt"
     "time"
 
@@ -81,14 +82,15 @@ func (instance *CurrencyRefreshRatesCommand) Run(runtimeInstance melodyruntimeco
 
     /* the same table helper product:list prints through, rendered into the command's own writer so the
        section that drives this command can read what it printed without capturing a process stream */
-    fprintTable(writer, headers, rows)
+    tableErr := fprintTable(writer, headers, rows)
 
     /* the refresh writes through the service so the listeners drop the cached currencies in this process: on the shared cache the server rereads the new rate, and on the in-process fallback it keeps the rate it cached until it restarts */
     if true == cacheIsProcessLocal(runtimeInstance) {
         _, _ = fmt.Fprintln(writer, processLocalCacheNotice)
     }
 
-    return refreshErr
+    /* the refresh's own failure stays first; a table the writer refused is joined after it */
+    return errors.Join(refreshErr, tableErr)
 }
 
 /* providerClockColumn renders how the provider's stamps were moved onto this clock: the offset, signed, with

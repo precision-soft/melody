@@ -9,8 +9,8 @@ import (
     "testing"
     "time"
 
-    melodybunorm "github.com/precision-soft/melody/integrations/bunorm/v3"
     melodypgsql "github.com/precision-soft/melody/integrations/bunorm/pgsql/v3"
+    melodybunorm "github.com/precision-soft/melody/integrations/bunorm/v3"
     "github.com/precision-soft/melody/v3/.example/generated"
     "github.com/precision-soft/melody/v3/.example/persistence"
     "github.com/precision-soft/melody/v3/.example/repository"

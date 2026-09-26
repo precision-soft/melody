@@ -1,6 +1,7 @@
 package cli
 
 import (
+    "errors"
     "fmt"
     "io"
     "os"
@@ -59,7 +60,7 @@ func (instance *DatabaseResetCommand) Flags() []melodyclicontract.Flag {
     }
 }
 
-func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
+func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) (runErr error) {
     if "" == instance.databaseServiceName {
         return melodyexception.NewError(
             "the example has no database configured, so there is nothing to reset",
@@ -81,6 +82,29 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
 
         return nil
     }
+
+    /* the cache is resolved before the first drop, so a cache the reset cannot reach refuses it before anything is touched; and it is cleared on every exit from here on, a failed step included, since a reset that dropped rows and then failed leaves the cache holding entities the database does not hold. A failed clear is joined to the step's failure, which stays first. */
+    cacheInstance, cacheErr := resolveCache(runtimeInstance)
+    if nil != cacheErr {
+        return cacheErr
+    }
+
+    cacheCleared := false
+    clearTheCache := func() error {
+        cacheCleared = true
+
+        return clearResolvedCache(runtimeInstance, cacheInstance, writer)
+    }
+
+    defer func() {
+        if nil == runErr || true == cacheCleared {
+            return
+        }
+
+        if deferredClearErr := clearTheCache(); nil != deferredClearErr {
+            runErr = errors.Join(runErr, deferredClearErr)
+        }
+    }()
 
     /* the runtime's context, not a background one, so an operator's interrupt reaches the drops as it reaches every other command; the first interrupt cuts the drops where they stand, and a second run finishes the volume */
     ctx := runtimeInstance.Context()
@@ -106,7 +130,7 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
 
     fmt.Fprintln(writer, "catalogue reset: the nomenclature was reseeded")
 
-    if clearErr := clearCache(runtimeInstance, writer); nil != clearErr {
+    if clearErr := clearTheCache(); nil != clearErr {
         return clearErr
     }
 
@@ -130,16 +154,15 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
     return nil
 }
 
-/* clearCache empties the cache and says so: the entities are cached with no expiry and cleared by the listeners of the write events, and a reset dispatches none, so without it a removed account would keep authenticating from its cached digest. On the in-process fallback it reaches this process alone, which the line says; a failed clear takes the exit code. */
-func clearCache(runtimeInstance melodyruntimecontract.Runtime, writer io.Writer) error {
-    cacheInstance, cacheErr := melodycontainer.FromResolver[melodycachecontract.Cache](
+func resolveCache(runtimeInstance melodyruntimecontract.Runtime) (melodycachecontract.Cache, error) {
+    return melodycontainer.FromResolver[melodycachecontract.Cache](
         runtimeInstance.Container(),
         melodycache.ServiceCache,
     )
-    if nil != cacheErr {
-        return cacheErr
-    }
+}
 
+/* clearResolvedCache empties the cache and says so: the entities are cached with no expiry and cleared by the listeners of the write events, and a reset dispatches none, so without it a removed account would keep authenticating from its cached digest. On the in-process fallback it reaches this process alone, which the line says; a failed clear takes the exit code. */
+func clearResolvedCache(runtimeInstance melodyruntimecontract.Runtime, cacheInstance melodycachecontract.Cache, writer io.Writer) error {
     if clearErr := cacheInstance.Clear(); nil != clearErr {
         return melodyexception.NewError("database reset: clearing the cache did not complete", nil, clearErr)
     }

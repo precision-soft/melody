@@ -2306,7 +2306,7 @@ func TestBuildSchema_JsonStringOptionKeepsTheEmptyUnsignedWindowUnsatisfiable(t 
     }
 }
 
-/* the validator measures a length fixed at zero, so notEmpty rejects every payload; advertising minItems 1 alone told a client a non-empty array would be accepted */
+/* the validator measures a length that is always zero, so notEmpty rejects every payload; advertising minItems 1 alone would tell a client a non-empty array is accepted */
 func TestBuildSchema_NotEmptyOnZeroLengthArrayIsUnsatisfiable(t *testing.T) {
     components := map[string]*Schema{}
     names := map[reflect.Type]string{}

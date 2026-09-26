@@ -591,9 +591,9 @@ func observeLockHolder(t *testing.T, database *sql.DB, name string) int64 {
 
 /* A refresh probe that could not be ANSWERED is not a probe that answered "lost". MySQL holds a
    named lock for exactly as long as the session that took it, so a live session still holds its
-   lock however the probe fared; releasing on it handed the lock away while the caller — which reads
-   a failed refresh as "another instance may hold it now" — stopped the callback, putting a second
-   holder inside an exclusive section this one had never left. */
+   lock however the probe fared; releasing on it would hand the lock away while the caller — which
+   reads a failed refresh as "another instance may hold it now" — stops the callback, putting a
+   second holder inside an exclusive section this one has not left. */
 func TestMysqlLock_RefreshOnAnUnansweredProbeKeepsHeldLock(t *testing.T) {
     dsn := os.Getenv("MYSQL_DSN")
     if "" == dsn {
@@ -660,7 +660,7 @@ func TestMysqlLock_RefreshOnAnUnansweredProbeKeepsHeldLock(t *testing.T) {
 }
 
 /* The same distinction on the re-acquire path: a verify that could not be answered must not release
-   the lock and report (false, nil), which told the caller it never held a lock it was holding. */
+   the lock and report (false, nil), which tells the caller it does not hold a lock it is holding. */
 func TestMysqlLock_AcquireOnAnUnansweredVerifyKeepsHeldLock(t *testing.T) {
     dsn := os.Getenv("MYSQL_DSN")
     if "" == dsn {
@@ -793,7 +793,7 @@ func TestMysqlLock_RefreshOnADeadSessionReportsTheLockLost(t *testing.T) {
     }
 }
 
-/* every lock failure names both spellings: the caller's name and the folded form the server was actually asked for — a name past the limit is folded to a hash-suffixed form, and a diagnostic that showed only the caller's spelling sent the operator to look for a lock the server had never heard of */
+/* every lock failure names both spellings: the caller's name and the folded form the server is actually asked for — a name past the limit is folded to a hash-suffixed form, so the probe's name is long enough to fold, and a diagnostic showing only the caller's spelling sends the operator to look for a lock the server does not know */
 func TestMysqlLock_FailuresNameTheFoldedLockNameBesideTheName(t *testing.T) {
     sqldb, openErr := sql.Open("mysql", "melody:melody@tcp(127.0.0.1:1)/melody")
     if nil != openErr {

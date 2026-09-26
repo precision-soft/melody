@@ -747,8 +747,8 @@ func TestAccessControlListener_WhenExceptionProducesNoResponse_FailsClosed(t *te
     }
 }
 
-/* A nil pointer of a request type is a non-nil interface, so the bare comparison this replaces carried it
-past the gate and into the path read below, which dereferences it — inside a kernel listener, where no
+/* A nil pointer of a request type is a non-nil interface, so a bare comparison would carry it past
+the gate and into the path read below, which dereferences it — inside a kernel listener, where no
 recover covers it. The listener must leave such an event alone, not crash the request. */
 func TestAccessControlListener_ATypedNilRequestIsLeftAlone(t *testing.T) {
     kernel := newTestKernel()
@@ -778,7 +778,7 @@ func TestAccessControlListener_ATypedNilRequestIsLeftAlone(t *testing.T) {
     }
 }
 
-/* the listener asks for ALL of a rule's attributes, and nothing in this file could tell that apart from ANY: the stub answered one field for both decisions and every rule carried a single attribute, so DecideAny(token, nil, nil) would have satisfied the whole suite. Here the two decisions disagree — all refuses, any accepts — and the rule carries two attributes of which the token holds one, which is exactly the input on which the semantics differ. */
+/* the listener asks for ALL of a rule's attributes, and a stub answering one field for both decisions, over rules carrying a single attribute, cannot tell that apart from ANY. Here the two decisions disagree — all refuses, any accepts — and the rule carries two attributes of which the token holds one, which is exactly the input on which the semantics differ. */
 func TestAccessControlListener_TheDecisionIsDecideAllOverTheWholeAttributeSet(t *testing.T) {
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()

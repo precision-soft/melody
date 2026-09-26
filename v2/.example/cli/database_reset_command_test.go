@@ -162,16 +162,22 @@ type clearCountingCache struct {
     mutex      sync.Mutex
     clearCount int
     onClear    func()
+    refusal    error
 }
 
 func (instance *clearCountingCache) Clear() error {
     instance.mutex.Lock()
     instance.clearCount = instance.clearCount + 1
     onClear := instance.onClear
+    refusal := instance.refusal
     instance.mutex.Unlock()
 
     if nil != onClear {
         onClear()
+    }
+
+    if nil != refusal {
+        return refusal
     }
 
     return instance.Cache.Clear()
@@ -193,6 +199,15 @@ func newResetCommandContainer(t *testing.T) melodycontainercontract.Container {
 
     serviceContainer := melodycontainer.NewContainer()
     registerCliTestService[*bun.DB](serviceContainer, testResetDatabaseServiceName, newUndialedResetDatabase())
+
+    backend := melodycache.NewInMemoryBackend(0, 0, melodyclock.NewSystemClock())
+    cacheInstance := &clearCountingCache{Cache: melodycache.NewManagerOwningBackend(backend, melodycache.NewJsonSerializer())}
+    t.Cleanup(func() {
+        _ = cacheInstance.Cache.Close()
+    })
+
+    registerCliTestService[melodycachecontract.Backend](serviceContainer, melodycache.ServiceCacheBackend, backend)
+    registerCliTestService[melodycachecontract.Cache](serviceContainer, melodycache.ServiceCache, cacheInstance)
 
     return serviceContainer
 }
@@ -324,8 +339,8 @@ func TestDatabaseResetCommandClearsTheCacheOnceAfterTheReseed(t *testing.T) {
         t.Fatalf("expected the refused reseed to name its step and database, got %v", refusedErr)
     }
 
-    if 0 != refusedCache.clears() {
-        t.Fatalf("expected no clear over a refused reseed, got %d", refusedCache.clears())
+    if 1 != refusedCache.clears() {
+        t.Fatalf("expected a refused reseed to clear the cache once, since the schema under it was already dropped, got %d", refusedCache.clears())
     }
 }
 
@@ -352,3 +367,33 @@ func TestDatabaseResetCommandHonoursTheRuntimeContext(t *testing.T) {
 }
 
 var _ melodyruntimecontract.Runtime = (melodyruntimecontract.Runtime)(nil)
+
+func TestDatabaseResetCommandJoinsAFailedClearToTheStepThatFailed(t *testing.T) {
+    refusedRecorder := &recordingResetConnector{refuseMatching: "INSERT IGNORE INTO `melody_example_v2_"}
+    refusedContainer, refusedCache := newRecordingResetContainer(t, refusedRecorder)
+    cacheRefusal := errors.New("the cache refused the clear")
+    refusedCache.refusal = cacheRefusal
+
+    _, runErr := runCliCommand(NewDatabaseResetCommand(testResetDatabaseServiceName, testResetDatabaseLocation), newCliTestRuntime(refusedContainer), []string{"--force"})
+    if nil == runErr || false == strings.HasPrefix(runErr.Error(), "database reset: reseeding the nomenclature did not complete") || false == errors.Is(runErr, cacheRefusal) {
+        t.Fatalf("expected the reseed's failure first with the failed clear joined, got %v", runErr)
+    }
+}
+
+func TestDatabaseResetCommandRefusesBeforeTouchingAnythingWhenTheCacheCannotBeResolved(t *testing.T) {
+    recorder := &recordingResetConnector{}
+    serviceContainer := melodycontainer.NewContainer()
+    registerCliTestService[*bun.DB](serviceContainer, testResetDatabaseServiceName, bun.NewDB(sql.OpenDB(recorder), mysqldialect.New()))
+
+    _, runErr := runCliCommand(NewDatabaseResetCommand(testResetDatabaseServiceName, testResetDatabaseLocation), newCliTestRuntime(serviceContainer), []string{"--force"})
+    if nil == runErr {
+        t.Fatalf("expected the reset to refuse a cache it cannot resolve")
+    }
+
+    /* the driver's own version probe on connect writes nothing; every statement of the reset does */
+    for _, statement := range recorder.recorded() {
+        if "SELECT version()" != statement {
+            t.Fatalf("expected nothing touched before the cache was resolved, got %q", recorder.recorded())
+        }
+    }
+}

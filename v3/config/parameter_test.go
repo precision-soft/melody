@@ -388,7 +388,7 @@ func TestParameter_Bool_ReadsBothShapesAndRefusesTheRest(t *testing.T) {
         t.Fatalf("expected an exception error")
     }
 
-    /* the cause is the parser's, and it names what the refusal is about: the outer message says only that a conversion failed, which told an operator holding a parameter registered as a number that something went wrong and nothing about what */
+    /* the cause is the parser's, and it names what the refusal is about: the outer message says only that a conversion failed, which tells an operator holding a parameter registered as a number that something went wrong and nothing about what */
     foreignCause := foreignExceptionErr.CauseErr()
     if nil == foreignCause {
         t.Fatalf("expected the shared parser's cause to be carried")

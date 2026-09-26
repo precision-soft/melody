@@ -16,10 +16,6 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
 )
 
-type scopeTestService struct {
-    value string
-}
-
 func TestScope_GetDelegatesToContainerAndCachesPerScope(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -1101,7 +1097,7 @@ func TestScopeClose_TwoFailingEvictedInstancesAreBothRecorded(t *testing.T) {
     }
 }
 
-/* the three panicking override doors on a scope had never been executed. Two of them are not on the Scope interface at all — they are reached through the optional options companion, which is exactly the shape a caller gets wrong — and all three have to carry their own message: a request-scoped substitution that failed has to say whether the protected door or the plain one refused it. */
+/* Two of the three panicking override doors on a scope are not on the Scope interface at all — they are reached through the optional options companion, which is exactly the shape a caller gets wrong — and all three have to carry their own message: a request-scoped substitution that fails has to say whether the protected door or the plain one refused it. */
 func TestScope_MustOverrideInstance_InstallsAndNamesItsOwnFailure(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -2296,5 +2292,56 @@ func TestScope_Close_ACloseErrorWhoseUnwrapPanicsDoesNotEndTheTeardown(t *testin
     failureDetails, _ := typedError.Context()["failureDetails"].(map[string]exceptioncontract.Context)
     if cause := failureDetails["scope:service:app.scoped.unwrapPanics"]["cause"]; "the links below could not be read, their Unwrap panicked: unwrap of a half-built error" != cause {
         t.Fatalf("expected the details to say where the chain was cut and why, got %v", failureDetails)
+    }
+}
+
+func TestScope_CloseWithContext_HandsTheCallersContextToTheEvictedAndTheReplacementInstance(t *testing.T) {
+    for _, expired := range []bool{false, true} {
+        t.Run(map[bool]string{false: "live", true: "expired"}[expired], func(t *testing.T) {
+            closeContext, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Minute))
+            defer cancel()
+            if true == expired {
+                cancel()
+            }
+
+            serviceContainer := NewContainer()
+            original := &contextClosingScopedProbe{}
+            replacement := &contextClosingScopedProbe{}
+            registerErr := serviceContainer.RegisterScoped("probe", func(containercontract.Resolver) (*contextClosingScopedProbe, error) {
+                return original, nil
+            })
+            if nil != registerErr {
+                t.Fatalf("register: %v", registerErr)
+            }
+
+            requestScope := serviceContainer.NewScope()
+            requestScope.MustGetByType(reflect.TypeOf(original))
+
+            overrideErr := requestScope.(containercontract.OverrideServiceWithOptions).OverrideInstanceWithOptions("probe", replacement, ClosedWithScope())
+            if nil != overrideErr {
+                t.Fatalf("override: %v", overrideErr)
+            }
+
+            closeErr := requestScope.(*scope).CloseWithContext(closeContext)
+            if nil != closeErr {
+                t.Fatalf("close: %v", closeErr)
+            }
+            secondCloseErr := requestScope.Close()
+            if nil != secondCloseErr {
+                t.Fatalf("second close: %v", secondCloseErr)
+            }
+
+            for label, probe := range map[string]*contextClosingScopedProbe{"evicted": original, "replacement": replacement} {
+                if 0 != probe.plainCalls || 1 != len(probe.contexts) {
+                    t.Fatalf("expected the %s instance closed once through CloseWithContext, got %d context and %d plain closes", label, len(probe.contexts), probe.plainCalls)
+                }
+                if closeContext != probe.contexts[0] {
+                    t.Fatalf("expected the %s instance to receive the caller's context", label)
+                }
+                if expired != (nil != probe.contexts[0].Err()) {
+                    t.Fatalf("expected the %s instance to observe the caller's cancellation=%v", label, expired)
+                }
+            }
+        })
     }
 }

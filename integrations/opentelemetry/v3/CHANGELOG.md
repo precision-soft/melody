@@ -17,6 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- the recording writer of the handler decorator and of the metrics middleware recorded an informational header as the final status: a handler that sent `103 Early Hints` and then `503` was traced and counted as `103`. An informational status other than `101` is forwarded without being recorded, so the final status is the one the handler writes next, or the implicit `200` of its first write.
 - documentation: the two grpc requirement entries are one, at v1.83.1, naming both advisories it fixes.
 - documentation: the README says that the status the metrics record is decided by the handler's error first, then by its response, then by what it wrote directly.
 - the tracing middleware set the server span's status to error for a deliberate sub-500 a handler answered — a 404, a 422 — which is the client's error; the status stays unset below 500 and the error is still recorded as the span's exception event.

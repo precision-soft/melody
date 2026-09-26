@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- documentation: the README says that a regeneration keeps the permission bits of an existing crontab, setuid, setgid and sticky aside, so a `chmod` applied once persists, where it read as though every run wrote `0644`.
 - `generate_command.go` — the crontab is written through a temp file named `.melody-cron-*.tmp` beside the destination, which the ownership marker still lets `--prune` find; the temp name carried the destination's basename, so a destination whose basename filled the 255 bytes of a path component could not be written.
 - `configuration.go` — the GoDoc of `EntryConfig.GracefulTimeout` states that the window follows a cancellation by the runner's shutdown as well as by `Timeout`; it said the window applied only when `Timeout` set a deadline.
 - the runs of one minute in the runner's document were ordered by the command alone, so two entries scheduling one command came out in the order they finished; they are ordered by the command, then the schedule, then the arguments.

@@ -14,22 +14,6 @@ import (
     "github.com/precision-soft/melody/v3/exception"
 )
 
-type testService struct {
-    Value string
-}
-
-type testInterface interface {
-    Name() string
-}
-
-type testImplementation struct {
-    name string
-}
-
-func (instance *testImplementation) Name() string {
-    return instance.name
-}
-
 func TestContainer_SingletonInstantiation(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -477,7 +461,7 @@ func TestContainer_RegisterTypeIdentityKeyCollisionRefused(t *testing.T) {
     }
 }
 
-/* the panicking by-type door on the container had never been executed: nothing proved it resolves at all, and nothing proved its failure carries the by-type message rather than the by-name one — a caller reading a boot log has only that message to tell which door it came in through. */
+/* the panicking by-type door has to resolve, and its failure has to carry the by-type message rather than the by-name one — a caller reading a boot log has only that message to tell which door it came in through. */
 func TestContainer_MustGetByType_AnswersAndNamesItsOwnFailure(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -527,7 +511,7 @@ func TestContainer_MustGetByType_AnswersAndNamesItsOwnFailure(t *testing.T) {
     _ = serviceContainer.MustGetByType(reflect.TypeOf((*testImplementation)(nil)))
 }
 
-/* the panicking override on the container had never been executed either. It has to install the value, and its refusal has to carry its own message rather than the unprotected one it delegates to — the two answer differently and a caller has to be able to tell which verb it called. */
+/* the panicking override has to install the value, and its refusal has to carry its own message rather than the unprotected one it delegates to — the two answer differently and a caller has to be able to tell which verb it called. */
 func TestContainer_MustOverrideInstance_InstallsAndNamesItsOwnFailure(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -742,7 +726,7 @@ func TestContainer_RegisterType_StrictDuplicateTypeRefused(t *testing.T) {
     }
 }
 
-/* Names is what an introspection command prints and what a boot report enumerates, and nothing called it: it could have returned the empty slice for the whole life of the package without a test noticing. It lists the DECLARED container names, sorted so the output is stable between runs, and it must not leak the scoped registrations — those belong to a lifetime the container never resolves. */
+/* Names is what an introspection command prints and what a boot report enumerates. It lists the DECLARED container names, sorted so the output is stable between runs, and it must not leak the scoped registrations — those belong to a lifetime the container never resolves. */
 func TestContainer_Names_ListsTheDeclaredContainerNamesSorted(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -998,7 +982,7 @@ type armedTypedProbe struct{ label string }
 
 func (instance *armedTypedProbe) Close() error { return nil }
 
-/* arming validated a snapshot: a declaration registered after it was never checked, and landed in one wave with the service it named. The rule arming asks of every edge is asked of each new edge at the door that declares it. */
+/* a declaration registered after arming is not in the snapshot arming validated, so the rule arming asks of every edge is asked of each new edge at the door that declares it; admitted unchecked, it would land in one wave with the service it names. */
 func TestContainer_Register_AfterArmingRefusesADeclaredDependencyOnAServiceThatWasNeverRegistered(t *testing.T) {
     serviceContainer := NewContainer()
 

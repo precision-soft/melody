@@ -3,6 +3,7 @@ package security
 import (
     stdpath "path"
     "regexp"
+    "regexp/syntax"
     "strings"
 
     "github.com/precision-soft/melody/v2/exception"
@@ -114,9 +115,84 @@ func NewAccessControlExactRule(path string, attributes ...string) AccessControlR
     return rule
 }
 
-/* accessControlRegexPatternIsAnchored reports whether a pattern is bound to the path start ("^"), which keeps a public rule out of the middle of an unrelated path. A start-anchored pattern can still over-match at its tail, but that only shadows a route guarded by a later regex, since exact and prefix rules outrank every regex. */
+/* accessControlRegexPatternIsAnchored reports whether every path the pattern can match starts where the path starts, which keeps a public rule out of the middle of an unrelated path. It reads the parsed expression, not the text: "^/public|/status" begins with "^" while its second branch floats, and "(?i)^/public(/|$)" is anchored behind its flag group. An alternation is anchored only when every branch is; \A anchors like ^, (?m)^ does not. A start-anchored pattern can still over-match at its tail, but that only shadows a route guarded by a later regex, since exact and prefix rules outrank every regex. */
 func accessControlRegexPatternIsAnchored(pattern string) bool {
-    return strings.HasPrefix(pattern, "^")
+    parsedPattern, parseErr := syntax.Parse(pattern, syntax.Perl)
+    if nil != parseErr {
+        /* an unparseable pattern is refused by the compile below; answering false only routes it to the PUBLIC_ACCESS refusal first */
+        return false
+    }
+
+    return accessControlExpressionIsAnchored(parsedPattern.Simplify())
+}
+
+func accessControlExpressionIsAnchored(expression *syntax.Regexp) bool {
+    if nil == expression {
+        return false
+    }
+
+    switch expression.Op {
+    case syntax.OpBeginText:
+        return true
+
+    case syntax.OpConcat:
+        /* a concatenation is anchored by its first element that consumes or asserts anything; a zero-width element in front of the anchor does not move the start */
+        for _, subExpression := range expression.Sub {
+            if true == accessControlExpressionMatchesEmptyOnly(subExpression) {
+                continue
+            }
+
+            return accessControlExpressionIsAnchored(subExpression)
+        }
+
+        return false
+
+    case syntax.OpAlternate:
+        for _, subExpression := range expression.Sub {
+            if false == accessControlExpressionIsAnchored(subExpression) {
+                return false
+            }
+        }
+
+        return 0 < len(expression.Sub)
+
+    case syntax.OpCapture:
+        if 1 != len(expression.Sub) {
+            return false
+        }
+
+        return accessControlExpressionIsAnchored(expression.Sub[0])
+
+    case syntax.OpPlus:
+        if 1 != len(expression.Sub) {
+            return false
+        }
+
+        return accessControlExpressionIsAnchored(expression.Sub[0])
+    }
+
+    return false
+}
+
+/* accessControlExpressionMatchesEmptyOnly reports whether the expression consumes nothing and asserts nothing about position, so it cannot move where the match begins. */
+func accessControlExpressionMatchesEmptyOnly(expression *syntax.Regexp) bool {
+    if nil == expression {
+        return false
+    }
+
+    switch expression.Op {
+    case syntax.OpEmptyMatch, syntax.OpNoMatch:
+        return true
+
+    case syntax.OpCapture:
+        if 1 != len(expression.Sub) {
+            return false
+        }
+
+        return accessControlExpressionMatchesEmptyOnly(expression.Sub[0])
+    }
+
+    return false
 }
 
 /* NewAccessControlRegexRule builds a rule that matches when the pattern is found anywhere in the canonicalized request path: it is compiled unanchored, so "/public" matches "/admin/public-notes", unlike a route requirement, which melody anchors. Write "^/public(/|$)" to bound it to one tree. Regex rules match after exact and prefix rules, and among themselves the first registered wins. */

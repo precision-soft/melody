@@ -3,54 +3,27 @@ package config
 import (
     "bytes"
     "context"
-    "database/sql"
-    "database/sql/driver"
     "errors"
+    "fmt"
     "strings"
+    "sync"
     "testing"
+    "time"
 
+    "github.com/precision-soft/melody/v3/.example/generated"
     "github.com/precision-soft/melody/v3/.example/persistence"
+    "github.com/precision-soft/melody/v3/.example/reporting"
+    "github.com/precision-soft/melody/v3/.example/repository"
     "github.com/precision-soft/melody/v3/.example/subscriber"
+    melodyclock "github.com/precision-soft/melody/v3/clock"
+    melodyclockcontract "github.com/precision-soft/melody/v3/clock/contract"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodylogging "github.com/precision-soft/melody/v3/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     bun "github.com/uptrace/bun"
-    "github.com/uptrace/bun/dialect/mysqldialect"
 )
-
-/* refusingConnector stands in for a driver that is never dialed. database/sql opens lazily, and nothing in
-   these tests issues a query, so a connector that refuses every connection is the cheapest handle that is a
-   real *bun.DB: it proves the tests measure the wiring rather than a server. */
-type refusingConnector struct{}
-
-func (instance *refusingConnector) Connect(ctx context.Context) (driver.Conn, error) {
-    return nil, errors.New("this handle is never dialed")
-}
-
-func (instance *refusingConnector) Driver() driver.Driver {
-    return nil
-}
-
-func newUndialedDatabase() *bun.DB {
-    return bun.NewDB(sql.OpenDB(&refusingConnector{}), mysqldialect.New())
-}
-
-/* containerRegistrar is the container under the name-based registrar the composition root is handed. The
-   application supplies this method by delegating to MustRegister; the container itself carries only the
-   Registrar half, so a test that drives a registration door needs the same one-line adapter. */
-type containerRegistrar struct {
-    melodycontainercontract.Container
-}
-
-func (instance containerRegistrar) RegisterService(
-    serviceName string,
-    provider any,
-    options ...melodycontainercontract.RegisterOption,
-) {
-    instance.MustRegister(serviceName, provider, options...)
-}
 
 /* The catalog storage is the one door an ordinary http process passes through on its way to a repository: the generated wiring resolves it by type for every one of them. A provider that captures the handle the composition root already built resolves nothing, so the container records no dependency, the registry's SetLogger never runs and at SIGTERM neither the pool nor the registry is closed. Resolving is what writes the edge. */
 func TestRegisterCatalogStorageService_ResolvesTheHandleRatherThanCapturingIt(t *testing.T) {
@@ -159,5 +132,87 @@ func TestRegisterArchiveStorageService_PublishesAHandlelessStorageWithoutAnArchi
 
     if true == storage.IsPersistent() {
         t.Fatal("expected an archive storage without a handle when no archive is wired")
+    }
+}
+
+func TestGeneratedServices_ConcurrentScopesKeepRequestStateSeparate(t *testing.T) {
+    serviceContainer := melodycontainer.NewContainer()
+    defer func() {
+        if closeErr := serviceContainer.Close(); nil != closeErr {
+            t.Errorf("close: %v", closeErr)
+        }
+    }()
+
+    generated.RegisterGeneratedServices(serviceContainer)
+    generated.RegisterGeneratedServicesScoped(serviceContainer)
+    melodycontainer.MustRegisterType(serviceContainer, func(melodycontainercontract.Resolver) (*persistence.CatalogStorage, error) {
+        return persistence.NewCatalogStorage(nil), nil
+    })
+    melodycontainer.MustRegisterType(serviceContainer, func(melodycontainercontract.Resolver) (melodyclockcontract.Clock, error) {
+        return melodyclock.NewSystemClock(), nil
+    })
+    melodycontainer.MustRegister(serviceContainer, "request.context", func(melodycontainercontract.Resolver) (*melodyhttp.RequestContext, error) {
+        return melodyhttp.NewRequestContext("outside-request", time.Now()), nil
+    })
+
+    journal := repository.MustGetCatalogJournalRepository(serviceContainer)
+    formatter := melodycontainer.MustFromResolverByType[*reporting.ReportFormatter](serviceContainer)
+
+    start := make(chan struct{})
+    var workers sync.WaitGroup
+    for _, requestId := range []string{"request-alpha", "request-beta"} {
+        requestScope := serviceContainer.NewScope()
+        requestScope.MustOverrideProtectedInstance("request.context", melodyhttp.NewRequestContext(requestId, time.Now()))
+
+        workers.Add(1)
+        go func(requestId string, requestScope melodycontainercontract.Scope) {
+            defer workers.Done()
+            defer func() {
+                if closeErr := requestScope.Close(); nil != closeErr {
+                    t.Errorf("close the %s scope: %v", requestId, closeErr)
+                }
+            }()
+
+            <-start
+
+            trail, resolveErr := melodycontainer.FromResolver[*reporting.RequestReportTrail](requestScope, reporting.ServiceRequestReportTrail)
+            if nil != resolveErr {
+                t.Errorf("resolve the %s trail: %v", requestId, resolveErr)
+
+                return
+            }
+            if requestId != trail.RequestId() {
+                t.Errorf("expected the trail of %s, got %s", requestId, trail.RequestId())
+            }
+            if formatter != melodycontainer.MustFromResolverByType[*reporting.ReportFormatter](requestScope) {
+                t.Errorf("expected the stateless formatter shared by %s", requestId)
+            }
+            if journal != repository.MustGetCatalogJournalRepository(requestScope) {
+                t.Errorf("expected the process journal shared by %s", requestId)
+            }
+
+            for entryIndex := 0; entryIndex < 20; entryIndex++ {
+                trail.Record(requestId, repository.CatalogJournalActionCreated, "product", fmt.Sprintf("%s-%d", requestId, entryIndex))
+            }
+        }(requestId, requestScope)
+    }
+    close(start)
+    workers.Wait()
+
+    entries, latestErr := journal.Latest(context.Background(), 100)
+    if nil != latestErr {
+        t.Fatalf("read the journal: %v", latestErr)
+    }
+
+    counts := map[string]int{}
+    for _, entry := range entries {
+        if entry.Actor != entry.RequestId {
+            t.Errorf("expected the entry of %s filed under its own request, got %s", entry.Actor, entry.RequestId)
+        }
+        counts[entry.RequestId]++
+    }
+
+    if 20 != counts["request-alpha"] || 20 != counts["request-beta"] || 40 != len(entries) {
+        t.Fatalf("expected twenty entries per request and forty in all, got %v and %d", counts, len(entries))
     }
 }

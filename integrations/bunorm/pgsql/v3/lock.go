@@ -159,7 +159,6 @@ func (instance *pgsqlLock) pinnedConnectionAlive() bool {
     return nil == instance.connection.PingContext(pingCtx)
 }
 
-/* releasePinnedConnection releases the lock held by the pinned connection and clears the pin. */
 func (instance *pgsqlLock) releasePinnedConnection() error {
     releaseErr := releaseLockedConnection(instance.connection, instance.keyHigh, instance.keyLow, instance.releaseTimeout)
     instance.connection = nil

@@ -129,7 +129,6 @@ func containerNameStore(
     }
 }
 
-/* containerTypeStore is containerNameStore for a type-keyed registration with no name. */
 func containerTypeStore(
     containerInstance *container,
     canonicalTargetType reflect.Type,
@@ -311,7 +310,6 @@ func (instance *resolverContext) lookupByName(serviceName string) createWithGuar
     }
 }
 
-/* lookupByType is lookupByName for a type-keyed resolution. */
 func (instance *resolverContext) lookupByType(canonicalTargetType reflect.Type) createWithGuardLookupFunc {
     return func() (any, bool) {
         if true == instance.scopeVisible() {

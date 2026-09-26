@@ -259,6 +259,24 @@ func TestEncryptedString_UnmarshalJSONLeavesTheValueOnNull(t *testing.T) {
     }
 }
 
+func TestEncryptedString_UnmarshalJSONLeavesTheValueOnAPaddedNull(t *testing.T) {
+    plain := EncryptedString("kept")
+    if unmarshalErr := plain.UnmarshalJSON([]byte(" null\n")); nil != unmarshalErr {
+        t.Fatalf("unmarshal: %v", unmarshalErr)
+    }
+    if "kept" != string(plain) {
+        t.Fatalf("expected a padded json null to leave the value untouched, got %q", string(plain))
+    }
+
+    deterministic := EncryptedDeterministicString("kept")
+    if unmarshalErr := deterministic.UnmarshalJSON([]byte("\tnull ")); nil != unmarshalErr {
+        t.Fatalf("unmarshal: %v", unmarshalErr)
+    }
+    if "kept" != string(deterministic) {
+        t.Fatalf("expected a padded json null to leave the deterministic value untouched, got %q", string(deterministic))
+    }
+}
+
 func TestEncryptedString_UnmarshalJSONRefusesANonStringValue(t *testing.T) {
     var decoded EncryptedString
     unmarshalErr := json.Unmarshal([]byte(`42`), &decoded)

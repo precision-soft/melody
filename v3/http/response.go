@@ -297,8 +297,18 @@ func confineFileToRoot(rootDirectory string, name string) (string, error) {
         return "", evalRootErr
     }
 
+    /* both sides are made absolute first: under a relative root a symlink with an absolute target resolves to an absolute path, which filepath.Rel cannot relate to a relative root */
+    absoluteRoot, absoluteRootErr := filepath.Abs(realRoot)
+    if nil != absoluteRootErr {
+        return "", absoluteRootErr
+    }
+    absolutePath, absolutePathErr := filepath.Abs(realPath)
+    if nil != absolutePathErr {
+        return "", absolutePathErr
+    }
+
     /* the containment is read on the relative path rather than as a textual prefix, since "." resolves names without a "./" and "/" would demand "//" */
-    relativePath, relativeErr := filepath.Rel(realRoot, realPath)
+    relativePath, relativeErr := filepath.Rel(absoluteRoot, absolutePath)
     if nil != relativeErr || ".." == relativePath || true == strings.HasPrefix(relativePath, ".."+string(os.PathSeparator)) {
         return "", exception.NewError(
             "the file resolves outside the root directory",

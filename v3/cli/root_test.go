@@ -52,7 +52,7 @@ func TestRoot_CommandNamesAnswersTheRegistrationOrder(t *testing.T) {
     }
 }
 
-/* the engine defaults each command's stream on its own, to the process's standard output, so a writer set on the tree alone left every command writing past it: the door has to reach the commands or it does not mean what it says */
+/* the engine defaults each command's stream on its own, to the process's standard output, so a writer set on the tree alone would leave every command writing past it: the door has to reach the commands or it does not mean what it says */
 func TestRoot_SetWriterReachesACommandRegisteredBeforeIt(t *testing.T) {
     written := runProbeCommandThroughRoot(t, false)
 

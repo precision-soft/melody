@@ -294,7 +294,7 @@ func TestJsonHandler_ServesValidationDetailUnderTheValidationErrorsKey(t *testin
         t.Fatalf("expected an http exception, got %T: %v", handleErr, handleErr)
     }
 
-    /* flattened into the message, the per-field detail never reached the client under the one key that names it, and the listener's rule-wiring classification — which reads exactly this key — could never fire for a route bound through this door */
+    /* the per-field detail reaches the client under the one key that names it, and the listener's rule-wiring classification reads exactly this key, for a route bound through this door as for any other */
     if _, exists := httpException.Context()["validationErrors"]; false == exists {
         t.Fatalf("expected the validation detail under validationErrors, got context %v", httpException.Context())
     }

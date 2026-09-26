@@ -9,7 +9,7 @@ import (
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
-/* DefaultTeardownTimeout is how long a process shutting down cleanly may spend releasing what it holds, when MELODY_TEARDOWN_TIMEOUT says nothing, before the teardown is abandoned and the process exits non-zero. It is the budget of the whole ordered teardown, not one per service, since a supervisor budgets for the process. A stalled dependency can cost far more, and the default matches what the commonest supervisor grants before SIGKILL; a deployment granted longer raises it, so the teardown runs to its end and names the service that failed. Zero asks for no deadline; a negative duration fails the boot. */
+/* DefaultTeardownTimeout is how long a process shutting down cleanly may spend releasing what it holds, when MELODY_TEARDOWN_TIMEOUT says nothing, before the teardown is abandoned and the process exits non-zero. It is the budget of the whole ordered teardown, not one per service, since a supervisor budgets for the process. A stalled dependency can cost far more, and the default matches what the commonest supervisor grants before SIGKILL; a deployment granted longer raises it, so the teardown runs to its end and names the service that failed. Zero asks for no deadline; a negative duration fails the boot. A positive budget hands the teardown a deadline at half of it and keeps the other half for the teardown to report in before it is abandoned. */
 const DefaultTeardownTimeout = 10 * time.Second
 
 func newKernelConfiguration(

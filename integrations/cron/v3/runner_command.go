@@ -63,7 +63,6 @@ type RunnerCommand struct {
     userIgnoredCommands []string
 }
 
-/* runReporting is the output posture one invocation of the scheduler loop reports under. */
 type runReporting struct {
     commandContext clicontract.Context
     option         output.Option
@@ -738,7 +737,6 @@ func errorTextOrEmpty(err error) string {
 /* clockJumpResetThreshold is the vixie-cron three-hour bound on wall-clock reconciliation: a jump smaller than this (a daylight-saving transition, a suspend, an ntp step) is resolved minute by minute, while a jump of at least this much in either direction is treated as a clock reset and the minute chain re-anchors to the current minute without catch-up. */
 const clockJumpResetThreshold = 3 * time.Hour
 
-/* minuteEvaluation names one wall minute the runner evaluates and which entry classes run at it. */
 type minuteEvaluation struct {
     at           time.Time
     runFixedTime bool

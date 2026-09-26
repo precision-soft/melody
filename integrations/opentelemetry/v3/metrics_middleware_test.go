@@ -143,6 +143,36 @@ func TestMetricsMiddleware_ReadsTheStatusADirectWriterCommitted(t *testing.T) {
     }
 }
 
+func TestMetricsMiddleware_AnEarlyHintDoesNotHideTheFinalStatus(t *testing.T) {
+    meter, registry, meterErr := NewPrometheusMeter("melody-early-hint-test")
+    if nil != meterErr {
+        t.Fatalf("meter: %v", meterErr)
+    }
+
+    middleware, middlewareErr := NewMetricsMiddleware(meter)
+    if nil != middlewareErr {
+        t.Fatalf("middleware: %v", middlewareErr)
+    }
+
+    directWriter := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        writer.WriteHeader(nethttp.StatusEarlyHints)
+        writer.WriteHeader(nethttp.StatusServiceUnavailable)
+
+        return nil, nil
+    }
+
+    request, runtimeInstance := testRequestAndRuntime()
+
+    if _, handlerErr := middleware(directWriter)(runtimeInstance, httptest.NewRecorder(), request); nil != handlerErr {
+        t.Fatalf("handler: %v", handlerErr)
+    }
+
+    labels := gatheredStatusLabels(t, registry)
+    if false == labels["503"] || true == labels["103"] {
+        t.Fatalf("expected the final 503 and no 103, got %v", labels)
+    }
+}
+
 /* typedNilProneResponse exists so a test can hand the middleware the typed-nil shape a userland error branch produces. Its accessors DEREFERENCE the receiver, like every real response's do: a method body that ignores the receiver would run happily on a nil pointer, and the guard's mutant would survive against a fixture that cannot reproduce the panic it guards against. */
 type typedNilProneResponse struct {
     statusCode int

@@ -497,3 +497,62 @@ func TestNewAccessControlRule_LonePublicAccessAllowed(t *testing.T) {
         t.Fatalf("expected exactly one PUBLIC_ACCESS attribute, got %v", rule.attributes)
     }
 }
+
+func TestAccessControlRegexPatternIsAnchored(t *testing.T) {
+    for _, testCase := range []struct {
+        pattern  string
+        anchored bool
+    }{
+        {"^/public", true},
+        {"^/public(/|$)", true},
+        {"(?i)^/public(/|$)", true},
+        {`\A/public`, true},
+        {"^/public|^/status", true},
+        {"^(/public|/status)", true},
+        {"^(?:/public|/status)(/|$)", true},
+        {"^/public$|^/status$", true},
+        {"^/a+", true},
+        {"(^/public)+", true},
+        {"(?:)^/public", true},
+        {"()^/public", true},
+
+        {"/status", false},
+        {"^/public|/status", false},
+        {"/status|^/public", false},
+        {"^/a|/b|^/c", false},
+        {"(?m)^/public", false},
+        {"(^/public)?", false},
+    } {
+        if testCase.anchored != accessControlRegexPatternIsAnchored(testCase.pattern) {
+            t.Fatalf("expected %q to read as anchored=%v", testCase.pattern, testCase.anchored)
+        }
+    }
+}
+
+func TestNewAccessControlRegexRule_RequiresEveryPublicBranchToBeAnchored(t *testing.T) {
+    for _, pattern := range []string{"^/public|/status", "(?m)^/public", "(^/public)?"} {
+        t.Run(pattern, func(t *testing.T) {
+            defer func() {
+                if nil == recover() {
+                    t.Fatalf("expected the public pattern %q to be refused", pattern)
+                }
+            }()
+
+            _ = NewAccessControlRegexRule(pattern, "PUBLIC_ACCESS")
+        })
+    }
+}
+
+func TestNewAccessControlRegexRule_AcceptsGroupedAndFlaggedPublicPatterns(t *testing.T) {
+    for _, pattern := range []string{"(?i)^/public(/|$)", `\A/public(/|$)`, "^(?:/public|/status)(/|$)", "^/public$|^/status$"} {
+        t.Run(pattern, func(t *testing.T) {
+            control := NewAccessControl(NewAccessControlRegexRule(pattern, "PUBLIC_ACCESS"))
+            if _, matched := control.Match("/public"); false == matched {
+                t.Fatalf("expected %q to match /public", pattern)
+            }
+            if _, matched := control.Match("/admin/status-board"); true == matched {
+                t.Fatalf("expected %q not to match inside a protected path", pattern)
+            }
+        })
+    }
+}

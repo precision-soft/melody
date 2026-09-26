@@ -781,7 +781,7 @@ func TestNewFileStorageFromFile_RefusesAHandleThatCannotBeSeeked(t *testing.T) {
     }
 }
 
-/* an appending handle ignores every seek, so each snapshot landed after the document it was replacing and the truncation then cut the pair to the new length. Refusing it at construction is the only place the operator can still be told: the saves that follow report success. */
+/* an appending handle ignores every seek, so each snapshot would land after the document it replaces and the truncation would then cut the pair to the new length. Refusing it at construction is the only place the operator can still be told: the saves that follow report success. */
 func TestNewFileStorageFromFile_RefusesAHandleOpenedForAppending(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
@@ -1288,7 +1288,7 @@ func TestFileStorage_LoadOfALapsedEntryAnswersAbsentWhenTheFlushCannotWrite(t *t
 
 const fileStorageWriteWindowProbeMarker = "MELODY_SESSION_WRITE_WINDOW_PROBE"
 
-/* the in-place writer must never leave the file empty: the order was a truncation to zero followed by the write, so a process killed between the two — an OOM kill, a docker kill, a deploy with no grace period — left a zero-length file that the next boot reads as "no sessions at all" and answers by logging every user out with no error anywhere.
+/* the in-place writer must never leave the file empty: a truncation to zero followed by the write would leave, for a process killed between the two — an OOM kill, a docker kill, a deploy with no grace period — a zero-length file that the next boot reads as "no sessions at all" and answers by logging every user out with no error anywhere.
 
    The kill is stood in for by a file size limit of zero, which is the only injection that reproduces it deterministically: a truncation to zero stays inside the limit and succeeds, while the write that follows fails at its first byte. The limit is process-wide, so this runs in a child of its own. */
 func TestFileStorage_InPlaceWrite_ARefusedWriteLeavesThePersistedSessionsIntact(t *testing.T) {

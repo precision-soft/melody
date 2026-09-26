@@ -126,8 +126,9 @@ type statusRecordingResponseWriter struct {
     hijacked    bool
 }
 
+/* WriteHeader records the first final status: an informational 1xx header other than 101 (103 Early Hints) is forwarded without being recorded, since net/http sends it ahead of the final header the handler still writes. */
 func (instance *statusRecordingResponseWriter) WriteHeader(statusCode int) {
-    if false == instance.wroteHeader {
+    if false == instance.wroteHeader && (nethttp.StatusOK <= statusCode || nethttp.StatusSwitchingProtocols == statusCode) {
         instance.statusCode = statusCode
         instance.wroteHeader = true
     }

@@ -326,7 +326,7 @@ func TestRateLimiter_TheCallersCancellationIsNotAStoreFailure(t *testing.T) {
     }
 }
 
-/* with no observer the failure is recorded here, and marked, because two of the three doors return nothing at all: Allow answers a bool and Reset answers nothing, so a store outage refused every call and reached no channel whatsoever. The mark is what lets the record be filed at the one place that knows the key and the failure mode without the http middleware writing a second copy beside it. */
+/* with no observer the failure is recorded here, and marked, because two of the three doors return nothing at all: Allow answers a bool and Reset answers nothing, so without this record a store outage refuses every call and reaches no channel whatsoever. The mark is what lets the record be filed at the one place that knows the key and the failure mode without the http middleware writing a second copy beside it. */
 func TestRateLimiter_WithoutAnObserverTheFailureIsRecordedAndMarked(t *testing.T) {
     for _, testCase := range []struct {
         name    string

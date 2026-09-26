@@ -95,7 +95,6 @@ func TestCreateCommand_MissingNameFails(t *testing.T) {
     }
 }
 
-/* the machine document names the argument the command ran on: built without the arguments it answered an empty list for every command, db:create included, whose one argument is the migration the document reports on */
 func TestCreateCommand_TheMachineDocumentCarriesTheArguments(t *testing.T) {
     database, _ := newFakeBunDatabase()
     runtimeInstance := newRuntimeWithDatabase(t, database)
@@ -155,7 +154,7 @@ func TestCreateCommand_FormatMigrationFilesSurvivesANilFile(t *testing.T) {
     }
 }
 
-/* a directory fsync that fails AFTER the rename leaves a whole file in place: the run succeeds with a warning naming what could not be guaranteed, because a failure verdict sent the operator to run the command again, which created a second migration under a new timestamp beside a perfectly good first one */
+/* a directory fsync that fails AFTER the rename leaves a whole file in place, so the run succeeds with a warning naming what could not be guaranteed: a failure verdict would send the operator to run the command again, which creates a second migration under a new timestamp beside a good first one — the probe counts exactly one file in the directory */
 func TestCreateCommand_ADirectorySyncFailureAfterTheRenameIsAWarningNotAFailure(t *testing.T) {
     previous := syncDirectoryAfterRename
     t.Cleanup(func() { syncDirectoryAfterRename = previous })

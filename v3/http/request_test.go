@@ -365,7 +365,6 @@ func TestNewRequest_ParseFormError_NilRuntime_NoPanic(t *testing.T) {
     }
 }
 
-/* Input delivers the query and post values it silently lost: the request bags stored every value as a list and the lax string accessor answered ("", true) for a list, so a provided parameter read as an empty field */
 func TestRequest_Input_DeliversQueryAndPostValues(t *testing.T) {
     queryRequest := httptest.NewRequest("GET", "/search?term=melody", nil)
     request := NewRequest(queryRequest, nil, nil, nil)

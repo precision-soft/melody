@@ -7,7 +7,7 @@ import (
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
-/* one case named both dependencies and supplied only the first as nil, asserting nothing but that something panicked — so the delegate's own guard had no test at all, and either refusal would have satisfied it. Each is asked for separately, and the message says which answered. */
+/* each dependency is asked for separately, and the message says which refusal answered: a single case naming both with only the first nil would be satisfied by either refusal, and the delegate's own guard would go untested. */
 func TestRoleHierarchyVoter_PanicsOnANilRoleHierarchy(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
         _ = NewRoleHierarchyVoter(nil, NewRoleVoter())

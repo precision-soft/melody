@@ -22,7 +22,7 @@ import (
         Iban encrypt.EncryptedStringFor[CrmCipher] `bun:"iban"`
     }
 
-Install the compartment with encrypt.UseCipherNamed("crm", cipher). Each named cipher owns its KeyProvider: key rotation inside the compartment keeps working through the key id embedded in the ciphertext, and a column of one compartment can never decrypt (or be decrypted by) another's. */
+Install the compartment with encrypt.UseCipherNamed("crm", cipher). Each named cipher owns its KeyProvider: key rotation inside the compartment keeps working through the key id embedded in the ciphertext, and a column of one compartment cannot decrypt another's as long as each provider holds keys of its own, since the name is not bound into the ciphertext. */
 type EncryptedStringFor[R CipherRef] string
 
 func (instance EncryptedStringFor[R]) encryptedColumn() {}

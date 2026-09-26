@@ -2071,7 +2071,7 @@ func (instance *closeTrackingResponseBodyReader) Close() error {
     return nil
 }
 
-/* the response being replaced owns whatever its body reader holds, and nothing downstream will ever read it: a file response left its *os.File open for the life of the process, one descriptor per request whose status landed outside the range net/http accepts */
+/* the response being replaced owns whatever its body reader holds, and nothing downstream will ever read it: a file response would leave its *os.File open for the life of the process, one descriptor per request whose status lands outside the range net/http accepts */
 func TestWriteResponse_ClosesTheBodyItDiscardsForAnOutOfRangeStatus(t *testing.T) {
     bodyReader := &closeTrackingResponseBodyReader{reader: strings.NewReader("file bytes")}
 
@@ -2126,4 +2126,40 @@ func TestMarkResponsePrivateForSessionCookie_KeepsEveryFieldLineAndQuotedList(t 
             t.Fatalf("expected the quoted field-name list to survive whole, got %q", got)
         }
     })
+}
+
+func TestWriteResponse_AnEarlyHintLeavesTheReturnedResponseToBeWritten(t *testing.T) {
+    server := httptest.NewServer(nethttp.HandlerFunc(func(rawWriter nethttp.ResponseWriter, rawRequest *nethttp.Request) {
+        writer := newRecordingResponseWriter(rawWriter)
+        writer.WriteHeader(nethttp.StatusEarlyHints)
+
+        writeResponse(
+            newTestRuntime(),
+            NewRequest(rawRequest, nil, nil, nil),
+            writer,
+            EmptyResponse(nethttp.StatusCreated),
+            nil,
+            nil,
+            httpcontract.ForwardedHeadersPolicy{
+                TrustForwardedHeaders: false,
+                TrustedProxyList:      []string{},
+            },
+            httpcontract.SessionCookiePolicy{
+                Path:     "/",
+                Domain:   "",
+                SameSite: nethttp.SameSiteLaxMode,
+            },
+        )
+    }))
+    defer server.Close()
+
+    response, getErr := nethttp.Get(server.URL)
+    if nil != getErr {
+        t.Fatalf("expected the request to succeed, got %v", getErr)
+    }
+    _ = response.Body.Close()
+
+    if nethttp.StatusCreated != response.StatusCode {
+        t.Fatalf("expected the returned 201 after the early hint, got %d", response.StatusCode)
+    }
 }

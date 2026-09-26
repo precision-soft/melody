@@ -3,7 +3,6 @@ package cli
 import (
     "fmt"
     "io"
-    "os"
     "strings"
     "time"
     "unicode/utf8"
@@ -48,8 +47,10 @@ func (instance *ProductListCommand) Flags() []melodyclicontract.Flag {
 }
 
 func (instance *ProductListCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext melodyclicontract.Context) error {
+    writer := commandContext.Writer()
+
     limit := int(commandContext.Int(productListFlagLimit))
-    fmt.Printf("product list: limit=%d\n", limit)
+    _, _ = fmt.Fprintf(writer, "product list: limit=%d\n", limit)
 
     productService := service.MustGetProductService(runtimeInstance.Container())
     categoryService := service.MustGetCategoryService(runtimeInstance.Container())
@@ -109,8 +110,7 @@ func (instance *ProductListCommand) Run(runtimeInstance melodyruntimecontract.Ru
         })
     }
 
-    printTable(headers, rows)
-    return nil
+    return fprintTable(writer, headers, rows)
 }
 
 /* nameById reads a whole nomenclature once and keys its names by identifier. A read that fails answers an empty map beside its error, so every name renders as a dash, the listing keeps rendering, and the caller journals the loss. */
@@ -162,16 +162,8 @@ func nameOrDash(nameById map[string]string, identifier string) string {
     return name
 }
 
-/* printTable renders to standard output, which is where the commands that only ever print a table want it.
-   A command whose output a test reads passes its own writer through fprintTable instead: the command
-   context carries one for exactly that reason, and capturing a process stream to assert a table is a test
-   about plumbing rather than about the command. */
-func printTable(headers []string, rows [][]string) {
-    fprintTable(os.Stdout, headers, rows)
-}
-
-/* the widths are counted in runes, not bytes: a multi-byte name padded by its byte length shifts every separator to its right and misaligns the table */
-func fprintTable(writer io.Writer, headers []string, rows [][]string) {
+/* fprintTable renders into the command's own writer and answers the first write that failed, so a table the operator never received does not exit zero. The widths are counted in runes, not bytes: a multi-byte name padded by its byte length shifts every separator to its right and misaligns the table. */
+func fprintTable(writer io.Writer, headers []string, rows [][]string) error {
     widths := make([]int, len(headers))
     for i, header := range headers {
         widths[i] = utf8.RuneCountInString(header)
@@ -185,31 +177,43 @@ func fprintTable(writer io.Writer, headers []string, rows [][]string) {
         }
     }
 
-    printRow(writer, headers, widths)
-    printSeparator(writer, widths)
+    if rowErr := printRow(writer, headers, widths); nil != rowErr {
+        return rowErr
+    }
+    if separatorErr := printSeparator(writer, widths); nil != separatorErr {
+        return separatorErr
+    }
 
     for _, row := range rows {
-        printRow(writer, row, widths)
+        if rowErr := printRow(writer, row, widths); nil != rowErr {
+            return rowErr
+        }
     }
+
+    return nil
 }
 
-func printRow(writer io.Writer, columns []string, widths []int) {
+func printRow(writer io.Writer, columns []string, widths []int) error {
     parts := make([]string, 0, len(columns))
     for i, column := range columns {
         padding := widths[i] - utf8.RuneCountInString(column)
         parts = append(parts, column+strings.Repeat(" ", padding))
     }
 
-    _, _ = fmt.Fprintln(writer, strings.Join(parts, "  |  "))
+    _, writeErr := fmt.Fprintln(writer, strings.Join(parts, "  |  "))
+
+    return writeErr
 }
 
-func printSeparator(writer io.Writer, widths []int) {
+func printSeparator(writer io.Writer, widths []int) error {
     parts := make([]string, 0, len(widths))
     for _, width := range widths {
         parts = append(parts, strings.Repeat("-", width))
     }
 
-    _, _ = fmt.Fprintln(writer, strings.Join(parts, "--+--"))
+    _, writeErr := fmt.Fprintln(writer, strings.Join(parts, "--+--"))
+
+    return writeErr
 }
 
 var _ melodyclicontract.Command = (*ProductListCommand)(nil)

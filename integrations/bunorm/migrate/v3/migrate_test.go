@@ -415,6 +415,33 @@ func TestRestoreDefaultRunnerOption_KeepsAValueTheHostInstalledWhileACommandRan(
 }
 
 /* three overlapping commands leaving out of order — the second, then the third, then the first — leave the second command's value live under nobody's name at the last restore: a compare-and-swap on the last command's own value would leave it there for the life of the process, which is why the restore asks whether the live value was installed by ANY command of the group */
+func TestRestoreDefaultRunnerOption_ARestoreStopsAtAValueWhoseCommandStillRuns(t *testing.T) {
+    t.Cleanup(func() {
+        processRunnerOption.Store(nil)
+        commandRunnerOptions.depth = 0
+        commandRunnerOptions.host = nil
+        commandRunnerOptions.installed = nil
+    })
+
+    var host, first, second, third bytes.Buffer
+    SetDefaultRunnerOption(RunnerOption{Writer: &host, NoColor: true})
+
+    firstInstalled, firstPrevious := swapDefaultRunnerOption(RunnerOption{Writer: &first, NoColor: true})
+    secondInstalled, secondPrevious := swapDefaultRunnerOption(RunnerOption{Writer: &second, NoColor: true})
+    thirdInstalled, thirdPrevious := swapDefaultRunnerOption(RunnerOption{Writer: &third, NoColor: true})
+
+    restoreDefaultRunnerOption(firstInstalled, firstPrevious)
+    restoreDefaultRunnerOption(thirdInstalled, thirdPrevious)
+    if &second != resolveDefaultRunnerOption().Writer {
+        t.Fatalf("expected the third command's restore to put the still-running second command's value back, got %v", resolveDefaultRunnerOption().Writer)
+    }
+
+    restoreDefaultRunnerOption(secondInstalled, secondPrevious)
+    if &host != resolveDefaultRunnerOption().Writer {
+        t.Fatalf("expected the host's own value back once the last command restored, got %v", resolveDefaultRunnerOption().Writer)
+    }
+}
+
 func TestRestoreDefaultRunnerOption_ThreeOverlappingCommandsLeavingOutOfOrderStillPutTheHostsValueBack(t *testing.T) {
     t.Cleanup(func() {
         processRunnerOption.Store(nil)
@@ -432,8 +459,8 @@ func TestRestoreDefaultRunnerOption_ThreeOverlappingCommandsLeavingOutOfOrderSti
 
     restoreDefaultRunnerOption(secondInstalled, secondPrevious)
     restoreDefaultRunnerOption(thirdInstalled, thirdPrevious)
-    if &second != resolveDefaultRunnerOption().Writer {
-        t.Fatalf("expected the third command's restore to put the second command's value back while the first still runs, got %v", resolveDefaultRunnerOption().Writer)
+    if &first != resolveDefaultRunnerOption().Writer {
+        t.Fatalf("expected the third command's restore to put the still-running first command's value back rather than the finished second's, got %v", resolveDefaultRunnerOption().Writer)
     }
 
     restoreDefaultRunnerOption(firstInstalled, firstPrevious)
@@ -480,6 +507,31 @@ func TestRunQueriesWithOption_EscapesTheMigrationNameInsideThePrefixOfEveryPerQu
         if true == strings.Contains(rendered, "m\x1b[31mred") {
             t.Fatalf("noColor=%v: the raw escape sequence of the migration name reached the writer: %q", noColor, rendered)
         }
+    }
+}
+
+func TestRunQueriesWithOption_EscapesTheDirectionOnEveryLine(t *testing.T) {
+    database, _ := newFakeBunDatabase()
+    buffer := &bytes.Buffer{}
+    queries := []Query{{Name: "create table", SQL: "CREATE TABLE users (id INTEGER)"}}
+
+    runErr := RunQueriesWithOption(context.Background(), database, "up\rinjected", "add_users", queries, RunnerOption{Writer: buffer, NoColor: true})
+    if nil != runErr {
+        t.Fatalf("expected the run to succeed, got %v", runErr)
+    }
+
+    emptyErr := RunQueriesWithOption(context.Background(), database, "up\rinjected", "empty", nil, RunnerOption{Writer: buffer, NoColor: true})
+    if nil != emptyErr {
+        t.Fatalf("expected the empty run to succeed, got %v", emptyErr)
+    }
+
+    rendered := buffer.String()
+    if true == strings.Contains(rendered, "\r") {
+        t.Fatalf("expected no raw carriage return from the direction, got %q", rendered)
+    }
+    /* executing and completed for the query, the success line, the empty line */
+    if 4 != strings.Count(rendered, `[migration:up\rinjected]`) {
+        t.Fatalf("expected the escaped direction on all four lines, got %q", rendered)
     }
 }
 

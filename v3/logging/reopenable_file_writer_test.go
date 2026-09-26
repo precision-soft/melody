@@ -217,7 +217,7 @@ func TestReopenableFileWriter_ASighupReopensTheJournalWhileArmed(t *testing.T) {
     }
 }
 
-/* the swap is committed before the replaced descriptor is closed and is never rolled back, so a refused close reports a rotation that HAPPENED. Sharing a headline with a failed open told the operator the journal was stuck on the renamed file while it was in fact healthy on the fresh one. */
+/* the swap is committed before the replaced descriptor is closed and is never rolled back, so a refused close reports a rotation that HAPPENED: sharing a headline with a failed open would tell the operator the journal is stuck on the renamed file while it is in fact healthy on the fresh one. */
 func TestReopenableFileWriter_ARefusedCloseOfTheReplacedDescriptorIsStillARotation(t *testing.T) {
     directory := t.TempDir()
     logPath := filepath.Join(directory, "application.log")

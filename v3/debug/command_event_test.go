@@ -744,7 +744,7 @@ func TestEventCommand_RendersTheDeclaredServingProcessListeners(t *testing.T) {
     }
 }
 
-/* the declaration is not part of the verbose detail: it exists so that "is access control wired?" is not answered with an absence meaning "not in this process", the table has printed it at every verbosity since the verdict that introduced it, and a machine consumer auditing the wiring read a list the two security listeners were simply missing from. The listing keeps its place — data.items, not data.events.items — because reparenting is what --verbose does and doing it here would break the very query the consumer would have to rewrite. */
+/* the declaration is not part of the verbose detail: it exists so that "is access control wired?" is not answered with an absence meaning "not in this process", so the json document carries it at every verbosity, as the table does. The listing keeps its place — data.items, not data.events.items — because reparenting is what --verbose does and doing it here would break the query a consumer auditing the wiring runs. */
 func TestEventCommand_DeclaresTheServingProcessListenersAtEveryVerbosity(t *testing.T) {
     command := NewEventCommand(func() []DeferredListener {
         return []DeferredListener{

@@ -67,3 +67,6 @@ func newRenderingDatabase() *bun.DB {
 }
 
 var _ schema.Dialect = (*renderingDialect)(nil)
+
+/* concurrentRounds is shared by the four in-memory suites in this package. */
+const concurrentRounds = 500

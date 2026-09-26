@@ -16,6 +16,8 @@ import (
     "github.com/precision-soft/melody/v3/.example/persistence"
     melodyaudit "github.com/precision-soft/melody/integrations/bunorm/v3/audit"
     "github.com/precision-soft/melody/v3/exception"
+    melodycontainer "github.com/precision-soft/melody/v3/container"
+    melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
     melodyruntime "github.com/precision-soft/melody/v3/runtime"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     bun "github.com/uptrace/bun"
@@ -477,6 +479,71 @@ func TestDatabaseResetCommandNamesTheUntouchedArchiveWhenTheClearFails(t *testin
     for _, statement := range archiveRecorder.recorded() {
         if false == strings.Contains(strings.ToLower(statement), "version") {
             t.Fatalf("expected the archive untouched after the failed clear, recorded %v", archiveRecorder.recorded())
+        }
+    }
+}
+
+func TestDatabaseResetCommandClearsTheCacheWhenAStepFailsAfterTheResetBegan(t *testing.T) {
+    runtimeInstance, cacheInstance := newResetRuntimeWithArchive(
+        t,
+        persistence.NewCatalogStorageAt(newUndialedResetStorage().Database(), "mysql:3306/melody_example_v3"),
+        persistence.NewArchiveStorage(nil),
+    )
+
+    runErr := NewDatabaseResetCommand().Run(runtimeInstance, newBoolFlagContext(databaseResetFlagForce, true, &bytes.Buffer{}))
+    if nil == runErr || false == strings.Contains(runErr.Error(), "dropping and recreating the schema did not complete") {
+        t.Fatalf("expected the drop step's failure, got %v", runErr)
+    }
+
+    if 1 != cacheInstance.clears() {
+        t.Fatalf("expected the failed reset to clear the cache once, got %d clears", cacheInstance.clears())
+    }
+}
+
+func TestDatabaseResetCommandJoinsAFailedClearToTheStepThatFailed(t *testing.T) {
+    runtimeInstance, cacheInstance := newResetRuntimeWithArchive(
+        t,
+        persistence.NewCatalogStorageAt(newUndialedResetStorage().Database(), "mysql:3306/melody_example_v3"),
+        persistence.NewArchiveStorage(nil),
+    )
+    cacheRefusal := errors.New("the cache refused the clear")
+    cacheInstance.refusal = cacheRefusal
+
+    runErr := NewDatabaseResetCommand().Run(runtimeInstance, newBoolFlagContext(databaseResetFlagForce, true, &bytes.Buffer{}))
+    if nil == runErr || false == strings.HasPrefix(runErr.Error(), "database reset: dropping and recreating the schema did not complete") || false == errors.Is(runErr, cacheRefusal) {
+        t.Fatalf("expected the drop step's failure first with the failed clear joined, got %v", runErr)
+    }
+}
+
+func TestDatabaseResetCommandRefusesBeforeTouchingAnythingWhenTheCacheCannotBeResolved(t *testing.T) {
+    storage, recorder := newRecordingResetStorage("mysql:3306/melody_example_v3")
+
+    serviceContainer := melodycontainer.NewContainer()
+    melodycontainer.MustRegister(
+        serviceContainer,
+        persistence.ServiceCatalogStorage,
+        func(resolver melodycontainercontract.Resolver) (*persistence.CatalogStorage, error) {
+            return storage, nil
+        },
+    )
+    melodycontainer.MustRegister(
+        serviceContainer,
+        persistence.ServiceArchiveStorage,
+        func(resolver melodycontainercontract.Resolver) (*persistence.ArchiveStorage, error) {
+            return persistence.NewArchiveStorage(nil), nil
+        },
+    )
+    runtimeInstance := melodyruntime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    runErr := NewDatabaseResetCommand().Run(runtimeInstance, newBoolFlagContext(databaseResetFlagForce, true, &bytes.Buffer{}))
+    if nil == runErr {
+        t.Fatalf("expected the reset to refuse a cache it cannot resolve")
+    }
+
+    /* the driver's own version probe on connect writes nothing; every statement of the reset does */
+    for _, statement := range recorder.recorded() {
+        if "SELECT version()" != statement {
+            t.Fatalf("expected nothing touched before the cache was resolved, got %q", recorder.recorded())
         }
     }
 }

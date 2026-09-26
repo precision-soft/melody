@@ -314,7 +314,7 @@ func TestCommandOutput_WantsDetailFollowsTheFormatNotTheVerbosity(t *testing.T) 
     }
 }
 
-/* the document key and the display title were one string, so the same set of migrations arrived under APPLIED from db:status and under APPLIED MIGRATIONS from db:migrate, with no enumerable set of keys and a rename for readability breaking every consumer in silence */
+/* the document is keyed on the key while the text block shows the display title, so the set of keys stays enumerable and renaming a title for readability breaks no consumer of the document */
 func TestCommandOutput_PrintMigrationsBlockKeysTheDocumentApartFromTheTitle(t *testing.T) {
     jsonOption := output.DefaultOption()
     jsonOption.Format = output.FormatJson
@@ -399,7 +399,7 @@ func TestCommandOutput_TheAbsentDatabaseIsJsonNull(t *testing.T) {
     }
 }
 
-/* TestCommandOutput_FinishCarriesTheFailureDetailsAndCause pins the two fields the json envelope always declared and always answered null. The machine document is the contract a pipeline reads, and it was the one rendering that threw away what the error already carried: at the same instant, over the same value, the journal filed the connection, the pool sizing and the whole cause chain while stdout answered a single sentence beside `"details":null, "cause":null`. */
+/* the machine document is the contract a pipeline reads, so the failure's own context and its whole cause chain reach the envelope's details and cause beside the message: the probe's error carries a context and a cause that wraps a further cause */
 func TestCommandOutput_FinishCarriesTheFailureDetailsAndCause(t *testing.T) {
     buffer := &bytes.Buffer{}
     outputInstance := newCommandOutput(buffer, nil, output.Option{Format: output.FormatJson})
@@ -754,7 +754,7 @@ func TestMigrateCommands_EveryCommandRunsInsideTheFrameThatPassesItsOwnRecover(t
     }
 }
 
-/* the warning is the one text door whose caller carries text off the wire — the close failure of the migration connection — and it let the message through as sent, so a carriage return in it repainted the line and an escape sequence in it was obeyed; every text door escapes what it did not write itself, in both colour modes, and the sequence the DATA carried is what must not survive, the colour's own being the door's to write */
+/* the warning is the one text door whose caller carries text off the wire — the close failure of the migration connection. Every text door escapes what it did not write itself, in both colour modes: the sequence the DATA carries is what must not survive, the colour's own being the door's to write */
 func TestCommandOutput_PrintWarningEscapesControlCharacters(t *testing.T) {
     for _, noColor := range []bool{true, false} {
         instance, buffer := newBufferedOutput(noColor)

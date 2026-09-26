@@ -85,6 +85,33 @@ func TestConvertedPriceFor_RestatesThePriceInTheCurrencyTheCallerNamed(t *testin
     }
 }
 
+func TestConvertedPriceFor_StampsTheOlderOfTheTwoQuotes(t *testing.T) {
+    olderInstant := conversionQuoteInstant.Add(-3 * time.Hour)
+    newerInstant := conversionQuoteInstant.Add(2 * time.Hour)
+
+    for _, testCase := range []struct {
+        sourceAsOf time.Time
+        targetAsOf time.Time
+    }{
+        {olderInstant, newerInstant},
+        {newerInstant, olderInstant},
+    } {
+        catalogue := []*entity.Currency{
+            entity.NewCurrency("cur-eur", "EUR", "Euro", 1, testCase.sourceAsOf),
+            entity.NewCurrency("cur-usd", "USD", "US Dollar", 1.0842, testCase.targetAsOf),
+        }
+
+        converted, err := convertedPriceFor(conversionRequest(t, "/products/api/read/prod-1/?currency=USD"), conversionProduct(), catalogue)
+        if nil != err || nil == converted {
+            t.Fatalf("the door failed: %v", err)
+        }
+
+        if olderInstant.Format(time.RFC3339) != converted.RateAsOf {
+            t.Errorf("source %s, target %s: the conversion is stamped %q, wanted the older quote %s", testCase.sourceAsOf, testCase.targetAsOf, converted.RateAsOf, olderInstant.Format(time.RFC3339))
+        }
+    }
+}
+
 /* the SHAPE of a query parameter is the client's to choose, so ?currency=USD&currency=RON has to be answered
    rather than refused: the first value wins, as it does at the framework's own Input door. */
 func TestConvertedPriceFor_TakesTheFirstValueOfARepeatedParameter(t *testing.T) {

@@ -6,7 +6,6 @@ import (
     "errors"
     "math"
     "reflect"
-    "sync/atomic"
     "testing"
     "time"
 
@@ -14,50 +13,10 @@ import (
     "github.com/precision-soft/melody/v3/.example/event"
     "github.com/precision-soft/melody/v3/.example/persistence"
     "github.com/precision-soft/melody/v3/.example/repository"
-    melodycontainer "github.com/precision-soft/melody/v3/container"
-    melodyexception "github.com/precision-soft/melody/v3/exception"
-    melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
     melodyeventcontract "github.com/precision-soft/melody/v3/event/contract"
-    melodylogging "github.com/precision-soft/melody/v3/logging"
-    melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
-    melodyruntime "github.com/precision-soft/melody/v3/runtime"
+    melodyexception "github.com/precision-soft/melody/v3/exception"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
-
-var currencyQuoteInstant = time.Date(2026, time.September, 7, 9, 0, 0, 0, time.UTC)
-
-/* the currency doors under test write through a repository, a cache and a dispatcher. All three are the real
-   ones: the storage without a database hands back the in-memory repository the application itself uses when
-   it is configured without one, the cache keeps values as they are because these probes are not about
-   serialization, and the dispatcher carries a listener so "the event was dispatched" means it arrived. */
-func currencyServiceUnderTest(t *testing.T) (*CurrencyService, *recordingDispatcher, melodyruntimecontract.Runtime) {
-    t.Helper()
-
-    currencyRepository, repositoryErr := repository.NewCurrencyRepository(persistence.NewCatalogStorage(nil))
-    if nil != repositoryErr {
-        t.Fatalf("building the repository failed: %v", repositoryErr)
-    }
-
-    clockInstance := &frozenClock{instant: currencyQuoteInstant}
-    dispatcher := newRecordingDispatcher(clockInstance, event.CurrencyUpdatedEventName)
-
-    containerInstance := melodycontainer.NewContainer()
-    t.Cleanup(func() { _ = containerInstance.Close() })
-
-    /* the framework's dispatcher resolves the logger from the runtime before it runs a listener, so a
-       container without one turns every dispatch into a refusal that looks like the door's */
-    melodycontainer.MustRegister(
-        containerInstance,
-        melodylogging.ServiceLogger,
-        func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
-            return melodylogging.NewNopLogger(), nil
-        },
-    )
-
-    return NewCurrencyService(currencyRepository, newTtlRecordingCache(), dispatcher.dispatcher, clockInstance),
-        dispatcher,
-        melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
-}
 
 func TestCurrencyServiceUpdateRate_WritesTheQuoteAndTellsTheListeners(t *testing.T) {
     currencyService, dispatcher, runtimeInstance := currencyServiceUnderTest(t)
@@ -320,25 +279,6 @@ func TestCurrencyServiceCreate_RefusesAQuoteThatIsNotAUsablePrice(t *testing.T) 
     if _, found, _ := currencyService.FindById("cur-gbp"); true == found {
         t.Error("a refused create left the currency in the catalogue")
     }
-}
-
-/* updateCountingCurrencyRepository counts the UPDATE statements a door issues; the value the door answers
-   comes from the real repository underneath */
-type updateCountingCurrencyRepository struct {
-    repository.CurrencyRepository
-    updates atomic.Int64
-}
-
-func (instance *updateCountingCurrencyRepository) Update(ctx context.Context, currency *entity.Currency) (bool, error) {
-    instance.updates.Add(1)
-
-    return instance.CurrencyRepository.Update(ctx, currency)
-}
-
-func (instance *updateCountingCurrencyRepository) UpdateQuote(ctx context.Context, id string, quote entity.RateQuote) (bool, error) {
-    instance.updates.Add(1)
-
-    return instance.CurrencyRepository.UpdateQuote(ctx, id, quote)
 }
 
 /* staleReadCurrencyRepository serves one FindById from a snapshot taken earlier — the row as a concurrent

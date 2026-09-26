@@ -37,6 +37,21 @@ func TestInMemoryCatalogReadingRepositoryRefusesASecondReadingAtTheSameInstant(t
     }
 }
 
+func TestInMemoryCatalogReadingRepositoryRefusesOneInstantSpelledInAnotherZone(t *testing.T) {
+    repositoryInstance := newInMemoryCatalogReadingRepository()
+    takenAt := time.Date(2026, time.September, 7, 10, 0, 0, 0, time.UTC)
+
+    first := &CatalogReadingRecord{TakenAt: takenAt, Headline: "catalog", Payload: "products=1", ProductCount: 1, JournalCount: 0}
+    if appendErr := repositoryInstance.Append(context.Background(), first); nil != appendErr {
+        t.Fatalf("expected the first reading to be recorded, got %v", appendErr)
+    }
+
+    second := &CatalogReadingRecord{TakenAt: takenAt.In(time.FixedZone("EEST", 3*60*60)), Headline: "catalog", Payload: "products=99", ProductCount: 99, JournalCount: 0}
+    if appendErr := repositoryInstance.Append(context.Background(), second); nil == appendErr || "reading already recorded" != appendErr.Error() {
+        t.Fatalf("expected the same instant in another zone to be refused as a duplicate, got %v", appendErr)
+    }
+}
+
 /* one second apart is the smallest distance the archive can tell apart, because the service truncates the instant to the second before it gets here — so this is the pair that proves the identity is the instant and not the reading. */
 func TestInMemoryCatalogReadingRepositoryKeepsReadingsOneSecondApart(t *testing.T) {
     repositoryInstance := newInMemoryCatalogReadingRepository()

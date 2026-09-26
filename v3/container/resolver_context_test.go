@@ -397,16 +397,6 @@ func contextValueInChain(err error, key string) string {
     return ""
 }
 
-/* renderedCauseChain walks the whole chain because a provider panic is wrapped by the creation guard before it reaches the caller, and only the chain says what the provider itself refused. */
-func renderedCauseChain(err error) string {
-    rendered := ""
-    for current := err; nil != current; current = errors.Unwrap(current) {
-        rendered = rendered + current.Error() + "\n"
-    }
-
-    return rendered
-}
-
 func TestResolverContext_Get_EmptyNameRefused(t *testing.T) {
     serviceContainer := NewContainer()
 

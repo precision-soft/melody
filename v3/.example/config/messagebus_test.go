@@ -7,7 +7,6 @@ import (
 
     "github.com/precision-soft/melody/v3/.example/message"
     "github.com/precision-soft/melody/v3/.example/subscriber"
-    melodyconfig "github.com/precision-soft/melody/v3/config"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
     melodyhttp "github.com/precision-soft/melody/v3/http"
@@ -15,22 +14,6 @@ import (
     melodymessagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
     melodyruntime "github.com/precision-soft/melody/v3/runtime"
 )
-
-func moduleWithEnvironment(t *testing.T, values map[string]string) *Module {
-    t.Helper()
-
-    environment, environmentErr := melodyconfig.NewEnvironment(&stubEnvironmentSource{values: values})
-    if nil != environmentErr {
-        t.Fatalf("new environment: %v", environmentErr)
-    }
-
-    configuration, configurationErr := melodyconfig.NewConfiguration(environment, "/tmp/melody")
-    if nil != configurationErr {
-        t.Fatalf("new configuration: %v", configurationErr)
-    }
-
-    return &Module{configuration: configuration}
-}
 
 /* Nothing dials at boot. The dsn below points at an address no broker answers on, and the transport is built over it without a packet leaving the process; a dsn this application cannot dial surfaces at the first publish, through the transport's own retry loop. The test is written as a deadline rather than as an assertion on the return, because the failure it guards against is a dial: the address is a discard port on a host that does not resolve, so a boot-time dial would spend the resolver's own timeout before it panicked. */
 func TestBuildMessageBusTransport_DoesNotDialAtBoot(t *testing.T) {

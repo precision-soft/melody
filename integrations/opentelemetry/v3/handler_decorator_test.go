@@ -254,3 +254,38 @@ func TestHandlerDecorator_AnUpgradedConnectionIsTracedAsSwitchingProtocols(t *te
 
     t.Fatal("expected the lifecycle span to carry a status attribute")
 }
+
+func TestStatusRecordingResponseWriter_AnEarlyHintIsNotRecordedAsTheFinalStatus(t *testing.T) {
+    recorder := &statusRecordingResponseWriter{ResponseWriter: httptest.NewRecorder(), statusCode: nethttp.StatusOK}
+
+    recorder.WriteHeader(nethttp.StatusEarlyHints)
+    recorder.WriteHeader(nethttp.StatusServiceUnavailable)
+
+    if nethttp.StatusServiceUnavailable != recorder.observedStatusCode() {
+        t.Fatalf("expected the final %d after an early hint, got %d", nethttp.StatusServiceUnavailable, recorder.observedStatusCode())
+    }
+}
+
+func TestStatusRecordingResponseWriter_AWriteAfterALoneEarlyHintRecordsTheImplicitOk(t *testing.T) {
+    recorder := &statusRecordingResponseWriter{ResponseWriter: httptest.NewRecorder(), statusCode: nethttp.StatusOK}
+
+    recorder.WriteHeader(nethttp.StatusEarlyHints)
+    if _, writeErr := recorder.Write([]byte("body")); nil != writeErr {
+        t.Fatalf("write: %v", writeErr)
+    }
+
+    if nethttp.StatusOK != recorder.observedStatusCode() || false == recorder.wroteHeader {
+        t.Fatalf("expected the implicit %d committed by the write, got %d (committed %v)", nethttp.StatusOK, recorder.observedStatusCode(), recorder.wroteHeader)
+    }
+}
+
+func TestStatusRecordingResponseWriter_SwitchingProtocolsIsRecordedAsTheFinalStatus(t *testing.T) {
+    recorder := &statusRecordingResponseWriter{ResponseWriter: httptest.NewRecorder(), statusCode: nethttp.StatusOK}
+
+    recorder.WriteHeader(nethttp.StatusSwitchingProtocols)
+    recorder.WriteHeader(nethttp.StatusInternalServerError)
+
+    if nethttp.StatusSwitchingProtocols != recorder.observedStatusCode() {
+        t.Fatalf("expected %d to be recorded, got %d", nethttp.StatusSwitchingProtocols, recorder.observedStatusCode())
+    }
+}

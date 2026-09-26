@@ -1887,3 +1887,39 @@ func TestMarkResponsePrivateForSessionCookie_KeepsEveryFieldLineAndQuotedList(t 
         }
     })
 }
+
+func TestWriteResponse_AnEarlyHintLeavesTheReturnedResponseToBeWritten(t *testing.T) {
+    server := httptest.NewServer(nethttp.HandlerFunc(func(rawWriter nethttp.ResponseWriter, rawRequest *nethttp.Request) {
+        writer := newRecordingResponseWriter(rawWriter)
+        writer.WriteHeader(nethttp.StatusEarlyHints)
+
+        writeResponse(
+            newTestRuntime(),
+            NewRequest(rawRequest, nil, nil, nil),
+            writer,
+            EmptyResponse(nethttp.StatusCreated),
+            nil,
+            nil,
+            httpcontract.ForwardedHeadersPolicy{
+                TrustForwardedHeaders: false,
+                TrustedProxyList:      []string{},
+            },
+            httpcontract.SessionCookiePolicy{
+                Path:     "/",
+                Domain:   "",
+                SameSite: nethttp.SameSiteLaxMode,
+            },
+        )
+    }))
+    defer server.Close()
+
+    response, getErr := nethttp.Get(server.URL)
+    if nil != getErr {
+        t.Fatalf("expected the request to succeed, got %v", getErr)
+    }
+    _ = response.Body.Close()
+
+    if nethttp.StatusCreated != response.StatusCode {
+        t.Fatalf("expected the returned 201 after the early hint, got %d", response.StatusCode)
+    }
+}

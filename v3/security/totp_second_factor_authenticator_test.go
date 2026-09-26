@@ -327,7 +327,7 @@ func TestTotpSecondFactor_VerifiesOnTheInjectedClock(t *testing.T) {
     }
 }
 
-/* fixedEnrollmentStore never fails, so the fail-closed refusal below it had no fixture that could reach it: inverting that refusal to return the primary token would have let every enrolled user past the second factor whenever the enrollment store was down, with the suite green. */
+/* fixedEnrollmentStore never fails, so the fail-closed refusal needs a fixture that can reach it: inverted to return the primary token, that refusal would let every enrolled user past the second factor whenever the enrollment store is down, with every test built on fixedEnrollmentStore green. */
 type failingEnrollmentStore struct {
     lookupErr error
 }

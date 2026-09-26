@@ -2,6 +2,7 @@ package cli
 
 import (
     "context"
+    "errors"
     "fmt"
     "io"
     "os"
@@ -44,7 +45,7 @@ func (instance *DatabaseResetCommand) Flags() []melodyclicontract.Flag {
     }
 }
 
-func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext melodyclicontract.Context) error {
+func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext melodyclicontract.Context) (runErr error) {
     storage, resolveErr := melodycontainer.FromResolver[*persistence.CatalogStorage](
         runtimeInstance.Container(),
         persistence.ServiceCatalogStorage,
@@ -85,6 +86,29 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
         return nil
     }
 
+    /* the cache is resolved before the first drop, so a cache the reset cannot reach refuses it before anything is touched; and it is cleared on every exit from here on, a failed step included, since a reset that dropped rows and then failed leaves the cache holding entities the database does not hold. A failed clear is joined to the step's failure, which stays first. */
+    cacheInstance, cacheErr := resolveCache(runtimeInstance)
+    if nil != cacheErr {
+        return cacheErr
+    }
+
+    cacheCleared := false
+    clearTheCache := func() error {
+        cacheCleared = true
+
+        return clearResolvedCache(runtimeInstance, cacheInstance, writer, "database reset")
+    }
+
+    defer func() {
+        if nil == runErr || true == cacheCleared {
+            return
+        }
+
+        if clearErr := clearTheCache(); nil != clearErr {
+            runErr = errors.Join(runErr, clearErr)
+        }
+    }()
+
     /* the runtime's context, not a background one: the drops run under the same signal every other command of this application honours, so an operator's interrupt is not the one thing a reset ignores */
     ctx := runtimeInstance.Context()
 
@@ -109,7 +133,7 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
         fmt.Fprintln(writer, "catalogue reset: the nomenclature was reseeded")
 
         /* the cache is cleared here, as the catalogue's last step, because the entities it holds are the catalogue's: a clear placed after the archive would leave every stale entry standing when the archive refuses, the removed account still authenticating from the cache */
-        if clearErr := clearCache(runtimeInstance, writer, "database reset"); nil != clearErr {
+        if clearErr := clearTheCache(); nil != clearErr {
             /* the exit names what the failed clear left undone: the archive after it was not touched, and the
                catalogue before it was */
             if true == archiveStorage.IsPersistent() {
@@ -132,7 +156,7 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
     /* an environment that wired the archive alone has no catalogue to reseed and nothing of its own in the cache;
        the cache is cleared all the same, so a reset leaves the same state whichever halves are wired */
     if false == storage.IsPersistent() {
-        if clearErr := clearCache(runtimeInstance, writer, "database reset"); nil != clearErr {
+        if clearErr := clearTheCache(); nil != clearErr {
             return clearErr
         }
     }

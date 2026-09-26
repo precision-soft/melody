@@ -787,7 +787,7 @@ func (instance *recordingCloseTransport) Close() error {
     return nil
 }
 
-/* the http process is the case the closer was never built for: it publishes through a routing that holds the transport value directly, so it resolves the transports map never, and before this the container closed nothing it had not been asked to build — the broker connection lived exactly as long as the process. */
+/* the http process publishes through a routing that holds the transport value directly, so it never resolves the transports map; the container still closes the registered transports, or the broker connection lives exactly as long as the process. */
 func TestBoot_TheRegisteredTransportsAreClosedByAProcessThatNeverResolvesTheMap(t *testing.T) {
     applicationInstance := NewApplication(
         context.Background(),

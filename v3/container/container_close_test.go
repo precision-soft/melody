@@ -7,55 +7,16 @@ import (
     "reflect"
     "sort"
     "strings"
-    "unicode/utf8"
     "sync"
     "sync/atomic"
     "testing"
     "time"
+    "unicode/utf8"
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
 )
-
-type closeOrderRecorder struct {
-    mutex         *sync.Mutex
-    closeSequence *[]string
-}
-
-func (instance *closeOrderRecorder) record(value string) {
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    *instance.closeSequence = append(*instance.closeSequence, value)
-}
-
-type closeOrderServiceA struct {
-    recorder *closeOrderRecorder
-}
-
-func (instance *closeOrderServiceA) Close() error {
-    instance.recorder.record("a")
-    return nil
-}
-
-type closeOrderServiceB struct {
-    recorder *closeOrderRecorder
-}
-
-func (instance *closeOrderServiceB) Close() error {
-    instance.recorder.record("b")
-    return nil
-}
-
-type closeOrderServiceC struct {
-    recorder *closeOrderRecorder
-}
-
-func (instance *closeOrderServiceC) Close() error {
-    instance.recorder.record("c")
-    return nil
-}
 
 type closeOrderServiceD struct {
     recorder *closeOrderRecorder
@@ -1383,14 +1344,6 @@ func TestContainer_Close_ClosesAHolderBeforeTheServiceItResolvedThroughAKeptReso
     }
 }
 
-type panickingCloseWithCauseService struct {
-    cause error
-}
-
-func (instance *panickingCloseWithCauseService) Close() error {
-    panic(instance.cause)
-}
-
 type panickingCloseWithTextService struct{}
 
 func (instance *panickingCloseWithTextService) Close() error {
@@ -1460,31 +1413,6 @@ func TestContainer_Close_CarriesTheFailureDetailsOfAPanickingCloseBesideItsLine(
     }
 
     assertCloseFailureDetails(t, typedError.Context(), "service:service.panics")
-}
-
-/* assertCloseFailureDetails reads the details a teardown error carries for one failed node: the line in the failure map, and beside it the recovered value and the frames of the contained panic. */
-func assertCloseFailureDetails(t *testing.T, context exceptioncontract.Context, nodeKey string) {
-    t.Helper()
-
-    failures, hasFailures := context["failures"].(map[string]string)
-    if false == hasFailures || "service close panicked" != failures[nodeKey] {
-        t.Fatalf("expected the failure line under %q, got %v", nodeKey, context["failures"])
-    }
-
-    failureDetails, hasDetails := context["failureDetails"].(map[string]exceptioncontract.Context)
-    if false == hasDetails {
-        t.Fatalf("expected the failure details beside the failure map, got %v", context["failureDetails"])
-    }
-
-    details := failureDetails[nodeKey]
-    if "the drain buffer was nil" != details["recoveredValue"] {
-        t.Fatalf("expected the recovered value under %q, got %v", nodeKey, details)
-    }
-
-    panicStack, hasStack := details["panicStack"].(string)
-    if false == hasStack || false == strings.Contains(panicStack, "panickingCloseWithCauseService") {
-        t.Fatalf("expected the frames that ran under %q, got %v", nodeKey, details["panicStack"])
-    }
 }
 
 func TestContainer_Close_AFailureThatSaysNothingBeyondItsLineAddsNoDetailsMap(t *testing.T) {
@@ -1715,12 +1643,6 @@ func (instance *deeplyPanickingCloseService) panicAtDepth(remaining int) {
     }
 
     instance.panicAtDepth(remaining - 1)
-}
-
-type panickingUnwrapCloseService struct{}
-
-func (instance *panickingUnwrapCloseService) Close() error {
-    return panickingUnwrapError{}
 }
 
 type panickingUnwrapError struct{}
@@ -2794,7 +2716,7 @@ func TestTeardownCloseOrder_ARingTakesAWaveOfItsOwn(t *testing.T) {
     }
 }
 
-/* a ring's wave is one past the last wave that CLOSED, not one past every wave assigned: a stalled node that a closed chain had pushed to a provisional wave three put the ring at four and itself at five, and the operator's view printed a wave nothing closed in */
+/* a ring's wave is one past the last wave that CLOSED, not one past every wave assigned: the probe's chain of three pushes the dependency it shares with the ring to a provisional wave three, and a ring counted past that assignment would leave a wave nothing closes in, which the operator's view prints */
 func TestTeardownCloseOrder_TheWaveIndexesHaveNoHole(t *testing.T) {
     nodeKeys := []string{"service:chain.0", "service:chain.1", "service:chain.2", "service:dep", "service:ring.a", "service:ring.b"}
 
@@ -3122,7 +3044,7 @@ func registerAmbiguousTypeWiring(t *testing.T, serviceContainer containercontrac
     }
 }
 
-/* a teardown dependency declared on a TYPE that more than one service is registered under orders NOTHING, and a close that reached it does not report a cycle nobody declared. Expanded onto every name of the type it wrote an edge the declaring code never asked for, and where one service of that type had already ordered itself before the declarer that edge closed a ring: the close then answered "dependency cycle detected" over a teardown in which all three services closed and every Close returned nil, and it did so with the parallel opt-in NOT armed, on the path this commit promised to leave alone. */
+/* a teardown dependency declared on a TYPE that more than one service is registered under orders NOTHING, and a close that reaches it does not report a cycle nobody declared: expanded onto every name of the type, it would write an edge the declaring code never asked for, and where one service of that type orders itself before the declarer that edge would close a ring over a teardown in which all three services close and every Close returns nil. The parallel opt-in is NOT armed here. */
 func TestContainer_Close_ADeclarationOnAnAmbiguousTypeOrdersNothingAndReportsNoCycle(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -3298,7 +3220,7 @@ func TestContainer_Close_ArmedEachRingClosesOneAfterTheOther(t *testing.T) {
     }
 }
 
-/* the close report names the members of the ring alone: the pure dependency a ring member resolves is closed after the ring, in the order the graph proves, and naming it beside the ring sent the operator looking for a ring it is not on — while the operator's view already left it unflagged */
+/* the close report names the members of the ring alone: the pure dependency a ring member resolves is closed after the ring, in the order the graph proves, and naming it beside the ring would send the operator looking for a ring it is not on */
 func TestContainer_Close_TheCycleReportNamesTheRingMembersAlone(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -3950,18 +3872,6 @@ func TestContainer_ArmParallelTeardown_RefusesADeclaredDependencyOnAScopedTypeAs
     }
 }
 
-type sharedPoolService struct {
-    label string
-}
-
-func (instance *sharedPoolService) Close() error { return nil }
-
-type poolDeclarerService struct {
-    label string
-}
-
-func (instance *poolDeclarerService) Close() error { return nil }
-
 /* the declaration's raw edge towards "type:<T>" is not written into the graph: a declaration turned ambiguous by a second, non-strict registration under the type expands to nothing, and the raw edge, translated through the alias of the first service once the type is resolved through itself, would close a ring with the resolution that first service made, so the close would report a cycle on the default path over a teardown in which every service closes. The sibling test above resolves by name and never creates the type node, which is why it cannot see the edge. */
 func TestContainer_Close_ADeclarationOnATypeResolvedThroughItselfLeavesNoRawEdgeBehind(t *testing.T) {
     serviceContainer := NewContainer()
@@ -4050,7 +3960,7 @@ func TestContainer_Close_ArmedACapturedPointerBackAgainstATypeDeclarationIsNoRin
     }
 }
 
-/* a resolution between two names of ONE instance collapses onto a self-edge, and a self-edge is no edge: the drain skipped it, the walk skipped it, and the plan published it — a service listed as closed before itself, with the operator's view saying "proved" */
+/* a resolution between two names of ONE instance collapses onto a self-edge, and a self-edge is no edge: a plan that kept it would list a service as closed before itself */
 func TestContainer_TeardownPlan_AResolutionBetweenTwoNamesOfOneInstanceIsNoEdge(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -4082,7 +3992,7 @@ func TestContainer_TeardownPlan_AResolutionBetweenTwoNamesOfOneInstanceIsNoEdge(
     }
 }
 
-/* what a declared type stands for is the plan's to expand, for one plan: written into the graph by the operator's view, the expansion outlived the registration that made the declaration ambiguous — a second, non-strict name under the type, which the plan then drops — and the edge left behind closed a ring with the resolution the first name had made, so the close reported a cycle on the DEFAULT path, over a teardown in which every service closed */
+/* what a declared type stands for is the plan's to expand, for one plan: the probe asks the operator's view for the plan while the type has one name, then registers a second, non-strict name under it, which makes the declaration ambiguous; an expansion written into the graph by the view would outlive that registration and close a ring with the resolution the first name makes, so the close would report a cycle on the DEFAULT path over a teardown in which every service closes */
 func TestContainer_Close_TheViewLeavesNoExpandedTypeEdgeBehindOnTheDefaultPath(t *testing.T) {
     serviceContainer := NewContainer()
 

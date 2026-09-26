@@ -1008,7 +1008,7 @@ func TestRunHttp_AnErrorHandlerInstalledAfterBootTakesTheListenersPlace(t *testi
 
     /* the decision is driven through runHttp rather than through the door it calls: what has to be
        proved is that serving makes it at all, and a probe that calls the door itself passes over a
-       runHttp that never does (§5.35) */
+       runHttp that never does */
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
 
@@ -1042,7 +1042,7 @@ func TestRunHttp_AnErrorHandlerInstalledAfterBootTakesTheListenersPlace(t *testi
    handler installed, an http process registers nothing at boot-end, so the framework listener has to
    arrive at runHttp or the application serves errors with nothing rendering them. With a handler
    installed both the correct form and a runHttp that never decides register nothing, so that case
-   cannot tell them apart (§5.26). */
+   cannot tell them apart. */
 func TestRunHttp_RegistersTheExceptionListenerWhenNoHandlerWasInstalled(t *testing.T) {
     applicationInstance := newCacheWarningTestApplication(t, config.ModeHttp, logging.NewNopLogger())
 
@@ -1077,7 +1077,7 @@ func TestRunHttp_RegistersTheExceptionListenerWhenNoHandlerWasInstalled(t *testi
     }
 }
 
-/* the drain exists for the connection the server's own Shutdown does not drain — a hijacked one — and that connection is exactly what makes Shutdown report a budget overrun, so returning on the overrun skipped the wait in the situation it was written for and closed the application container under a handler still on the wire. Both causes are independently actionable, so both have to survive.
+/* the drain exists for the connection the server's own Shutdown does not drain — a hijacked one — and that connection is exactly what makes Shutdown report a budget overrun, so returning on the overrun would skip the wait in the situation it exists for and close the application container under a handler still on the wire. Both causes are independently actionable, so both have to survive.
 
    The error channel is filled by the Serve goroutine rather than ahead of the call: with a value already in it, both arms of the select are ready at once and the branch taken is a coin flip. */
 func TestAwaitHttpServerEnd_DrainsOpenScopesEvenWhenTheShutdownOverran(t *testing.T) {

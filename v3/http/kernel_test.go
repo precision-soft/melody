@@ -1256,7 +1256,7 @@ func TestKernel_PanicRecoveryDoesNotCloseAResponseTheRepublishHandsBack(t *testi
     }
 }
 
-/* net/http documents this sentinel as "abort the connection and suppress the log"; converting it into an error answered an aborted upload with a 500 and an error line, and a reverse proxy panics with it on every client disconnect mid-stream */
+/* net/http documents this sentinel as "abort the connection and suppress the log", and a reverse proxy panics with it on every client disconnect mid-stream; converted into an error, an aborted upload would be answered with a 500 and an error line */
 func TestKernel_AbortHandlerPanicClosesTheConnectionWithoutAResponse(t *testing.T) {
     router := NewRouter()
 
@@ -3076,7 +3076,7 @@ func TestKernel_RefusesAWhitespacePaddedRequestPathBeforeTheHandler(t *testing.T
     }
 }
 
-/* the LEADING twin of the padded path on this major: Go's own server refuses a request line that does not begin with "/", but a handler mounted in front of the kernel that rewrites the path — the standard library's StripPrefix — hands the kernel " /public" for "/api%20/public". As routed that is "%20/public", a target that does not begin with "/", which the canonical guard leaves to the router — and the router answered it 404 where the two frozen majors answer 400 and the upgrade notes promise it; the guard asks the leading form of the decoded path as well, so the three majors refuse it alike */
+/* the LEADING twin of the padded path on this major: Go's own server refuses a request line that does not begin with "/", but a handler mounted in front of the kernel that rewrites the path — the standard library's StripPrefix — hands the kernel " /public" for "/api%20/public". As routed that is "%20/public", a target that does not begin with "/", which the canonical guard leaves to the router; the guard asks the leading form of the decoded path as well, so this major answers 400 as the two frozen majors do and the upgrade notes promise */
 func TestKernel_RefusesALeadingWhitespacePathAHandlerInFrontHandedIt(t *testing.T) {
     for _, rawPath := range []string{"/api%20/public", "/api%09/public", "/api%C2%A0/public"} {
         handlerRan := false

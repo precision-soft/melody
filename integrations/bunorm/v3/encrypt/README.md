@@ -97,7 +97,7 @@ type Customer struct {
 ```
 
 The marker parameterizes the generic column types `EncryptedStringFor[R]` and
-`EncryptedDeterministicStringFor[R]`, so the binding lives in the Go type — the only channel available, because `database/sql` gives `Value()`/`Scan()` no context. Compartments are isolated: the `crm` cipher can never decrypt a `billing` ciphertext, and key rotation inside one compartment keeps working through the key id embedded in each ciphertext. The plain `EncryptedString` keeps using the default cipher.
+`EncryptedDeterministicStringFor[R]`, so the binding lives in the Go type — the only channel available, because `database/sql` gives `Value()`/`Scan()` no context. Compartments are isolated only as far as their keys are: the name selects the registry entry and is not bound into the ciphertext, so two compartments whose providers hold the same key under the same id decrypt each other's ciphertext. Give each compartment keys of its own. Key rotation inside one compartment keeps working through the key id embedded in each ciphertext. The plain `EncryptedString` keeps using the default cipher.
 
 Two designs were considered and rejected: per-column key ids over one merged `KeyProvider` (the compartments stay merged — either context can decrypt the other's rows, exactly the isolation loss the feature exists to prevent) and a cipher per `bunorm.Manager` (a `driver.Valuer` has no manager context; bun query hooks would miss raw SQL paths).
 
@@ -175,6 +175,10 @@ Registration is **skipped only when `Database`, `DatabaseFactory` and `Cipher` a
 - both `Database` and `DatabaseFactory` set — `encrypt module received both a database and a database factory - set exactly one`.
 
 `ModuleConfig.Contexts` is **stricter**: there is no all-nil carve-out per entry. Every entry present in the slice is validated unconditionally, so a zero-value entry panics rather than being skipped — the empty-`Name` check runs first (`encrypt command context name is empty`), followed by the same needs-a-database-and-a-cipher and exactly-one-of-database-or-factory checks, each naming the offending context. Omit an entry entirely rather than leaving it blank.
+
+## Formatting boundaries
+
+The column types redact their plaintext when `fmt` calls their `String` or `GoString` method, which it does for the value itself under every verb but `%p`, whose misuse on a string prints the value in its bad-verb form. It is not an access-control boundary: a value held in an unexported field of another struct is printed by reflection without calling any method, so `fmt.Sprintf("%+v", holder)` prints the plaintext, and an explicit `string(value)` conversion is the plaintext. Format the encrypted value itself, and do not log the structs that hold it or the key material.
 
 ## Testing / dev
 

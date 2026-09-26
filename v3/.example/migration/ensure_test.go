@@ -2,14 +2,21 @@ package migration
 
 import (
     "context"
-    "strings"
+    "database/sql"
     "database/sql/driver"
     "errors"
+    "fmt"
+    "os"
+    "strings"
     "sync"
     "testing"
     "time"
 
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/uptrace/bun"
+    "github.com/uptrace/bun/dialect/pgdialect"
+    "github.com/uptrace/bun/driver/pgdriver"
+    "github.com/uptrace/bun/migrate"
 )
 
 func TestEnsureMigratedRefusesANilDatabase(t *testing.T) {
@@ -550,5 +557,166 @@ func TestEnsureMigratedNamesTheSetWhenTheLockWaitIsCancelled(t *testing.T) {
 
     if "waiting for the migration lock" != exception.LogContext(ensureErr)["step"] {
         t.Fatalf("expected the step named, got %v", exception.LogContext(ensureErr))
+    }
+}
+
+func TestResetThatFailsHalfWayLeavesTheHandleToBeMigratedAgain(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    memoizationKey := migratedSetKey{database: database, migrationSet: Migrations}
+
+    ensureMutex.Lock()
+    migratedDatabaseList[memoizationKey] = struct{}{}
+    ensureMutex.Unlock()
+    defer func() {
+        ensureMutex.Lock()
+        delete(migratedDatabaseList, memoizationKey)
+        ensureMutex.Unlock()
+    }()
+
+    dropRefused := errors.New("drop refused")
+    recorder.execHook = func(query string) error {
+        if "DROP TABLE" == query[:min(len(query), len("DROP TABLE"))] {
+            return dropRefused
+        }
+
+        return nil
+    }
+
+    if resetErr := Reset(context.Background(), database); false == errors.Is(resetErr, dropRefused) {
+        t.Fatalf("expected the reset to fail on the refused drop, got %v", resetErr)
+    }
+
+    ensureMutex.Lock()
+    _, stillMigrated := migratedDatabaseList[memoizationKey]
+    ensureMutex.Unlock()
+
+    if true == stillMigrated {
+        t.Fatalf("expected a reset that failed half way to clear the migrated memo for the handle")
+    }
+}
+
+/* postgresFieldError answers Field the way pgdriver.Error does, so the classification is exercised without a server */
+type postgresFieldError struct {
+    fields map[byte]string
+}
+
+func (instance postgresFieldError) Error() string {
+    return "ERROR: " + instance.fields['C']
+}
+
+func (instance postgresFieldError) Field(field byte) string {
+    return instance.fields[field]
+}
+
+func TestInitializeMigrationBookkeepingRetriesALostCreationRace(t *testing.T) {
+    for _, raceError := range []postgresFieldError{
+        {fields: map[byte]string{'C': "23505", 'n': "pg_class_relname_nsp_index"}},
+        {fields: map[byte]string{'C': "23505", 'n': "pg_type_typname_nsp_index"}},
+        {fields: map[byte]string{'C': "42P07"}},
+        {fields: map[byte]string{'C': "42710"}},
+    } {
+        database, recorder := newFakeBunDatabase()
+        creations := 0
+        recorder.execHook = func(query string) error {
+            if false == strings.HasPrefix(query, "CREATE TABLE") {
+                return nil
+            }
+
+            creations++
+            if 1 == creations {
+                return raceError
+            }
+
+            return nil
+        }
+
+        if initErr := initializeMigrationBookkeeping(context.Background(), migrate.NewMigrator(database, migrate.NewMigrations())); nil != initErr {
+            t.Fatalf("expected the lost race %v to be retried, got %v", raceError.fields, initErr)
+        }
+        if 2 > creations {
+            t.Fatalf("expected the creation to run again after the lost race %v, got %d", raceError.fields, creations)
+        }
+    }
+}
+
+func TestInitializeMigrationBookkeepingAnswersAnyOtherFailureAtOnce(t *testing.T) {
+    for _, otherError := range []error{
+        postgresFieldError{fields: map[byte]string{'C': "42501"}},
+        postgresFieldError{fields: map[byte]string{'C': "23505", 'n': "an_application_index"}},
+        errors.New("connection refused"),
+    } {
+        database, recorder := newFakeBunDatabase()
+        creations := 0
+        recorder.execHook = func(query string) error {
+            if true == strings.HasPrefix(query, "CREATE TABLE") {
+                creations++
+
+                return otherError
+            }
+
+            return nil
+        }
+
+        initErr := initializeMigrationBookkeeping(context.Background(), migrate.NewMigrator(database, migrate.NewMigrations()))
+        if nil == initErr || otherError.Error() != initErr.Error() || 1 != creations {
+            t.Fatalf("expected %v answered at once, got %v after %d creations", otherError, initErr, creations)
+        }
+    }
+}
+
+func TestInitializeMigrationBookkeepingSurvivesConcurrentCreatorsOnPostgres(t *testing.T) {
+    dsn := os.Getenv("POSTGRES_DSN")
+    if "" == dsn {
+        t.Skip("POSTGRES_DSN is not set")
+    }
+
+    ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+    defer cancel()
+
+    root := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
+    defer root.Close()
+
+    schemaName := fmt.Sprintf("melody_init_%d", time.Now().UnixNano())
+    if _, createErr := root.ExecContext(ctx, "CREATE SCHEMA "+schemaName); nil != createErr {
+        t.Fatalf("create schema: %v", createErr)
+    }
+    defer func() {
+        cleanupContext, cancelCleanup := context.WithTimeout(context.Background(), 5*time.Second)
+        defer cancelCleanup()
+
+        if _, dropErr := root.ExecContext(cleanupContext, "DROP SCHEMA "+schemaName+" CASCADE"); nil != dropErr {
+            t.Errorf("drop schema: %v", dropErr)
+        }
+    }()
+
+    const workers = 12
+    databases := make([]*bun.DB, workers)
+    for index := range databases {
+        sqlDatabase := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
+        sqlDatabase.SetMaxOpenConns(1)
+        sqlDatabase.SetMaxIdleConns(1)
+        if _, searchPathErr := sqlDatabase.ExecContext(ctx, "SET search_path TO "+schemaName); nil != searchPathErr {
+            _ = sqlDatabase.Close()
+            t.Fatalf("search path: %v", searchPathErr)
+        }
+
+        databases[index] = bun.NewDB(sqlDatabase, pgdialect.New())
+        defer databases[index].Close()
+    }
+
+    start := make(chan struct{})
+    results := make(chan error, workers)
+    for _, database := range databases {
+        go func() {
+            <-start
+            results <- initializeMigrationBookkeeping(ctx, migrate.NewMigrator(database, migrate.NewMigrations()))
+        }()
+    }
+    close(start)
+
+    for range workers {
+        if initErr := <-results; nil != initErr {
+            t.Errorf("expected every concurrent init to succeed, got %v", initErr)
+        }
     }
 }

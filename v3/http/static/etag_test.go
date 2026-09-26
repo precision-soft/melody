@@ -41,7 +41,7 @@ func TestEtagMatchesIfNoneMatch(t *testing.T) {
     }
 }
 
-/* GenerateEtag is what makes a conditional request answerable at all, and its nil branch had no test: a nil FileInfo has to produce the empty string rather than an entity tag built from a dereference, because the caller reaches here on the path where a stat failed and a panic there runs outside anything that could answer the request. */
+/* GenerateEtag is what makes a conditional request answerable at all: a nil FileInfo has to produce the empty string rather than an entity tag built from a dereference, because the caller reaches here on the path where a stat failed and a panic there runs outside anything that could answer the request. */
 
 func TestGenerateEtag_ANilFileInfoProducesNoTag(t *testing.T) {
     if "" != GenerateEtag(nil, false) {
@@ -70,7 +70,7 @@ func TestGenerateEtag_TheWeakFormDiffersOnlyByItsPrefix(t *testing.T) {
     }
 }
 
-/* the tag is a digest, and that is a disclosure property, not a rendering choice: spelled out, the tag told every anonymous client the file's modification instant to the nanosecond, and the embedded branch told them the binary's build version, on every asset */
+/* the tag is a digest, and that is a disclosure property, not a rendering choice: spelled out, the tag would tell every anonymous client the file's modification instant to the nanosecond, and the embedded branch would tell them the binary's build version, on every asset */
 func TestGenerateEtag_DisclosesNeitherTheTimestampNorTheBuildVersion(t *testing.T) {
     dated := GenerateEtag(&staticEtagFileInfo{size: 1024, modTime: time.Unix(1754049600, 0)}, false)
     if true == strings.Contains(dated, "1754049600") {

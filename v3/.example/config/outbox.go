@@ -85,7 +85,6 @@ func (instance *Module) buildOutboxTransport() (melodymessagebuscontract.Transpo
     }), nil
 }
 
-/* outboxNoticeCodec serializes the notice to and from the outbox row payload. */
 type outboxNoticeCodec struct{}
 
 func (instance *outboxNoticeCodec) Encode(messageInstance any) (string, []byte, error) {
