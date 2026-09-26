@@ -1412,13 +1412,13 @@ The module supplies no default of its own on purpose: the only thing that reaps 
 
 **What changed.** `melody:wiring:generate` fails, naming the site, on the inputs it used to read as "nothing": an unknown `//melody:` directive (a mistyped `scoped` demoted a request-lifetime service to a never-closed singleton; a mistyped `ignore` registered the constructor it acknowledged), a `//melody:bind` assignment without the equals sign or with an empty half (the override beside the constructor silently fell back to a broader bind), a malformed exclude pattern (`path.Match`'s `ErrBadPattern` was read as "does not match", so the exclusion excluded nothing), an empty import path or directory on a package binding (an empty directory scanned the whole project tree as one package), and two constructors that would register the same container key (the generated file panicked at first boot while the generation had reported success). `//melody:ignore` now accepts a trailing reason, which is the spelling the refusal of unknown directives makes mandatory to honour. An exclude that matched no constructor is reported like an unused bind, `--strict` fails on it, and a strict refusal carries every violation — binds, excludes, skipped constructors — in one error instead of the first found.
 
-**Symptom.** A generation that used to succeed over a tree carrying any of these now fails with an error naming the file and line, and a `--strict` pipeline with a dead exclude goes red.
+**Symptom.** A generation that used to succeed over a tree carrying any of these now fails with an error naming the file and line, and a `--strict` pipeline with a dead exclude goes red. `wiring.Scan` takes the build tags `--tags` names as a third parameter, so a direct caller of it no longer compiles until it passes them, `nil` for none.
 
 **Remedy.** Correct the named site: fix the directive spelling, add the equals sign, terminate the character class, split the two constructors or route one through `//melody:ignore`. Every refusal is a defect the generated file would otherwise carry into boot — none of them is a new rule about correct input.
 
 ### Wiring and openapi: the `--out` contract hardens, and the openapi anchor moves
 
-**What changed.** Both generate commands write through a temp file and a rename, so an interrupted write leaves the previous artifact intact instead of a torn one; both refuse to replace a file that is not theirs — wiring by the `DO NOT EDIT` marker, openapi by the target not holding a JSON document; wiring refuses an `--out` inside a scanned package directory, which its own documentation always forbade; and a relative `--out` on `melody:openapi:generate` is now anchored at the project directory, exactly as the wiring command has always anchored its own, with the parent directories created on the way.
+**What changed.** Both generate commands write through a temp file and a rename, so an interrupted write leaves the previous artifact intact instead of a torn one; both refuse to replace a file that is not theirs — wiring by the `DO NOT EDIT` marker, openapi by the target not holding a JSON document; wiring refuses an `--out` inside a scanned package directory, which its own documentation always forbade; and a relative `--out` on `melody:openapi:generate` and `melody:routes:manifest` is now anchored at the project directory, exactly as the wiring command has always anchored its own — the manifest command also writes through a temp file and a rename and refuses a target that is not a JSON document — with the parent directories created on the way.
 
 **Symptom.** `melody:openapi:generate --out openapi.json` run from a working directory other than the project root — a systemd unit, a Makefile in a subdirectory — now writes into the project instead of into that directory; a pipeline that relied on the old CWD anchoring reads the file from the wrong place. A mistyped `--out` pointing at a hand-written file fails instead of destroying it.
 
@@ -1452,7 +1452,7 @@ The module supplies no default of its own on purpose: the only thing that reaps 
 
 **What changed.** A `.env` line is preprocessed byte by byte rather than through runes, so a file saved as anything other than UTF-8 keeps its bytes — a rune round-trip re-encoded them, rewriting values, a password among them, where godotenv alone passes a quoted value through untouched. The comment cut now matches godotenv's own: a `#` opening before the key separator comments the whole line out, while a `#` after it stays in the produced line once the value has begun and godotenv's countback decides where the value ends, which stops the double cut that read `hello # world # x` as `hello` where godotenv reads `hello # world`. The one comment the countback cannot reach — the `#` that opens before any value byte, `APP_SECRET= # fill this in`, which sits at index zero of the trimmed value — is cut by the preprocessor under the same space-before rule, so the value reads as empty; `KEY=#glued` stays data. And a `${...}` reference whose closing brace arrived over a name outside the key grammar is refused rather than surviving as literal text — nobody types `${...}` into a password by accident — while an unclosed brace stays data, like the bare dollar it is.
 
-**Symptom.** A non-empty value carrying a hash after the separator keeps more of itself than it used to, and an empty one followed by a comment reads as empty rather than as the comment; a non-UTF-8 file stops being rewritten; a `.env` holding a malformed `${...}` fails the boot naming the enclosing key, where it used to load the braces as text.
+**Symptom.** A non-empty value carrying a hash after the separator keeps more of itself than it used to, and an empty one followed by a comment reads as empty rather than as the comment; a non-UTF-8 file stops being rewritten; a `.env` holding a malformed `${...}` fails the boot naming the enclosing key, where it used to load the braces as text, and so does an undefined, self- or mutually-referencing `${X}`, which used to expand to an empty string.
 
 **Remedy.** Correct the malformed reference, or escape a literal dollar as `\$`. For the comment cut and the encoding there is nothing to do: both moves take the reading onto what godotenv itself does, which is what the surrounding contract always promised.
 
@@ -1602,7 +1602,7 @@ The module supplies no default of its own on purpose: the only thing that reaps 
 
 ### Session: a sub-second positive ttl is refused by the manual constructor too
 
-**What changed.** `session.NewManager` and its siblings refuse a positive ttl below one second, the refusal `MELODY_HTTP_SESSION_TTL` validation has always given: such a lifetime stores no usable session — `SaveSession` reports success and the entry lapses before the client returns.
+**What changed.** `session.NewManager` and its siblings refuse a positive ttl below one second, the refusal `MELODY_HTTP_SESSION_TTL` validation gives too: such a lifetime stores no usable session — `SaveSession` reports success and the entry lapses before the client returns.
 
 **Symptom.** A hand-wired manager built with, say, `500*time.Millisecond` now panics at construction naming the rule; zero keeps meaning no expiry.
 
@@ -1720,6 +1720,164 @@ func (instance *CustomHttpConfiguration) SessionTombstoneRetention() time.Durati
 **Symptom.** An application that handed `NewManager` two catalogs of one locale — one built by the json loader and one by hand, say — gets the messages of both, the earlier catalog answering a message both hold; it used to get the later catalog alone, every message that lived only in the earlier one answering its raw id. An application that passed a catalog with an empty locale panics at construction where it used to boot with a catalog nothing could reach.
 
 **Remedy.** None for the common wiring. An application that relied on the later catalog overriding the earlier one passes the overriding catalog first.
+
+### Compile-level: `config/contract.HttpConfiguration` gained `SessionTtl`
+
+**What changed.** [`config/contract.HttpConfiguration`](../config/contract/http.go) declares `SessionTtl() time.Duration`, how long a stored session stays valid. The framework's own implementation reads it from `MELODY_HTTP_SESSION_TTL` (`kernel.http.session_ttl`); zero, the default, means no expiry, and a positive value below one second fails the boot.
+
+**Symptom.** A type of your own implementing `config/contract.HttpConfiguration` no longer satisfies the interface, and the assignment fails to compile with `missing method SessionTtl`.
+
+**Remedy.** Implement it. Returning `config.DefaultSessionTtl` keeps the lifetime the session manager had without the method:
+
+```go
+func (instance *CustomHttpConfiguration) SessionTtl() time.Duration {
+	return config.DefaultSessionTtl
+}
+```
+
+### Security: `NewAccessControlRule` refuses `PUBLIC_ACCESS`
+
+**What changed.** `security.NewAccessControlRule` builds its rule through `accesscontrol.NewRawPrefixRule`, which refuses `PUBLIC_ACCESS` with a panic at construction. A raw public prefix opens every path that merely starts with it (`/public` opens `/publicadmin`) and, being the longest match, shadows a bounded denial beneath it.
+
+**Symptom.** A boot that declares `NewAccessControlRule("/public", "PUBLIC_ACCESS")` panics with `access control PUBLIC_ACCESS may not be declared on a raw prefix rule`. A rule without `PUBLIC_ACCESS` is unchanged.
+
+**Remedy.** Declare the public area with `AccessControlBuilder.AllowAnonymous("/public")`, `NewAccessControlRuleWithSegmentPrefix("/public", "PUBLIC_ACCESS")` or `accesscontrol.NewSegmentPrefixRule`. Each governs `/public` and `/public/...` and nothing else.
+
+### Security: a regex rule carrying `PUBLIC_ACCESS` must anchor every branch
+
+**What changed.** The guard asks the parsed pattern whether every branch is anchored to the path start, instead of testing the text for a leading `^`.
+
+**Symptom.** `^/public|/status` now panics at boot, because its second branch matched anywhere. `(?m)^/public` is refused as well. `(?i)^/public(/|$)` and `\A/public`, which the textual test refused, are accepted.
+
+**Remedy.** Anchor each branch, as in `^(/public|/status)(/|$)`.
+
+### Security: `NewHmacTokenSource` refuses a negative `MaxFutureExpiry`
+
+**What changed.** A negative `MaxFutureExpiry` is refused at construction. It used to behave like zero, which means unbounded.
+
+**Symptom.** A configuration carrying a negative value fails when the token source is built.
+
+**Remedy.** Use zero for no cap, or the positive bound you meant.
+
+### Security: `totp.Config.Period` above one day takes the default
+
+**What changed.** A period past 24 hours falls back to the default of 30 seconds, as an out-of-range skew already did. A period of `1<<63` or more used to freeze the counter.
+
+**Symptom.** An authenticator configured with a period longer than a day verifies 30-second codes.
+
+**Remedy.** Keep the period at or below 86,400 seconds. Authenticator apps use 30.
+
+### Security: a firewall prefix with a trailing slash claims the bare path
+
+**What changed.** `PathPrefixMatcher` registered on `/admin/` also matches `/admin`, which the router serves as the same route.
+
+**Symptom.** A request for `/admin` reaches the firewall registered on `/admin/`, where it used to pass unguarded.
+
+**Remedy.** None, unless `/admin` was meant to be public. In that case, give it its own exact rule.
+
+### Http: the static file server refuses dot-prefixed paths
+
+**What changed.** A path element beginning with a dot is refused, so a `.env` or `.git/config` left in the public directory is no longer served. `http/static.DefaultAllowedDotPrefix` (`.well-known`) is admitted, and `FileServerConfig.SetAllowedDotPrefixList` names the others.
+
+**Symptom.** The file server no longer serves a dot-prefixed file outside `.well-known/`. The request passes on as if the file were missing, and a warning `static serve dot prefixed path element` is logged.
+
+**Remedy.** Add each prefix that is meant to be public to `SetAllowedDotPrefixList`.
+
+### Http: a request whose `RawPath` no longer matches `Path` is refused
+
+**What changed.** The kernel refuses with a 400, before authorization, a request whose `URL.RawPath` no longer unescapes to `URL.Path`. This is the state a handler mounted in front of the kernel leaves when it rewrites `Path` alone.
+
+**Symptom.** Behind a front handler that strips a prefix from `URL.Path` only, every request carrying an escape answers 400, and a warning carries `rawPath` beside `path`.
+
+**Remedy.** Rewrite both fields in the front handler, as `nethttp.StripPrefix` does, and never clear `RawPath`.
+
+### Http: a session-cookie response is kept out of shared caches
+
+**What changed.** A response carrying the session cookie drops `public` from `Cache-Control` and adds `private`, unless it already says `private` or `no-store`. The expiring cookie of a cleared or deleted session is handled the same way.
+
+**Symptom.** A shared cache or CDN that stored such responses stops storing them.
+
+**Remedy.** None. A response meant for a shared cache carries no session cookie.
+
+### Http: the default rate-limit key is the client IP alone, and the key map is bounded
+
+**What changed.** The default key extractor keys on the client IP instead of `ip:path`. Both limiters track at most `SetMaxKeys` distinct keys, 1,000,000 by default. Once the map is full and an idle-entry prune frees nothing, a request under an unseen key is denied.
+
+**Symptom.** A client that stayed under the limit on each path separately is now limited across all of them.
+
+**Remedy.** Raise the limit to the per-client budget you meant, or, if the per-path allowance was intended, set `RateLimitConfig.SetKeyExtractor` to one that returns the client IP joined with the path.
+
+### Security: an access-control rule whose attributes normalize to empty is refused
+
+**What changed.** A rule whose attribute list is empty after trimming is refused at construction. It used to be accepted as a rule that granted every authenticated principal and shadowed any denial with a longer prefix.
+
+**Symptom.** A boot declaring such a rule panics with `access control rule requires at least one attribute`.
+
+**Remedy.** Give the rule its attributes, or drop it.
+
+### Security: a refusal without a response is answered fail-closed
+
+**What changed.** When the access-control or resolution path refuses a request and no `kernel.exception` listener produced a response, a generic fail-closed response is written. The kernel used to read the nil response as "no decision" and serve the handler.
+
+**Symptom.** A request that used to reach its handler despite a refusal now answers with the refusal.
+
+**Remedy.** None. If a custom entry point produced no response, it now falls through to the fail-closed 401. Have it return the response it means.
+
+### Http: a middleware may reference only a middleware active wherever it is
+
+**What changed.** A `before` or `after` reference is refused when the referenced middleware is not enabled in every environment the referring one is enabled in. The declared environment sets are compared, not the booted environment.
+
+**Symptom.** A pipeline that booted in the environment at hand now fails at boot. It would have failed in another environment.
+
+**Remedy.** Enable the referenced middleware in every environment of the referrer, or narrow the referrer's environments.
+
+### Cache: a zero `waitTimeout` takes a memoized result without waiting
+
+**What changed.** A `waitTimeout` of zero means no waiting, not no answer. A result the in-flight call has already memoized is taken without blocking, and only a flight still in the air answers with the timeout.
+
+**Symptom.** A `Remember` with a zero wait that always answered the timeout now answers the value when one is ready.
+
+**Remedy.** None.
+
+### Bag: a key present with a nil value reads as unset from the string readers
+
+**What changed.** `String`, `StringSlice`, `StringStrict` and `StringSliceStrict` answer `exists == false` for a key present with a nil value. `v3.13.0`'s `BAG.md` documented `("", true)` for it. The typed readers already answered `false`.
+
+**Symptom.** Code that treated `exists == true` with an empty string as "sent empty" now takes its missing-key branch for a nil value.
+
+**Remedy.** Test `Has` for the presence of the key.
+
+### Configuration: `Resolve()` is refused once the application serves
+
+**What changed.** `Configuration.Resolve()` answers an error after `Run` has begun serving. It used to re-resolve under readers that had already settled.
+
+**Symptom.** A call to `Resolve()` from a handler or a background goroutine returns `cannot resolve the configuration once the application has begun serving`.
+
+**Remedy.** Register and resolve parameters during boot.
+
+### Openapi: `Describe` is refused once the application serves
+
+**What changed.** `Application.Run` marks the openapi registry serving at the moment it marks the configuration, and a `Describe` issued after it is refused, naming the route.
+
+**Symptom.** A route described from a handler or a goroutine started after boot now panics.
+
+**Remedy.** Describe routes during boot, beside their registration.
+
+### Application: a relative `MELODY_LOG_PATH` is anchored at the project directory
+
+**What changed.** A relative `MELODY_LOG_PATH` is anchored at the project directory, the rule the logs and cache directories already follow, and the file's parent directory is created before the open.
+
+**Symptom.** A process started from a working directory other than the project root writes its journal into the project, not into that directory.
+
+**Remedy.** Use an absolute `MELODY_LOG_PATH` to pin another location.
+
+### Logging: the serving process reopens its journal on `SIGHUP`
+
+**What changed.** The container-built logger of the serving process opens its file journal through `NewReopenableFileWriter` and reopens it on `SIGHUP`, the signal logrotate sends. A cli process is not armed.
+
+**Symptom.** `SIGHUP` no longer terminates the http process. It reopens the journal.
+
+**Remedy.** Stop the process with `SIGTERM` or `SIGINT`. Point logrotate's `postrotate` at `SIGHUP` instead of `copytruncate`.
 
 ## v3.0.0
 
