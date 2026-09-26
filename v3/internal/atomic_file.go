@@ -1,6 +1,7 @@
 package internal
 
 import (
+    "encoding/json"
     "os"
     "path/filepath"
     "strings"
@@ -28,7 +29,8 @@ func RefuseNonJsonOutputTarget(outputPath string, artifactName string) *exceptio
         return nil
     }
 
-    if true == strings.HasPrefix(trimmedContent, "{") {
+    /* the opening brace alone does not make a JSON document: "{ notes", an object followed by prose and two concatenated objects are someone's source too */
+    if true == strings.HasPrefix(trimmedContent, "{") && true == json.Valid([]byte(trimmedContent)) {
         return nil
     }
 
@@ -55,7 +57,8 @@ func WriteFileAtomically(outputPath string, payload []byte, artifactName string)
         )
     }
 
-    tempFile, tempErr := os.CreateTemp(directoryPath, filepath.Base(outputPath)+".*.tmp")
+    /* the temp name does not carry the output's basename, which may fill the 255 bytes of a path component on its own */
+    tempFile, tempErr := os.CreateTemp(directoryPath, ".melody-artifact-*.tmp")
     if nil != tempErr {
         return exception.NewError(
             "could not create the temp file of the "+artifactName,

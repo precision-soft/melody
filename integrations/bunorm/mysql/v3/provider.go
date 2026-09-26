@@ -50,7 +50,7 @@ type Provider struct {
     tunedForMigration bool
 }
 
-/* resolvedTimeoutConfig replaces every zero field with the constructor default and reads a negative one as Unlimited: on this driver a zero read or write deadline means no deadline, so an unset environment key would disarm the protection, while a negative deadline handed through would fail every dial at once. */
+/* resolvedTimeoutConfig replaces every zero field with the constructor default and reads a negative one as Unlimited: on this driver a zero read or write deadline means no deadline, so an unset environment key would disarm the protection, while a negative connect timeout handed through would fail every dial at once. */
 func (instance *Provider) resolvedTimeoutConfig() *TimeoutConfig {
     defaultConfig := DefaultTimeoutConfig()
 

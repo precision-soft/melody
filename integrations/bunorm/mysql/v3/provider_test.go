@@ -505,7 +505,7 @@ func TestResolvedTimeoutConfig_ZeroFieldsFallBackToTheDefaultsAndNegativeOnesLif
         t.Fatalf("expected the default deadlines for a zero-value configuration, got %v/%v", fromZero.ReadTimeout, fromZero.WriteTimeout)
     }
 
-    /* a negative value is Unlimited and resolves to the zero the driver reads as no deadline; handed through, a negative deadline would fail every dial at once */
+    /* a negative value is Unlimited and resolves to the zero the driver reads as no deadline; handed through, a negative connect timeout would fail every dial at once */
     fromNegative := (&Provider{timeoutConfig: NewTimeoutConfig(Unlimited, -time.Second, -5*time.Second)}).resolvedTimeoutConfig()
     if 0 != fromNegative.ConnectTimeout || 0 != fromNegative.ReadTimeout || 0 != fromNegative.WriteTimeout {
         t.Fatalf("expected a negative value to lift the deadline, got %+v", fromNegative)

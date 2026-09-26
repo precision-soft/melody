@@ -2,6 +2,8 @@ package session
 
 import (
     "bytes"
+    "crypto/sha256"
+    "encoding/hex"
     "encoding/json"
     "errors"
     "io"
@@ -331,6 +333,11 @@ func readSessionFileFromHandle(fileInstance *os.File) (map[string]fileSessionEnt
         return nil, exception.NewError("failed to decode session storage file", nil, err)
     }
 
+    /* a JSON null decodes without an error into a nil map, which the first Save would write into */
+    if nil == decoded {
+        return nil, exception.NewError("session storage snapshot must be a JSON object", nil, nil)
+    }
+
     return decoded, nil
 }
 
@@ -347,7 +354,7 @@ func writeSessionFileAtomically(path string, snapshot map[string]fileSessionEntr
         )
     }
 
-    tempFile, err := os.CreateTemp(directoryPath, filepath.Base(path)+".*.tmp")
+    tempFile, err := os.CreateTemp(directoryPath, sessionTemporaryPrefix(path)+"*.tmp")
     if nil != err {
         return exception.NewError(
             "failed to create session storage temp file",
@@ -439,6 +446,17 @@ func syncSessionDirectory(path string) error {
     return nil
 }
 
+/* sessionTemporaryPrefix is the prefix of the temp files of a snapshot path, shared by the write and the sweep. A basename longer than 200 bytes is replaced by its digest, since the random part CreateTemp appends would push the name past the 255 bytes of one path component. */
+func sessionTemporaryPrefix(path string) string {
+    base := filepath.Base(path)
+    if 200 < len(base) {
+        digest := sha256.Sum256([]byte(base))
+        base = ".melody-session-" + hex.EncodeToString(digest[:])
+    }
+
+    return base + "."
+}
+
 /* removeOrphanSessionTemporaryFiles sweeps the temp files a killed process left, each a full snapshot of every live session. It runs at construction, where per-process ownership means nothing is mid-rename; a file that cannot be removed is left for the next construction. */
 func removeOrphanSessionTemporaryFiles(path string) {
     directoryPath := filepath.Dir(path)
@@ -448,7 +466,7 @@ func removeOrphanSessionTemporaryFiles(path string) {
         return
     }
 
-    prefix := filepath.Base(path) + "."
+    prefix := sessionTemporaryPrefix(path)
 
     for _, entry := range entries {
         if true == entry.IsDir() {

@@ -2,6 +2,7 @@ package storage
 
 import (
     "crypto/rand"
+    "crypto/sha256"
     "encoding/hex"
     "io"
     "os"
@@ -106,10 +107,20 @@ func (instance *LocalStorage) Put(
 /* storageTempStaleAge is the age past which a later Put sweeps a leftover temp object a crash mid-write left; an in-flight Put refreshes its temp's mtime with every write. */
 const storageTempStaleAge = 1 * time.Hour
 
+/* storageTempObjectSuffix closes the name of every temp object; the random part sits between the reserved prefix and it. */
+const storageTempObjectSuffix = ".tmp"
+
+/* storageTempPrefix names the reserved namespace of a key's temp objects: a hidden name carrying the digest of the key's leaf, so no ordinary key shares it by accident, and a leaf of any length leaves room for the random part within one path component. */
+func storageTempPrefix(relativeKey string) string {
+    digest := sha256.Sum256([]byte(filepath.Base(relativeKey)))
+
+    return ".melody-storage-" + hex.EncodeToString(digest[:]) + "."
+}
+
 /* sweepStaleTempObjects removes abandoned temp objects for this key after a successful Put, best-effort: a failure is retried by the next Put. */
 func sweepStaleTempObjects(root *os.Root, relativeKey string) {
     directory := filepath.Dir(relativeKey)
-    prefix := filepath.Base(relativeKey) + ".tmp-"
+    prefix := storageTempPrefix(relativeKey)
 
     directoryFile, openErr := root.Open(directory)
     if nil != openErr {
@@ -123,7 +134,11 @@ func sweepStaleTempObjects(root *os.Root, relativeKey string) {
     }
 
     for _, name := range names {
-        if false == strings.HasPrefix(name, prefix) || false == isStorageTempSuffix(name[len(prefix):]) {
+        if false == strings.HasPrefix(name, prefix) || false == strings.HasSuffix(name, storageTempObjectSuffix) {
+            continue
+        }
+
+        if false == isStorageTempRandomPart(strings.TrimSuffix(name[len(prefix):], storageTempObjectSuffix)) {
             continue
         }
 
@@ -142,13 +157,13 @@ func sweepStaleTempObjects(root *os.Root, relativeKey string) {
     }
 }
 
-/* isStorageTempSuffix matches exactly the sixteen lowercase hex characters createStorageTempFile appends, so no user object is swept. */
-func isStorageTempSuffix(suffix string) bool {
-    if 16 != len(suffix) {
+/* isStorageTempRandomPart matches exactly the sixteen lowercase hex characters createStorageTempFile generates. */
+func isStorageTempRandomPart(randomPart string) bool {
+    if 16 != len(randomPart) {
         return false
     }
 
-    for _, character := range suffix {
+    for _, character := range randomPart {
         if ('0' > character || '9' < character) && ('a' > character || 'f' < character) {
             return false
         }
@@ -160,7 +175,7 @@ func isStorageTempSuffix(suffix string) bool {
 /* createStorageTempFile creates a uniquely named temp object beside the target, so the rename stays within the pinned root; O_EXCL never clobbers another writer's temp or the live key. */
 func createStorageTempFile(root *os.Root, relativeKey string) (string, *os.File, error) {
     directory := filepath.Dir(relativeKey)
-    base := filepath.Base(relativeKey)
+    prefix := storageTempPrefix(relativeKey)
 
     for attempt := 0; attempt < 10; attempt++ {
         suffix := make([]byte, 8)
@@ -168,7 +183,7 @@ func createStorageTempFile(root *os.Root, relativeKey string) (string, *os.File,
             return "", nil, randErr
         }
 
-        tempKey := filepath.Join(directory, base+".tmp-"+hex.EncodeToString(suffix))
+        tempKey := filepath.Join(directory, prefix+hex.EncodeToString(suffix)+storageTempObjectSuffix)
 
         file, openErr := root.OpenFile(tempKey, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o640)
         if nil == openErr {

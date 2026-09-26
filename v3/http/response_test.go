@@ -494,6 +494,72 @@ func TestConfinedFileResponse_ServesANameUnderTheRootAndNothingOutsideIt(t *test
     }
 }
 
+/* "." resolves every name to a relative path that carries no "./" prefix, and "/" joins with the separator into "//", so a containment read as a textual prefix of the root refuses every name under both */
+func TestConfinedFileResponse_ServesANameUnderTheCurrentDirectoryAndUnderTheFilesystemRoot(t *testing.T) {
+    directory := t.TempDir()
+
+    workingDirectory, getwdErr := os.Getwd()
+    if nil != getwdErr {
+        t.Fatalf("getwd error: %v", getwdErr)
+    }
+    if chdirErr := os.Chdir(directory); nil != chdirErr {
+        t.Fatalf("chdir error: %v", chdirErr)
+    }
+    t.Cleanup(func() {
+        _ = os.Chdir(workingDirectory)
+    })
+
+    if writeErr := os.WriteFile("invoice.txt", []byte("the invoice"), 0o644); nil != writeErr {
+        t.Fatalf("write error: %v", writeErr)
+    }
+
+    realDirectory, evalErr := filepath.EvalSymlinks(directory)
+    if nil != evalErr {
+        t.Fatalf("eval error: %v", evalErr)
+    }
+
+    filesystemRoot := filepath.VolumeName(realDirectory) + string(os.PathSeparator)
+    nameUnderFilesystemRoot, relativeErr := filepath.Rel(filesystemRoot, filepath.Join(realDirectory, "invoice.txt"))
+    if nil != relativeErr {
+        t.Fatalf("rel error: %v", relativeErr)
+    }
+
+    cases := []struct {
+        root string
+        name string
+    }{
+        {".", "invoice.txt"},
+        {filesystemRoot, nameUnderFilesystemRoot},
+    }
+    for _, testCase := range cases {
+        response, serveErr := ConfinedFileResponse(200, testCase.root, testCase.name)
+        if nil != serveErr {
+            t.Fatalf("expected %q under the root %q to be served, got %v", testCase.name, testCase.root, serveErr)
+        }
+
+        body, _ := io.ReadAll(response.BodyReader())
+        if closer, isCloser := response.BodyReader().(io.Closer); true == isCloser {
+            _ = closer.Close()
+        }
+        if "the invoice" != string(body) {
+            t.Fatalf("expected the invoice body under the root %q, got %q", testCase.root, string(body))
+        }
+    }
+
+    outsideDirectory := t.TempDir()
+    if writeErr := os.WriteFile(outsideDirectory+"/secret.txt", []byte("the secret"), 0o644); nil != writeErr {
+        t.Fatalf("write error: %v", writeErr)
+    }
+    if symlinkErr := os.Symlink(outsideDirectory+"/secret.txt", "innocent.txt"); nil != symlinkErr {
+        t.Fatalf("symlink error: %v", symlinkErr)
+    }
+
+    _, refuseErr := ConfinedFileResponse(200, ".", "innocent.txt")
+    if nil == refuseErr || false == strings.Contains(refuseErr.Error(), "outside the root directory") {
+        t.Fatalf("expected a symlink escaping the current directory to be refused by the containment, got %v", refuseErr)
+    }
+}
+
 /* the symlink is the escape the textual checks cannot see: the name is clean, the join is under the root, and the target is not */
 func TestConfinedFileResponse_ASymlinkPointingOutsideTheRootIsRefused(t *testing.T) {
     rootDirectory := t.TempDir()

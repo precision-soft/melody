@@ -273,3 +273,62 @@ func TestHasExcludedPathPrefix_ATrailingSlashEntryClaimsTheBareSpelling(t *testi
         }
     }
 }
+
+/* "." resolves every name to a relative path that carries no "./" prefix, and "/" joins with the separator into "//", so a containment read as a textual prefix of the base refuses every name under both */
+func TestDirFileSystem_OpenServesANameUnderTheCurrentDirectoryAndUnderTheFilesystemRoot(t *testing.T) {
+    directory := t.TempDir()
+
+    workingDirectory, getwdErr := os.Getwd()
+    if nil != getwdErr {
+        t.Fatalf("getwd error: %v", getwdErr)
+    }
+    if chdirErr := os.Chdir(directory); nil != chdirErr {
+        t.Fatalf("chdir error: %v", chdirErr)
+    }
+    t.Cleanup(func() {
+        _ = os.Chdir(workingDirectory)
+    })
+
+    if writeErr := os.WriteFile("file.txt", []byte("hello"), 0o644); nil != writeErr {
+        t.Fatalf("write error: %v", writeErr)
+    }
+
+    realDirectory, evalErr := filepath.EvalSymlinks(directory)
+    if nil != evalErr {
+        t.Fatalf("eval error: %v", evalErr)
+    }
+
+    filesystemRoot := filepath.VolumeName(realDirectory) + string(os.PathSeparator)
+    nameUnderFilesystemRoot, relativeErr := filepath.Rel(filesystemRoot, filepath.Join(realDirectory, "file.txt"))
+    if nil != relativeErr {
+        t.Fatalf("rel error: %v", relativeErr)
+    }
+
+    cases := []struct {
+        base string
+        name string
+    }{
+        {".", "file.txt"},
+        {filesystemRoot, filepath.ToSlash(nameUnderFilesystemRoot)},
+    }
+    for _, testCase := range cases {
+        file, openErr := osDirFileSystem(testCase.base).Open(testCase.name)
+        if nil != openErr {
+            t.Fatalf("expected %q under the base %q to open, got %v", testCase.name, testCase.base, openErr)
+        }
+        _ = file.Close()
+    }
+
+    outsideDirectory := t.TempDir()
+    if writeErr := os.WriteFile(filepath.Join(outsideDirectory, "secret.txt"), []byte("secret"), 0o644); nil != writeErr {
+        t.Fatalf("write error: %v", writeErr)
+    }
+    if symlinkErr := os.Symlink(filepath.Join(outsideDirectory, "secret.txt"), "innocent.txt"); nil != symlinkErr {
+        t.Fatalf("symlink error: %v", symlinkErr)
+    }
+
+    _, refuseErr := osDirFileSystem(".").Open("innocent.txt")
+    if false == errors.Is(refuseErr, fs.ErrPermission) {
+        t.Fatalf("expected a symlink escaping the current directory to be refused by the containment, got %v", refuseErr)
+    }
+}

@@ -54,7 +54,9 @@ func (instance *dirFileSystem) Open(name string) (fs.File, error) {
         realBase = instance.basePath
     }
 
-    if false == strings.HasPrefix(realPath, realBase+string(os.PathSeparator)) && realPath != realBase {
+    /* the containment is read on the relative path rather than as a textual prefix, since "." resolves names without a "./" and "/" would demand "//" */
+    relativePath, relativeErr := filepath.Rel(realBase, realPath)
+    if nil != relativeErr || ".." == relativePath || true == strings.HasPrefix(relativePath, ".."+string(os.PathSeparator)) {
         return nil, fs.ErrPermission
     }
 

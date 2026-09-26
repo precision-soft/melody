@@ -1,6 +1,7 @@
 package internal
 
 import (
+    "fmt"
     "os"
     "path/filepath"
     "strings"
@@ -132,5 +133,43 @@ func TestWriteFileAtomically_KeepsADeliberate0600DestinationMode(t *testing.T) {
 
     if 0o600 != info.Mode().Perm() {
         t.Fatalf("expected the deliberate 0600 destination mode to be kept, not widened, got %v", info.Mode().Perm())
+    }
+}
+
+/* an output basename of 255 bytes is the longest a path component admits; the temp file beside it must fit the same component */
+func TestWriteFileAtomically_ReplacesAnOutputWhoseBasenameFillsTheFilesystemComponent(t *testing.T) {
+    directory := t.TempDir()
+    targetPath := filepath.Join(directory, strings.Repeat("o", 250)+".json")
+
+    for _, payload := range []string{`{"first":true}`, `{"second":true}`} {
+        if writeErr := WriteFileAtomically(targetPath, []byte(payload), "route manifest"); nil != writeErr {
+            t.Fatalf("expected an output of 255 bytes to be written, got %v", writeErr)
+        }
+    }
+
+    written, readErr := os.ReadFile(targetPath)
+    if nil != readErr || `{"second":true}` != string(written) {
+        t.Fatalf("expected the replaced artifact, got %q, %v", string(written), readErr)
+    }
+
+    entries, readDirErr := os.ReadDir(directory)
+    if nil != readDirErr || 1 != len(entries) {
+        t.Fatalf("expected only the artifact in the directory, got %v, %v", entries, readDirErr)
+    }
+}
+
+func TestRefuseNonJsonOutputTarget_RefusesATargetThatOnlyOpensWithABrace(t *testing.T) {
+    directory := t.TempDir()
+
+    for index, content := range []string{"{ notes kept by hand", "{\"a\":1}\nprose after the object", "{\"a\":1}{\"b\":2}"} {
+        targetPath := filepath.Join(directory, fmt.Sprintf("target-%d.json", index))
+        if writeErr := os.WriteFile(targetPath, []byte(content), 0o644); nil != writeErr {
+            t.Fatalf("seed: %v", writeErr)
+        }
+
+        refusalErr := RefuseNonJsonOutputTarget(targetPath, "route manifest")
+        if nil == refusalErr || false == strings.Contains(refusalErr.Error(), "not a JSON document") {
+            t.Fatalf("expected %q to be refused as not a JSON document, got %v", content, refusalErr)
+        }
     }
 }

@@ -297,7 +297,9 @@ func confineFileToRoot(rootDirectory string, name string) (string, error) {
         return "", evalRootErr
     }
 
-    if realPath != realRoot && false == strings.HasPrefix(realPath, realRoot+string(os.PathSeparator)) {
+    /* the containment is read on the relative path rather than as a textual prefix, since "." resolves names without a "./" and "/" would demand "//" */
+    relativePath, relativeErr := filepath.Rel(realRoot, realPath)
+    if nil != relativeErr || ".." == relativePath || true == strings.HasPrefix(relativePath, ".."+string(os.PathSeparator)) {
         return "", exception.NewError(
             "the file resolves outside the root directory",
             map[string]any{

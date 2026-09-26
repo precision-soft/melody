@@ -207,3 +207,22 @@ func TestFinishFileAtomically_MarksADirectorySyncFailureAfterTheRename(t *testin
         t.Fatalf("expected the whole file in place beside the marked failure, got %q, %v", content, readErr)
     }
 }
+
+/* a migration basename of 255 bytes is the longest a path component admits; the temp file beside it must fit the same component */
+func TestFinishFileAtomically_ReplacesADestinationWhoseBasenameFillsTheFilesystemComponent(t *testing.T) {
+    directory := t.TempDir()
+    destination := filepath.Join(directory, "20260826120000_"+strings.Repeat("m", 237)+".go")
+
+    if writeErr := os.WriteFile(destination, []byte("truncated"), migrationFileMode); nil != writeErr {
+        t.Fatalf("could not seed the destination: %v", writeErr)
+    }
+
+    if finishErr := finishFileAtomically(destination, []byte("package migrations\n")); nil != finishErr {
+        t.Fatalf("expected a destination of 255 bytes to be rewritten, got %v", finishErr)
+    }
+
+    entries, readDirErr := os.ReadDir(directory)
+    if nil != readDirErr || 1 != len(entries) {
+        t.Fatalf("expected only the destination in the directory, got %v, %v", entries, readDirErr)
+    }
+}

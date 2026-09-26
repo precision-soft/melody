@@ -3775,3 +3775,27 @@ func TestRunLeavesADialectEmbeddingABuiltinAsItIsInsteadOfReplacingItWithTheBare
         t.Fatalf("expected no application line on a dialect the generator does not own, got: %s", content)
     }
 }
+
+/* a basename of 255 bytes is the longest a path component admits; the temp file beside it must fit the same component */
+func TestAtomicWriteFileReplacesADestinationWhoseBasenameFillsTheFilesystemComponent(t *testing.T) {
+    tempDir := t.TempDir()
+    destination := filepath.Join(tempDir, strings.Repeat("c", 255))
+
+    if writeErr := os.WriteFile(destination, []byte("first"), 0o644); nil != writeErr {
+        t.Fatalf("setup: %v", writeErr)
+    }
+
+    if writeErr := atomicWriteFile(destination, []byte("second"), 0o644); nil != writeErr {
+        t.Fatalf("expected a destination of 255 bytes to be replaced, got %v", writeErr)
+    }
+
+    written, readErr := os.ReadFile(destination)
+    if nil != readErr || "second" != string(written) {
+        t.Fatalf("expected the replaced content, got %q, %v", string(written), readErr)
+    }
+
+    entries, readDirErr := os.ReadDir(tempDir)
+    if nil != readDirErr || 1 != len(entries) {
+        t.Fatalf("expected only the destination in the directory, got %v, %v", entries, readDirErr)
+    }
+}

@@ -673,7 +673,8 @@ func printPrunedDestinations(commandContext *clicontract.CommandContext, pruned 
 
 /* atomicWriteFile writes the content to a temporary file beside the destination and renames it into place, removing the temporary file on every failure it sees. The mode applies to a new destination; an existing one keeps its permission bits, without setuid, setgid and sticky, so a crontab narrowed to 0600 is not widened. A process killed before the rename leaves the temporary file carrying the ownership marker, which a later --prune empties and reports. */
 func atomicWriteFile(destination string, content []byte, mode os.FileMode) error {
-    tmpFile, createErr := os.CreateTemp(filepath.Dir(destination), filepath.Base(destination)+".*.tmp")
+    /* the temp name does not carry the destination's basename, which may fill the 255 bytes of a path component on its own */
+    tmpFile, createErr := os.CreateTemp(filepath.Dir(destination), ".melody-cron-*.tmp")
     if nil != createErr {
         return exception.NewError(
             "cron: could not create temporary crontab next to destination",

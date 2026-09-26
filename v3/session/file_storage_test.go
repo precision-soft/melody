@@ -1635,3 +1635,73 @@ func TestFileStorage_TreatsTheExpiryInstantItselfAsLapsedAtTheDoor(t *testing.T)
         t.Fatalf("expected the expiry instant itself to be lapsed")
     }
 }
+
+func TestFileStorage_RefusesANullSnapshotOnBothConstructors(t *testing.T) {
+    path := filepath.Join(t.TempDir(), "session.json")
+    if writeErr := os.WriteFile(path, []byte("null"), 0600); nil != writeErr {
+        t.Fatalf("could not plant the snapshot: %v", writeErr)
+    }
+
+    storage, storageErr := NewFileStorageFromPath(path)
+    if nil == storageErr {
+        _ = storage.Close()
+        t.Fatal("expected a null snapshot to be refused by the path constructor")
+    }
+    if false == strings.Contains(storageErr.Error(), "must be a JSON object") {
+        t.Fatalf("expected the snapshot refusal, got %v", storageErr)
+    }
+
+    fileInstance, openErr := os.OpenFile(path, os.O_RDWR, 0600)
+    if nil != openErr {
+        t.Fatalf("open error: %v", openErr)
+    }
+    defer func() {
+        _ = fileInstance.Close()
+    }()
+
+    handleStorage, handleErr := NewFileStorageFromFile(fileInstance)
+    if nil == handleErr {
+        _ = handleStorage.Close()
+        t.Fatal("expected a null snapshot to be refused by the handle constructor")
+    }
+    if false == strings.Contains(handleErr.Error(), "must be a JSON object") {
+        t.Fatalf("expected the snapshot refusal, got %v", handleErr)
+    }
+
+    content, readErr := os.ReadFile(path)
+    if nil != readErr || "null" != string(content) {
+        t.Fatalf("expected the refused snapshot to stay untouched, got %q, %v", string(content), readErr)
+    }
+}
+
+/* a basename of 255 bytes is the longest a path component admits; the temp file beside it must fit the same component, and the sweep must find what the write names */
+func TestFileStorage_SavesUnderABasenameThatFillsTheFilesystemComponent(t *testing.T) {
+    directory := t.TempDir()
+    path := filepath.Join(directory, strings.Repeat("s", 250)+".json")
+
+    orphanPath := filepath.Join(directory, sessionTemporaryPrefix(path)+"123456.tmp")
+    if writeErr := os.WriteFile(orphanPath, []byte("{}"), 0600); nil != writeErr {
+        t.Fatalf("could not plant the orphan: %v", writeErr)
+    }
+
+    storage, storageErr := NewFileStorageFromPath(path)
+    if nil != storageErr {
+        t.Fatalf("unexpected construction error: %v", storageErr)
+    }
+    defer func() {
+        _ = storage.Close()
+    }()
+
+    if _, statErr := os.Stat(orphanPath); false == os.IsNotExist(statErr) {
+        t.Fatalf("expected the orphan of the long basename swept away, stat answered %v", statErr)
+    }
+
+    if saveErr := storage.Save("session-id", map[string]any{"user": "u"}, time.Hour); nil != saveErr {
+        t.Fatalf("expected a save under a basename of 255 bytes, got %v", saveErr)
+    }
+
+    entries, readErr := os.ReadDir(directory)
+    if nil != readErr || 1 != len(entries) || filepath.Base(path) != entries[0].Name() {
+        t.Fatalf("expected only the snapshot in the directory, got %v, %v", entries, readErr)
+    }
+}

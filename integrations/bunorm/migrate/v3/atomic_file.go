@@ -17,7 +17,8 @@ var errDirectorySyncAfterRename = errors.New("the directory entry could not be f
 func finishFileAtomically(destination string, content []byte) error {
     directory := filepath.Dir(destination)
 
-    tmpFile, tmpErr := os.CreateTemp(directory, "."+filepath.Base(destination)+".*")
+    /* the temp name does not carry the destination's basename, which may fill the 255 bytes of a path component on its own */
+    tmpFile, tmpErr := os.CreateTemp(directory, ".melody-migrate-*.tmp")
     if nil != tmpErr {
         return fmt.Errorf("could not create the temporary file beside %s: %w", destination, tmpErr)
     }
