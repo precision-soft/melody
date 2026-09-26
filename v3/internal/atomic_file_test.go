@@ -133,3 +133,28 @@ func TestWriteFileAtomically_KeepsADeliberate0600DestinationMode(t *testing.T) {
         t.Fatalf("expected the deliberate 0600 destination mode to be kept, not widened, got %v", info.Mode().Perm())
     }
 }
+
+func TestWriteFileAtomically_LongValidFilename(t *testing.T) {
+    directory := t.TempDir()
+    path := filepath.Join(directory, strings.Repeat("a", 250)+".json")
+    if err := os.WriteFile(path, []byte(`{"old":true}`), 0o600); nil != err { t.Fatalf("valid filename control: %v", err) }
+    if err := WriteFileAtomically(path, []byte(`{"new":true}`), "artifact"); nil != err { t.Fatalf("replace valid filename: %v", err) }
+    got, err := os.ReadFile(path)
+    if nil != err || `{"new":true}` != string(got) { t.Fatalf("content = %q, %v", got, err) }
+    info, err := os.Stat(path)
+    if nil != err || 0o600 != info.Mode().Perm() { t.Fatalf("private mode not preserved: %v", err) }
+    entries, err := os.ReadDir(directory)
+    if nil != err || 1 != len(entries) { t.Fatalf("unexpected residue: %v, %v", entries, err) }
+}
+
+func TestRefuseNonJsonOutputTarget_RejectsMalformedObject(t *testing.T) {
+    for _, content := range []string{"{ not json", `{"valid":true} trailing`, `{"first":1}{"second":2}`} {
+        t.Run(content, func(t *testing.T) {
+            path := filepath.Join(t.TempDir(), "source.txt")
+            if err := os.WriteFile(path, []byte(content), 0o600); nil != err { t.Fatal(err) }
+            if err := RefuseNonJsonOutputTarget(path, "artifact"); nil == err { t.Fatal("malformed existing content must be refused") }
+            got, err := os.ReadFile(path)
+            if nil != err || content != string(got) { t.Fatalf("existing content changed: %q, %v", got, err) }
+        })
+    }
+}

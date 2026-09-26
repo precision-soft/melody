@@ -3284,3 +3284,16 @@ func TestAtomicWriteFilePreservesPrivateDestination(t *testing.T) {
         t.Fatalf("permissions widened to %o", info.Mode().Perm())
     }
 }
+
+func TestAtomicWriteFileLongValidFilename(t *testing.T) {
+    directory := t.TempDir()
+    path := filepath.Join(directory, strings.Repeat("a", 255))
+    if err := os.WriteFile(path, []byte("old"), 0o600); nil != err { t.Fatalf("valid filename control: %v", err) }
+    if err := atomicWriteFile(path, []byte("new"), 0o644); nil != err { t.Fatalf("replace valid filename: %v", err) }
+    got, err := os.ReadFile(path)
+    if nil != err || "new" != string(got) { t.Fatalf("content = %q, %v", got, err) }
+    info, err := os.Stat(path)
+    if nil != err || 0o600 != info.Mode().Perm() { t.Fatalf("private mode not preserved: %v", err) }
+    entries, err := os.ReadDir(directory)
+    if nil != err || 1 != len(entries) { t.Fatalf("unexpected residue: %v, %v", entries, err) }
+}

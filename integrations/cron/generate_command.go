@@ -594,7 +594,8 @@ func atomicWriteFile(destination string, content []byte, mode os.FileMode) error
         return exception.NewError("cron: could not read destination permissions", exceptioncontract.Context{"destination": destination}, statErr)
     }
 
-    tmpFile, createErr := os.CreateTemp(filepath.Dir(destination), filepath.Base(destination)+".*.tmp")
+    /* A fixed prefix leaves room for the random suffix even when the destination basename fills the filesystem limit. The same directory keeps the rename atomic. */
+    tmpFile, createErr := os.CreateTemp(filepath.Dir(destination), ".melody-cron-*.tmp")
     if nil != createErr {
         return exception.NewError(
             "cron: could not create temporary crontab next to destination",

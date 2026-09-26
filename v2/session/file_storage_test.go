@@ -1533,3 +1533,45 @@ func TestSyncSessionDirectory_AcceptsARealDirectory(t *testing.T) {
         t.Fatalf("unexpected error over a real directory: %v", syncErr)
     }
 }
+
+func TestFileStorage_RejectsNullSnapshot(t *testing.T) {
+    for _, fromHandle := range []bool{false, true} {
+        name := "path"
+        if fromHandle { name = "handle" }
+        t.Run(name, func(t *testing.T) {
+            path := filepath.Join(t.TempDir(), "sessions.json")
+            if err := os.WriteFile(path, []byte("null"), 0o600); nil != err { t.Fatal(err) }
+            var storage *FileStorage
+            var err error
+            if fromHandle {
+                file, openErr := os.OpenFile(path, os.O_RDWR, 0o600)
+                if nil != openErr { t.Fatal(openErr) }
+                defer file.Close()
+                storage, err = NewFileStorageFromFile(file)
+            } else { storage, err = NewFileStorageFromPath(path) }
+            if nil == err {
+                _ = storage.Save("probe", map[string]any{"key":"value"}, time.Minute)
+                t.Fatal("null snapshot must be rejected by constructor")
+            }
+            got, readErr := os.ReadFile(path)
+            if nil != readErr || "null" != string(got) { t.Fatalf("invalid snapshot modified: %q, %v", got, readErr) }
+        })
+    }
+}
+
+func TestFileStorage_LongValidFilename(t *testing.T) {
+    directory := t.TempDir()
+    path := filepath.Join(directory, strings.Repeat("a", 250)+".json")
+    if err := os.WriteFile(path, []byte("{}"), 0o600); nil != err { t.Fatalf("valid filename control: %v", err) }
+    storage, err := NewFileStorageFromPath(path)
+    if nil != err { t.Fatal(err) }
+    if err := storage.Save("probe", map[string]any{"key":"value"}, time.Minute); nil != err { t.Fatalf("save valid filename: %v", err) }
+    if err := storage.Close(); nil != err { t.Fatal(err) }
+    reopened, err := NewFileStorageFromPath(path)
+    if nil != err { t.Fatal(err) }
+    defer reopened.Close()
+    data, found, err := reopened.Load("probe")
+    if nil != err || !found || "value" != data["key"] { t.Fatalf("reload = %v, %v, %v", data, found, err) }
+    entries, err := os.ReadDir(directory)
+    if nil != err || 1 != len(entries) { t.Fatalf("unexpected residue: %v, %v", entries, err) }
+}

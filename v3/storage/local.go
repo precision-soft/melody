@@ -2,6 +2,7 @@ package storage
 
 import (
     "crypto/rand"
+    "crypto/sha256"
     "encoding/hex"
     "io"
     "os"
@@ -101,6 +102,11 @@ func (instance *LocalStorage) Put(
 func createStorageTempFile(root *os.Root, relativeKey string) (string, *os.File, error) {
     directory := filepath.Dir(relativeKey)
     base := filepath.Base(relativeKey)
+    /* Bound the temporary basename while retaining a per-key prefix and room for the random suffix. */
+    if 200 < len(base) {
+        digest := sha256.Sum256([]byte(base))
+        base = ".melody-storage-" + hex.EncodeToString(digest[:])
+    }
 
     for attempt := 0; attempt < 10; attempt++ {
         suffix := make([]byte, 8)

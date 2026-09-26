@@ -2,6 +2,8 @@ package session
 
 import (
     "bytes"
+    "crypto/sha256"
+    "encoding/hex"
     "encoding/json"
     "errors"
     "io"
@@ -314,6 +316,11 @@ func readSessionFileFromHandle(fileInstance *os.File) (map[string]fileSessionEnt
         return nil, exception.NewError("failed to decode session storage file", nil, err)
     }
 
+    /* JSON null decodes without an error but cannot hold the entries Save writes. */
+    if nil == decoded {
+        return nil, exception.NewError("session storage snapshot must be a JSON object", nil, nil)
+    }
+
     return decoded, nil
 }
 
@@ -330,7 +337,7 @@ func writeSessionFileAtomically(path string, snapshot map[string]fileSessionEntr
         )
     }
 
-    tempFile, err := os.CreateTemp(directoryPath, filepath.Base(path)+".*.tmp")
+    tempFile, err := os.CreateTemp(directoryPath, sessionTemporaryPrefix(path)+"*.tmp")
     if nil != err {
         return exception.NewError(
             "failed to create session storage temp file",
@@ -424,6 +431,17 @@ func syncSessionDirectory(path string) error {
     return nil
 }
 
+/* sessionTemporaryPrefix leaves room for the random suffix within a filesystem component. The digest keeps long basenames distinct, and sharing this prefix with cleanup keeps their orphan snapshots discoverable. */
+func sessionTemporaryPrefix(path string) string {
+    base := filepath.Base(path)
+    if 200 < len(base) {
+        digest := sha256.Sum256([]byte(base))
+        base = ".melody-session-" + hex.EncodeToString(digest[:])
+    }
+
+    return base + "."
+}
+
 /* removeOrphanSessionTemporaryFiles sweeps the temp files a killed process left behind: a hard kill between CreateTemp and the rename skips every cleanup path, each orphan is a complete snapshot of every live session and its tokens, and nothing ever opened them again — the surface only grew. The sweep runs at construction, where the per-process ownership the session documentation states means nothing else can be mid-rename over this path. A file that cannot be removed is left for the next construction rather than failing this one. */
 func removeOrphanSessionTemporaryFiles(path string) {
     directoryPath := filepath.Dir(path)
@@ -433,7 +451,7 @@ func removeOrphanSessionTemporaryFiles(path string) {
         return
     }
 
-    prefix := filepath.Base(path) + "."
+    prefix := sessionTemporaryPrefix(path)
 
     for _, entry := range entries {
         if true == entry.IsDir() {

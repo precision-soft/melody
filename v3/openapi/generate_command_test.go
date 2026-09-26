@@ -253,3 +253,33 @@ func TestGenerateCommand_WarnsWhenTheInfoServiceIsAbsent(t *testing.T) {
         t.Fatalf("expected no warning once the info service is registered, got:\n%s", output)
     }
 }
+
+func TestGenerateCommand_RefusesToOverwriteMalformedJson(t *testing.T) {
+    projectDirectory := t.TempDir()
+    runtimeInstance := newCommandFixtureRuntime(t, projectDirectory, false, false)
+
+    foreignPath := filepath.Join(projectDirectory, "module.go")
+    if writeErr := os.WriteFile(foreignPath, []byte("{ not json"), 0o644); nil != writeErr {
+        t.Fatalf("write: %v", writeErr)
+    }
+
+    _, runErr := runOpenApiGenerateCommand(
+        t,
+        NewGenerateCommand(Info{Title: "Example", Version: "1.0.0"}, NewRegistry()),
+        runtimeInstance,
+        "--out",
+        "module.go",
+    )
+    if nil == runErr {
+        t.Fatalf("expected the foreign file to be protected")
+    }
+
+    if false == strings.Contains(runErr.Error(), "is not a JSON document") {
+        t.Fatalf("unexpected error: %v", runErr)
+    }
+
+    preserved, readErr := os.ReadFile(foreignPath)
+    if nil != readErr || "{ not json" != string(preserved) {
+        t.Fatalf("expected the foreign file preserved, got %q (%v)", string(preserved), readErr)
+    }
+}

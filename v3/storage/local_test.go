@@ -402,3 +402,16 @@ func TestLocalStorage_PutPreservesOldObjectsWithTempNames(t *testing.T) {
         t.Fatalf("stored object changed: %q, %v", payload, err)
     }
 }
+
+func TestLocalStorage_PutLongValidFilename(t *testing.T) {
+    directory := t.TempDir()
+    key := strings.Repeat("a", 255)
+    path := filepath.Join(directory, key)
+    if err := os.WriteFile(path, []byte("old"), 0o640); nil != err { t.Fatalf("valid filename control: %v", err) }
+    local := NewLocalStorage(directory)
+    if err := local.Put(testRuntime(), key, strings.NewReader("new"), 3, storagecontract.PutOptions{}); nil != err { t.Fatalf("replace valid filename: %v", err) }
+    got, err := os.ReadFile(path)
+    if nil != err || "new" != string(got) { t.Fatalf("stored content = %q, %v", got, err) }
+    entries, err := os.ReadDir(directory)
+    if nil != err || 1 != len(entries) { t.Fatalf("unexpected residue: %v, %v", entries, err) }
+}

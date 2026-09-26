@@ -179,3 +179,27 @@ func TestRouteManifestCommand_PrintsTheManifestToTheCommandWriterWhenOutIsEmpty(
         t.Fatalf("expected the manifest on the command writer, got %q", output)
     }
 }
+
+func TestRouteManifestCommand_RefusesToOverwriteMalformedJson(t *testing.T) {
+    projectDirectory := t.TempDir()
+    runtimeInstance := newManifestCommandRuntime(t, projectDirectory)
+
+    foreignPath := filepath.Join(projectDirectory, "main.go")
+    if writeErr := os.WriteFile(foreignPath, []byte("{ not json"), 0o644); nil != writeErr {
+        t.Fatalf("seed: %v", writeErr)
+    }
+
+    _, runErr := runRouteManifestCommand(t, runtimeInstance, "--out", "main.go")
+    if nil == runErr {
+        t.Fatalf("expected the foreign target to be refused")
+    }
+
+    survived, readErr := os.ReadFile(foreignPath)
+    if nil != readErr {
+        t.Fatalf("read back: %v", readErr)
+    }
+
+    if "{ not json" != string(survived) {
+        t.Fatalf("the foreign file was overwritten: %q", string(survived))
+    }
+}
