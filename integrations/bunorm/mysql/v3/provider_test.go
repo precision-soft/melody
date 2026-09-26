@@ -487,7 +487,7 @@ func TestComputeBackoffDelayNaNMultiplierFallsBackToDefault(t *testing.T) {
     }
 }
 
-func TestResolvedTimeoutConfig_NonPositiveFieldsFallBackToTheDefaults(t *testing.T) {
+func TestResolvedTimeoutConfig_ZeroFieldsFallBackToTheDefaultsAndNegativeOnesLiftTheDeadline(t *testing.T) {
     defaultConfig := DefaultTimeoutConfig()
 
     fromNil := (&Provider{}).resolvedTimeoutConfig()
@@ -505,12 +505,10 @@ func TestResolvedTimeoutConfig_NonPositiveFieldsFallBackToTheDefaults(t *testing
         t.Fatalf("expected the default deadlines for a zero-value configuration, got %v/%v", fromZero.ReadTimeout, fromZero.WriteTimeout)
     }
 
-    /* a negative deadline puts it in the past: every dial fails instantly with an i/o timeout no network event caused, and the retry loop burns its attempts against a healthy server */
-    fromNegative := (&Provider{timeoutConfig: NewTimeoutConfig(-1, -1, -1)}).resolvedTimeoutConfig()
-    if defaultConfig.ConnectTimeout != fromNegative.ConnectTimeout ||
-        defaultConfig.ReadTimeout != fromNegative.ReadTimeout ||
-        defaultConfig.WriteTimeout != fromNegative.WriteTimeout {
-        t.Fatalf("expected the defaults for negative values, got %+v", fromNegative)
+    /* a negative value is Unlimited and resolves to the zero the driver reads as no deadline; handed through, a negative deadline would fail every dial at once */
+    fromNegative := (&Provider{timeoutConfig: NewTimeoutConfig(Unlimited, -time.Second, -5*time.Second)}).resolvedTimeoutConfig()
+    if 0 != fromNegative.ConnectTimeout || 0 != fromNegative.ReadTimeout || 0 != fromNegative.WriteTimeout {
+        t.Fatalf("expected a negative value to lift the deadline, got %+v", fromNegative)
     }
 
     /* a configured positive value is never touched */
@@ -520,7 +518,7 @@ func TestResolvedTimeoutConfig_NonPositiveFieldsFallBackToTheDefaults(t *testing
     }
 }
 
-func TestResolvedPoolConfig_NonPositiveFieldsFallBackToTheDefaults(t *testing.T) {
+func TestResolvedPoolConfig_ZeroFieldsFallBackToTheDefaultsAndNegativeOnesLiftTheBound(t *testing.T) {
     defaultConfig := DefaultPoolConfig()
 
     fromNil := (&Provider{}).resolvedPoolConfig()
@@ -536,16 +534,24 @@ func TestResolvedPoolConfig_NonPositiveFieldsFallBackToTheDefaults(t *testing.T)
         t.Fatalf("expected the defaults for a zero-value pool, got %+v", fromZero)
     }
 
-    fromNegative := (&Provider{poolConfig: NewPoolConfig(-1, -1, -1, -1)}).resolvedPoolConfig()
-    if defaultConfig.MaxOpenConnections != fromNegative.MaxOpenConnections ||
-        defaultConfig.ConnectionMaxLifetime != fromNegative.ConnectionMaxLifetime {
-        t.Fatalf("expected the defaults for a negative pool, got %+v", fromNegative)
+    fromNegative := (&Provider{poolConfig: NewPoolConfig(Unlimited, -3, Unlimited, -time.Minute)}).resolvedPoolConfig()
+    if 0 != fromNegative.MaxOpenConnections || math.MaxInt != fromNegative.MaxIdleConnections ||
+        0 != fromNegative.ConnectionMaxLifetime || 0 != fromNegative.ConnectionMaxIdleTime {
+        t.Fatalf("expected a negative pool to lift every bound, got %+v", fromNegative)
     }
 
     configured := (&Provider{poolConfig: NewPoolConfig(3, 2, time.Minute, time.Second)}).resolvedPoolConfig()
     if 3 != configured.MaxOpenConnections || 2 != configured.MaxIdleConnections ||
         time.Minute != configured.ConnectionMaxLifetime || time.Second != configured.ConnectionMaxIdleTime {
         t.Fatalf("expected the configured pool to survive, got %+v", configured)
+    }
+}
+
+func TestResolvedTimeoutConfig_TheMigrationConnectionKeepsAnUnlimitedConnectTimeout(t *testing.T) {
+    derived := newTestProvider(WithTimeoutConfig(NewTimeoutConfig(Unlimited, 30*time.Second, 30*time.Second))).migrationProvider()
+
+    if 0 != derived.resolvedTimeoutConfig().ConnectTimeout {
+        t.Fatalf("expected the lifted connect timeout to reach the migration connection, got %v", derived.resolvedTimeoutConfig().ConnectTimeout)
     }
 }
 

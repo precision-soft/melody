@@ -123,7 +123,7 @@ func migrationPoolConfig() *PoolConfig {
     }
 }
 
-/* resolvedTimeoutConfig replaces every non-positive field with the constructor default: the guards below read a non-positive connect timeout as no deadline, so an unset environment key would disarm the protection, and a negative one would put the deadline in the past. */
+/* resolvedTimeoutConfig replaces every zero field with the constructor default and reads a negative one as Unlimited: the guards below read a zero connect timeout as no deadline, so an unset environment key would disarm the protection, while a negative deadline handed through would put it in the past. */
 func (instance *Provider) resolvedTimeoutConfig() *TimeoutConfig {
     defaultConfig := DefaultTimeoutConfig()
 
@@ -137,26 +137,20 @@ func (instance *Provider) resolvedTimeoutConfig() *TimeoutConfig {
         WriteTimeout:   instance.timeoutConfig.WriteTimeout,
     }
 
-    if 0 >= resolved.ConnectTimeout {
-        resolved.ConnectTimeout = defaultConfig.ConnectTimeout
-    }
+    resolved.ConnectTimeout = resolvedDuration(resolved.ConnectTimeout, defaultConfig.ConnectTimeout)
 
     if true == instance.tunedForMigration {
         return resolved
     }
 
-    if 0 >= resolved.ReadTimeout {
-        resolved.ReadTimeout = defaultConfig.ReadTimeout
-    }
+    resolved.ReadTimeout = resolvedDuration(resolved.ReadTimeout, defaultConfig.ReadTimeout)
 
-    if 0 >= resolved.WriteTimeout {
-        resolved.WriteTimeout = defaultConfig.WriteTimeout
-    }
+    resolved.WriteTimeout = resolvedDuration(resolved.WriteTimeout, defaultConfig.WriteTimeout)
 
     return resolved
 }
 
-/* resolvedPoolConfig answers the pool sizing the database is built with, with every non-positive field replaced by the constructor default: on database/sql a zero maximum means an UNLIMITED pool and a zero lifetime means connections that are never recycled, so a configuration assembled from unset environment keys would remove the bounds the nil configuration installs. */
+/* resolvedPoolConfig answers the pool sizing the database is built with, with every zero field replaced by the constructor default and a negative one read as Unlimited: on database/sql a zero maximum means an UNLIMITED pool and a zero lifetime means connections that are never recycled, so a configuration assembled from unset environment keys would remove the bounds the nil configuration installs. */
 func (instance *Provider) resolvedPoolConfig() *PoolConfig {
     defaultConfig := DefaultPoolConfig()
 
@@ -171,25 +165,17 @@ func (instance *Provider) resolvedPoolConfig() *PoolConfig {
         ConnectionMaxIdleTime: instance.poolConfig.ConnectionMaxIdleTime,
     }
 
-    if 0 >= resolved.MaxOpenConnections {
-        resolved.MaxOpenConnections = defaultConfig.MaxOpenConnections
-    }
+    resolved.MaxOpenConnections = resolvedOpenConnectionCount(resolved.MaxOpenConnections, defaultConfig.MaxOpenConnections)
 
-    if 0 >= resolved.MaxIdleConnections {
-        resolved.MaxIdleConnections = defaultConfig.MaxIdleConnections
-    }
+    resolved.MaxIdleConnections = resolvedIdleConnectionCount(resolved.MaxIdleConnections, defaultConfig.MaxIdleConnections)
 
     if true == instance.tunedForMigration {
         return resolved
     }
 
-    if 0 >= resolved.ConnectionMaxLifetime {
-        resolved.ConnectionMaxLifetime = defaultConfig.ConnectionMaxLifetime
-    }
+    resolved.ConnectionMaxLifetime = resolvedDuration(resolved.ConnectionMaxLifetime, defaultConfig.ConnectionMaxLifetime)
 
-    if 0 >= resolved.ConnectionMaxIdleTime {
-        resolved.ConnectionMaxIdleTime = defaultConfig.ConnectionMaxIdleTime
-    }
+    resolved.ConnectionMaxIdleTime = resolvedDuration(resolved.ConnectionMaxIdleTime, defaultConfig.ConnectionMaxIdleTime)
 
     return resolved
 }

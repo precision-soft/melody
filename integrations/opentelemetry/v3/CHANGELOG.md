@@ -17,6 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- documentation: the two grpc requirement entries are one, at v1.83.1, naming both advisories it fixes.
 - documentation: the README says that the status the metrics record is decided by the handler's error first, then by its response, then by what it wrote directly.
 - the tracing middleware set the server span's status to error for a deliberate sub-500 a handler answered — a 404, a 422 — which is the client's error; the status stays unset below 500 and the error is still recorded as the span's exception event.
 - the tracing middleware read a handler error's message through `Error()` bare, so a typed nil panicked inside the middleware; the message is read through the exception package and the span records it.
@@ -33,8 +34,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Security
 
-- `go.mod` — `google.golang.org/grpc` is required at v1.83.1, the fix for [GO-2026-6348](https://pkg.go.dev/vuln/GO-2026-6348) (heap exhaustion through HTTP/2 DATA frame fragmentation), which govulncheck reports as reachable from this module through the otlp exporter's transport. Same policy as the v1.82.1 requirement below it
-- `go.mod` — `google.golang.org/grpc` is required at v1.82.1, the fix for [GO-2026-6061](https://pkg.go.dev/vuln/GO-2026-6061), which govulncheck reports as reachable from this module through the otlp exporter path. The dependency pinning policy keeps the oldest version that compiles, and a reachable advisory is the exception that policy exists to admit
+- `go.mod` — `google.golang.org/grpc` is required at v1.83.1, which fixes [GO-2026-6061](https://pkg.go.dev/vuln/GO-2026-6061) and [GO-2026-6348](https://pkg.go.dev/vuln/GO-2026-6348) (heap exhaustion through HTTP/2 DATA frame fragmentation), both reported by govulncheck as reachable from this module through the otlp exporter's transport. The dependency pinning policy keeps the oldest version that compiles, and a reachable advisory is the exception that policy exists to admit
 
 ## [v3.1.0] - 2026-07-06 - Lifecycle Handler Decorator and OTLP Trace Export
 

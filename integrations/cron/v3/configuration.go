@@ -23,7 +23,7 @@ type EntryConfig struct {
     Instances int
     /* Timeout bounds one run of this entry under the in-process runner. Zero takes the runner default, which is no deadline, and a negative value asks for no deadline explicitly. The generated manifests ignore it, since an external scheduler bounds its own jobs. */
     Timeout time.Duration
-    /* GracefulTimeout is how long the entry's command is given to unwind after Timeout cancelled its context, before the runner stops waiting and closes the run's container scope under it; zero takes the runner default. It is reached only by a command that ignores its cancelled context, and only when Timeout set one. */
+    /* GracefulTimeout is how long the entry's command is given to unwind after Timeout or the runner's shutdown cancelled its context, before the runner stops waiting and closes the run's container scope under it; zero takes the runner default. It is reached only by a command that ignores its cancelled context. */
     GracefulTimeout time.Duration
 }
 

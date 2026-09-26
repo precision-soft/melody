@@ -429,7 +429,7 @@ func TestComputeBackoffDelayNaNMultiplierFallsBackToDefault(t *testing.T) {
     }
 }
 
-func TestResolvedTimeoutConfig_NonPositiveConnectTimeoutFallsBackToTheDefault(t *testing.T) {
+func TestResolvedTimeoutConfig_ZeroConnectTimeoutFallsBackToTheDefaultAndANegativeOneLiftsIt(t *testing.T) {
     defaultConfig := DefaultTimeoutConfig()
 
     if defaultConfig.ConnectTimeout != (&Provider{}).resolvedTimeoutConfig().ConnectTimeout {
@@ -440,8 +440,12 @@ func TestResolvedTimeoutConfig_NonPositiveConnectTimeoutFallsBackToTheDefault(t 
         t.Fatalf("expected the default for a zero-value configuration")
     }
 
-    if defaultConfig.ConnectTimeout != (&Provider{timeoutConfig: NewTimeoutConfig(-1, 0, 0)}).resolvedTimeoutConfig().ConnectTimeout {
-        t.Fatalf("expected the default for a negative connect timeout")
+    if 0 != (&Provider{timeoutConfig: NewTimeoutConfig(Unlimited, 0, 0)}).resolvedTimeoutConfig().ConnectTimeout {
+        t.Fatalf("expected Unlimited to lift the connect timeout")
+    }
+
+    if 0 != (&Provider{timeoutConfig: NewTimeoutConfig(-time.Second, 0, 0)}).resolvedTimeoutConfig().ConnectTimeout {
+        t.Fatalf("expected a negative connect timeout to lift it")
     }
 
     if 7*time.Second != (&Provider{timeoutConfig: NewTimeoutConfig(7*time.Second, 0, 0)}).resolvedTimeoutConfig().ConnectTimeout {
@@ -449,7 +453,7 @@ func TestResolvedTimeoutConfig_NonPositiveConnectTimeoutFallsBackToTheDefault(t 
     }
 }
 
-func TestResolvedPoolConfig_NonPositiveFieldsFallBackToTheDefaults(t *testing.T) {
+func TestResolvedPoolConfig_ZeroFieldsFallBackToTheDefaultsAndNegativeOnesLiftTheBound(t *testing.T) {
     defaultConfig := DefaultPoolConfig()
 
     fromZero := (&Provider{poolConfig: &PoolConfig{}}).resolvedPoolConfig()
@@ -460,10 +464,10 @@ func TestResolvedPoolConfig_NonPositiveFieldsFallBackToTheDefaults(t *testing.T)
         t.Fatalf("expected the defaults for a zero-value pool, got %+v", fromZero)
     }
 
-    fromNegative := (&Provider{poolConfig: NewPoolConfig(-1, -1, -1, -1)}).resolvedPoolConfig()
-    if defaultConfig.MaxOpenConnections != fromNegative.MaxOpenConnections ||
-        defaultConfig.ConnectionMaxLifetime != fromNegative.ConnectionMaxLifetime {
-        t.Fatalf("expected the defaults for a negative pool, got %+v", fromNegative)
+    fromNegative := (&Provider{poolConfig: NewPoolConfig(Unlimited, -3, Unlimited, -time.Minute)}).resolvedPoolConfig()
+    if 0 != fromNegative.MaxOpenConnections || math.MaxInt != fromNegative.MaxIdleConnections ||
+        0 != fromNegative.ConnectionMaxLifetime || 0 != fromNegative.ConnectionMaxIdleTime {
+        t.Fatalf("expected a negative pool to lift every bound, got %+v", fromNegative)
     }
 
     configured := (&Provider{poolConfig: NewPoolConfig(3, 2, time.Minute, time.Second)}).resolvedPoolConfig()
@@ -476,7 +480,7 @@ func TestResolvedPoolConfig_NonPositiveFieldsFallBackToTheDefaults(t *testing.T)
     }
 }
 
-func TestResolvedTimeoutConfigNormalizesNonPositiveReadAndWriteDeadlines(t *testing.T) {
+func TestResolvedTimeoutConfigDefaultsAZeroDeadlineAndLiftsANegativeOne(t *testing.T) {
     provider := &Provider{timeoutConfig: NewTimeoutConfig(time.Second, 0, -1)}
 
     resolved := provider.resolvedTimeoutConfig()
@@ -485,8 +489,16 @@ func TestResolvedTimeoutConfigNormalizesNonPositiveReadAndWriteDeadlines(t *test
         t.Fatalf("expected the zero read deadline to take the default, got %v", resolved.ReadTimeout)
     }
 
-    if DefaultTimeoutConfig().WriteTimeout != resolved.WriteTimeout {
-        t.Fatalf("expected the negative write deadline to take the default, got %v", resolved.WriteTimeout)
+    if 0 != resolved.WriteTimeout {
+        t.Fatalf("expected the negative write deadline to be lifted, got %v", resolved.WriteTimeout)
+    }
+}
+
+func TestResolvedTimeoutConfigTheMigrationConnectionKeepsAnUnlimitedConnectTimeout(t *testing.T) {
+    derived := NewProvider(WithTimeoutConfig(NewTimeoutConfig(Unlimited, 30*time.Second, 30*time.Second))).migrationProvider()
+
+    if 0 != derived.resolvedTimeoutConfig().ConnectTimeout {
+        t.Fatalf("expected the lifted connect timeout to reach the migration connection, got %v", derived.resolvedTimeoutConfig().ConnectTimeout)
     }
 }
 

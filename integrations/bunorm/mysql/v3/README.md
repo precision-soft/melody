@@ -61,7 +61,7 @@ Because the provider is given values rather than the configuration keys they cam
 
 ### Defaults
 
-All three configurations fill in **field by field**: a supplied `PoolConfig` or `TimeoutConfig` has every non-positive field replaced by the listed default, so passing `NewPoolConfig(0, 0, 0, 0)` yields the defaults rather than the zeros — on `database/sql` a zero maximum means *unlimited*, which is not a sizing anyone asks for by omission. What makes `RetryConfig` different is absence alone: an absent `RetryConfig` means **no retry at all** rather than the defaults, while a supplied one fills in field by field like the other two — except `BackoffMultiplier`, whose floor is `1`: any supplied value below it, `NaN` included, falls back to the default, while exactly `1` stays a valid constant backoff.
+All three configurations fill in **field by field**: a supplied `PoolConfig` or `TimeoutConfig` has every zero field replaced by the listed default, so passing `NewPoolConfig(0, 0, 0, 0)` yields the defaults rather than the zeros — on `database/sql` a zero maximum means *unlimited*, which is not a sizing anyone asks for by omission. A bound you do want lifted is asked for by name: [`Unlimited`](./unlimited.go), or any negative value, means no deadline for a timeout, no cap on the open or idle connections and no recycling for a lifetime or an idle time. What makes `RetryConfig` different is absence alone: an absent `RetryConfig` means **no retry at all** rather than the defaults, while a supplied one fills in field by field like the other two — except `BackoffMultiplier`, whose floor is `1`: any supplied value below it, `NaN` included, falls back to the default, while exactly `1` stays a valid constant backoff.
 
 Applied when the matching config is not set ([`DefaultPoolConfig`](./pool_config.go), [`DefaultTimeoutConfig`](./timeout_config.go), [`DefaultRetryConfig`](./retry_config.go)):
 
@@ -79,7 +79,7 @@ Applied when the matching config is not set ([`DefaultPoolConfig`](./pool_config
 | `RetryConfig`   | `MaxDelay`              | `5s`    |
 | `RetryConfig`   | `BackoffMultiplier`     | `2.0`   |
 
-Retrying is **opt-in**: without a `RetryConfig`, `Open` makes a single attempt. Only transient failures are retried; a non-transient error fails immediately. `ConnectTimeout` also bounds the initial `PingContext` and the post-build hook; a non-positive value falls back to the 10s default before the connector is built, so the dial, ping and hook always run under a deadline.
+Retrying is **opt-in**: without a `RetryConfig`, `Open` makes a single attempt. Only transient failures are retried; a non-transient error fails immediately. `ConnectTimeout` also bounds the initial `PingContext` and the post-build hook; a zero value falls back to the 10s default before the connector is built, so the dial, ping and hook run under a deadline unless `Unlimited` lifts it.
 
 The lock's own release/verify round trips are bounded separately by [`WithLockReleaseTimeout`](./lock.go) (default 5s).
 
