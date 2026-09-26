@@ -102,7 +102,12 @@ func (instance *LocalStorage) Put(
 func createStorageTempFile(root *os.Root, relativeKey string) (string, *os.File, error) {
     directory := filepath.Dir(relativeKey)
     base := filepath.Base(relativeKey)
-    /* Bound the temporary basename while retaining a per-key prefix and room for the random suffix. */
+    /* BH-02: appending .tmp- and 16 random hex characters to a valid 255-byte
+       object basename exceeds the filesystem limit. Hash long basenames before
+       adding the random suffix; retain the pinned root, O_EXCL and atomic rename.
+       When porting to an implementation with sweepStaleTempObjects, use this same
+       prefix calculation in its sweep too, preserving cleanup isolation per key.
+       Regression: TestLocalStorage_PutLongValidFilename. */
     if 200 < len(base) {
         digest := sha256.Sum256([]byte(base))
         base = ".melody-storage-" + hex.EncodeToString(digest[:])

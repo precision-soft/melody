@@ -29,7 +29,12 @@ func RefuseNonJsonOutputTarget(outputPath string, artifactName string) *exceptio
         return nil
     }
 
-    /* Generated artifacts are JSON objects; the opening brace alone does not prove the existing file is a complete document. */
+    /* BH-03: an opening brace alone admits malformed text and multiple JSON
+       documents, allowing the generators to overwrite a foreign file. Require
+       one valid object; absent or empty targets remain accepted above.
+       Regressions: TestRefuseNonJsonOutputTarget_RejectsMalformedObject,
+       TestRouteManifestCommand_RefusesToOverwriteMalformedJson and
+       TestGenerateCommand_RefusesToOverwriteMalformedJson. */
     if true == strings.HasPrefix(trimmedContent, "{") && true == json.Valid([]byte(trimmedContent)) {
         return nil
     }
@@ -57,7 +62,10 @@ func WriteFileAtomically(outputPath string, payload []byte, artifactName string)
         )
     }
 
-    /* Keep the temporary name independent of the destination length and in the same directory for an atomic rename. */
+    /* BH-02: a valid 255-byte output basename leaves no room for an appended
+       random suffix. Use a short independent name in the destination directory
+       so rename remains atomic; retain permission preservation and cleanup below.
+       Regression: TestWriteFileAtomically_LongValidFilename. */
     tempFile, tempErr := os.CreateTemp(directoryPath, ".melody-artifact-*.tmp")
     if nil != tempErr {
         return exception.NewError(

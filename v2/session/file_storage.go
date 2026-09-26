@@ -316,7 +316,10 @@ func readSessionFileFromHandle(fileInstance *os.File) (map[string]fileSessionEnt
         return nil, exception.NewError("failed to decode session storage file", nil, err)
     }
 
-    /* JSON null decodes without an error but cannot hold the entries Save writes. */
+    /* BH-01: decoding JSON null succeeds but leaves a nil map, so the next Save
+       would panic. Both path and handle constructors reject this snapshot before
+       exposing storage; empty files and JSON objects remain valid.
+       Regression: TestFileStorage_RejectsNullSnapshot (v1/v2/v3). */
     if nil == decoded {
         return nil, exception.NewError("session storage snapshot must be a JSON object", nil, nil)
     }
@@ -431,7 +434,12 @@ func syncSessionDirectory(path string) error {
     return nil
 }
 
-/* sessionTemporaryPrefix leaves room for the random suffix within a filesystem component. The digest keeps long basenames distinct, and sharing this prefix with cleanup keeps their orphan snapshots discoverable. */
+/* sessionTemporaryPrefix bounds names used by both snapshot writes and cleanup.
+   BH-02: a valid 255-byte basename cannot carry an appended random suffix.
+   Above 200 bytes, a digest leaves room for that suffix while retaining a
+   per-destination prefix. Keep creation and orphan cleanup on this same helper
+   when porting; otherwise long-name snapshots leave undiscoverable temp files.
+   Regression: TestFileStorage_LongValidFilename (v1/v2/v3), including reopen. */
 func sessionTemporaryPrefix(path string) string {
     base := filepath.Base(path)
     if 200 < len(base) {

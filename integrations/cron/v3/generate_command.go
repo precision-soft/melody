@@ -646,7 +646,11 @@ func atomicWriteFile(destination string, content []byte, mode os.FileMode) error
         return exception.NewError("cron: could not read destination permissions", exceptioncontract.Context{"destination": destination}, statErr)
     }
 
-    /* A fixed prefix leaves room for the random suffix even when the destination basename fills the filesystem limit. The same directory keeps the rename atomic. */
+    /* BH-02: appending a suffix to a valid 255-byte destination basename
+       exceeds the filesystem component limit. A fixed temporary prefix avoids
+       that limit; using the destination directory preserves atomic rename.
+       Keep the existing destination-permission handling when porting to each major.
+       Regression: TestAtomicWriteFileLongValidFilename (v1/v2/v3). */
     tmpFile, createErr := os.CreateTemp(filepath.Dir(destination), ".melody-cron-*.tmp")
     if nil != createErr {
         return exception.NewError(
