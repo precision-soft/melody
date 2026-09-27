@@ -278,6 +278,7 @@ func (instance *Builder) addFirewall(
     instance.validateFirewall(
         name,
         matcher,
+        rules,
         tokenSource,
         loginPath,
         logoutPath,
@@ -313,6 +314,7 @@ func (instance *Builder) addFirewall(
 func (instance *Builder) validateFirewall(
     name string,
     matcher securitycontract.Matcher,
+    rules []securitycontract.Rule,
     tokenSource securitycontract.TokenSource,
     loginPath string,
     logoutPath string,
@@ -334,6 +336,21 @@ func (instance *Builder) validateFirewall(
                 nil,
             ),
         )
+    }
+
+    for ruleIndex, rule := range rules {
+        if true == internal.IsNilInterface(rule) {
+            exception.Panic(
+                exception.NewError(
+                    "security firewall rule is nil",
+                    exceptioncontract.Context{
+                        "firewallName": name,
+                        "ruleIndex":    ruleIndex,
+                    },
+                    nil,
+                ),
+            )
+        }
     }
 
     if true == internal.IsNilInterface(tokenSource) {

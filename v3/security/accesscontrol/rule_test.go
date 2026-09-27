@@ -2,6 +2,8 @@ package accesscontrol
 
 import (
     "testing"
+
+    "github.com/precision-soft/melody/v3/internal/testhelper"
 )
 
 /* the four modes are the whole point of the package, and each one answers differently for the same set of paths. The table is the specification: a reader who wants to know which constructor to reach for reads the columns, and a change that blurs two modes into one fails here. */
@@ -190,3 +192,67 @@ func TestNewControlCopiesTheCallersRules(t *testing.T) {
         t.Fatalf("the control changed under a write to the caller's slice: %v", attributes)
     }
 }
+
+/* the request side is canonicalized to a leading slash, so a path declared without one could never match and the paths it names would reach their handlers without a decision. */
+func TestARulePathWithoutALeadingSlashIsRefusedInEveryPathMode(t *testing.T) {
+    config := RuleConfig{Attributes: []string{"ROLE_ADMIN"}}
+
+    for _, testCase := range []struct {
+        name  string
+        build func()
+    }{
+        {"exact", func() { _ = NewExactRule("admin", config) }},
+        {"segment prefix", func() { _ = NewSegmentPrefixRule(" admin/panel", config) }},
+        {"raw prefix", func() { _ = NewRawPrefixRule("admin", config) }},
+        {"new rule", func() { _ = NewRule("admin", MatchingSegmentPrefix, config) }},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            testhelper.AssertPanicsWithError(t, testCase.build, "access control rule path must begin with a slash")
+        })
+    }
+}
+
+/* a raw reach spelled with a trailing slash would be stored without it and claim every sibling beginning with the same letters, the reach the slash was written to exclude. */
+func TestNewRawPrefixRuleRefusesATrailingSlash(t *testing.T) {
+    testhelper.AssertPanicsWithError(
+        t,
+        func() { _ = NewRawPrefixRule("/api/", RuleConfig{Attributes: []string{"ROLE_USER"}}) },
+        "access control raw prefix rule may not end with a slash",
+    )
+}
+
+func TestNewRawPrefixRuleKeepsTheRootSpelling(t *testing.T) {
+    rule := NewRawPrefixRule("/", RuleConfig{Attributes: []string{"ROLE_USER"}})
+
+    if "/" != rule.PathPrefix() {
+        t.Fatalf("expected the root rule to keep its spelling, got %q", rule.PathPrefix())
+    }
+}
+
+/* the reach the trailing slash meant is the segment one, and declared so the neighbouring tree stays with the rule that names it. */
+func TestASegmentRuleLeavesTheNeighbouringTreeToItsOwnRule(t *testing.T) {
+    control := NewControl(
+        NewSegmentPrefixRule("/api/", RuleConfig{Attributes: []string{"ROLE_USER"}}),
+        NewRegexRule("^/api-internal(/|$)", RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
+    )
+
+    attributes, matched := control.Match("/api-internal/x")
+    if false == matched || 1 != len(attributes) || "ROLE_ADMIN" != attributes[0] {
+        t.Fatalf("expected the regex rule to govern its tree, got %v matched=%v", attributes, matched)
+    }
+
+    attributes, matched = control.Match("/api/x")
+    if false == matched || "ROLE_USER" != attributes[0] {
+        t.Fatalf("expected the segment rule to govern its tree, got %v matched=%v", attributes, matched)
+    }
+}
+
+/* the zero rule is the empty-prefix fallback with no attribute, so it would deny every path no other rule claimed. */
+func TestNewControlRefusesTheZeroRule(t *testing.T) {
+    testhelper.AssertPanicsWithError(
+        t,
+        func() { _ = NewControl(NewSegmentPrefixRule("/admin", RuleConfig{Attributes: []string{"ROLE_ADMIN"}}), Rule{}) },
+        "access control rule carries no attribute",
+    )
+}
+

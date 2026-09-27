@@ -14,7 +14,7 @@ type RuleConfig struct {
     Attributes []string
 }
 
-/* Rule is one access control rule: a path, the way that path is compared, and the attributes a matching request must satisfy. Build one with NewRule or with the mode-specific constructor beside it; the zero value governs nothing. */
+/* Rule is one access control rule: a path, the way that path is compared, and the attributes a matching request must satisfy. Build one with NewRule or with the mode-specific constructor beside it; the zero value carries no attribute and NewControl refuses it. */
 type Rule struct {
     pathPrefix      string
     regexPattern    string
@@ -93,6 +93,8 @@ func NewExactRule(path string, config RuleConfig) Rule {
         )
     }
 
+    refuseRelativePath(normalizedPath)
+
     if "/" != normalizedPath {
         normalizedPath = strings.TrimSuffix(normalizedPath, "/")
     }
@@ -113,6 +115,8 @@ func NewSegmentPrefixRule(path string, config RuleConfig) Rule {
         )
     }
 
+    refuseRelativePath(normalizedPrefix)
+
     return Rule{
         pathPrefix:      normalizedPrefix,
         attributes:      normalizeAttributes(config.Attributes),
@@ -120,9 +124,22 @@ func NewSegmentPrefixRule(path string, config RuleConfig) Rule {
     }
 }
 
-/* NewRawPrefixRule builds a rule that reaches across segment boundaries: "/admin" governs "/administrator" and "/admin-tools" as readily as "/admin/panel". PUBLIC_ACCESS is refused on it, since a raw public rule, being the longest match, would shadow a bounded denial. Reach for NewSegmentPrefixRule unless the cross-segment reach is what the rule means. */
+/* NewRawPrefixRule builds a rule that reaches across segment boundaries: "/admin" governs "/administrator" and "/admin-tools" as readily as "/admin/panel". PUBLIC_ACCESS is refused on it, since a raw public rule, being the longest match, would shadow a bounded denial. A trailing slash is refused, since a raw reach cannot express the segment boundary it spells: "/api/" would claim "/api-internal". Reach for NewSegmentPrefixRule unless the cross-segment reach is what the rule means. */
 func NewRawPrefixRule(path string, config RuleConfig) Rule {
     refusePublicAccess(config.Attributes, "a raw prefix rule; use a segment prefix, exact, or regex rule")
+
+    trimmedPath := strings.TrimSpace(path)
+    refuseRelativePath(trimmedPath)
+
+    if "/" != trimmedPath && true == strings.HasSuffix(trimmedPath, "/") {
+        exception.Panic(
+            exception.NewError(
+                "access control raw prefix rule may not end with a slash; declare the reach: a segment prefix rule, or the raw prefix without the slash",
+                map[string]any{"path": trimmedPath},
+                nil,
+            ),
+        )
+    }
 
     return Rule{
         pathPrefix: normalizePathPrefix(path),
@@ -201,6 +218,21 @@ func refusePublicAccess(attributes []string, target string) {
             )
         }
     }
+}
+
+/* refuseRelativePath refuses a non-empty path that does not begin with a slash: the request path is canonicalized to one, so such a rule could never match. The empty raw prefix stays the declared fallback. */
+func refuseRelativePath(path string) {
+    if "" == path || true == strings.HasPrefix(path, "/") {
+        return
+    }
+
+    exception.Panic(
+        exception.NewError(
+            "access control rule path must begin with a slash",
+            map[string]any{"path": path},
+            nil,
+        ),
+    )
 }
 
 func normalizePathPrefix(pathPrefix string) string {

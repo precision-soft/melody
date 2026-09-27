@@ -356,3 +356,50 @@ func TestFirewallOverride_TurningInheritanceOffOnTheZeroValueHoldsInEitherOrder(
         })
     }
 }
+
+/* a nil rule passes the declaration unseen and panics inside the resolution listener on every request behind the firewall, so it is refused where the composition root declared it. */
+func TestBuilder_AddFirewallRefusesANilRule(t *testing.T) {
+    var typedNilRule securitycontract.Rule = (*security.ApiKeyHeaderRule)(nil)
+
+    for _, testCase := range []struct {
+        name string
+        rule securitycontract.Rule
+    }{
+        {"nil", nil},
+        {"typed nil", typedNilRule},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            testhelper.AssertPanicsWithError(t, func() {
+                NewBuilder().AddStatelessFirewall(
+                    "api",
+                    security.NewPathPrefixMatcher("/api"),
+                    []securitycontract.Rule{testCase.rule},
+                    &anonymousTokenSource{},
+                    NewFirewallOverrideConfiguration(),
+                )
+            }, "security firewall rule is nil")
+        })
+    }
+}
+
+/* the registry answers the first firewall of a name and the manager the last, so two of one name would be two policies for one firewall. */
+func TestBuilder_AddFirewallRefusesANameAlreadyDeclared(t *testing.T) {
+    builder := NewBuilder().AddStatelessFirewall(
+        "api",
+        security.NewPathPrefixMatcher("/api"),
+        nil,
+        &anonymousTokenSource{},
+        NewFirewallOverrideConfiguration(),
+    )
+
+    testhelper.AssertPanicsWithError(t, func() {
+        builder.AddStatelessFirewall(
+            "api",
+            security.NewPathPrefixMatcher("/admin"),
+            nil,
+            &anonymousTokenSource{},
+            NewFirewallOverrideConfiguration(),
+        )
+    }, "security firewall name is already declared")
+}
+

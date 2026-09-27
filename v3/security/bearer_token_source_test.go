@@ -237,3 +237,14 @@ func TestBearerTokenSource_MarkedEnrichmentFailureLogsAtError(t *testing.T) {
         t.Fatal("an enrichment failure carrying the infrastructure mark must be filed at Error")
     }
 }
+
+func TestExtractBearerToken_TrimsTheSpaceAroundTheCredential(t *testing.T) {
+    tokenString, present := extractBearerToken("Bearer   opaque-123  ")
+    if false == present || "opaque-123" != tokenString {
+        t.Fatalf("expected the credential without its surrounding space, got %q present=%v", tokenString, present)
+    }
+
+    if _, present := extractBearerToken("Bearer    "); true == present {
+        t.Fatalf("expected a scheme followed by space alone to carry no credential")
+    }
+}

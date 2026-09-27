@@ -1177,3 +1177,37 @@ func TestAccessControlListener_ATypedNilRequestIsLeftAlone(t *testing.T) {
         t.Fatalf("expected no response for a request the listener cannot read")
     }
 }
+
+func TestAccessControlListener_ARulePathSpelledWithoutASlashGovernsItsPath(t *testing.T) {
+    kernel := newTestKernel()
+    runtimeInstance := newTestRuntime()
+
+    registry := NewFirewallRegistry(
+        NewCompiledConfiguration(nil, NewAccessControl(NewAccessControlRule("admin", "ROLE_ADMIN"))),
+    )
+
+    deniedCount := 0
+    kernel.EventDispatcher().AddListener(
+        securitycontract.EventSecurityAuthorizationDenied,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            deniedCount++
+            return nil
+        },
+        0,
+    )
+
+    RegisterKernelAccessControlListener(kernel, registry)
+
+    request := newSecurityTestRequest("GET", "/admin/x", nil, runtimeInstance)
+    requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, request)
+
+    _, err := kernel.EventDispatcher().DispatchName(runtimeInstance, "kernel.request", requestEvent)
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if 1 != deniedCount || nil == requestEvent.Response() {
+        t.Fatalf("expected the anonymous request refused by the rule, denied=%d response=%v", deniedCount, requestEvent.Response())
+    }
+}
+

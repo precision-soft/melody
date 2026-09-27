@@ -223,8 +223,8 @@ func TestAuthenticatorTokenSource_ResolveEmitsLoginSuccess(t *testing.T) {
     }
 }
 
-/* an authenticator that answers a nil token without an error yields an anonymous token and NO success event: nobody logged in, so nothing announces that somebody did */
-func TestAuthenticatorTokenSource_ResolveDoesNotAnnounceAnAnonymousToken(t *testing.T) {
+/* an authenticator that supported the request and answers a nil token without an error rejected its credentials: the request goes on anonymous, the failure event is dispatched once, and nothing announces a login */
+func TestAuthenticatorTokenSource_ResolveAnnouncesRejectedCredentialsAsAFailure(t *testing.T) {
     runtimeInstance, dispatcher := newTokenSourceTestRuntime(t)
 
     dispatchedNameList := recordSecurityLoginEvents(dispatcher)
@@ -249,8 +249,8 @@ func TestAuthenticatorTokenSource_ResolveDoesNotAnnounceAnAnonymousToken(t *test
         t.Fatalf("expected an anonymous token")
     }
 
-    if 0 != len(*dispatchedNameList) {
-        t.Fatalf("expected no login event for an anonymous outcome, got %v", *dispatchedNameList)
+    if 1 != len(*dispatchedNameList) || securitycontract.EventSecurityLoginFailure != (*dispatchedNameList)[0] {
+        t.Fatalf("expected exactly one login failure event for rejected credentials, got %v", *dispatchedNameList)
     }
 }
 
@@ -393,5 +393,94 @@ func TestResolverTokenSource_ResolveReadsATypedNilTokenAsAbsent(t *testing.T) {
 
     if _, isAnonymous := token.(*AnonymousToken); false == isAnonymous {
         t.Fatalf("expected the anonymous token, got %T", token)
+    }
+}
+
+func TestAuthenticatorTokenSource_AWrongApiKeyIsAnnouncedAsALoginFailure(t *testing.T) {
+    runtimeInstance, dispatcher := newTokenSourceTestRuntime(t)
+
+    dispatchedNameList := recordSecurityLoginEvents(dispatcher)
+
+    tokenSource := NewAuthenticatorTokenSource(
+        NewAuthenticatorManager(
+            NewApiKeyHeaderAuthenticator("X-Api-Key", "right", "service", []string{"ROLE_SERVICE"}),
+        ),
+    )
+
+    token, err := tokenSource.Resolve(
+        runtimeInstance,
+        newSecurityTestRequest("GET", "/", map[string]string{"X-Api-Key": "wrong"}, runtimeInstance),
+    )
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if true == token.IsAuthenticated() {
+        t.Fatalf("expected the wrong key answered anonymous")
+    }
+
+    if 1 != len(*dispatchedNameList) || securitycontract.EventSecurityLoginFailure != (*dispatchedNameList)[0] {
+        t.Fatalf("expected exactly one login failure event, got %v", *dispatchedNameList)
+    }
+}
+
+/* the first authenticator that supports the request decides: with its header present the second one never runs, so a wrong key is not retried against another door */
+func TestAuthenticatorTokenSource_TheFirstSupportingAuthenticatorDecides(t *testing.T) {
+    runtimeInstance, dispatcher := newTokenSourceTestRuntime(t)
+
+    dispatchedNameList := recordSecurityLoginEvents(dispatcher)
+
+    tokenSource := NewAuthenticatorTokenSource(
+        NewAuthenticatorManager(
+            NewApiKeyHeaderAuthenticator("X-Api-Key", "right", "service", []string{"ROLE_SERVICE"}),
+            &testAuthenticator{
+                supportsCallback: func(request httpcontract.Request) bool { return true },
+                authenticateCallback: func(request httpcontract.Request) (securitycontract.Token, error) {
+                    t.Fatalf("the second authenticator ran after the first supported the request")
+
+                    return nil, nil
+                },
+            },
+        ),
+    )
+
+    token, err := tokenSource.Resolve(
+        runtimeInstance,
+        newSecurityTestRequest("GET", "/", map[string]string{"X-Api-Key": "wrong"}, runtimeInstance),
+    )
+    if nil != err || true == token.IsAuthenticated() {
+        t.Fatalf("expected an anonymous answer, got token=%v err=%v", token, err)
+    }
+
+    if 1 != len(*dispatchedNameList) || securitycontract.EventSecurityLoginFailure != (*dispatchedNameList)[0] {
+        t.Fatalf("expected exactly one login failure event, got %v", *dispatchedNameList)
+    }
+}
+
+
+func TestAuthenticatorTokenSource_ResolveFailsWhenTheRejectedCredentialsDispatchFails(t *testing.T) {
+    runtimeInstance, dispatcher := newTokenSourceTestRuntime(t)
+
+    listenerErr := errors.New("event bus down")
+    dispatcher.AddListener(
+        securitycontract.EventSecurityLoginFailure,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            return listenerErr
+        },
+        0,
+    )
+
+    tokenSource := NewAuthenticatorTokenSource(
+        NewAuthenticatorManager(
+            NewApiKeyHeaderAuthenticator("X-Api-Key", "right", "service", []string{"ROLE_SERVICE"}),
+        ),
+    )
+
+    _, err := tokenSource.Resolve(
+        runtimeInstance,
+        newSecurityTestRequest("GET", "/", map[string]string{"X-Api-Key": "wrong"}, runtimeInstance),
+    )
+    if false == errors.Is(err, listenerErr) {
+        t.Fatalf("expected the listener's failure to fail the resolution, got %v", err)
     }
 }

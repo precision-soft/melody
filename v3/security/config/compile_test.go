@@ -1,6 +1,7 @@
 package config
 
 import (
+    "strings"
     "testing"
 
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
@@ -130,4 +131,53 @@ func (instance *typedNilDeniedHandlerProbe) Handle(
     decisionErr error,
 ) (httpcontract.Response, error) {
     return nil, nil
+}
+
+func TestCompile_RefusesANilRule(t *testing.T) {
+    _, err := Compile(Configuration{
+        firewalls: []FirewallConfiguration{
+            {
+                name:        "api",
+                matcher:     security.NewPathPrefixMatcher("/api"),
+                rules:       []securitycontract.Rule{nil},
+                tokenSource: &anonymousTokenSource{},
+            },
+        },
+    })
+    if nil == err || false == strings.Contains(err.Error(), "security firewall rule is nil") {
+        t.Fatalf("expected the nil rule refused, got %v", err)
+    }
+}
+
+func TestCompile_RefusesANameAlreadyDeclared(t *testing.T) {
+    firewall := FirewallConfiguration{
+        name:        "api",
+        matcher:     security.NewPathPrefixMatcher("/api"),
+        tokenSource: &anonymousTokenSource{},
+        override:    NewFirewallOverrideConfiguration().WithStateless(true),
+    }
+
+    if _, err := Compile(Configuration{firewalls: []FirewallConfiguration{firewall}}); nil != err {
+        t.Fatalf("expected one firewall of the name to compile, got %v", err)
+    }
+
+    _, err := Compile(Configuration{firewalls: []FirewallConfiguration{firewall, firewall}})
+    if nil == err || false == strings.Contains(err.Error(), "security firewall name is already declared") {
+        t.Fatalf("expected the duplicate name refused, got %v", err)
+    }
+}
+
+
+func TestCompile_DescribesTheFrameworksPathPrefixMatcher(t *testing.T) {
+    compiledConfiguration := NewBuilder().AddStatelessFirewall(
+        "admin",
+        security.NewPathPrefixMatcher("/admin"),
+        nil,
+        &anonymousTokenSource{},
+        NewFirewallOverrideConfiguration(),
+    ).BuildAndCompile()
+
+    if `path prefix "/admin"` != compiledConfiguration.Firewalls()[0].MatcherDescription() {
+        t.Fatalf("expected the matcher described, got %q", compiledConfiguration.Firewalls()[0].MatcherDescription())
+    }
 }

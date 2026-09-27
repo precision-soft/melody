@@ -28,6 +28,7 @@ func NewJwtTokenValidator(config JwtConfig) *JwtTokenValidator {
     return newJwtTokenValidator(config, nil)
 }
 
+/* NewJwtTokenValidatorWithRevocationEpoch is NewJwtTokenValidator with a revocation boundary read from epochStore. It sets RejectFutureIssuedAt whatever config says: the boundary is compared with iat, so a token claiming a future iat would outlive every boundary drawn before that instant. */
 func NewJwtTokenValidatorWithRevocationEpoch(
     config JwtConfig,
     epochStore securitycontract.RevocationEpochStore,
@@ -294,7 +295,9 @@ func (instance *JwtTokenValidator) verifyTimeClaims(rawClaims map[string]any, no
         }
     }
 
+    /* iat is read rounded up for the future refusal and rounded down for what the claims carry, so the revocation boundary never lifts a token issued inside the revoked second past it */
     issuedAt, hasIssuedAt, issuedAtValid := numericClaim(rawClaims, "iat", true)
+    issuedAtFloor, _, _ := numericClaim(rawClaims, "iat", false)
     if true == hasIssuedAt && false == issuedAtValid {
         return time.Time{}, exception.NewError("jwt iat claim is malformed", nil, nil)
     }
@@ -310,7 +313,7 @@ func (instance *JwtTokenValidator) verifyTimeClaims(rawClaims map[string]any, no
         }
     }
 
-    return time.Unix(issuedAt, 0).UTC(), nil
+    return time.Unix(issuedAtFloor, 0).UTC(), nil
 }
 
 func (instance *JwtTokenValidator) verifyRegisteredClaims(rawClaims map[string]any) error {

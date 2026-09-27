@@ -22,6 +22,7 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
     }
 
     compiledFirewalls := make([]*security.CompiledFirewall, 0)
+    declaredFirewallNames := make(map[string]struct{}, len(configuration.firewalls))
 
     for _, firewall := range configuration.firewalls {
         if "" == firewall.name {
@@ -37,6 +38,30 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
                 nil,
             )
         }
+
+        for ruleIndex, rule := range firewall.rules {
+            if true == internal.IsNilInterface(rule) {
+                return nil, exception.NewError(
+                    "security firewall rule is nil",
+                    exceptioncontract.Context{
+                        "firewallName": firewall.name,
+                        "ruleIndex":    ruleIndex,
+                    },
+                    nil,
+                )
+            }
+        }
+
+        if _, declared := declaredFirewallNames[firewall.name]; true == declared {
+            return nil, exception.NewError(
+                "security firewall name is already declared",
+                exceptioncontract.Context{
+                    "firewallName": firewall.name,
+                },
+                nil,
+            )
+        }
+        declaredFirewallNames[firewall.name] = struct{}{}
 
         if true == internal.IsNilInterface(firewall.tokenSource) {
             return nil, exception.NewError(

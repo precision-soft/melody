@@ -1409,3 +1409,39 @@ func TestLeaderGate_LeavesTheTermBeforeTheReleaseReachesTheStore(t *testing.T) {
         t.Fatalf("expected the gate to have left its term while its release was still in flight")
     }
 }
+
+/* the renewal ignores its context and answers success only after the demotion instant: the elected hook is still told to stop at the instant, before the lease it was elected under lapses */
+func TestLeaderGate_ARenewalIgnoringItsContextStopsTheElectedHookAtTheDemotionInstant(t *testing.T) {
+    ttl := 400 * time.Millisecond
+    locker := &contextIgnoringRefreshLocker{inner: NewInMemoryLocker(clock.NewSystemClock()), delay: 180 * time.Millisecond}
+
+    runContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    stoppedAfter := make(chan time.Duration, 1)
+    gate := NewLeaderGateWithOptions(locker, "worker:context-ignoring", ttl, LeaderGateOptions{
+        RetryInterval: 5 * time.Millisecond,
+        OnElected: func(runtimeInstance runtimecontract.Runtime) {
+            electedAt := time.Now()
+            select {
+            case <-runtimeInstance.Context().Done():
+                stoppedAfter <- time.Since(electedAt)
+            case <-time.After(3 * time.Second):
+                stoppedAfter <- -1
+            }
+        },
+    })
+
+    done := make(chan error, 1)
+    go func() {
+        done <- gate.Run(testRuntimeWithContext(runContext))
+    }()
+
+    stopped := <-stoppedAfter
+    cancel()
+    <-done
+
+    if 0 > stopped || stopped > ttl-ttl/8 {
+        t.Fatalf("expected the elected hook told to stop at least an eighth of the ttl before the lapse, stopped after %v", stopped)
+    }
+}

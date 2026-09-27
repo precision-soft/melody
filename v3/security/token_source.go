@@ -82,7 +82,22 @@ func (instance *AuthenticatorTokenSource) Resolve(runtimeInstance runtimecontrac
 
     /* IsNilInterface: a typed nil token falls through to the anonymous one */
     if true == internal.IsNilInterface(token) {
-        return NewAnonymousToken(), nil
+        token = NewAnonymousToken()
+    }
+
+    /* an authenticator that supported the request and answered no user rejected the credentials the request carried, a wrong api key among them: the failure event lets an audit or lockout listener see it, and the request goes on anonymous */
+    if true == usedAuthenticator && false == token.IsAuthenticated() {
+        eventDispatcher := event.EventDispatcherMustFromContainer(runtimeInstance.Container())
+        _, eventSecurityLoginFailureErr := eventDispatcher.DispatchName(
+            runtimeInstance,
+            securitycontract.EventSecurityLoginFailure,
+            NewLoginFailureEvent(request, exception.NewError("security credentials rejected", nil, nil)),
+        )
+        if nil != eventSecurityLoginFailureErr {
+            return nil, eventSecurityLoginFailureErr
+        }
+
+        return token, nil
     }
 
     if true == usedAuthenticator && true == token.IsAuthenticated() {

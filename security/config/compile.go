@@ -37,6 +37,19 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
             )
         }
 
+        for ruleIndex, rule := range firewall.rules {
+            if true == internal.IsNilInterface(rule) {
+                return nil, exception.NewError(
+                    "security firewall rule is nil",
+                    exceptioncontract.Context{
+                        "firewallName": firewall.name,
+                        "ruleIndex":    ruleIndex,
+                    },
+                    nil,
+                )
+            }
+        }
+
         if true == internal.IsNilInterface(firewall.tokenSource) {
             return nil, exception.NewError(
                 "security firewall token source is nil",

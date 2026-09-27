@@ -14,6 +14,30 @@ An upgrader who needs the old behaviour of any entry below pins the previous pat
 
 ## Unreleased
 
+### Security: an access control rule path begins with a slash, and a raw prefix declares its reach
+
+**What changed.** Every access control rule path that does not begin with a slash is refused at declaration, by the `accesscontrol` constructors, the builder's `Require` and `AllowAnonymous` and the deprecated `security` constructors; a raw prefix rule that ends with a slash is refused as well, and `accesscontrol.NewControl` refuses the zero `Rule`. The empty raw prefix, the declared fallback, and `/` are unchanged.
+
+**Symptom.** The application panics at boot with `access control rule path must begin with a slash`, `access control raw prefix rule may not end with a slash` or `access control rule carries no attribute`. The rule it names never did what it said: a path without a slash matched nothing, so its paths reached their handlers without a decision; a raw `/api/` claimed `/api-internal` and outranked a regex rule written for that tree; a zero `Rule` denied every path no other rule claimed.
+
+**Remedy.** Write the path with its leading slash. For a raw rule written with a trailing slash, declare the reach it meant: `accesscontrol.NewSegmentPrefixRule("/api", …)` for the segment, or the raw prefix without the slash when `/api-internal` belongs to it. Build every `Rule` with a constructor.
+
+### Security: a firewall's name is declared once, and its rules are never nil
+
+**What changed.** The builder and `Compile` refuse a second firewall of a name already declared, and a nil or typed-nil rule in a firewall's rule list; `NewCompiledFirewall` refuses the nil rule too.
+
+**Symptom.** The application panics at boot with `security firewall name is already declared` or `security firewall rule is nil`. Two firewalls of one name were answered as the first by the registry and as the last by the manager; a nil rule answered every request behind its firewall with a 500.
+
+**Remedy.** Give each firewall its own name, and remove the nil entry from its rule list.
+
+### Security: rejected credentials dispatch `security.login.failure`
+
+**What changed.** When the authenticator that supported the request answers no user, `AuthenticatorTokenSource` dispatches `security.login.failure`, carrying `security credentials rejected`, before the request goes on anonymous. A wrong `X-Api-Key` is the common case.
+
+**Symptom.** A listener on `security.login.failure` is called for a guessed or stale api key, where it was called only when an authenticator answered an error; a failing listener now fails that request, as it already failed a successful one.
+
+**Remedy.** None for a listener that audits or counts failures. One that assumed the event always carries an authenticator's error reads `LoginFailureEvent.Error()` as a description only.
+
 ### Application: the error handler is consulted, and the shutdown drain runs whatever failed before it
 
 **What changed.** An error handler installed after `Application.Boot` returned now takes the framework exception listener's place, as one installed before boot-end already did. The framework listener answers every `kernel.exception` dispatch and the kernel consults the handler only when the dispatch produced no response, so a registered listener takes the handler's place entirely — and the decision was frozen at the end of Boot. An http process now makes that one decision where serving begins; a console process keeps making it at boot-end, so its dispatcher still exposes the listener set a serving process runs. Separately, the http wind-down no longer returns on its first failing phase: the serve result, the server shutdown and the request-scope drain each run, and each failing one contributes its cause.
@@ -1361,7 +1385,7 @@ A correct size, a zero declared size, and a body **shorter** than its declared s
 
 ### Distributed lock: the callback is told to stop a quarter of the ttl before the lease lapses
 
-**What changed.** [`RunExclusive`](../lock/run_exclusive.go) and [`LeaderGate`](../lock/leader_gate.go) demote on the lease's demotion instant, half a renewal cadence — a quarter of the ttl at the default cadence — before the lease last written lapses, if no renewal has landed by then. A timer arms it whatever the store is doing, every renewal is bounded to it, and a failed renewal is retried once, halfway to it. A renewal that hung until its whole-cadence deadline or a store that failed at once used to demote at the lapse itself — the instant a contender could acquire — so the callback and the new holder overlapped.
+**What changed.** [`RunExclusive`](../lock/run_exclusive.go) and [`LeaderGate`](../lock/leader_gate.go) demote on the lease's demotion instant, half a renewal cadence — a quarter of the ttl at the default cadence — before the lease last written lapses, if no renewal has landed by then. A timer arms it whatever the store is doing — each renewal runs on a goroutine of its own, so one that ignores its context cannot hold it back — every renewal is bounded to it, and a failed renewal is retried once, halfway to it. A renewal that hung until its whole-cadence deadline or a store that failed at once used to demote at the lapse itself — the instant a contender could acquire — so the callback and the new holder overlapped.
 
 **Symptom.** A renewal that answers after the demotion instant no longer saves the lease: the callback's runtime is cancelled and `RunExclusive` returns `exclusive run lost the lock lease while running`, where a renewal landing anywhere inside the lease used to keep it. With a 30-second ttl the renewal issued at 15 seconds has until 22.5 seconds to land.
 

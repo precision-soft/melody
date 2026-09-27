@@ -79,6 +79,18 @@ func NewAccessControlRawPrefixRule(pathPrefix string, attributes ...string) Acce
         }
     }
 
+    /* a raw reach cannot express the segment boundary a trailing slash spells: "/api/" would be stored as "/api" and claim "/api-internal" */
+    trimmedPrefix := strings.TrimSpace(pathPrefix)
+    if "/" != trimmedPrefix && true == strings.HasSuffix(trimmedPrefix, "/") {
+        exception.Panic(
+            exception.NewError(
+                "access control raw prefix rule may not end with a slash; declare the reach: a segment prefix rule, or the raw prefix without the slash",
+                map[string]any{"pathPrefix": trimmedPrefix},
+                nil,
+            ),
+        )
+    }
+
     return newAccessControlPrefixRule(pathPrefix, attributes)
 }
 
@@ -103,6 +115,8 @@ func NewAccessControlExactRule(path string, attributes ...string) AccessControlR
             exception.NewError("access control exact path may not be empty", nil, nil),
         )
     }
+
+    normalizedPath = rootedPath(normalizedPath)
 
     if "/" != normalizedPath {
         normalizedPath = strings.TrimSuffix(normalizedPath, "/")
@@ -413,6 +427,8 @@ func normalizePathPrefix(pathPrefix string) string {
         return ""
     }
 
+    normalizedPrefix = rootedPath(normalizedPrefix)
+
     if "/" == normalizedPrefix {
         return "/"
     }
@@ -420,4 +436,13 @@ func normalizePathPrefix(pathPrefix string) string {
     normalizedPrefix = strings.TrimSuffix(normalizedPrefix, "/")
 
     return normalizedPrefix
+}
+
+/* rootedPath folds a leading slash onto a declared path: the request path is canonicalized to begin with one, so "admin" and "/admin" declare the same rule. */
+func rootedPath(path string) string {
+    if true == strings.HasPrefix(path, "/") {
+        return path
+    }
+
+    return "/" + path
 }

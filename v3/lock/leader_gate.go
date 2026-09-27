@@ -317,7 +317,10 @@ func (instance *LeaderGate) lead(runtimeInstance runtimecontract.Runtime, lock l
             }
         }()
 
-        refreshFailure = instance.refreshWhileLeading(termRuntime, lock)
+        refreshFailure = instance.refreshWhileLeading(termRuntime, lock, func() {
+            instance.leaveTerm()
+            cancel()
+        })
         if nil != refreshFailure {
             /* the lease is gone, so the claim is dropped here rather than where the term unwinds, which waits for OnElected to return; ending the term then stops OnElected */
             instance.leaveTerm()
@@ -351,7 +354,7 @@ func (instance *LeaderGate) lead(runtimeInstance runtimecontract.Runtime, lock l
 }
 
 /* refreshWhileLeading renews the held lease at the configured cadence until the term context ends, returning the renewal failure that ends the term. The lease clock is the demotion's: once the lease last written reaches its demotion instant, half a cadence before it lapses, with no renewal landed, the term ends — by a timer, whatever the store is doing, with every renewal bounded to that instant — so OnElected is told to stop while nobody else can yet be elected. A failed renewal is retried once, halfway to that instant; each landed renewal moves the lease, dated from the instant it was issued. */
-func (instance *LeaderGate) refreshWhileLeading(runtimeInstance runtimecontract.Runtime, lock lockcontract.Lock) error {
+func (instance *LeaderGate) refreshWhileLeading(runtimeInstance runtimecontract.Runtime, lock lockcontract.Lock, demote func()) error {
     refreshTtl := instance.ttl
     if 0 >= refreshTtl {
         /* session mode: a session locker ignores this ttl, while a lease locker rewrites the lease, so it renews for twice the probe cadence (see sessionProbeTtlFactor) */
@@ -386,6 +389,11 @@ func (instance *LeaderGate) refreshWhileLeading(runtimeInstance runtimecontract.
         case <-runtimeInstance.Context().Done():
             return nil
         case <-clock.demotion():
+            /* select picks at random among ready cases: a term the run context already ended has no lease left to lose */
+            if nil != runtimeInstance.Context().Err() {
+                return nil
+            }
+
             return clock.demotionError()
         case <-ticker.C:
         case <-clock.retry():
@@ -398,7 +406,19 @@ func (instance *LeaderGate) refreshWhileLeading(runtimeInstance runtimecontract.
             return clock.demotionError()
         }
 
-        refreshErr := refreshOnce(runtimeInstance, lock, refreshTtl, renewalBudget)
+        demoted, refreshErr := clock.renew(
+            func() error {
+                return refreshOnce(runtimeInstance, lock, refreshTtl, renewalBudget)
+            },
+            demote,
+            func() bool {
+                return nil != runtimeInstance.Context().Err()
+            },
+        )
+        if true == demoted {
+            return clock.demotionError()
+        }
+
         if nil == refreshErr {
             consecutiveFailureCount = 0
 

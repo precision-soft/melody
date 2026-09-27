@@ -11,6 +11,7 @@ import (
     eventcontract "github.com/precision-soft/melody/v3/event/contract"
     "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal/testhelper"
     "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
@@ -349,4 +350,10 @@ func TestCompiledFirewall_Logout_ADispatchFailureNamesTheBrokenListener(t *testi
     if false == strings.Contains(rendered, "the audit sink refused the record") {
         t.Fatalf("expected the broken listener's own cause in the record, got %s", rendered)
     }
+}
+
+func TestNewCompiledFirewall_RefusesANilRule(t *testing.T) {
+    testhelper.AssertPanicsWithError(t, func() {
+        _ = NewCompiledFirewall("api", NewPathPrefixMatcher("/api"), "", []securitycontract.Rule{nil}, nil, nil, nil, nil, nil, nil, "", "", nil, nil, SourceNone, SourceNone, SourceNone, SourceNone, SourceNone)
+    }, "security firewall rule is nil")
 }

@@ -112,7 +112,7 @@ func RunExclusive(
             }
         }()
 
-        refreshFailure = refreshWhileHeld(childRuntime, lock, ttl, acquireIssuedAt, refreshDone)
+        refreshFailure = refreshWhileHeld(childRuntime, lock, ttl, acquireIssuedAt, refreshDone, cancel)
         if nil != refreshFailure {
             /* the lease could not be extended, so callback is stopped rather than left working beside whoever may hold the lock now */
             cancel()
@@ -145,6 +145,7 @@ func refreshWhileHeld(
     ttl time.Duration,
     acquireIssuedAt time.Time,
     done <-chan struct{},
+    demote func(),
 ) error {
     refreshInterval, refreshTtl := resolveRefreshSchedule(ttl)
     refreshTimeout := resolveRefreshTimeout(refreshInterval)
@@ -157,6 +158,16 @@ func refreshWhileHeld(
     clock := newLeaseDemotionClock(0 < ttl, true, acquireIssuedAt.Add(refreshTtl), refreshInterval, refreshTimeout)
     defer clock.stop()
 
+    /* the run ended: its callback returned, or a shutdown cancelled its runtime */
+    settled := func() bool {
+        select {
+        case <-done:
+            return true
+        default:
+            return nil != runtimeInstance.Context().Err()
+        }
+    }
+
     for {
         select {
         case <-done:
@@ -164,6 +175,11 @@ func refreshWhileHeld(
         case <-runtimeInstance.Context().Done():
             return nil
         case <-clock.demotion():
+            /* select picks at random among ready cases: a callback that returned as the instant came has no lease left to lose */
+            if true == settled() {
+                return nil
+            }
+
             return clock.demotionError()
         case <-ticker.C:
         case <-clock.retry():
@@ -176,7 +192,17 @@ func refreshWhileHeld(
             return clock.demotionError()
         }
 
-        refreshErr := refreshOnce(runtimeInstance, lock, refreshTtl, renewalBudget)
+        demoted, refreshErr := clock.renew(
+            func() error {
+                return refreshOnce(runtimeInstance, lock, refreshTtl, renewalBudget)
+            },
+            demote,
+            settled,
+        )
+        if true == demoted {
+            return clock.demotionError()
+        }
+
         if nil == refreshErr {
             clock.landed(refreshIssuedAt.Add(refreshTtl))
 
@@ -271,6 +297,59 @@ func (instance *leaseDemotionClock) renewalBudget(now time.Time) (time.Duration,
     }
 
     return instance.refreshTimeout, true
+}
+
+/* renew runs one renewal and answers its result, or demoted when the lease reaches its demotion instant first. The renewal runs on a goroutine of its own and demote is called at the instant, unless settled says the run already ended, so a store that does not honour the context it is handed cannot keep the caller working past it; the answer is still awaited before renew returns, so the release that follows never overtakes a renewal on the wire. A renewal that answers success only after the instant is refused as well. A panic raised by the renewal is raised again here, where the loop's own recovery reads it. Without a lease clock the renewal runs inline. */
+func (instance *leaseDemotionClock) renew(renewal func() error, demote func(), settled func() bool) (bool, error) {
+    if false == instance.leaseClocked {
+        return false, renewal()
+    }
+
+    answered := make(chan renewalAnswer, 1)
+    go func() {
+        defer func() {
+            if recoveredValue := recover(); nil != recoveredValue {
+                answered <- renewalAnswer{panicked: true, recoveredValue: recoveredValue}
+            }
+        }()
+
+        answered <- renewalAnswer{err: renewal()}
+    }()
+
+    demoted := false
+
+    var answer renewalAnswer
+    select {
+    case answer = <-answered:
+    case <-instance.demotionTimer.C:
+        /* a run that ended before the instant, its callback returned or its runtime shut down, has no lease left to lose; the renewal's answer is still awaited, and the loop reads the ending */
+        demoted = false == settled()
+        if true == demoted {
+            demote()
+        }
+
+        answer = <-answered
+    }
+
+    if true == answer.panicked {
+        panic(answer.recoveredValue)
+    }
+
+    if true == demoted {
+        return true, nil
+    }
+
+    if nil == answer.err && false == time.Now().Before(leaseDemotionAt(instance.leaseExpiry, instance.refreshInterval)) && false == settled() {
+        return true, nil
+    }
+
+    return false, answer.err
+}
+
+type renewalAnswer struct {
+    err            error
+    panicked       bool
+    recoveredValue any
 }
 
 /* landed moves the lease to what a landed renewal wrote and re-arms the demotion on it. */

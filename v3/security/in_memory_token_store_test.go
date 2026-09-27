@@ -588,3 +588,19 @@ func TestInMemoryTokenStore_ATokenIssuedExactlyAtTheRevocationBoundaryIsRevoked(
         t.Fatalf("expected a token stamped one unit after the boundary to survive it, got found=%v err=%v", found, err)
     }
 }
+
+/* a token string stored again for another user leaves the first user's index, so revoking the first user does not delete the second user's session */
+func TestInMemoryTokenStore_PutForAnotherUserLeavesThePreviousUsersIndex(t *testing.T) {
+    store := NewInMemoryTokenStore()
+    store.Put("shared", securitycontract.Claims{UserIdentifier: "alice"})
+    store.Put("shared", securitycontract.Claims{UserIdentifier: "bob"})
+
+    if removed := store.DeleteByUser("alice"); 0 != removed {
+        t.Fatalf("expected alice to hold no token, removed %d", removed)
+    }
+
+    claims, found, err := store.Lookup(testRuntime(), "shared")
+    if nil != err || false == found || "bob" != claims.UserIdentifier {
+        t.Fatalf("expected bob's token kept, got %+v found=%v err=%v", claims, found, err)
+    }
+}

@@ -33,11 +33,17 @@ func NewCompiledFirewall(
     entryPointSource Source,
     accessDeniedHandlerSource Source,
 ) *CompiledFirewall {
+    var firewall *Firewall
+    if 0 != len(rules) {
+        firewall = NewFirewall(rules...)
+    }
+
     return &CompiledFirewall{
         name:                        name,
         matcher:                     matcher,
         matcherDescription:          matcherDescription,
         rules:                       append([]securitycontract.Rule{}, rules...),
+        firewall:                    firewall,
         tokenSource:                 tokenSource,
         accessControl:               accessControl,
         accessDecisionManager:       accessDecisionManager,
@@ -71,6 +77,7 @@ type CompiledFirewall struct {
     logoutHandler         securitycontract.LogoutHandler
 
     rules                       []securitycontract.Rule
+    firewall                    *Firewall
     accessControl               *AccessControl
     roleHierarchy               *RoleHierarchy
     roleHierarchySource         Source

@@ -381,7 +381,7 @@ func TestRunExclusive_DoesNotHangWhenARefreshIsInFlightAtReturn(t *testing.T) {
             testRuntimeWithContext(context.Background()),
             locker,
             "blocking",
-            2*time.Millisecond,
+            200*time.Millisecond,
             func(runtimecontract.Runtime) error {
                 <-entered
                 return nil
@@ -1116,5 +1116,66 @@ func TestRunExclusive_AFailingRenewalCancelsTheCallbackBeforeTheLeaseLapses(t *t
 
     if cancelledAfter := cancellationDelayUnder(t, &refreshFailingLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}, ttl); cancelledAfter > ttl-ttl/8 {
         t.Fatalf("expected the callback cancelled at least an eighth of the ttl before the lapse, cancelled after %v", cancelledAfter)
+    }
+}
+
+/* contextIgnoringRefreshLocker answers every renewal late and successfully, whatever the context it is handed says: the shape of a store client that does not honour cancellation */
+type contextIgnoringRefreshLocker struct {
+    inner lockcontract.Locker
+    delay time.Duration
+}
+
+func (instance *contextIgnoringRefreshLocker) CreateLock(name string, ttl time.Duration) lockcontract.Lock {
+    return &contextIgnoringRefreshLock{inner: instance.inner.CreateLock(name, ttl), delay: instance.delay}
+}
+
+type contextIgnoringRefreshLock struct {
+    inner lockcontract.Lock
+    delay time.Duration
+}
+
+func (instance *contextIgnoringRefreshLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+    return instance.inner.Acquire(runtimeInstance)
+}
+
+func (instance *contextIgnoringRefreshLock) Release(runtimeInstance runtimecontract.Runtime) error {
+    return instance.inner.Release(testRuntimeWithContext(context.Background()))
+}
+
+func (instance *contextIgnoringRefreshLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl time.Duration) error {
+    time.Sleep(instance.delay)
+
+    return instance.inner.Refresh(testRuntimeWithContext(context.Background()), ttl)
+}
+
+/* the renewal issued at half the ttl ignores its context and answers success only after the demotion instant: the callback is still told to stop at the instant, and the late success does not save the lease */
+func TestRunExclusive_ARenewalIgnoringItsContextCancelsTheCallbackAtTheDemotionInstant(t *testing.T) {
+    ttl := 400 * time.Millisecond
+    locker := &contextIgnoringRefreshLocker{inner: NewInMemoryLocker(clock.NewSystemClock()), delay: 180 * time.Millisecond}
+
+    if cancelledAfter := cancellationDelayUnder(t, locker, ttl); cancelledAfter > ttl-ttl/8 {
+        t.Fatalf("expected the callback cancelled at least an eighth of the ttl before the lapse, cancelled after %v", cancelledAfter)
+    }
+}
+
+/* the callback returns before the demotion instant while a renewal ignoring its context is still on the wire and answers after it: the run ended with its lease, so it is reported clean rather than as a lost lease */
+func TestRunExclusive_ACallbackThatReturnedBeforeTheInstantIsACleanRunWhateverTheRenewalAnswersLate(t *testing.T) {
+    ttl := 400 * time.Millisecond
+    locker := &contextIgnoringRefreshLocker{inner: NewInMemoryLocker(clock.NewSystemClock()), delay: 180 * time.Millisecond}
+
+    ran, runErr := RunExclusive(
+        testRuntimeWithContext(context.Background()),
+        locker,
+        "worker:returned-before-the-instant",
+        ttl,
+        func(runtimecontract.Runtime) error {
+            time.Sleep(250 * time.Millisecond)
+
+            return nil
+        },
+    )
+
+    if false == ran || nil != runErr {
+        t.Fatalf("expected a clean run, got ran=%v err=%v", ran, runErr)
     }
 }

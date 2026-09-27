@@ -45,10 +45,8 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
                 return nil
             }
 
-            firewallRules := firewall.Rules()
-            if 0 != len(firewallRules) {
-                firewallInstance := NewFirewall(firewallRules...)
-                checkErr := firewallInstance.Check(requestEvent.Request())
+            if nil != firewall.firewall {
+                checkErr := firewall.firewall.Check(requestEvent.Request())
                 if nil != checkErr {
                     setSecurityContextOnRuntime(runtimeInstance, firewall, NewAnonymousToken())
 

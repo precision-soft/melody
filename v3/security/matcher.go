@@ -1,6 +1,7 @@
 package security
 
 import (
+    "strconv"
     "strings"
 
     "github.com/precision-soft/melody/v3/http"
@@ -51,6 +52,11 @@ func (instance *PathPrefixMatcher) Matches(request httpcontract.Request) bool {
     }
 
     return false
+}
+
+/* String describes the matcher for the compiled firewall and the security context, as path prefix "/admin". */
+func (instance *PathPrefixMatcher) String() string {
+    return "path prefix " + strconv.Quote(instance.prefix)
 }
 
 var _ securitycontract.Matcher = (*PathPrefixMatcher)(nil)

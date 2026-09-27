@@ -3,6 +3,8 @@ package accesscontrol
 import (
     stdpath "path"
     "strings"
+
+    "github.com/precision-soft/melody/v3/exception"
 )
 
 /* Control is a set of access control rules resolved together. Build one with NewControl. */
@@ -10,8 +12,20 @@ type Control struct {
     rules []Rule
 }
 
-/* NewControl collects the rules a request is resolved against. The caller's slice is copied, so a later write to it does not change the compiled policy. */
+/* NewControl collects the rules a request is resolved against. The caller's slice is copied, so a later write to it does not change the compiled policy. A rule carrying no attribute, the zero Rule, is refused: it would be the empty-prefix fallback and deny every path no other rule claimed. */
 func NewControl(rules ...Rule) *Control {
+    for ruleIndex, rule := range rules {
+        if 0 == len(rule.attributes) {
+            exception.Panic(
+                exception.NewError(
+                    "access control rule carries no attribute; build it with a rule constructor",
+                    map[string]any{"ruleIndex": ruleIndex},
+                    nil,
+                ),
+            )
+        }
+    }
+
     return &Control{
         rules: append([]Rule{}, rules...),
     }
@@ -22,7 +36,7 @@ func (instance *Control) Rules() []Rule {
     return append([]Rule{}, instance.rules...)
 }
 
-/* Match resolves by category before position: an exact rule beats every prefix rule, a longer prefix beats a shorter one, every prefix beats every regex, and the empty-prefix fallback answers only when nothing else did; the position in the rule list breaks only the ties inside a category. A false second answer means no rule claimed the path, and the caller decides what that means. */
+/* Match resolves by category before position: an exact rule beats every prefix rule, a longer prefix beats a shorter one, every prefix beats every regex, and the empty-prefix fallback answers only when nothing else did; the position in the rule list breaks only the ties inside a category. A false second answer means no rule claimed the path: the access control listener then lets the request reach its handler without a decision, so an application that means to refuse what it did not name declares a final fallback, NewRawPrefixRule("") with a role, or a last "^/" regex rule. */
 func (instance *Control) Match(path string) ([]string, bool) {
     matchedIndex, matched := instance.MatchRuleIndex(path)
     if false == matched {

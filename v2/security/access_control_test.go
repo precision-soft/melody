@@ -556,3 +556,47 @@ func TestNewAccessControlRegexRule_AcceptsGroupedAndFlaggedPublicPatterns(t *tes
         })
     }
 }
+
+/* the request path is canonicalized to a leading slash, so a rule spelled without one is read as the rooted path it names. */
+func TestAccessControlRule_FoldsALeadingSlashOntoEveryPathMode(t *testing.T) {
+    for _, testCase := range []struct {
+        name string
+        rule AccessControlRule
+    }{
+        {"segment prefix", NewAccessControlRule("admin", "ROLE_ADMIN")},
+        {"raw prefix", NewAccessControlRawPrefixRule(" admin", "ROLE_ADMIN")},
+        {"exact", NewAccessControlExactRule("admin/", "ROLE_ADMIN")},
+    } {
+        if "/admin" != testCase.rule.pathPrefix {
+            t.Fatalf("%s: expected the path folded to /admin, got %q", testCase.name, testCase.rule.pathPrefix)
+        }
+    }
+}
+
+func TestAccessControlRawPrefixRule_KeepsTheEmptyFallbackAndTheRoot(t *testing.T) {
+    if "" != NewAccessControlRawPrefixRule("", "ROLE_USER").pathPrefix {
+        t.Fatalf("expected the empty raw prefix to stay the fallback")
+    }
+    if "/" != NewAccessControlRawPrefixRule("/", "ROLE_USER").pathPrefix {
+        t.Fatalf("expected the root raw prefix to keep its spelling")
+    }
+}
+
+/* a raw reach spelled with a trailing slash would be stored without it and claim every sibling beginning with the same letters, the reach the slash was written to exclude. */
+func TestAccessControlRawPrefixRule_RefusesATrailingSlash(t *testing.T) {
+    testhelper.AssertPanicsWithError(
+        t,
+        func() { _ = NewAccessControlRawPrefixRule("/api/", "ROLE_USER") },
+        "access control raw prefix rule may not end with a slash",
+    )
+}
+
+/* the zero rule is rebuilt as a raw fallback, and the attribute refusal of the constructors refuses it. */
+func TestAccessControl_RefusesTheZeroRule(t *testing.T) {
+    testhelper.AssertPanicsWithError(
+        t,
+        func() { _ = NewAccessControl(AccessControlRule{}) },
+        "access control rule requires at least one attribute",
+    )
+}
+

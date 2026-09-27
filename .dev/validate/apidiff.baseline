@@ -383,6 +383,7 @@ v3 ~ compatible ~ ./security.HmacTokenSourceConfig.Clock ~ added ~ keep ~ a comp
 v3 ~ compatible ~ ./security.(*InMemoryTokenStore).RevocationEpoch ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./security.(*InMemoryTokenStore).RevokeBefore ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./security.(*InMemoryTokenStore).WithRevocationEpochRetention ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
+v3 ~ compatible ~ ./security.(*PathPrefixMatcher).String ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features; the description the compiled firewall and MatchedFirewallMatcher read
 v3 ~ compatible ~ ./security.JwtConfig.Clock ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./security.JwtConfig.DeviceClaim ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./security.JwtConfig.RevocationEpochSkew ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features

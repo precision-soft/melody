@@ -501,3 +501,20 @@ func TestCompile_AnAbsentDependencyIsNotRefused(t *testing.T) {
         t.Fatalf("expected a compiled configuration")
     }
 }
+
+func TestCompile_RefusesANilRule(t *testing.T) {
+    _, err := Compile(Configuration{
+        firewalls: []FirewallConfiguration{
+            {
+                name:        "api",
+                matcher:     security.NewPathPrefixMatcher("/api"),
+                rules:       []securitycontract.Rule{nil},
+                tokenSource: &anonymousTokenSource{},
+            },
+        },
+    })
+    if nil == err || false == strings.Contains(err.Error(), "security firewall rule is nil") {
+        t.Fatalf("expected the nil rule refused, got %v", err)
+    }
+}
+

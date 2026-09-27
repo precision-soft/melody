@@ -57,8 +57,16 @@ func TestAccessControl_Match_FallbackRuleWhenPrefixEmpty(t *testing.T) {
     }
 }
 
-func TestAccessControlRule_NormalizesPrefixAndFiltersEmptyAttributes(t *testing.T) {
-    rule := NewAccessControlRule("/admin/", "ROLE_ADMIN", "", "   ", "ROLE_USER")
+func TestAccessControlRule_RefusesATrailingSlashOnItsRawReach(t *testing.T) {
+    testhelper.AssertPanicsWithError(
+        t,
+        func() { _ = NewAccessControlRule("/admin/", "ROLE_ADMIN") },
+        "access control raw prefix rule may not end with a slash",
+    )
+}
+
+func TestAccessControlRule_FiltersEmptyAttributes(t *testing.T) {
+    rule := NewAccessControlRule("/admin", "ROLE_ADMIN", "", "   ", "ROLE_USER")
 
     control := NewAccessControl(rule)
 

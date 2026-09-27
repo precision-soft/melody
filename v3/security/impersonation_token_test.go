@@ -171,3 +171,48 @@ func TestImpersonatorFromToken_AnswersFalseForAnythingElse(t *testing.T) {
         t.Fatalf("expected the admin behind the impersonation, got %v", impersonator)
     }
 }
+
+/* an admin impersonating a, then as a impersonating b, is carried as b behind a behind the admin, so the root admin stays accountable in the next service */
+func TestImpersonationToken_ANestedImpersonationKeepsTheRootAdminInTheActor(t *testing.T) {
+    admin := NewAuthenticatedToken("admin", []string{"ROLE_ADMIN"})
+    first := NewImpersonationToken(NewAuthenticatedToken("a", []string{"ROLE_A"}), admin)
+    nested := NewImpersonationToken(NewAuthenticatedToken("b", []string{"ROLE_B"}), first)
+
+    actor, present := nested.OnBehalfOf()
+    if false == present {
+        t.Fatalf("expected an originating actor")
+    }
+
+    data := ActorToData(actor)
+    if "b" != data.Identifier || nil == data.Impersonator || "a" != data.Impersonator.Identifier {
+        t.Fatalf("expected b behind a, got %+v", data)
+    }
+    if nil == data.Impersonator.Impersonator || "admin" != data.Impersonator.Impersonator.Identifier {
+        t.Fatalf("expected the root admin behind a, got %+v", data.Impersonator)
+    }
+}
+
+func TestImpersonationToken_ASingleImpersonationCarriesTheAdminAlone(t *testing.T) {
+    token := NewImpersonationToken(
+        NewAuthenticatedToken("a", []string{"ROLE_A"}),
+        NewAuthenticatedToken("admin", []string{"ROLE_ADMIN"}),
+    )
+
+    actor, _ := token.OnBehalfOf()
+    data := ActorToData(actor)
+    if nil == data.Impersonator || "admin" != data.Impersonator.Identifier || nil != data.Impersonator.Impersonator {
+        t.Fatalf("expected the admin alone behind a, got %+v", data)
+    }
+}
+
+/* an impersonator whose originating actor names somebody else, the user an upstream service acts for, is carried under its own identity */
+func TestImpersonationToken_AnImpersonatorActingForAnotherUserIsCarriedUnderItsOwnIdentity(t *testing.T) {
+    service := NewAuthenticatedTokenWithActor("service", []string{"ROLE_ADMIN"}, NewActor("upstream-user", securitycontract.ActorTypeUser, nil, nil))
+    token := NewImpersonationToken(NewAuthenticatedToken("a", []string{"ROLE_A"}), service)
+
+    actor, _ := token.OnBehalfOf()
+    data := ActorToData(actor)
+    if nil == data.Impersonator || "service" != data.Impersonator.Identifier {
+        t.Fatalf("expected the service as the impersonator, got %+v", data.Impersonator)
+    }
+}

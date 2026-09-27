@@ -53,7 +53,7 @@ func TestNumericClaim_RoundsNotBeforeUpAndExpiryDown(t *testing.T) {
 
     issuedAt, _, issuedAtValid := numericClaim(claims, "iat", true)
     if false == issuedAtValid || 1700000001 != issuedAt {
-        t.Fatalf("iat must round up (fail-closed), got %d (valid=%v)", issuedAt, issuedAtValid)
+        t.Fatalf("iat must round up for the future refusal (fail-closed there), got %d (valid=%v)", issuedAt, issuedAtValid)
     }
 
     expiry, _, expiryValid := numericClaim(claims, "exp", false)
@@ -771,5 +771,36 @@ func TestJwtTokenValidator_RefusesANotBeforeBeyondTheLeeway(t *testing.T) {
 
     if "jwt is not yet valid" != validateErr.Error() {
         t.Fatalf("expected the not-yet-valid refusal, got %q", validateErr.Error())
+    }
+}
+
+/* the future refusal reads iat rounded up and the revocation boundary reads it rounded down, so a fractional iat inside the revoked second is refused rather than lifted past the boundary. */
+func TestJwtTokenValidator_ReadsAFractionalIssuedAtDownAtTheRevocationBoundary(t *testing.T) {
+    secret := []byte("secret")
+
+    store := &revocationEpochStoreStub{}
+    store.RevokeBefore("alice", "", time.Unix(999, 700_000_000))
+
+    validator := NewJwtTokenValidatorWithRevocationEpoch(
+        JwtConfig{Secret: secret, Clock: clock.NewFrozenClock(time.Unix(1000, 900_000_000))},
+        store,
+    )
+
+    for _, testCase := range []struct {
+        issuedAt float64
+        accepted bool
+    }{
+        {999, false},
+        {999.5, false},
+        {999.7, false},
+        {999.9, false},
+        {1000, true},
+    } {
+        token := signJwtHs256(secret, map[string]any{"sub": "alice", "iat": testCase.issuedAt, "exp": 5000})
+
+        _, err := validator.Validate(testRuntime(), token)
+        if testCase.accepted != (nil == err) {
+            t.Fatalf("iat %v: expected accepted=%v, got %v", testCase.issuedAt, testCase.accepted, err)
+        }
     }
 }
