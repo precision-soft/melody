@@ -1,0 +1,366 @@
+package service
+
+import (
+    "context"
+    "fmt"
+    "strings"
+
+    "github.com/precision-soft/melody/v4/.example/entity"
+    "github.com/precision-soft/melody/v4/.example/event"
+    "github.com/precision-soft/melody/v4/.example/repository"
+    "github.com/precision-soft/melody/v4/.example/security"
+    melodycache "github.com/precision-soft/melody/v4/cache"
+    melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
+    "github.com/precision-soft/melody/v4/container"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
+    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+)
+
+const (
+    ServiceUserService = "service-example-user-service"
+)
+
+//melody:service ServiceUserService
+func NewUserService(
+    userRepository repository.UserRepository,
+    cacheInstance melodycachecontract.Cache,
+    eventDispatcher melodyeventcontract.EventDispatcher,
+) *UserService {
+    return &UserService{
+        userRepository:  userRepository,
+        cache:           cacheInstance,
+        eventDispatcher: eventDispatcher,
+    }
+}
+
+type UserService struct {
+    userRepository  repository.UserRepository
+    cache           melodycachecontract.Cache
+    eventDispatcher melodyeventcontract.EventDispatcher
+}
+
+func (instance *UserService) List() ([]*entity.User, error) {
+    users, rememberErr := melodycache.Remember(
+        instance.cache,
+        CacheKeyUserList,
+        0,
+        func(ctx context.Context) (any, error) {
+            return instance.userRepository.All(ctx)
+        },
+        nil,
+    )
+    if nil != rememberErr {
+        return nil, rememberErr
+    }
+
+    typed, ok := users.([]*entity.User)
+    if false == ok {
+        return nil, fmt.Errorf("invalid cache value for user list")
+    }
+
+    return typed, nil
+}
+
+func (instance *UserService) FindById(id string) (*entity.User, bool, error) {
+    /* an identifier no cache key can carry names no row, so it is answered as absent without asking the cache */
+    if false == CacheSafeIdentifier(id) {
+        return nil, false, nil
+    }
+
+    cacheKey := CacheKeyUserById(id)
+
+    cached, rememberErr := rememberEntityOrAbsence(
+        instance.cache,
+        cacheKey,
+        func(ctx context.Context) (any, error) {
+            user, found, findErr := instance.userRepository.FindById(ctx, id)
+            if nil != findErr {
+                return nil, findErr
+            }
+
+            if false == found {
+                return nil, nil
+            }
+
+            return user, nil
+        },
+    )
+    if nil != rememberErr {
+        return nil, false, rememberErr
+    }
+
+    if nil == cached {
+        return nil, false, nil
+    }
+
+    user, ok := cached.(*entity.User)
+    if false == ok {
+        return nil, false, fmt.Errorf("invalid cache value for user")
+    }
+
+    return user, true, nil
+}
+
+func (instance *UserService) findByUsernameUncached(ctx context.Context, username string) (*entity.User, bool, error) {
+    normalizedUsername := repository.NormalizedUsername(username)
+    if false == CacheSafeIdentifier(normalizedUsername) {
+        return nil, false, nil
+    }
+
+    return instance.userRepository.FindByUsername(ctx, normalizedUsername)
+}
+
+func (instance *UserService) FindByUsername(username string) (*entity.User, bool, error) {
+    /* CacheSafeIdentifier also refuses the empty spelling, and a name longer than the user table holds is answered as absent on the anonymous login door */
+    normalizedUsername := repository.NormalizedUsername(username)
+    if false == CacheSafeIdentifier(normalizedUsername) {
+        return nil, false, nil
+    }
+
+    cacheKey := CacheKeyUserByUsername(normalizedUsername)
+
+    cached, rememberErr := rememberEntityOrAbsence(
+        instance.cache,
+        cacheKey,
+        func(ctx context.Context) (any, error) {
+            user, found, findErr := instance.userRepository.FindByUsername(ctx, normalizedUsername)
+            if nil != findErr {
+                return nil, findErr
+            }
+
+            if false == found {
+                return nil, nil
+            }
+
+            return user, nil
+        },
+    )
+    if nil != rememberErr {
+        return nil, false, rememberErr
+    }
+
+    if nil == cached {
+        return nil, false, nil
+    }
+
+    user, ok := cached.(*entity.User)
+    if false == ok {
+        return nil, false, fmt.Errorf("invalid cache value for user")
+    }
+
+    return user, true, nil
+}
+
+func (instance *UserService) Create(
+    runtimeInstance melodyruntimecontract.Runtime,
+    userId string,
+    username string,
+    passwordHash string,
+    roles []string,
+) (*entity.User, error) {
+    user := entity.NewUser(userId, username, passwordHash, roles)
+
+    createErr := instance.userRepository.Create(WriteContext(runtimeInstance), user)
+    if nil != createErr {
+        return nil, createErr
+    }
+
+    createdEvent := event.NewUserCreatedEvent(user)
+    _, dispatchErr := instance.eventDispatcher.DispatchName(
+        runtimeInstance,
+        event.UserCreatedEventName,
+        createdEvent,
+    )
+    if nil != dispatchErr {
+        return nil, dispatchErr
+    }
+
+    return user, nil
+}
+
+/* GrantRole adds one role to an account through the repository's atomic door, so the console grant and the admin update door serialise on the account; the event carries the account the door wrote. A role already held is answered as held without an event, and the account's cache entries are dropped anyway, which heals entries a grant whose dispatch failed left standing. A dispatch that fails after the write is answered with the account, so a caller can say the grant is in the directory. */
+func (instance *UserService) GrantRole(
+    runtimeInstance melodyruntimecontract.Runtime,
+    userId string,
+    role string,
+) (*entity.User, repository.GrantRoleOutcome, error) {
+    ctx := WriteContext(runtimeInstance)
+
+    account, outcome, grantErr := instance.userRepository.GrantRole(ctx, userId, role)
+    if nil != grantErr {
+        return nil, outcome, grantErr
+    }
+
+    if repository.GrantRoleAlreadyHeld == outcome {
+        if dropErr := instance.dropCachedUser(account); nil != dropErr {
+            return nil, outcome, dropErr
+        }
+
+        return account, outcome, nil
+    }
+
+    if repository.GrantRoleGranted != outcome {
+        return nil, outcome, nil
+    }
+
+    updatedEvent := event.NewUserUpdatedEvent(account, account.Username)
+    _, dispatchErr := instance.eventDispatcher.DispatchName(
+        runtimeInstance,
+        event.UserUpdatedEventName,
+        updatedEvent,
+    )
+    if nil != dispatchErr {
+        return account, outcome, dispatchErr
+    }
+
+    return account, outcome, nil
+}
+
+/* dropCachedUser drops the entries an account is served from — by id, by username and the list — the same
+   three the updated listener drops, by the keys and without the event. */
+func (instance *UserService) dropCachedUser(account *entity.User) error {
+    if nil == account {
+        return nil
+    }
+
+    keyList := []string{CacheKeyUserById(account.Id), CacheKeyUserList}
+    if normalizedUsername := repository.NormalizedUsername(account.Username); "" != normalizedUsername && true == CacheSafeIdentifier(normalizedUsername) {
+        keyList = append(keyList, CacheKeyUserByUsername(normalizedUsername))
+    }
+
+    for _, key := range keyList {
+        if deleteErr := instance.cache.Delete(key); nil != deleteErr {
+            return deleteErr
+        }
+    }
+
+    return nil
+}
+
+func (instance *UserService) Update(
+    runtimeInstance melodyruntimecontract.Runtime,
+    userId string,
+    username string,
+    passwordHash string,
+    roles []string,
+) (*entity.User, bool, error) {
+    ctx := WriteContext(runtimeInstance)
+
+    user, found, findErr := instance.userRepository.FindById(ctx, userId)
+    if nil != findErr {
+        return nil, false, findErr
+    }
+
+    if false == found {
+        return nil, false, nil
+    }
+
+    /* under the in-memory configuration the loaded entity is the repository's stored value, shared with concurrent readers, so the changes land on a copy and a rename the repository refuses leaves the stored account untouched */
+    previousUsername := user.Username
+
+    modified := *user
+    modified.Username = username
+    modified.Password = passwordHash
+    modified.Roles = append([]string{}, roles...)
+
+    updated, updateErr := instance.userRepository.Update(ctx, &modified)
+    if nil != updateErr {
+        return nil, false, updateErr
+    }
+    if false == updated {
+        return nil, false, nil
+    }
+
+    updatedEvent := event.NewUserUpdatedEvent(&modified, previousUsername)
+    _, dispatchErr := instance.eventDispatcher.DispatchName(
+        runtimeInstance,
+        event.UserUpdatedEventName,
+        updatedEvent,
+    )
+    if nil != dispatchErr {
+        return nil, true, dispatchErr
+    }
+
+    return &modified, true, nil
+}
+
+func (instance *UserService) DeleteById(
+    runtimeInstance melodyruntimecontract.Runtime,
+    userId string,
+) (bool, error) {
+    ctx := WriteContext(runtimeInstance)
+
+    user, found, findErr := instance.userRepository.FindById(ctx, userId)
+    if nil != findErr {
+        return false, findErr
+    }
+
+    if false == found {
+        return false, nil
+    }
+
+    deleted, deleteErr := instance.userRepository.DeleteById(ctx, userId)
+    if nil != deleteErr {
+        return false, deleteErr
+    }
+    if false == deleted {
+        return false, nil
+    }
+
+    deletedEvent := event.NewUserDeletedEvent(userId, user.Username)
+    _, dispatchErr := instance.eventDispatcher.DispatchName(
+        runtimeInstance,
+        event.UserDeletedEventName,
+        deletedEvent,
+    )
+    if nil != dispatchErr {
+        return true, dispatchErr
+    }
+
+    return true, nil
+}
+
+/* AuthenticateByUsernameAndPassword reads the account through the repository rather than the cache, so a password change or a deletion the cache has not dropped yet cannot authenticate the replaced credential. The name is still refused as FindByUsername refuses it before any backend is asked. */
+func (instance *UserService) AuthenticateByUsernameAndPassword(
+    ctx context.Context,
+    username string,
+    password string,
+) (*entity.User, bool, error) {
+    normalizedUsername := strings.TrimSpace(username)
+    if "" == normalizedUsername {
+        return nil, false, nil
+    }
+
+    if "" == password {
+        return nil, false, nil
+    }
+
+    user, found, findErr := instance.findByUsernameUncached(ctx, normalizedUsername)
+    if nil != findErr {
+        return nil, false, findErr
+    }
+    if false == found {
+        /* an absent username spends a bcrypt comparison too, so it is not answered faster than a wrong password: the timing would reveal which usernames exist */
+        security.DummyPasswordMatch(password)
+
+        return nil, false, nil
+    }
+
+    if false == security.PasswordMatches(user.Password, password) {
+        return nil, false, nil
+    }
+
+    if 0 == len(user.Roles) {
+        return nil, false, fmt.Errorf("user has no roles")
+    }
+
+    return user, true, nil
+}
+
+func MustGetUserService(resolver melodycontainercontract.Resolver) *UserService {
+    return container.MustFromResolver[*UserService](
+        resolver,
+        ServiceUserService,
+    )
+}

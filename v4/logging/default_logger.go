@@ -1,0 +1,89 @@
+package logging
+
+import (
+    "fmt"
+    "log"
+    "sort"
+
+    "github.com/precision-soft/melody/v4/internal"
+    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+)
+
+func NewDefaultLogger() loggingcontract.Logger {
+    return NewDefaultLoggerWithLabels(loggingcontract.DefaultLevelLabels())
+}
+
+func NewDefaultLoggerWithLabels(labels loggingcontract.LevelLabels) loggingcontract.Logger {
+    /* the labels are copied: the map is read lock-free on every Log call, so a caller mutating the map it still holds would be a fatal concurrent map access */
+    return &defaultLogger{levelLabels: copyLevelLabels(labels)}
+}
+
+type defaultLogger struct {
+    levelLabels loggingcontract.LevelLabels
+}
+
+func (instance *defaultLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+    if nil == context {
+        context = loggingcontract.Context{}
+    }
+
+    /* one record stays one line: the message and context embed request-derived text, and an unescaped line break would start a forged record at whatever level the payload names */
+    log.Printf(
+        "[%s] %s %s",
+        instance.levelLabels.LabelFor(level),
+        internal.EscapeControlCharacters(message),
+        internal.EscapeControlCharacters(instance.formatContext(context)),
+    )
+}
+
+func (instance *defaultLogger) Debug(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelDebug, message, context)
+}
+
+func (instance *defaultLogger) Info(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelInfo, message, context)
+}
+
+func (instance *defaultLogger) Warning(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelWarning, message, context)
+}
+
+func (instance *defaultLogger) Error(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelError, message, context)
+}
+
+func (instance *defaultLogger) Emergency(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelEmergency, message, context)
+}
+
+func (instance *defaultLogger) formatContext(context loggingcontract.Context) string {
+    if 0 == len(context) {
+        return ""
+    }
+
+    keys := make([]string, 0, len(context))
+    for key := range context {
+        keys = append(keys, key)
+    }
+    sort.Strings(keys)
+
+    pairs := make([]string, 0, len(context))
+    for _, key := range keys {
+        pairs = append(pairs, key+"="+renderTextValue(context[key]))
+    }
+
+    return fmt.Sprintf("{%s}", instance.joinPairs(pairs))
+}
+
+func (instance *defaultLogger) joinPairs(values []string) string {
+    result := ""
+    for index, value := range values {
+        if 0 < index {
+            result += " "
+        }
+        result += value
+    }
+    return result
+}
+
+var _ loggingcontract.Logger = (*defaultLogger)(nil)

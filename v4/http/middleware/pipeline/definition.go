@@ -1,0 +1,60 @@
+package pipeline
+
+import (
+    httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
+)
+
+type HttpMiddlewareFactory func(kernel kernelcontract.Kernel) (httpcontract.Middleware, error)
+
+type HttpMiddlewareDefinition struct {
+    name                string
+    priority            int
+    before              []string
+    after               []string
+    groups              []string
+    enabledEnvironments []string
+    factory             HttpMiddlewareFactory
+    replaceExisting     bool
+    allowDuplicates     bool
+    /* captured at registration so a description needs no factory run; empty when the registrar did not declare it */
+    functionName string
+}
+
+/* SetFunctionName records the function a description names for this definition: the middleware itself, or the factory that builds it. */
+func (instance *HttpMiddlewareDefinition) SetFunctionName(functionName string) {
+    instance.functionName = functionName
+}
+
+func NewHttpMiddlewareDefinition(
+    name string,
+    priority int,
+    before []string,
+    after []string,
+    groups []string,
+    enabledEnvironments []string,
+    factory HttpMiddlewareFactory,
+    replaceExisting bool,
+    allowDuplicates bool,
+) *HttpMiddlewareDefinition {
+    /* the constraint lists are copied, since the builder reads them at every Build and Describe */
+    return &HttpMiddlewareDefinition{
+        name:                name,
+        priority:            priority,
+        before:              copyDefinitionList(before),
+        after:               copyDefinitionList(after),
+        groups:              copyDefinitionList(groups),
+        enabledEnvironments: copyDefinitionList(enabledEnvironments),
+        factory:             factory,
+        replaceExisting:     replaceExisting,
+        allowDuplicates:     allowDuplicates,
+    }
+}
+
+func copyDefinitionList(values []string) []string {
+    if nil == values {
+        return nil
+    }
+
+    return append(make([]string, 0, len(values)), values...)
+}

@@ -1,0 +1,35 @@
+//go:build !melody_static_embedded
+
+package application
+
+import (
+    "io/fs"
+
+    configcontract "github.com/precision-soft/melody/v4/config/contract"
+    "github.com/precision-soft/melody/v4/http/static"
+)
+
+func newStaticFileServerOptions(
+    embeddedPublicFiles fs.FS,
+    configuration configcontract.Configuration,
+) *static.Options {
+    _ = embeddedPublicFiles
+
+    fileServerConfig := static.NewFileServerConfig(
+        static.ModeFilesystem,
+        configuration.Http().PublicDir(),
+        configuration.Http().StaticIndexFile(),
+        "",
+        configuration.Http().StaticEnableCache(),
+        configuration.Http().StaticCacheMaxAge(),
+        false,
+    )
+
+    fileServerConfig.SetExcludedPathList(configuration.Http().StaticExcludedPaths())
+
+    return static.NewOptions(
+        fileServerConfig,
+        configuration.Kernel().ProjectDir(),
+        nil,
+    )
+}

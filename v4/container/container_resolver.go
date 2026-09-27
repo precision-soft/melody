@@ -1,0 +1,502 @@
+package container
+
+import (
+    "context"
+    "fmt"
+    "reflect"
+    "runtime"
+    "runtime/debug"
+
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+    "github.com/precision-soft/melody/v4/internal"
+)
+
+type creationState struct {
+    waitChannel     chan struct{}
+    ownerContextId  uint64
+    lastCreationErr error
+    /* the contexts blocked on waitChannel, so the owner drops their wait-graph edges under the lock that closes the channel; a stale edge would read as a cycle */
+    waiterContextIds []uint64
+}
+
+type createWithGuardLookupFunc func() (any, bool)
+type createWithGuardCreateFunc func(resolver containercontract.Resolver) (any, error, *providerDebugInfo)
+
+/* instanceStore is where a finished service is kept: the container's maps for a container provider, the driving scope for a scoped one. keep answers the value that ends up installed: an override that landed while the provider ran wins, overrideWins is raised, and the guard closes the value it built. */
+type instanceStore struct {
+    keep func(value any) (keptValue any, overrideWins bool, err error)
+}
+
+/* guardedCreation is one creation the guard runs: the lookup, the build, the store and the creation-state map that coalesces concurrent resolutions. */
+type guardedCreation struct {
+    requestedKey string
+    creatingKey  string
+    /* ownerNodeKey is the node the provider builds; whatever it resolves later through a kept resolver is recorded as this node's dependency */
+    ownerNodeKey       string
+    getCreatingState   func() (*creationState, bool)
+    setCreatingState   func(state *creationState)
+    clearCreatingState func()
+    lookup             createWithGuardLookupFunc
+    create             createWithGuardCreateFunc
+    store              instanceStore
+    /* suspendsScope is true for a container-owned provider, which reads only what the container holds, and false for a scoped one, which reads both levels */
+    suspendsScope bool
+}
+
+func (instance *container) serviceWithCreationGuardLocked(
+    creation guardedCreation,
+    resolver *resolverContext,
+) (any, error) {
+    requestedKey := creation.requestedKey
+    creatingKey := creation.creatingKey
+    lookup := creation.lookup
+    create := creation.create
+
+    /* refused before the lookup once the teardown finished; during the teardown the lookup still answers, so a service's own Close can resolve what it depends on */
+    if true == instance.teardownFinished {
+        return nil, newContainerClosedError(creatingKey)
+    }
+
+    value, exists := lookup()
+    if true == exists {
+        return value, nil
+    }
+
+    currentState, isBeingCreated := creation.getCreatingState()
+    if true == isBeingCreated {
+        if nil == currentState || nil == currentState.waitChannel {
+            return nil, exception.NewError(
+                "service has invalid creation state",
+                map[string]any{
+                    "creatingKey": creatingKey,
+                },
+                nil,
+            )
+        }
+
+        registerResolverWaitLockedErr := instance.registerResolverWaitLocked(
+            resolver.contextId,
+            currentState.ownerContextId,
+            creatingKey,
+            resolver.stackStringWithRepeat(creatingKey),
+        )
+        if nil != registerResolverWaitLockedErr {
+            return nil, registerResolverWaitLockedErr
+        }
+
+        currentState.waiterContextIds = append(currentState.waiterContextIds, resolver.contextId)
+
+        instance.mutex.Unlock()
+        /* the channel is closed on every exit of the creating call, panics included; a provider that never returns parks its waiters, and Close does not release them */
+        <-currentState.waitChannel
+        instance.mutex.Lock()
+
+        instance.clearResolverWaitLocked(
+            resolver.contextId,
+            currentState.ownerContextId,
+        )
+
+        if nil != currentState.lastCreationErr {
+            creationErr := exception.NewError(
+                "service creation failed",
+                map[string]any{
+                    "creatingKey":       creatingKey,
+                    "ownerContextId":    currentState.ownerContextId,
+                    "resolverContextId": resolver.contextId,
+                },
+                currentState.lastCreationErr,
+            )
+
+            /* the wrapper inherits the already-logged mark, so a coalesced waiter does not file the owner's failure again */
+            if true == exception.IsAlreadyLogged(currentState.lastCreationErr) {
+                _ = exception.MarkLogged(creationErr)
+            }
+
+            return nil, creationErr
+        }
+
+        value, exists = lookup()
+        if true == exists {
+            return value, nil
+        }
+
+        /* a scoped creation that finished while the scope closed stored a value the closed scope does not answer, so the waiter is refused as the scope refuses */
+        if false == creation.suspendsScope && true == resolver.isScopeClosed() {
+            return nil, exception.NewError(
+                "scope is closed",
+                map[string]any{
+                    "creatingKey": creatingKey,
+                },
+                ErrScopeClosed,
+            )
+        }
+
+        return nil, exception.NewError(
+            "service was not available after creation finished",
+            map[string]any{
+                "name": creatingKey,
+            },
+            nil,
+        )
+    }
+
+    if true == instance.isClosed {
+        return nil, newContainerClosedError(creatingKey)
+    }
+
+    newState := &creationState{
+        waitChannel:     make(chan struct{}),
+        ownerContextId:  resolver.contextId,
+        lastCreationErr: nil,
+    }
+
+    creation.setCreatingState(newState)
+
+    instance.mutex.Unlock()
+
+    /* a container-owned provider resolves from the container alone, so a process singleton never holds one request's values; a scoped provider reads both levels. Both ride on the view handed to the provider, never on the caller's context */
+    providerResolver := resolver.childOwnedBy(creation.ownerNodeKey, creation.suspendsScope)
+
+    createdValue, err, debugInfo := func() (createdValue any, err error, debugInfo *providerDebugInfo) {
+        defer func() {
+            recoveredValue := recover()
+            if nil == recoveredValue {
+                return
+            }
+
+            recoveredTypeString := fmt.Sprintf("%T", recoveredValue)
+            recoveredValueString := internal.DescribeRecoveredValue(recoveredValue)
+
+            var recoveredErr error
+            recoveredErr, _ = recoveredValue.(error)
+
+            /* a typed-nil error panic value is normalized away and its context rendered under its own containment: this runs with the mutex unlocked, where a second panic would unwind through the caller's deferred Unlock */
+            if true == internal.IsNilInterface(recoveredErr) {
+                recoveredErr = nil
+            }
+
+            context := exceptioncontract.Context{
+                "requestedKey":   requestedKey,
+                "creatingKey":    creatingKey,
+                "recoveredType":  recoveredTypeString,
+                "recoveredValue": recoveredValueString,
+                "stack":          resolver.stackStringWithRepeat(creatingKey),
+                "panicStack":     string(debug.Stack()),
+            }
+
+            if nil != recoveredErr {
+                func() {
+                    defer func() {
+                        _ = recover()
+                    }()
+
+                    context["recoveredContext"] = exception.LogContext(recoveredErr)
+                }()
+            }
+
+            err = exception.NewError(
+                "service provider panicked",
+                context,
+                recoveredErr,
+            )
+        }()
+
+        /* the view is marked the moment the provider leaves, however it leaves, so a view it retained never pushes onto the live chain after it */
+        createdValue, err, debugInfo = func() (any, error, *providerDebugInfo) {
+            defer providerResolver.providerReturned.Store(true)
+
+            return create(providerResolver)
+        }()
+
+        if true == internal.IsNilInterface(createdValue) {
+            /* a nil value with an error is the provider's reason, and is kept; the generic report is for a silent (nil, nil) */
+            if nil != err {
+                return nil, err, debugInfo
+            }
+
+            return nil, exception.NewError(
+                "service provider returned nil",
+                exceptioncontract.Context{
+                    "requestedKey": requestedKey,
+                    "creatingKey":  creatingKey,
+                    "stack":        resolver.stackStringWithRepeat(creatingKey),
+                    "providerType": func() string {
+                        if nil != debugInfo && "" != debugInfo.providerTypeString {
+                            return debugInfo.providerTypeString
+                        }
+                        return reflect.TypeOf(create).String()
+                    }(),
+                    "providerFunc": func() string {
+                        if nil != debugInfo && "" != debugInfo.providerFunctionString {
+                            return debugInfo.providerFunctionString
+                        }
+
+                        createPointer := reflect.ValueOf(create).Pointer()
+                        if 0 == createPointer {
+                            return ""
+                        }
+
+                        createFunction := runtime.FuncForPC(createPointer)
+                        if nil == createFunction {
+                            return ""
+                        }
+
+                        return createFunction.Name()
+                    }(),
+                },
+                nil,
+            ), nil
+        }
+
+        return createdValue, err, debugInfo
+    }()
+
+    instance.mutex.Lock()
+
+    if nil == createdValue && nil == err {
+        providerTypeString := ""
+        providerFunctionString := ""
+
+        if nil != debugInfo {
+            providerTypeString = debugInfo.providerTypeString
+            providerFunctionString = debugInfo.providerFunctionString
+        }
+
+        if "" == providerTypeString {
+            providerTypeString = reflect.TypeOf(create).String()
+        }
+
+        if "" == providerFunctionString {
+            createPointer := reflect.ValueOf(create).Pointer()
+            if 0 != createPointer {
+                createFunction := runtime.FuncForPC(createPointer)
+                if nil != createFunction {
+                    providerFunctionString = createFunction.Name()
+                }
+            }
+        }
+
+        err = exception.NewError(
+            "service provider returned nil for created value",
+            exceptioncontract.Context{
+                "requestedKey": requestedKey,
+                "creatingKey":  creatingKey,
+                "providerType": providerTypeString,
+                "providerFunc": providerFunctionString,
+                "stack":        resolver.stackStringWithRepeat(creatingKey),
+            },
+            nil,
+        )
+    }
+
+    /* a value created while Close ran would never be closed, so it is closed best-effort and the resolution fails */
+    if nil == err && true == instance.isClosed {
+        instance.mutex.Unlock()
+        closeValueAfterContainerClose(createdValue)
+        instance.mutex.Lock()
+
+        err = newContainerClosedError(creatingKey)
+    }
+
+    if nil == err {
+        keptValue, overrideWins, keepErr := creation.store.keep(createdValue)
+
+        if nil != keepErr {
+            /* the scope this value was built for closed while the provider ran, so it is closed best-effort and the resolution fails */
+            instance.mutex.Unlock()
+            closeValueAfterContainerClose(createdValue)
+            instance.mutex.Lock()
+
+            err = keepErr
+        } else if true == overrideWins {
+            instance.mutex.Unlock()
+            closeValueAfterContainerClose(createdValue)
+            instance.mutex.Lock()
+
+            createdValue = keptValue
+        }
+    }
+
+    newState.lastCreationErr = err
+
+    /* the waiters' edges are dropped under the lock that closes the channel */
+    for _, waiterContextId := range newState.waiterContextIds {
+        instance.clearResolverWaitLocked(waiterContextId, newState.ownerContextId)
+    }
+
+    creation.clearCreatingState()
+    close(newState.waitChannel)
+
+    if nil != err {
+        return nil, err
+    }
+
+    return createdValue, nil
+}
+
+func newContainerClosedError(creatingKey string) error {
+    return exception.NewError(
+        "container is closed",
+        map[string]any{
+            "creatingKey": creatingKey,
+        },
+        ErrContainerClosed,
+    )
+}
+
+/* closeValueAfterContainerClose closes a value no holder will ever close through the door the teardown would have used, the context-taking one included, under the background context a plain Close hands the teardown. */
+func closeValueAfterContainerClose(value any) {
+    closeable, contextCloseable, carriesADoor := closeDoorsOf(value)
+    if false == carriesADoor {
+        return
+    }
+
+    /* runs with the mutex unlocked under a deferred unlock, so a panicking Close is contained here */
+    defer func() {
+        _ = recover()
+    }()
+
+    _ = closeServiceValueWithin(context.Background(), closeable, contextCloseable)
+}
+
+func (instance *container) registerResolverWaitLocked(
+    fromContextId uint64,
+    toContextId uint64,
+    creatingKey string,
+    stack string,
+) error {
+    if 0 == fromContextId || 0 == toContextId {
+        return exception.NewError(
+            "resolver context id is invalid",
+            exceptioncontract.Context{
+                "creatingKey":   creatingKey,
+                "fromContextId": fromContextId,
+                "toContextId":   toContextId,
+                "resolverStack": stack,
+            },
+            nil,
+        )
+    }
+
+    if fromContextId == toContextId {
+        return exception.NewError(
+            "circular service dependency detected",
+            exceptioncontract.Context{
+                "creatingKey":   creatingKey,
+                "fromContextId": fromContextId,
+                "toContextId":   toContextId,
+                "resolverStack": stack,
+            },
+            nil,
+        )
+    }
+
+    if true == instance.hasResolverPathLocked(toContextId, fromContextId) {
+        return exception.NewError(
+            "circular service dependency detected across concurrent resolutions",
+            exceptioncontract.Context{
+                "creatingKey":   creatingKey,
+                "fromContextId": fromContextId,
+                "toContextId":   toContextId,
+                "resolverStack": stack,
+            },
+            nil,
+        )
+    }
+
+    instance.recordResolverWaitEdgeLocked(fromContextId, toContextId)
+
+    return nil
+}
+
+func (instance *container) recordResolverWaitEdgeLocked(
+    fromContextId uint64,
+    toContextId uint64,
+) {
+    children, exists := instance.resolverWaitGraph[fromContextId]
+    if false == exists || nil == children {
+        children = make(map[uint64]struct{})
+        instance.resolverWaitGraph[fromContextId] = children
+    }
+
+    children[toContextId] = struct{}{}
+}
+
+/* ownsCreationInFlightLocked reports whether the resolution contextId is still building a service of the container or of scopeInstance. */
+func (instance *container) ownsCreationInFlightLocked(
+    contextId uint64,
+    scopeInstance *scope,
+) bool {
+    creationMaps := []map[string]*creationState{instance.creatingByName, instance.creatingByType}
+    if nil != scopeInstance {
+        creationMaps = append(creationMaps, scopeInstance.creatingByName, scopeInstance.creatingByType)
+    }
+
+    for _, creations := range creationMaps {
+        for _, state := range creations {
+            if nil != state && contextId == state.ownerContextId {
+                return true
+            }
+        }
+    }
+
+    return false
+}
+
+func (instance *container) clearResolverWaitLocked(
+    fromContextId uint64,
+    toContextId uint64,
+) {
+    children, exists := instance.resolverWaitGraph[fromContextId]
+    if false == exists || nil == children {
+        return
+    }
+
+    delete(children, toContextId)
+    if 0 == len(children) {
+        delete(instance.resolverWaitGraph, fromContextId)
+    }
+}
+
+func (instance *container) hasResolverPathLocked(
+    startContextId uint64,
+    targetContextId uint64,
+) bool {
+    if startContextId == targetContextId {
+        return true
+    }
+
+    visited := make(map[uint64]struct{}, 8)
+    work := make([]uint64, 0, 8)
+    work = append(work, startContextId)
+
+    for 0 < len(work) {
+        current := work[len(work)-1]
+        work = work[:len(work)-1]
+
+        if _, exists := visited[current]; true == exists {
+            continue
+        }
+
+        visited[current] = struct{}{}
+
+        children, exists := instance.resolverWaitGraph[current]
+        if false == exists || nil == children {
+            continue
+        }
+
+        for child := range children {
+            if child == targetContextId {
+                return true
+            }
+
+            if _, alreadyVisited := visited[child]; false == alreadyVisited {
+                work = append(work, child)
+            }
+        }
+    }
+
+    return false
+}

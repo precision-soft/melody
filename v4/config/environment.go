@@ -1,0 +1,101 @@
+package config
+
+import (
+    configcontract "github.com/precision-soft/melody/v4/config/contract"
+    "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/internal"
+)
+
+const (
+    EnvDevelopment = "dev"
+    EnvProduction  = "prod"
+
+    ModeHttp = "http"
+    ModeCli  = "cli"
+
+    RoleWeb    = "web"
+    RoleWorker = "worker"
+    RoleAll    = "all"
+
+    DefaultModeKey                   = "MELODY_DEFAULT_MODE"
+    ProcessRoleKey                   = "MELODY_PROCESS_ROLE"
+    EnvKey                           = "MELODY_ENV"
+    HttpAddressKey                   = "MELODY_HTTP_ADDRESS"
+    HttpMaxRequestBodyBytesKey       = "MELODY_HTTP_MAX_REQUEST_BODY_BYTES"
+    HttpSessionTtlKey                = "MELODY_HTTP_SESSION_TTL"
+    HttpSessionTombstoneRetentionKey = "MELODY_HTTP_SESSION_TOMBSTONE_RETENTION"
+    HttpShutdownTimeoutKey           = "MELODY_HTTP_SHUTDOWN_TIMEOUT"
+    TeardownTimeoutKey               = "MELODY_TEARDOWN_TIMEOUT"
+    CliNameKey                       = "MELODY_CLI_NAME"
+    CliDescriptionKey                = "MELODY_CLI_DESCRIPTION"
+    LogPathKey                       = "MELODY_LOG_PATH"
+    LogLevelKey                      = "MELODY_LOG_LEVEL"
+    DefaultLocaleKey                 = "MELODY_DEFAULT_LOCALE"
+    PublicDirKey                     = "MELODY_PUBLIC_DIR"
+    StaticIndexFileKey               = "MELODY_STATIC_INDEX_FILE"
+    StaticEnableCacheKey             = "MELODY_STATIC_ENABLE_CACHE"
+    StaticCacheMaxAgeKey             = "MELODY_STATIC_CACHE_MAX_AGE"
+    StaticExcludedPathsKey           = "MELODY_STATIC_EXCLUDED_PATHS"
+
+    KernelDefaultMode                   = "kernel.default_mode"
+    KernelProcessRole                   = "kernel.process_role"
+    KernelEnv                           = "kernel.environment"
+    KernelHttpAddress                   = "kernel.http_address"
+    KernelHttpMaxRequestBodyBytes       = "kernel.http.max_request_body_bytes"
+    KernelHttpSessionTtl                = "kernel.http.session_ttl"
+    KernelHttpSessionTombstoneRetention = "kernel.http.session_tombstone_retention"
+    KernelHttpShutdownTimeout           = "kernel.http.shutdown_timeout"
+    KernelTeardownTimeout               = "kernel.teardown_timeout"
+    KernelCliName                       = "kernel.cli_name"
+    KernelCliDescription                = "kernel.cli_description"
+    KernelLogPath                       = "kernel.log_path"
+    KernelLogLevel                      = "kernel.log_level"
+    KernelDefaultLocale                 = "kernel.default_locale"
+    KernelPublicDir                     = "kernel.public_dir"
+    KernelStaticIndexFile               = "kernel.static.index_file"
+    KernelStaticEnableCache             = "kernel.static.enable_cache"
+    KernelStaticCacheMaxAge             = "kernel.static.cache_max_age"
+    KernelStaticExcludedPaths           = "kernel.static.excluded_paths"
+
+    KernelProjectDir = "kernel.project_dir"
+    KernelLogsDir    = "kernel.logs_dir"
+    KernelCacheDir   = "kernel.cache_dir"
+)
+
+type Environment struct {
+    values map[string]string
+}
+
+func NewEnvironment(source configcontract.EnvironmentSource) (*Environment, error) {
+    if true == internal.IsNilInterface(source) {
+        return nil, exception.NewError("environment source is required", nil, nil)
+    }
+
+    values, loadErr := source.Load()
+    if nil != loadErr {
+        return nil, loadErr
+    }
+
+    return &Environment{
+        values: values,
+    }, nil
+}
+
+func (instance *Environment) All() map[string]string {
+    copied := make(map[string]string, len(instance.values))
+
+    for key, value := range instance.values {
+        copied[key] = value
+    }
+
+    return copied
+}
+
+func (instance *Environment) Get(key string) (string, bool) {
+    value, exists := instance.values[key]
+    if false == exists {
+        return "", false
+    }
+
+    return value, true
+}

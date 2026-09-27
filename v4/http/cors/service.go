@@ -1,0 +1,348 @@
+package cors
+
+import (
+    nethttp "net/http"
+    "net/url"
+    "strconv"
+    "strings"
+
+    "github.com/precision-soft/melody/v4/exception"
+    httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    "github.com/precision-soft/melody/v4/internal"
+)
+
+type Service struct {
+    allowOrigins     []string
+    allowMethods     []string
+    allowHeaders     []string
+    exposeHeaders    []string
+    allowCredentials bool
+    maxAge           int
+    allowOriginFunc  func(origin string) bool
+
+    allowMethodsString  string
+    allowHeadersString  string
+    exposeHeadersString string
+    maxAgeString        string
+}
+
+type Config struct {
+    AllowOrigins     []string
+    AllowMethods     []string
+    AllowHeaders     []string
+    ExposeHeaders    []string
+    AllowCredentials bool
+    MaxAge           int
+    AllowOriginFunc  func(origin string) bool
+}
+
+func NewService(config Config) *Service {
+    allowOrigins := copyStrings(config.AllowOrigins)
+    allowMethods := copyStrings(config.AllowMethods)
+    allowHeaders := copyStrings(config.AllowHeaders)
+    exposeHeaders := copyStrings(config.ExposeHeaders)
+
+    /* a nil list takes the permissive default; an empty list is an expressed preference and denies every origin */
+    if nil == allowOrigins {
+        allowOrigins = []string{"*"}
+    }
+
+    /* methods and headers read nil and empty as origins do; the defaults are the lists DefaultService grants, Authorization included */
+    if nil == allowMethods {
+        allowMethods = defaultAllowMethodList()
+    }
+
+    if nil == allowHeaders {
+        allowHeaders = defaultAllowHeaderList()
+    }
+
+    if true == config.AllowCredentials && nil == config.AllowOriginFunc {
+        /* credentials with no origin to grant them to is refused at boot */
+        if 0 == len(allowOrigins) {
+            exception.Panic(
+                exception.NewError(
+                    "cors misconfiguration: allowCredentials cannot be true when no origin is allowed",
+                    nil,
+                    nil,
+                ),
+            )
+        }
+
+        for _, origin := range allowOrigins {
+            if "*" == strings.TrimSpace(origin) {
+                exception.Panic(
+                    exception.NewError(
+                        "cors misconfiguration: allowCredentials cannot be true when allowOrigins contains wildcard '*'",
+                        nil,
+                        nil,
+                    ),
+                )
+            }
+        }
+    }
+
+    return &Service{
+        allowOrigins:        allowOrigins,
+        allowMethods:        allowMethods,
+        allowHeaders:        allowHeaders,
+        exposeHeaders:       exposeHeaders,
+        allowCredentials:    config.AllowCredentials,
+        maxAge:              config.MaxAge,
+        allowOriginFunc:     config.AllowOriginFunc,
+        allowMethodsString:  strings.Join(allowMethods, ", "),
+        allowHeadersString:  strings.Join(allowHeaders, ", "),
+        exposeHeadersString: strings.Join(exposeHeaders, ", "),
+        maxAgeString:        strconv.Itoa(config.MaxAge),
+    }
+}
+
+/* defaultAllowMethodList is the default DefaultService and the nil-list fallback of NewService share. */
+func defaultAllowMethodList() []string {
+    return []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
+}
+
+/* defaultAllowHeaderList is the default header list, Authorization included, DefaultService and the nil-list fallback of NewService share. */
+func defaultAllowHeaderList() []string {
+    return []string{"Origin", "Content-Type", "Accept", "Authorization"}
+}
+
+func DefaultService() *Service {
+    return NewService(Config{
+        AllowOrigins:     []string{"*"},
+        AllowMethods:     defaultAllowMethodList(),
+        AllowHeaders:     defaultAllowHeaderList(),
+        ExposeHeaders:    []string{},
+        AllowCredentials: false,
+        MaxAge:           86400,
+    })
+}
+
+func RestrictiveService(allowedOrigins []string) *Service {
+    return NewService(Config{
+        AllowOrigins:     allowedOrigins,
+        AllowMethods:     []string{"GET", "POST", "PUT", "DELETE"},
+        AllowHeaders:     []string{"Content-Type", "Authorization"},
+        ExposeHeaders:    []string{},
+        AllowCredentials: true,
+        MaxAge:           3600,
+    })
+}
+
+func (instance *Service) AllowOrigins() []string      { return copyStrings(instance.allowOrigins) }
+func (instance *Service) AllowMethods() []string      { return copyStrings(instance.allowMethods) }
+func (instance *Service) AllowHeaders() []string      { return copyStrings(instance.allowHeaders) }
+func (instance *Service) ExposeHeaders() []string     { return copyStrings(instance.exposeHeaders) }
+func (instance *Service) AllowCredentials() bool      { return instance.allowCredentials }
+func (instance *Service) MaxAge() int                 { return instance.maxAge }
+func (instance *Service) AllowMethodsString() string  { return instance.allowMethodsString }
+func (instance *Service) AllowHeadersString() string  { return instance.allowHeadersString }
+func (instance *Service) ExposeHeadersString() string { return instance.exposeHeadersString }
+
+/* OriginAllowed reads a scheme-less entry, "example.com" or "*.example.com", as admitting that host under any scheme, "http://" included; an entry that writes the scheme out has it compared. The frozen majors read entries identically. */
+func (instance *Service) OriginAllowed(origin string) bool {
+    if nil != instance.allowOriginFunc {
+        return instance.allowOriginFunc(origin)
+    }
+
+    normalizedOrigin := normalizeOrigin(origin)
+    originHost := extractOriginHost(normalizedOrigin)
+    originScheme := extractOriginScheme(normalizedOrigin)
+
+    for _, allowedOrigin := range instance.allowOrigins {
+        normalizedAllowedOrigin := strings.TrimSpace(allowedOrigin)
+        if "" == normalizedAllowedOrigin {
+            continue
+        }
+
+        if "*" == normalizedAllowedOrigin {
+            return true
+        }
+
+        normalizedAllowedOrigin = normalizeOrigin(normalizedAllowedOrigin)
+
+        if true == strings.EqualFold(normalizedOrigin, normalizedAllowedOrigin) {
+            return true
+        }
+
+        wildcardScheme, wildcardSuffix, isSchemeWildcard := parseSchemeWildcard(normalizedAllowedOrigin)
+        if true == isSchemeWildcard {
+            if "" == originHost {
+                continue
+            }
+
+            if false == strings.EqualFold(originScheme, wildcardScheme) {
+                continue
+            }
+
+            allowedDomain := strings.ToLower(wildcardSuffix)
+            if "" == allowedDomain {
+                continue
+            }
+
+            suffix := "." + allowedDomain
+            if true == strings.HasSuffix(originHost, suffix) {
+                return true
+            }
+
+            continue
+        }
+
+        if true == strings.HasPrefix(normalizedAllowedOrigin, "*.") {
+            if "" == originHost {
+                continue
+            }
+
+            allowedDomain := strings.ToLower(strings.TrimPrefix(normalizedAllowedOrigin, "*."))
+            if "" == allowedDomain {
+                continue
+            }
+
+            suffix := "." + allowedDomain
+            if true == strings.HasSuffix(originHost, suffix) {
+                return true
+            }
+
+            continue
+        }
+
+        if "" != originHost && strings.ToLower(normalizedAllowedOrigin) == originHost {
+            return true
+        }
+    }
+
+    return false
+}
+
+func (instance *Service) ApplyResponseHeaders(origin string, headers nethttp.Header) {
+    if nil == headers {
+        return
+    }
+
+    headers.Set("Access-Control-Allow-Origin", origin)
+
+    if true == instance.allowCredentials {
+        headers.Set("Access-Control-Allow-Credentials", "true")
+    }
+
+    if "" != instance.exposeHeadersString {
+        headers.Set("Access-Control-Expose-Headers", instance.exposeHeadersString)
+    }
+
+    addVaryOrigin(headers)
+}
+
+func (instance *Service) ApplyPreflightHeaders(origin string, headers nethttp.Header) {
+    if nil == headers {
+        return
+    }
+
+    instance.ApplyResponseHeaders(origin, headers)
+
+    headers.Set("Access-Control-Allow-Methods", instance.allowMethodsString)
+    headers.Set("Access-Control-Allow-Headers", instance.allowHeadersString)
+
+    if 0 < instance.maxAge {
+        headers.Set("Access-Control-Max-Age", instance.maxAgeString)
+    }
+}
+
+func (instance *Service) IsPreflight(request httpcontract.Request) bool {
+    if true == internal.IsNilInterface(request) || nil == request.HttpRequest() {
+        return false
+    }
+
+    if nethttp.MethodOptions != request.HttpRequest().Method {
+        return false
+    }
+
+    return "" != request.HttpRequest().Header.Get("Access-Control-Request-Method")
+}
+
+func (instance *Service) RequestOrigin(request httpcontract.Request) string {
+    if true == internal.IsNilInterface(request) || nil == request.HttpRequest() {
+        return ""
+    }
+
+    return request.HttpRequest().Header.Get("Origin")
+}
+
+func copyStrings(values []string) []string {
+    if nil == values {
+        return nil
+    }
+
+    return append([]string{}, values...)
+}
+
+func normalizeOrigin(origin string) string {
+    value := strings.TrimSpace(origin)
+    if "" == value {
+        return ""
+    }
+
+    return strings.TrimSuffix(value, "/")
+}
+
+/* extractOriginHost keeps the port the origin names, so an entry without a port grants only the portless spelling. */
+func extractOriginHost(origin string) string {
+    if "" == origin {
+        return ""
+    }
+
+    parsedUrl, parseErr := url.Parse(origin)
+    if nil != parseErr {
+        return ""
+    }
+
+    host := parsedUrl.Host
+    if "" == host {
+        return ""
+    }
+
+    return strings.ToLower(host)
+}
+
+func extractOriginScheme(origin string) string {
+    if "" == origin {
+        return ""
+    }
+
+    parsedUrl, parseErr := url.Parse(origin)
+    if nil != parseErr {
+        return ""
+    }
+
+    return strings.ToLower(parsedUrl.Scheme)
+}
+
+/* parseSchemeWildcard recognizes a "<scheme>://*.suffix" pattern and answers its scheme and subdomain suffix. A scheme-less pattern is not a scheme wildcard. The port is significant in every suffix. */
+func parseSchemeWildcard(pattern string) (string, string, bool) {
+    index := strings.Index(pattern, "://")
+    if -1 == index {
+        return "", "", false
+    }
+
+    scheme := pattern[:index]
+    if "" == scheme {
+        return "", "", false
+    }
+
+    rest := pattern[index+len("://"):]
+    if false == strings.HasPrefix(rest, "*.") {
+        return "", "", false
+    }
+
+    return scheme, strings.TrimPrefix(rest, "*."), true
+}
+
+func addVaryOrigin(headers nethttp.Header) {
+    for _, existing := range headers.Values("Vary") {
+        for _, token := range strings.Split(existing, ",") {
+            if "origin" == strings.ToLower(strings.TrimSpace(token)) {
+                return
+            }
+        }
+    }
+
+    headers.Add("Vary", "Origin")
+}

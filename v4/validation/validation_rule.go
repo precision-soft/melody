@@ -1,0 +1,507 @@
+package validation
+
+import (
+    "strconv"
+    "strings"
+    "sync"
+
+    "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+)
+
+type validationRule struct {
+    name   string
+    params map[string]string
+}
+
+func splitByTopLevelComma(valueString string) []string {
+    var parts []string
+
+    bracketsBalanced := hasBalancedBrackets(valueString)
+
+    current := strings.Builder{}
+    parenDepth := 0
+    curlyDepth := 0
+    wasEscaped := false
+    classScanner := charClassScanner{}
+
+    for _, character := range valueString {
+        if true == wasEscaped {
+            current.WriteRune(character)
+            wasEscaped = false
+            classScanner.noteEscaped()
+            continue
+        }
+
+        if '\\' == character {
+            current.WriteRune(character)
+            wasEscaped = true
+            continue
+        }
+
+        if true == bracketsBalanced {
+            if true == classScanner.step(character) {
+                current.WriteRune(character)
+                continue
+            }
+
+            if '(' == character {
+                parenDepth++
+                current.WriteRune(character)
+                continue
+            }
+
+            if ')' == character {
+                if 0 < parenDepth {
+                    parenDepth--
+                }
+                current.WriteRune(character)
+                continue
+            }
+
+            if '{' == character {
+                curlyDepth++
+                current.WriteRune(character)
+                continue
+            }
+
+            if '}' == character {
+                if 0 < curlyDepth {
+                    curlyDepth--
+                }
+                current.WriteRune(character)
+                continue
+            }
+        }
+
+        if ',' == character {
+            if 0 == parenDepth && 0 == curlyDepth {
+                parts = append(parts, current.String())
+                current.Reset()
+                continue
+            }
+        }
+
+        current.WriteRune(character)
+    }
+
+    parts = append(parts, current.String())
+
+    return parts
+}
+
+/* charClassScanner tracks a regex character class so its members read as literals: a ']' first in the class is a literal, and a POSIX class ([:alpha:]) ends only on its ':]' pair. */
+type charClassScanner struct {
+    inClass          bool
+    contentSeen      bool
+    caretAllowed     bool
+    inPosixClass     bool
+    posixOpenPending bool
+    posixColonSeen   bool
+}
+
+func (instance *charClassScanner) step(character rune) bool {
+    if true == instance.inClass {
+        if true == instance.inPosixClass {
+            if (']' == character) && (true == instance.posixColonSeen) {
+                instance.inPosixClass = false
+                instance.posixColonSeen = false
+
+                return true
+            }
+
+            instance.posixColonSeen = ':' == character
+
+            return true
+        }
+
+        if true == instance.posixOpenPending {
+            instance.posixOpenPending = false
+
+            if ':' == character {
+                instance.inPosixClass = true
+                instance.posixColonSeen = false
+                instance.contentSeen = true
+
+                return true
+            }
+        }
+
+        if ('^' == character) && (false == instance.contentSeen) && (true == instance.caretAllowed) {
+            instance.caretAllowed = false
+
+            return true
+        }
+
+        instance.caretAllowed = false
+
+        if '[' == character {
+            instance.posixOpenPending = true
+            instance.contentSeen = true
+
+            return true
+        }
+
+        if (']' == character) && (true == instance.contentSeen) {
+            instance.inClass = false
+
+            return true
+        }
+
+        instance.contentSeen = true
+
+        return true
+    }
+
+    if '[' == character {
+        instance.inClass = true
+        instance.contentSeen = false
+        instance.caretAllowed = true
+
+        return true
+    }
+
+    return false
+}
+
+func (instance *charClassScanner) noteEscaped() {
+    if true == instance.inClass {
+        instance.caretAllowed = false
+        instance.contentSeen = true
+        instance.posixOpenPending = false
+        instance.posixColonSeen = false
+    }
+}
+
+func hasBalancedBrackets(valueString string) bool {
+    parenDepth := 0
+    curlyDepth := 0
+    wasEscaped := false
+    classScanner := charClassScanner{}
+
+    for _, character := range valueString {
+        if true == wasEscaped {
+            wasEscaped = false
+            classScanner.noteEscaped()
+            continue
+        }
+
+        if '\\' == character {
+            wasEscaped = true
+            continue
+        }
+
+        if true == classScanner.step(character) {
+            continue
+        }
+
+        /* a ']' closing no class is a literal to RE2, so it must not sink the tag */
+        switch character {
+        case '(':
+            parenDepth++
+        case ')':
+            if 0 == parenDepth {
+                return false
+            }
+            parenDepth--
+        case '{':
+            curlyDepth++
+        case '}':
+            if 0 == curlyDepth {
+                return false
+            }
+            curlyDepth--
+        }
+    }
+
+    return 0 == parenDepth && 0 == curlyDepth && false == classScanner.inClass
+}
+
+func splitByCommaOutsideRegexMeta(valueString string) []string {
+    var parts []string
+
+    current := strings.Builder{}
+    parenDepth := 0
+    curlyDepth := 0
+    isInSingleQuote := false
+    isInDoubleQuote := false
+    wasEscaped := false
+    classScanner := charClassScanner{}
+
+    for _, character := range valueString {
+        if true == wasEscaped {
+            current.WriteRune(character)
+            wasEscaped = false
+            classScanner.noteEscaped()
+            continue
+        }
+
+        if '\\' == character {
+            current.WriteRune(character)
+            wasEscaped = true
+            continue
+        }
+
+        if '"' == character && false == classScanner.inClass {
+            if false == isInSingleQuote {
+                isInDoubleQuote = false == isInDoubleQuote
+            }
+            current.WriteRune(character)
+            continue
+        }
+
+        if '\'' == character && false == classScanner.inClass {
+            if false == isInDoubleQuote {
+                isInSingleQuote = false == isInSingleQuote
+            }
+            current.WriteRune(character)
+            continue
+        }
+
+        if false == isInSingleQuote && false == isInDoubleQuote {
+            if true == classScanner.step(character) {
+                current.WriteRune(character)
+                continue
+            }
+
+            if '{' == character {
+                curlyDepth++
+                current.WriteRune(character)
+                continue
+            }
+
+            if '}' == character {
+                if 0 < curlyDepth {
+                    curlyDepth--
+                }
+                current.WriteRune(character)
+                continue
+            }
+
+            if '(' == character {
+                parenDepth++
+                current.WriteRune(character)
+                continue
+            }
+
+            if ')' == character {
+                if 0 < parenDepth {
+                    parenDepth--
+                }
+                current.WriteRune(character)
+                continue
+            }
+
+            if ',' == character {
+                if 0 == curlyDepth && 0 == parenDepth {
+                    parts = append(parts, current.String())
+                    current.Reset()
+                    continue
+                }
+            }
+        }
+
+        current.WriteRune(character)
+    }
+
+    parts = append(parts, current.String())
+
+    return parts
+}
+
+/* parseIntStrict accepts only a string that is an integer in its entirety, so a malformed parameter is refused rather than read as another bound, lessThan=-0.5 as 0 or 1e3 as 1. */
+func parseIntStrict(valueString string) (int, bool) {
+    result, err := strconv.Atoi(valueString)
+    if nil != err {
+        return 0, false
+    }
+
+    return result, true
+}
+
+type parsedValidationTag struct {
+    rules []validationRule
+    err   error
+}
+
+/* parsedValidationTagCache memoizes the parse of a validate tag, which applyFieldRules reaches once per element of an array. Tags are compile-time constants, so a request cannot grow the key space; the rules are shared, so every consumer copies a parameter map before handing it out. */
+var parsedValidationTagCache sync.Map
+
+func parseValidationTag(tag string) ([]validationRule, error) {
+    if cached, exists := parsedValidationTagCache.Load(tag); true == exists {
+        parsed := cached.(parsedValidationTag)
+
+        return parsed.rules, parsed.err
+    }
+
+    rules, err := parseValidationTagUncached(tag)
+
+    /* LoadOrStore rather than Store, so a concurrent first touch settles on one parse, the rules being shared by identity */
+    stored, _ := parsedValidationTagCache.LoadOrStore(tag, parsedValidationTag{rules: rules, err: err})
+    parsed := stored.(parsedValidationTag)
+
+    return parsed.rules, parsed.err
+}
+
+func copyValidationRuleParams(params map[string]string) map[string]string {
+    copied := make(map[string]string, len(params))
+    for key, value := range params {
+        copied[key] = value
+    }
+
+    return copied
+}
+
+func parseValidationTagUncached(tag string) ([]validationRule, error) {
+    var rules []validationRule
+
+    parts := splitByTopLevelComma(tag)
+    for _, rawPart := range parts {
+        part := strings.TrimSpace(rawPart)
+        if "" == part {
+            continue
+        }
+
+        rule := validationRule{
+            params: make(map[string]string),
+        }
+
+        openIndex := strings.Index(part, "(")
+        equalIndex := strings.Index(part, "=")
+
+        isParenthesized := 0 <= openIndex && (0 > equalIndex || openIndex < equalIndex)
+
+        if true == isParenthesized {
+            lastIndex := len(part) - 1
+            if ')' != part[lastIndex] {
+                return nil, exception.NewError(
+                    "invalid validation tag syntax",
+                    exceptioncontract.Context{
+                        "tag":  tag,
+                        "part": part,
+                    },
+                    nil,
+                )
+            }
+
+            name := strings.TrimSpace(part[:openIndex])
+            if "" == name {
+                return nil, exception.NewError(
+                    "invalid validation tag syntax",
+                    exceptioncontract.Context{
+                        "tag":  tag,
+                        "part": part,
+                    },
+                    nil,
+                )
+            }
+
+            paramsString := strings.TrimSpace(part[openIndex+1 : lastIndex])
+
+            if false == hasBalancedBrackets(paramsString) {
+                return nil, exception.NewError(
+                    "invalid validation tag syntax",
+                    exceptioncontract.Context{
+                        "tag":  tag,
+                        "part": part,
+                    },
+                    nil,
+                )
+            }
+
+            rule.name = name
+
+            if "" != paramsString {
+                paramPairs := splitByCommaOutsideRegexMeta(paramsString)
+                for _, pair := range paramPairs {
+                    pair = strings.TrimSpace(pair)
+                    if "" == pair {
+                        continue
+                    }
+
+                    keyValue := strings.SplitN(pair, "=", 2)
+                    if 2 != len(keyValue) {
+                        return nil, exception.NewError(
+                            "invalid validation tag syntax",
+                            exceptioncontract.Context{
+                                "tag":  tag,
+                                "part": part,
+                            },
+                            nil,
+                        )
+                    }
+
+                    key := strings.TrimSpace(keyValue[0])
+                    value := strings.TrimSpace(keyValue[1])
+
+                    if "" == key {
+                        return nil, exception.NewError(
+                            "invalid validation tag syntax",
+                            exceptioncontract.Context{
+                                "tag":  tag,
+                                "part": part,
+                            },
+                            nil,
+                        )
+                    }
+
+                    rule.params[key] = value
+                }
+            }
+
+            rules = append(rules, rule)
+            continue
+        }
+
+        if strings.Contains(part, "=") {
+            keyValue := strings.SplitN(part, "=", 2)
+            if 2 != len(keyValue) {
+                return nil, exception.NewError(
+                    "invalid validation tag syntax",
+                    exceptioncontract.Context{
+                        "tag":  tag,
+                        "part": part,
+                    },
+                    nil,
+                )
+            }
+
+            rule.name = strings.TrimSpace(keyValue[0])
+            if "" == rule.name {
+                return nil, exception.NewError(
+                    "invalid validation tag syntax",
+                    exceptioncontract.Context{
+                        "tag":  tag,
+                        "part": part,
+                    },
+                    nil,
+                )
+            }
+
+            rule.params["value"] = strings.TrimSpace(keyValue[1])
+
+            rules = append(rules, rule)
+            continue
+        }
+
+        rule.name = strings.TrimSpace(part)
+        if "" == rule.name {
+            continue
+        }
+
+        rules = append(rules, rule)
+    }
+
+    /* a tag that parses to no rule at all, a bare comma for example, is malformed, not a request to validate nothing */
+    if 0 == len(rules) {
+        return nil, exception.NewError(
+            "invalid validation tag syntax",
+            exceptioncontract.Context{
+                "tag": tag,
+            },
+            nil,
+        )
+    }
+
+    return rules, nil
+}

@@ -1,0 +1,345 @@
+package security
+
+import (
+    "errors"
+
+    "github.com/precision-soft/melody/v4/event"
+    "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+    httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    "github.com/precision-soft/melody/v4/internal"
+    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    securitycontract "github.com/precision-soft/melody/v4/security/contract"
+)
+
+func NewCompiledFirewall(
+    name string,
+    matcher securitycontract.Matcher,
+    matcherDescription string,
+    rules []securitycontract.Rule,
+    tokenSource securitycontract.TokenSource,
+    accessControl *AccessControl,
+    accessDecisionManager securitycontract.AccessDecisionManager,
+    roleHierarchy *RoleHierarchy,
+    entryPoint securitycontract.EntryPoint,
+    accessDeniedHandler securitycontract.AccessDeniedHandler,
+    loginPath string,
+    logoutPath string,
+    loginHandler securitycontract.LoginHandler,
+    logoutHandler securitycontract.LogoutHandler,
+    roleHierarchySource Source,
+    accessDecisionManagerSource Source,
+    accessControlSource Source,
+    entryPointSource Source,
+    accessDeniedHandlerSource Source,
+) *CompiledFirewall {
+    /* the firewall's name is in hand here, so the refusal names it beside the index, as the builder and Compile do; NewFirewall alone knows only the index */
+    for ruleIndex, rule := range rules {
+        if true == internal.IsNilInterface(rule) {
+            exception.Panic(
+                exception.NewError(
+                    "security firewall rule is nil",
+                    exceptioncontract.Context{
+                        "firewallName": name,
+                        "ruleIndex":    ruleIndex,
+                    },
+                    nil,
+                ),
+            )
+        }
+    }
+
+    var firewall *Firewall
+    if 0 != len(rules) {
+        firewall = NewFirewall(rules...)
+    }
+
+    return &CompiledFirewall{
+        name:                        name,
+        matcher:                     matcher,
+        matcherDescription:          matcherDescription,
+        rules:                       append([]securitycontract.Rule{}, rules...),
+        firewall:                    firewall,
+        tokenSource:                 tokenSource,
+        accessControl:               accessControl,
+        accessDecisionManager:       accessDecisionManager,
+        roleHierarchy:               roleHierarchy,
+        entryPoint:                  entryPoint,
+        accessDeniedHandler:         accessDeniedHandler,
+        loginPath:                   loginPath,
+        logoutPath:                  logoutPath,
+        loginHandler:                loginHandler,
+        logoutHandler:               logoutHandler,
+        roleHierarchySource:         roleHierarchySource,
+        accessDecisionManagerSource: accessDecisionManagerSource,
+        accessControlSource:         accessControlSource,
+        entryPointSource:            entryPointSource,
+        accessDeniedHandlerSource:   accessDeniedHandlerSource,
+    }
+}
+
+type CompiledFirewall struct {
+    name               string
+    matcherDescription string
+    loginPath          string
+    logoutPath         string
+
+    matcher               securitycontract.Matcher
+    accessDecisionManager securitycontract.AccessDecisionManager
+    tokenSource           securitycontract.TokenSource
+    entryPoint            securitycontract.EntryPoint
+    accessDeniedHandler   securitycontract.AccessDeniedHandler
+    loginHandler          securitycontract.LoginHandler
+    logoutHandler         securitycontract.LogoutHandler
+
+    rules                       []securitycontract.Rule
+    firewall                    *Firewall
+    accessControl               *AccessControl
+    roleHierarchy               *RoleHierarchy
+    roleHierarchySource         Source
+    accessDecisionManagerSource Source
+    accessControlSource         Source
+    entryPointSource            Source
+    accessDeniedHandlerSource   Source
+}
+
+func (instance *CompiledFirewall) Name() string {
+    return instance.name
+}
+
+func (instance *CompiledFirewall) Matcher() securitycontract.Matcher {
+    return instance.matcher
+}
+
+func (instance *CompiledFirewall) MatcherDescription() string {
+    return instance.matcherDescription
+}
+
+func (instance *CompiledFirewall) Rules() []securitycontract.Rule {
+    return append([]securitycontract.Rule{}, instance.rules...)
+}
+
+func (instance *CompiledFirewall) TokenSource() securitycontract.TokenSource {
+    return instance.tokenSource
+}
+
+func (instance *CompiledFirewall) AccessControl() *AccessControl {
+    return instance.accessControl
+}
+
+func (instance *CompiledFirewall) AccessDecisionManager() securitycontract.AccessDecisionManager {
+    return instance.accessDecisionManager
+}
+
+func (instance *CompiledFirewall) RoleHierarchy() *RoleHierarchy {
+    return instance.roleHierarchy
+}
+
+func (instance *CompiledFirewall) EntryPoint() securitycontract.EntryPoint {
+    return instance.entryPoint
+}
+
+func (instance *CompiledFirewall) AccessDeniedHandler() securitycontract.AccessDeniedHandler {
+    return instance.accessDeniedHandler
+}
+
+func (instance *CompiledFirewall) LoginPath() string {
+    return instance.loginPath
+}
+
+func (instance *CompiledFirewall) LogoutPath() string {
+    return instance.logoutPath
+}
+
+func (instance *CompiledFirewall) Login(
+    runtimeInstance runtimecontract.Runtime,
+    request httpcontract.Request,
+    input securitycontract.LoginInput,
+) (*securitycontract.LoginResult, error) {
+    /* IsNilInterface: the handler comes through NewCompiledFirewall unvalidated, so a typed nil must not reach the call below */
+    if true == internal.IsNilInterface(instance.loginHandler) {
+        return nil, exception.NewError(
+            "firewall login handler is nil",
+            exceptioncontract.Context{
+                "firewallName": instance.name,
+            },
+            nil,
+        )
+    }
+
+    result, err := instance.loginHandler.Login(runtimeInstance, request, input)
+    if nil != err {
+        dispatchErr := instance.dispatchLoginFailure(runtimeInstance, request, err)
+        if nil != dispatchErr {
+            /* both failures travel as causes: the login error first, so the client sees its reason, and the dispatch error beside it, so its context survives the render boundary */
+            return nil, exception.NewError(
+                "security login failure event dispatch failed",
+                exceptioncontract.Context{
+                    "firewallName": instance.name,
+                },
+                errors.Join(err, dispatchErr),
+            )
+        }
+
+        return nil, err
+    }
+
+    if nil == result {
+        return nil, exception.NewError(
+            "firewall login handler returned nil result",
+            exceptioncontract.Context{
+                "firewallName": instance.name,
+            },
+            nil,
+        )
+    }
+
+    dispatchErr := instance.dispatchLoginSuccess(runtimeInstance, request, result.Token)
+    if nil != dispatchErr {
+        return nil, dispatchErr
+    }
+
+    return result, nil
+}
+
+func (instance *CompiledFirewall) Logout(
+    runtimeInstance runtimecontract.Runtime,
+    request httpcontract.Request,
+    input securitycontract.LogoutInput,
+) (*securitycontract.LogoutResult, error) {
+    /* IsNilInterface, as for the login handler */
+    if true == internal.IsNilInterface(instance.logoutHandler) {
+        return nil, exception.NewError(
+            "firewall logout handler is nil",
+            exceptioncontract.Context{
+                "firewallName": instance.name,
+            },
+            nil,
+        )
+    }
+
+    result, err := instance.logoutHandler.Logout(runtimeInstance, request, input)
+    if nil != err {
+        dispatchErr := instance.dispatchLogoutFailure(runtimeInstance, request, err)
+        if nil != dispatchErr {
+            /* both failures travel as causes: the logout error first, so the client sees its reason, and the dispatch error beside it, so its context survives the render boundary */
+            return nil, exception.NewError(
+                "security logout failure event dispatch failed",
+                exceptioncontract.Context{
+                    "firewallName": instance.name,
+                },
+                errors.Join(err, dispatchErr),
+            )
+        }
+
+        return nil, err
+    }
+
+    if nil == result {
+        /* a nil result fails closed as in Login, since the caller dereferences result.Response */
+        return nil, exception.NewError(
+            "firewall logout handler returned nil result",
+            exceptioncontract.Context{
+                "firewallName": instance.name,
+            },
+            nil,
+        )
+    }
+
+    dispatchErr := instance.dispatchLogoutSuccess(runtimeInstance, request)
+    if nil != dispatchErr {
+        return nil, dispatchErr
+    }
+
+    return result, nil
+}
+
+func (instance *CompiledFirewall) Sources() (Source, Source, Source, Source, Source) {
+    return instance.roleHierarchySource, instance.accessDecisionManagerSource, instance.accessControlSource, instance.entryPointSource, instance.accessDeniedHandlerSource
+}
+
+func (instance *CompiledFirewall) dispatchLoginSuccess(
+    runtimeInstance runtimecontract.Runtime,
+    request httpcontract.Request,
+    token securitycontract.Token,
+) error {
+    eventDispatcher := event.EventDispatcherMustFromContainer(runtimeInstance.Container())
+
+    _, err := eventDispatcher.DispatchName(
+        runtimeInstance,
+        securitycontract.EventSecurityLoginSuccess,
+        NewLoginSuccessEvent(request, token),
+    )
+
+    return err
+}
+
+func (instance *CompiledFirewall) dispatchLoginFailure(
+    runtimeInstance runtimecontract.Runtime,
+    request httpcontract.Request,
+    failureErr error,
+) error {
+    eventDispatcher := event.EventDispatcherMustFromContainer(runtimeInstance.Container())
+
+    _, err := eventDispatcher.DispatchName(
+        runtimeInstance,
+        securitycontract.EventSecurityLoginFailure,
+        NewLoginFailureEvent(request, failureErr),
+    )
+
+    return err
+}
+
+func (instance *CompiledFirewall) dispatchLogoutSuccess(
+    runtimeInstance runtimecontract.Runtime,
+    request httpcontract.Request,
+) error {
+    eventDispatcher := event.EventDispatcherMustFromContainer(runtimeInstance.Container())
+
+    _, err := eventDispatcher.DispatchName(
+        runtimeInstance,
+        securitycontract.EventSecurityLogoutSuccess,
+        NewLogoutSuccessEvent(request),
+    )
+
+    return err
+}
+
+func (instance *CompiledFirewall) dispatchLogoutFailure(
+    runtimeInstance runtimecontract.Runtime,
+    request httpcontract.Request,
+    failureErr error,
+) error {
+    eventDispatcher := event.EventDispatcherMustFromContainer(runtimeInstance.Container())
+
+    _, err := eventDispatcher.DispatchName(
+        runtimeInstance,
+        securitycontract.EventSecurityLogoutFailure,
+        NewLogoutFailureEvent(request, failureErr),
+    )
+
+    return err
+}
+
+var _ securitycontract.Firewall = (*CompiledFirewall)(nil)
+
+type CompiledConfiguration struct {
+    firewalls []*CompiledFirewall
+
+    globalAccessControl *AccessControl
+}
+
+func NewCompiledConfiguration(firewalls []*CompiledFirewall, globalAccessControl *AccessControl) *CompiledConfiguration {
+    return &CompiledConfiguration{
+        firewalls:           append([]*CompiledFirewall{}, firewalls...),
+        globalAccessControl: globalAccessControl,
+    }
+}
+
+func (instance *CompiledConfiguration) Firewalls() []*CompiledFirewall {
+    return append([]*CompiledFirewall{}, instance.firewalls...)
+}
+
+func (instance *CompiledConfiguration) GlobalAccessControl() *AccessControl {
+    return instance.globalAccessControl
+}

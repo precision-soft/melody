@@ -1,0 +1,123 @@
+package translation
+
+import (
+    "strings"
+    "os"
+    "path/filepath"
+    "testing"
+
+    translationcontract "github.com/precision-soft/melody/v4/translation/contract"
+)
+
+func writeCatalogFile(t *testing.T, directory string, name string, content string) {
+    t.Helper()
+
+    if writeErr := os.WriteFile(filepath.Join(directory, name), []byte(content), 0o600); nil != writeErr {
+        t.Fatalf("could not write fixture %q: %v", name, writeErr)
+    }
+}
+
+func catalogForLocale(catalogs []translationcontract.Catalog, locale string) translationcontract.Catalog {
+    for _, catalog := range catalogs {
+        if locale == catalog.Locale() {
+            return catalog
+        }
+    }
+
+    return nil
+}
+
+func TestJsonDirectoryLoader_LoadsDomainsAndLocales(t *testing.T) {
+    directory := t.TempDir()
+    writeCatalogFile(t, directory, "messages.en.json", `{"greeting": "Hello", "farewell": "Bye"}`)
+    writeCatalogFile(t, directory, "errors.en.json", `{"not_found": "Not found"}`)
+    writeCatalogFile(t, directory, "messages.ro.json", `{"greeting": "Salut"}`)
+
+    catalogs, loadErr := NewJsonDirectoryLoader(directory).Load()
+    if nil != loadErr {
+        t.Fatalf("unexpected load error: %v", loadErr)
+    }
+
+    if 2 != len(catalogs) {
+        t.Fatalf("expected 2 locale catalogs, got %d", len(catalogs))
+    }
+
+    english := catalogForLocale(catalogs, "en")
+    if nil == english {
+        t.Fatalf("missing english catalog")
+    }
+
+    if greeting, found := english.Get("greeting", "messages"); false == found || "Hello" != greeting {
+        t.Fatalf("unexpected english messages.greeting: %q found=%v", greeting, found)
+    }
+
+    if notFound, found := english.Get("not_found", "errors"); false == found || "Not found" != notFound {
+        t.Fatalf("unexpected english errors.not_found: %q found=%v", notFound, found)
+    }
+
+    romanian := catalogForLocale(catalogs, "ro")
+    if nil == romanian {
+        t.Fatalf("missing romanian catalog")
+    }
+
+    if greeting, found := romanian.Get("greeting", "messages"); false == found || "Salut" != greeting {
+        t.Fatalf("unexpected romanian messages.greeting: %q found=%v", greeting, found)
+    }
+}
+
+func TestJsonDirectoryLoader_IgnoresNonJsonFilesAndDirectories(t *testing.T) {
+    directory := t.TempDir()
+    writeCatalogFile(t, directory, "messages.en.json", `{"greeting": "Hello"}`)
+    writeCatalogFile(t, directory, "readme.txt", "not a catalog")
+    if mkdirErr := os.Mkdir(filepath.Join(directory, "nested.en.json"), 0o750); nil != mkdirErr {
+        t.Fatalf("could not create directory entry: %v", mkdirErr)
+    }
+
+    catalogs, loadErr := NewJsonDirectoryLoader(directory).Load()
+    if nil != loadErr {
+        t.Fatalf("unexpected load error: %v", loadErr)
+    }
+
+    if 1 != len(catalogs) {
+        t.Fatalf("expected 1 catalog, got %d", len(catalogs))
+    }
+
+    if "en" != catalogs[0].Locale() {
+        t.Fatalf("unexpected locale: %q", catalogs[0].Locale())
+    }
+}
+
+func TestJsonDirectoryLoader_MisnamedJsonFileIsAHardError(t *testing.T) {
+    directory := t.TempDir()
+    writeCatalogFile(t, directory, "messages.en.json", `{"greeting": "Hello"}`)
+    writeCatalogFile(t, directory, "en.json", `{"orphan": "no domain"}`)
+
+    /* a misnamed file is refused by name, not skipped */
+    _, loadErr := NewJsonDirectoryLoader(directory).Load()
+    if nil == loadErr {
+        t.Fatalf("expected a hard error for a .json file that does not parse as <domain>.<locale>.json")
+    }
+
+    if false == strings.Contains(loadErr.Error(), "translation file name does not match") {
+        t.Fatalf("expected the refusal to name the naming rule, got: %v", loadErr)
+    }
+}
+
+func TestJsonDirectoryLoader_MalformedJsonReturnsError(t *testing.T) {
+    directory := t.TempDir()
+    writeCatalogFile(t, directory, "messages.en.json", `{"greeting": `)
+
+    _, loadErr := NewJsonDirectoryLoader(directory).Load()
+    if nil == loadErr {
+        t.Fatalf("expected an error for malformed json")
+    }
+}
+
+func TestJsonDirectoryLoader_MissingDirectoryReturnsError(t *testing.T) {
+    missing := filepath.Join(t.TempDir(), "does-not-exist")
+
+    _, loadErr := NewJsonDirectoryLoader(missing).Load()
+    if nil == loadErr {
+        t.Fatalf("expected an error for a missing directory")
+    }
+}

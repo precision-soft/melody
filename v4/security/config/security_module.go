@@ -1,0 +1,474 @@
+package config
+
+import (
+    "fmt"
+
+    "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+    "github.com/precision-soft/melody/v4/internal"
+    "github.com/precision-soft/melody/v4/security"
+    securitycontract "github.com/precision-soft/melody/v4/security/contract"
+)
+
+/* AccessControlMergeStrategy orders the merged rule list; it does not decide which rule answers a request. The matcher resolves by category first, so list position decides only the ties inside a category, and a rule that must beat a longer or more exact sibling needs a more specific path. */
+type AccessControlMergeStrategy string
+
+const (
+    AccessControlMergeLocalFirst   AccessControlMergeStrategy = "localFirst"
+    AccessControlMergeGlobalFirst  AccessControlMergeStrategy = "globalFirst"
+    AccessControlMergeOverrideOnly AccessControlMergeStrategy = "overrideOnly"
+)
+
+type GlobalConfiguration struct {
+    accessControl         *security.AccessControl
+    roleHierarchy         *security.RoleHierarchy
+    accessDecisionManager securitycontract.AccessDecisionManager
+    entryPoint            securitycontract.EntryPoint
+    accessDeniedHandler   securitycontract.AccessDeniedHandler
+}
+
+/* FirewallOverrideConfiguration starts from the constructor defaults wherever it is built: a With setter called on the zero value first reads the receiver as NewFirewallOverrideConfiguration. A firewall that inherits nothing and declares no rules of its own enforces nothing. */
+type FirewallOverrideConfiguration struct {
+    stateless                  bool
+    inheritGlobalAccessControl bool
+    mergeStrategy              AccessControlMergeStrategy
+    accessControl              *security.AccessControl
+    roleHierarchy              *security.RoleHierarchy
+    accessDecisionManager      securitycontract.AccessDecisionManager
+    entryPoint                 securitycontract.EntryPoint
+    accessDeniedHandler        securitycontract.AccessDeniedHandler
+}
+
+func (instance FirewallOverrideConfiguration) normalizeZeroReceiver() FirewallOverrideConfiguration {
+    if (FirewallOverrideConfiguration{}) == instance {
+        return NewFirewallOverrideConfiguration()
+    }
+
+    return instance
+}
+
+func (instance FirewallOverrideConfiguration) WithStateless(stateless bool) FirewallOverrideConfiguration {
+    instance = instance.normalizeZeroReceiver()
+    instance.stateless = stateless
+
+    return instance
+}
+
+func (instance FirewallOverrideConfiguration) WithAccessControl(accessControl *security.AccessControl) FirewallOverrideConfiguration {
+    instance = instance.normalizeZeroReceiver()
+    instance.accessControl = accessControl
+
+    return instance
+}
+
+func (instance FirewallOverrideConfiguration) WithRoleHierarchy(roleHierarchy *security.RoleHierarchy) FirewallOverrideConfiguration {
+    instance = instance.normalizeZeroReceiver()
+    instance.roleHierarchy = roleHierarchy
+
+    return instance
+}
+
+func (instance FirewallOverrideConfiguration) WithAccessDecisionManager(accessDecisionManager securitycontract.AccessDecisionManager) FirewallOverrideConfiguration {
+    instance = instance.normalizeZeroReceiver()
+    instance.accessDecisionManager = accessDecisionManager
+
+    return instance
+}
+
+func (instance FirewallOverrideConfiguration) WithEntryPoint(entryPoint securitycontract.EntryPoint) FirewallOverrideConfiguration {
+    instance = instance.normalizeZeroReceiver()
+    instance.entryPoint = entryPoint
+
+    return instance
+}
+
+func (instance FirewallOverrideConfiguration) WithAccessDeniedHandler(accessDeniedHandler securitycontract.AccessDeniedHandler) FirewallOverrideConfiguration {
+    instance = instance.normalizeZeroReceiver()
+    instance.accessDeniedHandler = accessDeniedHandler
+
+    return instance
+}
+
+/* WithMergeStrategy refuses a value that is none of the three named strategies, the empty string included, which the builder reads as an unconfigured override. */
+func (instance FirewallOverrideConfiguration) WithMergeStrategy(mergeStrategy AccessControlMergeStrategy) FirewallOverrideConfiguration {
+    if false == isValidAccessControlMergeStrategy(mergeStrategy) {
+        exception.Panic(
+            exception.NewError(
+                "unknown security access control merge strategy",
+                exceptioncontract.Context{
+                    "mergeStrategy": string(mergeStrategy),
+                },
+                nil,
+            ),
+        )
+    }
+
+    instance = instance.normalizeZeroReceiver()
+    instance.mergeStrategy = mergeStrategy
+
+    return instance
+}
+
+/* WithInheritGlobalAccessControl turns the global policy off for this firewall. A firewall that inherits nothing and declares no access control of its own enforces nothing: pair it with WithAccessControl. */
+func (instance FirewallOverrideConfiguration) WithInheritGlobalAccessControl(inheritGlobalAccessControl bool) FirewallOverrideConfiguration {
+    instance = instance.normalizeZeroReceiver()
+    instance.inheritGlobalAccessControl = inheritGlobalAccessControl
+
+    return instance
+}
+
+func isValidAccessControlMergeStrategy(mergeStrategy AccessControlMergeStrategy) bool {
+    return AccessControlMergeLocalFirst == mergeStrategy ||
+        AccessControlMergeGlobalFirst == mergeStrategy ||
+        AccessControlMergeOverrideOnly == mergeStrategy
+}
+
+type FirewallConfiguration struct {
+    name          string
+    matcher       securitycontract.Matcher
+    rules         []securitycontract.Rule
+    tokenSource   securitycontract.TokenSource
+    loginPath     string
+    logoutPath    string
+    loginHandler  securitycontract.LoginHandler
+    logoutHandler securitycontract.LogoutHandler
+    override      FirewallOverrideConfiguration
+}
+
+type Configuration struct {
+    global    GlobalConfiguration
+    firewalls []FirewallConfiguration
+}
+
+type Builder struct {
+    globalConfigured bool
+    global           GlobalConfiguration
+    firewalls        []FirewallConfiguration
+}
+
+func NewBuilder() *Builder {
+    return &Builder{
+        firewalls: make([]FirewallConfiguration, 0),
+    }
+}
+
+func (instance *Builder) SetGlobal(
+    accessControl *security.AccessControl,
+    roleHierarchy *security.RoleHierarchy,
+    accessDecisionManager securitycontract.AccessDecisionManager,
+    entryPoint securitycontract.EntryPoint,
+    accessDeniedHandler securitycontract.AccessDeniedHandler,
+) *Builder {
+    if true == instance.globalConfigured {
+        exception.Panic(exception.NewError("security global configuration may only be defined once", nil, nil))
+    }
+
+    /* a typed nil means a dependency was declared and holds nothing; the compile step would read it as declared and hand the runtime a nil to dereference */
+    refuseTypedNilGlobalDependency("access decision manager", accessDecisionManager)
+    refuseTypedNilGlobalDependency("entry point", entryPoint)
+    refuseTypedNilGlobalDependency("access denied handler", accessDeniedHandler)
+
+    instance.globalConfigured = true
+    instance.global.accessControl = accessControl
+    instance.global.roleHierarchy = roleHierarchy
+    instance.global.accessDecisionManager = accessDecisionManager
+    instance.global.entryPoint = entryPoint
+    instance.global.accessDeniedHandler = accessDeniedHandler
+
+    return instance
+}
+
+func (instance *Builder) AddFirewall(
+    name string,
+    matcher securitycontract.Matcher,
+    rules []securitycontract.Rule,
+    tokenSource securitycontract.TokenSource,
+    loginPath string,
+    logoutPath string,
+    loginHandler securitycontract.LoginHandler,
+    logoutHandler securitycontract.LogoutHandler,
+    override FirewallOverrideConfiguration,
+) *Builder {
+    return instance.addFirewall(
+        name,
+        matcher,
+        rules,
+        tokenSource,
+        loginPath,
+        logoutPath,
+        loginHandler,
+        logoutHandler,
+        override,
+    )
+}
+
+func (instance *Builder) AddStatelessFirewall(
+    name string,
+    matcher securitycontract.Matcher,
+    rules []securitycontract.Rule,
+    tokenSource securitycontract.TokenSource,
+    override FirewallOverrideConfiguration,
+) *Builder {
+    override.stateless = true
+
+    return instance.addFirewall(
+        name,
+        matcher,
+        rules,
+        tokenSource,
+        "",
+        "",
+        nil,
+        nil,
+        override,
+    )
+}
+
+func (instance *Builder) AddStatefulFirewall(
+    name string,
+    matcher securitycontract.Matcher,
+    rules []securitycontract.Rule,
+    tokenSource securitycontract.TokenSource,
+    loginPath string,
+    logoutPath string,
+    loginHandler securitycontract.LoginHandler,
+    logoutHandler securitycontract.LogoutHandler,
+    override FirewallOverrideConfiguration,
+) *Builder {
+    override.stateless = false
+
+    return instance.addFirewall(
+        name,
+        matcher,
+        rules,
+        tokenSource,
+        loginPath,
+        logoutPath,
+        loginHandler,
+        logoutHandler,
+        override,
+    )
+}
+
+func (instance *Builder) BuildAndCompile() *security.CompiledConfiguration {
+    compiled, err := Compile(
+        Configuration{
+            global:    instance.global,
+            firewalls: instance.firewalls,
+        },
+    )
+    if nil != err {
+        exception.Panic(exception.FromError(err))
+    }
+
+    return compiled
+}
+
+func (instance *Builder) addFirewall(
+    name string,
+    matcher securitycontract.Matcher,
+    rules []securitycontract.Rule,
+    tokenSource securitycontract.TokenSource,
+    loginPath string,
+    logoutPath string,
+    loginHandler securitycontract.LoginHandler,
+    logoutHandler securitycontract.LogoutHandler,
+    override FirewallOverrideConfiguration,
+) *Builder {
+    instance.validateFirewall(
+        name,
+        matcher,
+        rules,
+        tokenSource,
+        loginPath,
+        logoutPath,
+        loginHandler,
+        logoutHandler,
+        override,
+    )
+
+    if "" == string(override.mergeStrategy) {
+        /* an unconfigured override inherits the global access control, as NewFirewallOverrideConfiguration does; without it the firewall compiles an empty access control and opens every route behind it */
+        override.mergeStrategy = AccessControlMergeLocalFirst
+        override.inheritGlobalAccessControl = true
+    }
+
+    instance.firewalls = append(
+        instance.firewalls,
+        FirewallConfiguration{
+            name:          name,
+            matcher:       matcher,
+            rules:         append([]securitycontract.Rule{}, rules...),
+            tokenSource:   tokenSource,
+            loginPath:     loginPath,
+            logoutPath:    logoutPath,
+            loginHandler:  loginHandler,
+            logoutHandler: logoutHandler,
+            override:      override,
+        },
+    )
+
+    return instance
+}
+
+func (instance *Builder) validateFirewall(
+    name string,
+    matcher securitycontract.Matcher,
+    rules []securitycontract.Rule,
+    tokenSource securitycontract.TokenSource,
+    loginPath string,
+    logoutPath string,
+    loginHandler securitycontract.LoginHandler,
+    logoutHandler securitycontract.LogoutHandler,
+    override FirewallOverrideConfiguration,
+) {
+    if "" == name {
+        exception.Panic(exception.NewError("security firewall name may not be empty", nil, nil))
+    }
+
+    if true == internal.IsNilInterface(matcher) {
+        exception.Panic(
+            exception.NewError(
+                "security firewall matcher is nil",
+                exceptioncontract.Context{
+                    "firewallName": name,
+                },
+                nil,
+            ),
+        )
+    }
+
+    for ruleIndex, rule := range rules {
+        if true == internal.IsNilInterface(rule) {
+            exception.Panic(
+                exception.NewError(
+                    "security firewall rule is nil",
+                    exceptioncontract.Context{
+                        "firewallName": name,
+                        "ruleIndex":    ruleIndex,
+                    },
+                    nil,
+                ),
+            )
+        }
+    }
+
+    for _, firewall := range instance.firewalls {
+        if name == firewall.name {
+            exception.Panic(
+                exception.NewError(
+                    "security firewall name is already declared",
+                    exceptioncontract.Context{
+                        "firewallName": name,
+                    },
+                    nil,
+                ),
+            )
+        }
+    }
+
+    if true == internal.IsNilInterface(tokenSource) {
+        exception.Panic(
+            exception.NewError(
+                "security firewall token source is nil",
+                exceptioncontract.Context{
+                    "firewallName": name,
+                },
+                nil,
+            ),
+        )
+    }
+
+    if true == override.stateless {
+        if "" != loginPath || "" != logoutPath || false == internal.IsNilInterface(loginHandler) || false == internal.IsNilInterface(logoutHandler) {
+            exception.Panic(
+                exception.NewError(
+                    "security stateless firewall may not define login or logout configuration",
+                    exceptioncontract.Context{
+                        "firewallName": name,
+                    },
+                    nil,
+                ),
+            )
+        }
+
+        return
+    }
+
+    if "" == loginPath {
+        exception.Panic(
+            exception.NewError(
+                "security firewall login path may not be empty",
+                exceptioncontract.Context{
+                    "firewallName": name,
+                },
+                nil,
+            ),
+        )
+    }
+
+    if "" == logoutPath {
+        exception.Panic(
+            exception.NewError(
+                "security firewall logout path may not be empty",
+                exceptioncontract.Context{
+                    "firewallName": name,
+                },
+                nil,
+            ),
+        )
+    }
+
+    if true == internal.IsNilInterface(loginHandler) {
+        exception.Panic(
+            exception.NewError(
+                "security firewall login handler is nil",
+                exceptioncontract.Context{
+                    "firewallName": name,
+                },
+                nil,
+            ),
+        )
+    }
+
+    if true == internal.IsNilInterface(logoutHandler) {
+        exception.Panic(
+            exception.NewError(
+                "security firewall logout handler is nil",
+                exceptioncontract.Context{
+                    "firewallName": name,
+                },
+                nil,
+            ),
+        )
+    }
+}
+
+/* refuseTypedNilGlobalDependency refuses a dependency the caller declared that holds a typed nil; a plain nil is the ordinary "not declared". */
+func refuseTypedNilGlobalDependency(dependencyName string, dependency any) {
+    if nil == dependency {
+        return
+    }
+
+    if false == internal.IsNilInterface(dependency) {
+        return
+    }
+
+    exception.Panic(
+        exception.NewError(
+            "security global "+dependencyName+" is a typed nil",
+            exceptioncontract.Context{
+                "dependency":     dependencyName,
+                "dependencyType": fmt.Sprintf("%T", dependency),
+            },
+            nil,
+        ),
+    )
+}
+
+func NewFirewallOverrideConfiguration() FirewallOverrideConfiguration {
+    return FirewallOverrideConfiguration{
+        inheritGlobalAccessControl: true,
+        mergeStrategy:              AccessControlMergeLocalFirst,
+    }
+}

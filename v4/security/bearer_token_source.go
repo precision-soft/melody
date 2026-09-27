@@ -1,0 +1,115 @@
+package security
+
+import (
+    "strings"
+
+    "github.com/precision-soft/melody/v4/exception"
+    httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    "github.com/precision-soft/melody/v4/internal"
+    "github.com/precision-soft/melody/v4/logging"
+    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    securitycontract "github.com/precision-soft/melody/v4/security/contract"
+)
+
+const bearerPrefix = "Bearer "
+
+func NewBearerTokenSource(validator securitycontract.TokenValidator) *BearerTokenSource {
+    if true == internal.IsNilInterface(validator) {
+        exception.Panic(exception.NewError("token validator is nil", nil, nil))
+    }
+
+    return &BearerTokenSource{
+        validator: validator,
+    }
+}
+
+func NewBearerTokenSourceWithEnricher(
+    validator securitycontract.TokenValidator,
+    enricher securitycontract.TokenEnricher,
+) *BearerTokenSource {
+    if true == internal.IsNilInterface(validator) {
+        exception.Panic(exception.NewError("token validator is nil", nil, nil))
+    }
+
+    if true == internal.IsNilInterface(enricher) {
+        exception.Panic(exception.NewError("token enricher is nil", nil, nil))
+    }
+
+    return &BearerTokenSource{
+        validator: validator,
+        enricher:  enricher,
+    }
+}
+
+type BearerTokenSource struct {
+    validator securitycontract.TokenValidator
+    enricher  securitycontract.TokenEnricher
+}
+
+func (instance *BearerTokenSource) Name() string {
+    return "bearerToken"
+}
+
+func (instance *BearerTokenSource) Resolve(
+    runtimeInstance runtimecontract.Runtime,
+    request httpcontract.Request,
+) (securitycontract.Token, error) {
+    tokenString, extracted := extractBearerToken(request.Header("Authorization"))
+    if false == extracted {
+        return NewAnonymousToken(), nil
+    }
+
+    claims, validateErr := instance.validator.Validate(runtimeInstance, tokenString)
+    if nil != validateErr {
+        /* the request fails closed to anonymous either way, but a store that cannot answer degrades every bearer at once, so it is logged above a credential that failed its checks */
+        logger := logging.LoggerFromRuntime(runtimeInstance)
+        if nil != logger {
+            if true == isInfrastructureFailure(validateErr) {
+                logger.Error("bearer token validation infrastructure failed", exception.LogContext(validateErr))
+            } else {
+                logger.Info("bearer token rejected", exception.LogContext(validateErr))
+            }
+        }
+
+        return NewAnonymousToken(), nil
+    }
+
+    if false == internal.IsNilInterface(instance.enricher) {
+        enrichedClaims, enrichErr := instance.enricher.Enrich(runtimeInstance, claims)
+        if nil != enrichErr {
+            logger := logging.LoggerFromRuntime(runtimeInstance)
+            if nil != logger {
+                if true == isInfrastructureFailure(enrichErr) {
+                    logger.Error("bearer token enrichment infrastructure failed", exception.LogContext(enrichErr))
+                } else {
+                    logger.Info("bearer token enrichment failed", exception.LogContext(enrichErr))
+                }
+            }
+
+            return NewAnonymousToken(), nil
+        }
+
+        claims = enrichedClaims
+    }
+
+    return NewAuthenticatedTokenFromClaims(claims), nil
+}
+
+func extractBearerToken(headerValue string) (string, bool) {
+    if "" == headerValue {
+        return "", false
+    }
+
+    if len(headerValue) < len(bearerPrefix) || false == strings.EqualFold(headerValue[:len(bearerPrefix)], bearerPrefix) {
+        return "", false
+    }
+
+    tokenString := strings.TrimSpace(headerValue[len(bearerPrefix):])
+    if "" == tokenString {
+        return "", false
+    }
+
+    return tokenString, true
+}
+
+var _ securitycontract.TokenSource = (*BearerTokenSource)(nil)

@@ -1,0 +1,23 @@
+package contract
+
+import (
+    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+)
+
+type KernelConfiguration interface {
+    DefaultMode() string
+
+    ProcessRole() string
+
+    Env() string
+
+    ProjectDir() string
+
+    LogsDir() string
+
+    CacheDir() string
+
+    LogPath() string
+
+    LogLevel() loggingcontract.Level
+}

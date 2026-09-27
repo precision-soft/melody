@@ -1,0 +1,96 @@
+package user
+
+import (
+    "encoding/json"
+    "errors"
+    nethttp "net/http"
+    "strings"
+
+    "github.com/precision-soft/melody/v4/.example/entity"
+    "github.com/precision-soft/melody/v4/.example/presenter"
+    "github.com/precision-soft/melody/v4/.example/repository"
+    "github.com/precision-soft/melody/v4/.example/security"
+    "github.com/precision-soft/melody/v4/.example/service"
+    melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
+    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    melodysecurity "github.com/precision-soft/melody/v4/security"
+)
+
+func ApiCreateHandler() melodyhttpcontract.Handler {
+    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+        if false == melodysecurity.IsGranted(runtimeInstance, entity.RoleAdmin) {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusForbidden, "forbidden"), nil
+        }
+
+        var dto adminUserCreateRequest
+        decodeErr := json.NewDecoder(request.HttpRequest().Body).Decode(&dto)
+        if nil != decodeErr {
+            return presenter.ApiRefusal(runtimeInstance, request, nethttp.StatusBadRequest, "invalid json", decodeErr), nil
+        }
+
+        normalizedUsername := strings.TrimSpace(dto.Username)
+        if "" == normalizedUsername {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "username is required"), nil
+        }
+
+        /* the username becomes a cache key component and a 255-byte column, so a longer spelling is turned away before the row lands */
+        if false == service.CacheSafeIdentifier(repository.NormalizedUsername(normalizedUsername)) {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "username must stay within 255 bytes"), nil
+        }
+
+        normalizedPassword := strings.TrimSpace(dto.Password)
+        if "" == normalizedPassword {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "password is required"), nil
+        }
+
+        /* bcrypt reads at most 72 bytes of the plaintext, so a longer password is refused as the caller's mistake */
+        if security.PasswordMaximumBytes < len(normalizedPassword) {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, security.PasswordTooLongMessage), nil
+        }
+
+        if commaRole, hasCommaRole := roleContainingComma(dto.Roles); true == hasCommaRole {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "role "+commaRole+" must not contain commas"), nil
+        }
+
+        if unknownRole, hasUnknownRole := roleOutsideTheVocabulary(dto.Roles); true == hasUnknownRole {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "role "+unknownRole+" is not one this application knows ("+strings.Join(entity.KnownRoleList(), ", ")+")"), nil
+        }
+
+        userService := service.MustGetUserService(runtimeInstance.Container())
+
+        _, exists, findErr := userService.FindByUsername(normalizedUsername)
+        if nil != findErr {
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to check username", findErr), nil
+        }
+        if true == exists {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "username already exists"), nil
+        }
+
+        passwordHash, hashErr := security.HashPassword(normalizedPassword)
+        if nil != hashErr {
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to hash password", hashErr), nil
+        }
+
+        user, createErr := userService.Create(
+            runtimeInstance,
+            "",
+            normalizedUsername,
+            passwordHash,
+            normalizeRoles(dto.Roles),
+        )
+        if nil != createErr {
+            /* the read above is a check and the unique index is the guard: a name the index refuses is answered the same 400 the check answers */
+            if true == errors.Is(createErr, repository.ErrUsernameAlreadyExists) {
+                return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "username already exists"), nil
+            }
+
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to create user", createErr), nil
+        }
+
+        return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusCreated, map[string]any{
+            "id":       user.Id,
+            "username": user.Username,
+            "roles":    append([]string{}, user.Roles...),
+        }), nil
+    }
+}

@@ -1,0 +1,158 @@
+package otlp
+
+import (
+    "context"
+    "fmt"
+    "time"
+
+    "go.opentelemetry.io/otel/attribute"
+    "go.opentelemetry.io/otel/exporters/otlp/otlptrace"
+    "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+    "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+    "go.opentelemetry.io/otel/sdk/resource"
+    sdktrace "go.opentelemetry.io/otel/sdk/trace"
+    "google.golang.org/grpc"
+
+    "github.com/precision-soft/melody/v4/exception"
+)
+
+const (
+    /* ProtocolGrpc and ProtocolHttp select the OTLP transport; grpc (default) talks to the collector's 4317 receiver, http/protobuf to 4318. */
+    ProtocolGrpc = "grpc"
+    ProtocolHttp = "http"
+
+    defaultBatchTimeout = 5 * time.Second
+)
+
+/* Config describes how to export spans to an OTLP collector. Endpoint is host:port without a scheme, for example "otel-collector:4317", filled by the deployment from a parameter or .env. SampleRatio in (0,1) keeps that fraction of traces and 0 or >=1 samples everything; a negative or NaN ratio is refused at construction. */
+type Config struct {
+    Endpoint       string
+    Protocol       string
+    ServiceName    string
+    ServiceVersion string
+    SampleRatio    float64
+    Headers        map[string]string
+    Insecure       bool
+    BatchTimeout   time.Duration
+}
+
+/* String and Format keep Headers out of every rendering fmt routes through this value's methods, Headers reduced to its count, since it is an exported field that carries the collector auth token. Format answers %#v and the numeric verbs too, and value receivers make a Config and a pointer to it redact alike. %p and %w never reach Format, and a Config held in an unexported field of another struct is walked by reflection with no method called. */
+func (instance Config) String() string {
+    return fmt.Sprintf(
+        "otlp.Config{Endpoint:%q, Protocol:%q, ServiceName:%q, ServiceVersion:%q, SampleRatio:%v, Insecure:%v, BatchTimeout:%v, Headers:[redacted %d]}",
+        instance.Endpoint,
+        instance.Protocol,
+        instance.ServiceName,
+        instance.ServiceVersion,
+        instance.SampleRatio,
+        instance.Insecure,
+        instance.BatchTimeout,
+        len(instance.Headers),
+    )
+}
+
+func (instance Config) Format(state fmt.State, verb rune) {
+    _, _ = state.Write([]byte(instance.String()))
+}
+
+/* NewTracerProvider builds a batching TracerProvider wired to an OTLP exporter. The caller owns its lifecycle and runs Shutdown on exit to flush pending spans; the Module in this package does so by registering it as a container-managed service. */
+func NewTracerProvider(ctx context.Context, config Config) (*sdktrace.TracerProvider, error) {
+    if "" == config.Endpoint {
+        return nil, exception.NewError("otlp tracer provider endpoint is required", nil, nil)
+    }
+
+    /* a negative ratio, the natural "tracing off" sentinel, and a NaN from a failed parse would fall through samplerFor's window check to AlwaysSample, exporting everything when the operator asked for none, so both are refused */
+    if 0 > config.SampleRatio || config.SampleRatio != config.SampleRatio {
+        return nil, exception.NewError(
+            "otlp tracer provider sample ratio must not be negative or NaN: use a ratio in (0,1) to sample that fraction, or 0 / >=1 to sample everything",
+            map[string]any{"sampleRatio": config.SampleRatio},
+            nil,
+        )
+    }
+
+    exporter, exporterErr := newExporter(ctx, config)
+    if nil != exporterErr {
+        return nil, exporterErr
+    }
+
+    resourceInstance, resourceErr := resource.New(
+        ctx,
+        resource.WithAttributes(
+            attribute.String("service.name", serviceNameOrDefault(config.ServiceName)),
+            attribute.String("service.version", config.ServiceVersion),
+        ),
+    )
+    if nil != resourceErr {
+        return nil, exception.NewError("failed to build otlp resource", nil, resourceErr)
+    }
+
+    batchTimeout := config.BatchTimeout
+    if 0 >= batchTimeout {
+        batchTimeout = defaultBatchTimeout
+    }
+
+    tracerProvider := sdktrace.NewTracerProvider(
+        sdktrace.WithBatcher(exporter, sdktrace.WithBatchTimeout(batchTimeout)),
+        sdktrace.WithResource(resourceInstance),
+        sdktrace.WithSampler(sdktrace.ParentBased(samplerFor(config.SampleRatio))),
+    )
+
+    return tracerProvider, nil
+}
+
+func newExporter(ctx context.Context, config Config) (*otlptrace.Exporter, error) {
+    protocol := config.Protocol
+    if "" == protocol {
+        protocol = ProtocolGrpc
+    }
+
+    switch protocol {
+    case ProtocolGrpc:
+        options := []otlptracegrpc.Option{otlptracegrpc.WithEndpoint(config.Endpoint)}
+        if true == config.Insecure {
+            options = append(options, otlptracegrpc.WithInsecure())
+        }
+        if 0 < len(config.Headers) {
+            options = append(options, otlptracegrpc.WithHeaders(config.Headers))
+        }
+
+        /* the channel is dialled with the service config lookup disabled: grpc's dns resolver otherwise asks for a TXT record (_grpc_config.<host>) beside the address records, which melody never publishes. The channel opens on the first export, and on a resolver that never answers the TXT record, docker's embedded dns for a container name being one, that export, possibly the shutdown flush, would wait the resolver's whole timeout */
+        options = append(options, otlptracegrpc.WithDialOption(grpc.WithDisableServiceConfig()))
+
+        return otlptracegrpc.New(ctx, options...)
+
+    case ProtocolHttp:
+        options := []otlptracehttp.Option{otlptracehttp.WithEndpoint(config.Endpoint)}
+        if true == config.Insecure {
+            options = append(options, otlptracehttp.WithInsecure())
+        }
+        if 0 < len(config.Headers) {
+            options = append(options, otlptracehttp.WithHeaders(config.Headers))
+        }
+
+        return otlptracehttp.New(ctx, options...)
+
+    default:
+        return nil, exception.NewError(
+            "unsupported otlp protocol",
+            map[string]any{"protocol": protocol},
+            nil,
+        )
+    }
+}
+
+func samplerFor(ratio float64) sdktrace.Sampler {
+    if 0 < ratio && 1 > ratio {
+        return sdktrace.TraceIDRatioBased(ratio)
+    }
+
+    return sdktrace.AlwaysSample()
+}
+
+func serviceNameOrDefault(serviceName string) string {
+    if "" == serviceName {
+        return "melody"
+    }
+
+    return serviceName
+}

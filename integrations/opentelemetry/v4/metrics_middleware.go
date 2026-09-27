@@ -1,0 +1,146 @@
+package opentelemetry
+
+import (
+    nethttp "net/http"
+    "reflect"
+    "strconv"
+    "time"
+
+    "go.opentelemetry.io/otel/attribute"
+    "go.opentelemetry.io/otel/metric"
+
+    "github.com/precision-soft/melody/v4/exception"
+    httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+)
+
+func NewMetricsMiddleware(meter metric.Meter) (httpcontract.Middleware, error) {
+    /* a nil meter is refused at construction rather than panicking on the first meter.Int64Counter call, as NewHandlerDecorator requires a non-nil Meter */
+    if nil == meter {
+        return nil, exception.NewError("metrics middleware meter is nil", nil, nil)
+    }
+
+    requestCount, counterErr := meter.Int64Counter(
+        "http.server.request.count",
+        metric.WithDescription("number of handled http requests"),
+    )
+    if nil != counterErr {
+        return nil, exception.NewError("could not create the request counter", nil, counterErr)
+    }
+
+    requestDuration, histogramErr := meter.Float64Histogram(
+        "http.server.request.duration",
+        metric.WithDescription("duration of handled http requests in milliseconds"),
+        metric.WithUnit("ms"),
+    )
+    if nil != histogramErr {
+        return nil, exception.NewError("could not create the duration histogram", nil, histogramErr)
+    }
+
+    return func(next httpcontract.Handler) httpcontract.Handler {
+        return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            startedAt := time.Now()
+
+            /* the wrapped writer captures the status a handler commits directly, the nil-response streaming or proxy shape MetricsRouteHandler and the websocket bridge use, so the per-route instruments record what the handler wrote rather than a default 200 */
+            recorder := &statusRecordingResponseWriter{ResponseWriter: writer, statusCode: nethttp.StatusOK}
+
+            var response httpcontract.Response
+            var handlerErr error
+            completed := false
+
+            defer func() {
+                statusCode := nethttp.StatusInternalServerError
+                if true == completed {
+                    statusCode = completedStatusCode(handlerErr, response, recorder)
+                }
+
+                attributes := metric.WithAttributes(
+                    attribute.String("http.request.method", normalizedMethod(request.HttpRequest().Method)),
+                    attribute.String("http.route", routeLabel(request)),
+                    attribute.String("http.response.status_code", strconv.Itoa(statusCode)),
+                )
+
+                requestCount.Add(runtimeInstance.Context(), 1, attributes)
+                requestDuration.Record(runtimeInstance.Context(), float64(time.Since(startedAt).Microseconds())/1000.0, attributes)
+            }()
+
+            handlerResponse, nextErr := next(runtimeInstance, recorder, request)
+            response = handlerResponse
+            handlerErr = nextErr
+            completed = true
+
+            return handlerResponse, nextErr
+        }
+    }, nil
+}
+
+/* completedStatusCode answers the status of a handler that returned: a status the handler already committed to the writer is the one the connection carries, whatever it returned afterwards; otherwise the handler's error decides first and the response it returned next, in the order the kernel answers them, and a handler that returned neither is read off the writer */
+func completedStatusCode(handlerErr error, response httpcontract.Response, recorder *statusRecordingResponseWriter) int {
+    if true == recorder.wroteHeader {
+        return recorder.observedStatusCode()
+    }
+
+    if nil != handlerErr {
+        return statusCodeForError(handlerErr)
+    }
+
+    if false == isNilResponse(response) {
+        return response.StatusCode()
+    }
+
+    return recorder.observedStatusCode()
+}
+
+/* statusCodeForError maps a handler error to the status the client receives, as the kernel's exception listener does: a deliberate sub-500 an HttpException carries is graphed at its own status rather than as a 5xx, and anything else is a server error. */
+func statusCodeForError(handlerErr error) int {
+    httpException := exception.AsHttpException(handlerErr)
+    if nil != httpException && nethttp.StatusInternalServerError > httpException.StatusCode() {
+        return httpException.StatusCode()
+    }
+
+    return nethttp.StatusInternalServerError
+}
+
+/* isNilResponse answers true for a nil interface and for a typed-nil concrete response, since `nil != response` alone lets `var resp *SomeResponse; return resp, nil` through and the StatusCode() dereference would panic, charging the handler's defect to the observability layer. */
+func isNilResponse(response httpcontract.Response) bool {
+    if nil == response {
+        return true
+    }
+
+    value := reflect.ValueOf(response)
+    switch value.Kind() {
+    case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan, reflect.Interface:
+        return value.IsNil()
+    }
+
+    return false
+}
+
+func routeLabel(request httpcontract.Request) string {
+    route := request.RoutePattern()
+    if "" == route {
+        return "unmatched"
+    }
+
+    return route
+}
+
+var standardHttpMethods = map[string]bool{
+    nethttp.MethodGet:     true,
+    nethttp.MethodHead:    true,
+    nethttp.MethodPost:    true,
+    nethttp.MethodPut:     true,
+    nethttp.MethodPatch:   true,
+    nethttp.MethodDelete:  true,
+    nethttp.MethodConnect: true,
+    nethttp.MethodOptions: true,
+    nethttp.MethodTrace:   true,
+}
+
+func normalizedMethod(method string) string {
+    if true == standardHttpMethods[method] {
+        return method
+    }
+
+    return "_OTHER"
+}

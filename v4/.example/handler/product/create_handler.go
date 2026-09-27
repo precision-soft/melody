@@ -1,0 +1,70 @@
+package product
+
+import (
+    nethttp "net/http"
+    "strings"
+
+    "github.com/precision-soft/melody/v4/.example/entity"
+    "github.com/precision-soft/melody/v4/.example/presenter"
+    "github.com/precision-soft/melody/v4/.example/service"
+    melodyhttp "github.com/precision-soft/melody/v4/http"
+    melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
+    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    melodysecurity "github.com/precision-soft/melody/v4/security"
+)
+
+func ApiCreateHandler() melodyhttpcontract.Handler {
+    createProduct := melodyhttp.JsonHandler(
+        func(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, dto CreateRequest) (melodyhttpcontract.Response, error) {
+            productService := service.MustGetProductService(runtimeInstance.Container())
+
+            product, createErr := productService.Create(
+                runtimeInstance,
+                strings.TrimSpace(dto.Id),
+                strings.TrimSpace(dto.Name),
+                strings.TrimSpace(dto.Description),
+                strings.TrimSpace(dto.CategoryId),
+                dto.Price,
+                strings.TrimSpace(dto.CurrencyId),
+                dto.Stock,
+            )
+            if nil != createErr {
+                return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to create product", createErr), nil
+            }
+
+            return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusCreated, mapProduct(product)), nil
+        },
+        melodyhttp.WithJsonHandlerErrorResponder(apiJsonErrorResponder),
+    )
+
+    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+        if false == melodysecurity.IsGranted(runtimeInstance, entity.RoleEditor) {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusForbidden, "forbidden"), nil
+        }
+
+        return createProduct(runtimeInstance, writer, request)
+    }
+}
+
+/* apiJsonErrorResponder answers through ApiRefusal, so a validation failure is rendered field by field and any other refusal keeps its generic message with the decoder's diagnosis in the debug-gated context. It returns the response: a responder that answers nothing leaves the framework's own refusal standing. */
+func apiJsonErrorResponder(
+    runtimeInstance melodyruntimecontract.Runtime,
+    request melodyhttpcontract.Request,
+    status int,
+    message string,
+    cause error,
+) (melodyhttpcontract.Response, error) {
+    return presenter.ApiRefusal(runtimeInstance, request, status, message, cause), nil
+}
+
+/* bound by the openapi descriptor in config; keep it exported */
+type CreateRequest struct {
+    /* the id becomes a cache key component, whose grammar refuses spaces and newlines, so such a spelling is turned away here. The pattern reaches the published document as an OpenAPI 3.0 pattern facet (ECMA-262, no POSIX class), so \S is written. */
+    Id          string  `json:"id" validate:"max=60,regex=^\\S+$"`
+    Name        string  `json:"name" validate:"notBlank,min=2,max=120"`
+    Description string  `json:"description" validate:"notBlank,min=1,max=40"`
+    CategoryId  string  `json:"categoryId" validate:"notBlank"`
+    Price       float64 `json:"price" validate:"greaterThan=0"`
+    CurrencyId  string  `json:"currencyId" validate:"notBlank"`
+    Stock       int64   `json:"stock" validate:"greaterThan=-1"`
+}

@@ -1,0 +1,141 @@
+package handler
+
+import (
+    "encoding/json"
+    nethttp "net/http"
+    "strings"
+
+    "github.com/precision-soft/melody/v4/.example/page"
+    "github.com/precision-soft/melody/v4/.example/presenter"
+    "github.com/precision-soft/melody/v4/.example/route"
+    "github.com/precision-soft/melody/v4/.example/security"
+    "github.com/precision-soft/melody/v4/.example/service"
+    melodyhttp "github.com/precision-soft/melody/v4/http"
+    melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
+    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    melodysessioncontract "github.com/precision-soft/melody/v4/session/contract"
+)
+
+func LoginPageHandler() melodyhttpcontract.Handler {
+    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+        return page.Html(runtimeInstance, request, nethttp.StatusOK, page.LoginHtml), nil
+    }
+}
+
+func LoginHandler() melodyhttpcontract.Handler {
+    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+        type adminLoginRequest struct {
+            Username string `json:"username"`
+            Password string `json:"password"`
+        }
+
+        var dto adminLoginRequest
+
+        httpRequest := request.HttpRequest()
+        contentType := httpRequest.Header.Get("Content-Type")
+
+        if true == strings.HasPrefix(contentType, "application/json") {
+            decoderErr := json.NewDecoder(httpRequest.Body).Decode(&dto)
+            if nil != decoderErr {
+                return presenter.ApiRefusal(runtimeInstance, request, nethttp.StatusBadRequest, "invalid json", decoderErr), nil
+            }
+        } else {
+            parseFormErr := httpRequest.ParseForm()
+            if nil != parseFormErr {
+                return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "invalid form"), nil
+            }
+
+            /* the credentials are read from the body alone: FormValue would also read the url query, which lands in every access log in front of the application */
+            dto.Username = httpRequest.PostFormValue("username")
+            dto.Password = httpRequest.PostFormValue("password")
+        }
+
+        username := strings.TrimSpace(dto.Username)
+        password := strings.TrimSpace(dto.Password)
+
+        if "" == username || "" == password {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "invalid credentials input"), nil
+        }
+
+        userService := service.MustGetUserService(runtimeInstance.Container())
+
+        user, authenticated, authenticationErr := userService.AuthenticateByUsernameAndPassword(
+            runtimeInstance.Context(),
+            username,
+            password,
+        )
+        if nil != authenticationErr {
+            /* the cause names internals and this door is unauthenticated, so it stays out of the errors list; ApiErrorWithErr journals it and keeps it in the debug-gated context */
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "authentication failed", authenticationErr), nil
+        }
+
+        if false == authenticated {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusUnauthorized, "invalid credentials"), nil
+        }
+
+        sessionInstance := getSessionFromRequest(request)
+        if nil == sessionInstance {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "session is not available"), nil
+        }
+
+        /* the session id is rotated before the authenticated identity is written, against session fixation: a pre-login id the client held must not survive into the authenticated session. RegenerateRequestSession republishes the rotated session on the request, so the identity lands on the id the response emits. */
+        rotatedSession, regenerateErr := melodyhttp.RegenerateRequestSession(request)
+        if nil != regenerateErr {
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "session rotation failed", regenerateErr), nil
+        }
+
+        rotatedSession.Set(security.SessionKeySecurityUserId, user.Id)
+        rotatedSession.Set(security.SessionKeySecurityRoles, append([]string{}, user.Roles...))
+        rotatedSession.Set(security.SessionKeySecurityCredentialVersion, security.SessionCredentialVersion(user.Password))
+
+        redirectUrl, _ := melodyhttp.UrlGeneratorMustFromContainer(runtimeInstance.Container()).GeneratePath(route.ProductsListPageName, nil)
+
+        return presenter.ApiSuccess(
+            runtimeInstance,
+            request,
+            nethttp.StatusOK,
+            map[string]any{
+                "redirectUrl": redirectUrl,
+            },
+        ), nil
+    }
+}
+
+func LogoutHandler() melodyhttpcontract.Handler {
+    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+        indexUrl := "/"
+
+        sessionInstance := getSessionFromRequest(request)
+        if nil == sessionInstance {
+            return presenter.Redirect(runtimeInstance, request, indexUrl), nil
+        }
+
+        /* the whole session ends, not only the identity in it: an emptied session would be saved back under the same id with a re-issued cookie, while Clear routes the response path to DeleteSession and to the expired cookie */
+        sessionInstance.Clear()
+
+        return presenter.Redirect(runtimeInstance, request, indexUrl), nil
+    }
+}
+
+func getSessionFromRequest(request melodyhttpcontract.Request) melodysessioncontract.Session {
+    if nil == request {
+        return nil
+    }
+
+    attributes := request.Attributes()
+    if nil == attributes {
+        return nil
+    }
+
+    value, exists := attributes.Get(melodyhttp.RequestAttributeSession)
+    if false == exists {
+        return nil
+    }
+
+    sessionInstance, ok := value.(melodysessioncontract.Session)
+    if false == ok {
+        return nil
+    }
+
+    return sessionInstance
+}
