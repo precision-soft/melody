@@ -1,6 +1,7 @@
 package accesscontrol
 
 import (
+    stdpath "path"
     "regexp"
     "strings"
 
@@ -94,6 +95,7 @@ func NewExactRule(path string, config RuleConfig) Rule {
     }
 
     refuseRelativePath(normalizedPath)
+    refuseNonCanonicalPath(normalizedPath)
 
     if "/" != normalizedPath {
         normalizedPath = strings.TrimSuffix(normalizedPath, "/")
@@ -116,6 +118,7 @@ func NewSegmentPrefixRule(path string, config RuleConfig) Rule {
     }
 
     refuseRelativePath(normalizedPrefix)
+    refuseNonCanonicalPath(normalizedPrefix)
 
     return Rule{
         pathPrefix:      normalizedPrefix,
@@ -130,6 +133,7 @@ func NewRawPrefixRule(path string, config RuleConfig) Rule {
 
     trimmedPath := strings.TrimSpace(path)
     refuseRelativePath(trimmedPath)
+    refuseNonCanonicalPath(trimmedPath)
 
     if "/" != trimmedPath && true == strings.HasSuffix(trimmedPath, "/") {
         exception.Panic(
@@ -230,6 +234,27 @@ func refuseRelativePath(path string) {
         exception.NewError(
             "access control rule path must begin with a slash",
             map[string]any{"path": path},
+            nil,
+        ),
+    )
+}
+
+/* refuseNonCanonicalPath refuses a path carrying an empty, "." or ".." segment: the request path is matched cleaned, so "//admin" or "/x/../admin" could never match and the rule would govern nothing. A trailing slash is read by each constructor, and "/" and the empty raw prefix stay as declared. */
+func refuseNonCanonicalPath(path string) {
+    if "" == path || "/" == path {
+        return
+    }
+
+    declaredPath := strings.TrimSuffix(path, "/")
+    canonicalPath := stdpath.Clean(declaredPath)
+    if canonicalPath == declaredPath {
+        return
+    }
+
+    exception.Panic(
+        exception.NewError(
+            "access control rule path must be canonical: no empty, . or .. segment",
+            map[string]any{"path": path, "canonicalPath": canonicalPath},
             nil,
         ),
     )

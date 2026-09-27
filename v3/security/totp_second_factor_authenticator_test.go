@@ -79,6 +79,10 @@ func TestTotpSecondFactor_EnrolledWithoutCodeIsPending(t *testing.T) {
     if false == isPending || "user-1" != pendingUser {
         t.Fatalf("expected a two-factor challenge for user-1, got present=%v user=%q", isPending, pendingUser)
     }
+
+    if true == secondFactorRejected(t, token) {
+        t.Fatal("expected a challenge the request never answered not to read as a rejected second factor")
+    }
 }
 
 /* the replay-guard validity window must stay strictly positive even for a pathological period/skew: a window of zero or less makes the NonceGuard skip recording the accepted code (it ignores a ttl <= 0), silently disabling replay protection. The window saturates instead. With Period=3333333334, Skew=1 the un-guarded `time.Duration(period*(2*skew+1)) * time.Second` overflows int64 to a negative duration. */
@@ -117,6 +121,10 @@ func TestTotpSecondFactor_WrongCodeIsPending(t *testing.T) {
     if true == token.IsAuthenticated() {
         t.Fatal("expected a wrong code to stay pending")
     }
+
+    if false == secondFactorRejected(t, token) {
+        t.Fatal("expected a wrong code to read as a rejected second factor")
+    }
 }
 
 func TestTotpSecondFactor_ReplayedCodeIsRejected(t *testing.T) {
@@ -133,6 +141,10 @@ func TestTotpSecondFactor_ReplayedCodeIsRejected(t *testing.T) {
     second, _ := authenticator.Authenticate(totpRequest(code))
     if true == second.IsAuthenticated() {
         t.Fatal("expected a replayed code to be rejected by the guard")
+    }
+
+    if false == secondFactorRejected(t, second) {
+        t.Fatal("expected a replayed code to read as a rejected second factor")
     }
 }
 
@@ -243,6 +255,10 @@ func TestTotpSecondFactor_UnknownRecoveryCodeIsPending(t *testing.T) {
 
     if true == token.IsAuthenticated() {
         t.Fatal("expected an unknown recovery code to stay pending")
+    }
+
+    if false == secondFactorRejected(t, token) {
+        t.Fatal("expected a recovery code the store did not redeem to read as a rejected second factor")
     }
 }
 
@@ -364,4 +380,16 @@ func TestTotpSecondFactor_AFailingEnrollmentLookupRefusesInsteadOfPassingThrough
     if "could not look up two-factor enrollment" != err.Error() {
         t.Fatalf("unexpected refusal message: %q", err.Error())
     }
+}
+
+/* secondFactorRejected reads the optional rejection door of a pending token, failing the test when the token does not carry it. */
+func secondFactorRejected(t *testing.T, token securitycontract.Token) bool {
+    t.Helper()
+
+    rejection, reportsRejection := token.(securitycontract.TwoFactorRejection)
+    if false == reportsRejection {
+        t.Fatalf("expected a pending token reporting whether its second factor was rejected, got %T", token)
+    }
+
+    return rejection.SecondFactorRejected()
 }

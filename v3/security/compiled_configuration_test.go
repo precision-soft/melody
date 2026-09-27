@@ -352,6 +352,22 @@ func TestCompiledFirewall_Logout_ADispatchFailureNamesTheBrokenListener(t *testi
     }
 }
 
+/* the constructor has the firewall's name in hand, so its refusal names it beside the index, as the builder and Compile do */
+func TestNewCompiledFirewall_NamesTheFirewallOfANilRule(t *testing.T) {
+    defer func() {
+        refusal, isRefusal := recover().(*exception.Error)
+        if false == isRefusal {
+            t.Fatalf("expected an exception error refusing the nil rule")
+        }
+
+        if "api" != refusal.Context()["firewallName"] || 1 != refusal.Context()["ruleIndex"] {
+            t.Fatalf("expected the refusal to name firewall api and rule 1, got %v", refusal.Context())
+        }
+    }()
+
+    _ = NewCompiledFirewall("api", NewPathPrefixMatcher("/api"), "", []securitycontract.Rule{NewApiKeyHeaderRule(NewPathPrefixMatcher("/api"), "X-Api-Key", "key"), nil}, nil, nil, nil, nil, nil, nil, "", "", nil, nil, SourceNone, SourceNone, SourceNone, SourceNone, SourceNone)
+}
+
 func TestNewCompiledFirewall_RefusesANilRule(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
         _ = NewCompiledFirewall("api", NewPathPrefixMatcher("/api"), "", []securitycontract.Rule{nil}, nil, nil, nil, nil, nil, nil, "", "", nil, nil, SourceNone, SourceNone, SourceNone, SourceNone, SourceNone)

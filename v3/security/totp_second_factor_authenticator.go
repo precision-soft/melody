@@ -120,17 +120,19 @@ func (instance *TotpSecondFactorAuthenticator) Authenticate(request httpcontract
         return instance.authenticateWithTotpCode(request, token, secret, code)
     }
 
-    if redeemed, recoveryErr := instance.tryRecoveryCode(request, token); nil != recoveryErr {
+    if redeemed, supplied, recoveryErr := instance.tryRecoveryCode(request, token); nil != recoveryErr {
         return nil, recoveryErr
     } else if true == redeemed {
         return token, nil
+    } else if true == supplied {
+        return NewTwoFactorRejectedToken(token), nil
     }
 
-    /* no TOTP code and no accepted recovery code: the second factor is outstanding, so the primary credential does not stand on its own */
+    /* no TOTP code and no recovery code: the second factor is outstanding, so the primary credential does not stand on its own */
     return NewTwoFactorPendingToken(token), nil
 }
 
-/* authenticateWithTotpCode verifies a supplied TOTP code and, on success, enforces single use through the replay guard before authenticating. A wrong or replayed code yields a pending token so the caller re-prompts. */
+/* authenticateWithTotpCode verifies a supplied TOTP code and, on success, enforces single use through the replay guard before authenticating. A wrong or replayed code yields a rejected pending token so the caller re-prompts and the refusal is announced as a login failure. */
 func (instance *TotpSecondFactorAuthenticator) authenticateWithTotpCode(
     request httpcontract.Request,
     token securitycontract.Token,
@@ -143,31 +145,31 @@ func (instance *TotpSecondFactorAuthenticator) authenticateWithTotpCode(
     }
 
     if false == verified {
-        return NewTwoFactorPendingToken(token), nil
+        return NewTwoFactorRejectedToken(token), nil
     }
 
     if reused, replayErr := instance.codeAlreadyUsed(request, token.UserIdentifier(), code); nil != replayErr {
         return nil, replayErr
     } else if true == reused {
-        return NewTwoFactorPendingToken(token), nil
+        return NewTwoFactorRejectedToken(token), nil
     }
 
     return token, nil
 }
 
-/* tryRecoveryCode redeems a single-use recovery code supplied on the recovery header when the enrollment store implements TwoFactorRecoveryStore, and reports whether one was accepted and consumed. The store enforces single use atomically, so no replay-guard entry is recorded. */
+/* tryRecoveryCode redeems a single-use recovery code supplied on the recovery header when the enrollment store implements TwoFactorRecoveryStore, and reports whether one was accepted and consumed and whether one was supplied at all. The store enforces single use atomically, so no replay-guard entry is recorded. */
 func (instance *TotpSecondFactorAuthenticator) tryRecoveryCode(
     request httpcontract.Request,
     token securitycontract.Token,
-) (bool, error) {
+) (bool, bool, error) {
     recoveryStore, supportsRecovery := instance.enrollments.(securitycontract.TwoFactorRecoveryStore)
     if false == supportsRecovery {
-        return false, nil
+        return false, false, nil
     }
 
     recoveryCode := request.Header(instance.recoveryHeaderName)
     if "" == recoveryCode {
-        return false, nil
+        return false, false, nil
     }
 
     redeemed, redeemErr := recoveryStore.RedeemRecoveryCode(
@@ -176,10 +178,10 @@ func (instance *TotpSecondFactorAuthenticator) tryRecoveryCode(
         recoveryCode,
     )
     if nil != redeemErr {
-        return false, exception.NewError("could not redeem the two-factor recovery code", nil, redeemErr)
+        return false, true, exception.NewError("could not redeem the two-factor recovery code", nil, redeemErr)
     }
 
-    return redeemed, nil
+    return redeemed, true, nil
 }
 
 /* codeAlreadyUsed records an accepted code through the replay guard and reports whether it was already used within its validity window. It relies on the constructor always installing a guard, so a literal without one fails loudly instead of disabling replay protection. The nonce keys on the normalized code, as Verify compares it, so a captured code cannot be replayed by re-spacing it. */

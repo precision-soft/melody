@@ -9,6 +9,11 @@ type TwoFactorPending interface {
     PendingUserIdentifier() string
 }
 
+/* TwoFactorRejection is an optional companion to TwoFactorPending: a pending token that implements it tells a challenge the request never answered from a second factor it answered and had refused. AuthenticatorTokenSource dispatches security.login.failure only for a refused one, so a correct primary credential waiting for its code is not announced as a failure. */
+type TwoFactorRejection interface {
+    SecondFactorRejected() bool
+}
+
 /* TwoFactorEnrollmentStore reports whether a user has a second factor configured and, if so, returns the TOTP secret to verify against. It is supplied by the application because only the application knows where enrollments live (typically an encrypted column). Returning enrolled=false means the user has no second factor and primary authentication stands on its own. */
 type TwoFactorEnrollmentStore interface {
     FindTotpSecret(runtimeInstance runtimecontract.Runtime, userIdentifier string) (secret string, enrolled bool, err error)

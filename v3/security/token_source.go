@@ -85,13 +85,23 @@ func (instance *AuthenticatorTokenSource) Resolve(runtimeInstance runtimecontrac
         token = NewAnonymousToken()
     }
 
-    /* an authenticator that supported the request and answered no user rejected the credentials the request carried, a wrong api key among them: the failure event lets an audit or lockout listener see it, and the request goes on anonymous */
+    /* an authenticator that supported the request and answered no user rejected the credentials the request carried, a wrong api key among them: the failure event lets an audit or lockout listener see it, and the request goes on anonymous; a pending second factor is a rejection only when the token says the factor was supplied and refused, since a correct primary credential waiting for its code is the ordinary challenge */
     if true == usedAuthenticator && false == token.IsAuthenticated() {
+        failureMessage := "security credentials rejected"
+        if _, isPending := token.(securitycontract.TwoFactorPending); true == isPending {
+            rejection, reportsRejection := token.(securitycontract.TwoFactorRejection)
+            if false == reportsRejection || false == rejection.SecondFactorRejected() {
+                return token, nil
+            }
+
+            failureMessage = "security second factor rejected"
+        }
+
         eventDispatcher := event.EventDispatcherMustFromContainer(runtimeInstance.Container())
         _, eventSecurityLoginFailureErr := eventDispatcher.DispatchName(
             runtimeInstance,
             securitycontract.EventSecurityLoginFailure,
-            NewLoginFailureEvent(request, exception.NewError("security credentials rejected", nil, nil)),
+            NewLoginFailureEvent(request, exception.NewError(failureMessage, nil, nil)),
         )
         if nil != eventSecurityLoginFailureErr {
             return nil, eventSecurityLoginFailureErr

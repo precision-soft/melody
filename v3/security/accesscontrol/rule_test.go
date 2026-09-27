@@ -212,6 +212,39 @@ func TestARulePathWithoutALeadingSlashIsRefusedInEveryPathMode(t *testing.T) {
     }
 }
 
+/* the request path is matched cleaned, so a rule spelled with an empty, "." or ".." segment could never match and would govern nothing */
+func TestANonCanonicalRulePathIsRefusedInEveryPathMode(t *testing.T) {
+    config := RuleConfig{Attributes: []string{"ROLE_ADMIN"}}
+
+    for _, spelling := range []string{"//admin", "/./admin", "/x/../admin", "/admin/.", "/admin//panel"} {
+        for _, testCase := range []struct {
+            name  string
+            build func()
+        }{
+            {"exact", func() { _ = NewExactRule(spelling, config) }},
+            {"segment prefix", func() { _ = NewSegmentPrefixRule(spelling, config) }},
+            {"raw prefix", func() { _ = NewRawPrefixRule(spelling, config) }},
+        } {
+            t.Run(testCase.name+" "+spelling, func(t *testing.T) {
+                testhelper.AssertPanicsWithError(t, testCase.build, "access control rule path must be canonical")
+            })
+        }
+    }
+}
+
+/* a trailing slash stays each constructor's to read: the exact and segment rules fold it, so the canonical refusal does not reach it */
+func TestACanonicalRulePathWithATrailingSlashIsAccepted(t *testing.T) {
+    config := RuleConfig{Attributes: []string{"ROLE_ADMIN"}}
+
+    if "/admin" != NewExactRule("/admin/", config).PathPrefix() {
+        t.Fatalf("expected the exact rule to fold its trailing slash")
+    }
+
+    if "/admin" != NewSegmentPrefixRule("/admin/", config).PathPrefix() {
+        t.Fatalf("expected the segment rule to fold its trailing slash")
+    }
+}
+
 /* a raw reach spelled with a trailing slash would be stored without it and claim every sibling beginning with the same letters, the reach the slash was written to exclude. */
 func TestNewRawPrefixRuleRefusesATrailingSlash(t *testing.T) {
     testhelper.AssertPanicsWithError(

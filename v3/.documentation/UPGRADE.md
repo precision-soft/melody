@@ -14,13 +14,13 @@ An upgrader who needs the old behaviour of any entry below pins the previous pat
 
 ## Unreleased
 
-### Security: an access control rule path begins with a slash, and a raw prefix declares its reach
+### Security: an access control rule path begins with a slash and is canonical, and a raw prefix declares its reach
 
-**What changed.** Every access control rule path that does not begin with a slash is refused at declaration, by the `accesscontrol` constructors, the builder's `Require` and `AllowAnonymous` and the deprecated `security` constructors; a raw prefix rule that ends with a slash is refused as well, and `accesscontrol.NewControl` refuses the zero `Rule`. The empty raw prefix, the declared fallback, and `/` are unchanged.
+**What changed.** Every access control rule path that does not begin with a slash, or that carries an empty, `.` or `..` segment, is refused at declaration, by the `accesscontrol` constructors, the builder's `Require` and `AllowAnonymous` and the deprecated `security` constructors; a raw prefix rule that ends with a slash is refused as well, and `accesscontrol.NewControl` refuses the zero `Rule`. The empty raw prefix, the declared fallback, and `/` are unchanged.
 
-**Symptom.** The application panics at boot with `access control rule path must begin with a slash`, `access control raw prefix rule may not end with a slash` or `access control rule carries no attribute`. The rule it names never did what it said: a path without a slash matched nothing, so its paths reached their handlers without a decision; a raw `/api/` claimed `/api-internal` and outranked a regex rule written for that tree; a zero `Rule` denied every path no other rule claimed.
+**Symptom.** The application panics at boot with `access control rule path must begin with a slash`, `access control rule path must be canonical`, `access control raw prefix rule may not end with a slash` or `access control rule carries no attribute`. The rule it names never did what it said: a path without a slash or spelled `//admin` or `/x/../admin` matched nothing, since the request path is matched cleaned, so its paths reached their handlers without a decision; a raw `/api/` claimed `/api-internal` and outranked a regex rule written for that tree; a zero `Rule` denied every path no other rule claimed.
 
-**Remedy.** Write the path with its leading slash. For a raw rule written with a trailing slash, declare the reach it meant: `accesscontrol.NewSegmentPrefixRule("/api", …)` for the segment, or the raw prefix without the slash when `/api-internal` belongs to it. Build every `Rule` with a constructor.
+**Remedy.** Write the path with its leading slash, cleaned: `/admin` for `//admin` or `/x/../admin`. For a raw rule written with a trailing slash, declare the reach it meant: `accesscontrol.NewSegmentPrefixRule("/api", …)` for the segment, or the raw prefix without the slash when `/api-internal` belongs to it. Build every `Rule` with a constructor.
 
 ### Security: a firewall's name is declared once, and its rules are never nil
 
@@ -32,7 +32,7 @@ An upgrader who needs the old behaviour of any entry below pins the previous pat
 
 ### Security: rejected credentials dispatch `security.login.failure`
 
-**What changed.** When the authenticator that supported the request answers no user, `AuthenticatorTokenSource` dispatches `security.login.failure`, carrying `security credentials rejected`, before the request goes on anonymous. A wrong `X-Api-Key` is the common case.
+**What changed.** When the authenticator that supported the request answers no user, `AuthenticatorTokenSource` dispatches `security.login.failure`, carrying `security credentials rejected`, before the request goes on anonymous. A wrong `X-Api-Key` is the common case. A second factor supplied and refused, a wrong or replayed TOTP code or a recovery code the store did not redeem, dispatches it too, carrying `security second factor rejected`; a pending second factor the request has not answered yet dispatches nothing.
 
 **Symptom.** A listener on `security.login.failure` is called for a guessed or stale api key, where it was called only when an authenticator answered an error; a failing listener now fails that request, as it already failed a successful one.
 

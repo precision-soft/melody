@@ -33,6 +33,22 @@ func NewCompiledFirewall(
     entryPointSource Source,
     accessDeniedHandlerSource Source,
 ) *CompiledFirewall {
+    /* the firewall's name is in hand here, so the refusal names it beside the index, as the builder and Compile do; NewFirewall alone knows only the index */
+    for ruleIndex, rule := range rules {
+        if true == internal.IsNilInterface(rule) {
+            exception.Panic(
+                exception.NewError(
+                    "security firewall rule is nil",
+                    exceptioncontract.Context{
+                        "firewallName": name,
+                        "ruleIndex":    ruleIndex,
+                    },
+                    nil,
+                ),
+            )
+        }
+    }
+
     var firewall *Firewall
     if 0 != len(rules) {
         firewall = NewFirewall(rules...)

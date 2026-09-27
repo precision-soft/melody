@@ -350,6 +350,82 @@ func TestAuthenticatorTokenSource_ResolveFailsWhenTheSuccessDispatchFails(t *tes
 }
 
 /* recordSecurityLoginEvents plants a listener on both login events and hands back the slice of names it observed, in order. */
+/* a correct primary credential whose user owes a second factor is the ordinary challenge, not a rejection: a lockout listener counting failures would otherwise lock every enrolled user on their way to the code prompt */
+func TestAuthenticatorTokenSource_APendingSecondFactorIsNotAnnouncedAsAFailure(t *testing.T) {
+    runtimeInstance, dispatcher := newTokenSourceTestRuntime(t)
+
+    dispatchedNameList := recordSecurityLoginEvents(dispatcher)
+
+    tokenSource := NewAuthenticatorTokenSource(
+        NewAuthenticatorManager(
+            &testAuthenticator{
+                supportsCallback: func(request httpcontract.Request) bool { return true },
+                authenticateCallback: func(request httpcontract.Request) (securitycontract.Token, error) {
+                    return NewTwoFactorPendingToken(NewAuthenticatedToken("user-1", []string{"ROLE_USER"})), nil
+                },
+            },
+        ),
+    )
+
+    token, err := tokenSource.Resolve(runtimeInstance, newFirewallTestRequest("/"))
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if pendingUser, isPending := PendingUserFromToken(token); false == isPending || "user-1" != pendingUser {
+        t.Fatalf("expected the pending challenge to reach the application, got present=%v user=%q", isPending, pendingUser)
+    }
+
+    if 0 != len(*dispatchedNameList) {
+        t.Fatalf("expected no login event for a pending second factor, got %v", *dispatchedNameList)
+    }
+}
+
+/* a second factor the request supplied and had refused is a rejection of the credentials it carried, announced under its own description */
+func TestAuthenticatorTokenSource_ARejectedSecondFactorIsAnnouncedAsAFailure(t *testing.T) {
+    runtimeInstance, dispatcher := newTokenSourceTestRuntime(t)
+
+    failureMessageList := make([]string, 0)
+    dispatcher.AddListener(
+        securitycontract.EventSecurityLoginFailure,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            failureEvent, isFailureEvent := eventValue.Payload().(*LoginFailureEvent)
+            if false == isFailureEvent {
+                t.Fatalf("expected a login failure event, got %T", eventValue.Payload())
+            }
+
+            failureMessageList = append(failureMessageList, failureEvent.Error().Error())
+
+            return nil
+        },
+        0,
+    )
+
+    tokenSource := NewAuthenticatorTokenSource(
+        NewAuthenticatorManager(
+            &testAuthenticator{
+                supportsCallback: func(request httpcontract.Request) bool { return true },
+                authenticateCallback: func(request httpcontract.Request) (securitycontract.Token, error) {
+                    return NewTwoFactorRejectedToken(NewAuthenticatedToken("user-1", []string{"ROLE_USER"})), nil
+                },
+            },
+        ),
+    )
+
+    token, err := tokenSource.Resolve(runtimeInstance, newFirewallTestRequest("/"))
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if _, isPending := PendingUserFromToken(token); false == isPending {
+        t.Fatalf("expected the rejected challenge to stay pending so the application prompts again")
+    }
+
+    if 1 != len(failureMessageList) || "security second factor rejected" != failureMessageList[0] {
+        t.Fatalf("expected exactly one failure announcing the rejected second factor, got %v", failureMessageList)
+    }
+}
+
 func recordSecurityLoginEvents(dispatcher eventcontract.EventDispatcher) *[]string {
     dispatchedNameList := make([]string, 0)
 

@@ -438,11 +438,11 @@ func normalizePathPrefix(pathPrefix string) string {
     return normalizedPrefix
 }
 
-/* rootedPath folds a leading slash onto a declared path: the request path is canonicalized to begin with one, so "admin" and "/admin" declare the same rule. */
+/* rootedPath folds a declared path onto the spelling the request path is canonicalized to: a leading slash and no empty, "." or ".." segment, so "admin", "//admin" and "/x/../admin" declare the same rule as "/admin". */
 func rootedPath(path string) string {
-    if true == strings.HasPrefix(path, "/") {
-        return path
+    if false == strings.HasPrefix(path, "/") {
+        path = "/" + path
     }
 
-    return "/" + path
+    return stdpath.Clean(path)
 }

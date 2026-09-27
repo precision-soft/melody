@@ -573,6 +573,28 @@ func TestAccessControlRule_FoldsALeadingSlashOntoEveryPathMode(t *testing.T) {
     }
 }
 
+/* the request path is matched cleaned, so a rule spelled with an empty, "." or ".." segment is read as the clean path it names instead of governing nothing. */
+func TestAccessControlRule_FoldsANonCanonicalPathInEveryPathMode(t *testing.T) {
+    for _, spelling := range []string{"//admin", "/./admin", "/x/../admin", "/admin/."} {
+        for _, testCase := range []struct {
+            name string
+            rule AccessControlRule
+        }{
+            {"segment prefix", NewAccessControlRule(spelling, "ROLE_ADMIN")},
+            {"raw prefix", NewAccessControlRawPrefixRule(spelling, "ROLE_ADMIN")},
+            {"exact", NewAccessControlExactRule(spelling, "ROLE_ADMIN")},
+        } {
+            if "/admin" != testCase.rule.pathPrefix {
+                t.Fatalf("%s %q: expected the path folded to /admin, got %q", testCase.name, spelling, testCase.rule.pathPrefix)
+            }
+
+            if _, matched := NewAccessControl(testCase.rule).Match("/admin"); false == matched {
+                t.Fatalf("%s %q: expected the folded rule to govern /admin", testCase.name, spelling)
+            }
+        }
+    }
+}
+
 func TestAccessControlRawPrefixRule_KeepsTheEmptyFallbackAndTheRoot(t *testing.T) {
     if "" != NewAccessControlRawPrefixRule("", "ROLE_USER").pathPrefix {
         t.Fatalf("expected the empty raw prefix to stay the fallback")
