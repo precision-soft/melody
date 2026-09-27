@@ -340,3 +340,20 @@ type fitsProbeImplementer struct{}
 func (instance *fitsProbeImplementer) Greet() string {
     return "fits"
 }
+
+/* localCollisionProviderFirst and localCollisionProviderSecond build providers of two function-local types of one name in one package: String() spells both *container.Local and neither carries an import path of its own, so they are the pair the identity key cannot tell apart, and the collision guard is what refuses the second */
+func localCollisionProviderFirst() any {
+    type Local struct{ A int }
+
+    return func(resolver containercontract.Resolver) (*Local, error) {
+        return &Local{}, nil
+    }
+}
+
+func localCollisionProviderSecond() any {
+    type Local struct{ A int }
+
+    return func(resolver containercontract.Resolver) (*Local, error) {
+        return &Local{}, nil
+    }
+}

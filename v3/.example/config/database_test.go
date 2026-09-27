@@ -4,8 +4,8 @@ import (
     "context"
     "database/sql"
     "errors"
-    "io"
     "strings"
+    "sync"
     "testing"
     "time"
 
@@ -230,8 +230,8 @@ func (instance *recordingProvider) Open(params melodybunorm.ConnectionParameters
     return newUndialedDatabase(), nil
 }
 
-/* databaseServicesOver registers the database services of a module whose registry declares the catalogue and the archive over recording providers, beside a logger service that counts its resolutions; the logger it publishes is returned, so a test compares the logger an open receives with it */
-func databaseServicesOver(t *testing.T, archiveWired bool) (melodycontainercontract.Container, *recordingProvider, *recordingProvider, melodyloggingcontract.Logger, *int) {
+/* databaseServicesOver registers the database services of a module whose registry declares the catalogue and the archive over recording providers, beside a logger service that counts its resolutions; the buffer that logger writes into is returned, so a test reads where a record written through the logger an open receives lands */
+func databaseServicesOver(t *testing.T, archiveWired bool) (melodycontainercontract.Container, *recordingProvider, *recordingProvider, *lockedJournalBuffer, *int) {
     t.Helper()
 
     catalogProvider := &recordingProvider{}
@@ -256,8 +256,9 @@ func databaseServicesOver(t *testing.T, archiveWired bool) (melodycontainercontr
         t.Fatalf("build the registry: %v", registryErr)
     }
 
-    /* a logger of its own, so the open handed THIS one and not the one the registry was built on */
-    journal := melodylogging.NewJsonLogger(io.Discard, melodyloggingcontract.LevelDebug)
+    /* a logger of its own, so a record reaching THIS one proves the open reports through it and not through the one the registry was built on */
+    journalBuffer := &lockedJournalBuffer{}
+    journal := melodylogging.NewJsonLogger(journalBuffer, melodyloggingcontract.LevelDebug)
     loggerResolutions := 0
 
     containerInstance := melodycontainer.NewContainer()
@@ -278,7 +279,27 @@ func databaseServicesOver(t *testing.T, archiveWired bool) (melodycontainercontr
     moduleInstance.archiveLocation = "postgres:5432/archive"
     moduleInstance.registerDatabaseServices(containerRegistrar{Container: containerInstance})
 
-    return containerInstance, catalogProvider, archiveProvider, journal, &loggerResolutions
+    return containerInstance, catalogProvider, archiveProvider, journalBuffer, &loggerResolutions
+}
+
+/* lockedJournalBuffer is the journal's destination, read by the test while the application may still write */
+type lockedJournalBuffer struct {
+    mutex   sync.Mutex
+    content strings.Builder
+}
+
+func (instance *lockedJournalBuffer) Write(payload []byte) (int, error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return instance.content.Write(payload)
+}
+
+func (instance *lockedJournalBuffer) String() string {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return instance.content.String()
 }
 
 /* the chain the catalogue storage starts (storage, handle, registry, journal) continues here: the handle resolves the registry, and the registry's provider hands it the container's journal before the handle is opened, so the open reports through the application's logger rather than the emergency one the registry is built on. A handle that captured the registry would resolve nothing, so the swap would not run and the teardown would have no edge to order the two closes by. */
@@ -290,7 +311,7 @@ func TestRegisterDatabaseServices_EachHandleResolvesTheRegistryWhichTakesTheJour
         {serviceName: serviceDatabase},
         {serviceName: serviceArchiveDatabase, archive: true},
     } {
-        containerInstance, catalogProvider, archiveProvider, journal, loggerResolutions := databaseServicesOver(t, true)
+        containerInstance, catalogProvider, archiveProvider, journalBuffer, loggerResolutions := databaseServicesOver(t, true)
 
         database, openErr := melodycontainer.FromResolver[*bun.DB](containerInstance, handle.serviceName)
         if nil != openErr || nil == database {
@@ -306,8 +327,14 @@ func TestRegisterDatabaseServices_EachHandleResolvesTheRegistryWhichTakesTheJour
             t.Fatalf("%s: expected the registry's provider to run and resolve the journal once, got %d", handle.serviceName, *loggerResolutions)
         }
 
-        if 1 != len(opened.openedWith) || journal != opened.openedWith[0] {
-            t.Fatalf("%s: expected the open handed the container's journal, got %v", handle.serviceName, opened.openedWith)
+        if 1 != len(opened.openedWith) {
+            t.Fatalf("%s: expected one open, got %d", handle.serviceName, len(opened.openedWith))
+        }
+
+        /* the registry hands its own logger, which carries the application's, so the journal is proven by where a record lands rather than by identity */
+        opened.openedWith[0].Warning("open reported through the journal", nil)
+        if false == strings.Contains(journalBuffer.String(), "open reported through the journal") {
+            t.Fatalf("%s: expected the open handed a logger reporting into the container's journal, got %q", handle.serviceName, journalBuffer.String())
         }
     }
 }

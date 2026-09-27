@@ -6,6 +6,7 @@ import (
     "sync"
     "testing"
 
+    "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     "github.com/uptrace/bun/schema"
 )
@@ -286,4 +287,43 @@ func TestRouteDiagnostics_ALoggerWithoutIdentityIsNeverReadWhileItWrites(t *test
 
     close(stop)
     writers.Wait()
+}
+
+/* the registry's logger forwards the contract's one optional door, so a threshold the application's logger keeps still holds through it, and a logger without one is read as enabled, as logging.LevelEnabled reads any logger */
+func TestRegistryLogger_ForwardsTheWrappedLoggersThreshold(t *testing.T) {
+    filtered := newRegistryLogger(&errorOnlyLogger{})
+
+    if true == logging.LevelEnabled(filtered, loggingcontract.LevelWarning) || false == logging.LevelEnabled(filtered, loggingcontract.LevelError) {
+        t.Fatal("expected the wrapped logger's threshold to hold through the registry's logger")
+    }
+
+    if false == logging.LevelEnabled(newRegistryLogger(&capturingDiagnosticLogger{}), loggingcontract.LevelDebug) {
+        t.Fatal("expected a logger without a threshold to be read as enabled")
+    }
+}
+
+/* a routing through the registry's logger writes bun's records to the application's logger itself */
+func TestRegistryLogger_RoutesBunsRecordsToTheWrappedLogger(t *testing.T) {
+    t.Cleanup(ResetDiagnostics)
+
+    inner := &capturingDiagnosticLogger{}
+    RouteDiagnostics(newRegistryLogger(inner))
+
+    _ = schema.SafeQuery("SELECT 1", []any{42})
+
+    if 1 != len(inner.captured()) {
+        t.Fatalf("expected the record on the wrapped logger, got %d", len(inner.captured()))
+    }
+}
+
+/* a retired registry logger routes nothing, the door every late routing goes through */
+func TestRouteDiagnostics_ARetiredRegistryLoggerRoutesNothing(t *testing.T) {
+    t.Cleanup(ResetDiagnostics)
+
+    owned := newRegistryLogger(&capturingDiagnosticLogger{})
+    retireRegistryLogger(owned)
+
+    if nil != routeDiagnosticsTo(owned) || nil != bunDiagnosticsTarget.Load() {
+        t.Fatal("expected a retired registry logger to route nothing")
+    }
 }

@@ -100,6 +100,15 @@ func (instance *UserService) FindById(id string) (*entity.User, bool, error) {
     return user, true, nil
 }
 
+func (instance *UserService) findByUsernameUncached(ctx context.Context, username string) (*entity.User, bool, error) {
+    normalizedUsername := repository.NormalizedUsername(username)
+    if false == CacheSafeIdentifier(normalizedUsername) {
+        return nil, false, nil
+    }
+
+    return instance.userRepository.FindByUsername(ctx, normalizedUsername)
+}
+
 func (instance *UserService) FindByUsername(username string) (*entity.User, bool, error) {
     /* CacheSafeIdentifier also refuses the empty spelling, so the blank-username answer travels through the same door */
     normalizedUsername := repository.NormalizedUsername(username)
@@ -192,7 +201,7 @@ func (instance *UserService) Update(
     modified := *user
     modified.Username = username
     modified.Password = passwordHash
-    modified.Roles = roles
+    modified.Roles = append([]string{}, roles...)
 
     updated, updateErr := instance.userRepository.Update(ctx, &modified)
     if nil != updateErr {
@@ -251,7 +260,9 @@ func (instance *UserService) DeleteById(
     return true, nil
 }
 
+/* AuthenticateByUsernameAndPassword reads the account through the repository rather than the cache, so a password change or a deletion the cache has not dropped yet cannot authenticate the replaced credential. The name is still refused as FindByUsername refuses it before any backend is asked. */
 func (instance *UserService) AuthenticateByUsernameAndPassword(
+    ctx context.Context,
     username string,
     password string,
 ) (*entity.User, bool, error) {
@@ -264,7 +275,7 @@ func (instance *UserService) AuthenticateByUsernameAndPassword(
         return nil, false, nil
     }
 
-    user, found, findErr := instance.FindByUsername(normalizedUsername)
+    user, found, findErr := instance.findByUsernameUncached(ctx, normalizedUsername)
     if nil != findErr {
         return nil, false, findErr
     }

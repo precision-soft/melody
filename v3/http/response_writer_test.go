@@ -431,3 +431,40 @@ func TestRecordingResponseWriter_SwitchingProtocolsCommits(t *testing.T) {
         t.Fatalf("expected 101 to commit, got committed %v with status %d", writer.HeadersWritten(), writer.CommittedStatusCode())
     }
 }
+
+func TestRecordingResponseWriter_AStatusWrittenAfterTheCommitKeepsTheCommittedOne(t *testing.T) {
+    writer := newRecordingResponseWriter(httptest.NewRecorder())
+
+    writer.WriteHeader(nethttp.StatusAccepted)
+    writer.WriteHeader(nethttp.StatusInternalServerError)
+
+    if nethttp.StatusAccepted != writer.CommittedStatusCode() {
+        t.Fatalf("expected the committed 202, got %d", writer.CommittedStatusCode())
+    }
+}
+
+func TestRecordingResponseWriter_AStatusWrittenAfterTheImplicitCommitKeepsTheImplicitTwoHundred(t *testing.T) {
+    writer := newRecordingResponseWriter(httptest.NewRecorder())
+
+    _, writeErr := writer.Write([]byte("body"))
+    if nil != writeErr {
+        t.Fatalf("expected the write to succeed, got %v", writeErr)
+    }
+
+    writer.WriteHeader(nethttp.StatusInternalServerError)
+
+    if nethttp.StatusOK != writer.CommittedStatusCode() {
+        t.Fatalf("expected the implicit 200, got %d", writer.CommittedStatusCode())
+    }
+}
+
+func TestRecordingResponseWriter_AStatusWrittenAfterSwitchingProtocolsKeepsTheSwitch(t *testing.T) {
+    writer := newRecordingResponseWriter(httptest.NewRecorder())
+
+    writer.WriteHeader(nethttp.StatusSwitchingProtocols)
+    writer.WriteHeader(nethttp.StatusInternalServerError)
+
+    if nethttp.StatusSwitchingProtocols != writer.CommittedStatusCode() {
+        t.Fatalf("expected the committed 101, got %d", writer.CommittedStatusCode())
+    }
+}

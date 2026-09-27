@@ -191,7 +191,12 @@ func (instance *container) serviceWithCreationGuardLocked(
             )
         }()
 
-        createdValue, err, debugInfo = create(providerResolver)
+        /* the view is marked the moment the provider leaves, however it leaves, so a view it retained never pushes onto the live chain after it */
+        createdValue, err, debugInfo = func() (any, error, *providerDebugInfo) {
+            defer providerResolver.providerReturned.Store(true)
+
+            return create(providerResolver)
+        }()
 
         if true == internal.IsNilInterface(createdValue) {
             /* a nil value with an error is the provider's reason, and is kept; the generic report is for a silent (nil, nil) */

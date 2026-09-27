@@ -76,9 +76,7 @@ func (instance *container) expandedDeclaredTypeEdgesLocked() [][2]string {
             continue
         }
 
-        identityKey := strings.TrimPrefix(declaredEdge.dependencyNodeKey, containerTypeNodeKeyPrefix)
-
-        registeredType, known := instance.typeIdentityKeyToType[identityKey]
+        registeredType, known := instance.registeredTypeOfDeclaredEdgeLocked(declaredEdge)
         if false == known {
             continue
         }
@@ -123,6 +121,10 @@ func (instance *container) teardownNodeWasRegisteredLocked(nodeKey string) bool 
         return false
     }
 
+    return instance.typeWasRegisteredLocked(registeredType)
+}
+
+func (instance *container) typeWasRegisteredLocked(registeredType reflect.Type) bool {
     if _, provided := instance.typeProviders[registeredType]; true == provided {
         return true
     }
@@ -134,6 +136,38 @@ func (instance *container) teardownNodeWasRegisteredLocked(nodeKey string) bool 
     _, named := instance.typeRegistrationNamesByType[registeredType]
 
     return named
+}
+
+/* registeredTypeOfDeclaredEdgeLocked answers the type filed under a declared type edge's key, known only when it is the very type the edge declares: the key is built to be one per type, and this is the belt under it, so a declaration never binds to another type that shares its key. */
+func (instance *container) registeredTypeOfDeclaredEdgeLocked(declaredEdge declaredTeardownEdge) (reflect.Type, bool) {
+    registeredType, known := instance.typeIdentityKeyToType[strings.TrimPrefix(declaredEdge.dependencyNodeKey, containerTypeNodeKeyPrefix)]
+    if false == known || registeredType != declaredEdge.dependencyType {
+        return nil, false
+    }
+
+    return registeredType, true
+}
+
+/* declaredEdgeWasRegisteredLocked is teardownNodeWasRegisteredLocked for a declaration: a type edge counts only the type it declares. */
+func (instance *container) declaredEdgeWasRegisteredLocked(declaredEdge declaredTeardownEdge) bool {
+    if false == strings.HasPrefix(declaredEdge.dependencyNodeKey, containerTypeNodeKeyPrefix) {
+        return instance.teardownNodeWasRegisteredLocked(declaredEdge.dependencyNodeKey)
+    }
+
+    registeredType, known := instance.registeredTypeOfDeclaredEdgeLocked(declaredEdge)
+
+    return true == known && true == instance.typeWasRegisteredLocked(registeredType)
+}
+
+/* declaredEdgeIsScopedLocked is teardownNodeIsScopedLocked for a declaration: a type edge counts only the type it declares. */
+func (instance *container) declaredEdgeIsScopedLocked(declaredEdge declaredTeardownEdge) bool {
+    if false == strings.HasPrefix(declaredEdge.dependencyNodeKey, containerTypeNodeKeyPrefix) {
+        return instance.teardownNodeIsScopedLocked(declaredEdge.dependencyNodeKey)
+    }
+
+    registeredType, known := instance.registeredTypeOfDeclaredEdgeLocked(declaredEdge)
+
+    return true == known && 0 < len(instance.scopedTypeRegistrationNamesByType[registeredType])
 }
 
 /* teardownNodeIsScopedLocked answers whether a node key names a scoped registration, under either its name or its type. */
@@ -169,11 +203,11 @@ func (instance *container) refuseDeclaredTeardownEdgeLocked(declaredEdge declare
         return ambiguityErr
     }
 
-    if true == instance.teardownNodeWasRegisteredLocked(declaredEdge.dependencyNodeKey) {
+    if true == instance.declaredEdgeWasRegisteredLocked(declaredEdge) {
         return nil
     }
 
-    if true == instance.teardownNodeIsScopedLocked(declaredEdge.dependencyNodeKey) {
+    if true == instance.declaredEdgeIsScopedLocked(declaredEdge) {
         return exception.NewError(
             "a declared teardown dependency names a scoped service, which is built and closed by each scope and has no node in the container's teardown graph, and the parallel teardown admits no ordering that cannot be written",
             exceptioncontract.Context{
@@ -201,9 +235,7 @@ func (instance *container) refuseAmbiguousDeclaredTypeEdgeLocked(declaredEdge de
         return nil
     }
 
-    identityKey := strings.TrimPrefix(declaredEdge.dependencyNodeKey, containerTypeNodeKeyPrefix)
-
-    registeredType, known := instance.typeIdentityKeyToType[identityKey]
+    registeredType, known := instance.registeredTypeOfDeclaredEdgeLocked(declaredEdge)
     if false == known {
         return nil
     }

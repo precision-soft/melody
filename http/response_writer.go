@@ -119,9 +119,13 @@ func newRecordingResponseWriter(responseWriter nethttp.ResponseWriter) *recordin
     }
 }
 
-/* WriteHeader raises the commit flag only after the delegate returns: the delegate panics on a status outside [100, 999] before anything reaches the connection, and a flag raised first would make the recovery skip its 500. An informational status other than 101 (103 Early Hints) commits nothing: net/http sends it ahead of the final header, which is still to be written. */
+/* WriteHeader raises the commit flag only after the delegate returns: the delegate panics on a status outside [100, 999] before anything reaches the connection, and a flag raised first would make the recovery skip its 500. An informational status other than 101 (103 Early Hints) commits nothing: net/http sends it ahead of the final header, which is still to be written. A call after the commit reaches the delegate, which ignores it, and leaves the recorded status as the one the connection carries. */
 func (instance *recordingResponseWriter) WriteHeader(statusCode int) {
     instance.ResponseWriter.WriteHeader(statusCode)
+    if true == instance.wroteHeader {
+        return
+    }
+
     if nethttp.StatusOK > statusCode && nethttp.StatusSwitchingProtocols != statusCode {
         return
     }

@@ -19,7 +19,7 @@ type LazyService[T any] struct {
     sourceClosed bool
 }
 
-/* Lazy returns a handle that resolves serviceName on first use, the deferred form of FromResolver. A handle over the container is safe for concurrent first uses; one over a provider's resolver context that escapes the provider is not, since that context is one resolution chain. */
+/* Lazy returns a handle that resolves serviceName on first use, the deferred form of FromResolver. A handle is safe for concurrent first uses, over the container as over the resolver a provider received: once that provider has returned, every resolution through its resolver starts a chain of its own and is still recorded as the provider's dependency. */
 func Lazy[T any](resolver containercontract.Resolver, serviceName string) *LazyService[T] {
     return &LazyService[T]{
         source: resolver,

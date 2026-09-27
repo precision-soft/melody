@@ -11,6 +11,7 @@ import (
     "github.com/prometheus/client_golang/prometheus"
 
     "github.com/precision-soft/melody/v3/exception"
+    melodyhttp "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
@@ -278,9 +279,8 @@ func TestStatusCodeForError_MapsSubFiveHundredHttpExceptionsAndDefaultsToFiveHun
     }
 }
 
-func TestCompletedStatusCode_TheErrorDecidesThenTheResponseThenTheWriter(t *testing.T) {
-    hijackedRecorder := &statusRecordingResponseWriter{statusCode: nethttp.StatusOK, hijacked: true}
-    writtenRecorder := &statusRecordingResponseWriter{statusCode: nethttp.StatusAccepted}
+func TestCompletedStatusCode_ACommittedStatusDecidesThenTheErrorThenTheResponseThenTheWriter(t *testing.T) {
+    uncommittedRecorder := &statusRecordingResponseWriter{statusCode: nethttp.StatusAccepted}
 
     cases := map[string]struct {
         handlerErr error
@@ -288,22 +288,71 @@ func TestCompletedStatusCode_TheErrorDecidesThenTheResponseThenTheWriter(t *test
         recorder   *statusRecordingResponseWriter
         expected   int
     }{
-        "error over response and upgrade": {
+        "committed status over error and response": {
             handlerErr: exception.NewHttpException(nethttp.StatusNotFound, "not found"),
             response:   &typedNilProneResponse{statusCode: nethttp.StatusCreated},
-            recorder:   hijackedRecorder,
+            recorder:   &statusRecordingResponseWriter{statusCode: nethttp.StatusAccepted, wroteHeader: true},
+            expected:   nethttp.StatusAccepted,
+        },
+        "upgrade over error and response": {
+            handlerErr: exception.NewHttpException(nethttp.StatusNotFound, "not found"),
+            response:   &typedNilProneResponse{statusCode: nethttp.StatusCreated},
+            recorder:   &statusRecordingResponseWriter{statusCode: nethttp.StatusOK, wroteHeader: true, hijacked: true},
+            expected:   nethttp.StatusSwitchingProtocols,
+        },
+        "error over response": {
+            handlerErr: exception.NewHttpException(nethttp.StatusNotFound, "not found"),
+            response:   &typedNilProneResponse{statusCode: nethttp.StatusCreated},
+            recorder:   uncommittedRecorder,
             expected:   nethttp.StatusNotFound,
         },
-        "response over upgrade":     {response: &typedNilProneResponse{statusCode: nethttp.StatusCreated}, recorder: hijackedRecorder, expected: nethttp.StatusCreated},
-        "typed-nil response":        {response: (*typedNilProneResponse)(nil), recorder: writtenRecorder, expected: nethttp.StatusAccepted},
-        "upgrade over the status":   {recorder: &statusRecordingResponseWriter{statusCode: nethttp.StatusAccepted, hijacked: true}, expected: nethttp.StatusSwitchingProtocols},
-        "status committed directly": {recorder: writtenRecorder, expected: nethttp.StatusAccepted},
+        "response over the writer": {response: &typedNilProneResponse{statusCode: nethttp.StatusCreated}, recorder: uncommittedRecorder, expected: nethttp.StatusCreated},
+        "typed-nil response":       {response: (*typedNilProneResponse)(nil), recorder: uncommittedRecorder, expected: nethttp.StatusAccepted},
     }
 
     for name, testCase := range cases {
         t.Run(name, func(t *testing.T) {
             if statusCode := completedStatusCode(testCase.handlerErr, testCase.response, testCase.recorder); testCase.expected != statusCode {
                 t.Fatalf("expected %d, got %d", testCase.expected, statusCode)
+            }
+        })
+    }
+}
+
+/* a handler that committed a status and then returned something else has already answered the client: the committed status is the one graphed, over a returned response as over a returned error */
+func TestMetricsMiddleware_ACommittedStatusWinsOverWhatTheHandlerReturnsAfterIt(t *testing.T) {
+    for name, returned := range map[string]func() (httpcontract.Response, error){
+        "a returned response": func() (httpcontract.Response, error) {
+            return melodyhttp.TextResponse(nethttp.StatusInternalServerError, "unused"), nil
+        },
+        "a returned error": func() (httpcontract.Response, error) {
+            return nil, errors.New("failed after the commit")
+        },
+    } {
+        t.Run(name, func(t *testing.T) {
+            meter, registry, meterErr := NewPrometheusMeter("melody-committed-status-test")
+            if nil != meterErr {
+                t.Fatalf("meter: %v", meterErr)
+            }
+
+            middleware, middlewareErr := NewMetricsMiddleware(meter)
+            if nil != middlewareErr {
+                t.Fatalf("middleware: %v", middlewareErr)
+            }
+
+            committing := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                writer.WriteHeader(nethttp.StatusAccepted)
+
+                return returned()
+            }
+
+            request, runtimeInstance := testRequestAndRuntime()
+
+            _, _ = middleware(committing)(runtimeInstance, httptest.NewRecorder(), request)
+
+            labels := gatheredStatusLabels(t, registry)
+            if false == labels["202"] || true == labels["500"] {
+                t.Fatalf("expected the committed 202 and no 500, got %v", labels)
             }
         })
     }

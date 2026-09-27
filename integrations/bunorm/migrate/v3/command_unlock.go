@@ -21,7 +21,7 @@ func (instance *UnlockCommand) Name() string {
 }
 
 func (instance *UnlockCommand) Description() string {
-    return "Unlock Bun migrations table (use when migration process crashed)"
+    return "Unlock Bun migrations table after a migration process crashed; no migration may be running against this database"
 }
 
 func (instance *UnlockCommand) Flags() []clicontract.Flag {

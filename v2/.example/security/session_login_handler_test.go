@@ -8,17 +8,17 @@ import (
     "testing"
     "time"
 
-    "github.com/precision-soft/melody/v3/.example/entity"
-    melodycontainer "github.com/precision-soft/melody/v3/container"
-    melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
-    melodyhttp "github.com/precision-soft/melody/v3/http"
-    melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
-    melodyruntime "github.com/precision-soft/melody/v3/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
-    melodysecurity "github.com/precision-soft/melody/v3/security"
-    melodysecuritycontract "github.com/precision-soft/melody/v3/security/contract"
-    melodysession "github.com/precision-soft/melody/v3/session"
-    melodysessioncontract "github.com/precision-soft/melody/v3/session/contract"
+    "github.com/precision-soft/melody/v2/.example/entity"
+    melodycontainer "github.com/precision-soft/melody/v2/container"
+    melodycontainercontract "github.com/precision-soft/melody/v2/container/contract"
+    melodyhttp "github.com/precision-soft/melody/v2/http"
+    melodyhttpcontract "github.com/precision-soft/melody/v2/http/contract"
+    melodyruntime "github.com/precision-soft/melody/v2/runtime"
+    melodyruntimecontract "github.com/precision-soft/melody/v2/runtime/contract"
+    melodysecurity "github.com/precision-soft/melody/v2/security"
+    melodysecuritycontract "github.com/precision-soft/melody/v2/security/contract"
+    melodysession "github.com/precision-soft/melody/v2/session"
+    melodysessioncontract "github.com/precision-soft/melody/v2/session/contract"
 )
 
 /* the session a client held before authenticating is the one an attacker could have planted, so the identity must land on a session under a fresh id and never on the one the request arrived with */
@@ -84,7 +84,7 @@ func TestSessionLoginHandlerWritesTheIdentityUnderARotatedId(t *testing.T) {
 func TestSessionLoginHandlerAnswersAServerErrorWithoutASession(t *testing.T) {
     result, loginErr := NewSessionLoginHandler(currentAccountLookup).Login(
         nil,
-        plainRequest(t),
+        requestAccepting(t, ""),
         melodysecuritycontract.LoginInput{Token: melodysecurity.NewAuthenticatedToken("user-1", []string{"ROLE_USER"})},
     )
     if nil != loginErr {

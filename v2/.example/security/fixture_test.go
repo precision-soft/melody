@@ -1,11 +1,13 @@
 package security
 
 import (
+    "errors"
     nethttp "net/http"
     "net/http/httptest"
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v2/.example/entity"
     melodyhttp "github.com/precision-soft/melody/v2/http"
     melodyhttpcontract "github.com/precision-soft/melody/v2/http/contract"
     melodysession "github.com/precision-soft/melody/v2/session"
@@ -72,4 +74,27 @@ func requestCarryingSessionAttribute(t *testing.T, value any) melodyhttpcontract
     request.Attributes().Set(melodyhttp.RequestAttributeSession, value)
 
     return request
+}
+
+const testPasswordHash = "test-password-hash"
+
+/* currentAccountLookup answers every account as present, holding testPasswordHash and the roles the session tests write for it, so a resolution that turns anonymous is one of the session's own guards and not the account check. */
+func currentAccountLookup(request melodyhttpcontract.Request, userId string) (*entity.User, bool, error) {
+    roles := []string{"ROLE_USER", "ROLE_EDITOR"}
+    if "user-3" == userId {
+        roles = []string{"ROLE_USER", "ROLE_ADMIN"}
+    }
+
+    return entity.NewUser(userId, "test-user", testPasswordHash, roles), true, nil
+}
+
+var errAccountRepositoryUnavailable = errors.New("the account repository is unavailable")
+
+func refusingAccountLookup(request melodyhttpcontract.Request, userId string) (*entity.User, bool, error) {
+    return nil, false, errAccountRepositoryUnavailable
+}
+
+/* withCurrentCredential writes the credential version of testPasswordHash, so a test that drives an earlier guard is not also refused for a missing version */
+func withCurrentCredential(sessionInstance melodysessioncontract.Session) {
+    sessionInstance.Set(SessionKeySecurityCredentialVersion, SessionCredentialVersion(testPasswordHash))
 }

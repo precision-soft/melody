@@ -1,9 +1,14 @@
 package repository
 
 import (
+    "context"
     "database/sql"
+    "database/sql/driver"
     "fmt"
+    "strings"
     "testing"
+
+    "github.com/uptrace/bun"
 )
 
 type stubResult struct {
@@ -36,5 +41,70 @@ func TestAffectedAtLeastOneRow(t *testing.T) {
 
     if true == affectedAtLeastOneRow(stubResult{affected: 3, affectedErr: fmt.Errorf("unsupported")}) {
         t.Fatalf("expected a driver that will not report a count to read as no change")
+    }
+}
+
+/* identicalUpdateDatabase answers every by-id select with the row until the re-read, which finds it only when presentAtReRead holds, the uniqueness count with none, and every update with zero changed rows: what MySQL reports for an update writing the values the row already holds */
+func identicalUpdateDatabase(presentAtReRead bool) *bun.DB {
+    database, recorder := newFakeBunDatabase()
+    recorder.rowsAffected = func(query string) int64 {
+        return 0
+    }
+
+    reads := 0
+    recorder.queryHook = func(query string) ([]string, [][]driver.Value, error) {
+        if true == strings.Contains(query, "count(*)") {
+            return []string{"count"}, [][]driver.Value{{int64(0)}}, nil
+        }
+
+        if true == strings.Contains(query, "(id = ") {
+            reads = reads + 1
+            if 1 == reads || true == presentAtReRead {
+                return []string{"id"}, [][]driver.Value{{"row-1"}}, nil
+            }
+        }
+
+        return []string{}, nil, nil
+    }
+
+    return database
+}
+
+func identicalUpdateDoors() map[string]func(database *bun.DB) (bool, error) {
+    return map[string]func(database *bun.DB) (bool, error){
+        "currency": func(database *bun.DB) (bool, error) {
+            return NewBunCurrencyRepository(database).Update(context.Background(), validCurrency())
+        },
+        "category": func(database *bun.DB) (bool, error) {
+            return NewBunCategoryRepository(database).Update(context.Background(), validCategory())
+        },
+        "product": func(database *bun.DB) (bool, error) {
+            return NewBunProductRepository(database).Update(context.Background(), validProduct())
+        },
+        "user": func(database *bun.DB) (bool, error) {
+            return NewBunUserRepository(database).Update(context.Background(), validUser())
+        },
+    }
+}
+
+func TestUpdateWritingTheValuesTheRowHoldsIsAnsweredAsFound(t *testing.T) {
+    for name, update := range identicalUpdateDoors() {
+        t.Run(name, func(t *testing.T) {
+            found, updateErr := update(identicalUpdateDatabase(true))
+            if nil != updateErr || false == found {
+                t.Fatalf("expected an update that changed nothing to find its row, got found=%v err=%v", found, updateErr)
+            }
+        })
+    }
+}
+
+func TestUpdateOfARowGoneBeforeTheWriteIsAnsweredAsAbsent(t *testing.T) {
+    for name, update := range identicalUpdateDoors() {
+        t.Run(name, func(t *testing.T) {
+            found, updateErr := update(identicalUpdateDatabase(false))
+            if nil != updateErr || true == found {
+                t.Fatalf("expected a row gone before the write to be answered as absent, got found=%v err=%v", found, updateErr)
+            }
+        })
     }
 }

@@ -124,5 +124,5 @@ With the default prefix (`db`), the commands are:
 * `db:migrate` – applies pending migrations.
 * `db:rollback` – rolls back the last migration group.
 * `db:status` – shows applied and pending migrations.
-* `db:unlock` – unlocks the migrations table.
+* `db:unlock` – unlocks the migrations table. It clears the lock whatever holds it, so it is run only once no migration is running against the database: a lock a live run holds, cleared, lets a second run apply the same set beside it. The failure of a run that could not release its lock names the table and this command.
 * `db:create <migration-name>` – creates a go migrations file.

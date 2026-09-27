@@ -27,6 +27,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- documentation: `db:unlock` says in its description and in the README that it clears the lock whatever holds it, so it is run only once no migration is running against the database; cleared under a live run, the lock lets a second run apply the same set beside it.
 - the progress lines of a run escape the migration direction as they escape the migration name: `RunQueries` takes the direction as a string, and a carriage return or an escape sequence in it reached the terminal raw on every executing, completed, success and empty line.
 - documentation: the unreleased entries spell the behavioural-change marker in full, and the two entries refining this release's atomic file write and process-wide output fallback no longer carry it.
 - an explicit `RunnerOption` without a `Writer` — passed to `UpWithOption`, `DownWithOption` or `RunQueriesWithOption` to set the colour alone — printed its per-query lines on standard output instead of the writer the running command put on the context, into the middle of a `--format=json` document; it takes the command's writer, then the process fallback, then standard output.

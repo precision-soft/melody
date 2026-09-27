@@ -5,6 +5,7 @@ import (
     "runtime"
     "sort"
     "strings"
+    "sync/atomic"
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
@@ -59,6 +60,8 @@ type resolverContext struct {
     ownerKey string
     /* scopeSuspended is set while a container-owned provider builds its service, which may read only what the container holds. Suspension is a refusal: a scope-only service is reported as not existing, and the logger is the container's */
     scopeSuspended bool
+    /* providerReturned is set once the provider that received this view has returned; from then on the live chain belongs to the resolution above it, and a resolution through the view starts a chain of its own */
+    providerReturned atomic.Bool
 }
 
 /* childOwnedBy is the view handed to one node's provider: the same container, scope, resolution id and live stack, with the owning node written on it. The suspension rides on the view, so the caller above keeps seeing the scope. */
@@ -71,6 +74,23 @@ func (instance *resolverContext) childOwnedBy(nodeKey string, scopeSuspended boo
         stack:             instance.stack,
         ownerKey:          nodeKey,
         scopeSuspended:    scopeSuspended,
+    }
+}
+
+/* lateResolution answers the view a resolution through this one starts from once its provider has returned: a chain and a resolution id of its own, with the owner, the scope and the suspension kept, so the owner's dependency edge is still recorded while concurrent resolutions through one retained view — a Lazy built over a provider's resolver — never push onto one chain. A view whose provider is still running answers nil and resolves on the live chain. */
+func (instance *resolverContext) lateResolution() *resolverContext {
+    if false == instance.providerReturned.Load() {
+        return nil
+    }
+
+    return &resolverContext{
+        containerInstance: instance.containerInstance,
+        scopeInstance:     instance.scopeInstance,
+        contextId:         instance.containerInstance.resolverContextIdCounter.Add(1),
+        rootRequestedKey:  "",
+        stack:             newResolutionStack(),
+        ownerKey:          instance.ownerKey,
+        scopeSuspended:    instance.scopeSuspended,
     }
 }
 
@@ -151,6 +171,10 @@ func containerTypeStore(
 func (instance *resolverContext) Get(serviceName string) (any, error) {
     if "" == serviceName {
         return nil, exception.NewError("service name is required in get", nil, nil)
+    }
+
+    if lateResolver := instance.lateResolution(); nil != lateResolver {
+        return lateResolver.Get(serviceName)
     }
 
     if "" == instance.rootRequestedKey {
@@ -366,6 +390,10 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
             nil,
             nil,
         )
+    }
+
+    if lateResolver := instance.lateResolution(); nil != lateResolver {
+        return lateResolver.GetByType(targetType)
     }
 
     if "" == instance.rootRequestedKey {
@@ -730,6 +758,11 @@ func (instance *resolverContext) ReferencesImplementing(interfaceType reflect.Ty
 
 /* isResolvingReference reports whether the reference is the service this context is creating now, the innermost node; only that one is excluded from a collection, so a deeper one fails as the circular dependency it is. On a type node the exclusion narrows to the name held in creation, by reflect.Type identity. */
 func (instance *resolverContext) isResolvingReference(reference containercontract.ServiceReference) bool {
+    /* a view whose provider returned creates nothing, and the chain it shares is the resolution above it */
+    if true == instance.providerReturned.Load() {
+        return false
+    }
+
     if 0 == len(instance.stack.keys) {
         return false
     }

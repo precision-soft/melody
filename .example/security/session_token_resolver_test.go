@@ -1,20 +1,24 @@
 package security
 
 import (
+    "errors"
     "testing"
 
+    "github.com/precision-soft/melody/.example/entity"
+    melodyhttpcontract "github.com/precision-soft/melody/http/contract"
     melodysecuritycontract "github.com/precision-soft/melody/security/contract"
 )
 
-/* signedIn writes the pair the login handler writes, which is the only shape the resolver accepts. */
+/* signedIn writes what the login handler writes: the identity, the roles and the credential version. */
 func signedIn(t *testing.T, userId string, roles []string) melodysecuritycontract.Token {
     t.Helper()
 
     request, sessionInstance := requestCarryingSession(t)
     sessionInstance.Set(SessionKeySecurityUserId, userId)
     sessionInstance.Set(SessionKeySecurityRoles, roles)
+    withCurrentCredential(sessionInstance)
 
-    return SessionTokenResolver()(request)
+    return SessionTokenResolver(currentAccountLookup)(request)
 }
 
 func TestSessionTokenResolverAnswersTheSignedInIdentity(t *testing.T) {
@@ -38,8 +42,9 @@ func TestSessionTokenResolverAcceptsARestoredRoleList(t *testing.T) {
     request, sessionInstance := requestCarryingSession(t)
     sessionInstance.Set(SessionKeySecurityUserId, "user-2")
     sessionInstance.Set(SessionKeySecurityRoles, []any{"ROLE_USER", "ROLE_EDITOR"})
+    withCurrentCredential(sessionInstance)
 
-    token := SessionTokenResolver()(request)
+    token := SessionTokenResolver(currentAccountLookup)(request)
 
     if false == token.IsAuthenticated() {
         t.Fatalf("a restored role list left the request anonymous")
@@ -54,26 +59,28 @@ func TestSessionTokenResolverAcceptsARestoredRoleList(t *testing.T) {
 func TestSessionTokenResolverFailsClosed(t *testing.T) {
     for name, request := range map[string]func(*testing.T) melodysecuritycontract.Token{
         "no request at all": func(t *testing.T) melodysecuritycontract.Token {
-            return SessionTokenResolver()(nil)
+            return SessionTokenResolver(currentAccountLookup)(nil)
         },
         "no session published on the request": func(t *testing.T) melodysecuritycontract.Token {
-            return SessionTokenResolver()(requestAccepting(t, ""))
+            return SessionTokenResolver(currentAccountLookup)(requestAccepting(t, ""))
         },
         "something that is not a session under the session attribute": func(t *testing.T) melodysecuritycontract.Token {
-            return SessionTokenResolver()(requestCarryingSessionAttribute(t, "not a session"))
+            return SessionTokenResolver(currentAccountLookup)(requestCarryingSessionAttribute(t, "not a session"))
         },
         "a session with no user id": func(t *testing.T) melodysecuritycontract.Token {
             request, sessionInstance := requestCarryingSession(t)
             sessionInstance.Set(SessionKeySecurityRoles, []string{"ROLE_USER"})
+            withCurrentCredential(sessionInstance)
 
-            return SessionTokenResolver()(request)
+            return SessionTokenResolver(currentAccountLookup)(request)
         },
         "a user id that is not a string": func(t *testing.T) melodysecuritycontract.Token {
             request, sessionInstance := requestCarryingSession(t)
             sessionInstance.Set(SessionKeySecurityUserId, 7)
             sessionInstance.Set(SessionKeySecurityRoles, []string{"ROLE_USER"})
+            withCurrentCredential(sessionInstance)
 
-            return SessionTokenResolver()(request)
+            return SessionTokenResolver(currentAccountLookup)(request)
         },
         "an empty user id": func(t *testing.T) melodysecuritycontract.Token {
             return signedIn(t, "", []string{"ROLE_USER"})
@@ -81,15 +88,17 @@ func TestSessionTokenResolverFailsClosed(t *testing.T) {
         "a session with no roles": func(t *testing.T) melodysecuritycontract.Token {
             request, sessionInstance := requestCarryingSession(t)
             sessionInstance.Set(SessionKeySecurityUserId, "user-1")
+            withCurrentCredential(sessionInstance)
 
-            return SessionTokenResolver()(request)
+            return SessionTokenResolver(currentAccountLookup)(request)
         },
         "roles that are not a string slice": func(t *testing.T) melodysecuritycontract.Token {
             request, sessionInstance := requestCarryingSession(t)
             sessionInstance.Set(SessionKeySecurityUserId, "user-1")
             sessionInstance.Set(SessionKeySecurityRoles, "ROLE_USER")
+            withCurrentCredential(sessionInstance)
 
-            return SessionTokenResolver()(request)
+            return SessionTokenResolver(currentAccountLookup)(request)
         },
         "an empty role list": func(t *testing.T) melodysecuritycontract.Token {
             return signedIn(t, "user-1", []string{})
@@ -98,15 +107,17 @@ func TestSessionTokenResolverFailsClosed(t *testing.T) {
             request, sessionInstance := requestCarryingSession(t)
             sessionInstance.Set(SessionKeySecurityUserId, "user-1")
             sessionInstance.Set(SessionKeySecurityRoles, []any{"ROLE_USER", 7})
+            withCurrentCredential(sessionInstance)
 
-            return SessionTokenResolver()(request)
+            return SessionTokenResolver(currentAccountLookup)(request)
         },
         "an empty restored role list": func(t *testing.T) melodysecuritycontract.Token {
             request, sessionInstance := requestCarryingSession(t)
             sessionInstance.Set(SessionKeySecurityUserId, "user-1")
             sessionInstance.Set(SessionKeySecurityRoles, []any{})
+            withCurrentCredential(sessionInstance)
 
-            return SessionTokenResolver()(request)
+            return SessionTokenResolver(currentAccountLookup)(request)
         },
     } {
         t.Run(name, func(t *testing.T) {
@@ -118,6 +129,127 @@ func TestSessionTokenResolverFailsClosed(t *testing.T) {
 
             if true == token.IsAuthenticated() {
                 t.Fatalf("the request was authenticated as %q with roles %v", token.UserIdentifier(), token.Roles())
+            }
+        })
+    }
+}
+
+/* the session's authority is the account's current one: every change to the account after the login is read on the next request, and a session the account does not back is emptied so it cannot come back once the account does */
+func TestSessionTokenResolverAnswersTheAccountsCurrentAuthority(t *testing.T) {
+    for name, scenario := range map[string]struct {
+        sessionVersion any
+        account        func(userId string) (*entity.User, bool, error)
+        authenticated  bool
+        roles          []string
+        cleared        bool
+    }{
+        "an account demoted since the login answers its current role only": {
+            sessionVersion: SessionCredentialVersion("original-hash"),
+            account: func(userId string) (*entity.User, bool, error) {
+                return entity.NewUser(userId, "editor", "original-hash", []string{"ROLE_USER"}), true, nil
+            },
+            authenticated: true,
+            roles:         []string{"ROLE_USER"},
+        },
+        "a deleted account": {
+            sessionVersion: SessionCredentialVersion("original-hash"),
+            account: func(userId string) (*entity.User, bool, error) {
+                return nil, false, nil
+            },
+            cleared: true,
+        },
+        "a changed password": {
+            sessionVersion: SessionCredentialVersion("original-hash"),
+            account: func(userId string) (*entity.User, bool, error) {
+                return entity.NewUser(userId, "editor", "replacement-hash", []string{"ROLE_EDITOR"}), true, nil
+            },
+            cleared: true,
+        },
+        "an account left without roles": {
+            sessionVersion: SessionCredentialVersion("original-hash"),
+            account: func(userId string) (*entity.User, bool, error) {
+                return entity.NewUser(userId, "editor", "original-hash", nil), true, nil
+            },
+            cleared: true,
+        },
+        "an account without a password hash": {
+            sessionVersion: SessionCredentialVersion(""),
+            account: func(userId string) (*entity.User, bool, error) {
+                return entity.NewUser(userId, "editor", "", []string{"ROLE_EDITOR"}), true, nil
+            },
+            cleared: true,
+        },
+        "the lookup answering another account": {
+            sessionVersion: SessionCredentialVersion("original-hash"),
+            account: func(userId string) (*entity.User, bool, error) {
+                return entity.NewUser("another-user", "editor", "original-hash", []string{"ROLE_EDITOR"}), true, nil
+            },
+            cleared: true,
+        },
+        "a session written before the credential version": {
+            account: func(userId string) (*entity.User, bool, error) {
+                return entity.NewUser(userId, "editor", "original-hash", []string{"ROLE_EDITOR"}), true, nil
+            },
+            cleared: true,
+        },
+        "a credential version that is not a string": {
+            sessionVersion: 7,
+            account: func(userId string) (*entity.User, bool, error) {
+                return entity.NewUser(userId, "editor", "original-hash", []string{"ROLE_EDITOR"}), true, nil
+            },
+            cleared: true,
+        },
+        "an empty credential version": {
+            sessionVersion: "",
+            account: func(userId string) (*entity.User, bool, error) {
+                return entity.NewUser(userId, "editor", "", []string{"ROLE_EDITOR"}), true, nil
+            },
+            cleared: true,
+        },
+        "a session written before the credential version is cleared without asking for the account": {
+            account: func(userId string) (*entity.User, bool, error) {
+                return nil, false, errors.New("the account repository is unavailable")
+            },
+            cleared: true,
+        },
+        "an account the lookup did not find": {
+            sessionVersion: SessionCredentialVersion("original-hash"),
+            account: func(userId string) (*entity.User, bool, error) {
+                return entity.NewUser(userId, "editor", "original-hash", []string{"ROLE_EDITOR"}), false, nil
+            },
+            cleared: true,
+        },
+        "a failing lookup leaves the session to the next request": {
+            sessionVersion: SessionCredentialVersion("original-hash"),
+            account: func(userId string) (*entity.User, bool, error) {
+                return nil, false, errors.New("the account repository is unavailable")
+            },
+        },
+    } {
+        t.Run(name, func(t *testing.T) {
+            request, sessionInstance := requestCarryingSession(t)
+            sessionInstance.Set(SessionKeySecurityUserId, "user-2")
+            sessionInstance.Set(SessionKeySecurityRoles, []string{"ROLE_EDITOR"})
+            if nil != scenario.sessionVersion {
+                sessionInstance.Set(SessionKeySecurityCredentialVersion, scenario.sessionVersion)
+            }
+
+            lookup := func(request melodyhttpcontract.Request, userId string) (*entity.User, bool, error) {
+                return scenario.account(userId)
+            }
+
+            token := SessionTokenResolver(lookup)(request)
+
+            if scenario.authenticated != token.IsAuthenticated() {
+                t.Fatalf("expected authenticated %v, got %v with roles %v", scenario.authenticated, token.IsAuthenticated(), token.Roles())
+            }
+
+            if true == scenario.authenticated && (len(scenario.roles) != len(token.Roles()) || scenario.roles[0] != token.Roles()[0]) {
+                t.Fatalf("expected the current roles %v, got %v", scenario.roles, token.Roles())
+            }
+
+            if scenario.cleared == sessionInstance.Has(SessionKeySecurityUserId) {
+                t.Fatalf("expected the session cleared %v, it still carries the identity: %v", scenario.cleared, sessionInstance.Has(SessionKeySecurityUserId))
             }
         })
     }

@@ -20,6 +20,8 @@ Conceptually, the example models a minimal admin-style catalog application:
 
 ---
 
+Sign-in and every signed-in request read the account from the repository, past the cached user records: a role granted or taken away applies on the next request, and a deleted account or a changed password ends the sessions opened before it, since a session carries a version of the password hash it was opened under. When the repository cannot be read, the request is answered as anonymous and the session is kept for the next one.
+
 ## Seeded credentials
 
 For convenience, the example ships with a few predefined users:

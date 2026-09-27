@@ -74,8 +74,12 @@ func NewMetricsMiddleware(meter metric.Meter) (httpcontract.Middleware, error) {
     }, nil
 }
 
-/* completedStatusCode answers the status of a handler that returned, in the order the kernel answers it: the handler's error decides first, then the response it returned, and only a handler that returned neither is read off what it committed to the writer directly */
+/* completedStatusCode answers the status of a handler that returned: a status the handler already committed to the writer is the one the connection carries, whatever it returned afterwards; otherwise the handler's error decides first and the response it returned next, in the order the kernel answers them, and a handler that returned neither is read off the writer */
 func completedStatusCode(handlerErr error, response httpcontract.Response, recorder *statusRecordingResponseWriter) int {
+    if true == recorder.wroteHeader {
+        return recorder.observedStatusCode()
+    }
+
     if nil != handlerErr {
         return statusCodeForError(handlerErr)
     }

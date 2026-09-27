@@ -21,12 +21,29 @@ var (
     bunDiagnosticsOnce sync.Once
     /* the live destination, replaceable for the life of the process. A nil pointer means no destination, and the forwarder falls back to standard error — where bun writes when nobody routes it at all. */
     bunDiagnosticsTarget atomic.Pointer[diagnosticsTarget]
+    /* serialises a routing against a retirement, so a routing that read its logger as live cannot land after the logger was retired; the forwarder's Write never takes it */
+    bunDiagnosticsRouting sync.Mutex
 )
 
 /* diagnosticsTarget holds the writer one routing installed, built through logging.NewStandardErrorLogger, and the logger it was built for, so a repeated routing on the same logger installs nothing and a teardown hands the channel back only when it is its own. */
 type diagnosticsTarget struct {
     logger loggingcontract.Logger
     writer io.Writer
+}
+
+/* registryLogger is the logger a registry hands its providers: the application's logger under an identity the registry owns, so a routing through it is recognised whatever the logger's own comparability, and refused once the registry retired it at SetLogger or at Close. A provider reads it through loggingcontract.Logger and must not assert its concrete type. */
+type registryLogger struct {
+    loggingcontract.Logger
+    retired atomic.Bool
+}
+
+func newRegistryLogger(logger loggingcontract.Logger) *registryLogger {
+    return &registryLogger{Logger: logger}
+}
+
+/* Enabled answers the wrapped logger's threshold, and true for one that cannot be asked, as logging.LevelEnabled reads a logger: the contract's one optional door, forwarded through the wrapper. */
+func (instance *registryLogger) Enabled(level loggingcontract.Level) bool {
+    return logging.LevelEnabled(instance.Logger, level)
 }
 
 /* RouteDiagnostics sends bun's own diagnostic channel, which reports declaration mistakes such as an unknown struct tag option, to the application's journal as warning records. Bun's logger is set once for the process, to a forwarder whose destination each routing on a different logger replaces, so a rebuilt application takes the channel back; a routing on the logger already installed changes nothing, and a nil or typed-nil logger routes nothing. The mysql dialect's server-version line goes through the standard library's default logger and is not reached; see the mysql readme. */
@@ -37,6 +54,14 @@ func RouteDiagnostics(logger loggingcontract.Logger) {
 /* routeDiagnosticsTo is RouteDiagnostics answering the destination it left live, so a registry can hand exactly that one back at its Close. A logger whose dynamic type carries no identity is routed afresh on every call; nil and a typed nil route nothing and answer nil. */
 func routeDiagnosticsTo(logger loggingcontract.Logger) *diagnosticsTarget {
     if true == isNilInterface(logger) {
+        return nil
+    }
+
+    bunDiagnosticsRouting.Lock()
+    defer bunDiagnosticsRouting.Unlock()
+
+    /* a registry's logger retired at its SetLogger or its Close routes nothing: a provider open still in flight must not take the channel back onto it */
+    if owned, isOwned := logger.(*registryLogger); true == isOwned && true == owned.retired.Load() {
         return nil
     }
 
@@ -68,6 +93,35 @@ func ResetDiagnostics() {
 
 /* resetDiagnosticsRoutedTo hands the channel back only when the live destination is the one routed to this logger, or the very destination the caller routed, so one registry closing does not take the channel from another; two registries on one logger share one channel. The destination is compared by identity, since a logger holding a slice, a map or a func has none and reading it by content would race its Log. */
 func resetDiagnosticsRoutedTo(logger loggingcontract.Logger, routed *diagnosticsTarget) {
+    bunDiagnosticsRouting.Lock()
+    defer bunDiagnosticsRouting.Unlock()
+
+    resetDiagnosticsRoutedToLocked(logger, routed)
+}
+
+/* retireDiagnosticsRoutedBy retires a registry's logger, so no routing through it takes the channel again, and hands the channel back when it is that logger's, under one hold of the routing lock. */
+func retireDiagnosticsRoutedBy(logger loggingcontract.Logger, routed *diagnosticsTarget) {
+    bunDiagnosticsRouting.Lock()
+    defer bunDiagnosticsRouting.Unlock()
+
+    if owned, isOwned := logger.(*registryLogger); true == isOwned {
+        owned.retired.Store(true)
+    }
+
+    resetDiagnosticsRoutedToLocked(logger, routed)
+}
+
+/* retireRegistryLogger retires a registry's logger without touching the channel, for a SetLogger whose next routing replaces the destination at once */
+func retireRegistryLogger(logger loggingcontract.Logger) {
+    bunDiagnosticsRouting.Lock()
+    defer bunDiagnosticsRouting.Unlock()
+
+    if owned, isOwned := logger.(*registryLogger); true == isOwned {
+        owned.retired.Store(true)
+    }
+}
+
+func resetDiagnosticsRoutedToLocked(logger loggingcontract.Logger, routed *diagnosticsTarget) {
     live := bunDiagnosticsTarget.Load()
     if nil == live {
         return

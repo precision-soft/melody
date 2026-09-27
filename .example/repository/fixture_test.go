@@ -55,6 +55,8 @@ type queryRecorder struct {
     mutex     sync.Mutex
     queries   []string
     queryHook func(query string) ([]string, [][]driver.Value, error)
+    /* rowsAffected answers the changed-row count of a statement; without it every statement changed one row */
+    rowsAffected func(query string) int64
 }
 
 func (instance *queryRecorder) record(query string) {
@@ -125,7 +127,12 @@ func (instance *fakeConnection) Begin() (driver.Tx, error) {
 func (instance *fakeConnection) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
     instance.recorder.record(query)
 
-    return &fakeResult{}, nil
+    affected := int64(1)
+    if nil != instance.recorder.rowsAffected {
+        affected = instance.recorder.rowsAffected(query)
+    }
+
+    return &fakeResult{affected: affected}, nil
 }
 
 func (instance *fakeConnection) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
@@ -143,14 +150,16 @@ func (instance *fakeConnection) QueryContext(ctx context.Context, query string, 
     return &fakeRows{columns: []string{}, rows: nil}, nil
 }
 
-type fakeResult struct{}
+type fakeResult struct {
+    affected int64
+}
 
 func (instance *fakeResult) LastInsertId() (int64, error) {
     return 1, nil
 }
 
 func (instance *fakeResult) RowsAffected() (int64, error) {
-    return 1, nil
+    return instance.affected, nil
 }
 
 type fakeRows struct {

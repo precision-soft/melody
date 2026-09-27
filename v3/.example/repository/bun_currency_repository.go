@@ -171,7 +171,14 @@ func (instance *bunCurrencyRepository) Update(ctx context.Context, currency *ent
         return false, updateErr
     }
 
-    return affectedAtLeastOneRow(result), nil
+    if true == affectedAtLeastOneRow(result) {
+        return true, nil
+    }
+
+    /* MySQL answers the rows an update changed, not the rows it matched, so an update writing the values the row already holds reports none: the row is read again, and only a row that is gone by now is answered as absent */
+    _, stillFound, refindErr := instance.findRowById(ctx, id)
+
+    return stillFound, refindErr
 }
 
 /* renameQuery writes the code and the name alone: the quote the caller read may be older than the row's by now, and only the conditional write of UpdateQuote judges that. */

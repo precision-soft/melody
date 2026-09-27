@@ -39,7 +39,7 @@ if nil != middlewareErr {
 // expose the registry; e.g. route GET /metrics -> opentelemetry.MetricsHandler(registry)
 ```
 
-`NewMetricsMiddleware` records `http.server.request.count` and `http.server.request.duration` (ms) with `http.request.method`, `http.route`, and `http.response.status_code` attributes. The status attribute is the status the client receives, in the order the kernel answers it: a handler error decides first (an `HttpException` below `500` at its own status, anything else as `500`), then the response the handler returns, and — for the nil-response streaming/proxy shape — the status the handler committed directly to the writer (`101` for a hijacked upgrade).
+`NewMetricsMiddleware` records `http.server.request.count` and `http.server.request.duration` (ms) with `http.request.method`, `http.route`, and `http.response.status_code` attributes. The status attribute is the status the client receives: a status the handler already committed to the writer is recorded over anything it returns afterwards (`101` for a hijacked upgrade); otherwise, in the order the kernel answers it, a handler error decides first (an `HttpException` below `500` at its own status, anything else as `500`), then the response the handler returns, and for a handler that returned neither, what it wrote.
 
 `NewPrometheusMeter` builds a pull-based meter: the underlying meter provider has no background goroutine and no close door is offered — it lives for the process, which is the lifetime a Prometheus registry serves anyway.
 
@@ -57,7 +57,7 @@ tracer := tracerProvider.Tracer("my-service") // your configured *sdktrace.Trace
 tracingMiddleware := opentelemetry.NewTracingMiddleware(tracer, nil) // nil -> W3C TraceContext propagation
 ```
 
-The tracing middleware extracts the incoming trace context from request headers, starts a server span per request (named `<METHOD> <route>`), injects the span context into the runtime passed downstream, records method/route/status attributes, and marks the span as errored on a handler error or a 5xx response.
+The tracing middleware extracts the incoming trace context from request headers, starts a server span per request (named `<METHOD> <route>`), injects the span context into the runtime passed downstream, records method/route/status attributes with the status decided as the metrics decide it — including a status the handler writes directly, as streaming, proxy and upgrade handlers do — and marks the span as errored when the status the client receives is a 5xx; a handler error is recorded on the span as an exception event either way.
 
 ### OTLP export
 

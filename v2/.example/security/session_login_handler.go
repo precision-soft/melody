@@ -1,6 +1,7 @@
 package security
 
 import (
+    "errors"
     "net/http"
 
     melodyhttp "github.com/precision-soft/melody/v2/http"
@@ -9,11 +10,16 @@ import (
     melodysecuritycontract "github.com/precision-soft/melody/v2/security/contract"
 )
 
-func NewSessionLoginHandler() melodysecuritycontract.LoginHandler {
-    return &sessionLoginHandler{}
+/* NewSessionLoginHandler writes the session of an authenticated token from the account the lookup reads, not from the token: the session carries the account's roles and the credential version of its password hash, which SessionTokenResolver checks on every later request. */
+func NewSessionLoginHandler(lookupUser SessionUserLookup) melodysecuritycontract.LoginHandler {
+    return &sessionLoginHandler{
+        lookupUser: lookupUser,
+    }
 }
 
-type sessionLoginHandler struct{}
+type sessionLoginHandler struct {
+    lookupUser SessionUserLookup
+}
 
 func (instance *sessionLoginHandler) Login(
     runtimeInstance melodyruntimecontract.Runtime,
@@ -30,11 +36,19 @@ func (instance *sessionLoginHandler) Login(
         }, nil
     }
 
-    userIdentifier := ""
-    var roles []string
-    if nil != input.Token {
-        userIdentifier = input.Token.UserIdentifier()
-        roles = input.Token.Roles()
+    if nil == input.Token || false == input.Token.IsAuthenticated() {
+        return nil, errors.New("an authenticated token is required to open a session")
+    }
+
+    userIdentifier := input.Token.UserIdentifier()
+
+    user, found, lookupErr := instance.lookupUser(request, userIdentifier)
+    if nil != lookupErr {
+        return nil, lookupErr
+    }
+
+    if false == found || nil == user || userIdentifier != user.Id || "" == user.Password || 0 == len(user.Roles) {
+        return nil, errors.New("the authenticated account is not available")
     }
 
     /* the session id is rotated before the authenticated identity is written, against session fixation: an id chosen before authentication, possibly seeded by an attacker, must not carry the identity. RegenerateRequestSession carries the values over under a fresh id and republishes it on the request, so the identity lands on the id the response emits. */
@@ -44,7 +58,8 @@ func (instance *sessionLoginHandler) Login(
     }
 
     rotatedSession.Set(SessionKeySecurityUserId, userIdentifier)
-    rotatedSession.Set(SessionKeySecurityRoles, roles)
+    rotatedSession.Set(SessionKeySecurityRoles, append([]string{}, user.Roles...))
+    rotatedSession.Set(SessionKeySecurityCredentialVersion, SessionCredentialVersion(user.Password))
 
     response, err := melodyhttp.JsonResponse(http.StatusOK, map[string]any{
         "success": true,

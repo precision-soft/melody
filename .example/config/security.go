@@ -1,10 +1,15 @@
 package config
 
 import (
+    "errors"
+
     "github.com/precision-soft/melody/.example/entity"
+    "github.com/precision-soft/melody/.example/repository"
     "github.com/precision-soft/melody/.example/route"
     "github.com/precision-soft/melody/.example/security"
     melodyapplication "github.com/precision-soft/melody/application"
+    melodycontainer "github.com/precision-soft/melody/container"
+    melodyhttpcontract "github.com/precision-soft/melody/http/contract"
     melodysecurity "github.com/precision-soft/melody/security"
     melodysecurityconfig "github.com/precision-soft/melody/security/config"
     melodysecuritycontract "github.com/precision-soft/melody/security/contract"
@@ -63,10 +68,10 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         "main",
         melodysecurity.NewPathPrefixMatcher("/"),
         []melodysecuritycontract.Rule{},
-        melodysecurity.NewResolverTokenSource(security.SessionTokenResolver()),
+        melodysecurity.NewResolverTokenSource(security.SessionTokenResolver(sessionUserLookup)),
         route.LoginPagePattern,
         route.LogoutPattern,
-        security.NewSessionLoginHandler(),
+        security.NewSessionLoginHandler(sessionUserLookup),
         security.NewSessionLogoutHandler(),
         override,
     )
@@ -97,3 +102,18 @@ func (instance *Module) registerApiKeyFirewall(builder *melodysecurityconfig.Bui
 }
 
 var _ melodyapplication.SecurityModule = (*Module)(nil)
+
+/* sessionUserLookup reads the account through the repository, under the request's context: the user service answers usernames from its cache, and the session's authority must not outlive a change the cache has not dropped yet. */
+func sessionUserLookup(request melodyhttpcontract.Request, userId string) (*entity.User, bool, error) {
+    runtimeInstance := request.RuntimeInstance()
+    if nil == runtimeInstance {
+        return nil, false, errors.New("the request carries no runtime to read the account through")
+    }
+
+    userRepository, resolveErr := melodycontainer.FromResolver[repository.UserRepository](runtimeInstance.Container(), repository.ServiceUserRepository)
+    if nil != resolveErr {
+        return nil, false, resolveErr
+    }
+
+    return userRepository.FindById(runtimeInstance.Context(), userId)
+}

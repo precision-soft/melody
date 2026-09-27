@@ -157,6 +157,19 @@ func TestTypeIdentityKey_KeepsTwoSameNamedPackagesApartOnACompositeType(t *testi
         {reflect.TypeOf(map[string]*collisionalpha.Bus{}), reflect.TypeOf(map[string]*collisionbeta.Bus{})},
         {reflect.TypeOf(make(chan collisionalpha.Bus)), reflect.TypeOf(make(chan collisionbeta.Bus))},
         {reflect.TypeOf([2]collisionalpha.Bus{}), reflect.TypeOf([2]collisionbeta.Bus{})},
+        {reflect.TypeOf(func(collisionalpha.Bus) {}), reflect.TypeOf(func(collisionbeta.Bus) {})},
+        {reflect.TypeOf(func() collisionalpha.Bus { return collisionalpha.Bus{} }), reflect.TypeOf(func() collisionbeta.Bus { return collisionbeta.Bus{} })},
+        {reflect.TypeOf(func(...collisionalpha.Bus) {}), reflect.TypeOf(func(...collisionbeta.Bus) {})},
+        {reflect.TypeOf(func(collisionalpha.Bus, collisionbeta.Bus) {}), reflect.TypeOf(func(collisionbeta.Bus, collisionalpha.Bus) {})},
+        {reflect.TypeOf(&struct{ B collisionalpha.Bus }{}), reflect.TypeOf(&struct{ B collisionbeta.Bus }{})},
+        {reflect.TypeOf(&struct{ collisionalpha.Bus }{}), reflect.TypeOf(&struct{ collisionbeta.Bus }{})},
+        {reflect.TypeOf((*interface{ Ride() collisionalpha.Bus })(nil)).Elem(), reflect.TypeOf((*interface{ Ride() collisionbeta.Bus })(nil)).Elem()},
+        {reflect.TypeOf(func(func(collisionalpha.Bus)) {}), reflect.TypeOf(func(func(collisionbeta.Bus)) {})},
+        {reflect.TypeOf(map[string]func() collisionalpha.Bus{}), reflect.TypeOf(map[string]func() collisionbeta.Bus{})},
+        {reflect.TypeOf(&struct{ F []func(collisionalpha.Bus) }{}), reflect.TypeOf(&struct{ F []func(collisionbeta.Bus) }{})},
+        {reflect.TypeOf(&[2]struct{ B collisionalpha.Bus }{}), reflect.TypeOf(&[2]struct{ B collisionbeta.Bus }{})},
+        {collisionalpha.HiddenType(), collisionbeta.HiddenType()},
+        {collisionalpha.RiderType(), collisionbeta.RiderType()},
     }
 
     for _, pair := range pairs {

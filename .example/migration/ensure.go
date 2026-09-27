@@ -2,6 +2,7 @@ package migration
 
 import (
     "context"
+    "errors"
     "sync"
     "time"
 
@@ -66,7 +67,7 @@ func ensureMigratedSet(ctx context.Context, database *bun.DB, migrationSet *migr
         migrate.WithMarkAppliedOnSuccess(true),
     )
 
-    if initErr := migrator.Init(ctx); nil != initErr {
+    if initErr := initializeMigrationBookkeeping(ctx, migrator); nil != initErr {
         return initErr
     }
 
@@ -180,7 +181,7 @@ func resetSet(ctx context.Context, database *bun.DB, migrationSet *migrate.Migra
 
     migrator := migrate.NewMigrator(database, migrationSet, migrate.WithMarkAppliedOnSuccess(true))
 
-    if initErr := migrator.Init(ctx); nil != initErr {
+    if initErr := initializeMigrationBookkeeping(ctx, migrator); nil != initErr {
         return initErr
     }
 
@@ -204,4 +205,40 @@ func resetSet(ctx context.Context, database *bun.DB, migrationSet *migrate.Migra
     }
 
     return nil
+}
+
+/* migrationBookkeepingInitAttempts bounds the retries of a bookkeeping init that lost a race to another process creating the same tables */
+const migrationBookkeepingInitAttempts = 4
+
+/* initializeMigrationBookkeeping runs bun's Init, retrying it when postgres answers that a concurrent creator of the same bookkeeping table won the race. CREATE TABLE IF NOT EXISTS is not atomic there: two replicas booting at once can both find the table absent, and the second fails on the catalog's unique index (23505 on pg_class_relname_nsp_index or pg_type_typname_nsp_index), with 42P07 for the table or with 42710 for its row type. The table exists afterwards, so the retry succeeds; every other failure is answered at once. MySQL's IF NOT EXISTS runs under its metadata lock and answers none of these codes. */
+func initializeMigrationBookkeeping(ctx context.Context, migrator *migrate.Migrator) error {
+    for attempt := 1; ; attempt++ {
+        initErr := migrator.Init(ctx)
+        if nil == initErr || migrationBookkeepingInitAttempts <= attempt || false == isConcurrentBookkeepingCreation(initErr) {
+            return initErr
+        }
+
+        if nil != ctx.Err() {
+            return ctx.Err()
+        }
+    }
+}
+
+/* isConcurrentBookkeepingCreation reads the SQLSTATE and the constraint off a postgres error through the Field method pgdriver.Error carries, so the package takes no driver import for it */
+func isConcurrentBookkeepingCreation(initErr error) bool {
+    var postgresErr interface{ Field(field byte) string }
+    if false == errors.As(initErr, &postgresErr) {
+        return false
+    }
+
+    switch postgresErr.Field('C') {
+    case "42P07", "42710":
+        return true
+    case "23505":
+        constraint := postgresErr.Field('n')
+
+        return "pg_class_relname_nsp_index" == constraint || "pg_type_typname_nsp_index" == constraint
+    }
+
+    return false
 }

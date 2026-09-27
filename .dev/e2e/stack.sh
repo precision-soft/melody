@@ -116,7 +116,7 @@ e2e_require_dev_service
 # mismatch message prints both numbers, so the count to move to is in the failure itself. A run that took one of
 # the degraded early-exit branches (an unreachable supervised app, a cold-cache timeout) legitimately executes
 # fewer checks; it is already red from the check_fail that branch raised
-EXPECTED_CHECK_COUNT_INTEGER=169
+EXPECTED_CHECK_COUNT_INTEGER=171
 readonly EXPECTED_CHECK_COUNT_INTEGER
 
 # state the scope in the output, so a reader never has to infer which major these checks covered
@@ -1536,6 +1536,16 @@ check_section_start "V3 ROLE GRANT" "${TAG_VALIDATE}" "e2e"
 # the row locked, and no test of the package drives it against a database. It sits right before the reset,
 # which is the door that gives the role back — every section before this one reads the seeded directory,
 # and the account it widens is the one the sections above needed narrow
+# a session opened BEFORE the grant carries the authority the account holds NOW: the session resolver reads the
+# account through the repository on every request, so the write role the grant adds opens the write doors to the
+# same cookie, and a password changed behind the application (out of band, past every cache) closes the session.
+# The status code is read at the door; the cookie is carried across the separate container shells in this shell
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "wget -q -S -O /dev/null --post-data='username=user&password=user' --header='Accept: application/json' \"\${EXAMPLE_BASE_URL}/login/\" 2>&1 | sed -n 's/^ *Set-Cookie: *\([^;]*\).*/session_cookie=\1/p' | head -1"
+V3_AUTHORITY_COOKIE_STRING="$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | sed -n 's/^session_cookie=//p' | head -1)"
+V3_AUTHORITY_STATUS_SNIPPET_STRING="wget -q -S -O /dev/null --header='Cookie: ${V3_AUTHORITY_COOKIE_STRING}' --header='Accept: application/json' \"\${EXAMPLE_BASE_URL}/outbox/status\" 2>&1 | sed -n 's/^ *HTTP\/[0-9.]* \([0-9]*\).*/status=\1/p' | tail -1"
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "${V3_AUTHORITY_STATUS_SNIPPET_STRING}"
+V3_STATUS_BEFORE_GRANT_STRING="$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | sed -n 's/^status=//p' | tail -1)"
+
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:grant:role --role ROLE_EDITOR --user user 2>&1 | sed 's/\x1b\[[0-9;]*m//g'"
 V3_GRANTED_ROLES_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT roles FROM melody_example_v3_user WHERE id = 'user-1'")"
 if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'granted role "ROLE_EDITOR" to user "user"' \
@@ -1553,6 +1563,23 @@ if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'already holds role "ROLE
     check_pass "a second grant of the same role is answered as held and appends nothing"
 else
     check_fail "the second grant did not read the row as held: output ${RUN_IN_DEV_OUTPUT_STRING:-<empty>}, roles ${V3_REGRANTED_ROLES_STRING:-<no answer>}"
+fi
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "${V3_AUTHORITY_STATUS_SNIPPET_STRING}"
+V3_STATUS_AFTER_GRANT_STRING="$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | sed -n 's/^status=//p' | tail -1)"
+if [[ -n "${V3_AUTHORITY_COOKIE_STRING}" && "403" = "${V3_STATUS_BEFORE_GRANT_STRING}" && "200" = "${V3_STATUS_AFTER_GRANT_STRING}" ]]; then
+    check_pass "a session opened before the grant carries the granted role on its next request (403 before, 200 after)"
+else
+    check_fail "the session did not follow the account's roles: cookie ${V3_AUTHORITY_COOKIE_STRING:-<none>}, before ${V3_STATUS_BEFORE_GRANT_STRING:-<none>}, after ${V3_STATUS_AFTER_GRANT_STRING:-<none>}"
+fi
+
+e2e_mysql_scalar "melody_example_v3" "UPDATE melody_example_v3_user SET password = CONCAT(password, 'x') WHERE id = 'user-1'" >/dev/null
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "${V3_AUTHORITY_STATUS_SNIPPET_STRING}"
+V3_STATUS_AFTER_PASSWORD_STRING="$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | sed -n 's/^status=//p' | tail -1)"
+if [[ -n "${V3_STATUS_AFTER_PASSWORD_STRING}" && "200" != "${V3_STATUS_AFTER_PASSWORD_STRING}" && "403" != "${V3_STATUS_AFTER_PASSWORD_STRING}" ]]; then
+    check_pass "a password changed behind the application closes the session opened under the old one (answered ${V3_STATUS_AFTER_PASSWORD_STRING})"
+else
+    check_fail "the session outlived the password change: answered ${V3_STATUS_AFTER_PASSWORD_STRING:-<none>}"
 fi
 
 check_section_end "V3 ROLE GRANT" "${TAG_VALIDATE}" "e2e"

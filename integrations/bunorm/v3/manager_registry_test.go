@@ -2332,11 +2332,14 @@ func TestManagerRegistry_SetLoggerReachesTheNextOpen(t *testing.T) {
         t.Fatalf("expected two opens, got %d", len(received))
     }
 
-    if loggingcontract.Logger(wiringLogger) != received[0] {
+    /* a provider receives the registry's logger, which wraps the application's */
+    first, firstIsOwned := received[0].(*registryLogger)
+    if false == firstIsOwned || loggingcontract.Logger(wiringLogger) != first.Logger {
         t.Fatalf("the first open did not get the wiring logger")
     }
 
-    if loggingcontract.Logger(applicationLogger) != received[1] {
+    second, secondIsOwned := received[1].(*registryLogger)
+    if false == secondIsOwned || loggingcontract.Logger(applicationLogger) != second.Logger {
         t.Fatalf("the open after the replacement did not get the application logger")
     }
 }
@@ -2782,5 +2785,162 @@ func TestIsNilInterface_AnswersTheNilInterfaceAndTheTypedNil(t *testing.T) {
 
     if true == isNilInterface(t) {
         t.Fatalf("expected a live pointer to be read as present")
+    }
+}
+
+/* an open still in flight when its registry closed routes bun's channel late, with the logger it received: the registry retired that logger at its close, so the late routing takes nothing from the destination the application routed after */
+func TestManagerRegistry_DelayedProviderCannotRouteAfterClose(t *testing.T) {
+    t.Cleanup(ResetDiagnostics)
+
+    provider := &delayedDiagnosticProvider{entered: make(chan struct{}), resume: make(chan struct{})}
+    logger := &capturingDiagnosticLogger{}
+
+    registry, registryErr := NewManagerRegistry(logger, ProviderDefinition{Name: "main", Provider: provider})
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    completed := make(chan struct{})
+    go func() {
+        defer close(completed)
+        _, _ = registry.Manager("main")
+    }()
+    <-provider.entered
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+    closeErr := registry.CloseWithContext(cancelledContext)
+
+    nextLogger := &capturingDiagnosticLogger{}
+    RouteDiagnostics(nextLogger)
+
+    close(provider.resume)
+    <-completed
+
+    if nil == closeErr {
+        t.Fatal("expected the close to report the open still in flight")
+    }
+
+    _ = schema.SafeQuery("SELECT 1", []any{42})
+
+    if 0 != len(logger.captured()) || 1 != len(nextLogger.captured()) {
+        t.Fatalf("stale routing: retired=%d next=%d", len(logger.captured()), len(nextLogger.captured()))
+    }
+}
+
+/* the same for a replacement: an open still in flight when SetLogger replaced the logger routes late with the one it received, which the replacement retired, so the channel stays on the new logger */
+func TestManagerRegistry_DelayedProviderCannotRouteAfterSetLogger(t *testing.T) {
+    t.Cleanup(ResetDiagnostics)
+
+    provider := &delayedDiagnosticProvider{entered: make(chan struct{}), resume: make(chan struct{})}
+    wiringLogger := &capturingDiagnosticLogger{}
+
+    registry, registryErr := NewManagerRegistry(wiringLogger, ProviderDefinition{Name: "main", Provider: provider})
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+    t.Cleanup(func() { _ = registry.Close() })
+
+    completed := make(chan struct{})
+    go func() {
+        defer close(completed)
+        _, _ = registry.Manager("main")
+    }()
+    <-provider.entered
+
+    applicationLogger := &capturingDiagnosticLogger{}
+    if setErr := registry.SetLogger(applicationLogger); nil != setErr {
+        t.Fatalf("unexpected error: %v", setErr)
+    }
+
+    close(provider.resume)
+    <-completed
+
+    _ = schema.SafeQuery("SELECT 1", []any{42})
+
+    if 0 != len(wiringLogger.captured()) || 1 != len(applicationLogger.captured()) {
+        t.Fatalf("stale routing: retired=%d current=%d", len(wiringLogger.captured()), len(applicationLogger.captured()))
+    }
+}
+
+/* a logger held by value has no identity of its own, so a registry's close could not recognise the channel its provider routed through it: the registry's own logger carries the identity, and the close hands the channel back, for a logger given to the constructor as for one given to SetLogger */
+func TestManagerRegistry_CloseHandsBackTheChannelItsProviderRoutedForAValueLogger(t *testing.T) {
+    for name, build := range map[string]func(t *testing.T, logger loggingcontract.Logger) *ManagerRegistry{
+        "constructor": func(t *testing.T, logger loggingcontract.Logger) *ManagerRegistry {
+            registry, registryErr := NewManagerRegistry(logger, ProviderDefinition{Name: "main", Provider: &routingProvider{}, IsDefault: true})
+            if nil != registryErr {
+                t.Fatalf("registry error: %v", registryErr)
+            }
+
+            return registry
+        },
+        "SetLogger": func(t *testing.T, logger loggingcontract.Logger) *ManagerRegistry {
+            registry, registryErr := NewManagerRegistry(&fakeLogger{}, ProviderDefinition{Name: "main", Provider: &routingProvider{}, IsDefault: true})
+            if nil != registryErr {
+                t.Fatalf("registry error: %v", registryErr)
+            }
+
+            if setErr := registry.SetLogger(logger); nil != setErr {
+                t.Fatalf("unexpected error: %v", setErr)
+            }
+
+            return registry
+        },
+    } {
+        t.Run(name, func(t *testing.T) {
+            t.Cleanup(ResetDiagnostics)
+
+            registry := build(t, funcCarryingLogger{sink: func(string) {}})
+
+            if _, managerErr := registry.Manager("main"); nil != managerErr {
+                t.Fatalf("unexpected error: %v", managerErr)
+            }
+
+            if nil == bunDiagnosticsTarget.Load() {
+                t.Fatal("expected the provider to have routed bun's channel")
+            }
+
+            if closeErr := registry.Close(); nil != closeErr {
+                t.Fatalf("unexpected close error: %v", closeErr)
+            }
+
+            if nil != bunDiagnosticsTarget.Load() {
+                t.Fatal("expected the close to hand back the channel its provider routed")
+            }
+        })
+    }
+}
+
+/* two registries holding loggers of equal content are two owners: the close of one hands back only the channel its own provider routed */
+func TestManagerRegistry_CloseLeavesTheChannelAnotherRegistryOfAnEqualValueLoggerRouted(t *testing.T) {
+    t.Cleanup(ResetDiagnostics)
+
+    first, firstErr := NewManagerRegistry(sliceCarryingLogger{records: make([]string, 0)}, ProviderDefinition{Name: "main", Provider: &routingProvider{}, IsDefault: true})
+    if nil != firstErr {
+        t.Fatalf("registry error: %v", firstErr)
+    }
+
+    second, secondErr := NewManagerRegistry(sliceCarryingLogger{records: make([]string, 0)}, ProviderDefinition{Name: "main", Provider: &routingProvider{}, IsDefault: true})
+    if nil != secondErr {
+        t.Fatalf("registry error: %v", secondErr)
+    }
+    t.Cleanup(func() { _ = second.Close() })
+
+    if _, managerErr := first.Manager("main"); nil != managerErr {
+        t.Fatalf("unexpected error: %v", managerErr)
+    }
+
+    if _, managerErr := second.Manager("main"); nil != managerErr {
+        t.Fatalf("unexpected error: %v", managerErr)
+    }
+
+    routedBySecond := bunDiagnosticsTarget.Load()
+
+    if closeErr := first.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if nil == routedBySecond || routedBySecond != bunDiagnosticsTarget.Load() {
+        t.Fatal("expected the first registry's close to leave the channel the second routed")
     }
 }

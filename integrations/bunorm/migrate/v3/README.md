@@ -145,7 +145,7 @@ With the default prefix (`db`):
 * `db:migrate` — applies pending migrations.
 * `db:rollback` — rolls back the last migration group.
 * `db:status` — shows applied and pending migrations.
-* `db:unlock` — unlocks the migrations table.
+* `db:unlock` — unlocks the migrations table. It clears the lock whatever holds it, so it is run only once no migration is running against the database: a lock a live run holds, cleared, lets a second run apply the same set beside it. The failure of a run that could not release its lock names the table and this command.
 * `db:create <migration-name>` — creates a Go migrations file.
 
 Every command runs on the registry's DEDICATED migration connection where the provider offers one — a pool with the driver's read and write deadlines lifted, so a DDL statement that legitimately runs for minutes is not cut mid-statement — and ends it on the way out through the registry's `CloseMigrationDatabase`. That connection recycles nothing by design, so leaving it memoized meant a migration run at the boot of a process that goes on to serve requests kept a deadline-less connection open for the life of that process. A provider offering no migration capability ran on the ordinary pool, which belongs to the application and is left untouched.

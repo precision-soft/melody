@@ -1,7 +1,10 @@
 package bunorm
 
 import (
+    "errors"
     "sync"
+
+    "github.com/uptrace/bun"
 
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
@@ -52,4 +55,39 @@ func (instance *capturingDiagnosticLogger) captured() []capturedDiagnosticRecord
     defer instance.mutex.Unlock()
 
     return append([]capturedDiagnosticRecord{}, instance.records...)
+}
+
+/* delayedDiagnosticProvider routes bun's channel as a provider does at open, then waits for resume and routes again, the open still in flight when its registry closes or replaces its logger */
+type delayedDiagnosticProvider struct {
+    entered chan struct{}
+    resume  chan struct{}
+}
+
+func (instance *delayedDiagnosticProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    RouteDiagnostics(logger)
+    close(instance.entered)
+    <-instance.resume
+    RouteDiagnostics(logger)
+
+    return nil, errors.New("delayed open refused")
+}
+
+/* routingProvider routes bun's channel with the logger its open receives, as the mysql and pgsql providers do, and answers a stub database */
+type routingProvider struct{}
+
+func (instance *routingProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    RouteDiagnostics(logger)
+
+    database, _ := newCloseRaceDatabase()
+
+    return database, nil
+}
+
+/* errorOnlyLogger reports only the error level as enabled, the shape of a logger with a threshold */
+type errorOnlyLogger struct {
+    capturingDiagnosticLogger
+}
+
+func (instance *errorOnlyLogger) Enabled(level loggingcontract.Level) bool {
+    return loggingcontract.LevelError == level
 }

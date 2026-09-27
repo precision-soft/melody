@@ -2,6 +2,7 @@ package service
 
 import (
     "context"
+    "errors"
     "testing"
     "time"
 
@@ -46,7 +47,7 @@ func newUserServiceUnderTest(t *testing.T) *UserService {
 func TestAuthenticateByUsernameAndPasswordAcceptsTheSeededCredentials(t *testing.T) {
     userService := newUserServiceUnderTest(t)
 
-    user, authenticated, authenticationErr := userService.AuthenticateByUsernameAndPassword("editor", "editor")
+    user, authenticated, authenticationErr := userService.AuthenticateByUsernameAndPassword(context.Background(), "editor", "editor")
     if nil != authenticationErr {
         t.Fatalf("authenticate the seeded editor: %v", authenticationErr)
     }
@@ -63,7 +64,7 @@ func TestAuthenticateByUsernameAndPasswordAcceptsTheSeededCredentials(t *testing
 func TestAuthenticateByUsernameAndPasswordTrimsTheUsername(t *testing.T) {
     userService := newUserServiceUnderTest(t)
 
-    _, authenticated, authenticationErr := userService.AuthenticateByUsernameAndPassword("  editor  ", "editor")
+    _, authenticated, authenticationErr := userService.AuthenticateByUsernameAndPassword(context.Background(), "  editor  ", "editor")
     if nil != authenticationErr {
         t.Fatalf("authenticate with a padded username: %v", authenticationErr)
     }
@@ -86,7 +87,7 @@ func TestAuthenticateByUsernameAndPasswordRefusesQuietly(t *testing.T) {
         t.Run(name, func(t *testing.T) {
             userService := newUserServiceUnderTest(t)
 
-            user, authenticated, authenticationErr := userService.AuthenticateByUsernameAndPassword(credentials[0], credentials[1])
+            user, authenticated, authenticationErr := userService.AuthenticateByUsernameAndPassword(context.Background(), credentials[0], credentials[1])
             if nil != authenticationErr {
                 t.Fatalf("the refusal carried an error: %v", authenticationErr)
             }
@@ -109,7 +110,7 @@ func TestAuthenticateByUsernameAndPasswordRefusesAUserWithoutRoles(t *testing.T)
         t.Fatalf("create the roleless user: %v", createErr)
     }
 
-    _, authenticated, authenticationErr := userService.AuthenticateByUsernameAndPassword("bare", "bare")
+    _, authenticated, authenticationErr := userService.AuthenticateByUsernameAndPassword(context.Background(), "bare", "bare")
     if nil == authenticationErr {
         t.Fatalf("a user without roles authenticated quietly")
     }
@@ -136,7 +137,7 @@ func TestFindByIdAnswersAbsentForACacheUnsafeIdentifier(t *testing.T) {
 func TestAuthenticateRefusesACacheUnsafeUsernameQuietly(t *testing.T) {
     userService := newUserServiceUnderTest(t)
 
-    user, authenticated, authenticationErr := userService.AuthenticateByUsernameAndPassword("john doe", "whatever")
+    user, authenticated, authenticationErr := userService.AuthenticateByUsernameAndPassword(context.Background(), "john doe", "whatever")
     if nil != authenticationErr {
         t.Fatalf("expected the quiet refusal, got error %v", authenticationErr)
     }
@@ -237,5 +238,88 @@ func TestUpdateRefusedByTheRepositoryLeavesTheStoredAccountUntouched(t *testing.
 
     if renamed.Username != stored.Username {
         t.Fatalf("the refused rename reached the stored account: it reads %q, wanted %q", stored.Username, renamed.Username)
+    }
+}
+
+/* the login reads the account from the repository, so a password change or a deletion the cache has not dropped yet cannot sign in with the replaced credential */
+func TestAuthenticateByUsernameAndPasswordReadsTheAccountPastTheCache(t *testing.T) {
+    userService := newUserServiceUnderTest(t)
+
+    cached, found, findErr := userService.FindByUsername("editor")
+    if nil != findErr || false == found {
+        t.Fatalf("expected the seeded editor to be cached, got found=%v err=%v", found, findErr)
+    }
+
+    modified := *cached
+    modified.Password = security.MustHashPassword("replacement-password")
+    if updated, updateErr := userService.userRepository.Update(context.Background(), &modified); nil != updateErr || false == updated {
+        t.Fatalf("expected the password change to land, got updated=%v err=%v", updated, updateErr)
+    }
+
+    if _, authenticated, authenticationErr := userService.AuthenticateByUsernameAndPassword(context.Background(), "editor", "editor"); nil != authenticationErr || true == authenticated {
+        t.Fatalf("expected the password the cache still holds to be refused, got authenticated=%v err=%v", authenticated, authenticationErr)
+    }
+
+    if _, authenticated, authenticationErr := userService.AuthenticateByUsernameAndPassword(context.Background(), "editor", "replacement-password"); nil != authenticationErr || false == authenticated {
+        t.Fatalf("expected the current password to sign in, got authenticated=%v err=%v", authenticated, authenticationErr)
+    }
+
+    if deleted, deleteErr := userService.userRepository.DeleteById(context.Background(), modified.Id); nil != deleteErr || false == deleted {
+        t.Fatalf("expected the deletion to land, got deleted=%v err=%v", deleted, deleteErr)
+    }
+
+    if _, authenticated, authenticationErr := userService.AuthenticateByUsernameAndPassword(context.Background(), "editor", "replacement-password"); nil != authenticationErr || true == authenticated {
+        t.Fatalf("expected a deleted account to be refused, got authenticated=%v err=%v", authenticated, authenticationErr)
+    }
+}
+
+/* failingUsernameRepository fails every username read, so a login that reached the repository is told apart from one refused before it */
+type failingUsernameRepository struct {
+    repository.UserRepository
+}
+
+func (instance *failingUsernameRepository) FindByUsername(ctx context.Context, username string) (*entity.User, bool, error) {
+    return nil, false, errors.New("the repository was asked")
+}
+
+/* a username the cache key grammar refuses is answered as absent before any backend is asked, on the login door as on FindByUsername */
+func TestAuthenticateByUsernameAndPasswordRefusesACacheUnsafeUsernameBeforeTheRepository(t *testing.T) {
+    userService := NewUserService(&failingUsernameRepository{}, nil, nil)
+
+    user, authenticated, authenticationErr := userService.AuthenticateByUsernameAndPassword(context.Background(), "john doe", "whatever")
+    if nil != authenticationErr || true == authenticated || nil != user {
+        t.Fatalf("expected the username to be answered as absent without asking the repository, got authenticated=%v err=%v", authenticated, authenticationErr)
+    }
+}
+
+/* the stored account owns its role list: a caller that goes on writing into the slice it handed Update must not change the account behind the repository */
+func TestUpdateStoresACopyOfTheCallersRoleList(t *testing.T) {
+    userService := newUserServiceUnderTest(t)
+
+    target, found, findErr := userService.userRepository.FindByUsername(context.Background(), "editor")
+    if nil != findErr || false == found {
+        t.Fatalf("expected the seeded editor, got found=%v err=%v", found, findErr)
+    }
+
+    serviceContainer := melodycontainer.NewContainer()
+    melodycontainer.MustRegister[loggingcontract.Logger](
+        serviceContainer,
+        melodylogging.ServiceLogger,
+        func(resolver melodycontainercontract.Resolver) (loggingcontract.Logger, error) {
+            return melodylogging.NewNopLogger(), nil
+        },
+    )
+    runtimeInstance := melodyruntime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    roles := []string{"ROLE_USER", "ROLE_EDITOR"}
+    if _, updated, updateErr := userService.Update(runtimeInstance, target.Id, target.Username, target.Password, roles); nil != updateErr || false == updated {
+        t.Fatalf("expected the update to land, got updated=%v err=%v", updated, updateErr)
+    }
+
+    roles[1] = "ROLE_ADMIN"
+
+    stored, found, findErr := userService.userRepository.FindById(context.Background(), target.Id)
+    if nil != findErr || false == found || "ROLE_EDITOR" != stored.Roles[1] {
+        t.Fatalf("the caller's slice reached the stored account: %v", stored.Roles)
     }
 }

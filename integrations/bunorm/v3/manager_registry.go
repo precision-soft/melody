@@ -98,7 +98,7 @@ func NewManagerRegistryWithContext(ctx context.Context, logger loggingcontract.L
     openContext, openCancel := context.WithCancel(ctx)
 
     return &ManagerRegistry{
-        logger:                        logger,
+        logger:                        newRegistryLogger(logger),
         openContext:                   openContext,
         openCancel:                    openCancel,
         providerDefinitionByName:      providerDefinitionByName,
@@ -488,8 +488,12 @@ func (instance *ManagerRegistry) SetLogger(logger loggingcontract.Logger) error 
         return ErrManagerRegistryClosed
     }
 
-    instance.logger = logger
-    instance.routedDiagnostics = routeDiagnosticsTo(logger)
+    /* the logger handed out before is retired first, so a provider open still in flight on it cannot route after the new one */
+    retireRegistryLogger(instance.logger)
+
+    ownedLogger := newRegistryLogger(logger)
+    instance.logger = ownedLogger
+    instance.routedDiagnostics = routeDiagnosticsTo(ownedLogger)
 
     return nil
 }
@@ -650,7 +654,7 @@ func (instance *ManagerRegistry) CloseWithContext(closeContext context.Context) 
     closingLogger, routedDiagnostics := instance.logger, instance.routedDiagnostics
     instance.lock.Unlock()
 
-    resetDiagnosticsRoutedTo(closingLogger, routedDiagnostics)
+    retireDiagnosticsRoutedBy(closingLogger, routedDiagnostics)
 
     /* teardown diagnostics must name every pool that failed to close, not the first alone: the caller gets one error, so the other failures would otherwise leave no trace anywhere */
     if 1 < len(failedNames) {

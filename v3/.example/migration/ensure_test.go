@@ -664,6 +664,32 @@ func TestInitializeMigrationBookkeepingAnswersAnyOtherFailureAtOnce(t *testing.T
     }
 }
 
+func TestEnsureMigratedAndResetRetryABookkeepingCreationRaceTheyLost(t *testing.T) {
+    for name, run := range map[string]func(ctx context.Context, database *bun.DB) error{
+        "ensure": EnsureMigrated,
+        "reset":  Reset,
+    } {
+        database, recorder := newFakeBunDatabase()
+        creations := 0
+        recorder.execHook = func(query string) error {
+            if false == strings.HasPrefix(query, "CREATE TABLE") {
+                return nil
+            }
+
+            creations++
+            if 1 == creations {
+                return postgresFieldError{fields: map[byte]string{'C': "42P07"}}
+            }
+
+            return nil
+        }
+
+        if runErr := run(context.Background(), database); nil != runErr {
+            t.Fatalf("expected %s to retry the lost bookkeeping creation, got %v", name, runErr)
+        }
+    }
+}
+
 func TestInitializeMigrationBookkeepingSurvivesConcurrentCreatorsOnPostgres(t *testing.T) {
     dsn := os.Getenv("POSTGRES_DSN")
     if "" == dsn {

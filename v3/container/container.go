@@ -94,6 +94,8 @@ type declaredTeardownEdge struct {
     dependentServiceName string
     dependencyNodeKey    string
     dependencySpelling   string
+    /* dependencyType is the canonical type a type edge declares, nil on a name edge: the key finds the registration, and the type confirms it is this one */
+    dependencyType reflect.Type
 }
 
 func declaredNameEdge(serviceName string, dependencyName string) declaredTeardownEdge {
@@ -109,6 +111,7 @@ func declaredTypeEdge(serviceName string, dependencyType reflect.Type) declaredT
         dependentServiceName: serviceName,
         dependencyNodeKey:    containerTypeNodeKey(dependencyType),
         dependencySpelling:   dependencyType.String(),
+        dependencyType:       canonicalServiceType(dependencyType),
     }
 }
 

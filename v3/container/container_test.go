@@ -442,9 +442,7 @@ func TestContainer_RegisterTypeIdentityKeyCollisionRefused(t *testing.T) {
 
     firstRegisterErr := serviceContainer.Register(
         "app.collision.alpha",
-        func(resolver containercontract.Resolver) (*struct{ Bus collisionalpha.Bus }, error) {
-            return &struct{ Bus collisionalpha.Bus }{}, nil
-        },
+        localCollisionProviderFirst(),
     )
     if nil != firstRegisterErr {
         t.Fatalf("unexpected register error: %v", firstRegisterErr)
@@ -452,9 +450,7 @@ func TestContainer_RegisterTypeIdentityKeyCollisionRefused(t *testing.T) {
 
     secondRegisterErr := serviceContainer.Register(
         "app.collision.beta",
-        func(resolver containercontract.Resolver) (*struct{ Bus collisionbeta.Bus }, error) {
-            return &struct{ Bus collisionbeta.Bus }{}, nil
-        },
+        localCollisionProviderSecond(),
     )
     if nil == secondRegisterErr {
         t.Fatalf("expected the colliding identity key to be refused")
@@ -1294,5 +1290,125 @@ func TestContainer_Register_AfterArmingAdmitsADeclaredDependencyOnARegisteredTyp
 
     if false == declarerPlanned {
         t.Fatalf("expected the declarer in the plan")
+    }
+}
+
+/* a composite built from two packages' same-named types names two types, so both are registered and a declaration keyed by one of them orders against its own service only */
+func TestContainer_AcceptsTheCompositeTwinsOfTwoPackages(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    MustRegister[func(collisionalpha.Bus)](serviceContainer, "app.twin.alpha", func(resolver containercontract.Resolver) (func(collisionalpha.Bus), error) {
+        return func(collisionalpha.Bus) {}, nil
+    })
+
+    if registerErr := serviceContainer.Register(
+        "app.twin.beta",
+        func(resolver containercontract.Resolver) (func(collisionbeta.Bus), error) {
+            return func(collisionbeta.Bus) {}, nil
+        },
+    ); nil != registerErr {
+        t.Fatalf("expected the other package's twin to be registered, got %v", registerErr)
+    }
+
+    MustRegister[*typedNodeProbeService](serviceContainer, "app.dependent", func(resolver containercontract.Resolver) (*typedNodeProbeService, error) {
+        return &typedNodeProbeService{label: "dependent"}, nil
+    }, WithTeardownDependencyOfType[func(collisionalpha.Bus)]())
+
+    MustFromResolver[func(collisionalpha.Bus)](serviceContainer, "app.twin.alpha")
+    MustFromResolver[func(collisionbeta.Bus)](serviceContainer, "app.twin.beta")
+    MustFromResolver[*typedNodeProbeService](serviceContainer, "app.dependent")
+
+    for _, entry := range serviceContainer.(teardownPlanner).TeardownPlan() {
+        if "service:app.dependent" != entry.NodeKey {
+            continue
+        }
+
+        if 1 != len(entry.Dependencies) || "service:app.twin.alpha" != entry.Dependencies[0] {
+            t.Fatalf("expected the declaration to order against its own type's service only, got %v", entry.Dependencies)
+        }
+
+        return
+    }
+
+    t.Fatalf("expected the plan to list the dependent")
+}
+
+/* a declaration keyed by one package's composite never binds to the other package's twin, whichever is written first: nothing is registered under the declared type, so the default path orders nothing and the armed path refuses it */
+func TestContainer_DeclaredCompositeTypeDoesNotBindToTheOtherPackagesTwin(t *testing.T) {
+    registerTwin := func(serviceContainer containercontract.Container) {
+        MustRegister[func(collisionbeta.Bus)](serviceContainer, "app.twin.beta", func(resolver containercontract.Resolver) (func(collisionbeta.Bus), error) {
+            return func(collisionbeta.Bus) {}, nil
+        })
+    }
+
+    registerDependent := func(serviceContainer containercontract.Container) {
+        MustRegister[*typedNodeProbeService](serviceContainer, "app.dependent", func(resolver containercontract.Resolver) (*typedNodeProbeService, error) {
+            return &typedNodeProbeService{label: "dependent"}, nil
+        }, WithTeardownDependencyOfType[func(collisionalpha.Bus)]())
+    }
+
+    for name, register := range map[string]func(serviceContainer containercontract.Container){
+        "twin first": func(serviceContainer containercontract.Container) {
+            registerTwin(serviceContainer)
+            registerDependent(serviceContainer)
+        },
+        "declaration first": func(serviceContainer containercontract.Container) {
+            registerDependent(serviceContainer)
+            registerTwin(serviceContainer)
+        },
+    } {
+        t.Run(name, func(t *testing.T) {
+            serviceContainer := NewContainer()
+            register(serviceContainer)
+
+            MustFromResolver[func(collisionbeta.Bus)](serviceContainer, "app.twin.beta")
+            MustFromResolver[*typedNodeProbeService](serviceContainer, "app.dependent")
+
+            for _, entry := range serviceContainer.(teardownPlanner).TeardownPlan() {
+                if "service:app.dependent" == entry.NodeKey && 0 != len(entry.Dependencies) {
+                    t.Fatalf("expected the declaration to order nothing, got %v", entry.Dependencies)
+                }
+            }
+
+            if armErr := serviceContainer.(parallelTeardownArmer).ArmParallelTeardown(); false == errors.Is(armErr, ErrTeardownDependencyWasNeverRegistered) {
+                t.Fatalf("expected the armed path to refuse the declaration, got %v", armErr)
+            }
+        })
+    }
+}
+
+/* the key finds a declared type's registration and the type confirms it: a type filed under the declared key that is not the declared type is not its registration, so the declaration neither expands onto its service nor passes the armed path */
+func TestContainer_DeclaredTypeEdgeBindsOnlyToTheTypeItDeclares(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    MustRegister[func(collisionbeta.Bus)](serviceContainer, "app.twin.beta", func(resolver containercontract.Resolver) (func(collisionbeta.Bus), error) {
+        return func(collisionbeta.Bus) {}, nil
+    })
+
+    MustRegister[*typedNodeProbeService](serviceContainer, "app.dependent", func(resolver containercontract.Resolver) (*typedNodeProbeService, error) {
+        return &typedNodeProbeService{label: "dependent"}, nil
+    }, WithTeardownDependencyOfType[func(collisionalpha.Bus)]())
+
+    containerInstance := serviceContainer.(*container)
+
+    /* the other type is filed under the declaration's own key, in its canonical form, so it is a registration the key finds and whose service is named */
+    containerInstance.mutex.Lock()
+    declaredKey := strings.TrimPrefix(containerInstance.declaredTeardownEdges[0].dependencyNodeKey, containerTypeNodeKeyPrefix)
+    otherType := canonicalServiceType(reflect.TypeOf(func(collisionbeta.Bus) {}))
+    containerInstance.typeIdentityKeyToType[declaredKey] = otherType
+    otherNames := containerInstance.typeRegistrationNamesByType[otherType]
+    expanded := containerInstance.expandedDeclaredTypeEdgesLocked()
+    containerInstance.mutex.Unlock()
+
+    if 1 != len(otherNames) {
+        t.Fatalf("expected the other type to name its one service, which is what makes this test able to see a binding, got %v", otherNames)
+    }
+
+    if 0 != len(expanded) {
+        t.Fatalf("expected the declaration not to expand onto another type's service, got %v", expanded)
+    }
+
+    if armErr := serviceContainer.(parallelTeardownArmer).ArmParallelTeardown(); false == errors.Is(armErr, ErrTeardownDependencyWasNeverRegistered) {
+        t.Fatalf("expected the armed path to refuse the declaration, got %v", armErr)
     }
 }
