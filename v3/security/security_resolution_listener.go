@@ -167,7 +167,7 @@ func resolveTokenSourceSafely(
                 "firewallName":    firewall.Name(),
                 "tokenSourceName": tokenSourceName,
                 "panicType":       fmt.Sprintf("%T", recoveredValue),
-                "panicValue":      fmt.Sprintf("%v", recoveredValue),
+                "panicValue":      internal.DescribeRecoveredValue(recoveredValue),
                 "panicStack":      string(debug.Stack()),
             },
             recoveredErr,

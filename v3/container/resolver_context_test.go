@@ -8,6 +8,7 @@ import (
     "sync"
     "sync/atomic"
     "testing"
+    "time"
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
@@ -686,5 +687,221 @@ func TestResolverContext_ConcurrentFirstUsesOfALazyOverAProvidersResolverAllReso
         for failure := range failures {
             t.Fatalf("round %d: a first use through the provider's resolver failed: %v", round, failure)
         }
+    }
+}
+
+type lateCycleParent struct{}
+
+type lateCycleHolder struct {
+    handle   *LazyService[*lateCycleLeaf]
+    other    *LazyService[*lateCycleOther]
+    resolver containercontract.Resolver
+}
+
+type lateCycleLeaf struct{}
+
+type lateCycleOther struct{}
+
+/* the parent resolves the holder, whose provider keeps a Lazy over its resolver and returns; parentBody then uses what the holder kept while the parent is still being built, and the leaf resolves the parent back when leafNeedsParent */
+func newLateCycleContainer(parentBody func(holder *lateCycleHolder) error, leafNeedsParent bool) *container {
+    serviceContainer := NewContainer()
+
+    MustRegister[*lateCycleHolder](serviceContainer, "late.holder", func(resolver containercontract.Resolver) (*lateCycleHolder, error) {
+        return &lateCycleHolder{
+            handle:   Lazy[*lateCycleLeaf](resolver, "late.leaf"),
+            other:    Lazy[*lateCycleOther](resolver, "late.other"),
+            resolver: resolver,
+        }, nil
+    })
+
+    MustRegister[*lateCycleLeaf](serviceContainer, "late.leaf", func(resolver containercontract.Resolver) (*lateCycleLeaf, error) {
+        if true == leafNeedsParent {
+            if _, parentErr := FromResolver[*lateCycleParent](resolver, "late.parent"); nil != parentErr {
+                return nil, parentErr
+            }
+        }
+
+        return &lateCycleLeaf{}, nil
+    })
+
+    MustRegister[*lateCycleOther](serviceContainer, "late.other", func(resolver containercontract.Resolver) (*lateCycleOther, error) {
+        return &lateCycleOther{}, nil
+    })
+
+    MustRegister[*lateCycleParent](serviceContainer, "late.parent", func(resolver containercontract.Resolver) (*lateCycleParent, error) {
+        holder, holderErr := FromResolver[*lateCycleHolder](resolver, "late.holder")
+        if nil != holderErr {
+            return nil, holderErr
+        }
+
+        if bodyErr := parentBody(holder); nil != bodyErr {
+            return nil, bodyErr
+        }
+
+        return &lateCycleParent{}, nil
+    })
+
+    return serviceContainer.(*container)
+}
+
+func resolveLateCycleParentWithin(t *testing.T, serviceContainer *container) error {
+    t.Helper()
+
+    answer := make(chan error, 1)
+    go func() {
+        _, resolveErr := FromResolver[*lateCycleParent](serviceContainer, "late.parent")
+        answer <- resolveErr
+    }()
+
+    select {
+    case resolveErr := <-answer:
+        return resolveErr
+    case <-time.After(5 * time.Second):
+        t.Fatalf("the resolution did not answer within 5s")
+
+        return nil
+    }
+}
+
+func assertResolverWaitGraphIsEmpty(t *testing.T, serviceContainer *container) {
+    t.Helper()
+
+    serviceContainer.mutex.RLock()
+    defer serviceContainer.mutex.RUnlock()
+
+    if 0 != len(serviceContainer.resolverWaitGraph) {
+        t.Fatalf("expected no wait edge left once the resolutions returned, got %v", serviceContainer.resolverWaitGraph)
+    }
+}
+
+func TestResolverContext_ACycleClosedThroughALazyOverAProvidersResolverIsRefusedAsCircular(t *testing.T) {
+    serviceContainer := newLateCycleContainer(func(holder *lateCycleHolder) error {
+        _, resolveErr := holder.handle.Resolve()
+
+        return resolveErr
+    }, true)
+
+    resolveErr := resolveLateCycleParentWithin(t, serviceContainer)
+    if nil == resolveErr || false == strings.Contains(resolveErr.Error(), "circular service dependency") {
+        t.Fatalf("expected the cycle through the retained resolver to be refused as circular, got %v", resolveErr)
+    }
+
+    assertResolverWaitGraphIsEmpty(t, serviceContainer)
+}
+
+func TestResolverContext_ACycleClosedThroughAProvidersResolverByTypeIsRefusedAsCircular(t *testing.T) {
+    serviceContainer := newLateCycleContainer(func(holder *lateCycleHolder) error {
+        _, resolveErr := FromResolverByType[*lateCycleLeaf](holder.resolver)
+
+        return resolveErr
+    }, true)
+
+    resolveErr := resolveLateCycleParentWithin(t, serviceContainer)
+    if nil == resolveErr || false == strings.Contains(resolveErr.Error(), "circular service dependency") {
+        t.Fatalf("expected the cycle through the retained resolver to be refused as circular, got %v", resolveErr)
+    }
+
+    assertResolverWaitGraphIsEmpty(t, serviceContainer)
+}
+
+func TestResolverContext_LateUsesInsideABuildingAncestorWithoutACycleResolveAndLeaveNoWaitEdge(t *testing.T) {
+    serviceContainer := newLateCycleContainer(func(holder *lateCycleHolder) error {
+        if _, otherErr := holder.other.Resolve(); nil != otherErr {
+            return otherErr
+        }
+
+        _, leafErr := holder.handle.Resolve()
+
+        return leafErr
+    }, false)
+
+    if resolveErr := resolveLateCycleParentWithin(t, serviceContainer); nil != resolveErr {
+        t.Fatalf("expected the late uses without a cycle to resolve, got %v", resolveErr)
+    }
+
+    assertResolverWaitGraphIsEmpty(t, serviceContainer)
+}
+
+/* another goroutine uses the kept handle while the parent is still being built, on a path that never reaches the parent */
+func TestResolverContext_ALateUseFromAnotherGoroutineOffTheAncestorsPathResolves(t *testing.T) {
+    otherAnswer := make(chan error, 1)
+    serviceContainer := newLateCycleContainer(func(holder *lateCycleHolder) error {
+        go func() {
+            _, otherErr := holder.other.Resolve()
+            otherAnswer <- otherErr
+        }()
+
+        select {
+        case otherErr := <-otherAnswer:
+            otherAnswer <- otherErr
+        case <-time.After(5 * time.Second):
+        }
+
+        return nil
+    }, false)
+
+    if resolveErr := resolveLateCycleParentWithin(t, serviceContainer); nil != resolveErr {
+        t.Fatalf("expected the parent to resolve, got %v", resolveErr)
+    }
+
+    if otherErr := <-otherAnswer; nil != otherErr {
+        t.Fatalf("expected the late use off the ancestor's path to resolve, got %v", otherErr)
+    }
+
+    assertResolverWaitGraphIsEmpty(t, serviceContainer)
+}
+
+type lateScopedCycleParent struct{}
+
+type lateScopedCycleHolder struct {
+    handle *LazyService[*lateScopedCycleLeaf]
+}
+
+type lateScopedCycleLeaf struct{}
+
+/* the same cycle among scoped services: the parent's creation is in flight in the scope's own maps, which the late resolution reads too */
+func TestResolverContext_ACycleClosedThroughALazyAmongScopedServicesIsRefusedAsCircular(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    MustRegisterScoped[*lateScopedCycleHolder](serviceContainer, "late.scoped.holder", func(resolver containercontract.Resolver) (*lateScopedCycleHolder, error) {
+        return &lateScopedCycleHolder{handle: Lazy[*lateScopedCycleLeaf](resolver, "late.scoped.leaf")}, nil
+    })
+
+    MustRegisterScoped[*lateScopedCycleLeaf](serviceContainer, "late.scoped.leaf", func(resolver containercontract.Resolver) (*lateScopedCycleLeaf, error) {
+        if _, parentErr := FromResolver[*lateScopedCycleParent](resolver, "late.scoped.parent"); nil != parentErr {
+            return nil, parentErr
+        }
+
+        return &lateScopedCycleLeaf{}, nil
+    })
+
+    MustRegisterScoped[*lateScopedCycleParent](serviceContainer, "late.scoped.parent", func(resolver containercontract.Resolver) (*lateScopedCycleParent, error) {
+        holder, holderErr := FromResolver[*lateScopedCycleHolder](resolver, "late.scoped.holder")
+        if nil != holderErr {
+            return nil, holderErr
+        }
+
+        if _, leafErr := holder.handle.Resolve(); nil != leafErr {
+            return nil, leafErr
+        }
+
+        return &lateScopedCycleParent{}, nil
+    })
+
+    scopeInstance := serviceContainer.NewScope()
+
+    answer := make(chan error, 1)
+    go func() {
+        _, resolveErr := FromResolver[*lateScopedCycleParent](scopeInstance, "late.scoped.parent")
+        answer <- resolveErr
+    }()
+
+    select {
+    case resolveErr := <-answer:
+        if nil == resolveErr || false == strings.Contains(resolveErr.Error(), "circular service dependency") {
+            t.Fatalf("expected the scoped cycle through the retained resolver to be refused as circular, got %v", resolveErr)
+        }
+    case <-time.After(5 * time.Second):
+        t.Fatalf("the resolution did not answer within 5s")
     }
 }

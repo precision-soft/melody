@@ -1249,3 +1249,163 @@ func TestLeaderGateRun_RefusesATypedNilScopeBeforeCampaigning(t *testing.T) {
         t.Fatalf("expected no lock to be held by the refused run, got acquired=%v err=%v", acquired, acquireErr)
     }
 }
+
+/* measures how long before a second gate is elected the first gate's hook, still working, is told to stop; the first gate renews through firstLocker, over the same store the second campaigns on */
+func handoverMarginUnder(t *testing.T, innerLocker lockcontract.Locker, firstLocker lockcontract.Locker, ttl time.Duration) time.Duration {
+    t.Helper()
+
+    firstContext, firstCancel := context.WithCancel(context.Background())
+    defer firstCancel()
+    secondContext, secondCancel := context.WithCancel(context.Background())
+    defer secondCancel()
+
+    firstElected := make(chan struct{})
+    firstStopped := make(chan time.Time, 1)
+    secondElected := make(chan time.Time, 1)
+    releaseFirstHook := make(chan struct{})
+
+    /* the hook keeps working after it is told to stop, so the lock is not released and the second gate can only take it once the lease lapses */
+    first := NewLeaderGateWithOptions(firstLocker, "worker:handover", ttl, LeaderGateOptions{
+        RetryInterval:   time.Minute,
+        RefreshInterval: ttl / 2,
+        OnElected: func(runtimeInstance runtimecontract.Runtime) {
+            close(firstElected)
+            <-runtimeInstance.Context().Done()
+            firstStopped <- time.Now()
+            <-releaseFirstHook
+        },
+    })
+
+    second := NewLeaderGateWithOptions(innerLocker, "worker:handover", ttl, LeaderGateOptions{
+        RetryInterval:   5 * time.Millisecond,
+        RefreshInterval: ttl / 2,
+        OnElected: func(runtimeInstance runtimecontract.Runtime) {
+            select {
+            case secondElected <- time.Now():
+            default:
+            }
+
+            <-runtimeInstance.Context().Done()
+        },
+    })
+
+    var waitGroup sync.WaitGroup
+    waitGroup.Add(1)
+    go func() {
+        defer waitGroup.Done()
+        _ = first.Run(testRuntimeWithContext(firstContext))
+    }()
+
+    <-firstElected
+
+    waitGroup.Add(1)
+    go func() {
+        defer waitGroup.Done()
+        _ = second.Run(testRuntimeWithContext(secondContext))
+    }()
+
+    stoppedAt := <-firstStopped
+    electedAt := <-secondElected
+
+    close(releaseFirstHook)
+    firstCancel()
+    secondCancel()
+    waitGroup.Wait()
+
+    return electedAt.Sub(stoppedAt)
+}
+
+/* the renewal issued at the cadence never answers; bounded to the lease's demotion instant it is cut there, so an elected hook still working is told to stop a quarter of the ttl before the lease lapses and a second gate takes the lock, rather than at the lapse itself */
+func TestLeaderGate_AHungRenewalStopsTheElectedHookBeforeASecondGateIsElected(t *testing.T) {
+    innerLocker := NewInMemoryLocker(clock.NewSystemClock())
+    ttl := 400 * time.Millisecond
+
+    if margin := handoverMarginUnder(t, innerLocker, &hangingRefreshLocker{inner: innerLocker}, ttl); margin < ttl/8 {
+        t.Fatalf("expected the first hook told to stop at least an eighth of the ttl before the second gate was elected, stopped %v before", margin)
+    }
+}
+
+/* every renewal fails at once; the one retry halfway to the demotion instant fails too, and the timer ends the term there instead of the next tick ending it at the lapse */
+func TestLeaderGate_AFailingRenewalStopsTheElectedHookBeforeASecondGateIsElected(t *testing.T) {
+    innerLocker := NewInMemoryLocker(clock.NewSystemClock())
+    ttl := 400 * time.Millisecond
+
+    failing := &switchableRefreshLocker{inner: innerLocker}
+    failing.fail.Store(true)
+
+    if margin := handoverMarginUnder(t, innerLocker, failing, ttl); margin < ttl/8 {
+        t.Fatalf("expected the first hook told to stop at least an eighth of the ttl before the second gate was elected, stopped %v before", margin)
+    }
+}
+
+/* parkingReleaseLocker holds every Release until the test lets it go, so the instant between leaving the term and the lock reaching the store can be observed */
+type parkingReleaseLocker struct {
+    inner          lockcontract.Locker
+    releaseEntered chan struct{}
+    releaseProceed chan struct{}
+    enteredOnce    sync.Once
+}
+
+func (instance *parkingReleaseLocker) CreateLock(name string, ttl time.Duration) lockcontract.Lock {
+    return &parkingReleaseLock{locker: instance, inner: instance.inner.CreateLock(name, ttl)}
+}
+
+type parkingReleaseLock struct {
+    locker *parkingReleaseLocker
+    inner  lockcontract.Lock
+}
+
+func (instance *parkingReleaseLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+    return instance.inner.Acquire(runtimeInstance)
+}
+
+func (instance *parkingReleaseLock) Release(runtimeInstance runtimecontract.Runtime) error {
+    instance.locker.enteredOnce.Do(func() {
+        close(instance.locker.releaseEntered)
+    })
+    <-instance.locker.releaseProceed
+
+    return instance.inner.Release(runtimeInstance)
+}
+
+func (instance *parkingReleaseLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl time.Duration) error {
+    return instance.inner.Refresh(runtimeInstance, ttl)
+}
+
+/* the term is left before the lock is released: while the release is still on its way to the store the lease is valid, and a gate that still claimed leadership then would answer IsLeader for a lock it is handing back */
+func TestLeaderGate_LeavesTheTermBeforeTheReleaseReachesTheStore(t *testing.T) {
+    locker := &parkingReleaseLocker{
+        inner:          NewInMemoryLocker(clock.NewSystemClock()),
+        releaseEntered: make(chan struct{}),
+        releaseProceed: make(chan struct{}),
+    }
+
+    runContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    elected := make(chan struct{})
+    gate := NewLeaderGateWithOptions(locker, "worker:leave-then-release", time.Minute, LeaderGateOptions{
+        RetryInterval: 5 * time.Millisecond,
+        OnElected: func(runtimeInstance runtimecontract.Runtime) {
+            close(elected)
+        },
+    })
+
+    done := make(chan error, 1)
+    go func() {
+        done <- gate.Run(testRuntimeWithContext(runContext))
+    }()
+
+    <-elected
+    cancel()
+    <-locker.releaseEntered
+
+    leadingDuringTheRelease := gate.IsLeader()
+
+    close(locker.releaseProceed)
+    <-done
+
+    if true == leadingDuringTheRelease {
+        t.Fatalf("expected the gate to have left its term while its release was still in flight")
+    }
+}

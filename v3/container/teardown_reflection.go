@@ -21,7 +21,7 @@ type heldPointer struct {
 }
 
 /* heldPointerIdentities answers which pointer identities a freshly built service value holds, transitively, so the teardown can order a provider that captured its collaborator. It is walked where the value is filed, not at teardown. Every word is read as memory another goroutine may be writing, so only pointer words and the struct and array layouts around them are read: interfaces, strings, slices, maps, funcs, chans and unsafe pointers are never entered, and a collaborator reached only through one of them keeps the order it had. The walk is breadth-first, so every pointer is entered once, at its shallowest depth. */
-func heldPointerIdentities(root any) []heldPointer {
+func heldPointerIdentities(root any, opaqueIdentities map[pointerIdentity]any) []heldPointer {
     found := make([]heldPointer, 0)
     seen := make(map[pointerIdentity]struct{})
 
@@ -73,6 +73,11 @@ func heldPointerIdentities(root any) []heldPointer {
             seen[identity] = struct{}{}
 
             found = append(found, heldPointer{identity: identity, keepAlive: target})
+
+            /* a service registered WithoutTeardownReflection is recorded as held and never entered */
+            if _, opaque := opaqueIdentities[identity]; true == opaque {
+                continue
+            }
 
             if true == childrenInReach {
                 enqueue(target, item.depth+1)
@@ -156,7 +161,7 @@ func typeCanHoldIdentityUncached(valueType reflect.Type) bool {
     return false
 }
 
-/* recordHeldIdentitiesLocked keeps what a service holds against its node, only while the waves are armed. One pointer value is walked once however many nodes it is filed under and the record is shared; a re-filed node replaces its record. */
+/* recordHeldIdentitiesLocked keeps what a service holds against its node, only while the waves are armed. One pointer value is walked once however many nodes it is filed under and the record is shared; a re-filed node replaces its record. A node registered WithoutTeardownReflection is not walked: its value is kept as an identity other walks record and never enter. */
 func (instance *container) recordHeldIdentitiesLocked(nodeKey string, value any) {
     if false == instance.teardownInWaves {
         return
@@ -168,6 +173,21 @@ func (instance *container) recordHeldIdentitiesLocked(nodeKey string, value any)
     }
 
     valueKey, hasPointer := pointerKeyOf(value)
+
+    if _, skipped := instance.reflectionSkippedNodeKeys[nodeKey]; true == skipped {
+        delete(instance.heldIdentitiesByNodeKey, nodeKey)
+
+        if true == hasPointer {
+            if nil == instance.opaqueIdentities {
+                instance.opaqueIdentities = make(map[pointerIdentity]any)
+            }
+
+            instance.opaqueIdentities[valueKey] = value
+        }
+
+        return
+    }
+
     if true == hasPointer {
         if walked, already := instance.heldIdentitiesByValue[valueKey]; true == already {
             instance.heldIdentitiesByNodeKey[nodeKey] = walked
@@ -176,7 +196,7 @@ func (instance *container) recordHeldIdentitiesLocked(nodeKey string, value any)
         }
     }
 
-    walked := heldPointerIdentities(value)
+    walked := heldPointerIdentities(value, instance.opaqueIdentities)
 
     instance.heldIdentitiesByNodeKey[nodeKey] = walked
 
@@ -185,14 +205,31 @@ func (instance *container) recordHeldIdentitiesLocked(nodeKey string, value any)
     }
 }
 
-/* recordHeldIdentitiesOfBuiltServicesLocked walks what was built before arming; everything built later is walked where it is filed. */
-func (instance *container) recordHeldIdentitiesOfBuiltServicesLocked() {
-    for serviceName, value := range instance.instances {
-        instance.recordHeldIdentitiesLocked(containerNameNodeKey(serviceName), value)
+/* skipTeardownReflectionLocked marks a node registered WithoutTeardownReflection. */
+func (instance *container) skipTeardownReflectionLocked(nodeKey string) {
+    if nil == instance.reflectionSkippedNodeKeys {
+        instance.reflectionSkippedNodeKeys = make(map[string]struct{})
     }
 
-    for registeredType, value := range instance.typeInstances {
-        instance.recordHeldIdentitiesLocked(containerTypeNodeKey(registeredType), value)
+    instance.reflectionSkippedNodeKeys[nodeKey] = struct{}{}
+}
+
+/* recordHeldIdentitiesOfBuiltServicesLocked walks what was built before arming; everything built later is walked where it is filed. The skipped nodes are filed first, so no walk enters one of them whatever order the maps answer in. */
+func (instance *container) recordHeldIdentitiesOfBuiltServicesLocked() {
+    for _, skippedPass := range []bool{true, false} {
+        for serviceName, value := range instance.instances {
+            nodeKey := containerNameNodeKey(serviceName)
+            if _, skipped := instance.reflectionSkippedNodeKeys[nodeKey]; skippedPass == skipped {
+                instance.recordHeldIdentitiesLocked(nodeKey, value)
+            }
+        }
+
+        for registeredType, value := range instance.typeInstances {
+            nodeKey := containerTypeNodeKey(registeredType)
+            if _, skipped := instance.reflectionSkippedNodeKeys[nodeKey]; skippedPass == skipped {
+                instance.recordHeldIdentitiesLocked(nodeKey, value)
+            }
+        }
     }
 }
 

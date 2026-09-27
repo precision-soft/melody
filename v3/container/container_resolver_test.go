@@ -106,6 +106,138 @@ func TestResolve_DuringCloseClosesTheCreatedValueInsteadOfLeakingIt(t *testing.T
     }
 }
 
+/* a value carrying only the context-taking door, built while Close ran, is closed through that door rather than left to leak */
+func TestResolve_DuringCloseClosesACreatedValueThatCarriesOnlyCloseWithContext(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    providerStarted := make(chan struct{})
+    providerRelease := make(chan struct{})
+
+    service := &contextDoorOnlyService{}
+
+    MustRegister[*contextDoorOnlyService](
+        serviceContainer,
+        "context.door.race",
+        func(resolver containercontract.Resolver) (*contextDoorOnlyService, error) {
+            close(providerStarted)
+            <-providerRelease
+
+            return service, nil
+        },
+    )
+
+    resultChannel := make(chan error, 1)
+    go func() {
+        _, getErr := serviceContainer.Get("context.door.race")
+        resultChannel <- getErr
+    }()
+
+    <-providerStarted
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    close(providerRelease)
+
+    if getErr := <-resultChannel; false == errors.Is(getErr, ErrContainerClosed) {
+        t.Fatalf("expected the resolution that finished after Close to fail as closed, got %v", getErr)
+    }
+
+    if 1 != service.closes {
+        t.Fatalf("expected the value carrying only CloseWithContext to be closed once, got %d closes", service.closes)
+    }
+}
+
+func TestResolve_AScopedValueWhoseScopeClosedWhileItsProviderRanIsClosedThroughCloseWithContext(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    providerStarted := make(chan struct{})
+    providerRelease := make(chan struct{})
+
+    service := &scopedContextDoorOnlyService{}
+
+    MustRegisterScoped[*scopedContextDoorOnlyService](
+        serviceContainer,
+        "scoped.context.door.race",
+        func(resolver containercontract.Resolver) (*scopedContextDoorOnlyService, error) {
+            close(providerStarted)
+            <-providerRelease
+
+            return service, nil
+        },
+    )
+
+    scopeInstance := serviceContainer.NewScope()
+
+    resultChannel := make(chan error, 1)
+    go func() {
+        _, getErr := scopeInstance.Get("scoped.context.door.race")
+        resultChannel <- getErr
+    }()
+
+    <-providerStarted
+
+    if closeErr := scopeInstance.Close(); nil != closeErr {
+        t.Fatalf("scope close: %v", closeErr)
+    }
+
+    close(providerRelease)
+
+    if getErr := <-resultChannel; nil == getErr {
+        t.Fatalf("expected the resolution that finished after the scope closed to fail")
+    }
+
+    if 1 != service.closes {
+        t.Fatalf("expected the scoped value carrying only CloseWithContext to be closed once, got %d closes", service.closes)
+    }
+}
+
+func TestResolve_AValueAnOverrideBeatWhileItsProviderRanIsClosedThroughCloseWithContext(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    providerStarted := make(chan struct{})
+    providerRelease := make(chan struct{})
+
+    service := &contextDoorOnlyService{}
+    override := &contextDoorOnlyService{}
+
+    MustRegister[*contextDoorOnlyService](
+        serviceContainer,
+        "context.door.override",
+        func(resolver containercontract.Resolver) (*contextDoorOnlyService, error) {
+            close(providerStarted)
+            <-providerRelease
+
+            return service, nil
+        },
+    )
+
+    resultChannel := make(chan any, 1)
+    go func() {
+        value, _ := serviceContainer.Get("context.door.override")
+        resultChannel <- value
+    }()
+
+    <-providerStarted
+
+    serviceContainer.MustOverrideInstance("context.door.override", override)
+
+    close(providerRelease)
+
+    if value := <-resultChannel; override != value {
+        t.Fatalf("expected the override to answer the resolution, got %v", value)
+    }
+
+    if 1 != service.closes {
+        t.Fatalf("expected the built value the override beat to be closed once, got %d closes", service.closes)
+    }
+
+    if 0 != override.closes {
+        t.Fatalf("expected the override to stay open, got %d closes", override.closes)
+    }
+}
+
 type panickingCloser struct{}
 
 func (instance *panickingCloser) Close() error {
@@ -921,5 +1053,66 @@ func TestCreationGuard_APanicValueWhoseUnwrapPanicsIsContained(t *testing.T) {
     _, getErr := serviceContainer.Get("app.unwrap.panic")
     if nil == getErr {
         t.Fatalf("expected the panicking provider to fail the resolution")
+    }
+}
+
+type coalescedScopedUnit struct{}
+
+/* the owner closes the scope as soon as its own resolution returns, so the waiters coalesced behind it wake on either side of the close; with the check disarmed about three refusals in ten carry no ErrScopeClosed, so two hundred rounds cannot miss it */
+func TestCreationGuard_AWaiterCoalescedBehindAScopedCreationWhoseScopeClosesIsRefusedAsTheScopeRefuses(t *testing.T) {
+    const waiters = 8
+
+    refusals := 0
+    for round := 0; round < 200; round++ {
+        serviceContainer := NewContainer()
+        release := make(chan struct{})
+
+        MustRegisterScoped[*coalescedScopedUnit](serviceContainer, "scoped.coalesced", func(resolver containercontract.Resolver) (*coalescedScopedUnit, error) {
+            <-release
+
+            return &coalescedScopedUnit{}, nil
+        })
+
+        scopeInstance := serviceContainer.NewScope()
+        results := make(chan error, waiters+1)
+
+        var group sync.WaitGroup
+        group.Add(1)
+        go func() {
+            defer group.Done()
+
+            _, getErr := scopeInstance.Get("scoped.coalesced")
+            _ = scopeInstance.Close()
+            results <- getErr
+        }()
+
+        for waiter := 0; waiter < waiters; waiter++ {
+            group.Add(1)
+            go func() {
+                defer group.Done()
+
+                _, getErr := scopeInstance.Get("scoped.coalesced")
+                results <- getErr
+            }()
+        }
+
+        close(release)
+        group.Wait()
+        close(results)
+
+        for getErr := range results {
+            if nil == getErr {
+                continue
+            }
+
+            refusals = refusals + 1
+            if false == errors.Is(getErr, ErrScopeClosed) {
+                t.Fatalf("round %d: expected every refusal of the closed scope to classify as ErrScopeClosed, got %v", round, getErr)
+            }
+        }
+    }
+
+    if 0 == refusals {
+        t.Fatalf("expected the scope to close under some waiter, so the refusal was observed at all")
     }
 }

@@ -507,10 +507,10 @@ func (instance *slowSucceedingRefreshLock) Refresh(runtimeInstance runtimecontra
     }
 }
 
-/* a renewal that answers inside the lease it renews renewed it, however slowly, and demotion follows the lease clock; the delay sits between a quarter of the ttl and the lease */
+/* a renewal that lands before the lease's demotion instant renewed it, however slowly; the delay sits between an eighth and a quarter of the ttl */
 func TestRunExclusive_ASlowButSuccessfulRenewalDoesNotLoseTheLease(t *testing.T) {
-    ttl := 200 * time.Millisecond
-    locker := &slowSucceedingRefreshLocker{delay: 80 * time.Millisecond}
+    ttl := 400 * time.Millisecond
+    locker := &slowSucceedingRefreshLocker{delay: 60 * time.Millisecond}
 
     completed := false
 
@@ -520,7 +520,7 @@ func TestRunExclusive_ASlowButSuccessfulRenewalDoesNotLoseTheLease(t *testing.T)
         "worker:slow-store",
         ttl,
         func(runtimeInstance runtimecontract.Runtime) error {
-            time.Sleep(500 * time.Millisecond)
+            time.Sleep(time.Second)
             completed = true
 
             return nil
@@ -536,7 +536,36 @@ func TestRunExclusive_ASlowButSuccessfulRenewalDoesNotLoseTheLease(t *testing.T)
     }
 
     if false == completed {
-        t.Fatal("the callback was cancelled: a renewal that succeeded inside the lease was read as a lost lock")
+        t.Fatal("the callback was cancelled: a renewal that landed before the demotion instant was read as a lost lock")
+    }
+}
+
+/* a renewal still unanswered at the lease's demotion instant, a quarter of the ttl before the lapse, is cut there and costs the lease, since whether it would land before a contender acquires cannot be known */
+func TestRunExclusive_ARenewalThatCannotLandBeforeTheDemotionInstantLosesTheLease(t *testing.T) {
+    ttl := 400 * time.Millisecond
+    locker := &slowSucceedingRefreshLocker{delay: 150 * time.Millisecond}
+
+    ran, runErr := RunExclusive(
+        testRuntimeWithContext(context.Background()),
+        locker,
+        "worker:slower-store",
+        ttl,
+        func(runtimeInstance runtimecontract.Runtime) error {
+            select {
+            case <-runtimeInstance.Context().Done():
+                return nil
+            case <-time.After(5 * time.Second):
+                return nil
+            }
+        },
+    )
+
+    if false == ran {
+        t.Fatal("expected the exclusive run to have taken the lock")
+    }
+
+    if nil == runErr {
+        t.Fatal("expected a renewal that could not land before the demotion instant to lose the lease")
     }
 }
 
@@ -666,7 +695,7 @@ func (instance *slowAcquireCountingLock) Refresh(runtimeInstance runtimecontract
 }
 
 func TestRunExclusive_LeaseIsDatedFromTheAcquireIssueInstant(t *testing.T) {
-    /* the acquire answers 600ms after it is issued, against a 400ms ttl: the lease the store wrote has already lapsed by the time callback starts. Dated from the ISSUE instant, the very first failed renewal finds the lease beyond recovery and demotes; dated from the ANSWER, the believed lease would run a further 600ms past the real one, the first failure would be read as survivable, and the callback would keep running through a window in which a second instance can legally acquire. The refresh count at demotion is the observable that separates the two datings. */
+    /* the acquire answers 600ms after it is issued, against a 400ms ttl: the lease the store wrote has already lapsed by the time callback starts. Dated from the ISSUE instant, its demotion instant has passed and the caller is demoted before any renewal; dated from the ANSWER, the believed lease would run a further 600ms past the real one, renewals would be attempted and a failure read as survivable, and the callback would keep running through a window in which a second instance can legally acquire. The refresh count at demotion is the observable that separates the two datings. */
     locker := &slowAcquireCountingLocker{acquireDelay: 600 * time.Millisecond}
 
     ran, runErr := RunExclusive(
@@ -692,8 +721,8 @@ func TestRunExclusive_LeaseIsDatedFromTheAcquireIssueInstant(t *testing.T) {
         t.Fatalf("expected the lost lease to surface as an error")
     }
 
-    if 1 != locker.refreshCount.Load() {
-        t.Fatalf("expected the first failed renewal to demote a lease dated from the acquire issue instant, got %d renewals", locker.refreshCount.Load())
+    if 0 != locker.refreshCount.Load() {
+        t.Fatalf("expected a lease dated from the acquire issue instant to be demoted before any renewal, got %d renewals", locker.refreshCount.Load())
     }
 }
 
@@ -866,7 +895,7 @@ func (instance *slowThenFailingRefreshLock) Refresh(runtimeInstance runtimecontr
 }
 
 func TestRunExclusive_RenewalLeaseIsDatedFromTheRenewalIssueInstant(t *testing.T) {
-    /* the first renewal is issued at 200ms and answers at 500ms; dated from the ISSUE, the lease it wrote lapses at 600ms, so the failure right behind it (issued at 500ms, inside the 100ms recovery margin of that lease) demotes at the SECOND call. Dated from the answer, the believed lease would run to 900ms and two more failures would be read as survivable first. */
+    /* the first renewal is issued at 200ms and, ignoring its context, answers at 500ms; dated from the ISSUE, the lease it wrote lapses at 600ms and its demotion instant is 500ms, already come, so the caller is demoted as it lands and no second call is made. Dated from the answer, the believed lease would run to 900ms and further renewals would be attempted first. */
     locker := &slowThenFailingRefreshLocker{firstDelay: 300 * time.Millisecond}
 
     _, runErr := RunExclusive(
@@ -888,8 +917,8 @@ func TestRunExclusive_RenewalLeaseIsDatedFromTheRenewalIssueInstant(t *testing.T
         t.Fatalf("expected the lost lease to surface as an error")
     }
 
-    if 2 != locker.refreshCount.Load() {
-        t.Fatalf("expected the failure behind a slow successful renewal to demote a lease dated from the renewal issue instant, got %d renewals", locker.refreshCount.Load())
+    if 1 != locker.refreshCount.Load() {
+        t.Fatalf("expected a slow renewal dated from its issue instant to demote as it lands, got %d renewals", locker.refreshCount.Load())
     }
 }
 
@@ -1012,5 +1041,80 @@ func TestRunExclusive_ACallbackPanicJoinsTheRefreshBeforeReleasing(t *testing.T)
     acquired, acquireErr := locker.inner.CreateLock("callback-panics", time.Minute).Acquire(runtimeInstance)
     if nil != acquireErr || false == acquired {
         t.Fatalf("expected the lock to be released after the panic, got acquired=%v err=%v", acquired, acquireErr)
+    }
+}
+
+/* hangingUntilCancelledRefreshLocker answers the acquire and never answers a renewal until the renewal's context ends, the shape of a store that accepted the call and went silent */
+type hangingUntilCancelledRefreshLocker struct{}
+
+func (instance *hangingUntilCancelledRefreshLocker) CreateLock(name string, ttl time.Duration) lockcontract.Lock {
+    return &hangingUntilCancelledRefreshLock{}
+}
+
+type hangingUntilCancelledRefreshLock struct{}
+
+func (instance *hangingUntilCancelledRefreshLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+    return true, nil
+}
+
+func (instance *hangingUntilCancelledRefreshLock) Release(runtimeInstance runtimecontract.Runtime) error {
+    return nil
+}
+
+func (instance *hangingUntilCancelledRefreshLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl time.Duration) error {
+    <-runtimeInstance.Context().Done()
+
+    return runtimeInstance.Context().Err()
+}
+
+/* measures how long after the acquire the callback is told to stop */
+func cancellationDelayUnder(t *testing.T, locker lockcontract.Locker, ttl time.Duration) time.Duration {
+    t.Helper()
+
+    startedAt := time.Now()
+    cancelledAfter := time.Duration(0)
+
+    _, runErr := RunExclusive(
+        testRuntimeWithContext(context.Background()),
+        locker,
+        "worker:demotion-instant",
+        ttl,
+        func(runtimeInstance runtimecontract.Runtime) error {
+            select {
+            case <-runtimeInstance.Context().Done():
+                cancelledAfter = time.Since(startedAt)
+            case <-time.After(5 * time.Second):
+            }
+
+            return nil
+        },
+    )
+
+    if nil == runErr {
+        t.Fatalf("expected the lost lease to surface as an error")
+    }
+
+    if 0 == cancelledAfter {
+        t.Fatalf("expected the callback to be cancelled")
+    }
+
+    return cancelledAfter
+}
+
+/* the renewal issued at half the ttl never answers; bounded to the demotion instant, it is cut there, and the callback is told to stop a quarter of the ttl before a contender can acquire rather than at the lapse */
+func TestRunExclusive_AHungRenewalCancelsTheCallbackBeforeTheLeaseLapses(t *testing.T) {
+    ttl := 400 * time.Millisecond
+
+    if cancelledAfter := cancellationDelayUnder(t, &hangingUntilCancelledRefreshLocker{}, ttl); cancelledAfter > ttl-ttl/8 {
+        t.Fatalf("expected the callback cancelled at least an eighth of the ttl before the lapse, cancelled after %v", cancelledAfter)
+    }
+}
+
+/* every renewal fails at once; the one retry comes halfway to the demotion instant and fails too, and the timer demotes there instead of the next tick demoting at the lapse */
+func TestRunExclusive_AFailingRenewalCancelsTheCallbackBeforeTheLeaseLapses(t *testing.T) {
+    ttl := 400 * time.Millisecond
+
+    if cancelledAfter := cancellationDelayUnder(t, &refreshFailingLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}, ttl); cancelledAfter > ttl-ttl/8 {
+        t.Fatalf("expected the callback cancelled at least an eighth of the ttl before the lapse, cancelled after %v", cancelledAfter)
     }
 }

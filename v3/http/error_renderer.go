@@ -156,7 +156,7 @@ func serializeErrorPayloadSafely(serializerInstance serializercontract.Serialize
         serializeErr = exception.NewError(
             "error payload serialization panicked",
             exceptioncontract.Context{
-                "value": fmt.Sprintf("%v", recoveredValue),
+                "value": internal.DescribeRecoveredValue(recoveredValue),
             },
             nil,
         )

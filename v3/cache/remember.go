@@ -240,7 +240,7 @@ func executeRememberInFlightLeader(
                 "cache remember cache access panicked",
                 map[string]any{
                     "key":        key,
-                    "panic":      fmt.Sprintf("%v", recoveredValue),
+                    "panic":      internal.DescribeRecoveredValue(recoveredValue),
                     "panicStack": string(debug.Stack()),
                 },
                 exception.PanicCause(recoveredValue),
@@ -400,7 +400,7 @@ func executeRememberCallbackSafely(
             "cache remember callback panicked",
             map[string]any{
                 "key":        key,
-                "panic":      fmt.Sprintf("%v", recoveredValue),
+                "panic":      internal.DescribeRecoveredValue(recoveredValue),
                 "panicStack": string(debug.Stack()),
             },
             exception.PanicCause(recoveredValue),

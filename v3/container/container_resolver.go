@@ -1,6 +1,7 @@
 package container
 
 import (
+    "context"
     "fmt"
     "reflect"
     "runtime"
@@ -121,6 +122,17 @@ func (instance *container) serviceWithCreationGuardLocked(
             return value, nil
         }
 
+        /* a scoped creation that finished while the scope closed stored a value the closed scope does not answer, so the waiter is refused as the scope refuses */
+        if false == creation.suspendsScope && true == resolver.isScopeClosed() {
+            return nil, exception.NewError(
+                "scope is closed",
+                map[string]any{
+                    "creatingKey": creatingKey,
+                },
+                ErrScopeClosed,
+            )
+        }
+
         return nil, exception.NewError(
             "service was not available after creation finished",
             map[string]any{
@@ -155,7 +167,7 @@ func (instance *container) serviceWithCreationGuardLocked(
             }
 
             recoveredTypeString := fmt.Sprintf("%T", recoveredValue)
-            recoveredValueString := fmt.Sprintf("%v", recoveredValue)
+            recoveredValueString := internal.DescribeRecoveredValue(recoveredValue)
 
             var recoveredErr error
             recoveredErr, _ = recoveredValue.(error)
@@ -334,9 +346,10 @@ func newContainerClosedError(creatingKey string) error {
     )
 }
 
+/* closeValueAfterContainerClose closes a value no holder will ever close through the door the teardown would have used, the context-taking one included, under the background context a plain Close hands the teardown. */
 func closeValueAfterContainerClose(value any) {
-    closeable, isCloseable := value.(interface{ Close() error })
-    if false == isCloseable {
+    closeable, contextCloseable, carriesADoor := closeDoorsOf(value)
+    if false == carriesADoor {
         return
     }
 
@@ -345,7 +358,7 @@ func closeValueAfterContainerClose(value any) {
         _ = recover()
     }()
 
-    _ = closeable.Close()
+    _ = closeServiceValueWithin(context.Background(), closeable, contextCloseable)
 }
 
 func (instance *container) registerResolverWaitLocked(
@@ -393,6 +406,15 @@ func (instance *container) registerResolverWaitLocked(
         )
     }
 
+    instance.recordResolverWaitEdgeLocked(fromContextId, toContextId)
+
+    return nil
+}
+
+func (instance *container) recordResolverWaitEdgeLocked(
+    fromContextId uint64,
+    toContextId uint64,
+) {
     children, exists := instance.resolverWaitGraph[fromContextId]
     if false == exists || nil == children {
         children = make(map[uint64]struct{})
@@ -400,8 +422,27 @@ func (instance *container) registerResolverWaitLocked(
     }
 
     children[toContextId] = struct{}{}
+}
 
-    return nil
+/* ownsCreationInFlightLocked reports whether the resolution contextId is still building a service of the container or of scopeInstance. */
+func (instance *container) ownsCreationInFlightLocked(
+    contextId uint64,
+    scopeInstance *scope,
+) bool {
+    creationMaps := []map[string]*creationState{instance.creatingByName, instance.creatingByType}
+    if nil != scopeInstance {
+        creationMaps = append(creationMaps, scopeInstance.creatingByName, scopeInstance.creatingByType)
+    }
+
+    for _, creations := range creationMaps {
+        for _, state := range creations {
+            if nil != state && contextId == state.ownerContextId {
+                return true
+            }
+        }
+    }
+
+    return false
 }
 
 func (instance *container) clearResolverWaitLocked(

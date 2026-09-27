@@ -79,6 +79,9 @@ type container struct {
     /* what each built service was seen to hold, recorded at construction while the waves are armed; heldIdentitiesByValue keys the same record by the value walked */
     heldIdentitiesByNodeKey map[string][]heldPointer
     heldIdentitiesByValue   map[pointerIdentity][]heldPointer
+    /* reflectionSkippedNodeKeys are the nodes registered WithoutTeardownReflection; opaqueIdentities are their filed values, which a walk records and never enters, kept alive so an address is not reused under them */
+    reflectionSkippedNodeKeys map[string]struct{}
+    opaqueIdentities          map[pointerIdentity]any
     /* teardownInWaves is the application's assertion that the teardown graph is complete; off by default */
     teardownInWaves bool
     /* teardownFinished is the second closing state: isClosed refuses new creations for the whole teardown, and teardownFinished refuses every resolution once the last Close returned, so a service's own Close can still resolve its dependencies */
@@ -611,6 +614,13 @@ func (instance *container) register(
             delete(instance.providerServiceTypeByName, serviceName)
             delete(instance.collectionPriorityByName, serviceName)
             return registerTypeErr
+        }
+    }
+
+    if true == registerOption.SkipsTeardownReflection {
+        instance.skipTeardownReflectionLocked(containerNameNodeKey(serviceName))
+        if true == registerOption.AlsoRegisterType && nil != serviceType {
+            instance.skipTeardownReflectionLocked(containerTypeNodeKey(serviceType))
         }
     }
 

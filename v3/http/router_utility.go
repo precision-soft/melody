@@ -4,7 +4,6 @@ import (
     "crypto/sha256"
     "encoding/hex"
     "errors"
-    "fmt"
     "io"
     "io/fs"
     "net"
@@ -461,7 +460,7 @@ func closeResponseBodySafely(closer io.Closer) (closeErr error) {
         closeErr = exception.NewError(
             "response body close panicked",
             exceptioncontract.Context{
-                "value": fmt.Sprintf("%v", recoveredValue),
+                "value": internal.DescribeRecoveredValue(recoveredValue),
             },
             nil,
         )

@@ -49,6 +49,13 @@ func WithTeardownDependencyOfType[T any]() containercontract.RegisterOption {
     }
 }
 
+/* WithoutTeardownReflection keeps the armed teardown's walk out of this service's memory, for a service whose own goroutines rewrite its pointer fields: the walk reads those words without synchronisation, which the race detector reports. The service's value is not walked where it is filed nor at ArmParallelTeardown, and a walk of another service that reaches it records the edge toward it and does not enter it, so what it holds orders nothing and is declared with WithTeardownDependency instead. The option also covers a value installed over the name, and the scoped registration paths do not read it. */
+func WithoutTeardownReflection() containercontract.RegisterOption {
+    return func(option *containercontract.RegisterOptions) {
+        option.SkipsTeardownReflection = true
+    }
+}
+
 /* WithReplacesContainerService admits a scoped registration whose name or registered type the container already claims, so the scoped one answers inside a scope and the container's outside. Without it the overlap is refused. It admits substitution, not decoration. The container-level registration paths do not read it. */
 func WithReplacesContainerService() containercontract.RegisterOption {
     return func(option *containercontract.RegisterOptions) {

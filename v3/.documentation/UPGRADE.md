@@ -440,7 +440,7 @@ debug.NewMiddlewareCommand(
 
 **Symptom.** A handle built over a request scope and used after the request stops answering the memoized value and returns `lazy service scope is closed`. `LazyService.Get` panics with that error rather than handing back a dead request's state.
 
-**Remedy.** Build the handle over the container where it is meant to outlive the request — every container resolution mints a fresh resolver context, so that is also the form safe for concurrent first uses. Code shared across requests resolves per call through `FromResolver` with the current request's resolver; the value is then keyed to the right scope by the scope's own instance map. A handle built over the container is untouched by this change, because the container does not answer the liveness question.
+**Remedy.** Build the handle over the container where it is meant to outlive the request — every container resolution mints a fresh resolver context, so that is also the form safe for concurrent first uses. Code shared across requests resolves per call through `FromResolver` with the current request's resolver; the value is then keyed to the right scope by the scope's own instance map. A handle built over the container, or over the resolver a container provider was handed, follows the container instead: it keeps serving through the teardown and turns terminal once the teardown finished, answering `ErrContainerClosed` rather than the scope's sentinel, so a caller classifying the refusal tells an application shutting down from a request that ended.
 
 ### Http: `RedirectResponse` is relative-only
 
@@ -1358,6 +1358,14 @@ A correct size, a zero declared size, and a body **shorter** than its declared s
 **Symptom.** An invocation already passing `--limit` or `--offset` received the full list and now receives a window; with `--verbose`, `debug:events` also narrows its listeners block to the windowed events. `--order=desc` was accepted and ignored before, so an invocation that passed it now gets different output.
 
 **Remedy.** Nothing for a client that paged with `offset += limit` — it now walks each item exactly once instead of re-reading the whole list on every page. A consumer that passed `--limit` while expecting everything must drop the flag.
+
+### Distributed lock: the callback is told to stop a quarter of the ttl before the lease lapses
+
+**What changed.** [`RunExclusive`](../lock/run_exclusive.go) and [`LeaderGate`](../lock/leader_gate.go) demote on the lease's demotion instant, half a renewal cadence — a quarter of the ttl at the default cadence — before the lease last written lapses, if no renewal has landed by then. A timer arms it whatever the store is doing, every renewal is bounded to it, and a failed renewal is retried once, halfway to it. A renewal that hung until its whole-cadence deadline or a store that failed at once used to demote at the lapse itself — the instant a contender could acquire — so the callback and the new holder overlapped.
+
+**Symptom.** A renewal that answers after the demotion instant no longer saves the lease: the callback's runtime is cancelled and `RunExclusive` returns `exclusive run lost the lock lease while running`, where a renewal landing anywhere inside the lease used to keep it. With a 30-second ttl the renewal issued at 15 seconds has until 22.5 seconds to land.
+
+**Remedy.** None where the store answers renewals within a quarter of the ttl. A store that is regularly slower needs a longer ttl, which widens every window proportionally; for a `LeaderGate`, a denser `RefreshInterval` also narrows the demotion margin, since the margin is half the cadence. Session mode (a non-positive ttl) is unchanged.
 
 ### Distributed lock: `LeaderGate.OnElected` receives a term-scoped runtime
 

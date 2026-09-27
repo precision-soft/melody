@@ -492,6 +492,43 @@ func TestLazyService_AContainerBackedHandleTurnsTerminalAfterContainerClose(t *t
     if nil == resolveErr {
         t.Fatalf("expected the container-backed handle to refuse after the container closed, not serve the dead value")
     }
+
+    if false == errors.Is(resolveErr, ErrContainerClosed) || true == errors.Is(resolveErr, ErrScopeClosed) {
+        t.Fatalf("expected the container-backed handle to answer the container's sentinel, got %v", resolveErr)
+    }
+
+    if _, secondErr := lazyService.Resolve(); false == errors.Is(secondErr, ErrContainerClosed) {
+        t.Fatalf("expected the terminal handle to answer the container's sentinel on every later call, got %v", secondErr)
+    }
+}
+
+func TestLazyService_AHandleOverAContainerProvidersResolverAnswersTheContainersSentinelAfterClose(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    MustRegister[*lazyProbeItem](serviceContainer, "app.dependency", func(resolver containercontract.Resolver) (*lazyProbeItem, error) {
+        return &lazyProbeItem{name: "dependency"}, nil
+    })
+
+    capturedHandle := (*LazyService[*lazyProbeItem])(nil)
+    MustRegister[string](serviceContainer, "app.holder", func(resolver containercontract.Resolver) (string, error) {
+        capturedHandle = Lazy[*lazyProbeItem](resolver, "app.dependency")
+
+        return "holder", nil
+    })
+
+    MustFromResolver[string](serviceContainer, "app.holder")
+
+    if _, resolveErr := capturedHandle.Resolve(); nil != resolveErr {
+        t.Fatalf("expected the live container to serve the value, got %v", resolveErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if _, resolveErr := capturedHandle.Resolve(); false == errors.Is(resolveErr, ErrContainerClosed) || true == errors.Is(resolveErr, ErrScopeClosed) {
+        t.Fatalf("expected the handle over a container provider's resolver to answer the container's sentinel, got %v", resolveErr)
+    }
 }
 
 /* the closing service reaches through the handle from inside its own Close, which is the only place the

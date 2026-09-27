@@ -27,7 +27,7 @@ const sessionProbeTtlFactor = 2
 /* defaultReleaseTimeout bounds the detached release after callback, whose runtime is detached from the caller's context: a release skipped on that cancellation would hold the lock until the ttl lapses, losing the next tick. */
 const defaultReleaseTimeout = 5 * time.Second
 
-/* RunExclusive acquires the named lock, runs callback while holding it, and always releases afterwards, so the ttl acts only as crash-safety, never as the run cadence. It returns (false, nil) without running callback when another holder owns the lock, so N cron-launched instances run the command exactly once per tick. While callback runs, the lock is refreshed at half the ttl on a background goroutine; the child runtime handed to callback is cancelled once the lease may be held by another instance: a failed refresh is survivable while the lease last written leaves room for another attempt, and demotes the caller once it does not. A non-positive ttl selects the session-lock behavior: no lease to extend, only a liveness probe at defaultSessionProbeInterval. */
+/* RunExclusive acquires the named lock, runs callback while holding it, and always releases afterwards, so the ttl acts only as crash-safety, never as the run cadence. It returns (false, nil) without running callback when another holder owns the lock, so N cron-launched instances run the command exactly once per tick. While callback runs, the lock is refreshed at half the ttl on a background goroutine; the child runtime handed to callback is cancelled at the lease's demotion instant, a quarter of the ttl before the lease last written lapses, when no renewal has landed by then, so the callback is told to stop before another instance can acquire the lock; a failed refresh is retried once before that instant. A non-positive ttl selects the session-lock behavior: no lease to extend, only a liveness probe at defaultSessionProbeInterval. */
 func RunExclusive(
     runtimeInstance runtimecontract.Runtime,
     locker lockcontract.Locker,
@@ -138,7 +138,7 @@ func RunExclusive(
     return true, runErr
 }
 
-/* refreshWhileHeld extends the lease at half the ttl until done closes or the runtime context ends, returning the failure that cost the lease; a non-positive ttl probes a session lock at defaultSessionProbeInterval. The lease clock demotes the caller, not a single call: a failed or abandoned attempt is remembered, and the loop demotes only once the lease last written is too close to lapsing for another attempt to land. */
+/* refreshWhileHeld extends the lease at half the ttl until done closes or the runtime context ends, returning the failure that cost the lease; a non-positive ttl probes a session lock at defaultSessionProbeInterval. The lease clock demotes the caller, not a single call: once the lease last written reaches its demotion instant, half a cadence before it lapses, with no renewal landed, the caller is demoted — by a timer, whatever the store is doing, with every renewal bounded to that instant — so the callback is told to stop while nobody else can yet acquire the lock. A failed renewal is retried once, halfway to that instant, since the next tick would come too late to save the lease. */
 func refreshWhileHeld(
     runtimeInstance runtimecontract.Runtime,
     lock lockcontract.Lock,
@@ -153,7 +153,9 @@ func refreshWhileHeld(
     defer ticker.Stop()
 
     /* the lease runs from the instant the acquire was issued, so a slow acquire answer cannot make the believed lease outlive the real one; the leader gate's enterTerm dates it the same way */
-    leaseExpiry := acquireIssuedAt.Add(refreshTtl)
+    /* a session probe has no lease clock to arm, and a failed probe is still judged on the lease it believes it wrote */
+    clock := newLeaseDemotionClock(0 < ttl, true, acquireIssuedAt.Add(refreshTtl), refreshInterval, refreshTimeout)
+    defer clock.stop()
 
     for {
         select {
@@ -161,35 +163,168 @@ func refreshWhileHeld(
             return nil
         case <-runtimeInstance.Context().Done():
             return nil
+        case <-clock.demotion():
+            return clock.demotionError()
         case <-ticker.C:
-            refreshIssuedAt := time.Now()
+        case <-clock.retry():
+        }
 
-            refreshErr := refreshOnce(runtimeInstance, lock, refreshTtl, refreshTimeout)
-            if nil == refreshErr {
-                leaseExpiry = refreshIssuedAt.Add(refreshTtl)
+        refreshIssuedAt := time.Now()
 
-                continue
-            }
+        renewalBudget, withinLease := clock.renewalBudget(refreshIssuedAt)
+        if false == withinLease {
+            return clock.demotionError()
+        }
 
-            /* callback finished, or a shutdown cancelled the context the backend is called with: either way a failing refresh is the stop itself, not a lost lease */
-            select {
-            case <-done:
-                return nil
-            case <-runtimeInstance.Context().Done():
-                return nil
-            default:
-            }
+        refreshErr := refreshOnce(runtimeInstance, lock, refreshTtl, renewalBudget)
+        if nil == refreshErr {
+            clock.landed(refreshIssuedAt.Add(refreshTtl))
 
-            if true == leaseIsBeyondRecovery(time.Now(), leaseExpiry, refreshInterval) {
-                return refreshErr
-            }
+            continue
+        }
+
+        /* callback finished, or a shutdown cancelled the context the backend is called with: either way a failing refresh is the stop itself, not a lost lease */
+        select {
+        case <-done:
+            return nil
+        case <-runtimeInstance.Context().Done():
+            return nil
+        default:
+        }
+
+        if true == clock.failed(time.Now(), refreshErr) {
+            return refreshErr
         }
     }
 }
 
-/* leaseIsBeyondRecovery reports whether the lease last written is close enough to lapsing that a failed attempt is treated as the lost lock. The margin is half the cadence, so the first failure stays survivable while a lease at its edge is not held; two lost renewals in a row demote as the lease lapses. */
+/* leaseDemotionClock keeps the lease a renewal loop believes it holds: the timer that demotes at the lease's demotion instant, the single retry after a failed renewal, and the last failure to report. Without a lease clock — a session lock — it arms no timer and bounds no renewal; failuresJudgedOnLease says whether a failed renewal is still judged against the lease the loop believes it wrote. */
+type leaseDemotionClock struct {
+    leaseClocked          bool
+    failuresJudgedOnLease bool
+    leaseExpiry     time.Time
+    refreshInterval time.Duration
+    refreshTimeout  time.Duration
+    demotionTimer   *time.Timer
+    retryTimer      *time.Timer
+    retryArmed      bool
+    lastRefreshErr  error
+}
+
+func newLeaseDemotionClock(leaseClocked bool, failuresJudgedOnLease bool, leaseExpiry time.Time, refreshInterval time.Duration, refreshTimeout time.Duration) *leaseDemotionClock {
+    clock := &leaseDemotionClock{
+        leaseClocked:          leaseClocked,
+        failuresJudgedOnLease: failuresJudgedOnLease,
+        leaseExpiry:     leaseExpiry,
+        refreshInterval: refreshInterval,
+        refreshTimeout:  refreshTimeout,
+    }
+
+    if true == leaseClocked {
+        clock.demotionTimer = time.NewTimer(time.Until(leaseDemotionAt(leaseExpiry, refreshInterval)))
+    }
+
+    return clock
+}
+
+func (instance *leaseDemotionClock) stop() {
+    if nil != instance.demotionTimer {
+        instance.demotionTimer.Stop()
+    }
+
+    if nil != instance.retryTimer {
+        instance.retryTimer.Stop()
+    }
+}
+
+func (instance *leaseDemotionClock) demotion() <-chan time.Time {
+    if nil == instance.demotionTimer {
+        return nil
+    }
+
+    return instance.demotionTimer.C
+}
+
+func (instance *leaseDemotionClock) retry() <-chan time.Time {
+    if false == instance.retryArmed {
+        return nil
+    }
+
+    return instance.retryTimer.C
+}
+
+/* renewalBudget answers the budget of a renewal issued now: the cadence's, bounded to the demotion instant; false once that instant has passed. */
+func (instance *leaseDemotionClock) renewalBudget(now time.Time) (time.Duration, bool) {
+    instance.retryArmed = false
+
+    if false == instance.leaseClocked {
+        return instance.refreshTimeout, true
+    }
+
+    untilDemotion := leaseDemotionAt(instance.leaseExpiry, instance.refreshInterval).Sub(now)
+    if 0 >= untilDemotion {
+        return 0, false
+    }
+
+    if untilDemotion < instance.refreshTimeout {
+        return untilDemotion, true
+    }
+
+    return instance.refreshTimeout, true
+}
+
+/* landed moves the lease to what a landed renewal wrote and re-arms the demotion on it. */
+func (instance *leaseDemotionClock) landed(leaseExpiry time.Time) {
+    instance.leaseExpiry = leaseExpiry
+    instance.lastRefreshErr = nil
+
+    if true == instance.leaseClocked {
+        instance.demotionTimer.Reset(time.Until(leaseDemotionAt(leaseExpiry, instance.refreshInterval)))
+    }
+}
+
+/* failed records a failed renewal and answers whether it cost the lease; one that did not is retried once, halfway to the demotion instant. */
+func (instance *leaseDemotionClock) failed(now time.Time, refreshErr error) bool {
+    firstFailure := nil == instance.lastRefreshErr
+    instance.lastRefreshErr = refreshErr
+
+    if true == instance.failuresJudgedOnLease && true == leaseIsBeyondRecovery(now, instance.leaseExpiry, instance.refreshInterval) {
+        return true
+    }
+
+    if false == instance.leaseClocked || false == firstFailure {
+        return false
+    }
+
+    retryDelay := leaseDemotionAt(instance.leaseExpiry, instance.refreshInterval).Sub(now) / 2
+    if nil == instance.retryTimer {
+        instance.retryTimer = time.NewTimer(retryDelay)
+    } else {
+        instance.retryTimer.Reset(retryDelay)
+    }
+
+    instance.retryArmed = true
+
+    return false
+}
+
+/* demotionError is the failure a lease reaching its demotion instant reports: the last renewal that failed, or the lapse itself when none answered at all. */
+func (instance *leaseDemotionClock) demotionError() error {
+    if nil != instance.lastRefreshErr {
+        return instance.lastRefreshErr
+    }
+
+    return exception.NewError("lock lease reached its demotion instant before a renewal landed", nil, nil)
+}
+
+/* leaseDemotionAt is the instant a lease last written to lapse at leaseExpiry stops being held: half a cadence before the lapse, so a caller told to stop at it stops before anybody else can acquire the lock, and the first failed renewal of a cadence stays survivable. */
+func leaseDemotionAt(leaseExpiry time.Time, refreshInterval time.Duration) time.Time {
+    return leaseExpiry.Add(-refreshInterval / 2)
+}
+
+/* leaseIsBeyondRecovery reports whether the lease last written has reached its demotion instant, so a failed attempt is treated as the lost lock; two lost renewals in a row demote before the lease lapses. */
 func leaseIsBeyondRecovery(now time.Time, leaseExpiry time.Time, refreshInterval time.Duration) bool {
-    return false == now.Before(leaseExpiry.Add(-refreshInterval/2))
+    return false == now.Before(leaseDemotionAt(leaseExpiry, refreshInterval))
 }
 
 /* resolveRefreshSchedule derives the refresh cadence and the ttl each refresh writes: half of a positive ttl, or the session probe interval renewed for a multiple of it. The interval is floored, since time.NewTicker panics on a non-positive duration. */

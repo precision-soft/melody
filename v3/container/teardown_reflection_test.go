@@ -99,7 +99,7 @@ func TestContainer_Close_NotArmedAHeldCollaboratorIsClosedBeforeTheServiceHoldin
 func TestHeldPointerIdentities_DoesNotEnterAMap(t *testing.T) {
     held := &closeOrderServiceB{}
 
-    throughField := heldPointerIdentities(&capturingHolder{held: held})
+    throughField := heldPointerIdentities(&capturingHolder{held: held}, nil)
     if 0 == len(throughField) {
         t.Fatalf("expected the walk to reach a collaborator held in a field")
     }
@@ -113,7 +113,7 @@ func TestHeldPointerIdentities_DoesNotEnterAMap(t *testing.T) {
         t.Fatalf("expected the field walk to find the collaborator")
     }
 
-    throughMap := heldPointerIdentities(map[string]*closeOrderServiceB{"held": held})
+    throughMap := heldPointerIdentities(map[string]*closeOrderServiceB{"held": held}, nil)
     if 0 != len(throughMap) {
         t.Fatalf("expected a map to be neither entered nor counted, got %d identities", len(throughMap))
     }
@@ -300,7 +300,7 @@ func TestHeldPointerIdentities_DoesNotReadAnInterfaceFieldOfForeignMemory(t *tes
     hubIdentity, _ := pointerKeyOf(hub)
 
     for iteration := 0; iteration < 200; iteration = iteration + 1 {
-        identities := heldPointerIdentities(&hubHolder{hub: hub})
+        identities := heldPointerIdentities(&hubHolder{hub: hub}, nil)
 
         if false == holdsIdentity(identities, hubIdentity) {
             t.Fatalf("expected the hub itself to be found through the holder's own pointer field")
@@ -331,7 +331,7 @@ func TestHeldPointerIdentities_DoesNotReadInsideAContextItHolds(t *testing.T) {
             _ = ctx.Done()
         }()
 
-        identities := heldPointerIdentities(&hubHolder{ctx: ctx})
+        identities := heldPointerIdentities(&hubHolder{ctx: ctx}, nil)
 
         firstUse.Wait()
         cancel()
@@ -359,7 +359,7 @@ func TestHeldPointerIdentities_StillFindsAServiceBehindAnIntermediateStruct(t *t
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
 
-    if false == holdsIdentity(heldPointerIdentities(&outerHolder{middle: &intermediateStruct{service: held}}), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(&outerHolder{middle: &intermediateStruct{service: held}}, nil), heldIdentity) {
         t.Fatalf("expected the service behind an intermediate struct pointer to be found")
     }
 }
@@ -397,11 +397,11 @@ func TestHeldPointerIdentities_FindsAServiceAtTheDepthLimitWhicheverFieldComesFi
     for length := 3; length <= 7; length = length + 1 {
         tail := &chainLink{held: held}
 
-        if false == holdsIdentity(heldPointerIdentities(&chainFirstRoot{chain: chainOfLinks(length, tail), direct: tail}), heldIdentity) {
+        if false == holdsIdentity(heldPointerIdentities(&chainFirstRoot{chain: chainOfLinks(length, tail), direct: tail}, nil), heldIdentity) {
             t.Fatalf("expected the service to be found with the long path listed first, chain of %d links", length)
         }
 
-        if false == holdsIdentity(heldPointerIdentities(&directFirstRoot{chain: chainOfLinks(length, tail), direct: tail}), heldIdentity) {
+        if false == holdsIdentity(heldPointerIdentities(&directFirstRoot{chain: chainOfLinks(length, tail), direct: tail}, nil), heldIdentity) {
             t.Fatalf("expected the service to be found with the short path listed first, chain of %d links", length)
         }
     }
@@ -411,11 +411,11 @@ func TestHeldPointerIdentities_StopsAtTheDepthLimit(t *testing.T) {
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
 
-    if false == holdsIdentity(heldPointerIdentities(&chainFirstRoot{chain: chainOfLinks(4, &chainLink{held: held})}), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(&chainFirstRoot{chain: chainOfLinks(4, &chainLink{held: held})}, nil), heldIdentity) {
         t.Fatalf("expected a service at the depth limit to be found")
     }
 
-    if true == holdsIdentity(heldPointerIdentities(&chainFirstRoot{chain: chainOfLinks(5, &chainLink{held: held})}), heldIdentity) {
+    if true == holdsIdentity(heldPointerIdentities(&chainFirstRoot{chain: chainOfLinks(5, &chainLink{held: held})}, nil), heldIdentity) {
         t.Fatalf("expected a service past the depth limit not to be found")
     }
 }
@@ -454,11 +454,11 @@ func TestHeldPointerIdentities_DoesNotReadAPointerOnePastTheDepthLimit(t *testin
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
 
-    if false == holdsIdentity(heldPointerIdentities(&oddDepthRoot{chain: oddDepthChain(3, held)}), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(&oddDepthRoot{chain: oddDepthChain(3, held)}, nil), heldIdentity) {
         t.Fatalf("expected a service at depth eleven to be found")
     }
 
-    if true == holdsIdentity(heldPointerIdentities(&oddDepthRoot{chain: oddDepthChain(4, held)}), heldIdentity) {
+    if true == holdsIdentity(heldPointerIdentities(&oddDepthRoot{chain: oddDepthChain(4, held)}, nil), heldIdentity) {
         t.Fatalf("expected a service one past the depth limit not to be found")
     }
 }
@@ -490,20 +490,20 @@ func TestHeldPointerIdentities_StopsAtTheNodeBudget(t *testing.T) {
     last := &wideHolder{}
     last.cells[255][255].service = held
 
-    if true == holdsIdentity(heldPointerIdentities(last), heldIdentity) {
+    if true == holdsIdentity(heldPointerIdentities(last, nil), heldIdentity) {
         t.Fatalf("expected the walk to stop at its budget before the last cell of a table wider than it")
     }
 
     beside := &wideHolderWithPeer{peer: held}
 
-    if false == holdsIdentity(heldPointerIdentities(beside), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(beside, nil), heldIdentity) {
         t.Fatalf("expected a peer declared after a table wider than the budget to be found before the table is paid for")
     }
 
     bounded := &boundedHolder{}
     bounded.cells[63][255].service = held
 
-    if false == holdsIdentity(heldPointerIdentities(bounded), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(bounded, nil), heldIdentity) {
         t.Fatalf("expected the last cell of a table within the budget to be reached")
     }
 }
@@ -547,7 +547,7 @@ func TestHeldPointerIdentities_KeepsAHeldCollaboratorAlive(t *testing.T) {
     holder := &capturingHolder{held: &closeOrderServiceB{}}
     runtime.SetFinalizer(holder.held, func(*closeOrderServiceB) { finalized <- struct{}{} })
 
-    identities := heldPointerIdentities(holder)
+    identities := heldPointerIdentities(holder, nil)
     holder.held = nil
 
     for cycle := 0; cycle < 3; cycle = cycle + 1 {
@@ -723,7 +723,7 @@ func TestHeldPointerIdentities_DoesNotReadASliceEvenInItsOwnMemory(t *testing.T)
     foreign := &closeOrderServiceB{}
     foreignIdentity, _ := pointerKeyOf(foreign)
 
-    identities := heldPointerIdentities(&bagHolder{bag: &foreignBag{items: []*closeOrderServiceB{foreign}}, items: []*closeOrderServiceB{own}})
+    identities := heldPointerIdentities(&bagHolder{bag: &foreignBag{items: []*closeOrderServiceB{foreign}}, items: []*closeOrderServiceB{own}}, nil)
 
     if true == holdsIdentity(identities, ownIdentity) {
         t.Fatalf("expected a service in the holder's own slice to stay unread, since the holder may have been handed that slice")
@@ -939,7 +939,7 @@ func TestContainer_ArmParallelTeardown_WalksAlreadyBuiltServicesAsPublishedMemor
     armParallelTeardown(t, serviceContainer)
 
     for iteration := 0; iteration < 200; iteration = iteration + 1 {
-        heldPointerIdentities(hub)
+        heldPointerIdentities(hub, nil)
     }
 
     close(stop)
@@ -1254,11 +1254,11 @@ func TestHeldPointerIdentities_DoesNotWalkAWholeSubtreeAgainFromAShallowerPath(t
     hub := &fatHub{}
 
     /* the held service sits four links below the holder, at depth ten: a hub of forty-nine thousand items walked once leaves it room in the budget, walked twice from the chain's second path it does not */
-    if false == holdsIdentity(heldPointerIdentities(&collaboratorFirstHolder{collaborator: newCollaboratorChain(held, 4), hub: hub, chain: newHubChain(hub, 2)}), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(&collaboratorFirstHolder{collaborator: newCollaboratorChain(held, 4), hub: hub, chain: newHubChain(hub, 2)}, nil), heldIdentity) {
         t.Fatalf("expected the collaborator declared first to be found")
     }
 
-    if false == holdsIdentity(heldPointerIdentities(&chainFirstHolder{chain: newHubChain(hub, 2), hub: hub, collaborator: newCollaboratorChain(held, 4)}), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(&chainFirstHolder{chain: newHubChain(hub, 2), hub: hub, collaborator: newCollaboratorChain(held, 4)}, nil), heldIdentity) {
         t.Fatalf("expected the collaborator declared after a chain of links to one large object to be found as well")
     }
 }
@@ -1282,11 +1282,11 @@ func TestHeldPointerIdentities_CountsAnArrayOfScalarsAsOneNode(t *testing.T) {
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
 
-    if false == holdsIdentity(heldPointerIdentities(&peerFirstCodec{peer: newCollaboratorChain(held, 1)}), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(&peerFirstCodec{peer: newCollaboratorChain(held, 1)}, nil), heldIdentity) {
         t.Fatalf("expected the peer declared before the table to be found")
     }
 
-    if false == holdsIdentity(heldPointerIdentities(&tableFirstCodec{peer: newCollaboratorChain(held, 1)}), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(&tableFirstCodec{peer: newCollaboratorChain(held, 1)}, nil), heldIdentity) {
         t.Fatalf("expected the peer declared after the table to be found as well")
     }
 }
@@ -1325,7 +1325,7 @@ func TestHeldPointerIdentities_CountsAStructOfScalarsAsOneNode(t *testing.T) {
     root := reflect.New(rootType)
     root.Elem().Field(1).Set(reflect.ValueOf(newCollaboratorChain(held, 1)))
 
-    if false == holdsIdentity(heldPointerIdentities(root.Interface()), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(root.Interface(), nil), heldIdentity) {
         t.Fatalf("expected the peer one link below the struct of scalars to be found: the struct is one node, not one per field")
     }
 }
@@ -1345,7 +1345,7 @@ func TestHeldPointerIdentities_ChargesTheBudgetWhenAnItemIsQueued(t *testing.T) 
     var before runtime.MemStats
     runtime.ReadMemStats(&before)
 
-    found := holdsIdentity(heldPointerIdentities(table), heldIdentity)
+    found := holdsIdentity(heldPointerIdentities(table, nil), heldIdentity)
 
     var after runtime.MemStats
     runtime.ReadMemStats(&after)
@@ -1413,13 +1413,13 @@ func TestHeldPointerIdentities_FindsAHeldServiceBehindARingFromTheShortPathWhich
 
     chain, tail := newCycleMemberShape(held)
 
-    if false == holdsIdentity(heldPointerIdentities(&tailThenChainHolder{tail: tail, chain: chain}), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(&tailThenChainHolder{tail: tail, chain: chain}, nil), heldIdentity) {
         t.Fatalf("expected the collaborator found through the short path declared first")
     }
 
     chain, tail = newCycleMemberShape(held)
 
-    if false == holdsIdentity(heldPointerIdentities(&chainThenTailHolder{chain: chain, tail: tail}), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(&chainThenTailHolder{chain: chain, tail: tail}, nil), heldIdentity) {
         t.Fatalf("expected the collaborator found through the short path declared after the chain that cut it")
     }
 }
@@ -1452,7 +1452,7 @@ func TestHeldPointerIdentities_AHubOnARingIsPaidForOnceAndTheCollaboratorAfterIt
     head := &cyclicHubLink{next: tail, hub: hub}
     hub.back = head
 
-    if false == holdsIdentity(heldPointerIdentities(&chainFirstCyclicHubHolder{chain: head, hub: hub, collaborator: held}), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(&chainFirstCyclicHubHolder{chain: head, hub: hub, collaborator: held}, nil), heldIdentity) {
         t.Fatalf("expected the collaborator declared after a cyclic hub walked whole once to be found")
     }
 }
@@ -1496,7 +1496,7 @@ func TestHeldPointerIdentities_FindsAHeldServiceBehindARingHeldThroughAForwardEd
 
     chain, holderOfMember := newCrossEdgeShape(held)
 
-    if false == holdsIdentity(heldPointerIdentities(&crossEdgeHolder{chain: chain, short: holderOfMember}), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(&crossEdgeHolder{chain: chain, short: holderOfMember}, nil), heldIdentity) {
         t.Fatalf("expected the collaborator found through the short path into the holder of a cycle member")
     }
 }
@@ -1520,11 +1520,11 @@ func TestHeldPointerIdentities_CountsAnArrayOfWhatItDoesNotReadAsOneNode(t *test
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
 
-    if false == holdsIdentity(heldPointerIdentities(&anyTableFirstCodec{peer: newCollaboratorChain(held, 1)}), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(&anyTableFirstCodec{peer: newCollaboratorChain(held, 1)}, nil), heldIdentity) {
         t.Fatalf("expected the peer declared after a table of interfaces to be found")
     }
 
-    if false == holdsIdentity(heldPointerIdentities(&sliceTableFirstCodec{peer: newCollaboratorChain(held, 1)}), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(&sliceTableFirstCodec{peer: newCollaboratorChain(held, 1)}, nil), heldIdentity) {
         t.Fatalf("expected the peer declared after a table of slices to be found")
     }
 }
@@ -1544,7 +1544,7 @@ func TestHeldPointerIdentities_ReadsAValuePointingAtItselfOnce(t *testing.T) {
     holder := &selfReferringHolder{collaborator: held}
     holder.self = holder
 
-    identities := heldPointerIdentities(holder)
+    identities := heldPointerIdentities(holder, nil)
 
     if false == holdsIdentity(identities, heldIdentity) {
         t.Fatalf("expected the collaborator of a self-referring holder to be found")
@@ -1835,7 +1835,7 @@ func TestHeldPointerIdentities_MatchesTheBoundedReachabilityOfARandomGraph(t *te
             }
         }
 
-        held := heldPointerIdentities(nodes[0])
+        held := heldPointerIdentities(nodes[0], nil)
         for index, node := range nodes {
             identity, _ := pointerKeyOf(node)
             /* each link is a pointer and a struct, two levels of the walk */
@@ -1844,5 +1844,242 @@ func TestHeldPointerIdentities_MatchesTheBoundedReachabilityOfARandomGraph(t *te
                 t.Fatalf("sample %d node %d at distance %d: expected held=%v over the edges %v", sample, index, distances[index], wanted, edges)
             }
         }
+    }
+}
+
+type reflectionStorageInner struct{}
+
+/* reflectionStorage keeps a pointer its holder does not carry, so the inner identity is reachable only by entering the storage */
+type reflectionStorage struct {
+    inner *reflectionStorageInner
+    pad   int
+}
+
+type reflectionStorageHolder struct {
+    storage *reflectionStorage
+}
+
+/* registers app.storage WithoutTeardownReflection when skipReflection, and app.holder capturing it; the storage is filed before the holder, so the holder's walk meets a value already known to be opaque */
+func registerStorageFiledBeforeItsCapturingHolder(t *testing.T, serviceContainer containercontract.Container, skipReflection bool) *reflectionStorage {
+    t.Helper()
+
+    captured := &reflectionStorage{inner: &reflectionStorageInner{}}
+
+    storageOptions := []containercontract.RegisterOption{}
+    if true == skipReflection {
+        storageOptions = append(storageOptions, WithoutTeardownReflection())
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.storage",
+        func(resolver containercontract.Resolver) (*reflectionStorage, error) {
+            return captured, nil
+        },
+        storageOptions...,
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.holder",
+        func(resolver containercontract.Resolver) (*reflectionStorageHolder, error) {
+            return &reflectionStorageHolder{storage: captured}, nil
+        },
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := FromResolver[*reflectionStorage](serviceContainer, "app.storage"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if _, getErr := FromResolver[*reflectionStorageHolder](serviceContainer, "app.holder"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    return captured
+}
+
+func heldRecordOf(serviceContainer containercontract.Container, nodeKey string) ([]heldPointer, bool) {
+    concrete := serviceContainer.(*container)
+
+    concrete.mutex.RLock()
+    defer concrete.mutex.RUnlock()
+
+    record, recorded := concrete.heldIdentitiesByNodeKey[nodeKey]
+
+    return record, recorded
+}
+
+func TestContainer_ArmParallelTeardown_AServiceRegisteredWithoutTeardownReflectionIsHeldButNeverEntered(t *testing.T) {
+    for _, skipReflection := range []bool{false, true} {
+        serviceContainer := NewContainer()
+        armParallelTeardown(t, serviceContainer)
+
+        captured := registerStorageFiledBeforeItsCapturingHolder(t, serviceContainer, skipReflection)
+
+        storageIdentity, _ := pointerKeyOf(captured)
+        innerIdentity, _ := pointerKeyOf(captured.inner)
+
+        holderRecord, holderRecorded := heldRecordOf(serviceContainer, containerNameNodeKey("app.holder"))
+        if false == holderRecorded || false == holdsIdentity(holderRecord, storageIdentity) {
+            t.Fatalf("skip=%v: expected the holder's walk to record the storage it holds, got %v", skipReflection, holderRecord)
+        }
+
+        if skipReflection == holdsIdentity(holderRecord, innerIdentity) {
+            t.Fatalf("skip=%v: expected the holder's walk to enter the storage only when it was registered with reflection, got %v", skipReflection, holderRecord)
+        }
+
+        if _, storageRecorded := heldRecordOf(serviceContainer, containerNameNodeKey("app.storage")); skipReflection == storageRecorded {
+            t.Fatalf("skip=%v: expected the storage to be walked only when it was registered with reflection", skipReflection)
+        }
+    }
+}
+
+/* arming walks what was already built in whatever order the maps answer; the skipped nodes are filed first, so the holder's walk never enters the storage whichever comes out first */
+func TestContainer_ArmParallelTeardown_ArmedAfterTheWiringNeverEntersAServiceRegisteredWithoutTeardownReflection(t *testing.T) {
+    for round := 0; round < 32; round++ {
+        serviceContainer := NewContainer()
+
+        captured := registerStorageFiledBeforeItsCapturingHolder(t, serviceContainer, true)
+
+        armParallelTeardown(t, serviceContainer)
+
+        storageIdentity, _ := pointerKeyOf(captured)
+        innerIdentity, _ := pointerKeyOf(captured.inner)
+
+        holderRecord, _ := heldRecordOf(serviceContainer, containerNameNodeKey("app.holder"))
+        if false == holdsIdentity(holderRecord, storageIdentity) || true == holdsIdentity(holderRecord, innerIdentity) {
+            t.Fatalf("round %d: expected the holder to hold the storage without the walk entering it, got %v", round, holderRecord)
+        }
+    }
+}
+
+/* an override files its value under every type the name is registered under too; the option covers that type node as it covers the name */
+func TestContainer_ArmParallelTeardown_AnOverrideIsNotWalkedUnderTheTypeOfANameRegisteredWithoutTeardownReflection(t *testing.T) {
+    for _, skipReflection := range []bool{false, true} {
+        serviceContainer := NewContainer()
+        armParallelTeardown(t, serviceContainer)
+
+        _ = registerStorageFiledBeforeItsCapturingHolder(t, serviceContainer, skipReflection)
+
+        serviceContainer.MustOverrideInstance("app.storage", &reflectionStorage{inner: &reflectionStorageInner{}})
+
+        typeNodeKey := containerTypeNodeKey(reflect.TypeOf((*reflectionStorage)(nil)))
+        if _, typeRecorded := heldRecordOf(serviceContainer, typeNodeKey); skipReflection == typeRecorded {
+            t.Fatalf("skip=%v: expected the type node to be walked only when the registration kept reflection", skipReflection)
+        }
+    }
+}
+
+/* the option is the registration's, so a value installed over the name is not walked either */
+func TestContainer_ArmParallelTeardown_AnOverrideOfANameRegisteredWithoutTeardownReflectionIsNotWalked(t *testing.T) {
+    serviceContainer := NewContainer()
+    armParallelTeardown(t, serviceContainer)
+
+    _ = registerStorageFiledBeforeItsCapturingHolder(t, serviceContainer, true)
+
+    serviceContainer.MustOverrideInstance("app.storage", &reflectionStorage{inner: &reflectionStorageInner{}})
+
+    if _, storageRecorded := heldRecordOf(serviceContainer, containerNameNodeKey("app.storage")); true == storageRecorded {
+        t.Fatalf("expected the override of a name registered without reflection not to be walked")
+    }
+}
+
+/* the held edge is kept: the storage is still closed a wave past the holder that captured it */
+func TestContainer_ArmParallelTeardown_AServiceRegisteredWithoutTeardownReflectionIsStillOneWavePastItsHolder(t *testing.T) {
+    serviceContainer := NewContainer()
+    armParallelTeardown(t, serviceContainer)
+
+    _ = registerStorageFiledBeforeItsCapturingHolder(t, serviceContainer, true)
+
+    waveByNode := make(map[string]int)
+    for _, entry := range serviceContainer.(interface {
+        TeardownPlan() []containercontract.TeardownPlanEntry
+    }).TeardownPlan() {
+        waveByNode[entry.NodeKey] = entry.WaveIndex
+    }
+
+    holderWave, holderPlanned := waveByNode["service:app.holder"]
+    storageWave, storagePlanned := waveByNode["service:app.storage"]
+    if false == holderPlanned || false == storagePlanned || holderWave >= storageWave {
+        t.Fatalf("expected the storage at least one wave past its holder, got %v", waveByNode)
+    }
+}
+
+type reflectionBusyLink struct {
+    next *reflectionBusyLink
+}
+
+/* reflectionBusyService rewrites a pointer field from its own goroutine under its own mutex, which is what the walk cannot read without a data race */
+type reflectionBusyService struct {
+    mutex sync.Mutex
+    head  *reflectionBusyLink
+    stop  chan struct{}
+    done  chan struct{}
+}
+
+func newReflectionBusyService() *reflectionBusyService {
+    service := &reflectionBusyService{stop: make(chan struct{}), done: make(chan struct{})}
+    started := make(chan struct{})
+
+    go func() {
+        defer close(service.done)
+        close(started)
+
+        for {
+            select {
+            case <-service.stop:
+                return
+            default:
+            }
+
+            service.mutex.Lock()
+            service.head = &reflectionBusyLink{next: service.head}
+            service.head.next = nil
+            service.mutex.Unlock()
+
+            runtime.Gosched()
+        }
+    }()
+
+    <-started
+
+    return service
+}
+
+func (instance *reflectionBusyService) Close() error {
+    close(instance.stop)
+    <-instance.done
+
+    return nil
+}
+
+type reflectionBusyHolder struct {
+    busy *reflectionBusyService
+}
+
+/* a data race is visible only under -race, which the gate's race lane runs: registered without the option, the walk of the holder and of the service itself reads head while the goroutine writes it */
+func TestContainer_ArmParallelTeardown_ABusyServiceRegisteredWithoutTeardownReflectionIsNeverRead(t *testing.T) {
+    serviceContainer := NewContainer()
+    armParallelTeardown(t, serviceContainer)
+
+    MustRegister[*reflectionBusyService](serviceContainer, "app.busy", func(resolver containercontract.Resolver) (*reflectionBusyService, error) {
+        return newReflectionBusyService(), nil
+    }, WithoutTeardownReflection())
+
+    MustRegister[*reflectionBusyHolder](serviceContainer, "app.busy.holder", func(resolver containercontract.Resolver) (*reflectionBusyHolder, error) {
+        busy, busyErr := FromResolver[*reflectionBusyService](resolver, "app.busy")
+        if nil != busyErr {
+            return nil, busyErr
+        }
+
+        return &reflectionBusyHolder{busy: busy}, nil
+    })
+
+    MustFromResolver[*reflectionBusyHolder](serviceContainer, "app.busy.holder")
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
     }
 }

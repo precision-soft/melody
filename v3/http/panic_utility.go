@@ -26,7 +26,7 @@ func RecoverToError(recoveredValue any) error {
     return exception.NewError(
         "panic recovered",
         map[string]any{
-            "value": fmt.Sprintf("%v", recoveredValue),
+            "value": internal.DescribeRecoveredValue(recoveredValue),
         },
         nil,
     )

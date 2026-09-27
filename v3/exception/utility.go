@@ -171,7 +171,7 @@ func renderedContextOf(provider exceptioncontract.ContextProvider) (context exce
         }
 
         context = exceptioncontract.Context{
-            "contextPanicked": fmt.Sprintf("%v", recoveredValue),
+            "contextPanicked": describeRecoveredValue(recoveredValue),
         }
     }()
 
@@ -437,4 +437,17 @@ func buildCauseContextChainFromRoots(roots []error, maxDepth int) []map[string]a
     }
 
     return chain
+}
+
+/* describeRecoveredValue renders a recovered panic value inside the defer reporting it, under a recover of its own, as internal.DescribeRecoveredValue does for the packages that can import it: a value that panics with a value whose own rendering panics is named by its type. */
+func describeRecoveredValue(value any) (text string) {
+    defer func() {
+        if nil == recover() {
+            return
+        }
+
+        text = fmt.Sprintf("a value of type %T whose rendering panicked", value)
+    }()
+
+    return fmt.Sprintf("%v", value)
 }

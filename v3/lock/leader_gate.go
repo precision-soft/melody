@@ -350,7 +350,7 @@ func (instance *LeaderGate) lead(runtimeInstance runtimecontract.Runtime, lock l
     return hookFailure
 }
 
-/* refreshWhileLeading renews the held lease at the configured cadence until the term context ends, returning the first renewal failure. Every renewal runs under its own deadline (resolveRefreshTimeout), so a call that never answers cannot sit while the lease lapses; each landed renewal moves the lease deadline, dated from the instant it was issued. */
+/* refreshWhileLeading renews the held lease at the configured cadence until the term context ends, returning the renewal failure that ends the term. The lease clock is the demotion's: once the lease last written reaches its demotion instant, half a cadence before it lapses, with no renewal landed, the term ends — by a timer, whatever the store is doing, with every renewal bounded to that instant — so OnElected is told to stop while nobody else can yet be elected. A failed renewal is retried once, halfway to that instant; each landed renewal moves the lease, dated from the instant it was issued. */
 func (instance *LeaderGate) refreshWhileLeading(runtimeInstance runtimecontract.Runtime, lock lockcontract.Lock) error {
     refreshTtl := instance.ttl
     if 0 >= refreshTtl {
@@ -363,35 +363,63 @@ func (instance *LeaderGate) refreshWhileLeading(runtimeInstance runtimecontract.
     ticker := time.NewTicker(instance.options.RefreshInterval)
     defer ticker.Stop()
 
+    /* enterTerm wrote the lease before this goroutine started, and leaveTerm zeroes it; a zero here is a term already left, whose stop is not a lost lease */
+    leaseExpiryOffset := instance.leaseExpiry.Load()
+    if 0 < instance.ttl && 0 == leaseExpiryOffset {
+        return nil
+    }
+
+    /* in session mode there is no lease, and only the consecutive-failure threshold ends the term */
+    clock := newLeaseDemotionClock(
+        0 < instance.ttl,
+        0 < instance.ttl,
+        instance.timeAnchor.Add(time.Duration(leaseExpiryOffset)),
+        instance.options.RefreshInterval,
+        refreshTimeout,
+    )
+    defer clock.stop()
+
     consecutiveFailureCount := 0
 
     for {
         select {
         case <-runtimeInstance.Context().Done():
             return nil
+        case <-clock.demotion():
+            return clock.demotionError()
         case <-ticker.C:
-            refreshIssuedAt := time.Now()
+        case <-clock.retry():
+        }
 
-            if refreshErr := refreshOnce(runtimeInstance, lock, refreshTtl, refreshTimeout); nil != refreshErr {
-                /* a shutdown cancels the context the backend is called with, so a renewal failing with the cancellation is the stop itself, not a lost lease */
-                if nil != runtimeInstance.Context().Err() {
-                    return nil
-                }
+        refreshIssuedAt := time.Now()
 
-                consecutiveFailureCount = consecutiveFailureCount + 1
+        renewalBudget, withinLease := clock.renewalBudget(refreshIssuedAt)
+        if false == withinLease {
+            return clock.demotionError()
+        }
 
-                if true == instance.refreshFailureEndsTheTerm(consecutiveFailureCount) {
-                    return refreshErr
-                }
-
-                continue
-            }
-
+        refreshErr := refreshOnce(runtimeInstance, lock, refreshTtl, renewalBudget)
+        if nil == refreshErr {
             consecutiveFailureCount = 0
 
             if 0 < instance.ttl {
                 instance.leaseExpiry.Store(instance.leaseExpiryOffset(refreshIssuedAt, refreshTtl))
             }
+
+            clock.landed(refreshIssuedAt.Add(refreshTtl))
+
+            continue
+        }
+
+        /* a shutdown cancels the context the backend is called with, so a renewal failing with the cancellation is the stop itself, not a lost lease */
+        if nil != runtimeInstance.Context().Err() {
+            return nil
+        }
+
+        consecutiveFailureCount = consecutiveFailureCount + 1
+
+        if true == clock.failed(time.Now(), refreshErr) || true == instance.refreshFailureEndsTheTerm(consecutiveFailureCount) {
+            return refreshErr
         }
     }
 }

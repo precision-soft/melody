@@ -4186,3 +4186,38 @@ func TestBoundedCloseFailureDetail_KeepsTheLimitPastAnInvalidByte(t *testing.T) 
         t.Fatalf("a run of continuation bytes across the limit cut the detail to %d bytes, wanted the three-byte bound at %d", len(kept), closeFailureStackLimit-(utf8.UTFMax-1))
     }
 }
+
+/* doublyPanickingCloseValue panics, when rendered, with a value whose own rendering panics: fmt contains the first panic and re-raises the second */
+type doublyPanickingCloseValue struct{}
+
+func (instance doublyPanickingCloseValue) Error() string {
+    panic(panickingErrorMessage{})
+}
+
+type doublyPanickingCloseService struct{}
+
+func (instance *doublyPanickingCloseService) Close() error {
+    panic(doublyPanickingCloseValue{})
+}
+
+func TestContainer_Close_APanicValueWhoseRenderingPanicsIsRecordedInsteadOfEscapingTheTeardown(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    MustRegister[*doublyPanickingCloseService](serviceContainer, "service.doubly.panics", func(resolver containercontract.Resolver) (*doublyPanickingCloseService, error) {
+        return &doublyPanickingCloseService{}, nil
+    })
+
+    MustFromResolver[*doublyPanickingCloseService](serviceContainer, "service.doubly.panics")
+
+    closeErr := serviceContainer.Close()
+
+    typedError, isTyped := closeErr.(*exception.Error)
+    if false == isTyped {
+        t.Fatalf("expected the close failure to be recorded, got %T %v", closeErr, closeErr)
+    }
+
+    failures, _ := typedError.Context()["failures"].(map[string]string)
+    if "service close panicked" != failures["service:service.doubly.panics"] {
+        t.Fatalf("expected the panic recorded against its service, got %+v", typedError.Context())
+    }
+}

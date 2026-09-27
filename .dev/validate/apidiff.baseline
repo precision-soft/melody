@@ -253,6 +253,7 @@ v3 ~ compatible ~ ./container/contract.OverrideOptions ~ added ~ keep ~ a compat
 v3 ~ compatible ~ ./container/contract.OverrideServiceWithOptions ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./container/contract.RegisterOptions.ReplacesContainerService ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./container/contract.RegisterOptions.TeardownDependencyNames ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
+v3 ~ compatible ~ ./container/contract.RegisterOptions.SkipsTeardownReflection ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features; the field WithoutTeardownReflection sets
 v3 ~ compatible ~ ./container/contract.ScopedRegistrar ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./container/contract.ServiceDescription ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./container/contract.ServiceLifetimeContainer ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
@@ -271,6 +272,7 @@ v3 ~ compatible ~ ./container.RegisterScopedType ~ added ~ keep ~ a compatible a
 v3 ~ compatible ~ ./container.Replacing ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./container.WithReplacesContainerService ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./container.WithTeardownDependency ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
+v3 ~ compatible ~ ./container.WithoutTeardownReflection ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features; the opt-out a service with live goroutines needs before the armed walk reads its memory
 v3 ~ compatible ~ ./debug.DeferredListener ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./debug.DeferredListenerProvider ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./debug.MiddlewareBuildProvider ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features

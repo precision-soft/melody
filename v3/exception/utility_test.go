@@ -1327,3 +1327,29 @@ func TestLogged_AnErrorWhoseMarkPanicsIsWrappedMarked(t *testing.T) {
         t.Fatalf("expected a marked error back, got %v", logged)
     }
 }
+
+type contextDoublyPanickingValue struct{}
+
+func (instance contextDoublyPanickingValue) Error() string {
+    panic(panickingMessageError{})
+}
+
+type contextDoublyPanickingProviderError struct{}
+
+func (instance *contextDoublyPanickingProviderError) Error() string {
+    return "the provider refused"
+}
+
+func (instance *contextDoublyPanickingProviderError) Context() exceptioncontract.Context {
+    panic(contextDoublyPanickingValue{})
+}
+
+/* the context's panic value is rendered inside the recover that caught it, so a value whose rendering panics twice is named by its type instead of raising past the record */
+func TestLogContext_AContextPanicValueWhoseRenderingPanicsIsNamedByItsType(t *testing.T) {
+    logContext := LogContext(&contextDoublyPanickingProviderError{})
+
+    rendered, _ := logContext["contextPanicked"].(string)
+    if false == strings.Contains(rendered, "contextDoublyPanickingValue") || false == strings.Contains(rendered, "rendering panicked") {
+        t.Fatalf("expected the panic value named by its type, got %#v", logContext)
+    }
+}

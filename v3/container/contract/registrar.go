@@ -15,6 +15,8 @@ type RegisterOptions struct {
     TeardownDependencyNames []string
     /* TeardownDependencyTypes are the same declaration keyed by type; T and *T name the same node. */
     TeardownDependencyTypes []reflect.Type
+    /* SkipsTeardownReflection keeps the armed teardown's walk out of this service's memory: its value is not walked, and a walk that reaches it records the edge and does not enter it. */
+    SkipsTeardownReflection bool
 }
 
 type RegisterOption func(option *RegisterOptions)

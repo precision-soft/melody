@@ -77,13 +77,13 @@ func (instance *resolverContext) childOwnedBy(nodeKey string, scopeSuspended boo
     }
 }
 
-/* lateResolution answers the view a resolution through this one starts from once its provider has returned: a chain and a resolution id of its own, with the owner, the scope and the suspension kept, so the owner's dependency edge is still recorded while concurrent resolutions through one retained view — a Lazy built over a provider's resolver — never push onto one chain. A view whose provider is still running answers nil and resolves on the live chain. */
-func (instance *resolverContext) lateResolution() *resolverContext {
+/* lateResolution answers the view a resolution through this one starts from once its provider has returned: a chain and a resolution id of its own, with the owner, the scope and the suspension kept, so the owner's dependency edge is still recorded while concurrent resolutions through one retained view — a Lazy built over a provider's resolver — never push onto one chain. The new chain is recorded in the wait graph as awaited by the resolution that handed this view out, so a cycle closed through the retained view while that resolution is still building is refused as circular instead of waiting on a creation its own caller holds; the edge can refuse only a wait on a creation that resolution owns, so it is written only while that resolution owns one, which spares a retained resolver used after the boot the exclusive lock, and the release, deferred by the caller, removes it. A view whose provider is still running answers nil and resolves on the live chain. */
+func (instance *resolverContext) lateResolution() (*resolverContext, func()) {
     if false == instance.providerReturned.Load() {
-        return nil
+        return nil, nil
     }
 
-    return &resolverContext{
+    lateResolver := &resolverContext{
         containerInstance: instance.containerInstance,
         scopeInstance:     instance.scopeInstance,
         contextId:         instance.containerInstance.resolverContextIdCounter.Add(1),
@@ -91,6 +91,27 @@ func (instance *resolverContext) lateResolution() *resolverContext {
         stack:             newResolutionStack(),
         ownerKey:          instance.ownerKey,
         scopeSuspended:    instance.scopeSuspended,
+    }
+
+    containerInstance := instance.containerInstance
+
+    containerInstance.mutex.RLock()
+    ancestorBuilding := containerInstance.ownsCreationInFlightLocked(instance.contextId, instance.scopeInstance)
+    containerInstance.mutex.RUnlock()
+
+    if false == ancestorBuilding {
+        return lateResolver, func() {}
+    }
+
+    containerInstance.mutex.Lock()
+    containerInstance.recordResolverWaitEdgeLocked(instance.contextId, lateResolver.contextId)
+    containerInstance.mutex.Unlock()
+
+    return lateResolver, func() {
+        containerInstance.mutex.Lock()
+        defer containerInstance.mutex.Unlock()
+
+        containerInstance.clearResolverWaitLocked(instance.contextId, lateResolver.contextId)
     }
 }
 
@@ -114,6 +135,11 @@ func (instance *resolverContext) Closed() bool {
     }
 
     return instance.containerInstance.resolutionsRefused()
+}
+
+/* readsContainer tells a terminal LazyService which sentinel it answers, under the same predicate as Closed. */
+func (instance *resolverContext) readsContainer() bool {
+    return false == instance.scopeVisible()
 }
 
 /* isScopeClosed lets a collection through this resolver refuse as it refuses through a closed scope, under the same predicate as Closed. */
@@ -173,7 +199,9 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
         return nil, exception.NewError("service name is required in get", nil, nil)
     }
 
-    if lateResolver := instance.lateResolution(); nil != lateResolver {
+    if lateResolver, release := instance.lateResolution(); nil != lateResolver {
+        defer release()
+
         return lateResolver.Get(serviceName)
     }
 
@@ -392,7 +420,9 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
         )
     }
 
-    if lateResolver := instance.lateResolution(); nil != lateResolver {
+    if lateResolver, release := instance.lateResolution(); nil != lateResolver {
+        defer release()
+
         return lateResolver.GetByType(targetType)
     }
 

@@ -256,6 +256,11 @@ func (instance *container) refuseAmbiguousDeclaredTypeEdgeLocked(declaredEdge de
     )
 }
 
+/* readsContainer tells a terminal LazyService built over the container that it answers ErrContainerClosed. */
+func (instance *container) readsContainer() bool {
+    return true
+}
+
 /* resolutionsRefused answers whether the container has stopped answering resolutions, which is later than IsClosed turning true. */
 func (instance *container) resolutionsRefused() bool {
     instance.mutex.RLock()
@@ -1029,7 +1034,7 @@ func containedClose(close func() error) (closeErr error) {
             "service close panicked",
             exceptioncontract.Context{
                 "recoveredType":  fmt.Sprintf("%T", recoveredValue),
-                "recoveredValue": fmt.Sprintf("%v", recoveredValue),
+                "recoveredValue": internal.DescribeRecoveredValue(recoveredValue),
                 "panicStack":     string(debug.Stack()),
             },
             exception.PanicCause(recoveredValue),
