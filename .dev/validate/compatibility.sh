@@ -59,6 +59,14 @@
 # The skips are counted rather than dropped because built + skipped has to equal discovered: a module
 # that quietly vanished from the run is not a module that passed.
 #
+# A module that pins a melody module whose major no tag has released yet is skipped the same way, printed
+# and counted: a major under construction, such as the fourth before its first tag, pins a version the proxy
+# cannot serve, so there is no published contract to ask about and a failed download would read as the
+# toolchain failing. The released majors are read from the repository's tags on the host, where git runs,
+# and handed to the container: a tag `vX.Y.Z` releases the framework's major X, a tag `integrations/<p>/vX.Y.Z`
+# that integration's, and a major of 0 or 1 carries no suffix in its module path. The question is asked of
+# the MAJOR, not of the version, so a released major pinned at a version that does not exist still fails.
+#
 # The v1 and v2 integrations pin RELEASED versions of frozen majors and are expected to build. They are
 # the band's positive control, not filler: a run in which they fail is a finding about the freeze.
 #
@@ -175,12 +183,32 @@ if [[ 0 -eq "${#MODULE_RELATIVE_PATH_LIST[@]}" ]]; then
     fail "no integration module found to build — an empty module list here would report a pass over nothing"
 fi
 
+# the module path of every major a tag has released, one per line, read on the host because git runs here
+RELEASED_MODULE_PATH_LIST_STRING="$(
+    git -C "${REPOSITORY_ROOT_DIRECTORY_STRING}" tag --list |
+        awk '
+            match($0, /v[0-9]+\.[0-9]+\.[0-9]+/) {
+                prefix = substr($0, 1, RSTART - 1)
+                major = substr($0, RSTART + 1)
+                sub(/\..*$/, "", major)
+                path = "github.com/precision-soft/melody"
+                if ("" != prefix) { path = path "/" substr(prefix, 1, length(prefix) - 1) }
+                if (1 < major + 0) { path = path "/v" major }
+                print path
+            }
+        ' |
+        sort -u
+)"
+if [[ "" = "${RELEASED_MODULE_PATH_LIST_STRING}" ]]; then
+    fail "no released melody major was read from the tags — without them every pin would read as unreleased and the band would skip everything"
+fi
+
 # one container invocation for the whole run: the loop runs inside, and every line of the protocol names
 # the module it is about, so a module that produced no terminal line at all is detected on the host rather
 # than silently counted as clean. A failure with no compiler diagnostic in it is the toolchain or the
 # network failing, never a compatibility finding, and is reported as an error of the band itself.
 BUILD_OUTPUT_STRING="$(
-    docker_compose_no_log exec -T "${SERVICE_NAME_STRING}" sh -s -- "${MODULE_RELATIVE_PATH_LIST[@]}" <<'CONTAINER_SCRIPT'
+    docker_compose_no_log exec -T -e "MELODY_RELEASED_MODULE_PATH_LIST=${RELEASED_MODULE_PATH_LIST_STRING}" "${SERVICE_NAME_STRING}" sh -s -- "${MODULE_RELATIVE_PATH_LIST[@]}" <<'CONTAINER_SCRIPT'
 set -u
 for MODULE_PATH in "$@"; do
     [ -n "${MODULE_PATH}" ] || continue
@@ -222,6 +250,19 @@ for MODULE_PATH in "$@"; do
     MELODY_PIN_COUNT="$(printf '%s\n' "${DECLARED}" | awk -F'\t' '$1 == "PIN" && $2 ~ /^github\.com\/precision-soft\/melody/' | grep -c . || true)"
     if [ 0 -eq "${MELODY_PIN_COUNT}" ]; then
         printf '%s\tSKIPPED\tthe module declares no melody requirement, so it pins no framework version to build against\n' "${MODULE_PATH}"
+        continue
+    fi
+
+    UNRELEASED_PIN="$(printf '%s\n' "${DECLARED}" | awk -F'\t' -v released="${MELODY_RELEASED_MODULE_PATH_LIST}" '
+        BEGIN { count = split(released, list, "\n"); for (i = 1; i <= count; i++) { known[list[i]] = 1 } }
+        $1 == "PIN" && $2 ~ /^github\.com\/precision-soft\/melody/ {
+            path = $2
+            sub(/@.*$/, "", path)
+            if (!(path in known)) { printf "%s ", $2 }
+        }
+    ')"
+    if [ -n "${UNRELEASED_PIN}" ]; then
+        printf '%s\tSKIPPED\tit pins %swhose major no tag has released yet, so there is no published contract to build against\n' "${MODULE_PATH}" "${UNRELEASED_PIN}"
         continue
     fi
 
