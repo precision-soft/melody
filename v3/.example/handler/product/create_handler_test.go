@@ -4,6 +4,8 @@ import (
     "bytes"
     "context"
     "encoding/json"
+    "errors"
+    "fmt"
     nethttp "net/http"
     "net/http/httptest"
     "strings"
@@ -11,6 +13,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v3/.example/entity"
+    "github.com/precision-soft/melody/v3/.example/repository"
     melodyconfig "github.com/precision-soft/melody/v3/config"
     melodyconfigcontract "github.com/precision-soft/melody/v3/config/contract"
     melodycontainer "github.com/precision-soft/melody/v3/container"
@@ -220,5 +223,19 @@ func TestApiCreateDoorKeepsTheDecoderDiagnosisOutOfTheErrorsList(t *testing.T) {
 
     if true == strings.Contains(errorList[0], "invalid character") {
         t.Fatalf("the decoder diagnosis reached the errors list: %v", errorList)
+    }
+}
+
+func TestCreateRefusalStatusAnswersAConflictForATakenIdentifier(t *testing.T) {
+    status, message := createRefusalStatus(fmt.Errorf("create product: %w", repository.ErrIdAlreadyExists))
+    if nethttp.StatusConflict != status || "id already exists" != message {
+        t.Fatalf("expected 409 naming the identifier, got %d %q", status, message)
+    }
+}
+
+func TestCreateRefusalStatusAnswersAnyOtherFailureAsTheCatalogues(t *testing.T) {
+    status, message := createRefusalStatus(errors.New("connection refused"))
+    if nethttp.StatusInternalServerError != status || "failed to create product" != message {
+        t.Fatalf("expected 500, got %d %q", status, message)
     }
 }

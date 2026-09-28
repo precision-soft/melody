@@ -1,4 +1,4 @@
-//go:build !(linux || darwin || freebsd || netbsd || dragonfly)
+//go:build !unix
 
 package session
 

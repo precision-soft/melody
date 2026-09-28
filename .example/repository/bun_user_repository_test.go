@@ -183,7 +183,7 @@ func TestBunUserRepository_UpdateAnswersTheUsernameIndexRefusalAsATakenName(t *t
     }
 }
 
-func TestBunUserRepository_CreateLeavesAnotherRefusalAsTheDriverAnswered(t *testing.T) {
+func TestBunUserRepository_CreateAnswersThePrimaryKeysRefusalAsATakenIdentifierNotATakenName(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     primaryKeyRefusal := errors.New("Error 1062 (23000): Duplicate entry 'user-9' for key 'melody_example_v1_user.PRIMARY'")
     recorder.execHook = func(query string) error {
@@ -195,7 +195,7 @@ func TestBunUserRepository_CreateLeavesAnotherRefusalAsTheDriverAnswered(t *test
     }
 
     createErr := (&bunUserRepository{database: database}).Create(context.Background(), entity.NewUser("user-9", "user", "hash", []string{entity.RoleUser}))
-    if true == errors.Is(createErr, ErrUsernameAlreadyExists) || nil == createErr || false == strings.Contains(createErr.Error(), "PRIMARY") {
-        t.Fatalf("expected the identifier collision to stay the driver's, got %v", createErr)
+    if true == errors.Is(createErr, ErrUsernameAlreadyExists) || false == errors.Is(createErr, ErrIdAlreadyExists) {
+        t.Fatalf("expected the identifier collision answered as a taken identifier, got %v", createErr)
     }
 }

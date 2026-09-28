@@ -2,9 +2,13 @@ package migration
 
 import (
     "context"
+    "database/sql/driver"
+    "errors"
+    "net"
     "sync"
     "time"
 
+    mysqldriver "github.com/go-sql-driver/mysql"
     melodymysql "github.com/precision-soft/melody/integrations/bunorm/mysql/v2"
     melodyexception "github.com/precision-soft/melody/v2/exception"
     melodyexceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
@@ -71,7 +75,7 @@ func EnsureMigrated(ctx context.Context, database *bun.DB) error {
     return nil
 }
 
-/* acquireMigrationLock answers whether the lock was taken. A false with a nil error means another process applied the whole set while this one waited, so there is nothing left to run and the lock was never held here. Only a refusal lockHeld reads as the lock row's duplicate key is waited on; bun wraps the driver's error, so the classifier reaches it, and any other refusal — a missing grant, a missing table — is the database refusing this process, answered at once with the driver's error as the cause. */
+/* acquireMigrationLock answers whether the lock was taken. A false with a nil error means another process applied the whole set while this one waited, so there is nothing left to run and the lock was never held here. A refusal is read in four classes: once the caller's context has ended the answer is the context's, whatever shape the driver gave the refusal; the lock row's duplicate key, which lockHeld reads through bun's wrapping, is another process holding the lock and is waited on; a refusal a retry can outlive, which isTransientLockRefusal reads, is retried over the same window; and any other refusal — a missing grant, a missing table — is the database refusing this process, answered at once with the driver's error as the cause. */
 func acquireMigrationLock(ctx context.Context, migrator *migrate.Migrator, lockHeld func(error) bool) (bool, error) {
     startedAt := time.Now()
 
@@ -81,7 +85,12 @@ func acquireMigrationLock(ctx context.Context, migrator *migrate.Migrator, lockH
             return true, nil
         }
 
-        if false == lockHeld(lockErr) {
+        if contextErr := ctx.Err(); nil != contextErr {
+            return false, contextErr
+        }
+
+        held := lockHeld(lockErr)
+        if false == held && false == isTransientLockRefusal(lockErr) {
             return false, melodyexception.NewError(
                 "migration: taking the migration lock was refused by the database",
                 nil,
@@ -96,6 +105,14 @@ func acquireMigrationLock(ctx context.Context, migrator *migrate.Migrator, lockH
         }
 
         if migrationLockRetryWindow <= time.Since(startedAt) {
+            if false == held {
+                return false, melodyexception.NewError(
+                    "migration: taking the migration lock kept failing through the retry window",
+                    nil,
+                    lockErr,
+                )
+            }
+
             /* the refusal names the resource and the remedy, the unlock command that clears a lock a crashed process left, which bun's error does not; the bun error stays the cause, so errors.Is still reaches it */
             return false, melodyexception.NewError(
                 "migration: the migration lock is held; another migration is running, or a crashed one left it behind",
@@ -113,6 +130,25 @@ func acquireMigrationLock(ctx context.Context, migrator *migrate.Migrator, lockH
         case <-time.After(migrationLockRetryInterval):
         }
     }
+}
+
+/* isTransientLockRefusal reads a refusal of the lock INSERT that a retry can outlive: a connection the pool has to replace, a failure of the network under it, and the server's lock wait timeout and deadlock refusals, which an INSERT of the lock row another process has not yet committed can answer. bunorm exports no classifier beyond the duplicate key, so the shapes are read here, off the driver errors bun wraps. */
+func isTransientLockRefusal(err error) bool {
+    if true == errors.Is(err, driver.ErrBadConn) || true == errors.Is(err, mysqldriver.ErrInvalidConn) {
+        return true
+    }
+
+    var networkErr net.Error
+    if true == errors.As(err, &networkErr) {
+        return true
+    }
+
+    var mysqlErr *mysqldriver.MySQLError
+    if true == errors.As(err, &mysqlErr) {
+        return 1205 == mysqlErr.Number || 1213 == mysqlErr.Number
+    }
+
+    return false
 }
 
 func hasUnappliedMigration(ctx context.Context, migrator *migrate.Migrator) (bool, error) {

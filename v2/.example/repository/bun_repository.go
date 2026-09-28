@@ -4,6 +4,7 @@ import (
     "context"
     "database/sql"
     "database/sql/driver"
+    "errors"
     "fmt"
     "sync"
     "time"
@@ -25,6 +26,22 @@ func affectedAtLeastOneRow(result sql.Result) bool {
     return 0 < affected
 }
 
+/* ErrIdAlreadyExists is the refusal a create answers for a supplied identifier another row holds, whether the read before the insert or the primary key caught it, so the http doors answer 409 rather than 500. */
+var ErrIdAlreadyExists = errors.New("id already exists")
+
+/* asIdAlreadyExists maps the primary key's refusal of a supplied identifier onto ErrIdAlreadyExists: the read before the insert cannot stop a concurrent create of the same identifier, and the key is what holds it. The refusal is read from its key clause down the whole chain of causes; any other failure is answered untouched. */
+func asIdAlreadyExists(insertErr error) error {
+    if nil == insertErr {
+        return nil
+    }
+
+    if false == errorChainNamesKey(insertErr, "PRIMARY") {
+        return insertErr
+    }
+
+    return ErrIdAlreadyExists
+}
+
 /* identifierMintLockWait bounds how long a create waits, on the server, for another create of the same table to finish minting and inserting */
 const identifierMintLockWait = 10 * time.Second
 
@@ -34,7 +51,7 @@ const identifierMintLockReleaseTimeout = 5 * time.Second
 /* insertWithMintedIdentifier mints and inserts under the table's MySQL advisory lock, taken by one create of this process at a time, so two creates never read the same highest identifier: unserialized, every create read the list before any committed, minted the same one, and the primary key refused all but one. GET_LOCK waits on the server and belongs to the session that took it, so the lock is taken and released on one connection pinned for the call, while the mint and the insert run on the handle's pool; a release that cannot be issued ends the session, which releases the lock. A caller-supplied identifier is inserted without the lock. */
 func insertWithMintedIdentifier(ctx context.Context, database *bun.DB, lockName string, mintsIdentifier bool, mint func() error, insert func() error) error {
     if false == mintsIdentifier {
-        return insert()
+        return asIdAlreadyExists(insert())
     }
 
     /* the creates of this process queue here, holding no connection: waiting in GET_LOCK holds a pooled connection, so twenty waiters on a pool of ten would leave the holder none for its read and its insert */

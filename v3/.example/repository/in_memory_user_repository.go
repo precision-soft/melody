@@ -46,7 +46,7 @@ func (instance *inMemoryUserRepository) Create(ctx context.Context, user *entity
 
     /* an occupied id is refused, as in the sibling repositories, since a second row under it could be neither read nor removed by id */
     if _, occupied := instance.findByIdLocked(user.Id); true == occupied {
-        return fmt.Errorf("id already exists")
+        return ErrIdAlreadyExists
     }
 
     instance.users = append(instance.users, user)

@@ -11,6 +11,7 @@ import (
     "strings"
     "sync"
     "testing"
+    "time"
 
     mysqldriver "github.com/go-sql-driver/mysql"
     "github.com/uptrace/bun"
@@ -74,6 +75,45 @@ func (instance *queryRecorder) countMatching(matcher func(query string) bool) in
 /* lockRowExists is the refusal the catalog database answers a lock INSERT with while another process holds the lock: the primary key's duplicate entry, the one refusal the lock wait reads as held */
 func lockRowExists() error {
     return &mysqldriver.MySQLError{Number: 1062, Message: "Duplicate entry '1' for key 'PRIMARY'"}
+}
+
+/* shortenMigrationLockRetryInterval lets a test retry the lock INSERT without sleeping the production interval between attempts */
+func shortenMigrationLockRetryInterval(t *testing.T) {
+    t.Helper()
+
+    previousInterval := migrationLockRetryInterval
+    migrationLockRetryInterval = time.Millisecond
+    t.Cleanup(func() {
+        migrationLockRetryInterval = previousInterval
+    })
+}
+
+/* refuseLockInsertTimes answers the first times lock INSERTs with refusal and lets every later one through, and answers how many were attempted */
+func refuseLockInsertTimes(recorder *queryRecorder, refusal error, times int) func() int {
+    var mutex sync.Mutex
+    attempts := 0
+    recorder.execHook = func(query string) error {
+        if false == isMigrationLockInsert(query) {
+            return nil
+        }
+
+        mutex.Lock()
+        defer mutex.Unlock()
+
+        attempts = attempts + 1
+        if attempts <= times {
+            return refusal
+        }
+
+        return nil
+    }
+
+    return func() int {
+        mutex.Lock()
+        defer mutex.Unlock()
+
+        return attempts
+    }
 }
 
 func isMigrationLockInsert(query string) bool {

@@ -2,6 +2,7 @@ package repository
 
 import (
     "context"
+    "errors"
     "sync"
     "testing"
     "time"
@@ -126,5 +127,20 @@ func TestInMemoryProductRepositoryCreateRefusesAnIncompleteProduct(t *testing.T)
 
     if "name is required" != createErr.Error() {
         t.Fatalf("expected the shared validation message, got %q", createErr.Error())
+    }
+}
+
+func TestInMemoryProductRepositoryCreateAnswersATakenIdentifierWithTheSentinel(t *testing.T) {
+    ctx := context.Background()
+    repositoryInstance := newInMemoryProductRepository()
+
+    now := time.Now()
+    if createErr := repositoryInstance.Create(ctx, entity.NewProduct("prod-taken", "Probe", "black", "cat-1", 1, "cur-eur", 1, now, now)); nil != createErr {
+        t.Fatalf("unexpected create error: %v", createErr)
+    }
+
+    createErr := repositoryInstance.Create(ctx, entity.NewProduct("prod-taken", "Second", "black", "cat-1", 1, "cur-eur", 1, now, now))
+    if false == errors.Is(createErr, ErrIdAlreadyExists) {
+        t.Fatalf("expected the taken identifier's refusal, got %v", createErr)
     }
 }

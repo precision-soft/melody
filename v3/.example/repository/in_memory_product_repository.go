@@ -65,7 +65,7 @@ func (instance *inMemoryProductRepository) Create(ctx context.Context, product *
 
     _, exists := instance.findByIdLocked(product.Id)
     if true == exists {
-        return fmt.Errorf("id already exists")
+        return ErrIdAlreadyExists
     }
 
     now := time.Now()

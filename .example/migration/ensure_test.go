@@ -6,6 +6,7 @@ import (
     "database/sql/driver"
     "errors"
     "fmt"
+    "net"
     "os"
     "strings"
     "sync"
@@ -633,5 +634,103 @@ func TestEnsureJournalMigratedRefusesALockInsertTheDatabaseDeniesAtOnce(t *testi
     }
     if false == errors.Is(ensureErr, denied) {
         t.Fatalf("expected the driver's refusal to stay the cause, got %v", ensureErr)
+    }
+}
+
+func TestEnsureMigratedRetriesATransientLockRefusalAndTakesTheLock(t *testing.T) {
+    testCaseList := []struct {
+        name    string
+        refusal error
+        times   int
+    }{
+        {name: "lock wait timeout", refusal: &mysqldriver.MySQLError{Number: 1205, Message: "Lock wait timeout exceeded; try restarting transaction"}, times: 2},
+        {name: "deadlock", refusal: &mysqldriver.MySQLError{Number: 1213, Message: "Deadlock found when trying to get lock; try restarting transaction"}, times: 2},
+        {name: "network", refusal: &net.OpError{Op: "write", Net: "tcp", Err: errors.New("broken pipe")}, times: 2},
+        /* database/sql retries a bad connection itself before answering it, so the refusal has to outlast those attempts to reach the lock wait */
+        {name: "bad connection", refusal: driver.ErrBadConn, times: 4},
+    }
+
+    for _, testCase := range testCaseList {
+        t.Run(testCase.name, func(t *testing.T) {
+            shortenMigrationLockRetryInterval(t)
+
+            database, recorder := newFakeBunDatabase()
+            attempts := refuseLockInsertTimes(recorder, testCase.refusal, testCase.times)
+
+            if ensureErr := EnsureMigrated(context.Background(), database); nil != ensureErr {
+                t.Fatalf("expected the lock to be taken once the refusal passed, got %v", ensureErr)
+            }
+            if testCase.times+1 != attempts() {
+                t.Fatalf("expected %d lock attempts, got %d", testCase.times+1, attempts())
+            }
+            if createCount := recorder.countMatching(isExampleCreateTable); 0 == createCount {
+                t.Fatal("expected the set to be applied under the lock taken on the retry")
+            }
+        })
+    }
+}
+
+func TestEnsureMigratedRefusesATransientLockRefusalThatOutlivesTheWindow(t *testing.T) {
+    previousWindow := migrationLockRetryWindow
+    migrationLockRetryWindow = 0
+    defer func() {
+        migrationLockRetryWindow = previousWindow
+    }()
+
+    database, recorder := newFakeBunDatabase()
+
+    refusal := error(&mysqldriver.MySQLError{Number: 1205, Message: "Lock wait timeout exceeded; try restarting transaction"})
+    refuseLockInsertTimes(recorder, refusal, 1<<30)
+
+    ensureErr := EnsureMigrated(context.Background(), database)
+    if nil == ensureErr || false == strings.Contains(ensureErr.Error(), "taking the migration lock kept failing through the retry window") {
+        t.Fatalf("expected the transient refusal to be reported once the window passed, got %v", ensureErr)
+    }
+    if false == errors.Is(ensureErr, refusal) {
+        t.Fatalf("expected the driver's refusal to stay the cause, got %v", ensureErr)
+    }
+}
+
+/* the refusal is a plain error, which the fourth class refuses as the database's, so only the context class answers the context */
+func TestEnsureMigratedAnswersTheContextThatEndedDuringTheLockInsert(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    recorder.execHook = func(query string) error {
+        if true == isMigrationLockInsert(query) {
+            cancel()
+
+            return errors.New("the driver gave up on the statement")
+        }
+
+        return nil
+    }
+
+    ensureErr := EnsureMigrated(ctx, database)
+    if false == errors.Is(ensureErr, context.Canceled) {
+        t.Fatalf("expected the context's error, got %v", ensureErr)
+    }
+    if true == strings.Contains(ensureErr.Error(), "refused by the database") {
+        t.Fatalf("expected no database refusal for an ended context, got %q", ensureErr.Error())
+    }
+}
+
+func TestEnsureJournalMigratedRetriesATransientLockRefusalAndTakesTheLock(t *testing.T) {
+    for _, sqlState := range []string{"40001", "40P01", "55P03"} {
+        t.Run(sqlState, func(t *testing.T) {
+            shortenMigrationLockRetryInterval(t)
+
+            database, recorder := newFakeBunDatabase()
+            attempts := refuseLockInsertTimes(recorder, postgresRefusal{sqlState: sqlState}, 2)
+
+            if ensureErr := EnsureJournalMigrated(context.Background(), database); nil != ensureErr {
+                t.Fatalf("expected the lock to be taken once the refusal passed, got %v", ensureErr)
+            }
+            if 3 != attempts() {
+                t.Fatalf("expected 3 lock attempts, got %d", attempts())
+            }
+        })
     }
 }

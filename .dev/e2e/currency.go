@@ -4,7 +4,9 @@ import (
     "context"
     "database/sql"
     "errors"
+    "io"
     "net/http"
+    "strings"
 
     "github.com/uptrace/bun"
 )
@@ -24,7 +26,7 @@ type exampleCurrency struct {
     Rate float64 `json:"rate"`
 }
 
-/* assertMysqlCurrencyWrites drives the three currency write doors as the administrator and reads each outcome out of band: the row the create wrote, the name the rename wrote with the rate kept, and the row gone after the delete; the listing is read after the create and after the delete, since it is what a client sees. A plain user is refused at the create by the access rule. Currencies are not audited, so no trail is asserted. */
+/* assertMysqlCurrencyWrites drives the three currency write doors as the administrator and reads each outcome out of band: the row the create wrote, the name the rename wrote with the rate kept, and the row gone after the delete, and a second create on the probe's identifier refused with 409 and the row left as it was; the listing is read after the create and after the delete, since it is what a client sees. A plain user is refused at the create by the access rule. Currencies are not audited, so no trail is asserted. */
 func assertMysqlCurrencyWrites(client *http.Client, baseUrl string, database *bun.DB) {
     removeMysqlCurrencyProbe(database)
     defer removeMysqlCurrencyProbe(database)
@@ -55,6 +57,16 @@ func assertMysqlCurrencyWrites(client *http.Client, baseUrl string, database *bu
 
     if false == mysqlCurrencyListed(client, baseUrl) {
         fail("%s: the listing does not carry the created currency %s", mysqlLabel, mysqlCurrencyProbeId)
+    }
+
+    conflictStatus, conflictBody := mysqlWriteStatus(client, "POST", baseUrl, "/currencies/api/create/", `{"id":"`+mysqlCurrencyProbeId+`","code":"ZZF","name":"`+mysqlCurrencyProbeRenamed+`","rate":3.5}`, "create a second currency on the probe's identifier")
+    if http.StatusConflict != conflictStatus || false == strings.Contains(conflictBody, "id already exists") {
+        fail("%s: a create on a taken identifier answered %d: %s, wanted 409 naming the identifier", mysqlLabel, conflictStatus, exampleTruncate(conflictBody))
+    }
+
+    kept, found := readMysqlCurrencyProbe(database)
+    if false == found || "ZZE" != kept.Code || 2.5 != kept.Rate {
+        fail("%s: the refused create on a taken identifier left %+v (found %v), wanted the probe untouched", mysqlLabel, kept, found)
     }
 
     requireMysqlWrite(client, "PUT", baseUrl, "/currencies/api/update/"+mysqlCurrencyProbeId+"/", `{"code":"ZZE","name":"`+mysqlCurrencyProbeRenamed+`"}`, "rename the currency probe")
@@ -121,4 +133,28 @@ func removeMysqlCurrencyProbe(database *bun.DB) {
     if nil != deleteErr {
         fail("%s: remove the currency probe: %v", mysqlLabel, deleteErr)
     }
+}
+
+/* mysqlWriteStatus performs one write and answers its status and body, for the refusals requireMysqlWrite turns into failures */
+func mysqlWriteStatus(client *http.Client, method string, baseUrl string, path string, body string, what string) (int, string) {
+    request, requestErr := http.NewRequest(method, strings.TrimRight(baseUrl, "/")+path, strings.NewReader(body))
+    if nil != requestErr {
+        fail("%s: build the request to %s: %v", mysqlLabel, what, requestErr)
+    }
+
+    request.Header.Set("Content-Type", "application/json")
+    request.Header.Set("Accept", "application/json")
+
+    response, responseErr := client.Do(request)
+    if nil != responseErr {
+        fail("%s: %s: %v", mysqlLabel, what, responseErr)
+    }
+    defer response.Body.Close()
+
+    payload, readErr := io.ReadAll(response.Body)
+    if nil != readErr {
+        fail("%s: read the response to %s: %v", mysqlLabel, what, readErr)
+    }
+
+    return response.StatusCode, string(payload)
 }

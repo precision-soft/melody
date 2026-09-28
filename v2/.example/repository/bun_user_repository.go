@@ -190,7 +190,7 @@ func (instance *bunUserRepository) Create(ctx context.Context, user *entity.User
         }
 
         if true == occupied {
-            return fmt.Errorf("id already exists")
+            return ErrIdAlreadyExists
         }
     }
 

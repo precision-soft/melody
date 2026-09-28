@@ -160,7 +160,7 @@ func (instance *bunProductRepository) Create(ctx context.Context, product *entit
         }
 
         if true == exists {
-            return fmt.Errorf("id already exists")
+            return ErrIdAlreadyExists
         }
     }
 

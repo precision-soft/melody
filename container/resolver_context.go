@@ -5,6 +5,7 @@ import (
     "runtime"
     "sort"
     "strings"
+    "sync/atomic"
 
     containercontract "github.com/precision-soft/melody/container/contract"
     "github.com/precision-soft/melody/exception"
@@ -55,6 +56,8 @@ type resolverContext struct {
     ownerKey string
     /* scopeSuspended is set while a provider registered on the container builds its service: a process-lifetime singleton may read only what the container holds, never one request's values. Suspension is a refusal, not a substitution: a scope-only service is reported as not existing, the logger resolves to the container's own, and only the service actually requested is looked up through the scope. */
     scopeSuspended bool
+    /* providerReturned is set once the provider that received this view has returned; from then on the live chain belongs to the resolution above it, and a resolution through the view starts a chain of its own */
+    providerReturned atomic.Bool
 }
 
 /* childOwnedBy is the view of this resolution handed to the provider of one node: the same container, scope, resolution id and live stack, with the owning node written on it. The suspension rides on the view rather than on the shared context, so the caller's resolution above this frame keeps seeing the scope, a panic included. */
@@ -67,6 +70,44 @@ func (instance *resolverContext) childOwnedBy(nodeKey string, scopeSuspended boo
         stack:             instance.stack,
         ownerKey:          nodeKey,
         scopeSuspended:    scopeSuspended,
+    }
+}
+
+/* lateResolution answers the view a resolution through this one starts from once its provider has returned: a chain and a resolution id of its own, with the owner, the scope and the suspension kept, so the owner's dependency edge is still recorded while concurrent resolutions through one retained view — a Lazy built over a provider's resolver — never push onto one chain. The new chain is recorded in the wait graph as awaited by the resolution that handed this view out, so a cycle closed through the retained view while that resolution is still building is refused as circular instead of waiting on a creation its own caller holds; the edge can refuse only a wait on a creation that resolution owns, so it is written only while that resolution owns one, which spares a retained resolver used after the boot the exclusive lock, and the release, deferred by the caller, removes it. A view whose provider is still running answers nil and resolves on the live chain. */
+func (instance *resolverContext) lateResolution() (*resolverContext, func()) {
+    if false == instance.providerReturned.Load() {
+        return nil, nil
+    }
+
+    lateResolver := &resolverContext{
+        containerInstance: instance.containerInstance,
+        scopeInstance:     instance.scopeInstance,
+        contextId:         instance.containerInstance.resolverContextIdCounter.Add(1),
+        rootRequestedKey:  "",
+        stack:             newResolutionStack(),
+        ownerKey:          instance.ownerKey,
+        scopeSuspended:    instance.scopeSuspended,
+    }
+
+    containerInstance := instance.containerInstance
+
+    containerInstance.mutex.RLock()
+    ancestorBuilding := containerInstance.ownsCreationInFlightLocked(instance.contextId, instance.scopeInstance)
+    containerInstance.mutex.RUnlock()
+
+    if false == ancestorBuilding {
+        return lateResolver, func() {}
+    }
+
+    containerInstance.mutex.Lock()
+    containerInstance.recordResolverWaitEdgeLocked(instance.contextId, lateResolver.contextId)
+    containerInstance.mutex.Unlock()
+
+    return lateResolver, func() {
+        containerInstance.mutex.Lock()
+        defer containerInstance.mutex.Unlock()
+
+        containerInstance.clearResolverWaitLocked(instance.contextId, lateResolver.contextId)
     }
 }
 
@@ -141,6 +182,12 @@ func containerTypeStore(
 func (instance *resolverContext) Get(serviceName string) (any, error) {
     if "" == serviceName {
         return nil, exception.NewError("service name is required in get", nil, nil)
+    }
+
+    if lateResolver, release := instance.lateResolution(); nil != lateResolver {
+        defer release()
+
+        return lateResolver.Get(serviceName)
     }
 
     if "" == instance.rootRequestedKey {
@@ -357,6 +404,12 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
             nil,
             nil,
         )
+    }
+
+    if lateResolver, release := instance.lateResolution(); nil != lateResolver {
+        defer release()
+
+        return lateResolver.GetByType(targetType)
     }
 
     if "" == instance.rootRequestedKey {

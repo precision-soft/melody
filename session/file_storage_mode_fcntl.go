@@ -1,32 +1,33 @@
-//go:build linux || darwin || freebsd || netbsd || dragonfly
+//go:build unix
 
 package session
 
 import (
     "os"
-    "syscall"
+
+    "golang.org/x/sys/unix"
 )
 
-/* fileHandleWritable reads the descriptor's access mode with fcntl F_GETFL, through the raw connection rather than Fd, which would put the file into blocking mode. An error means the mode could not be read. */
+/* fileHandleWritable reads the descriptor's access mode with fcntl F_GETFL through golang.org/x/sys/unix, which reaches it through the C library on the platforms that keep the system call behind it, and through the raw connection rather than Fd, which would put the file into blocking mode. An error means the mode could not be read. */
 func fileHandleWritable(fileInstance *os.File) (bool, error) {
     rawConnection, connectionErr := fileInstance.SyscallConn()
     if nil != connectionErr {
         return true, connectionErr
     }
 
-    var flags uintptr
-    var errno syscall.Errno
+    var flags int
+    var fcntlErr error
 
     controlErr := rawConnection.Control(func(descriptor uintptr) {
-        flags, _, errno = syscall.Syscall(syscall.SYS_FCNTL, descriptor, syscall.F_GETFL, 0)
+        flags, fcntlErr = unix.FcntlInt(descriptor, unix.F_GETFL, 0)
     })
     if nil != controlErr {
         return true, controlErr
     }
 
-    if 0 != errno {
-        return true, errno
+    if nil != fcntlErr {
+        return true, fcntlErr
     }
 
-    return syscall.O_RDONLY != int(flags)&syscall.O_ACCMODE, nil
+    return unix.O_RDONLY != flags&unix.O_ACCMODE, nil
 }

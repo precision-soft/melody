@@ -193,7 +193,12 @@ func (instance *container) serviceWithCreationGuardLocked(
             )
         }()
 
-        createdValue, err, debugInfo = create(providerResolver)
+        /* the view is marked the moment the provider leaves, however it leaves, so a view it retained never pushes onto the live chain after it */
+        createdValue, err, debugInfo = func() (any, error, *providerDebugInfo) {
+            defer providerResolver.providerReturned.Store(true)
+
+            return create(providerResolver)
+        }()
 
         if true == internal.IsNilInterface(createdValue) {
             /* a nil value with an error is the provider saying why it could not build the service, and that reason is kept as the failure; the generic report is only for a silent (nil, nil) return. */
@@ -390,6 +395,15 @@ func (instance *container) registerResolverWaitLocked(
         )
     }
 
+    instance.recordResolverWaitEdgeLocked(fromContextId, toContextId)
+
+    return nil
+}
+
+func (instance *container) recordResolverWaitEdgeLocked(
+    fromContextId uint64,
+    toContextId uint64,
+) {
     children, exists := instance.resolverWaitGraph[fromContextId]
     if false == exists || nil == children {
         children = make(map[uint64]struct{})
@@ -397,8 +411,27 @@ func (instance *container) registerResolverWaitLocked(
     }
 
     children[toContextId] = struct{}{}
+}
 
-    return nil
+/* ownsCreationInFlightLocked reports whether the resolution contextId is still building a service of the container or of scopeInstance. */
+func (instance *container) ownsCreationInFlightLocked(
+    contextId uint64,
+    scopeInstance *scope,
+) bool {
+    creationMaps := []map[string]*creationState{instance.creatingByName, instance.creatingByType}
+    if nil != scopeInstance {
+        creationMaps = append(creationMaps, scopeInstance.creatingByName, scopeInstance.creatingByType)
+    }
+
+    for _, creations := range creationMaps {
+        for _, state := range creations {
+            if nil != state && contextId == state.ownerContextId {
+                return true
+            }
+        }
+    }
+
+    return false
 }
 
 func (instance *container) clearResolverWaitLocked(

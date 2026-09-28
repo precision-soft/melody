@@ -138,7 +138,7 @@ func (instance *bunCategoryRepository) Create(ctx context.Context, category *ent
         }
 
         if true == exists {
-            return fmt.Errorf("id already exists")
+            return ErrIdAlreadyExists
         }
     }
 

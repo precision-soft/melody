@@ -64,7 +64,7 @@ func (instance *inMemoryCategoryRepository) Create(ctx context.Context, category
 
     _, exists := instance.findByIdLocked(category.Id)
     if true == exists {
-        return fmt.Errorf("id already exists")
+        return ErrIdAlreadyExists
     }
 
     instance.categories = append(instance.categories, category)

@@ -7,6 +7,7 @@ import (
 
     "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/presenter"
+    "github.com/precision-soft/melody/v3/.example/repository"
     "github.com/precision-soft/melody/v3/.example/service"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
@@ -44,7 +45,7 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
     }
 }
 
-/* a rate the body can carry and a conversion cannot use is the client's input, refused as the binding refuses a field; any other failure is the catalogue's */
+/* a rate the body can carry and a conversion cannot use is the client's input, refused as the binding refuses a field; a supplied identifier another currency holds is a conflict; any other failure is the catalogue's */
 func createRefusal(
     runtimeInstance melodyruntimecontract.Runtime,
     request melodyhttpcontract.Request,
@@ -52,6 +53,10 @@ func createRefusal(
 ) melodyhttpcontract.Response {
     if true == errors.Is(createErr, service.ErrUnusableRate) {
         return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "rate: "+service.ErrUnusableRate.Error())
+    }
+
+    if true == errors.Is(createErr, repository.ErrIdAlreadyExists) {
+        return presenter.ApiError(runtimeInstance, request, nethttp.StatusConflict, "id already exists")
     }
 
     return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to create currency", createErr)

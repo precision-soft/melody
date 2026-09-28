@@ -64,7 +64,7 @@ func (instance *inMemoryCurrencyRepository) Create(ctx context.Context, currency
 
     _, exists := instance.findByIdLocked(currency.Id)
     if true == exists {
-        return fmt.Errorf("id already exists")
+        return ErrIdAlreadyExists
     }
 
     instance.currencies = append(instance.currencies, currency)

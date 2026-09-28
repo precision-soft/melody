@@ -131,7 +131,7 @@ func (instance *bunCurrencyRepository) Create(ctx context.Context, currency *ent
         }
 
         if true == exists {
-            return fmt.Errorf("id already exists")
+            return ErrIdAlreadyExists
         }
     }
 

@@ -224,3 +224,42 @@ func TestInsertWithMintedIdentifier_WaitsAtTheProcessGateWithoutAConnection(t *t
         t.Fatalf("expected no GET_LOCK while the gate is held, got %v", recorder.recordedQueries())
     }
 }
+
+/* the read before the insert cannot stop a concurrent create of the same supplied identifier, so the primary key's refusal of it is answered as the read's would be */
+func TestInsertWithMintedIdentifier_AnswersThePrimaryKeysRefusalOfASuppliedIdentifierAsTaken(t *testing.T) {
+    refusal := fmt.Errorf("Error 1062 (23000): Duplicate entry 'prod-supplied' for key 'melody_example_v3_product.PRIMARY'")
+
+    insertErr := insertWithMintedIdentifier(
+        context.Background(),
+        nil,
+        productIdentifierMintLockName,
+        false,
+        func() error {
+            t.Fatalf("expected no mint for a supplied identifier")
+
+            return nil
+        },
+        func() error {
+            return fmt.Errorf("insert failed: %w", refusal)
+        },
+    )
+
+    if false == errors.Is(insertErr, ErrIdAlreadyExists) {
+        t.Fatalf("expected the taken identifier's refusal, got %v", insertErr)
+    }
+}
+
+func TestAsIdAlreadyExists_LeavesEveryOtherFailureAlone(t *testing.T) {
+    if nil != asIdAlreadyExists(nil) {
+        t.Fatalf("expected no refusal for a write that landed")
+    }
+
+    for _, failure := range []error{
+        fmt.Errorf("Error 1062 (23000): Duplicate entry 'probe' for key 'melody_example_v3_user.user_username_unique'"),
+        errors.New("connection refused"),
+    } {
+        if failure != asIdAlreadyExists(failure) {
+            t.Fatalf("expected %q answered untouched, got %v", failure, asIdAlreadyExists(failure))
+        }
+    }
+}

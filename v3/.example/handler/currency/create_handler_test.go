@@ -105,3 +105,29 @@ func TestApiCreateDoorMintsTheIdentifierWhenNoneIsGiven(t *testing.T) {
         t.Fatalf("expected the minted currency %q in the repository", envelope.Payload.Id)
     }
 }
+
+func TestApiCreateDoorAnswersATakenIdentifierAsAConflict(t *testing.T) {
+    fixture := newCurrencyDoorFixture(t)
+
+    status, body := fixture.call(t, ApiCreateHandler(), fixture.runtimeFor(entity.RoleEditor), nethttp.MethodPost, `{"id":"cur-chf","code":"CHF","name":"Swiss Franc","rate":0.94}`, nil)
+    if nethttp.StatusCreated != status {
+        t.Fatalf("expected the first create to answer 201, got %d with body %q", status, body)
+    }
+
+    status, body = fixture.call(t, ApiCreateHandler(), fixture.runtimeFor(entity.RoleEditor), nethttp.MethodPost, `{"id":"cur-chf","code":"CHX","name":"Second Franc","rate":0.5}`, nil)
+    if nethttp.StatusConflict != status {
+        t.Fatalf("expected 409 for a taken identifier, got %d with body %q", status, body)
+    }
+
+    envelope := currencyEnvelope{}
+    decodeBody(t, body, &envelope)
+
+    if 1 != len(envelope.Errors) || "id already exists" != envelope.Errors[0] {
+        t.Fatalf("expected the refusal to name the identifier, got %v", envelope.Errors)
+    }
+
+    stored, found := fixture.stored(t, "cur-chf")
+    if false == found || "CHF" != stored.Code {
+        t.Fatalf("expected the first currency kept, got %+v", stored)
+    }
+}

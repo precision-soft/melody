@@ -2,11 +2,13 @@ package product
 
 import (
     "encoding/json"
+    "errors"
     nethttp "net/http"
     "strings"
 
     "github.com/precision-soft/melody/.example/entity"
     "github.com/precision-soft/melody/.example/presenter"
+    "github.com/precision-soft/melody/.example/repository"
     "github.com/precision-soft/melody/.example/service"
     melodyhttpcontract "github.com/precision-soft/melody/http/contract"
     melodyruntimecontract "github.com/precision-soft/melody/runtime/contract"
@@ -47,7 +49,9 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
             dto.Stock,
         )
         if nil != createErr {
-            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to create product", createErr), nil
+            status, message := createRefusalStatus(createErr)
+
+            return presenter.ApiErrorWithErr(runtimeInstance, request, status, message, createErr), nil
         }
 
         return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusCreated, mapProduct(product)), nil
@@ -63,4 +67,13 @@ type createRequest struct {
     Price       float64 `json:"price" validate:"greaterThan=0"`
     CurrencyId  string  `json:"currencyId" validate:"notBlank"`
     Stock       int64   `json:"stock" validate:"greaterThan=-1"`
+}
+
+/* createRefusalStatus answers the status and the public message of a refused create: a supplied identifier another product holds is a conflict, any other failure is the catalogue's */
+func createRefusalStatus(createErr error) (int, string) {
+    if true == errors.Is(createErr, repository.ErrIdAlreadyExists) {
+        return nethttp.StatusConflict, "id already exists"
+    }
+
+    return nethttp.StatusInternalServerError, "failed to create product"
 }
