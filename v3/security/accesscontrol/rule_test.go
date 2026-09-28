@@ -3,6 +3,7 @@ package accesscontrol
 import (
     "testing"
 
+    "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/internal/testhelper"
 )
 
@@ -230,6 +231,36 @@ func TestANonCanonicalRulePathIsRefusedInEveryPathMode(t *testing.T) {
             })
         }
     }
+}
+
+/* the segment rule folds one trailing slash, so the canonical check reads the declared spelling: "/admin//" folded once would pass as "/admin/" and govern nothing */
+func TestASegmentRulePathWithANonCanonicalTrailIsRefused(t *testing.T) {
+    config := RuleConfig{Attributes: []string{"ROLE_ADMIN"}}
+
+    for _, spelling := range []string{"/admin//", "/admin/./"} {
+        t.Run(spelling, func(t *testing.T) {
+            testhelper.AssertPanicsWithError(
+                t,
+                func() { _ = NewSegmentPrefixRule(spelling, config) },
+                "access control rule path must be canonical",
+            )
+        })
+    }
+}
+
+func TestTheCanonicalRefusalOfASegmentRuleNamesTheDeclaredPath(t *testing.T) {
+    defer func() {
+        refusal, isRefusal := recover().(*exception.Error)
+        if false == isRefusal {
+            t.Fatalf("expected an exception error refusing the path")
+        }
+
+        if "/admin///" != refusal.Context()["path"] {
+            t.Fatalf("expected the refusal to name the declared path, got %v", refusal.Context())
+        }
+    }()
+
+    _ = NewSegmentPrefixRule("/admin///", RuleConfig{Attributes: []string{"ROLE_ADMIN"}})
 }
 
 /* a trailing slash stays each constructor's to read: the exact and segment rules fold it, so the canonical refusal does not reach it */

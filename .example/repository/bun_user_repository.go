@@ -49,6 +49,9 @@ func NewBunUserRepository(database *bun.DB) *bunUserRepository {
     return &bunUserRepository{database: database}
 }
 
+/* userIdentifierMintLockName names the advisory lock the creates of melody_example_v1_user mint their identifiers under */
+const userIdentifierMintLockName = "melody_example_v1_user.id"
+
 type bunUserRepository struct {
     database *bun.DB
 }
@@ -177,31 +180,43 @@ func (instance *bunUserRepository) Create(ctx context.Context, user *entity.User
         return fmt.Errorf("username already exists")
     }
 
-    if "" == strings.TrimSpace(user.Id) {
-        identifierList, identifierErr := instance.identifierList(ctx)
-        if nil != identifierErr {
-            return identifierErr
+    mintsIdentifier := "" == strings.TrimSpace(user.Id)
+    if false == mintsIdentifier {
+        /* a supplied id that is occupied is answered "id already exists" before the insert, as in the sibling repositories, rather than as the primary key's raw duplicate-key text */
+        _, occupied, occupiedErr := instance.findRowById(ctx, user.Id)
+        if nil != occupiedErr {
+            return occupiedErr
         }
 
-        user.Id = nextUserId(identifierList)
+        if true == occupied {
+            return fmt.Errorf("id already exists")
+        }
     }
 
-    /* an occupied id is answered "id already exists" before the insert, as in the sibling repositories, rather than as the primary key's raw duplicate-key text */
-    _, occupied, occupiedErr := instance.findRowById(ctx, user.Id)
-    if nil != occupiedErr {
-        return occupiedErr
-    }
+    return insertWithMintedIdentifier(
+        ctx,
+        instance.database,
+        userIdentifierMintLockName,
+        mintsIdentifier,
+        func() error {
+            identifierList, identifierErr := instance.identifierList(ctx)
+            if nil != identifierErr {
+                return identifierErr
+            }
 
-    if true == occupied {
-        return fmt.Errorf("id already exists")
-    }
+            user.Id = nextUserId(identifierList)
 
-    _, insertErr := instance.database.
-        NewInsert().
-        Model(newUserRow(user)).
-        Exec(ctx)
+            return nil
+        },
+        func() error {
+            _, insertErr := instance.database.
+                NewInsert().
+                Model(newUserRow(user)).
+                Exec(ctx)
 
-    return insertErr
+            return insertErr
+        },
+    )
 }
 
 func (instance *bunUserRepository) Update(ctx context.Context, user *entity.User) (bool, error) {

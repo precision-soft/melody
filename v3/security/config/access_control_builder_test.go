@@ -65,6 +65,14 @@ func TestAccessControlBuilder_AllowAnonymousRefusesAPathWithoutALeadingSlash(t *
     )
 }
 
+func TestAccessControlBuilder_AllowAnonymousRefusesANonCanonicalTrail(t *testing.T) {
+    testhelper.AssertPanicsWithError(
+        t,
+        func() { NewAccessControlBuilder().AllowAnonymous("/admin//") },
+        "access control rule path must be canonical",
+    )
+}
+
 func TestAccessControlBuilder_RequireRefusesATrailingSlash(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,

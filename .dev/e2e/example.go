@@ -210,6 +210,7 @@ func runExampleApplicationCheck(major exampleMajor, redisAddress string, mysqlDs
     pass("[%s] built from %s and answered %s on port %d", major.label, major.relativeDirectory, exampleReadinessRoute, major.port)
 
     runExampleHttpAssertions(major, application, redisAddress, mysqlDsn, postgresDsn)
+    assertExampleCreatesConcurrentlyWithDistinctIdentifiers(major, redisAddress, mysqlDsn)
     runExampleCliAssertions(major, workspace)
 
     if true == major.processServiceInventory {

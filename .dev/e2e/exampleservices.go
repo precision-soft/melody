@@ -91,7 +91,13 @@ var exampleProcessServiceInventory = map[string]processServiceClassification{
 type exampleContainerDescription struct {
     Name     string `json:"name"`
     Lifetime string `json:"lifetime"`
+    IsBuilt  bool   `json:"isBuilt"`
     TypeName string `json:"typeName"`
+}
+
+/* exampleBootServiceNameList is the composition root's list of services built at boot rather than at first use (config.ResolveBootServices); the describing listing of a fresh console process, which builds nothing on its own, shows each one built */
+var exampleBootServiceNameList = []string{
+    "service.example.catalog.notification.hub",
 }
 
 type exampleContainerBuildItem struct {
@@ -128,6 +134,17 @@ func assertExampleProcessServicesAreClassified(major exampleMajor, workspace str
     if decodeErr := json.Unmarshal([]byte(exampleJsonDocument(describeOutput)), &describeEnvelope); nil != decodeErr {
         fail("[%s] debug:container --format=json emitted no decodable envelope (%v):\n%s", major.label, decodeErr, exampleTail(describeOutput, 20))
     }
+
+    builtByName := map[string]bool{}
+    for _, description := range describeEnvelope.Data.Items {
+        builtByName[description.Name] = description.IsBuilt
+    }
+    for _, serviceName := range exampleBootServiceNameList {
+        if false == builtByName[serviceName] {
+            fail("[%s] %s is not built at boot: the composition root resolves it before the first request, so its provider installs what it needs before a reader could reach it", major.label, serviceName)
+        }
+    }
+    pass("[%s] the %d service(s) the composition root builds at boot are built before the first request", major.label, len(exampleBootServiceNameList))
 
     buildOutput := runExampleCommandTolerantOfExit(major, workspace, "debug:container", "--build", "--limit=0", "--format=json")
     buildEnvelope := struct {

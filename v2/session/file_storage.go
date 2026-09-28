@@ -60,14 +60,14 @@ func NewFileStorageFromPath(path string) (*FileStorage, error) {
     return storage, nil
 }
 
-/* NewFileStorageFromFile builds the storage over a handle the caller owns and keeps owning: it is not closed here, and every write goes through it, so the temp-file-and-rename atomicity of NewFileStorageFromPath is not available. The snapshot is encoded whole before a byte is written, the write precedes the truncation and the truncation cuts to the length written, so no crash leaves a zero-length file; a kill inside the write can leave a torn document, which the next construction reports as a decode failure. The handle must be seekable and not opened for appending, and both are refused here. */
+/* NewFileStorageFromFile builds the storage over a handle the caller owns and keeps owning: it is not closed here, and every write goes through it, so the temp-file-and-rename atomicity of NewFileStorageFromPath is not available. The snapshot is encoded whole before a byte is written, the write precedes the truncation and the truncation cuts to the length written, so no crash leaves a zero-length file; a kill inside the write can leave a torn document, which the next construction reports as a decode failure. The handle must be seekable, not opened for appending and not opened read-only, and all three are refused here. */
 func NewFileStorageFromFile(fileInstance *os.File) (*FileStorage, error) {
     if nil == fileInstance {
         return nil, exception.NewError("session storage file is nil", nil, nil)
     }
 
-    if appendErr := refuseAppendModeHandle(fileInstance); nil != appendErr {
-        return nil, appendErr
+    if handleErr := refuseUnwritableHandle(fileInstance); nil != handleErr {
+        return nil, handleErr
     }
 
     decoded, err := readSessionFileFromHandle(fileInstance)
@@ -457,20 +457,31 @@ func removeOrphanSessionTemporaryFiles(path string) {
     }
 }
 
-/* refuseAppendModeHandle asks the handle with a write of nothing: WriteAt refuses an appending handle before it looks at the bytes, so an empty slice settles the question without touching the file, through the same field WriteAt consults on every save. It cannot tell whether the handle can write at all: a read-only handle passes, loads sessions and fails every Save, because Go exposes the descriptor's access mode nowhere portable, and a truncate probe would also refuse a handle whose writes work while its truncate does not. */
-func refuseAppendModeHandle(fileInstance *os.File) error {
+/* refuseUnwritableHandle refuses a handle no Save could write through. An appending handle is refused by a zero-length WriteAt, which refuses such a handle before touching the file; a read-only one passes that write, which never reaches the descriptor, and is refused on the descriptor's access mode where the platform lets it be read. A mode that cannot be read is not a refusal: the handle is left to the read that follows. A truncate probe is not used, since it would also refuse a handle whose writes work while its truncate does not. */
+func refuseUnwritableHandle(fileInstance *os.File) error {
     _, err := fileInstance.WriteAt([]byte{}, 0)
-    if nil == err {
-        return nil
+    if nil != err {
+        return exception.NewError(
+            "session storage file is opened for appending",
+            exceptioncontract.Context{
+                "name": fileInstance.Name(),
+            },
+            err,
+        )
     }
 
-    return exception.NewError(
-        "session storage file is opened for appending",
-        exceptioncontract.Context{
-            "name": fileInstance.Name(),
-        },
-        err,
-    )
+    writable, modeErr := fileHandleWritable(fileInstance)
+    if nil == modeErr && false == writable {
+        return exception.NewError(
+            "session storage file is opened read-only",
+            exceptioncontract.Context{
+                "name": fileInstance.Name(),
+            },
+            nil,
+        )
+    }
+
+    return nil
 }
 
 func writeSessionFileInPlace(fileInstance *os.File, snapshot map[string]fileSessionEntry) error {

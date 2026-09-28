@@ -595,6 +595,38 @@ func TestAccessControlRule_FoldsANonCanonicalPathInEveryPathMode(t *testing.T) {
     }
 }
 
+/* a ".." that climbs above the root, or back onto it, names no rule the author could have meant, and folding it would declare the catch-all "/". The raw mode refuses "/admin/../" at its trailing slash, so that spelling is its own refusal there. */
+func TestAccessControlRule_RefusesAPathThatClimbsBackToTheRootOrAboveIt(t *testing.T) {
+    for _, spelling := range []string{"/admin/..", "/admin/../", "/..", "/a/../../b", "..", "admin/.."} {
+        for _, testCase := range []struct {
+            name  string
+            build func()
+        }{
+            {"segment prefix", func() { _ = NewAccessControlRule(spelling, "PUBLIC_ACCESS") }},
+            {"raw prefix", func() { _ = NewAccessControlRawPrefixRule(spelling, "ROLE_ADMIN") }},
+            {"exact", func() { _ = NewAccessControlExactRule(spelling, "PUBLIC_ACCESS") }},
+        } {
+            expectedMessage := "access control rule path climbs back to the root or above it"
+            if "raw prefix" == testCase.name && true == strings.HasSuffix(spelling, "/") {
+                expectedMessage = "access control raw prefix rule may not end with a slash"
+            }
+
+            t.Run(testCase.name+" "+spelling, func(t *testing.T) {
+                testhelper.AssertPanicsWithError(t, testCase.build, expectedMessage)
+            })
+        }
+    }
+}
+
+func TestAccessControlRule_KeepsTheRootAndAClimbThatStaysInside(t *testing.T) {
+    if "/" != NewAccessControlRule("/", "ROLE_USER").pathPrefix {
+        t.Fatalf("expected the root segment prefix to stay /")
+    }
+    if "/admin" != NewAccessControlRule("/admin/x/..", "ROLE_ADMIN").pathPrefix {
+        t.Fatalf("expected a climb that stays inside the root to fold")
+    }
+}
+
 func TestAccessControlRawPrefixRule_KeepsTheEmptyFallbackAndTheRoot(t *testing.T) {
     if "" != NewAccessControlRawPrefixRule("", "ROLE_USER").pathPrefix {
         t.Fatalf("expected the empty raw prefix to stay the fallback")

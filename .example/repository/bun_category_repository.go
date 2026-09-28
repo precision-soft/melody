@@ -34,6 +34,9 @@ func NewBunCategoryRepository(database *bun.DB) *bunCategoryRepository {
     return &bunCategoryRepository{database: database}
 }
 
+/* categoryIdentifierMintLockName names the advisory lock the creates of melody_example_v1_category mint their identifiers under */
+const categoryIdentifierMintLockName = "melody_example_v1_category.id"
+
 type bunCategoryRepository struct {
     database *bun.DB
 }
@@ -127,30 +130,42 @@ func (instance *bunCategoryRepository) Create(ctx context.Context, category *ent
         return validationErr
     }
 
-    if "" == strings.TrimSpace(category.Id) {
-        identifierList, identifierErr := instance.identifierList(ctx)
-        if nil != identifierErr {
-            return identifierErr
+    mintsIdentifier := "" == strings.TrimSpace(category.Id)
+    if false == mintsIdentifier {
+        _, exists, existsErr := instance.findRowById(ctx, category.Id)
+        if nil != existsErr {
+            return existsErr
         }
 
-        category.Id = nextCategoryId(identifierList)
+        if true == exists {
+            return fmt.Errorf("id already exists")
+        }
     }
 
-    _, exists, existsErr := instance.findRowById(ctx, category.Id)
-    if nil != existsErr {
-        return existsErr
-    }
+    return insertWithMintedIdentifier(
+        ctx,
+        instance.database,
+        categoryIdentifierMintLockName,
+        mintsIdentifier,
+        func() error {
+            identifierList, identifierErr := instance.identifierList(ctx)
+            if nil != identifierErr {
+                return identifierErr
+            }
 
-    if true == exists {
-        return fmt.Errorf("id already exists")
-    }
+            category.Id = nextCategoryId(identifierList)
 
-    _, insertErr := instance.database.
-        NewInsert().
-        Model(newCategoryRow(category)).
-        Exec(ctx)
+            return nil
+        },
+        func() error {
+            _, insertErr := instance.database.
+                NewInsert().
+                Model(newCategoryRow(category)).
+                Exec(ctx)
 
-    return insertErr
+            return insertErr
+        },
+    )
 }
 
 func (instance *bunCategoryRepository) Update(ctx context.Context, category *entity.Category) (bool, error) {

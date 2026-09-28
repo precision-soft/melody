@@ -72,7 +72,7 @@ func NewFileStorageFromPathWithClock(path string, clockInstance clockcontract.Cl
     return storage, nil
 }
 
-/* NewFileStorageFromFile builds the storage over a handle the caller owns and keeps owning: it is not closed here, and every write goes through it. A write cannot be atomic through a handle, but the snapshot is encoded whole first, the write precedes the truncation and the truncation cuts to the length written, so no crash leaves a zero-length file; a kill mid-write can leave a torn document, which the next construction reports as a decode failure. A handle that cannot seek or that appends is refused. */
+/* NewFileStorageFromFile builds the storage over a handle the caller owns and keeps owning: it is not closed here, and every write goes through it. A write cannot be atomic through a handle, but the snapshot is encoded whole first, the write precedes the truncation and the truncation cuts to the length written, so no crash leaves a zero-length file; a kill mid-write can leave a torn document, which the next construction reports as a decode failure. A handle that cannot seek, that appends or that is opened read-only is refused. */
 func NewFileStorageFromFile(fileInstance *os.File) (*FileStorage, error) {
     return NewFileStorageFromFileWithClock(fileInstance, clock.NewSystemClock())
 }
@@ -87,8 +87,8 @@ func NewFileStorageFromFileWithClock(fileInstance *os.File, clockInstance clockc
         return nil, exception.NewError("session storage clock is not provided", nil, nil)
     }
 
-    if appendErr := refuseAppendModeHandle(fileInstance); nil != appendErr {
-        return nil, appendErr
+    if handleErr := refuseUnwritableHandle(fileInstance); nil != handleErr {
+        return nil, handleErr
     }
 
     decoded, err := readSessionFileFromHandle(fileInstance)
@@ -480,20 +480,31 @@ func removeOrphanSessionTemporaryFiles(path string) {
     }
 }
 
-/* refuseAppendModeHandle refuses an appending handle with a zero-length WriteAt, which refuses such a handle before touching the file. A read-only handle passes it, since the zero-length write never reaches the descriptor, and then fails every Save. */
-func refuseAppendModeHandle(fileInstance *os.File) error {
+/* refuseUnwritableHandle refuses a handle no Save could write through. An appending handle is refused by a zero-length WriteAt, which refuses such a handle before touching the file; a read-only one passes that write, which never reaches the descriptor, and is refused on the descriptor's access mode where the platform lets it be read. A mode that cannot be read is not a refusal: the handle is left to the read that follows. A truncate probe is not used, since it would also refuse a handle whose writes work while its truncate does not. */
+func refuseUnwritableHandle(fileInstance *os.File) error {
     _, err := fileInstance.WriteAt([]byte{}, 0)
-    if nil == err {
-        return nil
+    if nil != err {
+        return exception.NewError(
+            "session storage file is opened for appending",
+            exceptioncontract.Context{
+                "name": fileInstance.Name(),
+            },
+            err,
+        )
     }
 
-    return exception.NewError(
-        "session storage file is opened for appending",
-        exceptioncontract.Context{
-            "name": fileInstance.Name(),
-        },
-        err,
-    )
+    writable, modeErr := fileHandleWritable(fileInstance)
+    if nil == modeErr && false == writable {
+        return exception.NewError(
+            "session storage file is opened read-only",
+            exceptioncontract.Context{
+                "name": fileInstance.Name(),
+            },
+            nil,
+        )
+    }
+
+    return nil
 }
 
 func writeSessionFileInPlace(fileInstance *os.File, snapshot map[string]fileSessionEntry) error {

@@ -118,7 +118,8 @@ func NewSegmentPrefixRule(path string, config RuleConfig) Rule {
     }
 
     refuseRelativePath(normalizedPrefix)
-    refuseNonCanonicalPath(normalizedPrefix)
+    /* the declared spelling, not the folded one: the fold trims one trailing slash, so "/admin//" would reach the check as "/admin/" */
+    refuseNonCanonicalPath(strings.TrimSpace(path))
 
     return Rule{
         pathPrefix:      normalizedPrefix,

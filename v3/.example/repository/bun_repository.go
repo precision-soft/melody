@@ -3,6 +3,10 @@ package repository
 import (
     "context"
     "database/sql"
+    "database/sql/driver"
+    "fmt"
+    "sync"
+    "time"
 
     bun "github.com/uptrace/bun"
 )
@@ -44,4 +48,79 @@ func seedIfEmptyRows[Row any](ctx context.Context, database *bun.DB, buildRows f
         Exec(ctx)
 
     return insertErr
+}
+
+
+/* identifierMintLockWait bounds how long a create waits, on the server, for another create of the same table to finish minting and inserting */
+const identifierMintLockWait = 10 * time.Second
+
+/* identifierMintLockReleaseTimeout bounds the release, issued on a fresh context so a request that ended cannot leave the lock held on a pooled connection */
+const identifierMintLockReleaseTimeout = 5 * time.Second
+
+/* insertWithMintedIdentifier mints and inserts under the table's MySQL advisory lock, taken by one create of this process at a time, so two creates never read the same highest identifier: unserialized, every create read the list before any committed, minted the same one, and the primary key refused all but one. GET_LOCK waits on the server and belongs to the session that took it, so the lock is taken and released on one connection pinned for the call, while the mint and the insert run on the handle's pool; a release that cannot be issued ends the session, which releases the lock. A caller-supplied identifier is inserted without the lock. */
+func insertWithMintedIdentifier(ctx context.Context, database *bun.DB, lockName string, mintsIdentifier bool, mint func() error, insert func() error) error {
+    if false == mintsIdentifier {
+        return insert()
+    }
+
+    /* the creates of this process queue here, holding no connection: waiting in GET_LOCK holds a pooled connection, so twenty waiters on a pool of ten would leave the holder none for its read and its insert */
+    gate := identifierMintGate(lockName)
+    select {
+    case gate <- struct{}{}:
+    case <-ctx.Done():
+        return ctx.Err()
+    }
+    defer func() {
+        <-gate
+    }()
+
+    connection, connectionErr := database.DB.Conn(ctx)
+    if nil != connectionErr {
+        return connectionErr
+    }
+
+    var acquired sql.NullInt64
+    lockErr := connection.QueryRowContext(ctx, "SELECT GET_LOCK(?, ?)", lockName, int64(identifierMintLockWait/time.Second)).Scan(&acquired)
+    if nil != lockErr {
+        /* GET_LOCK may have taken the lock on the server before the answer was lost */
+        releaseIdentifierMintLock(connection, lockName)
+
+        return lockErr
+    }
+
+    if false == acquired.Valid || 1 != acquired.Int64 {
+        _ = connection.Close()
+
+        return fmt.Errorf("the identifier mint lock %s was not taken within %s", lockName, identifierMintLockWait)
+    }
+
+    defer releaseIdentifierMintLock(connection, lockName)
+
+    if mintErr := mint(); nil != mintErr {
+        return mintErr
+    }
+
+    return insert()
+}
+
+/* identifierMintGates holds one single-slot gate per lock name, so the creates of one process take the advisory lock one at a time */
+var identifierMintGates sync.Map
+
+func identifierMintGate(lockName string) chan struct{} {
+    gate, _ := identifierMintGates.LoadOrStore(lockName, make(chan struct{}, 1))
+
+    return gate.(chan struct{})
+}
+
+func releaseIdentifierMintLock(connection *sql.Conn, lockName string) {
+    releaseCtx, cancel := context.WithTimeout(context.Background(), identifierMintLockReleaseTimeout)
+    defer cancel()
+
+    if _, releaseErr := connection.ExecContext(releaseCtx, "DO RELEASE_LOCK(?)", lockName); nil != releaseErr {
+        _ = connection.Raw(func(_ any) error {
+            return driver.ErrBadConn
+        })
+    }
+
+    _ = connection.Close()
 }

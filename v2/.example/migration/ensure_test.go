@@ -4,9 +4,12 @@ import (
     "context"
     "database/sql/driver"
     "errors"
+    "strings"
     "sync"
     "testing"
+    "time"
 
+    mysqldriver "github.com/go-sql-driver/mysql"
     melodyexception "github.com/precision-soft/melody/v2/exception"
 )
 
@@ -70,7 +73,7 @@ func TestEnsureMigratedRunsOncePerHandle(t *testing.T) {
 func TestEnsureMigratedSkipsWhenTheLockIsHeldAndNothingIsPending(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 
-    lockHeld := errors.New("lock row exists")
+    lockHeld := lockRowExists()
     recorder.execHook = func(query string) error {
         if true == isMigrationLockInsert(query) {
             return lockHeld
@@ -121,7 +124,7 @@ func TestEnsureMigratedRefusesAfterTheRetryWindowNamingTheRemedy(t *testing.T) {
         migrationLockRetryWindow = previousWindow
     }()
 
-    lockHeld := errors.New("lock row exists")
+    lockHeld := lockRowExists()
     recorder.execHook = func(query string) error {
         if true == isMigrationLockInsert(query) {
             return lockHeld
@@ -322,5 +325,36 @@ func TestResetThatFailsHalfWayLeavesTheHandleToBeMigratedAgain(t *testing.T) {
 
     if true == stillMigrated {
         t.Fatalf("expected a reset that failed half way to clear the migrated memo for the handle")
+    }
+}
+
+/* only the primary key's duplicate entry means another process holds the lock; any other refusal of the lock INSERT — a missing grant here — is the database refusing this process, which no wait heals and which the unlock command would not clear */
+func TestEnsureMigratedRefusesALockInsertTheDatabaseDeniesAtOnce(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+
+    denied := error(&mysqldriver.MySQLError{Number: 1142, Message: "INSERT command denied to user 'app'@'%' for table 'bun_migration_locks'"})
+    recorder.execHook = func(query string) error {
+        if true == isMigrationLockInsert(query) {
+            return denied
+        }
+
+        return nil
+    }
+
+    startedAt := time.Now()
+    ensureErr := EnsureMigrated(context.Background(), database)
+    cost := time.Since(startedAt)
+
+    if nil == ensureErr {
+        t.Fatal("expected the denied lock INSERT to refuse the resolution")
+    }
+    if 50*time.Millisecond < cost {
+        t.Fatalf("expected the refusal at once, not after a wait, got %v", cost)
+    }
+    if false == strings.Contains(ensureErr.Error(), "taking the migration lock was refused by the database") {
+        t.Fatalf("expected the refusal to name the lock step, got %q", ensureErr.Error())
+    }
+    if false == errors.Is(ensureErr, denied) {
+        t.Fatalf("expected the driver's refusal to stay the cause, got %v", ensureErr)
     }
 }

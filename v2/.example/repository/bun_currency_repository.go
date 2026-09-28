@@ -36,6 +36,9 @@ func NewBunCurrencyRepository(database *bun.DB) *bunCurrencyRepository {
     return &bunCurrencyRepository{database: database}
 }
 
+/* currencyIdentifierMintLockName names the advisory lock the creates of melody_example_v2_currency mint their identifiers under */
+const currencyIdentifierMintLockName = "melody_example_v2_currency.id"
+
 type bunCurrencyRepository struct {
     database *bun.DB
 }
@@ -129,30 +132,42 @@ func (instance *bunCurrencyRepository) Create(ctx context.Context, currency *ent
         return validationErr
     }
 
-    if "" == strings.TrimSpace(currency.Id) {
-        identifierList, identifierErr := instance.identifierList(ctx)
-        if nil != identifierErr {
-            return identifierErr
+    mintsIdentifier := "" == strings.TrimSpace(currency.Id)
+    if false == mintsIdentifier {
+        _, exists, existsErr := instance.findRowById(ctx, currency.Id)
+        if nil != existsErr {
+            return existsErr
         }
 
-        currency.Id = nextCurrencyId(identifierList)
+        if true == exists {
+            return fmt.Errorf("id already exists")
+        }
     }
 
-    _, exists, existsErr := instance.findRowById(ctx, currency.Id)
-    if nil != existsErr {
-        return existsErr
-    }
+    return insertWithMintedIdentifier(
+        ctx,
+        instance.database,
+        currencyIdentifierMintLockName,
+        mintsIdentifier,
+        func() error {
+            identifierList, identifierErr := instance.identifierList(ctx)
+            if nil != identifierErr {
+                return identifierErr
+            }
 
-    if true == exists {
-        return fmt.Errorf("id already exists")
-    }
+            currency.Id = nextCurrencyId(identifierList)
 
-    _, insertErr := instance.database.
-        NewInsert().
-        Model(newCurrencyRow(currency)).
-        Exec(ctx)
+            return nil
+        },
+        func() error {
+            _, insertErr := instance.database.
+                NewInsert().
+                Model(newCurrencyRow(currency)).
+                Exec(ctx)
 
-    return insertErr
+            return insertErr
+        },
+    )
 }
 
 func (instance *bunCurrencyRepository) Update(ctx context.Context, currency *entity.Currency) (bool, error) {

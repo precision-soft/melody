@@ -5,6 +5,7 @@ import (
     "sync"
     "time"
 
+    melodymysql "github.com/precision-soft/melody/integrations/bunorm/mysql/v2"
     melodyexception "github.com/precision-soft/melody/v2/exception"
     melodyexceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
     "github.com/uptrace/bun"
@@ -54,7 +55,7 @@ func EnsureMigrated(ctx context.Context, database *bun.DB) error {
         return initErr
     }
 
-    locked, lockErr := acquireMigrationLock(ctx, migrator)
+    locked, lockErr := acquireMigrationLock(ctx, migrator, melodymysql.IsDuplicateKey)
     if nil != lockErr {
         return lockErr
     }
@@ -70,14 +71,22 @@ func EnsureMigrated(ctx context.Context, database *bun.DB) error {
     return nil
 }
 
-/* acquireMigrationLock answers whether the lock was taken. A false with a nil error means another process applied the whole set while this one waited, so there is nothing left to run and the lock was never held here. */
-func acquireMigrationLock(ctx context.Context, migrator *migrate.Migrator) (bool, error) {
+/* acquireMigrationLock answers whether the lock was taken. A false with a nil error means another process applied the whole set while this one waited, so there is nothing left to run and the lock was never held here. Only a refusal lockHeld reads as the lock row's duplicate key is waited on; bun wraps the driver's error, so the classifier reaches it, and any other refusal — a missing grant, a missing table — is the database refusing this process, answered at once with the driver's error as the cause. */
+func acquireMigrationLock(ctx context.Context, migrator *migrate.Migrator, lockHeld func(error) bool) (bool, error) {
     startedAt := time.Now()
 
     for {
         lockErr := migrator.Lock(ctx)
         if nil == lockErr {
             return true, nil
+        }
+
+        if false == lockHeld(lockErr) {
+            return false, melodyexception.NewError(
+                "migration: taking the migration lock was refused by the database",
+                nil,
+                lockErr,
+            )
         }
 
         /* the status read can fail while the lock holder is mid-migration; an unreadable status keeps the wait going instead of concluding anything from it */

@@ -422,16 +422,7 @@ func TestFileStorage_Delete_RemovesTheEntryAndSkipsTheFlushForAnAbsentId(t *test
         t.Fatalf("unexpected error seeding the read-only storage file: %s", writeErr.Error())
     }
 
-    readOnlyHandle, openErr := os.OpenFile(readOnlyPath, os.O_RDONLY, 0644)
-    if nil != openErr {
-        t.Fatalf("unexpected error opening the read-only storage file: %s", openErr.Error())
-    }
-    defer readOnlyHandle.Close()
-
-    unwritableStorage, err := NewFileStorageFromFile(readOnlyHandle)
-    if nil != err {
-        t.Fatalf("unexpected storage error: %s", err.Error())
-    }
+    unwritableStorage := newFileStorageOverAReadOnlyHandle(t, readOnlyPath)
 
     if deleteErr := unwritableStorage.Delete("never-stored"); nil != deleteErr {
         t.Fatalf("expected deleting an absent id to answer success without flushing, got %s", deleteErr.Error())
@@ -899,6 +890,106 @@ func TestNewFileStorageFromPath_RefusesAnEmptyPath(t *testing.T) {
     }
 }
 
+/* a read-only handle loads sessions and then fails every Save for the life of the process; its descriptor's access mode is read at construction instead. */
+func TestNewFileStorageFromFile_RefusesAReadOnlyHandle(t *testing.T) {
+    fileInstance := openSeededSessionFile(t, os.O_RDONLY)
+
+    storage, storageErr := NewFileStorageFromFile(fileInstance)
+    if nil == storageErr {
+        t.Fatalf("expected a read-only handle to be refused")
+    }
+
+    if nil != storage {
+        t.Fatalf("expected no storage over a read-only handle")
+    }
+
+    if "session storage file is opened read-only" != storageErr.Error() {
+        t.Fatalf("expected the read-only refusal, got %q", storageErr.Error())
+    }
+}
+
+/* a write-only handle cannot load the sessions it would replace, so the read that follows the mode checks refuses it */
+func TestNewFileStorageFromFile_RefusesAWriteOnlyHandleAtTheRead(t *testing.T) {
+    fileInstance := openSeededSessionFile(t, os.O_WRONLY)
+
+    storage, storageErr := NewFileStorageFromFile(fileInstance)
+    if nil == storageErr {
+        t.Fatalf("expected a write-only handle to be refused")
+    }
+
+    if nil != storage {
+        t.Fatalf("expected no storage over a write-only handle")
+    }
+
+    if "session storage file is opened read-only" == storageErr.Error() {
+        t.Fatalf("expected the write-only handle to pass the mode check and be refused at the read")
+    }
+}
+
+func TestNewFileStorageFromFile_AcceptsAReadWriteHandleAndSaves(t *testing.T) {
+    fileInstance := openSeededSessionFile(t, os.O_RDWR)
+
+    storage, storageErr := NewFileStorageFromFile(fileInstance)
+    if nil != storageErr {
+        t.Fatalf("unexpected error over a read-write handle: %s", storageErr.Error())
+    }
+
+    if saveErr := storage.Save("sid-1", map[string]any{"key": "value"}, 0); nil != saveErr {
+        t.Fatalf("unexpected save error over a read-write handle: %s", saveErr.Error())
+    }
+}
+
+func openSeededSessionFile(t *testing.T, flag int) *os.File {
+    t.Helper()
+
+    path := filepath.Join(t.TempDir(), "session.json")
+
+    if writeErr := os.WriteFile(path, []byte("{}"), 0644); nil != writeErr {
+        t.Fatalf("unexpected error seeding the storage file: %s", writeErr.Error())
+    }
+
+    fileInstance, openErr := os.OpenFile(path, flag, 0644)
+    if nil != openErr {
+        t.Fatalf("unexpected open error: %s", openErr.Error())
+    }
+
+    t.Cleanup(func() {
+        _ = fileInstance.Close()
+    })
+
+    return fileInstance
+}
+
+/* newFileStorageOverAReadOnlyHandle builds a storage whose every flush fails: construction refuses a read-only handle, so the storage is built over a read-write one and handed the read-only one after. */
+func newFileStorageOverAReadOnlyHandle(t *testing.T, path string) *FileStorage {
+    t.Helper()
+
+    readWriteHandle, openErr := os.OpenFile(path, os.O_RDWR, 0644)
+    if nil != openErr {
+        t.Fatalf("unexpected error opening the storage file: %s", openErr.Error())
+    }
+
+    storage, storageErr := NewFileStorageFromFile(readWriteHandle)
+    if nil != storageErr {
+        t.Fatalf("unexpected error constructing the storage: %s", storageErr.Error())
+    }
+
+    _ = readWriteHandle.Close()
+
+    readOnlyHandle, openErr := os.OpenFile(path, os.O_RDONLY, 0644)
+    if nil != openErr {
+        t.Fatalf("unexpected error opening the storage file read-only: %s", openErr.Error())
+    }
+
+    t.Cleanup(func() {
+        _ = readOnlyHandle.Close()
+    })
+
+    storage.file = readOnlyHandle
+
+    return storage
+}
+
 /* a nil handle is refused where a nil path is refused: the storage would otherwise construct successfully and fail on the first flush, long after the wiring mistake */
 func TestNewFileStorageFromFile_RefusesANilHandle(t *testing.T) {
     storage, storageErr := NewFileStorageFromFile(nil)
@@ -1252,16 +1343,7 @@ func TestFileStorage_LoadOfALapsedEntryAnswersAbsentWhenTheFlushCannotWrite(t *t
         t.Fatalf("unexpected error seeding the storage file: %v", err)
     }
 
-    readOnlyHandle, err := os.OpenFile(path, os.O_RDONLY, 0644)
-    if nil != err {
-        t.Fatalf("unexpected error opening the storage file: %v", err)
-    }
-    defer readOnlyHandle.Close()
-
-    storage, err := NewFileStorageFromFile(readOnlyHandle)
-    if nil != err {
-        t.Fatalf("unexpected error constructing the storage: %v", err)
-    }
+    storage := newFileStorageOverAReadOnlyHandle(t, path)
 
     sessionId := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 

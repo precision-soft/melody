@@ -12,6 +12,7 @@ import (
     "testing"
     "time"
 
+    mysqldriver "github.com/go-sql-driver/mysql"
     "github.com/precision-soft/melody/v3/exception"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/pgdialect"
@@ -79,7 +80,7 @@ func TestEnsureMigratedRunsOncePerHandle(t *testing.T) {
 func TestEnsureMigratedSkipsWhenTheLockIsHeldAndNothingIsPending(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 
-    lockHeld := errors.New("lock row exists")
+    lockHeld := lockRowExists()
     recorder.execHook = func(query string) error {
         if true == isMigrationLockInsert(query) {
             return lockHeld
@@ -130,7 +131,7 @@ func TestEnsureMigratedRefusesAfterTheRetryWindowNamingTheRemedy(t *testing.T) {
         migrationLockRetryWindow = previousWindow
     }()
 
-    lockHeld := errors.New("lock row exists")
+    lockHeld := lockRowExists()
     recorder.execHook = func(query string) error {
         if true == isMigrationLockInsert(query) {
             return lockHeld
@@ -309,7 +310,7 @@ func TestEnsureMigratedAnswersARememberedRefusalWithoutWaitingAgain(t *testing.T
         migrationLockRetryWindow = previousWindow
     }()
 
-    lockHeld := errors.New("lock row exists")
+    lockHeld := lockRowExists()
     recorder.execHook = func(query string) error {
         if true == isMigrationLockInsert(query) {
             return lockHeld
@@ -353,7 +354,7 @@ func TestEnsureMigratedForgetsTheRefusalOnceItsWindowHasPassed(t *testing.T) {
 
     recorder.execHook = func(query string) error {
         if true == isMigrationLockInsert(query) {
-            return errors.New("lock row exists")
+            return lockRowExists()
         }
 
         return nil
@@ -520,7 +521,7 @@ func TestEnsureMigratedNamesTheSetWhenTheLockWaitIsCancelled(t *testing.T) {
 
     recorder.execHook = func(query string) error {
         if true == isMigrationLockInsert(query) {
-            return errors.New("lock row exists")
+            return lockRowExists()
         }
 
         return nil
@@ -744,5 +745,92 @@ func TestInitializeMigrationBookkeepingSurvivesConcurrentCreatorsOnPostgres(t *t
         if initErr := <-results; nil != initErr {
             t.Errorf("expected every concurrent init to succeed, got %v", initErr)
         }
+    }
+}
+
+/* only the primary key's duplicate entry means another process holds the lock; any other refusal of the lock INSERT — a missing grant here — is the database refusing this process, which no wait heals and which the unlock command would not clear */
+func TestEnsureMigratedRefusesALockInsertTheDatabaseDeniesAtOnce(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+
+    denied := &mysqldriver.MySQLError{Number: 1142, Message: "INSERT command denied to user 'app'@'%' for table 'bun_migration_locks'"}
+    recorder.execHook = func(query string) error {
+        if true == isMigrationLockInsert(query) {
+            return denied
+        }
+
+        return nil
+    }
+
+    startedAt := time.Now()
+    ensureErr := EnsureMigrated(context.Background(), database)
+    cost := time.Since(startedAt)
+
+    if nil == ensureErr {
+        t.Fatal("expected the denied lock INSERT to refuse the resolution")
+    }
+    if 50*time.Millisecond < cost {
+        t.Fatalf("expected the refusal at once, not after a wait, got %v", cost)
+    }
+    if "taking the migration lock" != exception.LogContext(ensureErr)["step"] {
+        t.Fatalf("expected the step named, got %v", exception.LogContext(ensureErr))
+    }
+    if _, namesTheLocksTable := exception.LogContext(ensureErr)["locksTable"]; true == namesTheLocksTable {
+        t.Fatalf("expected no held-lock refusal, got %v", exception.LogContext(ensureErr))
+    }
+    if false == errors.Is(ensureErr, denied) {
+        t.Fatalf("expected the driver's refusal to stay the cause, got %v", ensureErr)
+    }
+}
+
+func TestEnsureArchiveMigratedRefusesALockInsertTheDatabaseDeniesAtOnce(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+
+    denied := postgresRefusal{sqlState: "42501"}
+    recorder.execHook = func(query string) error {
+        if true == isMigrationLockInsert(query) {
+            return denied
+        }
+
+        return nil
+    }
+
+    startedAt := time.Now()
+    ensureErr := EnsureArchiveMigrated(context.Background(), database)
+    cost := time.Since(startedAt)
+
+    if nil == ensureErr {
+        t.Fatal("expected the denied lock INSERT to refuse the resolution")
+    }
+    if 50*time.Millisecond < cost {
+        t.Fatalf("expected the refusal at once, not after a wait, got %v", cost)
+    }
+    if "taking the migration lock" != exception.LogContext(ensureErr)["step"] || "archive" != exception.LogContext(ensureErr)["set"] {
+        t.Fatalf("expected the archive set and the step named, got %v", exception.LogContext(ensureErr))
+    }
+}
+
+func TestEnsureArchiveMigratedWaitsForALockRowThatExists(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+
+    previousWindow := migrationLockRetryWindow
+    migrationLockRetryWindow = 0
+    defer func() {
+        migrationLockRetryWindow = previousWindow
+    }()
+
+    recorder.execHook = func(query string) error {
+        if true == isMigrationLockInsert(query) {
+            return postgresRefusal{sqlState: "23505"}
+        }
+
+        return nil
+    }
+
+    ensureErr := EnsureArchiveMigrated(context.Background(), database)
+    if nil == ensureErr {
+        t.Fatal("expected the held lock to refuse once the window is spent")
+    }
+    if migrationLocksTable != exception.LogContext(ensureErr)["locksTable"] {
+        t.Fatalf("expected the held-lock refusal naming the locks table, got %v", exception.LogContext(ensureErr))
     }
 }

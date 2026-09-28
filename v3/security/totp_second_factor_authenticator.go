@@ -157,7 +157,7 @@ func (instance *TotpSecondFactorAuthenticator) authenticateWithTotpCode(
     return token, nil
 }
 
-/* tryRecoveryCode redeems a single-use recovery code supplied on the recovery header when the enrollment store implements TwoFactorRecoveryStore, and reports whether one was accepted and consumed and whether one was supplied at all. The store enforces single use atomically, so no replay-guard entry is recorded. */
+/* tryRecoveryCode redeems a single-use recovery code supplied on the recovery header when the enrollment store implements TwoFactorRecoveryStore, and reports whether one was accepted and consumed and whether one was supplied. A store without that door answers neither: the header is not read, so the caller answers the plain challenge rather than the rejected form. The store enforces single use atomically, so no replay-guard entry is recorded. */
 func (instance *TotpSecondFactorAuthenticator) tryRecoveryCode(
     request httpcontract.Request,
     token securitycontract.Token,

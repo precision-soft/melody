@@ -4,10 +4,13 @@ import (
     "context"
     "database/sql"
     "database/sql/driver"
+    "errors"
     "fmt"
     "strings"
     "testing"
+    "time"
 
+    "github.com/precision-soft/melody/.example/entity"
     "github.com/uptrace/bun"
 )
 
@@ -106,5 +109,122 @@ func TestUpdateOfARowGoneBeforeTheWriteIsAnsweredAsAbsent(t *testing.T) {
                 t.Fatalf("expected a row gone before the write to be answered as absent, got found=%v err=%v", found, updateErr)
             }
         })
+    }
+}
+
+func identifierMintLockAnswering(acquired int64) func(query string) ([]string, [][]driver.Value, error) {
+    return func(query string) ([]string, [][]driver.Value, error) {
+        if true == strings.Contains(query, "GET_LOCK") {
+            return []string{"acquired"}, [][]driver.Value{{acquired}}, nil
+        }
+
+        return []string{}, nil, nil
+    }
+}
+
+func indexOfFirstQuery(queries []string, matcher func(query string) bool) int {
+    for index, query := range queries {
+        if true == matcher(query) {
+            return index
+        }
+    }
+
+    return -1
+}
+
+/* two creates that read the identifier list before either inserted mint the same identifier; the lock is taken before the read and released after the insert, so the read of the next create sees the row of the one before */
+func TestInsertWithMintedIdentifier_ReadsAndInsertsUnderTheTablesAdvisoryLock(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = identifierMintLockAnswering(1)
+
+    repository := &bunCategoryRepository{database: database}
+    category := entity.NewCategory("", "Probe")
+
+    if createErr := repository.Create(context.Background(), category); nil != createErr {
+        t.Fatalf("unexpected create error: %v", createErr)
+    }
+
+    if "cat-1" != category.Id {
+        t.Fatalf("expected the minted id cat-1, got %q", category.Id)
+    }
+
+    queries := recorder.recordedQueries()
+    lockIndex := indexOfFirstQuery(queries, func(query string) bool {
+        return true == strings.Contains(query, "GET_LOCK")
+    })
+    readIndex := indexOfFirstQuery(queries, func(query string) bool {
+        return true == strings.HasPrefix(query, "SELECT") && false == strings.Contains(query, "GET_LOCK")
+    })
+    insertIndex := indexOfFirstQuery(queries, func(query string) bool {
+        return true == strings.HasPrefix(query, "INSERT")
+    })
+    releaseIndex := indexOfFirstQuery(queries, func(query string) bool {
+        return true == strings.Contains(query, "RELEASE_LOCK")
+    })
+
+    if false == (0 <= lockIndex && lockIndex < readIndex && readIndex < insertIndex && insertIndex < releaseIndex) {
+        t.Fatalf("expected lock, read, insert, release in that order, got %v", queries)
+    }
+}
+
+func TestInsertWithMintedIdentifier_InsertsASuppliedIdentifierWithoutTheLock(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = identifierMintLockAnswering(1)
+
+    repository := &bunCategoryRepository{database: database}
+
+    if createErr := repository.Create(context.Background(), entity.NewCategory("cat-supplied", "Probe")); nil != createErr {
+        t.Fatalf("unexpected create error: %v", createErr)
+    }
+
+    if lockCount := recorder.countMatching(func(query string) bool {
+        return true == strings.Contains(query, "GET_LOCK")
+    }); 0 != lockCount {
+        t.Fatalf("expected no lock around a supplied identifier, got %v", recorder.recordedQueries())
+    }
+}
+
+/* GET_LOCK answers 0 when its wait runs out; the create is refused rather than minting outside the lock */
+func TestInsertWithMintedIdentifier_RefusesWhenTheLockIsNotTaken(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = identifierMintLockAnswering(0)
+
+    repository := &bunCategoryRepository{database: database}
+
+    createErr := repository.Create(context.Background(), entity.NewCategory("", "Probe"))
+    if nil == createErr || false == strings.Contains(createErr.Error(), "was not taken") {
+        t.Fatalf("expected the refusal naming the lock, got %v", createErr)
+    }
+
+    if insertCount := recorder.countMatching(func(query string) bool {
+        return true == strings.HasPrefix(query, "INSERT")
+    }); 0 != insertCount {
+        t.Fatalf("expected no insert without the lock, got %v", recorder.recordedQueries())
+    }
+}
+
+/* a create waiting behind another create of this process holds no connection: it waits at the gate, where its context still ends it, and reaches GET_LOCK only once the gate is free */
+func TestInsertWithMintedIdentifier_WaitsAtTheProcessGateWithoutAConnection(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = identifierMintLockAnswering(1)
+
+    gate := identifierMintGate(categoryIdentifierMintLockName)
+    gate <- struct{}{}
+    defer func() {
+        <-gate
+    }()
+
+    ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+    defer cancel()
+
+    createErr := (&bunCategoryRepository{database: database}).Create(ctx, entity.NewCategory("", "Probe"))
+    if false == errors.Is(createErr, context.DeadlineExceeded) {
+        t.Fatalf("expected the wait at the gate to end with the context, got %v", createErr)
+    }
+
+    if lockCount := recorder.countMatching(func(query string) bool {
+        return true == strings.Contains(query, "GET_LOCK")
+    }); 0 != lockCount {
+        t.Fatalf("expected no GET_LOCK while the gate is held, got %v", recorder.recordedQueries())
     }
 }

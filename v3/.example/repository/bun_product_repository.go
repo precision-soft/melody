@@ -62,6 +62,9 @@ func newBunProductRepository(storage *persistence.CatalogStorage) *bunProductRep
 }
 
 /* bunProductRepository keeps the catalogue in the database and its history beside it. Every write goes through the audit tracker, which performs it and records the field-level change in one transaction, so the catalogue never holds a version of a row the trail cannot account for. */
+/* productIdentifierMintLockName names the advisory lock the creates of melody_example_v3_product mint their identifiers under */
+const productIdentifierMintLockName = "melody_example_v3_product.id"
+
 type bunProductRepository struct {
     database *bun.DB
     tracker  *melodyaudit.Tracker
@@ -149,22 +152,16 @@ func (instance *bunProductRepository) Create(ctx context.Context, product *entit
         return validationErr
     }
 
-    if "" == strings.TrimSpace(product.Id) {
-        identifierList, identifierErr := instance.identifierList(ctx)
-        if nil != identifierErr {
-            return identifierErr
+    mintsIdentifier := "" == strings.TrimSpace(product.Id)
+    if false == mintsIdentifier {
+        _, exists, existsErr := instance.findRowById(ctx, product.Id)
+        if nil != existsErr {
+            return existsErr
         }
 
-        product.Id = nextProductId(identifierList)
-    }
-
-    _, exists, existsErr := instance.findRowById(ctx, product.Id)
-    if nil != existsErr {
-        return existsErr
-    }
-
-    if true == exists {
-        return fmt.Errorf("id already exists")
+        if true == exists {
+            return fmt.Errorf("id already exists")
+        }
     }
 
     now := time.Now()
@@ -175,7 +172,25 @@ func (instance *bunProductRepository) Create(ctx context.Context, product *entit
         product.UpdatedAt = now
     }
 
-    return instance.tracker.Insert(auditContext(ctx), persistence.AuditEntityProduct, product.Id, newProductRow(product))
+    return insertWithMintedIdentifier(
+        ctx,
+        instance.database,
+        productIdentifierMintLockName,
+        mintsIdentifier,
+        func() error {
+            identifierList, identifierErr := instance.identifierList(ctx)
+            if nil != identifierErr {
+                return identifierErr
+            }
+
+            product.Id = nextProductId(identifierList)
+
+            return nil
+        },
+        func() error {
+            return instance.tracker.Insert(auditContext(ctx), persistence.AuditEntityProduct, product.Id, newProductRow(product))
+        },
+    )
 }
 
 func (instance *bunProductRepository) Update(ctx context.Context, product *entity.Product) (bool, error) {

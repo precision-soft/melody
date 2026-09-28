@@ -56,6 +56,9 @@ func newBunUserRepository(storage *persistence.CatalogStorage) *bunUserRepositor
 }
 
 /* bunUserRepository keeps the directory in the database and its history beside it. Every write goes through the audit tracker, the password recorded as changed without its value; GrantRole, which runs its own transaction, records through the recorder inside it. */
+/* userIdentifierMintLockName names the advisory lock the creates of melody_example_v3_user mint their identifiers under */
+const userIdentifierMintLockName = "melody_example_v3_user.id"
+
 type bunUserRepository struct {
     database *bun.DB
     tracker  *melodyaudit.Tracker
@@ -163,26 +166,38 @@ func (instance *bunUserRepository) Create(ctx context.Context, user *entity.User
         return ErrUsernameAlreadyExists
     }
 
-    if "" == strings.TrimSpace(user.Id) {
-        identifierList, identifierErr := instance.identifierList(ctx)
-        if nil != identifierErr {
-            return identifierErr
+    mintsIdentifier := "" == strings.TrimSpace(user.Id)
+    if false == mintsIdentifier {
+        /* a supplied id that is occupied is answered "id already exists" before the insert, as in the sibling repositories, rather than as the primary key's raw duplicate-key text */
+        _, occupied, occupiedErr := instance.findRowById(ctx, user.Id)
+        if nil != occupiedErr {
+            return occupiedErr
         }
 
-        user.Id = nextUserId(identifierList)
+        if true == occupied {
+            return fmt.Errorf("id already exists")
+        }
     }
 
-    /* an occupied id is answered "id already exists" before the insert, as in the sibling repositories, rather than as the primary key's raw duplicate-key text */
-    _, occupied, occupiedErr := instance.findRowById(ctx, user.Id)
-    if nil != occupiedErr {
-        return occupiedErr
-    }
+    insertErr := insertWithMintedIdentifier(
+        ctx,
+        instance.database,
+        userIdentifierMintLockName,
+        mintsIdentifier,
+        func() error {
+            identifierList, identifierErr := instance.identifierList(ctx)
+            if nil != identifierErr {
+                return identifierErr
+            }
 
-    if true == occupied {
-        return fmt.Errorf("id already exists")
-    }
+            user.Id = nextUserId(identifierList)
 
-    insertErr := instance.tracker.Insert(auditContext(ctx), persistence.AuditEntityUser, user.Id, newUserRow(user))
+            return nil
+        },
+        func() error {
+            return instance.tracker.Insert(auditContext(ctx), persistence.AuditEntityUser, user.Id, newUserRow(user))
+        },
+    )
 
     return asUsernameAlreadyExists(insertErr)
 }

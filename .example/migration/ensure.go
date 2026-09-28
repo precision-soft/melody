@@ -8,6 +8,8 @@ import (
 
     melodyexception "github.com/precision-soft/melody/exception"
     melodyexceptioncontract "github.com/precision-soft/melody/exception/contract"
+    melodymysql "github.com/precision-soft/melody/integrations/bunorm/mysql"
+    melodypgsql "github.com/precision-soft/melody/integrations/bunorm/pgsql"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/migrate"
 )
@@ -40,15 +42,15 @@ var (
 
 /* EnsureMigrated applies the Migrations set to the catalog database, once per handle and per process; the catalog repository providers call it at first resolution, so a freshly recreated volume needs no operator step. Only a success is recorded. The mutex serializes the providers of one process, and the bun migration lock serializes processes sharing the database. */
 func EnsureMigrated(ctx context.Context, database *bun.DB) error {
-    return ensureMigratedSet(ctx, database, Migrations, migrationUnlockCommand)
+    return ensureMigratedSet(ctx, database, Migrations, migrationUnlockCommand, melodymysql.IsDuplicateKey)
 }
 
 /* EnsureJournalMigrated applies the JournalMigrations set to the journal database, through the same funnel EnsureMigrated runs — only the set and the unlock remedy differ, because the journal's lock lives in the journal's own database and is cleared by db:journal:unlock, not db:unlock. */
 func EnsureJournalMigrated(ctx context.Context, database *bun.DB) error {
-    return ensureMigratedSet(ctx, database, JournalMigrations, journalMigrationUnlockCommand)
+    return ensureMigratedSet(ctx, database, JournalMigrations, journalMigrationUnlockCommand, melodypgsql.IsDuplicateKey)
 }
 
-func ensureMigratedSet(ctx context.Context, database *bun.DB, migrationSet *migrate.Migrations, unlockCommand string) error {
+func ensureMigratedSet(ctx context.Context, database *bun.DB, migrationSet *migrate.Migrations, unlockCommand string, lockHeld func(error) bool) error {
     if nil == database {
         return melodyexception.NewError("migration: bun database is nil", nil, nil)
     }
@@ -71,7 +73,7 @@ func ensureMigratedSet(ctx context.Context, database *bun.DB, migrationSet *migr
         return initErr
     }
 
-    locked, lockErr := acquireMigrationLock(ctx, migrator, unlockCommand)
+    locked, lockErr := acquireMigrationLock(ctx, migrator, unlockCommand, lockHeld)
     if nil != lockErr {
         return lockErr
     }
@@ -87,14 +89,22 @@ func ensureMigratedSet(ctx context.Context, database *bun.DB, migrationSet *migr
     return nil
 }
 
-/* acquireMigrationLock answers whether the lock was taken. A false with a nil error means another process applied the whole set while this one waited, so there is nothing left to run and the lock was never held here. */
-func acquireMigrationLock(ctx context.Context, migrator *migrate.Migrator, unlockCommand string) (bool, error) {
+/* acquireMigrationLock answers whether the lock was taken. A false with a nil error means another process applied the whole set while this one waited, so there is nothing left to run and the lock was never held here. Only a refusal lockHeld reads as the lock row's duplicate key is waited on; bun wraps the driver's error, so the classifier reaches it, and any other refusal — a missing grant, a missing table — is the database refusing this process, answered at once with the driver's error as the cause. */
+func acquireMigrationLock(ctx context.Context, migrator *migrate.Migrator, unlockCommand string, lockHeld func(error) bool) (bool, error) {
     startedAt := time.Now()
 
     for {
         lockErr := migrator.Lock(ctx)
         if nil == lockErr {
             return true, nil
+        }
+
+        if false == lockHeld(lockErr) {
+            return false, melodyexception.NewError(
+                "migration: taking the migration lock was refused by the database",
+                nil,
+                lockErr,
+            )
         }
 
         /* the status read can fail while the lock holder is mid-migration; an unreadable status keeps the wait going instead of concluding anything from it */

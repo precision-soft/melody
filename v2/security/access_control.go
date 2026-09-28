@@ -438,11 +438,41 @@ func normalizePathPrefix(pathPrefix string) string {
     return normalizedPrefix
 }
 
-/* rootedPath folds a declared path onto the spelling the request path is canonicalized to: a leading slash and no empty, "." or ".." segment, so "admin", "//admin" and "/x/../admin" declare the same rule as "/admin". */
+/* rootedPath folds a declared path onto the spelling the request path is canonicalized to: a leading slash and no empty, "." or ".." segment, so "admin", "//admin" and "/x/../admin" declare the same rule as "/admin". A ".." that climbs above the root, or back onto it, is refused: the clean path would fold it onto "/", the catch-all no author meant. */
 func rootedPath(path string) string {
     if false == strings.HasPrefix(path, "/") {
         path = "/" + path
     }
 
+    depth := 0
+    climbed := false
+    for _, segment := range strings.Split(path, "/") {
+        switch segment {
+        case "", ".":
+        case "..":
+            if 0 == depth {
+                refuseClimbToTheRoot(path)
+            }
+            depth--
+            climbed = true
+        default:
+            depth++
+        }
+    }
+
+    if true == climbed && 0 == depth {
+        refuseClimbToTheRoot(path)
+    }
+
     return stdpath.Clean(path)
+}
+
+func refuseClimbToTheRoot(path string) {
+    exception.Panic(
+        exception.NewError(
+            "access control rule path climbs back to the root or above it",
+            map[string]any{"path": path},
+            nil,
+        ),
+    )
 }

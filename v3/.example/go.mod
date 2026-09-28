@@ -3,6 +3,7 @@ module github.com/precision-soft/melody/v3/.example
 go 1.25.0
 
 require (
+	github.com/go-sql-driver/mysql v1.8.1
 	github.com/minio/minio-go/v7 v7.0.77
 	github.com/precision-soft/melody/integrations/amqp/v3 v3.0.0
 	github.com/precision-soft/melody/integrations/awss3/v3 v3.0.0
@@ -34,7 +35,6 @@ require (
 	github.com/go-ini/ini v1.67.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/go-sql-driver/mysql v1.8.1 // indirect
 	github.com/goccy/go-json v0.10.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 // indirect

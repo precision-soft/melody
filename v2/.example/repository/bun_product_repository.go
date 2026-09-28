@@ -59,6 +59,9 @@ func NewBunProductRepository(database *bun.DB) *bunProductRepository {
     return &bunProductRepository{database: database}
 }
 
+/* productIdentifierMintLockName names the advisory lock the creates of melody_example_v2_product mint their identifiers under */
+const productIdentifierMintLockName = "melody_example_v2_product.id"
+
 type bunProductRepository struct {
     database *bun.DB
 }
@@ -152,22 +155,16 @@ func (instance *bunProductRepository) Create(ctx context.Context, product *entit
         return validationErr
     }
 
-    if "" == strings.TrimSpace(product.Id) {
-        identifierList, identifierErr := instance.identifierList(ctx)
-        if nil != identifierErr {
-            return identifierErr
+    mintsIdentifier := "" == strings.TrimSpace(product.Id)
+    if false == mintsIdentifier {
+        _, exists, existsErr := instance.findRowById(ctx, product.Id)
+        if nil != existsErr {
+            return existsErr
         }
 
-        product.Id = nextProductId(identifierList)
-    }
-
-    _, exists, existsErr := instance.findRowById(ctx, product.Id)
-    if nil != existsErr {
-        return existsErr
-    }
-
-    if true == exists {
-        return fmt.Errorf("id already exists")
+        if true == exists {
+            return fmt.Errorf("id already exists")
+        }
     }
 
     now := time.Now()
@@ -178,12 +175,30 @@ func (instance *bunProductRepository) Create(ctx context.Context, product *entit
         product.UpdatedAt = now
     }
 
-    _, insertErr := instance.database.
-        NewInsert().
-        Model(newProductRow(product)).
-        Exec(ctx)
+    return insertWithMintedIdentifier(
+        ctx,
+        instance.database,
+        productIdentifierMintLockName,
+        mintsIdentifier,
+        func() error {
+            identifierList, identifierErr := instance.identifierList(ctx)
+            if nil != identifierErr {
+                return identifierErr
+            }
 
-    return insertErr
+            product.Id = nextProductId(identifierList)
+
+            return nil
+        },
+        func() error {
+            _, insertErr := instance.database.
+                NewInsert().
+                Model(newProductRow(product)).
+                Exec(ctx)
+
+            return insertErr
+        },
+    )
 }
 
 func (instance *bunProductRepository) Update(ctx context.Context, product *entity.Product) (bool, error) {

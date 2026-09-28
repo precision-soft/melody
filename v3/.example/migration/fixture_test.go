@@ -12,6 +12,7 @@ import (
     "sync"
     "testing"
 
+    mysqldriver "github.com/go-sql-driver/mysql"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect"
     "github.com/uptrace/bun/dialect/feature"
@@ -68,6 +69,28 @@ func (instance *queryRecorder) countMatching(matcher func(query string) bool) in
     }
 
     return count
+}
+
+/* lockRowExists is the refusal the catalogue database answers a lock INSERT with while another process holds the lock: the primary key's duplicate entry, the one refusal the lock wait reads as held */
+func lockRowExists() error {
+    return &mysqldriver.MySQLError{Number: 1062, Message: "Duplicate entry '1' for key 'PRIMARY'"}
+}
+
+/* postgresRefusal is a PostgreSQL protocol error in pgdriver's shape, answering its SQLSTATE through Field('C') */
+type postgresRefusal struct {
+    sqlState string
+}
+
+func (instance postgresRefusal) Error() string {
+    return "ERROR: refused (SQLSTATE " + instance.sqlState + ")"
+}
+
+func (instance postgresRefusal) Field(field byte) string {
+    if 'C' == field {
+        return instance.sqlState
+    }
+
+    return ""
 }
 
 func isMigrationLockInsert(query string) bool {
