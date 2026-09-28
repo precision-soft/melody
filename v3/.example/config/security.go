@@ -95,6 +95,16 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         melodyaccesscontrol.NewSegmentPrefixRule(route.CategoriesPrefix, melodyaccesscontrol.RuleConfig{
             Attributes: []string{entity.RoleUser},
         }),
+        /* the currency writes are catalogue data, as the products are, so they carry the editor's requirement; they stand before the listing's rule, which would otherwise claim them for any user */
+        melodyaccesscontrol.NewSegmentPrefixRule(route.CurrenciesApiCreatePrefix, melodyaccesscontrol.RuleConfig{
+            Attributes: []string{entity.RoleEditor},
+        }),
+        melodyaccesscontrol.NewSegmentPrefixRule(route.CurrenciesApiUpdatePrefix, melodyaccesscontrol.RuleConfig{
+            Attributes: []string{entity.RoleEditor},
+        }),
+        melodyaccesscontrol.NewSegmentPrefixRule(route.CurrenciesApiDeletePrefix, melodyaccesscontrol.RuleConfig{
+            Attributes: []string{entity.RoleEditor},
+        }),
         melodyaccesscontrol.NewSegmentPrefixRule(route.CurrenciesPrefix, melodyaccesscontrol.RuleConfig{
             Attributes: []string{entity.RoleUser},
         }),

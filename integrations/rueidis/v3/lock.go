@@ -63,6 +63,7 @@ func WithLockerCallTimeout(timeout time.Duration) LockerOption {
     }
 }
 
+/* Locker holds a redis client and the per-call timeout, both fixed at construction. It keeps no state of its own, since a lease lives in redis under its key, so one Locker serves concurrent callers without a lock. */
 type Locker struct {
     client      rueidis.Client
     callTimeout time.Duration

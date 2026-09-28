@@ -618,6 +618,34 @@ func TestAccessControlRule_RefusesAPathThatClimbsBackToTheRootOrAboveIt(t *testi
     }
 }
 
+func TestAccessControlRule_RefusesAPathThatFoldsOntoTheRootThroughADotSegment(t *testing.T) {
+    for _, spelling := range []string{"/.", ".", "/./", "./", "/./."} {
+        for _, testCase := range []struct {
+            name  string
+            build func()
+        }{
+            {"segment prefix", func() { _ = NewAccessControlRule(spelling, "PUBLIC_ACCESS") }},
+            {"raw prefix", func() { _ = NewAccessControlRawPrefixRule(spelling, "ROLE_ADMIN") }},
+            {"exact", func() { _ = NewAccessControlExactRule(spelling, "PUBLIC_ACCESS") }},
+        } {
+            expectedMessage := "access control rule path folds onto the root through a . segment"
+            if "raw prefix" == testCase.name && true == strings.HasSuffix(spelling, "/") {
+                expectedMessage = "access control raw prefix rule may not end with a slash"
+            }
+
+            t.Run(testCase.name+" "+spelling, func(t *testing.T) {
+                testhelper.AssertPanicsWithError(t, testCase.build, expectedMessage)
+            })
+        }
+    }
+}
+
+func TestAccessControlRule_KeepsADotSegmentThatStaysInside(t *testing.T) {
+    if "/admin" != NewAccessControlRule("/./admin/.", "ROLE_ADMIN").pathPrefix {
+        t.Fatalf("expected a dot segment inside the path to fold")
+    }
+}
+
 func TestAccessControlRule_KeepsTheRootAndAClimbThatStaysInside(t *testing.T) {
     if "/" != NewAccessControlRule("/", "ROLE_USER").pathPrefix {
         t.Fatalf("expected the root segment prefix to stay /")

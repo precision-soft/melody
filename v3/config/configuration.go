@@ -78,6 +78,7 @@ func NewConfiguration(
     return configuration, nil
 }
 
+/* Configuration holds the environment, the parameters and the cli, kernel and http sections. It is written at boot and read on the request path, both under mutex; MarkServing sets serving under the write lock, and a resolution that arrives afterwards is refused rather than rewriting the parameters under settled readers. */
 type Configuration struct {
     mutex       sync.RWMutex
     environment *Environment

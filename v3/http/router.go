@@ -22,6 +22,7 @@ func NewRouterWithRouteRegistry(routeRegistry *RouteRegistry) *Router {
     }
 }
 
+/* Router holds the route tree and the registry it matches against. It is written at boot and read on the request path with no lock; the kernel raises serving when it builds its handler, and a registration after that is refused. */
 type Router struct {
     routeRegistry *RouteRegistry
     routeTreeRoot *routeTreeNode

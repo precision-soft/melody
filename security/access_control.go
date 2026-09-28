@@ -446,9 +446,12 @@ func rootedPath(path string) string {
 
     depth := 0
     climbed := false
+    dotted := false
     for _, segment := range strings.Split(path, "/") {
         switch segment {
-        case "", ".":
+        case "":
+        case ".":
+            dotted = true
         case "..":
             if 0 == depth {
                 refuseClimbToTheRoot(path)
@@ -462,6 +465,16 @@ func rootedPath(path string) string {
 
     if true == climbed && 0 == depth {
         refuseClimbToTheRoot(path)
+    }
+
+    if true == dotted && 0 == depth {
+        exception.Panic(
+            exception.NewError(
+                "access control rule path folds onto the root through a . segment",
+                map[string]any{"path": path},
+                nil,
+            ),
+        )
     }
 
     return stdpath.Clean(path)

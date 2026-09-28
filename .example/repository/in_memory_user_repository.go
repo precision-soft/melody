@@ -37,7 +37,7 @@ func (instance *inMemoryUserRepository) Create(ctx context.Context, user *entity
 
     _, usernameExists := instance.findByUsernameLocked(user.Username)
     if true == usernameExists {
-        return fmt.Errorf("username already exists")
+        return ErrUsernameAlreadyExists
     }
 
     if "" == strings.TrimSpace(user.Id) {
@@ -78,7 +78,7 @@ func (instance *inMemoryUserRepository) Update(ctx context.Context, user *entity
         }
 
         if true == instance.usernameTakenByAnotherLocked(user.Username, id) {
-            return false, fmt.Errorf("username already exists")
+            return false, ErrUsernameAlreadyExists
         }
 
         instance.users[index] = user

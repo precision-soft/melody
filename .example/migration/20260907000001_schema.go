@@ -10,7 +10,10 @@ func init() {
     Migrations.MustRegister(upSchema, downSchema)
 }
 
-/* upSchema creates the four catalog tables in one step: the example has a single state, the present one, and its schema is the statement of that state; a volume in an older shape is brought to it by example:db:reset. Every statement tolerates a volume provisioned before the set and several processes applying it at once. */
+/* UserUsernameIndexName is the one spelling of the index. The schema owns it, so this step and the repository that maps the driver's duplicate-key refusal onto the public message read the same constant. */
+const UserUsernameIndexName = "melody_example_v1_user_username_folded"
+
+/* upSchema creates the four catalog tables and the unique key on the folded username in one step: the example has a single state, the present one, and its schema is the statement of that state; a volume in an older shape is brought to it by example:db:reset. Every statement tolerates a volume provisioned before the set and several processes applying it at once. */
 func upSchema(ctx context.Context, database *bun.DB) error {
     for _, statement := range schemaUpStatementList {
         if _, execErr := database.ExecContext(ctx, statement); nil != execErr {
@@ -18,7 +21,7 @@ func upSchema(ctx context.Context, database *bun.DB) error {
         }
     }
 
-    return nil
+    return addUserUsernameIndex(ctx, database)
 }
 
 /* downSchema drops what upSchema created, in reverse order, so the step stays correct once a foreign key is added. */
@@ -65,6 +68,11 @@ const createUserTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v1_user` 
     "`roles` VARCHAR(255) NOT NULL, " +
     "PRIMARY KEY (`id`))"
 
+/* the index is on LOWER(username) cast to the binary collation because that expression is the identity this application gives a username: NormalizedUsername folds case and nothing else, and the lookup door compares on utf8mb4_bin. It is what holds a name against two callers that pass the repository's read-then-write check at the same moment. A volume provisioned before the index does not carry it, since the step is recorded as applied by name; example:db:reset brings it here. */
+const createUserUsernameIndexSql = "ALTER TABLE `melody_example_v1_user` " +
+    "ADD UNIQUE KEY `" + UserUsernameIndexName + "` " +
+    "((CAST(LOWER(`username`) AS CHAR(255) CHARACTER SET utf8mb4) COLLATE utf8mb4_bin))"
+
 var schemaUpStatementList = []string{
     createCategoryTableSql,
     createCurrencyTableSql,
@@ -92,4 +100,27 @@ func dropStatementList(tableNameList []string) []string {
     }
 
     return statementList
+}
+
+/* MySQL has no ADD KEY IF NOT EXISTS, so the tolerance of a second run of the set is spelled by asking the catalogue first, or the run would fail on a duplicate index name. */
+func addUserUsernameIndex(ctx context.Context, database *bun.DB) error {
+    count := 0
+
+    queryErr := database.NewRaw(
+        "SELECT COUNT(*) FROM information_schema.STATISTICS "+
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?",
+        "melody_example_v1_user",
+        UserUsernameIndexName,
+    ).Scan(ctx, &count)
+    if nil != queryErr {
+        return queryErr
+    }
+
+    if 0 < count {
+        return nil
+    }
+
+    _, execErr := database.ExecContext(ctx, createUserUsernameIndexSql)
+
+    return execErr
 }

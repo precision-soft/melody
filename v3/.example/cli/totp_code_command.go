@@ -47,7 +47,7 @@ func (instance *TotpCodeCommand) Run(
         return codeErr
     }
 
-    fmt.Printf("%s\n", code)
+    _, writeErr := fmt.Fprintf(commandContext.Writer(), "%s\n", code)
 
-    return nil
+    return writeErr
 }

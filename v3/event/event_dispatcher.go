@@ -33,6 +33,7 @@ func NewEventDispatcher(clock clockcontract.Clock) *EventDispatcher {
     }
 }
 
+/* EventDispatcher holds the listeners of every event and the registrations of every subscriber, read and written for the life of the process. The two maps and the identity counters are read and written under mutex; subscriberMutex serializes whole subscriber installations and removals and is always taken before mutex, never inside it. */
 type EventDispatcher struct {
     mutex                   sync.RWMutex
     listeners               map[string][]listenerWithPriority

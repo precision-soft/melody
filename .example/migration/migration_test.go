@@ -2,6 +2,7 @@ package migration
 
 import (
     "context"
+    "database/sql/driver"
     "strings"
     "testing"
 )
@@ -43,6 +44,8 @@ func TestUpSchemaCreatesEveryCatalogTableTolerantly(t *testing.T) {
         "CREATE TABLE IF NOT EXISTS `melody_example_v1_currency`",
         "CREATE TABLE IF NOT EXISTS `melody_example_v1_product`",
         "CREATE TABLE IF NOT EXISTS `melody_example_v1_user`",
+        "information_schema.STATISTICS",
+        "ADD UNIQUE KEY `melody_example_v1_user_username_folded`",
     })
 }
 
@@ -117,5 +120,26 @@ func TestUpSchemaComparesEveryIdentifierColumnByteForByte(t *testing.T) {
 
     if 6 != collated {
         t.Errorf("%d identifier columns are compared under utf8mb4_bin, wanted 6", collated)
+    }
+}
+
+func TestUpSchemaDoesNotAddTheUsernameIndexASecondTime(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = func(query string) ([]string, [][]driver.Value, error) {
+        if true == strings.Contains(query, "information_schema.STATISTICS") {
+            return []string{"count"}, [][]driver.Value{{int64(1)}}, nil
+        }
+
+        return nil, nil, nil
+    }
+
+    if upErr := upSchema(context.Background(), database); nil != upErr {
+        t.Fatalf("expected the up migration to succeed over a volume holding the index, got %v", upErr)
+    }
+
+    for _, query := range recorder.recordedQueries() {
+        if true == strings.Contains(query, "ADD UNIQUE KEY") {
+            t.Fatalf("expected the present index not to be added again, got %q", query)
+        }
     }
 }

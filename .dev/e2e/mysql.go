@@ -75,6 +75,7 @@ func runMysqlCheck(baseUrl string, redisAddress string) {
     signInExampleHttpAdmin(client, baseUrl)
 
     assertMysqlProductAuditTrail(client, baseUrl, database)
+    assertMysqlCurrencyWrites(client, baseUrl, database)
     assertMysqlPasswordRedactedInTrail(client, baseUrl, database)
     assertMysqlDeletedAccountReleasesItsEnrollment(client, baseUrl, database)
 }

@@ -83,7 +83,7 @@ func (instance *MailSendCommand) Run(
         return sendErr
     }
 
-    fmt.Println("sent email to", to)
+    _, _ = fmt.Fprintln(commandContext.Writer(), "sent email to", to)
 
     return nil
 }

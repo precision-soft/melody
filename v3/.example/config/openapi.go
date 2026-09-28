@@ -3,6 +3,7 @@ package config
 import (
     "reflect"
 
+    handlercurrency "github.com/precision-soft/melody/v3/.example/handler/currency"
     handleri18n "github.com/precision-soft/melody/v3/.example/handler/i18n"
     handlerproduct "github.com/precision-soft/melody/v3/.example/handler/product"
     "github.com/precision-soft/melody/v3/.example/route"
@@ -24,6 +25,14 @@ func (instance *Module) buildOpenApi() {
         201,
         melodyopenapi.WithSummary("Create a product"),
         melodyopenapi.WithTags("products"),
+    )
+
+    melodyopenapi.DescribeTyped[handlercurrency.CreateRequest, handlercurrency.CurrencyResponse](
+        instance.openApiRegistry,
+        route.CurrenciesApiCreateName,
+        201,
+        melodyopenapi.WithSummary("Create a currency"),
+        melodyopenapi.WithTags("currencies"),
     )
 
     instance.openApiRegistry.Describe(route.I18nGreetingName, melodyopenapi.Descriptor{

@@ -46,6 +46,26 @@ func TestRegisterSecurity_TheDoorsThatWriteIntoABackendCarryARole(t *testing.T) 
     }
 }
 
+/* The currency writes are catalogue data and carry the editor's requirement, while the listing keeps the user's; the listing's rule is a prefix of the writes, so each write path is asked on its own. */
+func TestRegisterSecurity_TheCurrencyWritesRequireTheEditor(t *testing.T) {
+    control := compiledSecurityModule(t).BuildAndCompile().GlobalAccessControl()
+
+    expectations := map[string]string{
+        "/currencies/api/create/":         entity.RoleEditor,
+        "/currencies/api/update/cur-eur/": entity.RoleEditor,
+        "/currencies/api/delete/cur-eur/": entity.RoleEditor,
+        "/currencies/api/read/":           entity.RoleUser,
+    }
+
+    for path, role := range expectations {
+        attributes, matched := control.Match(path)
+
+        if false == matched || 1 != len(attributes) || role != attributes[0] {
+            t.Fatalf("expected %s to require %s, got matched=%v attributes=%v", path, role, matched, attributes)
+        }
+    }
+}
+
 /* The public rules are the readiness probe, the login and logout doors, the frontend bundle, the metrics and the openapi document, and the cipher round-trip probe, which reads nothing from the caller; the list is closed, so a rule added as public shows up here as the path that was not expected. */
 func TestRegisterSecurity_ThePublicRulesAreTheClosedListTheReadmeStates(t *testing.T) {
     control := compiledSecurityModule(t).BuildAndCompile().GlobalAccessControl()

@@ -8,6 +8,7 @@ import (
     "strings"
 
     "github.com/precision-soft/melody/.example/entity"
+    "github.com/precision-soft/melody/.example/migration"
     "github.com/uptrace/bun"
 )
 
@@ -177,7 +178,7 @@ func (instance *bunUserRepository) Create(ctx context.Context, user *entity.User
     }
 
     if true == usernameExists {
-        return fmt.Errorf("username already exists")
+        return ErrUsernameAlreadyExists
     }
 
     mintsIdentifier := "" == strings.TrimSpace(user.Id)
@@ -214,7 +215,7 @@ func (instance *bunUserRepository) Create(ctx context.Context, user *entity.User
                 Model(newUserRow(user)).
                 Exec(ctx)
 
-            return insertErr
+            return asUsernameAlreadyExists(insertErr)
         },
     )
 }
@@ -245,7 +246,7 @@ func (instance *bunUserRepository) Update(ctx context.Context, user *entity.User
     }
 
     if true == takenByAnother {
-        return false, fmt.Errorf("username already exists")
+        return false, ErrUsernameAlreadyExists
     }
 
     result, updateErr := instance.database.
@@ -254,7 +255,7 @@ func (instance *bunUserRepository) Update(ctx context.Context, user *entity.User
         WherePK().
         Exec(ctx)
     if nil != updateErr {
-        return false, updateErr
+        return false, asUsernameAlreadyExists(updateErr)
     }
 
     if true == affectedAtLeastOneRow(result) {
@@ -321,3 +322,72 @@ func (instance *bunUserRepository) identifierList(ctx context.Context) ([]string
 }
 
 var _ UserRepository = (*bunUserRepository)(nil)
+
+/* ErrUsernameAlreadyExists is the refusal both write doors answer for a name another account holds, whether the preceding read or the unique index caught it, so the http doors answer 400 rather than 500. */
+var ErrUsernameAlreadyExists = errors.New("username already exists")
+
+/* asUsernameAlreadyExists maps the unique index's refusal onto ErrUsernameAlreadyExists: the read before the write cannot stop two concurrent callers, and the index is what holds the name. The refusal is matched on the index's own name, looked for down the whole chain of causes; any other failure is answered untouched. */
+func asUsernameAlreadyExists(writeErr error) error {
+    if nil == writeErr {
+        return nil
+    }
+
+    if false == errorChainNamesKey(writeErr, migration.UserUsernameIndexName) {
+        return writeErr
+    }
+
+    return ErrUsernameAlreadyExists
+}
+
+/* errorChainNamesKey answers whether any link of the chain, every branch of a joined error included, is the driver's duplicate refusal for the named index, read from the refusal's key clause rather than searched for in the text. The walk visits at most errorChainLinkLimit links across all branches, so a chain that closes on itself ends instead of exhausting the stack. */
+func errorChainNamesKey(err error, indexName string) bool {
+    remainingLinks := errorChainLinkLimit
+
+    var walk func(link error) bool
+    walk = func(link error) bool {
+        if nil == link || 0 == remainingLinks {
+            return false
+        }
+        remainingLinks--
+
+        if true == duplicateRefusalNamesKey(link.Error(), indexName) {
+            return true
+        }
+
+        if joined, isJoined := link.(interface{ Unwrap() []error }); true == isJoined {
+            for _, branch := range joined.Unwrap() {
+                if true == walk(branch) {
+                    return true
+                }
+            }
+
+            return false
+        }
+
+        return walk(errors.Unwrap(link))
+    }
+
+    return walk(err)
+}
+
+/* errorChainLinkLimit is far past any chain a write produces and small enough that a cyclic one ends at once. */
+const errorChainLinkLimit = 64
+
+/* duplicateRefusalNamesKey reads the key clause of a MySQL duplicate refusal, "for key '<table>.<index>'", and answers whether it names the index given, bare or qualified. The clause read is the last one, because the duplicated value is rendered unescaped before it and may spell a clause itself. */
+func duplicateRefusalNamesKey(text string, indexName string) bool {
+    const keyClause = "for key '"
+
+    clauseStart := strings.LastIndex(text, keyClause)
+    if -1 == clauseStart {
+        return false
+    }
+
+    key := text[clauseStart+len(keyClause):]
+    keyEnd := strings.Index(key, "'")
+    if -1 == keyEnd {
+        return false
+    }
+    key = key[:keyEnd]
+
+    return key == indexName || true == strings.HasSuffix(key, "."+indexName)
+}

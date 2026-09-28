@@ -114,6 +114,9 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     router.HandleWithOptions(route.ReportsApiHistoryPattern, handlerreport.ApiHistoryHandler(), frontendRoute(route.ReportsApiHistoryName, "GET"))
 
     router.HandleWithOptions(route.CurrenciesApiReadAllPattern, handlercurrency.ApiReadAllHandler(), frontendRoute(route.CurrenciesApiReadAllName, "GET"))
+    router.HandleWithOptions(route.CurrenciesApiCreatePattern, instance.throttledWrite(handlercurrency.ApiCreateHandler()), frontendRoute(route.CurrenciesApiCreateName, "POST"))
+    router.HandleWithOptions(route.CurrenciesApiUpdatePattern, instance.throttledWrite(handlercurrency.ApiUpdateHandler()), frontendRoute(route.CurrenciesApiUpdateName, "PUT"))
+    router.HandleWithOptions(route.CurrenciesApiDeletePattern, instance.throttledWrite(handlercurrency.ApiDeleteHandler()), frontendRoute(route.CurrenciesApiDeleteName, "DELETE"))
 
     router.HandleWithOptions(route.ProductsListPagePattern, handlerproduct.ListPageHandler(), frontendRoute(route.ProductsListPageName, "GET"))
     router.HandleWithOptions(route.ProductsCreatePagePattern, handlerproduct.CreatePageHandler(), frontendRoute(route.ProductsCreatePageName, "GET"))

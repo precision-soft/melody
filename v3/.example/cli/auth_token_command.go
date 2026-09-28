@@ -91,9 +91,9 @@ func (instance *AuthTokenCommand) Run(
         claims[examplesecurity.DeviceClaim] = device
     }
 
-    fmt.Println(signHs256(instance.secret, claims))
+    _, writeErr := fmt.Fprintln(commandContext.Writer(), signHs256(instance.secret, claims))
 
-    return nil
+    return writeErr
 }
 
 func signHs256(secret []byte, claims map[string]any) string {

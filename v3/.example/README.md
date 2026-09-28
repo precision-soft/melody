@@ -300,6 +300,14 @@ of it was proven by compilation.
   conversion at all; a code the catalogue does not carry is a `400`, while a product quoted in a currency the
   catalogue lost, or against a rate that is not a usable price, is the catalogue's fault and a `500` with the
   cause journaled.
+- The nomenclature is written through three doors that require `ROLE_EDITOR`, as the product writes do, while
+  the listing `GET /currencies/api/read/` keeps `ROLE_USER`: `POST /currencies/api/create/` takes an `id`
+  (minted when absent), a three-letter upper-case `code`, a `name` and the first `rate`, stamped with the
+  instant of the create and refused with a `400` when it is not a usable price; `PUT /currencies/api/update/:id/`
+  renames the code and the name and never writes the rate, which only the refresh quotes; `DELETE
+  /currencies/api/delete/:id/` removes the row. A missing currency is a `404` on both. The currencies are not
+  audited, and a product quoted in a deleted currency answers its conversion with a `500`, as it does for any
+  currency the catalogue lost.
 - `catalog:report:refresh` pushes its reading to `APP_REPORTING_EXPORT_ENDPOINT` when one is configured, and
   takes the command's exit code with it if the sink refuses.
 

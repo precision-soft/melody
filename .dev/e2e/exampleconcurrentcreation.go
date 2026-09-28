@@ -89,6 +89,51 @@ func assertExampleCreatesConcurrentlyWithDistinctIdentifiers(major exampleMajor,
         fail("%s: %d concurrent creates answered 201 with %d distinct identifiers", label, exampleConcurrentCreationCount, len(distinctIdList))
     }
     pass("%s: %d creates started together all answered 201 with distinct identifiers, and were removed", label, exampleConcurrentCreationCount)
+
+    assertExampleHoldsOneUsernameAgainstConcurrentCreates(label, client, redisAddress, rateLimitPrefix, mysqlDsn, major, runTag+"-same")
+}
+
+/* exampleSameUsernameCreationCount creates of one username start together: every one of them passes the read that precedes the insert before any commits, so only the unique key on the folded username can hold the name */
+const exampleSameUsernameCreationCount = 4
+
+func assertExampleHoldsOneUsernameAgainstConcurrentCreates(label string, client *exampleClient, redisAddress string, rateLimitPrefix string, mysqlDsn string, major exampleMajor, username string) {
+    resetExampleRateLimitCounters(label, redisAddress, rateLimitPrefix)
+
+    statusList := make([]int, exampleSameUsernameCreationCount)
+    idList := make([]string, exampleSameUsernameCreationCount)
+    start := make(chan struct{})
+    var group sync.WaitGroup
+    for index := 0; index < exampleSameUsernameCreationCount; index++ {
+        group.Add(1)
+        go func(index int) {
+            defer group.Done()
+            <-start
+            statusList[index], idList[index] = createExampleUser(client, username)
+        }(index)
+    }
+    close(start)
+    group.Wait()
+
+    createdIdList := []string{}
+    createdCount := 0
+    refusedCount := 0
+    for index, status := range statusList {
+        switch status {
+        case http.StatusCreated:
+            createdCount++
+            createdIdList = append(createdIdList, idList[index])
+        case http.StatusBadRequest:
+            refusedCount++
+        }
+    }
+
+    resetExampleRateLimitCounters(label, redisAddress, rateLimitPrefix)
+    removeExampleUsers(label, client, mysqlDsn, major, createdIdList)
+
+    if 1 != createdCount || exampleSameUsernameCreationCount-1 != refusedCount {
+        fail("%s: %d concurrent creates of one username answered %v, wanted one 201 and %d 400", label, exampleSameUsernameCreationCount, statusList, exampleSameUsernameCreationCount-1)
+    }
+    pass("%s: %d concurrent creates of one username answered one 201 and %d 400, and the account was removed", label, exampleSameUsernameCreationCount, exampleSameUsernameCreationCount-1)
 }
 
 func createExampleUser(client *exampleClient, username string) (int, string) {

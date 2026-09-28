@@ -50,6 +50,7 @@ func NewInMemoryStorageWithClock(cleanupInterval time.Duration, clockInstance cl
     return storage
 }
 
+/* InMemoryStorage holds the sessions of this process. The session map and the closed flag are read and written under mutex; the cleanup goroutine is stopped once, through stopCleanupOnce, and the interval and the clock are fixed at construction. */
 type InMemoryStorage struct {
     mutex           sync.RWMutex
     sessions        map[string]inMemorySessionEntry

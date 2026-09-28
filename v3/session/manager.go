@@ -26,6 +26,7 @@ const TombstoneRetention = 5 * time.Minute
 /* sessionStripeCount is the number of locks the per-session critical sections are spread over; a fixed number, since a map of locks would need a lock of its own to grow and prune. */
 const sessionStripeCount = 256
 
+/* Manager holds the tombstones of the deleted sessions and the ids a rotation retired, beside the storage it writes through. The check and the write of one session run under the stripe of sessionMutexes its id falls on, and the tombstone maps are read and written under tombstoneMutex, which is never held across the storage; the storage, the clock and the durations are fixed at construction. */
 type Manager struct {
     storage sessioncontract.Storage
     /* every instant the tombstone record reads comes from here, so a framework-wired manager agrees with the kernel's clock */

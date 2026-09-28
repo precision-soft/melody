@@ -46,6 +46,7 @@ func WithLockReleaseTimeout(releaseTimeout time.Duration) LockerOption {
     }
 }
 
+/* Locker holds the database handle and the release timeout, both fixed at construction. An advisory lock lives in postgres, on the connection that took it, so one Locker serves concurrent callers without a lock of its own. */
 type Locker struct {
     database       *bun.DB
     releaseTimeout time.Duration

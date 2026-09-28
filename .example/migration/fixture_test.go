@@ -170,7 +170,14 @@ func (instance *fakeConnection) QueryContext(ctx context.Context, query string, 
             return nil, hookErr
         }
 
-        return &fakeRows{columns: columns, rows: rows}, nil
+        if 0 < len(columns) {
+            return &fakeRows{columns: columns, rows: rows}, nil
+        }
+    }
+
+    /* a COUNT select always answers a row on a real server, so a double that answers none turns the step that asks the catalogue whether the username index is there into "sql: no rows in result set"; zero is what a fresh volume holds */
+    if true == strings.Contains(query, "information_schema.STATISTICS") {
+        return &fakeRows{columns: []string{"count"}, rows: [][]driver.Value{{int64(0)}}}, nil
     }
 
     return &fakeRows{columns: []string{}, rows: nil}, nil

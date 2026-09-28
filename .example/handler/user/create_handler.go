@@ -1,6 +1,7 @@
 package user
 
 import (
+    "errors"
     "encoding/json"
     nethttp "net/http"
     "strings"
@@ -74,6 +75,10 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
             normalizeRoles(dto.Roles),
         )
         if nil != createErr {
+            if true == errors.Is(createErr, repository.ErrUsernameAlreadyExists) {
+                return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "username already exists"), nil
+            }
+
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to create user", createErr), nil
         }
 

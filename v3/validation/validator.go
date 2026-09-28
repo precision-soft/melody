@@ -135,6 +135,7 @@ func NewValidator() *Validator {
     return validator
 }
 
+/* Validator holds the registry of named constraints and the constraints a parameterized rule built. The registry is read and written under mutex, so a constraint registered while values are validated is safe; the built constraints are kept in a sync.Map whose entries never go stale, since a registered name never changes constraint. */
 type Validator struct {
     mutex       sync.RWMutex
     constraints map[string]validationcontract.Constraint

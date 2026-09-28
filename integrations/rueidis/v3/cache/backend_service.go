@@ -36,6 +36,7 @@ func NewBackendService(
     }, nil
 }
 
+/* BackendService holds a redis client and the cache backend built over it, both fixed at construction. The entries live in redis, so one service serves concurrent callers without a lock. */
 type BackendService struct {
     client  rueidis.Client
     backend *Backend

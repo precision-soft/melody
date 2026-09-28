@@ -78,8 +78,13 @@ func (instance *InternalSignCommand) Run(
         return signErr
     }
 
-    fmt.Printf("%s\n", instance.signer.HeaderName())
-    fmt.Printf("%s\n", header)
+    writer := commandContext.Writer()
 
-    return nil
+    if _, writeErr := fmt.Fprintf(writer, "%s\n", instance.signer.HeaderName()); nil != writeErr {
+        return writeErr
+    }
+
+    _, writeErr := fmt.Fprintf(writer, "%s\n", header)
+
+    return writeErr
 }

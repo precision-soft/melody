@@ -49,6 +49,18 @@ const (
     CurrenciesApiReadAllName    = "example.currencies.api.read.all"
     CurrenciesApiReadAllPattern = CurrenciesPrefix + "/api/read/"
 
+    CurrenciesApiCreatePrefix  = CurrenciesPrefix + "/api/create"
+    CurrenciesApiCreateName    = "example.currencies.api.create"
+    CurrenciesApiCreatePattern = CurrenciesApiCreatePrefix + "/"
+
+    CurrenciesApiUpdatePrefix  = CurrenciesPrefix + "/api/update"
+    CurrenciesApiUpdateName    = "example.currencies.api.update"
+    CurrenciesApiUpdatePattern = CurrenciesApiUpdatePrefix + "/:id/"
+
+    CurrenciesApiDeletePrefix  = CurrenciesPrefix + "/api/delete"
+    CurrenciesApiDeleteName    = "example.currencies.api.delete"
+    CurrenciesApiDeletePattern = CurrenciesApiDeletePrefix + "/:id/"
+
     UsersPrefix = "/users"
 
     UsersListPageName    = "example.users.list.page"

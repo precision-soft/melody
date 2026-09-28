@@ -57,6 +57,8 @@ type queryRecorder struct {
     queryHook func(query string) ([]string, [][]driver.Value, error)
     /* rowsAffected answers the changed-row count of a statement; without it every statement changed one row */
     rowsAffected func(query string) int64
+    /* execHook answers the refusal a statement meets on the server; without it every statement succeeds */
+    execHook func(query string) error
 }
 
 func (instance *queryRecorder) record(query string) {
@@ -126,6 +128,12 @@ func (instance *fakeConnection) Begin() (driver.Tx, error) {
 
 func (instance *fakeConnection) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
     instance.recorder.record(query)
+
+    if nil != instance.recorder.execHook {
+        if hookErr := instance.recorder.execHook(query); nil != hookErr {
+            return nil, hookErr
+        }
+    }
 
     affected := int64(1)
     if nil != instance.recorder.rowsAffected {

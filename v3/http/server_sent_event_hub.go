@@ -25,6 +25,7 @@ func NewServerSentEventHub() *ServerSentEventHub {
     }
 }
 
+/* ServerSentEventHub holds the subscribers of every topic, the backplane and the logger for the life of the process. The subscriber maps, the closed flag, the backplane and the logger are read and written under mutex; publishesInFlight and publishesOutstanding count the publishes past the closed check so Shutdown waits for them, and the drop and failure counters are atomics read without the lock. */
 type ServerSentEventHub struct {
     mutex              sync.RWMutex
     subscribersByTopic map[string]map[*ServerSentEventSubscriber]struct{}

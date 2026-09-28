@@ -162,6 +162,11 @@ func newFlagContext(role string, user string) *flagContext {
     return &flagContext{stringByName: map[string]string{"role": role, "user": user}}
 }
 
+/* newFlagContextWithWriter is the grant arm for a test that reads what the command printed */
+func newFlagContextWithWriter(role string, user string, writer io.Writer) *flagContext {
+    return &flagContext{stringByName: map[string]string{"role": role, "user": user}, writer: writer}
+}
+
 /* newBoolFlagContext is the arm the reset command needs: its only flag is a bool, and what a test of that
    command reads is what the command wrote, so this one carries a writer of its own. */
 func newBoolFlagContext(flagName string, value bool, writer io.Writer) *flagContext {

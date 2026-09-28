@@ -283,6 +283,7 @@ func WithRevocationEpochRetention(retention time.Duration) TokenStoreOption {
     }
 }
 
+/* RedisTokenStore holds a redis client and the settings of the store — the base context, the key prefix, the scan batch, the clock, the retention and skew bounds and the per-call timeout — all fixed at construction. The tokens and the revocation epochs live in redis, so one store serves concurrent callers without a lock. */
 type RedisTokenStore struct {
     client                     rueidis.Client
     ctx                        context.Context

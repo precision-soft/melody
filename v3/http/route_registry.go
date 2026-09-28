@@ -23,6 +23,7 @@ const (
     BootCollisionKindHttpRouteName = "httpRouteName"
 )
 
+/* RouteRegistry holds the routes in registration order, by name and by dispatch identity. It has no lock of its own: its only writer is the registration of the Router that owns it, refused once that Router is serving, so after boot it is only read; the boot collision recorder is set and cleared by the application around the boot window. */
 type RouteRegistry struct {
     routes      []route
     routeByName map[string]route

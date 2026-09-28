@@ -43,12 +43,14 @@ func (instance *GrantRoleCommand) Flags() []melodyclicontract.Flag {
 }
 
 func (instance *GrantRoleCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext melodyclicontract.Context) error {
+    writer := commandContext.Writer()
+
     /* the flag is trimmed and judged against the roles the application knows before anything is read, as the two admin doors normalise what they store: an untrimmed role would never match the no-op check and be appended on every re-run, and a misspelt one would be reported as granted while the voter, which compares exactly, grants nothing */
     role := strings.TrimSpace(commandContext.String("role"))
     user := commandContext.String("user")
 
     if "" == role {
-        fmt.Println("no role given; pass --role to grant one")
+        _, _ = fmt.Fprintln(writer, "no role given; pass --role to grant one")
 
         return nil
     }
@@ -73,7 +75,7 @@ func (instance *GrantRoleCommand) Run(runtimeInstance melodyruntimecontract.Runt
         return findErr
     }
 
-    fmt.Printf("user service resolved lazily: user %q known=%t\n", user, known)
+    _, _ = fmt.Fprintf(writer, "user service resolved lazily: user %q known=%t\n", user, known)
 
     if false == known {
         return fmt.Errorf("user %q does not exist", user)
@@ -84,7 +86,7 @@ func (instance *GrantRoleCommand) Run(runtimeInstance melodyruntimecontract.Runt
     if nil != grantErr {
         /* a grant whose write committed and whose listeners then refused is not a failed grant: the role is in the directory and the account's cache entries are not dropped, and the operator reads both rather than re-running a grant the re-run would find held */
         if nil != granted && repository.GrantRoleGranted == outcome {
-            fmt.Printf("granted role %q to user %q, but the listeners that drop the account's cache entries were not told: %v\n", role, user, grantErr)
+            _, _ = fmt.Fprintf(writer, "granted role %q to user %q, but the listeners that drop the account's cache entries were not told: %v\n", role, user, grantErr)
 
             return fmt.Errorf("the role was granted, and the cache entries of user %q could not be dropped: %w", user, grantErr)
         }
@@ -96,16 +98,16 @@ func (instance *GrantRoleCommand) Run(runtimeInstance melodyruntimecontract.Runt
     case repository.GrantRoleAccountAbsent:
         return fmt.Errorf("user %q disappeared before the role could be granted", user)
     case repository.GrantRoleAlreadyHeld:
-        fmt.Printf("user %q already holds role %q; nothing to do\n", user, role)
+        _, _ = fmt.Fprintf(writer, "user %q already holds role %q; nothing to do\n", user, role)
 
         return nil
     }
 
-    fmt.Printf("granted role %q to user %q\n", role, user)
+    _, _ = fmt.Fprintf(writer, "granted role %q to user %q\n", role, user)
 
     /* the listeners that drop the account's cache entries ran in THIS process: on the shared cache that is the server's view too, on the in-process fallback it is not, and a session opened against the server keeps the roles it cached until that server restarts */
     if true == cacheIsProcessLocal(runtimeInstance) {
-        fmt.Println(processLocalCacheNotice)
+        _, _ = fmt.Fprintln(writer, processLocalCacheNotice)
     }
 
     return nil
