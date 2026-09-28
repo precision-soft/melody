@@ -554,3 +554,38 @@ func TestBootCli_LeavesTheDebugVersionApplicationSlotEmpty(t *testing.T) {
         t.Fatalf("expected the wiring to leave the application slot empty, got %q", versionCommand.ApplicationVersion)
     }
 }
+
+func bootCliCommandNames(t *testing.T, environmentName string) map[string]bool {
+    t.Helper()
+
+    applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{config.EnvKey: environmentName})
+
+    applicationInstance.bootCli()
+
+    names := make(map[string]bool, len(applicationInstance.cliCommands))
+    for _, command := range applicationInstance.cliCommands {
+        names[command.Name()] = true
+    }
+
+    return names
+}
+
+/* the debug family reads the container's services and the resolved parameters, secrets among them, so outside development only debug:router is registered: a production binary answers every other debug command as not found */
+func TestBootCli_RegistersTheDebugFamilyOnlyInDevelopment(t *testing.T) {
+    developmentNames := bootCliCommandNames(t, config.EnvDevelopment)
+    productionNames := bootCliCommandNames(t, config.EnvProduction)
+
+    for _, name := range []string{"debug:container", "debug:parameters", "debug:events", "debug:middleware", "debug:version"} {
+        if false == developmentNames[name] {
+            t.Fatalf("expected %s registered in development, got %v", name, developmentNames)
+        }
+
+        if true == productionNames[name] {
+            t.Fatalf("expected %s absent in production, got %v", name, productionNames)
+        }
+    }
+
+    if false == productionNames["debug:router"] {
+        t.Fatalf("expected debug:router registered in production too, got %v", productionNames)
+    }
+}

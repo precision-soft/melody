@@ -548,6 +548,105 @@ func TestResolverContext_AScopedParentWritesNoEdgeIntoTheContainerGraph(t *testi
     }
 }
 
+type lateViewOwner struct {
+    recorder *closeOrderRecorder
+    resolver containercontract.Resolver
+}
+
+func (instance *lateViewOwner) Close() error {
+    instance.recorder.record("owner")
+
+    return nil
+}
+
+/* a view kept by a provider that returned resolves on a chain of its own: resolved while the resolution that built its owner is still building another node, the dependency lands on the view's owner and not on the node the live chain is building, so the owner closes before what it resolved */
+func TestResolverContext_AViewWhoseProviderReturnedRecordsItsOwnersDependency(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 3)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    MustRegister[*closeOrderServiceA](serviceContainer, "service.a", func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+        return &closeOrderServiceA{recorder: recorder}, nil
+    })
+
+    MustRegister[*lateViewOwner](serviceContainer, "app.owner", func(resolver containercontract.Resolver) (*lateViewOwner, error) {
+        return &lateViewOwner{recorder: recorder, resolver: resolver}, nil
+    })
+
+    MustRegister[*closeOrderServiceB](serviceContainer, "service.b", func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+        owner, ownerErr := FromResolver[*lateViewOwner](resolver, "app.owner")
+        if nil != ownerErr {
+            return nil, ownerErr
+        }
+
+        /* the owner's provider has returned and this provider is still running on the same chain */
+        if _, lateErr := FromResolver[*closeOrderServiceA](owner.resolver, "service.a"); nil != lateErr {
+            return nil, lateErr
+        }
+
+        return &closeOrderServiceB{recorder: recorder}, nil
+    })
+
+    MustFromResolver[*closeOrderServiceB](serviceContainer, "service.b")
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if "b,owner,a" != strings.Join(closeSequence, ",") {
+        t.Fatalf("expected b, then the owner, then what the owner resolved, got %v", closeSequence)
+    }
+}
+
+/* the same through the by-type door: resolved while the resolution that built its owner is still building another node, the dependency lands on the view's owner and not on the node the live chain is building, so the owner closes before what it resolved */
+func TestResolverContext_AViewWhoseProviderReturnedRecordsItsOwnersDependencyByType(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 3)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    MustRegister[*closeOrderServiceA](serviceContainer, "service.a", func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+        return &closeOrderServiceA{recorder: recorder}, nil
+    })
+
+    MustRegister[*lateViewOwner](serviceContainer, "app.owner", func(resolver containercontract.Resolver) (*lateViewOwner, error) {
+        return &lateViewOwner{recorder: recorder, resolver: resolver}, nil
+    })
+
+    MustRegister[*closeOrderServiceB](serviceContainer, "service.b", func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+        owner, ownerErr := FromResolver[*lateViewOwner](resolver, "app.owner")
+        if nil != ownerErr {
+            return nil, ownerErr
+        }
+
+        /* the owner's provider has returned and this provider is still running on the same chain */
+        if _, lateErr := FromResolverByType[*closeOrderServiceA](owner.resolver); nil != lateErr {
+            return nil, lateErr
+        }
+
+        return &closeOrderServiceB{recorder: recorder}, nil
+    })
+
+    MustFromResolver[*closeOrderServiceB](serviceContainer, "service.b")
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if "b,owner,a" != strings.Join(closeSequence, ",") {
+        t.Fatalf("expected b, then the owner, then what the owner resolved, got %v", closeSequence)
+    }
+}
+
 type lateLeafA struct{}
 
 type lateLeafB struct {

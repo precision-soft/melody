@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- documentation: the readme documents `IsDuplicateKey`, which answers whether an error, or one it wraps, is the driver's duplicate key refusal (1062), and `ConnectionConfig` with `NewConnectionConfig`, the record whose `SafeContext` carries every failed open without the password. Both were published with no line in the readme, and the third major's binding now documents them.
+
 ### Fixed
 
 - documentation: the README says how the host is joined with the port: an IPv6 literal may be bare or in brackets, a bare one is bracketed, a bracketed one is kept, and a scoped literal keeps its zone.

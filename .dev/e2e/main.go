@@ -165,6 +165,7 @@ func main() {
         infrastructureSections++
         section("AMQP PUBLISH/CONSUME (live rabbitmq)")
         runAmqpCheck(dsn)
+        runAmqpDelayedRedeliveryCheck(dsn)
         sections++
     }
 

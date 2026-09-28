@@ -1,7 +1,6 @@
 package user
 
 import (
-    "errors"
     "encoding/json"
     nethttp "net/http"
     "strings"
@@ -107,11 +106,12 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
             targetUser.Roles,
         )
         if nil != updateErr {
-            if true == errors.Is(updateErr, repository.ErrUsernameAlreadyExists) {
-                return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "username already exists"), nil
+            status, message := userWriteRefusalStatus(updateErr, "failed to update user")
+            if nethttp.StatusBadRequest == status {
+                return presenter.ApiError(runtimeInstance, request, status, message), nil
             }
 
-            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to update user", updateErr), nil
+            return presenter.ApiErrorWithErr(runtimeInstance, request, status, message, updateErr), nil
         }
 
         if false == updated {

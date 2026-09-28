@@ -8,6 +8,7 @@ import (
     "github.com/precision-soft/melody/v3/internal/testhelper"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     "github.com/precision-soft/melody/v3/security"
+    "github.com/precision-soft/melody/v3/security/accesscontrol"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
@@ -180,4 +181,71 @@ func TestCompile_DescribesTheFrameworksPathPrefixMatcher(t *testing.T) {
     if `path prefix "/admin"` != compiledConfiguration.Firewalls()[0].MatcherDescription() {
         t.Fatalf("expected the matcher described, got %q", compiledConfiguration.Firewalls()[0].MatcherDescription())
     }
+}
+
+/* compileMergeStrategyFirewall compiles one firewall under the strategy given: the global policy and the firewall's own both claim /admin under a different role, so the order of the merged rules decides which answers, and only the global policy claims /reports, so whether it was inherited at all is read there */
+func compileMergeStrategyFirewall(t *testing.T, mergeStrategy AccessControlMergeStrategy) *security.AccessControl {
+    t.Helper()
+
+    builder := NewBuilder()
+
+    builder.SetGlobal(
+        security.NewAccessControl(
+            accesscontrol.NewSegmentPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_GLOBAL"}}),
+            accesscontrol.NewSegmentPrefixRule("/reports", accesscontrol.RuleConfig{Attributes: []string{"ROLE_GLOBAL"}}),
+        ),
+        nil,
+        nil,
+        nil,
+        nil,
+    )
+
+    builder.AddStatelessFirewall(
+        "api",
+        security.NewPathPrefixMatcher("/"),
+        nil,
+        &anonymousTokenSource{},
+        NewFirewallOverrideConfiguration().
+            WithAccessControl(security.NewAccessControl(
+                accesscontrol.NewSegmentPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}}),
+            )).
+            WithMergeStrategy(mergeStrategy),
+    )
+
+    return builder.BuildAndCompile().Firewalls()[0].AccessControl()
+}
+
+func assertMergedAccessControlAnswers(t *testing.T, accessControl *security.AccessControl, path string, expected string) {
+    t.Helper()
+
+    attributes, matched := accessControl.Match(path)
+    actual := strings.Join(attributes, ",")
+    if false == matched {
+        actual = "no rule"
+    }
+
+    if expected != actual {
+        t.Fatalf("expected %s to answer %s, got %s", path, expected, actual)
+    }
+}
+
+func TestCompile_TheLocalFirstStrategyPutsTheFirewallsRulesAheadOfTheGlobalOnes(t *testing.T) {
+    accessControl := compileMergeStrategyFirewall(t, AccessControlMergeLocalFirst)
+
+    assertMergedAccessControlAnswers(t, accessControl, "/admin", "ROLE_LOCAL")
+    assertMergedAccessControlAnswers(t, accessControl, "/reports", "ROLE_GLOBAL")
+}
+
+func TestCompile_TheGlobalFirstStrategyPutsTheGlobalRulesAheadOfTheFirewalls(t *testing.T) {
+    accessControl := compileMergeStrategyFirewall(t, AccessControlMergeGlobalFirst)
+
+    assertMergedAccessControlAnswers(t, accessControl, "/admin", "ROLE_GLOBAL")
+    assertMergedAccessControlAnswers(t, accessControl, "/reports", "ROLE_GLOBAL")
+}
+
+func TestCompile_TheOverrideOnlyStrategyIgnoresTheGlobalRules(t *testing.T) {
+    accessControl := compileMergeStrategyFirewall(t, AccessControlMergeOverrideOnly)
+
+    assertMergedAccessControlAnswers(t, accessControl, "/admin", "ROLE_LOCAL")
+    assertMergedAccessControlAnswers(t, accessControl, "/reports", "no rule")
 }

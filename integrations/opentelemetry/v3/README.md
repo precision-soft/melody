@@ -59,6 +59,24 @@ tracingMiddleware := opentelemetry.NewTracingMiddleware(tracer, nil) // nil -> W
 
 The tracing middleware extracts the incoming trace context from request headers, starts a server span per request (named `<METHOD> <route>`), injects the span context into the runtime passed downstream, records method/route/status attributes with the status decided as the metrics decide it — including a status the handler writes directly, as streaming, proxy and upgrade handlers do — and marks the span as errored when the status the client receives is a 5xx; a handler error is recorded on the span as an exception event either way.
 
+### Lifecycle decorator
+
+The middlewares see a request only once the kernel routed it, so a security denial, a response a `kernel.request` listener wrote and the panic-recovery path leave no span and no metric there. [`NewHandlerDecorator`](./handler_decorator.go) builds the outermost seam instead: it wraps the whole `nethttp.Handler` the http kernel produces.
+
+```go
+decorator, decoratorErr := opentelemetry.NewHandlerDecorator(opentelemetry.HandlerDecoratorConfig{
+    Tracer: tracer, // required: a nil tracer is refused with "handler decorator tracer is nil"
+    Meter:  meter,  // optional
+})
+if nil != decoratorErr {
+    return decoratorErr
+}
+
+app.RegisterHttpHandlerDecorator(decorator) // or ModuleConfig.HandlerDecorators
+```
+
+Every request, short-circuited ones included, gets a lifecycle span; the tracing middleware's span becomes its child through the context the decorator injects. `Propagator` defaults to W3C TraceContext. With a `Meter`, the decorator counts and times under `http.server.lifecycle.request.count` and `http.server.lifecycle.request.duration`, names distinct from the middleware's `http.server.request.*`, so a routed request is not counted twice.
+
 ### OTLP export
 
 The `TracerProvider` the tracing middleware needs is not something you have to assemble yourself: the [`otlp`](./otlp) subpackage ships one wired to an OTLP exporter.
@@ -101,6 +119,7 @@ app.RegisterModule(opentelemetry.NewModule(opentelemetry.ModuleConfig{
     Middlewares:    []httpcontract.Middleware{metricsMiddleware, tracingMiddleware},
     MetricsHandler: metricsHandler,
     MetricsPath:    "/metrics",
+    // HandlerDecorators: []applicationcontract.HttpHandlerDecorator{decorator},
 }))
 ```
 

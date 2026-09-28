@@ -80,6 +80,15 @@ func (instance *Application) RegisterHttpHandlerDecorator(decorator applicationc
     instance.httpHandlerDecorators = append(instance.httpHandlerDecorators, decorator)
 }
 
+/* decorateHttpHandler wraps the handler the http kernel built in the registered decorators, last to first, so the first registered decorator ends up outermost */
+func (instance *Application) decorateHttpHandler(httpHandler nethttp.Handler) nethttp.Handler {
+    for index := len(instance.httpHandlerDecorators) - 1; 0 <= index; index-- {
+        httpHandler = instance.httpHandlerDecorators[index](httpHandler)
+    }
+
+    return httpHandler
+}
+
 /* OnHttpShutdown registers a callback that runs as soon as the http server begins shutting down, before it waits for connections to drain. It is how an application unwinds handlers the server cannot: `http.Server.Shutdown` neither cancels the contexts of in-flight requests nor tracks hijacked connections, so a Server-Sent Events stream or a websocket blocks the whole shutdown timeout and is then cut mid-flight. Closing the hub those handlers select on (`ServerSentEventHub.Shutdown`) releases them at once. */
 func (instance *Application) OnHttpShutdown(hook func()) {
     if true == instance.booted {
@@ -153,12 +162,7 @@ func (instance *Application) runHttp(
         instance.httpMiddlewares.all(instance.kernel)...,
     )
 
-    httpHandler := httpKernel.ServeHttp(instance.kernel.ServiceContainer())
-
-    /* last-to-first, so the first registered decorator ends up outermost */
-    for index := len(instance.httpHandlerDecorators) - 1; 0 <= index; index-- {
-        httpHandler = instance.httpHandlerDecorators[index](httpHandler)
-    }
+    httpHandler := instance.decorateHttpHandler(httpKernel.ServeHttp(instance.kernel.ServiceContainer()))
 
     httpServer := &nethttp.Server{
         Addr:    configuration.Http().Address(),

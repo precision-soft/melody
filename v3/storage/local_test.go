@@ -504,3 +504,17 @@ func TestLocalStorage_PutStoresAKeyWhoseLeafFillsTheFilesystemComponent(t *testi
         t.Fatalf("expected only the stored object in the directory, got %d entries", len(entries))
     }
 }
+
+/* a local directory has no signing authority to delegate a read to, so the door refuses rather than handing out a path a client could not use */
+func TestLocalStorage_PresignedUrlIsRefused(t *testing.T) {
+    local := NewLocalStorage(t.TempDir())
+
+    url, presignErr := local.PresignedUrl(nil, "reports/report.csv", time.Minute)
+    if nil == presignErr || false == strings.Contains(presignErr.Error(), "presigned urls are not supported by local storage") {
+        t.Fatalf("expected the local storage to refuse a presigned url, got %v", presignErr)
+    }
+
+    if "" != url {
+        t.Fatalf("expected no url beside the refusal, got %q", url)
+    }
+}

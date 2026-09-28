@@ -6,6 +6,7 @@ import (
     "errors"
     "math"
     "os"
+    "strconv"
     "strings"
     "sync"
     "testing"
@@ -3114,5 +3115,106 @@ func TestPositiveOrDefault_ANonPositiveDurationIsTheDefault(t *testing.T) {
 func TestTransport_AZeroPublishTimeoutIsTheDefaultBudget(t *testing.T) {
     if resolved := (&Transport{}).resolvedPublishTimeout(); defaultPublishTimeout != resolved {
         t.Fatalf("expected a transport built without a publish timeout to take the default %v, got %v", defaultPublishTimeout, resolved)
+    }
+}
+
+func TestTransport_MainTargetIsTheConfiguredExchangeAndRoutingKey(t *testing.T) {
+    routed := &Transport{queue: "orders.queue", exchange: "orders.direct", routingKey: "orders"}
+    if exchange, routingKey := routed.mainTarget(); "orders.direct" != exchange || "orders" != routingKey {
+        t.Fatalf("expected the configured exchange and routing key, got %q %q", exchange, routingKey)
+    }
+
+    direct := &Transport{queue: "orders.queue", routingKey: "ignored"}
+    if exchange, routingKey := direct.mainTarget(); "" != exchange || "orders.queue" != routingKey {
+        t.Fatalf("expected the default exchange keyed by the queue, got %q %q", exchange, routingKey)
+    }
+}
+
+/* the transport declares the direct exchange and binds its queue under the routing key; a probe queue bound under the same key receives a copy of the Send only when the publish goes through the exchange under that key, which a publish straight to the queue never delivers */
+func TestTransport_SendRoutesThroughTheConfiguredExchangeAndRoutingKey(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+
+    provider := NewProvider()
+    connection, openErr := provider.Open(dsn)
+    if nil != openErr {
+        t.Fatalf("open connection: %v", openErr)
+    }
+    defer provider.Close(connection)
+
+    suffix := strconv.FormatInt(time.Now().UnixNano(), 10)
+    queueName := "melody.amqp.test.routed." + suffix
+    exchangeName := "melody.amqp.test.direct." + suffix
+
+    registry := NewMessageRegistry()
+    RegisterMessage[testMessage](registry, "amqp.test.message")
+
+    transport := NewTransport(TransportConfig{
+        Connection: connection,
+        Queue:      queueName,
+        Exchange:   exchangeName,
+        RoutingKey: "orders",
+        Registry:   registry,
+    })
+    defer transport.Close()
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+
+    queue, receiveErr := transport.Receive(runtimeInstance)
+    if nil != receiveErr {
+        t.Fatalf("receive: %v", receiveErr)
+    }
+
+    channel, channelErr := connection.Channel()
+    if nil != channelErr {
+        t.Fatalf("open channel: %v", channelErr)
+    }
+    defer channel.Close()
+    defer func() {
+        _, _ = channel.QueueDelete(queueName, false, false, false)
+        _, _ = channel.QueueDelete(queueName+".delay", false, false, false)
+        for _, bucket := range transport.delayBuckets {
+            _, _ = channel.QueueDelete(delayBucketQueueName(queueName, bucket), false, false, false)
+        }
+        _ = channel.ExchangeDelete(exchangeName, false, false)
+    }()
+
+    probeQueue, probeErr := channel.QueueDeclare("", false, true, true, false, nil)
+    if nil != probeErr {
+        t.Fatalf("declare probe queue: %v", probeErr)
+    }
+
+    if bindErr := channel.QueueBind(probeQueue.Name, "orders", exchangeName, false, nil); nil != bindErr {
+        t.Fatalf("bind probe queue: %v", bindErr)
+    }
+
+    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 7, Name: "routed"})); nil != sendErr {
+        t.Fatalf("send through the exchange: %v", sendErr)
+    }
+
+    select {
+    case envelopeInstance := <-queue:
+        messageInstance, isType := envelopeInstance.Message().(testMessage)
+        if false == isType || 7 != messageInstance.Id {
+            t.Fatalf("unexpected message %#v", envelopeInstance.Message())
+        }
+
+        if ackErr := transport.Ack(runtimeInstance, envelopeInstance); nil != ackErr {
+            t.Fatalf("ack: %v", ackErr)
+        }
+    case <-time.After(10 * time.Second):
+        t.Fatalf("timed out waiting for the message routed through the exchange")
+    }
+
+    delivery, delivered, getErr := channel.Get(probeQueue.Name, true)
+    if nil != getErr {
+        t.Fatalf("read the probe queue: %v", getErr)
+    }
+
+    if false == delivered || "amqp.test.message" != delivery.Headers["x-message-type"] {
+        t.Fatalf("expected the probe queue bound under the routing key to hold a copy of the send, delivered=%v headers=%v", delivered, delivery.Headers)
     }
 }

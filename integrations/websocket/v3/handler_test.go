@@ -1100,3 +1100,57 @@ func TestStreamHandler_RefusesAShutDownHubBeforeTheUpgrade(t *testing.T) {
         t.Fatalf("expected no subscription on a shut-down hub, got %d", hub.SubscriberCount("demo"))
     }
 }
+
+func TestStreamHandler_BinaryWritesDeliverTheBroadcastAsABinaryFrame(t *testing.T) {
+    hub := melodyhttp.NewServerSentEventHub()
+
+    handler := NewStreamHandler(hub, Options{
+        TopicResolver:  func(request httpcontract.Request) string { return "demo" },
+        OriginPatterns: []string{"*"},
+        IdleTimeout:    30 * time.Second,
+        BinaryWrites:   true,
+    })
+
+    server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+        serviceContainer := container.NewContainer()
+        runtimeInstance := runtime.New(request.Context(), serviceContainer.NewScope(), serviceContainer)
+        melodyRequest := melodyhttp.NewRequest(request, nil, runtimeInstance, nil)
+        handler(runtimeInstance, writer, melodyRequest)
+    }))
+    defer server.Close()
+
+    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    defer cancel()
+
+    wsUrl := "ws" + strings.TrimPrefix(server.URL, "http")
+
+    connection, _, dialErr := coderwebsocket.Dial(ctx, wsUrl, nil)
+    if nil != dialErr {
+        t.Fatalf("dial: %v", dialErr)
+    }
+    defer connection.CloseNow()
+
+    subscribeDeadline := time.Now().Add(2 * time.Second)
+    for hub.SubscriberCount("demo") < 1 {
+        if true == time.Now().After(subscribeDeadline) {
+            t.Fatalf("the websocket handler did not subscribe to the hub in time")
+        }
+        time.Sleep(time.Millisecond)
+    }
+
+    delivered := hub.Broadcast("demo", melodyhttp.ServerSentEvent{Event: "notification", Data: "hello-ws"})
+    if 1 != delivered {
+        t.Fatalf("expected the broadcast to reach 1 subscriber, got %d", delivered)
+    }
+
+    messageType, payload, readErr := connection.Read(ctx)
+    if nil != readErr {
+        t.Fatalf("read: %v", readErr)
+    }
+
+    if coderwebsocket.MessageBinary != messageType || "hello-ws" != string(payload) {
+        t.Fatalf("unexpected message: %v %q", messageType, payload)
+    }
+
+    connection.Close(coderwebsocket.StatusNormalClosure, "")
+}

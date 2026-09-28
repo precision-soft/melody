@@ -5,6 +5,7 @@ import (
     "errors"
     "net"
     nethttp "net/http"
+    "net/http/httptest"
     "slices"
     "strings"
     "sync"
@@ -12,6 +13,7 @@ import (
     "testing"
     "time"
 
+    applicationcontract "github.com/precision-soft/melody/v3/application/contract"
     "github.com/precision-soft/melody/v3/config"
     configcontract "github.com/precision-soft/melody/v3/config/contract"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
@@ -1179,4 +1181,82 @@ func TestWrapHttpShutdownHook_FilesAPanicWhoseErrorOrUnwrapPanics(t *testing.T) 
             t.Fatalf("%s: expected one record %q, got %v", name, testCase.message, logger.messages)
         }
     }
+}
+
+type decoratorContributingModule struct {
+    fakeModule
+    decorators []applicationcontract.HttpHandlerDecorator
+}
+
+func (instance decoratorContributingModule) RegisterHttpHandlerDecorators(kernelInstance kernelcontract.Kernel) []applicationcontract.HttpHandlerDecorator {
+    return instance.decorators
+}
+
+func recordingHttpHandlerDecorator(name string, sequence *[]string) applicationcontract.HttpHandlerDecorator {
+    return func(next nethttp.Handler) nethttp.Handler {
+        return nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+            *sequence = append(*sequence, name)
+            next.ServeHTTP(writer, request)
+        })
+    }
+}
+
+/* the registered decorator comes first and the module's after it, since modules contribute theirs at boot; a nil the module hands back is skipped rather than called */
+func TestApplicationDecorateHttpHandler_TheFirstRegisteredDecoratorIsOutermost(t *testing.T) {
+    applicationInstance := NewApplication(
+        context.Background(),
+        testhelper.NewEmbeddedEnvFs(),
+        testhelper.NewEmbeddedStaticFs(),
+    )
+
+    sequence := make([]string, 0, 4)
+
+    applicationInstance.RegisterHttpHandlerDecorator(recordingHttpHandlerDecorator("registered", &sequence))
+    applicationInstance.RegisterModule(decoratorContributingModule{
+        fakeModule: fakeModule{name: "decorator.module"},
+        decorators: []applicationcontract.HttpHandlerDecorator{
+            nil,
+            recordingHttpHandlerDecorator("module", &sequence),
+        },
+    })
+
+    applicationInstance.Boot()
+
+    handler := applicationInstance.decorateHttpHandler(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+        sequence = append(sequence, "kernel")
+    }))
+
+    handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/", nil))
+
+    if "registered,module,kernel" != strings.Join(sequence, ",") {
+        t.Fatalf("expected the registered decorator outermost, then the module's, then the kernel's handler, got %v", sequence)
+    }
+}
+
+func TestApplicationRegisterHttpHandlerDecorator_PanicsOnNil(t *testing.T) {
+    applicationInstance := NewApplication(
+        context.Background(),
+        testhelper.NewEmbeddedEnvFs(),
+        testhelper.NewEmbeddedStaticFs(),
+    )
+
+    testhelper.AssertPanicsWithError(t, func() {
+        applicationInstance.RegisterHttpHandlerDecorator(nil)
+    }, "http handler decorator may not be nil")
+}
+
+func TestApplicationRegisterHttpHandlerDecorator_PanicsAfterBoot(t *testing.T) {
+    applicationInstance := NewApplication(
+        context.Background(),
+        testhelper.NewEmbeddedEnvFs(),
+        testhelper.NewEmbeddedStaticFs(),
+    )
+
+    applicationInstance.Boot()
+
+    testhelper.AssertPanicsWithError(t, func() {
+        applicationInstance.RegisterHttpHandlerDecorator(func(next nethttp.Handler) nethttp.Handler {
+            return next
+        })
+    }, "may not register http handler decorators after boot")
 }

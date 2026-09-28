@@ -83,6 +83,24 @@ Retrying is **opt-in**: without a `RetryConfig`, `Open` makes a single attempt. 
 
 The lock's own release/verify round trips are bounded separately by [`WithLockReleaseTimeout`](./lock.go) (default 5s).
 
+### Recognising a duplicate key, and the connection record
+
+[`mysql.IsDuplicateKey(err)`](./mysql_error.go) answers whether `err`, or any error it wraps, is the driver's `*mysql.MySQLError` with number `1062` (`ER_DUP_ENTRY`). A repository uses it to turn a unique key's refusal into its own domain error instead of a 500:
+
+```go
+if _, insertErr := database.NewInsert().Model(row).Exec(ctx); nil != insertErr {
+    if true == mysql.IsDuplicateKey(insertErr) {
+        return ErrUsernameAlreadyExists
+    }
+
+    return insertErr
+}
+```
+
+It says nothing about which key refused; read the key clause of the driver's message when a table carries more than one.
+
+[`mysql.ConnectionConfig`](./connection_config.go) is the record the provider builds from the `ConnectionParameters` at open time, through [`NewConnectionConfig`](./connection_config.go). Its `SafeContext` names the host, the port, the database and the user, and leaves the password out. That is the shape every failed-open error carries, so a diagnostic never prints the credential. An application does not need to build one to open a database.
+
 ### Opening under a context, and opening for migrations
 
 - [`Provider.OpenContext`](./provider.go) implements [`bunorm.ContextOpener`](../../v3/provider.go): the retry sleeps watch the caller's context alongside the clock, so a shutdown that cancels it reaches a retry loop in flight instead of sleeping through the whole remaining budget. The registry prefers it and hands the context it was constructed with.

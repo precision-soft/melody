@@ -330,6 +330,8 @@ Per `CronJob`:
 | `--namespace`      | `melody.cron.k8s.namespace`      | optional; omitted from the manifest when empty                          |
 | `--restart-policy` | `melody.cron.k8s.restart_policy` | optional; default `OnFailure`; only `OnFailure` or `Never` are accepted |
 
+A namespace that is set must be an RFC 1123 label: lowercase alphanumerics and `-`, starting and ending with an alphanumeric, at most 63 characters. Any other value is refused with `ErrK8sInvalidNamespace` before a manifest is written, because `kubectl apply` would refuse it after the generation had reported success.
+
 These parameters are **not** registered by `RegisterDefaultParameters` (the crontab template needs none of them); set them via the flags or register them yourself. The heartbeat options (`--heartbeat-path` / `--heartbeat-command`) are crontab-only and are ignored by the `k8s` template (which prints a warning when they are set, so the dropped liveness entry is not silent) — model cluster liveness with a dedicated scheduled command instead.
 
 ### Registering a custom template
@@ -606,6 +608,6 @@ The **v3 binding only** additionally exposes:
 
 * The built-in `k8s` template: `K8sTemplate`, `TemplateNameK8s`.
 * Its parameter-name constants: `ParameterImage`, `ParameterNamespace`, `ParameterRestartPolicy`.
-* Its sentinel errors: `ErrK8sImageMissing`, `ErrK8sInvalidRestartPolicy`, `ErrK8sInvalidName`, `ErrK8sDuplicateName`.
+* Its sentinel errors: `ErrK8sImageMissing`, `ErrK8sInvalidRestartPolicy`, `ErrK8sInvalidNamespace`, `ErrK8sInvalidName`, `ErrK8sDuplicateName`.
 * `Commands(configuration *Configuration) []clicontract.Command` ([`v3/command.go`](./v3/command.go)) — the integration's commands as a slice, for applications that wire `RegisterCliCommands` by hand instead of registering the module.
 * `(*Configuration).InTimezone(name string) *Configuration` and `(*Configuration).TimezoneName() string` ([`v3/configuration.go`](./v3/configuration.go)), the runner's `--timezone` flag ([`v3/runner_command.go`](./v3/runner_command.go)) and `ErrUnknownTimezone` ([`v3/errors.go`](./v3/errors.go)) — the zone the in-process runner evaluates under. See the timezone caveat above for what it does and does not reach.
