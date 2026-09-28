@@ -39,8 +39,8 @@ type exampleMajor struct {
     port              int
     /* integrationDemos is off for v3 on purpose. Its example drives the same rate-limit counter that EXAMPLE OVER HTTP measures an exact exhaustion point on against the supervised application, so running the demos here as well would spend a budget another section is counting. */
     integrationDemos bool
-    /* showcaseProbes and sessionRestartProbe gate the wirings the two published examples carry — cors, gzip, the api-key firewall, per-field validation errors, the trusted-proxy client address, the file-backed session storage and the static cache validators. The three examples deliberately do not mirror each other, so these are per-major capabilities like integrationDemos, not shared surface. */
-    showcaseProbes      bool
+    /* showcaseProbes and sessionRestartProbe gate the wirings an example carries — cors, gzip, the api-key firewall, per-field validation errors, the identity and grammar doors, the trusted-proxy client address, the file-backed session storage and the static cache validators. The three examples deliberately do not mirror each other, so these are per-major capabilities like integrationDemos, not shared surface, and showcaseProbes names each wiring on its own: the two published examples carry all of them, the third the cors listeners and the per-field validation. */
+    showcaseProbes      exampleShowcaseProbes
     sessionRestartProbe bool
     /* loginThrottleProbe names the majors whose example puts the login submit behind the shared per-address write budget. It is a per-major capability like the two above: v3's example declares the route public and leaves it unthrottled, so asserting the refusal there would assert a wiring it does not carry. */
     loginThrottleProbe bool
@@ -48,12 +48,16 @@ type exampleMajor struct {
     journalOnPostgres bool
     /* processServiceInventory names the major whose process services are classified against the stateless-by-default rule: the rule is v3's (and v4 inherits it), and the classification was measured on v3's composition root; the frozen majors carry no inventory to pin. */
     processServiceInventory bool
+    /* requestSurfaceProbes names the major whose request surface is probed over the wire beyond the shared sections: the canonical-path refusal ahead of the firewall, HEAD, OPTIONS and the 405 with its Allow, the error envelope's request id, the dotfiles the static surface must not serve and a malformed session cookie. The behaviours are the framework's, but the probes read them through the routes and the envelope this example declares. */
+    requestSurfaceProbes bool
+    /* shutdownStreamProbe names the major whose example releases its event streams through the application's http shutdown hook (OnHttpShutdown closing the hub), so the closing SIGINT is sent with a signed-in stream still open. The frozen majors' examples keep their own shutdown wiring and are not re-proved here. */
+    shutdownStreamProbe bool
 }
 
 var exampleMajorCatalog = []exampleMajor{
-    {number: 1, label: "v1", relativeDirectory: ".example", port: 18081, integrationDemos: true, showcaseProbes: true, sessionRestartProbe: true, loginThrottleProbe: true, journalOnPostgres: true},
-    {number: 2, label: "v2", relativeDirectory: "v2/.example", port: 18082, integrationDemos: true, showcaseProbes: true, sessionRestartProbe: true, loginThrottleProbe: true},
-    {number: 3, label: "v3", relativeDirectory: "v3/.example", port: 18083, integrationDemos: false, processServiceInventory: true},
+    {number: 1, label: "v1", relativeDirectory: ".example", port: 18081, integrationDemos: true, showcaseProbes: exampleShowcaseProbesAll, sessionRestartProbe: true, loginThrottleProbe: true, journalOnPostgres: true},
+    {number: 2, label: "v2", relativeDirectory: "v2/.example", port: 18082, integrationDemos: true, showcaseProbes: exampleShowcaseProbesAll, sessionRestartProbe: true, loginThrottleProbe: true},
+    {number: 3, label: "v3", relativeDirectory: "v3/.example", port: 18083, integrationDemos: false, showcaseProbes: exampleShowcaseProbes{cors: true, validation: true}, processServiceInventory: true, shutdownStreamProbe: true, requestSurfaceProbes: true},
 }
 
 /* exampleMysqlDsn answers the dsn of one major's own database. The three examples share the development mysql but not a database in it — each holds its schema in melody_example_v<major> — so a harness section that reads what an application wrote has to ask the database that application writes to. MYSQL_DSN carries v3's, the one the supervised sections use, and this swaps the database segment of it for the major being driven.
@@ -629,8 +633,10 @@ func runExampleHttpAssertions(major exampleMajor, application *exampleApplicatio
     assertExampleStaticTraversal(major, client)
 
     /* the showcase probes run BEFORE the integration demos on purpose: the throttled writes they spend are reset by the rate-limit subsection in there, which clears the counters before its exact count */
-    if true == major.showcaseProbes {
-        runExampleShowcaseAssertions(major, application, redisAddress)
+    runExampleShowcaseAssertions(major, application, redisAddress)
+
+    if true == major.requestSurfaceProbes {
+        runExampleRequestSurfaceAssertions(major)
     }
 
     /* the demo routes sit under the example's ROLE_USER catch-all, so they are driven here — between the login and the logout — with the session the login flow established */
@@ -1147,6 +1153,12 @@ func assertExampleGracefulShutdown(major exampleMajor, application *exampleAppli
     _, _ = io.Copy(io.Discard, response.Body)
     _ = response.Body.Close()
 
+    var heldStream *http.Response
+    if true == major.shutdownStreamProbe {
+        heldStream = openExampleShutdownStream(major)
+    }
+
+    signalledAt := time.Now()
     if signalErr := application.command.Process.Signal(os.Interrupt); nil != signalErr {
         fail("[%s] example application: send SIGINT: %v", major.label, signalErr)
     }
@@ -1158,10 +1170,60 @@ func assertExampleGracefulShutdown(major exampleMajor, application *exampleAppli
         }
 
         pass("[%s] one SIGINT while serving http exited 0 with no SIGKILL needed", major.label)
+
+        if nil != heldStream {
+            assertExampleShutdownReleasedTheStream(major, heldStream, time.Since(signalledAt))
+        }
     case <-time.After(30 * time.Second):
         application.kill()
         <-application.exitList
 
         fail("[%s] the application was still running 30s after one SIGINT and had to be SIGKILLed\n%s", major.label, application.logTail(20))
     }
+}
+
+/* exampleShutdownStreamCeiling is the exit the held stream is allowed: well under the 5s DefaultHttpShutdownTimeout the example leaves unconfigured. A stream the hook never released would hold the server for that whole budget and then be cut, so an exit inside the ceiling can only mean the hub closed it as the shutdown began. */
+const exampleShutdownStreamCeiling = 3 * time.Second
+
+/* openExampleShutdownStream signs the seeded editor in and opens the catalog event stream, reading up to its preamble, so the SIGINT that follows finds a live stream the server cannot drain on its own. The body is registered for release on the failure path, since fail() exits without running deferred functions. */
+func openExampleShutdownStream(major exampleMajor) *http.Response {
+    editorClient := newExampleHttpClient()
+    signInExampleHttpEditor(editorClient, major.baseUrl(), "")
+
+    response := newLiveExampleClient(major.baseUrl()).openStream(serverSentEventLabel, serverSentEventStreamRoute+"?topic="+liveExampleUnique("e2e-shutdown"), map[string]string{
+        "Accept": "text/event-stream",
+        "Cookie": exampleSessionCookieHeader(editorClient, major.baseUrl()),
+    })
+    pushFailureCleanup(func() {
+        _ = response.Body.Close()
+    })
+
+    if http.StatusOK != response.StatusCode {
+        fail("[%s] the shutdown probe's event stream answered %d, wanted 200, so no stream was held across the SIGINT", major.label, response.StatusCode)
+    }
+
+    reader := newServerSentEventStreamReader(response.Body)
+    if _, arrived := reader.next(serverSentEventArrivalBudget); false == arrived {
+        fail("[%s] the shutdown probe's event stream sent no preamble, so it was not live when the SIGINT was sent", major.label)
+    }
+
+    return response
+}
+
+/* assertExampleShutdownReleasedTheStream holds the exit to the ceiling the hook buys, then releases the harness side of the stream. */
+func assertExampleShutdownReleasedTheStream(major exampleMajor, heldStream *http.Response, exitedAfter time.Duration) {
+    defer func() {
+        _ = heldStream.Body.Close()
+    }()
+
+    if exampleShutdownStreamCeiling <= exitedAfter {
+        fail(
+            "[%s] with a signed-in event stream open, the SIGINT exit took %s, not under %s: the http shutdown hook did not release the stream and the server waited out its budget",
+            major.label,
+            exitedAfter.Round(time.Millisecond),
+            exampleShutdownStreamCeiling,
+        )
+    }
+
+    pass("[%s] with a signed-in event stream held open, one SIGINT exited 0 after %s: OnHttpShutdown closed the hub and released the stream", major.label, exitedAfter.Round(time.Millisecond))
 }

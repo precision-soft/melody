@@ -10,6 +10,7 @@ import (
     "io"
     "net/http"
     "net/url"
+    "os"
     "strings"
     "time"
 
@@ -84,6 +85,7 @@ func runServerSentEventCheck(baseUrl string, redisAddress string) {
         "Accept": "text/event-stream",
         "Cookie": sessionCookieHeader,
     })
+    streamOpenedAt := time.Now()
 
     /* both paths, because os.Exit runs no deferred function: without the failure hook a red assertion below leaves this stream open and its subscriber registered inside the supervised application forever */
     releaseStream := pushFailureCleanup(func() {
@@ -105,6 +107,48 @@ func runServerSentEventCheck(baseUrl string, redisAddress string) {
     assertServerSentEventTopicIsolation(redisClient, reader, topic)
     assertServerSentEventMalformedPayloadSurvives(redisClient, reader, topic)
     assertServerSentEventOriginSuppression(redisAddress, redisClient)
+    assertServerSentEventOutlivesTheWriteTimeout(redisClient, reader, topic, streamOpenedAt)
+}
+
+/* serverSentEventServerWriteTimeout is the v3 application's http server write timeout (defaultHttpWriteTimeout), which net/http arms once, from the request line, for the whole response. */
+const serverSentEventServerWriteTimeout = 30 * time.Second
+
+/* serverSentEventSlowProbeVariable opts a run into the probes that hold a connection past a server timeout: they cost the timeout itself on every run, so the default run skips them and says so. */
+const serverSentEventSlowProbeVariable = "E2E_SLOW"
+
+/* assertServerSentEventOutlivesTheWriteTimeout holds the stream past the server's write timeout and then requires one more event to arrive. net/http arms that deadline once for the whole response, so without the writer re-arming it per frame (WithWriteBudget) the connection is cut at the timeout and the event never arrives; the keepalive comments the handler writes in between are what re-arm it while the stream is idle, and they are stepped over. */
+func assertServerSentEventOutlivesTheWriteTimeout(redisClient rueidis.Client, reader *serverSentEventStreamReader, topic string, streamOpenedAt time.Time) {
+    if "1" != os.Getenv(serverSentEventSlowProbeVariable) {
+        skip("%s: the stream held past the %s write timeout is skipped (%s unset)", serverSentEventLabel, serverSentEventServerWriteTimeout, serverSentEventSlowProbeVariable)
+
+        return
+    }
+
+    heldUntil := streamOpenedAt.Add(serverSentEventServerWriteTimeout + 5*time.Second)
+    for remaining := time.Until(heldUntil); 0 < remaining; remaining = time.Until(heldUntil) {
+        frame, arrived := reader.next(remaining)
+        if false == arrived {
+            break
+        }
+
+        if false == frame.isComment() {
+            fail("%s: while the stream was held idle past the write timeout an event arrived: %s", serverSentEventLabel, frame.describe())
+        }
+    }
+
+    data := liveExampleUnique("past-the-write-timeout")
+    publishServerSentEventWirePayload(redisClient, serverSentEventWirePayload{
+        Origin: newServerSentEventForeignOrigin(),
+        Topic:  topic,
+        Event:  melodyhttp.ServerSentEvent{Event: "wire", Data: data},
+    })
+
+    frame := requireServerSentEventFrame(reader, "the event published after the write timeout")
+    if data != frame.data() {
+        fail("%s: the event published after the write timeout delivered %q, wanted %q (%s)", serverSentEventLabel, frame.data(), data, frame.describe())
+    }
+
+    pass("a stream held open %s, past the %s server write timeout, still delivered an event: every frame re-arms the write deadline", time.Since(streamOpenedAt).Round(time.Second), serverSentEventServerWriteTimeout)
 }
 
 func assertServerSentEventHeaders(response *http.Response) {

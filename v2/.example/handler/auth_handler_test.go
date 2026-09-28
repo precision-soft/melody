@@ -3,6 +3,7 @@ package handler
 import (
     "bytes"
     "context"
+    "errors"
     "io"
     nethttp "net/http"
     "net/http/httptest"
@@ -16,9 +17,16 @@ import (
     melodycachecontract "github.com/precision-soft/melody/v2/cache/contract"
     melodycontainer "github.com/precision-soft/melody/v2/container"
     melodycontainercontract "github.com/precision-soft/melody/v2/container/contract"
+    melodyclock "github.com/precision-soft/melody/v2/clock"
+    melodyevent "github.com/precision-soft/melody/v2/event"
+    melodyeventcontract "github.com/precision-soft/melody/v2/event/contract"
     melodyhttp "github.com/precision-soft/melody/v2/http"
+    melodylogging "github.com/precision-soft/melody/v2/logging"
+    melodyloggingcontract "github.com/precision-soft/melody/v2/logging/contract"
     melodyruntime "github.com/precision-soft/melody/v2/runtime"
     melodyruntimecontract "github.com/precision-soft/melody/v2/runtime/contract"
+    melodysecurity "github.com/precision-soft/melody/v2/security"
+    melodysecuritycontract "github.com/precision-soft/melody/v2/security/contract"
     melodysession "github.com/precision-soft/melody/v2/session"
 )
 
@@ -142,7 +150,17 @@ var _ melodycachecontract.Cache = (*passThroughCache)(nil)
 func loginRuntimeOverAnEmptyDirectory(t *testing.T) melodyruntimecontract.Runtime {
     t.Helper()
 
+    runtimeInstance, _ := loginRuntimeRefusingEveryCredential(t)
+
+    return runtimeInstance
+}
+
+/* loginRuntimeRefusingEveryCredential is the runtime over the empty directory with the dispatcher a refused login reaches, and the failures that dispatcher recorded. */
+func loginRuntimeRefusingEveryCredential(t *testing.T) (melodyruntimecontract.Runtime, *[]error) {
+    t.Helper()
+
     containerInstance := melodycontainer.NewContainer()
+    failureList := registerLoginFailureRecorder(t, containerInstance)
 
     registerErr := melodycontainer.Register[*service.UserService](
         containerInstance,
@@ -155,7 +173,7 @@ func loginRuntimeOverAnEmptyDirectory(t *testing.T) melodyruntimecontract.Runtim
         t.Fatalf("register user service: %v", registerErr)
     }
 
-    return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance), failureList
 }
 
 /* the credentials are read from the body alone: a POST whose query string carries them and whose form body is empty answers as a request without credentials, where FormValue would have read the query and authenticated — with the credentials written into every access log in front of the application. The body form of the same credentials reaches the authentication, which the empty directory refuses, so the two arms are told apart by the status. */
@@ -189,5 +207,81 @@ func TestLoginHandler_ReadsTheFormCredentialsFromTheBodyNotTheQuery(t *testing.T
     statusCode, body = login("/login", "username=admin&password=secret")
     if nethttp.StatusUnauthorized != statusCode || false == strings.Contains(body, "invalid credentials") {
         t.Fatalf("credentials carried by the body did not reach the authentication: status %d, body %s", statusCode, body)
+    }
+}
+
+/* registerLoginFailureRecorder registers an event dispatcher that records the failure each security.login.failure event carries, the one listener the login door's refusal must reach. */
+func registerLoginFailureRecorder(t *testing.T, containerInstance melodycontainercontract.Container) *[]error {
+    t.Helper()
+
+    failureList := make([]error, 0, 1)
+
+    dispatcher := melodyevent.NewEventDispatcher(melodyclock.NewSystemClock())
+    dispatcher.AddListener(
+        melodysecuritycontract.EventSecurityLoginFailure,
+        func(runtimeInstance melodyruntimecontract.Runtime, eventValue melodyeventcontract.Event) error {
+            if failure, isFailure := eventValue.Payload().(*melodysecurity.LoginFailureEvent); true == isFailure {
+                failureList = append(failureList, failure.Error())
+            }
+
+            return nil
+        },
+        0,
+    )
+
+    registerErr := melodycontainer.Register[melodyeventcontract.EventDispatcher](
+        containerInstance,
+        melodyevent.ServiceEventDispatcher,
+        func(resolver melodycontainercontract.Resolver) (melodyeventcontract.EventDispatcher, error) {
+            return dispatcher, nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("register event dispatcher: %v", registerErr)
+    }
+
+    /* the dispatcher journals each dispatch through the runtime's logger */
+    registerLoggerErr := melodycontainer.Register[melodyloggingcontract.Logger](
+        containerInstance,
+        melodylogging.ServiceLogger,
+        func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
+            return melodylogging.NewNopLogger(), nil
+        },
+    )
+    if nil != registerLoggerErr {
+        t.Fatalf("register logger: %v", registerLoggerErr)
+    }
+
+    return &failureList
+}
+
+/* a refused login answers 401 and raises security.login.failure once, carrying a failure that names neither credential: the door authenticates the credentials itself, so the event is its own to dispatch */
+func TestLoginHandler_RaisesTheLoginFailureOnRefusedCredentials(t *testing.T) {
+    runtimeInstance, failureList := loginRuntimeRefusingEveryCredential(t)
+
+    httpRequest := httptest.NewRequest(nethttp.MethodPost, "/login", bytes.NewBufferString("username=nobody&password=wrong"))
+    httpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+    request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("login-failure-test", time.Now()))
+
+    response, handlerErr := LoginHandler()(runtimeInstance, httptest.NewRecorder(), request)
+    if nil != handlerErr {
+        t.Fatalf("login handler: %v", handlerErr)
+    }
+
+    if nethttp.StatusUnauthorized != response.StatusCode() {
+        t.Fatalf("expected the refused login answered 401, got %d", response.StatusCode())
+    }
+
+    if 1 != len(*failureList) {
+        t.Fatalf("expected one security.login.failure event, got %d", len(*failureList))
+    }
+
+    if false == errors.Is((*failureList)[0], errInvalidCredentials) {
+        t.Fatalf("expected the event to carry the invalid credentials failure, got %v", (*failureList)[0])
+    }
+
+    if true == strings.Contains((*failureList)[0].Error(), "wrong") || true == strings.Contains((*failureList)[0].Error(), "nobody") {
+        t.Fatalf("expected the failure to name neither credential, got %q", (*failureList)[0].Error())
     }
 }

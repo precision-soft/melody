@@ -336,7 +336,7 @@ func buildErrorContext(
         context["path"] = request.HttpRequest().URL.Path
         context["routeName"] = request.RouteName()
         context["routePattern"] = request.RoutePattern()
-        context["requestId"] = request.Header(melodyhttp.HeaderRequestId)
+        context["requestId"] = errorContextRequestId(request)
         context["params"] = request.Params()
     }
 
@@ -348,6 +348,16 @@ func buildErrorContext(
     }
 
     return context
+}
+
+/* errorContextRequestId answers the identifier the kernel minted for the request, the one the X-Request-Id response header carries. The request's own X-Request-Id header is the client's claim: echoing it put a value the caller chose in the envelope beside a response header naming another, and left the envelope empty for every client that sent none. */
+func errorContextRequestId(request melodyhttpcontract.Request) string {
+    requestContext := request.RequestContext()
+    if nil == requestContext {
+        return ""
+    }
+
+    return requestContext.RequestId()
 }
 
 func buildErrorTrace(err error, debugEnabled bool) []map[string]any {

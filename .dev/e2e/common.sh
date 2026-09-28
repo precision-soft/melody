@@ -292,6 +292,7 @@ e2e_dev_command() {
         " MYSQL_DSN='${MYSQL_DSN}'" \
         " PROMETHEUS_URL='${PROMETHEUS_URL}'" \
         " MELODY_E2E_MAJORS='${MELODY_E2E_MAJORS}'" \
+        " E2E_SLOW='${E2E_SLOW:-}'" \
         "; cd ${DIRECTORY_STRING} || exit 1; ${COMMAND_STRING}"
 }
 

@@ -1260,3 +1260,88 @@ func TestApplicationRegisterHttpHandlerDecorator_PanicsAfterBoot(t *testing.T) {
         })
     }, "may not register http handler decorators after boot")
 }
+
+/* the seam is proved on its own above; this proves runHttp serves what the seam answers: a request over the wire must pass through the registered decorator, which marks the response before the kernel's handler answers it */
+func TestRunHttp_ServesThroughTheRegisteredDecorators(t *testing.T) {
+    environment, environmentErr := config.NewEnvironment(
+        &mapEnvironmentSource{
+            values: map[string]string{
+                config.HttpAddressKey: "127.0.0.1:34523",
+            },
+        },
+    )
+    if nil != environmentErr {
+        t.Fatalf("unexpected environment error: %v", environmentErr)
+    }
+
+    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+    if nil != configurationErr {
+        t.Fatalf("unexpected configuration error: %v", configurationErr)
+    }
+
+    applicationInstance := &Application{
+        ctx:                  context.Background(),
+        configuration:        configuration,
+        runtimeFlags:         NewRuntimeFlags(config.ModeHttp),
+        kernel:               newTestKernel(),
+        httpMiddlewares:      NewHttpMiddleware(newStaticFileServerOptions(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
+        moduleConfigurations: make(map[string]any),
+    }
+
+    applicationInstance.RegisterService(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return &warningRecordingLogger{}, nil
+        },
+    )
+
+    applicationInstance.registerCache()
+
+    applicationInstance.RegisterHttpHandlerDecorator(func(next nethttp.Handler) nethttp.Handler {
+        return nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+            writer.Header().Set("X-Decorated", "yes")
+            next.ServeHTTP(writer, request)
+        })
+    })
+
+    runContext, cancelRun := context.WithCancel(context.Background())
+    defer cancelRun()
+
+    runResult := make(chan error, 1)
+    go func() {
+        runResult <- applicationInstance.runHttp(runContext)
+    }()
+
+    client := &nethttp.Client{
+        Timeout:   2 * time.Second,
+        Transport: &nethttp.Transport{DisableKeepAlives: true},
+    }
+
+    var response *nethttp.Response
+    var requestErr error
+    for attempt := 0; attempt < 200; attempt++ {
+        response, requestErr = client.Get("http://127.0.0.1:34523/probe")
+        if nil == requestErr {
+            break
+        }
+
+        time.Sleep(10 * time.Millisecond)
+    }
+    if nil != requestErr {
+        t.Fatalf("the server never answered: %v", requestErr)
+    }
+    _ = response.Body.Close()
+
+    cancelRun()
+
+    select {
+    case <-runResult:
+
+    case <-time.After(10 * time.Second):
+        t.Fatalf("expected runHttp to return after the cancellation; it is still waiting")
+    }
+
+    if "yes" != response.Header.Get("X-Decorated") {
+        t.Fatalf("expected the served response to pass through the registered decorator, got X-Decorated=%q (status %d)", response.Header.Get("X-Decorated"), response.StatusCode)
+    }
+}

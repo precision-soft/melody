@@ -1,6 +1,7 @@
 package main
 
 import (
+    "bytes"
     "context"
     "fmt"
     "net/http"
@@ -22,6 +23,7 @@ const (
     twoFactorTable             = "melody_example_v3_two_factor"
     twoFactorPrimaryKeyColumn  = "user_identifier"
     twoFactorCodeHeader        = "X-2FA-Code"
+    twoFactorRecoveryHeader    = "X-2FA-Recovery-Code"
     twoFactorExpiredPeriodBack = 5
 
     twoFactorRateLimitPrefix = "melody-example-v3:rate_limit:"
@@ -62,7 +64,81 @@ func runTwoFactorCheck(baseUrl string, redisAddress string) {
     assertTwoFactorVerifyRefused(client, code, "the same code replayed verbatim")
     assertTwoFactorVerifyRefused(client, twoFactorSpacedCode(code), "the same code replayed with whitespace inserted")
 
+    assertTwoFactorRecoveryCodeRedeemsOnce(client, user, enrollment.RecoveryCodes[0])
+
     cleanUpTwoFactorEnrollment(user)
+}
+
+/* assertTwoFactorRecoveryCodeRedeemsOnce spends one of the recovery codes the enrollment handed out: it verifies once and is refused the second time. The codes are stored encrypted, so the out-of-band half reads the stored column as opaque bytes: the redemption must rewrite it, since the spent code leaves the set, and the refused second use must leave it as the first use left it. A 401 on the second use with the column unchanged by the first would be a code that was never redeemed at all. */
+func assertTwoFactorRecoveryCodeRedeemsOnce(client *liveExampleClient, user string, recoveryCode string) {
+    before := readTwoFactorRecoveryColumn(user)
+
+    first := twoFactorRecover(client, recoveryCode)
+    requireLiveExampleStatus(twoFactorLabel, twoFactorVerifyRoute+" with an unused recovery code", first, http.StatusOK)
+
+    redeemed := struct {
+        Factor   string `json:"factor"`
+        Redeemed bool   `json:"redeemed"`
+    }{}
+    decodeLiveExamplePayload(twoFactorLabel, first, &redeemed)
+
+    if "recovery" != redeemed.Factor || false == redeemed.Redeemed {
+        fail("%s: the recovery code verified as factor %q redeemed=%v, wanted recovery redeemed=true", twoFactorLabel, redeemed.Factor, redeemed.Redeemed)
+    }
+
+    afterFirst := readTwoFactorRecoveryColumn(user)
+
+    second := twoFactorRecover(client, recoveryCode)
+    if http.StatusUnauthorized != second.statusCode {
+        fail("%s: the recovery code spent once answered %d the second time, wanted 401", twoFactorLabel, second.statusCode)
+    }
+
+    afterSecond := readTwoFactorRecoveryColumn(user)
+
+    if nil == before {
+        fmt.Printf("NOTE  %s: MYSQL_DSN is not set, so the stored recovery codes were NOT re-read out of band\n", twoFactorLabel)
+        pass("an unused recovery code verified once and was refused 401 the second time")
+
+        return
+    }
+
+    if true == bytes.Equal(before, afterFirst) {
+        fail("%s: the stored recovery codes of %q are unchanged by the redemption, so the spent code was not removed from the set", twoFactorLabel, user)
+    }
+    if false == bytes.Equal(afterFirst, afterSecond) {
+        fail("%s: the refused second use of the recovery code rewrote the stored recovery codes of %q", twoFactorLabel, user)
+    }
+
+    pass("an unused recovery code verified once and was refused 401 the second time; out of band the redemption rewrote the stored set and the refusal left it untouched")
+}
+
+func twoFactorRecover(client *liveExampleClient, recoveryCode string) liveExampleResponse {
+    return client.call(twoFactorLabel, liveExampleRequest{
+        method:     "POST",
+        path:       twoFactorVerifyRoute,
+        headerList: map[string]string{twoFactorRecoveryHeader: recoveryCode},
+    })
+}
+
+/* readTwoFactorRecoveryColumn reads the stored, encrypted recovery codes of one enrollment through the harness's own connection; nil when MYSQL_DSN is not set. */
+func readTwoFactorRecoveryColumn(user string) []byte {
+    dsn := os.Getenv("MYSQL_DSN")
+    if "" == dsn {
+        return nil
+    }
+
+    database := openMysql(twoFactorLabel, dsn)
+    defer func() {
+        _ = database.Close()
+    }()
+
+    stored := []byte{}
+    query := fmt.Sprintf("SELECT recovery_codes FROM %s WHERE %s = ?", twoFactorTable, twoFactorPrimaryKeyColumn)
+    if scanErr := database.QueryRowContext(context.Background(), query, user).Scan(&stored); nil != scanErr {
+        fail("%s: read the stored recovery codes of %q out of band: %v", twoFactorLabel, user, scanErr)
+    }
+
+    return stored
 }
 
 /* assertTwoFactorAnonymousEnrollmentRefused is the door's own guard, not the codes'. While the route was public and the identifier came from a query parameter, this request answered 200 and bound a second factor the caller held to whatever identifier it named — and the account was then stuck with it, because a second enrollment collided with the row. Both halves are the same repair, so both are asserted here. */

@@ -9,7 +9,7 @@ import (
     "strings"
 )
 
-/* The v1 example's showcase wirings, driven over the wire. The origin and the api token are the values its .env ships (APP_CORS_ALLOW_ORIGINS, APP_API_TOKEN); the forwarded address is a TEST-NET-3 literal no real client carries, so finding it in a rate-limit key can only mean the forwarded header was believed. */
+/* The examples' showcase wirings, driven over the wire. The origin and the api token are the values its .env ships (APP_CORS_ALLOW_ORIGINS, APP_API_TOKEN); the forwarded address is a TEST-NET-3 literal no real client carries, so finding it in a rate-limit key can only mean the forwarded header was believed. */
 const (
     exampleShowcaseAllowedOrigin    = "https://catalog.example.test"
     exampleShowcaseDisallowedOrigin = "https://elsewhere.example.test"
@@ -18,16 +18,54 @@ const (
     exampleShowcaseForwardedFor     = "203.0.113.77"
 )
 
-/* runExampleShowcaseAssertions covers the wirings only the v1 example carries: the cors listeners, the api-key firewall, gzip compression, per-field validation errors and the trusted-proxy client address. It runs between the login flow and the integration demos, so the throttled writes it spends are cleared by the rate-limit subsection's own reset before that section counts an exact budget. */
+/* exampleShowcaseProbes names, one by one, the showcase wirings a major's example carries, so a wiring one example declares is probed there without asserting it on an example that does not carry it. */
+type exampleShowcaseProbes struct {
+    cors             bool
+    apiKey           bool
+    gzip             bool
+    validation       bool
+    identityGrammar  bool
+    forwardedAddress bool
+    staticCache      bool
+}
+
+/* exampleShowcaseProbesAll is the set the two published examples carry. */
+var exampleShowcaseProbesAll = exampleShowcaseProbes{
+    cors:             true,
+    apiKey:           true,
+    gzip:             true,
+    validation:       true,
+    identityGrammar:  true,
+    forwardedAddress: true,
+    staticCache:      true,
+}
+
+/* runExampleShowcaseAssertions covers the showcase wirings a major's example declares: the cors listeners, the api-key firewall, gzip compression, per-field validation errors, the identity and grammar doors, the trusted-proxy client address and the static cache validators. It runs between the login flow and the integration demos, so the throttled writes it spends are cleared by the rate-limit subsection's own reset before that section counts an exact budget. */
 func runExampleShowcaseAssertions(major exampleMajor, application *exampleApplication, redisAddress string) {
-    assertExampleCorsPreflight(major)
-    assertExampleCorsDecoratesARefusal(major)
-    assertExampleApiKeyFirewall(major)
-    assertExampleGzipCompression(major)
-    assertExampleValidationAnswersPerField(major, application)
-    assertExampleIdentityAndGrammarDoors(major, application)
-    assertExampleForwardedAddressKeysTheLimiter(major, application, redisAddress)
-    assertExampleStaticCacheValidators(major)
+    probes := major.showcaseProbes
+
+    if true == probes.cors {
+        assertExampleCorsPreflight(major)
+        assertExampleCorsDecoratesARefusal(major)
+    }
+    if true == probes.apiKey {
+        assertExampleApiKeyFirewall(major)
+    }
+    if true == probes.gzip {
+        assertExampleGzipCompression(major)
+    }
+    if true == probes.validation {
+        assertExampleValidationAnswersPerField(major, application)
+    }
+    if true == probes.identityGrammar {
+        assertExampleIdentityAndGrammarDoors(major, application)
+    }
+    if true == probes.forwardedAddress {
+        assertExampleForwardedAddressKeysTheLimiter(major, application, redisAddress)
+    }
+    if true == probes.staticCache {
+        assertExampleStaticCacheValidators(major)
+    }
 }
 
 /* assertExampleStaticCacheValidators proves the static cache the v1 example arms in its .env (MELODY_STATIC_ENABLE_CACHE): a tracked asset answers with the validators and the cache policy, a client replaying the ETag is answered 304 with no body, a stale ETag gets the bytes again, and the two validators keep their precedence — If-Modified-Since is consulted only when no If-None-Match was offered, so a mismatched ETag wins over a matching date. The values are read from the live answer rather than assumed, because the workspace copy does not preserve the source tree's modification times. */

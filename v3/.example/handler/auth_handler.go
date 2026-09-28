@@ -2,6 +2,7 @@ package handler
 
 import (
     "encoding/json"
+    "errors"
     nethttp "net/http"
     "strings"
 
@@ -10,9 +11,12 @@ import (
     "github.com/precision-soft/melody/v3/.example/route"
     "github.com/precision-soft/melody/v3/.example/security"
     "github.com/precision-soft/melody/v3/.example/service"
+    melodyevent "github.com/precision-soft/melody/v3/event"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
+    melodysecurity "github.com/precision-soft/melody/v3/security"
+    melodysecuritycontract "github.com/precision-soft/melody/v3/security/contract"
     melodysessioncontract "github.com/precision-soft/melody/v3/session/contract"
 )
 
@@ -70,6 +74,11 @@ func LoginHandler() melodyhttpcontract.Handler {
         }
 
         if false == authenticated {
+            if dispatchErr := dispatchLoginFailure(runtimeInstance, request); nil != dispatchErr {
+                /* the refusal keeps its status, as the framework's token source keeps it: the dispatch failure is journaled as the cause, not answered as a 500 */
+                return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusUnauthorized, "invalid credentials", dispatchErr), nil
+            }
+
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusUnauthorized, "invalid credentials"), nil
         }
 
@@ -99,6 +108,20 @@ func LoginHandler() melodyhttpcontract.Handler {
             },
         ), nil
     }
+}
+
+/* errInvalidCredentials is the failure the login door reports on the security.login.failure event for a refused username or password. It names neither, so the journal records the refusal without the credentials that were tried. */
+var errInvalidCredentials = errors.New("invalid credentials")
+
+/* dispatchLoginFailure raises the login failure the firewall's own Login raises for a refused login. This door authenticates the credentials itself rather than through the firewall, so without it a refused password reached none of the security.login.failure listeners, the security journal's among them. */
+func dispatchLoginFailure(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request) error {
+    _, dispatchErr := melodyevent.EventDispatcherMustFromContainer(runtimeInstance.Container()).DispatchName(
+        runtimeInstance,
+        melodysecuritycontract.EventSecurityLoginFailure,
+        melodysecurity.NewLoginFailureEvent(request, errInvalidCredentials),
+    )
+
+    return dispatchErr
 }
 
 func LogoutHandler() melodyhttpcontract.Handler {

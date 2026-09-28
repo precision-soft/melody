@@ -39,6 +39,13 @@
 #                        while an ordinary parameter still prints in clear
 #   - OPTIONAL ENV KEY   the default processor falls back when the key is unset, an .env.local override
 #                        wins over the fallback, and the empty-string fallback resolves to ""
+#   - V3 BOOT CONFIG     a built binary under --mode=cli, --mode=bogus and --mode=http over a cli default, an empty .env
+#                        refusing both modes, .env.dev and .env.dev.local precedence, an empty MELODY_ENV, %% and a
+#                        malformed %env( placeholder, and a process variable logged as ignored while .env keeps its value
+#   - V3 LOGIN FAILURE   a refused password on the supervised example writes the security login failure line, read out
+#                        of band from its journal and tied to the 401 by its request id
+#   - V3 DEBUG           the dev-registered family, the armed teardown plan in waves (the hub before the logger), the
+#                        middleware order and the route manifest filtered by zone
 #   - V3 MIGRATIONS      the db:* family over the v3 example's own one-migration schema — the catalogue, the
 #                        journal and the two-factor enrollment table — with the machine document asserted
 #                        from a live application and the rollback read straight out of mysql
@@ -116,7 +123,7 @@ e2e_require_dev_service
 # mismatch message prints both numbers, so the count to move to is in the failure itself. A run that took one of
 # the degraded early-exit branches (an unreachable supervised app, a cold-cache timeout) legitimately executes
 # fewer checks; it is already red from the check_fail that branch raised
-EXPECTED_CHECK_COUNT_INTEGER=171
+EXPECTED_CHECK_COUNT_INTEGER=189
 readonly EXPECTED_CHECK_COUNT_INTEGER
 
 # state the scope in the output, so a reader never has to infer which major these checks covered
@@ -1291,6 +1298,233 @@ trap - EXIT
 check_section_end "OPTIONAL ENV KEY" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
+# V3 BOOT CONFIGURATION — the runtime mode flag, the .env artifacts and their grammar, read from a built binary
+# ---------------------------------------------------------------------------------------------------
+
+check_section_start "V3 BOOT CONFIGURATION" "${TAG_VALIDATE}" "e2e"
+
+# one binary built into its own directory beside a copy of the example's .env (the shape of the signal section),
+# so every arm below states its configuration in files it writes itself and removes before the next arm. The
+# catalogue title is the vehicle for the file precedence and the percent grammar because app:info prints it
+# (catalog_report), so the value read back is the one the booted application resolved, not a listing of the
+# parameter table. The http arm runs on 18085 (18080 is the signal section's, 18084 the teardown section's).
+# --mode=http is driven over MELODY_DEFAULT_MODE=cli, where the bare binary prints its usage and exits: only
+# the flag, not the configured default, can explain a process that then serves /health.
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "WORK_DIRECTORY=/tmp/example-boot-e2e
+    EMPTY_DIRECTORY=/tmp/example-boot-empty-e2e
+    rm -rf \"\${WORK_DIRECTORY}\" \"\${EMPTY_DIRECTORY}\"
+    mkdir -p \"\${WORK_DIRECTORY}\" \"\${EMPTY_DIRECTORY}\"
+    if ! go build -o \"\${WORK_DIRECTORY}/example-boot\" . >/tmp/example-boot-build.log 2>&1; then
+        echo build_failed=1
+        cat /tmp/example-boot-build.log
+        exit 0
+    fi
+    cp .env \"\${WORK_DIRECTORY}/.env\"
+    cp -r public \"\${WORK_DIRECTORY}/public\"
+    cp \"\${WORK_DIRECTORY}/example-boot\" \"\${EMPTY_DIRECTORY}/example-boot\"
+    cp -r public \"\${EMPTY_DIRECTORY}/public\"
+    : > \"\${EMPTY_DIRECTORY}/.env\"
+    cd \"\${WORK_DIRECTORY}\" || exit 1
+    ./example-boot --mode=cli app:info >/tmp/example-boot.log 2>&1
+    echo \"mode_cli_exit=\$?\"
+    ./example-boot --mode=bogus app:info >/tmp/example-boot.log 2>&1
+    echo \"mode_bogus_exit=\$?\"
+    if grep -q 'invalid mode: --mode is a runtime flag' /tmp/example-boot.log; then echo mode_bogus_named=1; else echo mode_bogus_named=0; fi
+    printf 'MELODY_DEFAULT_MODE=cli\nMELODY_HTTP_ADDRESS=:18085\n' > .env.local
+    ./example-boot >/tmp/example-boot.log 2>&1
+    echo \"default_cli_exit=\$?\"
+    ./example-boot --mode=http >/tmp/example-boot-http.log 2>&1 &
+    APP_PID=\$!
+    READY=0
+    for _ in \$(seq 1 150); do
+        if wget -q -O /dev/null http://127.0.0.1:18085/health 2>/dev/null; then
+            READY=1
+            break
+        fi
+        if ! kill -0 \${APP_PID} 2>/dev/null; then
+            break
+        fi
+        sleep 0.2
+    done
+    echo \"mode_http_ready=\${READY}\"
+    kill -INT \${APP_PID} 2>/dev/null || true
+    for _ in \$(seq 1 150); do
+        if ! kill -0 \${APP_PID} 2>/dev/null; then
+            break
+        fi
+        sleep 0.2
+    done
+    kill -KILL \${APP_PID} 2>/dev/null || true
+    wait \${APP_PID} 2>/dev/null || true
+    rm -f .env.local
+    printf 'APP_CATALOG_TITLE=FromEnvDev\n' > .env.dev
+    ./example-boot app:info 2>/dev/null | grep -o 'catalog_report: [^:]*' | sed 's/^/env_dev_/'
+    printf 'APP_CATALOG_TITLE=FromEnvDevLocal\n' > .env.dev.local
+    ./example-boot app:info 2>/dev/null | grep -o 'catalog_report: [^:]*' | sed 's/^/env_dev_local_/'
+    rm -f .env.dev .env.dev.local
+    printf 'MELODY_ENV=\n' > .env.local
+    ./example-boot app:info >/tmp/example-boot.log 2>&1
+    echo \"empty_env_name_exit=\$?\"
+    if grep -q 'environment may not be empty' /tmp/example-boot.log; then echo empty_env_name_named=1; else echo empty_env_name_named=0; fi
+    printf 'APP_CATALOG_TITLE=50%%%%\n' > .env.local
+    ./example-boot app:info 2>/dev/null | grep -o 'catalog_report: [^:]*' | sed 's/^/percent_/'
+    printf 'APP_CATALOG_TITLE=%%env(A))%%\n' > .env.local
+    ./example-boot app:info >/tmp/example-boot.log 2>&1
+    echo \"malformed_exit=\$?\"
+    if grep -q 'malformed environment placeholder' /tmp/example-boot.log; then echo malformed_named=1; else echo malformed_named=0; fi
+    rm -f .env.local
+    rm -f var/log/dev.log
+    MYSQL_HOST=nope ./example-boot debug:parameters --format=json 2>/dev/null | tr -d ' \n\t' | grep -o '\"name\":\"MYSQL_HOST\"[^}]*' | head -1 | sed 's/^/process_env_parameter=/'
+    if grep -q 'process environment variable is ignored.*\"environmentVariable\":\"MYSQL_HOST\"' var/log/dev.log 2>/dev/null; then echo process_env_warned=1; else echo process_env_warned=0; fi
+    cd \"\${EMPTY_DIRECTORY}\" || exit 1
+    ./example-boot --mode=http >/tmp/example-boot.log 2>&1
+    echo \"empty_dotenv_http_exit=\$?\"
+    if grep -q 'could not resolve the config parameters' /tmp/example-boot.log; then echo empty_dotenv_http_named=1; else echo empty_dotenv_http_named=0; fi
+    ./example-boot app:info >/tmp/example-boot.log 2>&1
+    echo \"empty_dotenv_cli_exit=\$?\"
+    if grep -q 'no environment keys were loaded from the .env artifacts' /tmp/example-boot.log; then echo empty_dotenv_cli_warned=1; else echo empty_dotenv_cli_warned=0; fi
+    rm -rf \"\${WORK_DIRECTORY}\" \"\${EMPTY_DIRECTORY}\" /tmp/example-boot.log /tmp/example-boot-http.log /tmp/example-boot-build.log"
+BOOT_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+
+printf '%s\n' "${BOOT_OUTPUT_STRING}"
+
+boot_output_has() {
+    printf '%s' "${BOOT_OUTPUT_STRING}" | grep -qx "${1}"
+}
+
+boot_output_value() {
+    printf '%s' "${BOOT_OUTPUT_STRING}" | grep -o "^${1}=.*" | head -1 || true
+}
+
+if boot_output_has 'build_failed=1'; then
+    check_fail "the example did not build, so the boot configuration was not exercised"
+else
+    if boot_output_has 'mode_cli_exit=0'; then
+        check_pass "--mode=cli ahead of the command runs app:info and exits zero"
+    else
+        check_fail "--mode=cli app:info did not exit zero ($(boot_output_value mode_cli_exit))"
+    fi
+
+    if boot_output_has 'mode_bogus_exit=1' && boot_output_has 'mode_bogus_named=1'; then
+        check_pass "--mode=bogus is refused at boot, exit 1, with the diagnostic naming the runtime flag"
+    else
+        check_fail "--mode=bogus was not refused with the runtime flag's diagnostic ($(boot_output_value mode_bogus_exit) $(boot_output_value mode_bogus_named))"
+    fi
+
+    # the default arm is the control: under MELODY_DEFAULT_MODE=cli the bare binary prints its usage and leaves,
+    # so a /health answered by the next arm is the flag's doing
+    if boot_output_has 'default_cli_exit=0' && boot_output_has 'mode_http_ready=1'; then
+        check_pass "--mode=http serves /health over a configured cli default, where the bare binary exits after its usage"
+    else
+        check_fail "--mode=http did not serve over a cli default ($(boot_output_value default_cli_exit) $(boot_output_value mode_http_ready))"
+    fi
+
+    if boot_output_has 'empty_dotenv_http_exit=1' && boot_output_has 'empty_dotenv_http_named=1'; then
+        check_pass "an empty .env refuses the http boot, exit 1, on the config parameters it cannot resolve"
+    else
+        check_fail "an empty .env did not refuse the http boot on its parameters ($(boot_output_value empty_dotenv_http_exit) $(boot_output_value empty_dotenv_http_named))"
+    fi
+
+    # the refusal is not the http server's: a console command refuses on the same parameters, and says why
+    if boot_output_has 'empty_dotenv_cli_exit=1' && boot_output_has 'empty_dotenv_cli_warned=1'; then
+        check_pass "an empty .env refuses a console command as well, warning that no key was loaded from the .env artifacts"
+    else
+        check_fail "an empty .env did not refuse the console command with the no-keys warning ($(boot_output_value empty_dotenv_cli_exit) $(boot_output_value empty_dotenv_cli_warned))"
+    fi
+
+    if boot_output_has 'env_dev_catalog_report: FromEnvDev'; then
+        check_pass ".env.dev overrides .env under MELODY_ENV=dev (catalog_report FromEnvDev)"
+    else
+        check_fail ".env.dev did not override .env ($(boot_output_value env_dev_catalog_report))"
+    fi
+
+    if boot_output_has 'env_dev_local_catalog_report: FromEnvDevLocal'; then
+        check_pass ".env.dev.local overrides .env.dev (catalog_report FromEnvDevLocal)"
+    else
+        check_fail ".env.dev.local did not override .env.dev ($(boot_output_value env_dev_local_catalog_report))"
+    fi
+
+    if boot_output_has 'empty_env_name_exit=1' && boot_output_has 'empty_env_name_named=1'; then
+        check_pass "an empty MELODY_ENV is refused at boot, naming the empty environment"
+    else
+        check_fail "an empty MELODY_ENV was not refused ($(boot_output_value empty_env_name_exit) $(boot_output_value empty_env_name_named))"
+    fi
+
+    if boot_output_has 'percent_catalog_report: 50%'; then
+        check_pass "%% in a .env value resolves to one literal percent sign (catalog_report 50%)"
+    else
+        check_fail "%% did not resolve to a literal percent sign ($(boot_output_value percent_catalog_report))"
+    fi
+
+    if boot_output_has 'malformed_exit=1' && boot_output_has 'malformed_named=1'; then
+        check_pass "a malformed %env( placeholder refuses the boot, naming the malformed placeholder"
+    else
+        check_fail "a malformed %env( placeholder was not refused ($(boot_output_value malformed_exit) $(boot_output_value malformed_named))"
+    fi
+
+    # the warning alone would also appear if the process value had been APPLIED and then reported, so the value the
+    # parameter table holds is read beside it
+    if boot_output_has 'process_env_warned=1'; then
+        check_pass "a process environment variable shadowing a .env key is logged as ignored, naming MYSQL_HOST"
+    else
+        check_fail "the ignored process environment variable was not logged ($(boot_output_value process_env_warned))"
+    fi
+
+    if printf '%s' "$(boot_output_value process_env_parameter)" | grep -q '"value":"mysql"'; then
+        check_pass "MYSQL_HOST keeps the .env value (mysql) while the process environment says nope"
+    else
+        check_fail "MYSQL_HOST did not keep the .env value ($(boot_output_value process_env_parameter))"
+    fi
+fi
+
+check_section_end "V3 BOOT CONFIGURATION" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
+# V3 LOGIN FAILURE JOURNAL — a refused password on the supervised example reaches the security journal
+# ---------------------------------------------------------------------------------------------------
+
+check_section_start "V3 LOGIN FAILURE JOURNAL" "${TAG_VALIDATE}" "e2e"
+
+# the login door authenticates the credentials itself, so the security.login.failure event is its own to raise; the
+# journal line is read out of band, from the supervised example's own log. The request carries a user agent no other
+# client sends, which the access log records beside the request id: that id, read from the access line, is what ties
+# the failure line to this request and not to one an earlier run left behind. The log is read by its last lines, since
+# it outgrows the byte offsets busybox tail accepts, and the failure line must name neither credential that was tried.
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "LOG_PATH=var/log/dev.log
+    USER_AGENT=e2e-login-failure-\$\$-\$(date +%s%N)
+    wget -q -O /dev/null -U \"\${USER_AGENT}\" --header 'Accept: application/json' --post-data 'username=e2e-login-failure-probe&password=e2e-wrong-password' http://127.0.0.1:8080/login 2>/tmp/example-login-failure.log
+    grep -o 'HTTP/[0-9.]* [0-9]*' /tmp/example-login-failure.log | tail -1 | sed 's/^.* /response_status=/'
+    sleep 1
+    REQUEST_ID=\$(tail -n 4000 \"\${LOG_PATH}\" | grep '\"message\":\"request completed\"' | grep \"\\\"userAgent\\\":\\\"\${USER_AGENT}\\\"\" | grep -o '\"requestId\":\"[^\"]*\"' | tail -1 | sed 's/^\"requestId\":\"//; s/\"\$//')
+    echo \"access_request_id=\${REQUEST_ID}\"
+    if [ -n \"\${REQUEST_ID}\" ]; then
+        tail -n 4000 \"\${LOG_PATH}\" | grep '\"message\":\"security login failure\"' | grep \"\${REQUEST_ID}\" | tail -1 | sed 's/^/journal_line=/'
+    fi
+    rm -f /tmp/example-login-failure.log"
+LOGIN_FAILURE_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+
+printf '%s\n' "${LOGIN_FAILURE_OUTPUT_STRING}"
+
+LOGIN_FAILURE_REQUEST_ID_STRING="$(printf '%s' "${LOGIN_FAILURE_OUTPUT_STRING}" | grep -o '^access_request_id=.*' | head -1 | sed 's/^access_request_id=//' || true)"
+LOGIN_FAILURE_JOURNAL_LINE_STRING="$(printf '%s' "${LOGIN_FAILURE_OUTPUT_STRING}" | grep -o '^journal_line=.*' | head -1 | sed 's/^journal_line=//' || true)"
+
+if printf '%s' "${LOGIN_FAILURE_OUTPUT_STRING}" | grep -qx 'response_status=401' && [[ "" != "${LOGIN_FAILURE_REQUEST_ID_STRING}" ]] && [[ "" != "${LOGIN_FAILURE_JOURNAL_LINE_STRING}" ]]; then
+    check_pass "a refused password on /login answered 401 and wrote a security login failure line under the request id its access line carries"
+else
+    check_fail "a refused password left no security login failure line for its request ($(printf '%s' "${LOGIN_FAILURE_OUTPUT_STRING}" | tr '\n' ' '))"
+fi
+
+if [[ "" != "${LOGIN_FAILURE_JOURNAL_LINE_STRING}" ]] \
+    && printf '%s' "${LOGIN_FAILURE_JOURNAL_LINE_STRING}" | grep -q '"path":"/login"' \
+    && ! printf '%s' "${LOGIN_FAILURE_JOURNAL_LINE_STRING}" | grep -q 'e2e-wrong-password\|e2e-login-failure-probe'; then
+    check_pass "the journal line names the login path and neither credential that was tried"
+else
+    check_fail "the journal line does not name the login path or names a credential (${LOGIN_FAILURE_JOURNAL_LINE_STRING:-<none>})"
+fi
+
+check_section_end "V3 LOGIN FAILURE JOURNAL" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
 # V3 DEBUG COMMANDS — the dev-registered family answers from the v3 example, and the two commands that
 # used to build in order to list now describe by default. The split is asserted on STATE — the state
 # column, the scoped block, and the two exit codes — not on the command's own word about itself.
@@ -1388,6 +1622,49 @@ if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'priority' && printf '%s'
     check_pass "v3 debug:router reports the priority and the registration order"
 else
     check_fail "v3 debug:router did not report the discriminators (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+fi
+
+# the example arms the parallel teardown in main.go, so the plan the listing prints is the one a stopping process
+# walks: the block names its waves, and the one edge the example declares — the notification hub, which logs its
+# own close, closes before the logger — is read on both ends of the edge, with the ordering the plan proved for it
+if printf '%s' "${V3_CONTAINER_OUTPUT_STRING}" | grep -q 'TEARDOWN (DEPENDENCY WAVES)'; then
+    check_pass "v3 debug:container prints the armed teardown plan in dependency waves"
+else
+    check_fail "v3 debug:container printed no teardown plan in waves (${V3_CONTAINER_OUTPUT_STRING:-<empty>})"
+fi
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . debug:container --limit=0 --format=json 2>/dev/null"
+V3_CONTAINER_JSON_STRING="$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | tr -d ' \n\t')"
+V3_HUB_TEARDOWN_STRING="$(printf '%s' "${V3_CONTAINER_JSON_STRING}" | grep -o '"name":"service.example.catalog.notification.hub"[^}]*}[^}]*}' | head -1 || true)"
+V3_LOGGER_TEARDOWN_STRING="$(printf '%s' "${V3_CONTAINER_JSON_STRING}" | grep -o '"name":"service.logger"[^}]*}[^}]*}' | head -1 || true)"
+if printf '%s' "${V3_HUB_TEARDOWN_STRING}" | grep -q '"wave":0,"node":"service:service.example.catalog.notification.hub","closedBefore":\["service:service.logger"\]' \
+    && printf '%s' "${V3_HUB_TEARDOWN_STRING}" | grep -q '"ordering":"proved"' \
+    && printf '%s' "${V3_LOGGER_TEARDOWN_STRING}" | grep -q '"wave":1,' \
+    && printf '%s' "${V3_LOGGER_TEARDOWN_STRING}" | grep -q '"closedAfter":\["service:service.example.catalog.notification.hub"\]'; then
+    check_pass "v3 teardown plan: the notification hub closes in wave 0 before the logger in wave 1, the edge proved on both ends"
+else
+    check_fail "v3 teardown plan does not order the hub before the logger (hub ${V3_HUB_TEARDOWN_STRING:-<missing>}; logger ${V3_LOGGER_TEARDOWN_STRING:-<missing>})"
+fi
+
+# the order the example registers its middlewares in is the order they wrap the handler: the metrics outermost,
+# then the timing that reports the duration, then the journal flush the timing measures. The json listing names each
+# by its constructor, so the positions are read off the one document
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . debug:middleware --format=json 2>/dev/null"
+V3_MIDDLEWARE_ORDER_STRING="$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | tr -d ' \n\t' | grep -o 'NewMetricsMiddleware\|NewTimingMiddleware\|NewCatalogJournalFlushMiddleware\|NewTracingMiddleware' | tr '\n' ',' || true)"
+if [[ "NewMetricsMiddleware,NewTimingMiddleware,NewCatalogJournalFlushMiddleware,NewTracingMiddleware," == "${V3_MIDDLEWARE_ORDER_STRING}" ]]; then
+    check_pass "v3 debug:middleware lists metrics, timing, the journal flush and tracing in the order the example registers them"
+else
+    check_fail "v3 debug:middleware lists the example's middlewares out of order: ${V3_MIDDLEWARE_ORDER_STRING:-<none>}"
+fi
+
+# the manifest is filtered by zone: the health route is exposed in the public zone only, so the frontend export must
+# leave it out while the public one carries it — the second arm is what makes the absence a filter rather than a gap
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . melody:routes:manifest --zone frontend 2>/dev/null | grep -c '\"pattern\": \"/health\"'; go run . melody:routes:manifest --zone public 2>/dev/null | grep -c '\"pattern\": \"/health\"'"
+V3_MANIFEST_COUNTS_STRING="$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | tr '\n' ',')"
+if [[ "0,1" == "${V3_MANIFEST_COUNTS_STRING%,}" ]]; then
+    check_pass "melody:routes:manifest --zone frontend leaves out /health, which --zone public carries"
+else
+    check_fail "the manifest zones did not filter /health (frontend,public counts: ${V3_MANIFEST_COUNTS_STRING:-<none>})"
 fi
 
 check_section_end "V3 DEBUG COMMANDS" "${TAG_VALIDATE}" "e2e"

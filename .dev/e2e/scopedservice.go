@@ -4,6 +4,7 @@ import (
     "context"
     "io"
     "net/http"
+    "strconv"
     "strings"
 
     "github.com/uptrace/bun"
@@ -264,6 +265,12 @@ func createScopedServiceProbe(client *http.Client, baseUrl string, name string) 
     requestId := response.Header.Get("X-Request-Id")
     if "" == requestId {
         fail("%s: the response for %q carried no X-Request-Id, so the journal entry cannot be tied to it", scopedServiceLabel, name)
+    }
+
+    /* the timing middleware wraps the journal flush, so the one response has to carry both headers: a duration missing here while the change count is present means the pipeline the example declares is not the one that served the write */
+    durationHeader := response.Header.Get("X-Example-Duration-Ms")
+    if duration, parseErr := strconv.ParseInt(durationHeader, 10, 64); nil != parseErr || 0 > duration {
+        fail("%s: the response for %q carried X-Example-Duration-Ms %q, wanted a non-negative millisecond count from the timing middleware", scopedServiceLabel, name, durationHeader)
     }
 
     return created.Id, requestId, response.Header.Get("X-Example-Catalog-Changes")

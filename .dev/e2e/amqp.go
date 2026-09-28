@@ -2,6 +2,7 @@ package main
 
 import (
     "strconv"
+    "sync"
     "time"
 
     amqp "github.com/precision-soft/melody/integrations/amqp/v3"
@@ -31,7 +32,10 @@ func runAmqpCheck(dsn string) {
         Queue:    queueName,
         Registry: registry,
     })
-    defer transport.Close()
+    teardown := amqpProbeTeardown(dsn, transport, amqpProbeQueueNameList(queueName, amqpDefaultDelayBucketList), nil)
+    removeTeardownOnFailure := pushFailureCleanup(teardown)
+    defer removeTeardownOnFailure()
+    defer teardown()
 
     /* publish two orders, each under a stable producer-assigned message id */
     sent := map[int]string{1: "widget", 2: "gadget"}
@@ -107,6 +111,11 @@ func runAmqpDelayedRedeliveryCheck(dsn string) {
         DelayBuckets: []time.Duration{amqpRedeliveryDelay},
     })
 
+    teardown := amqpProbeTeardown(dsn, transport, append(amqpProbeQueueNameList(queueName, []time.Duration{amqpRedeliveryDelay}), queueName+".dlq"), []string{queueName + ".dlx"})
+    removeTeardownOnFailure := pushFailureCleanup(teardown)
+    defer removeTeardownOnFailure()
+    defer teardown()
+
     inspection, inspectionErr := amqp091.Dial(dsn)
     if nil != inspectionErr {
         fail("amqp redelivery: dial the inspection connection: %v", inspectionErr)
@@ -118,15 +127,6 @@ func runAmqpDelayedRedeliveryCheck(dsn string) {
         fail("amqp redelivery: open the inspection channel: %v", channelErr)
     }
     defer inspectionChannel.Close()
-    /* the transport is closed before its queues are deleted, since a consumer whose queue the broker deletes under it reports the lost channel as a failure */
-    defer func() {
-        _ = transport.Close()
-
-        for _, name := range []string{queueName, queueName + ".delay", queueName + ".delay." + strconv.FormatInt(amqpRedeliveryDelay.Milliseconds(), 10) + "ms", queueName + ".dlq"} {
-            _, _ = inspectionChannel.QueueDelete(name, false, false, false)
-        }
-        _ = inspectionChannel.ExchangeDelete(queueName+".dlx", false, false)
-    }()
 
     envelope := melodymessagebus.NewEnvelope(
         amqpOrder{Id: 3, Name: "retried"},
@@ -194,6 +194,11 @@ func runAmqpDelayedRedeliveryCheck(dsn string) {
         fail("amqp redelivery: expected the refused delivery in %s.dlq, read %d messages there out of band", queueName, deadLetterDepth)
     }
 
+    /* the transport's consumer is closed first: while it is attached, a delivery wrongly requeued to it sits unacknowledged at the consumer and the passive declare counts only the ready messages, so the empty main queue would prove nothing. Closed, every unacknowledged delivery returns to the queue where the count sees it. */
+    if closeErr := transport.Close(); nil != closeErr {
+        fail("amqp redelivery: close the transport before reading the main queue: %v", closeErr)
+    }
+
     mainQueue, inspectErr := inspectionChannel.QueueDeclarePassive(queueName, true, false, false, false, nil)
     if nil != inspectErr {
         fail("amqp redelivery: inspect the main queue out of band: %v", inspectErr)
@@ -202,7 +207,7 @@ func runAmqpDelayedRedeliveryCheck(dsn string) {
     if 0 != mainQueue.Messages {
         fail("amqp redelivery: expected the main queue empty after the dead-lettering, read %d messages out of band", mainQueue.Messages)
     }
-    pass("refused without requeue, the delivery is the one message in %s.dlq and the main queue is empty, both read out of band", queueName)
+    pass("refused without requeue, the delivery is the one message in %s.dlq and the main queue, read after the consumer closed, is empty, both out of band", queueName)
 }
 
 func receiveAmqpOrder(queue <-chan messagebuscontract.Envelope, within time.Duration, what string) messagebuscontract.Envelope {
@@ -218,4 +223,47 @@ func receiveAmqpOrder(queue <-chan messagebuscontract.Envelope, within time.Dura
     }
 
     return nil
+}
+
+/* amqpDefaultDelayBucketList mirrors the transport's defaultDelayBuckets, which a transport declared with no DelayBuckets declares a queue for each of. The harness cannot read the unexported list, so a change there leaves queues behind here until this list follows it. */
+var amqpDefaultDelayBucketList = []time.Duration{5 * time.Second, time.Minute, 10 * time.Minute, time.Hour}
+
+/* amqpProbeQueueNameList answers every queue a transport declares for its queue and delay buckets: the queue itself, the per-message-ttl delay queue and one queue per bucket. */
+func amqpProbeQueueNameList(queueName string, bucketList []time.Duration) []string {
+    nameList := []string{queueName, queueName + ".delay"}
+    for _, bucket := range bucketList {
+        nameList = append(nameList, queueName+".delay."+strconv.FormatInt(bucket.Milliseconds(), 10)+"ms")
+    }
+
+    return nameList
+}
+
+/* amqpProbeTeardown answers the teardown of a probe's transport and of the queues and exchanges it declared, on a connection of its own. The transport is closed before its queues are deleted, since a consumer whose queue the broker deletes under it reports the lost channel as a failure. The section registers it both deferred and as a failure cleanup, because fail() exits without running deferred functions; the once keeps the two from running it twice. */
+func amqpProbeTeardown(dsn string, transport *amqp.Transport, queueNameList []string, exchangeNameList []string) func() {
+    var once sync.Once
+
+    return func() {
+        once.Do(func() {
+            _ = transport.Close()
+
+            connection, dialErr := amqp091.Dial(dsn)
+            if nil != dialErr {
+                return
+            }
+            defer connection.Close()
+
+            channel, channelErr := connection.Channel()
+            if nil != channelErr {
+                return
+            }
+            defer channel.Close()
+
+            for _, name := range queueNameList {
+                _, _ = channel.QueueDelete(name, false, false, false)
+            }
+            for _, name := range exchangeNameList {
+                _ = channel.ExchangeDelete(name, false, false)
+            }
+        })
+    }
 }

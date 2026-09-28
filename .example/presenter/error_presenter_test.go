@@ -525,3 +525,17 @@ func TestApiErrorWithErrFilesAClientThatLeftAtWarning(t *testing.T) {
         t.Fatalf("a cancellation under a live request was filed %d times at error, wanted once", len(logger.lines()))
     }
 }
+
+/* the envelope carries the identifier the kernel minted, never the one a client claimed on its request: the response header names the minted one, and the two must agree */
+func TestBuildErrorContextCarriesTheMintedRequestIdNotTheClaimedOne(t *testing.T) {
+    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/refused", nil)
+    httpRequest.Header.Set(melodyhttp.HeaderRequestId, "claimed-by-the-client")
+
+    request := melodyhttp.NewRequest(httpRequest, nil, nil, melodyhttp.NewRequestContext("minted-by-the-kernel", time.Now()))
+
+    errorContext := buildErrorContext(request, nethttp.StatusNotFound, nil, false)
+
+    if "minted-by-the-kernel" != errorContext["requestId"] {
+        t.Fatalf("expected the minted request id in the error context, got %v", errorContext["requestId"])
+    }
+}
