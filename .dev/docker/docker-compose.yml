@@ -13,6 +13,9 @@ services:
             MELODY_DEV_REFLEX_ENABLED: ${MELODY_DEV_REFLEX_ENABLED:-1}
             MELODY_DEV_EXAMPLE_DIR: ${MELODY_DEV_EXAMPLE_DIR:-/app/v3/.example}
             MELODY_DEV_RUN_COMMAND: ${MELODY_DEV_RUN_COMMAND:-go run .}
+            # the third major's serving process reopens its file journal on SIGHUP, so the entrypoint can rotate it
+            # by size; the first and second majors' do not, and their services leave the rotation off.
+            MELODY_DEV_LOG_ROTATE_BYTES: ${MELODY_DEV_LOG_ROTATE_BYTES:-67108864}
             # note: the example's live-integration endpoints (MYSQL_HOST, REDIS_ADDRESS,
             # AMQP_DSN, S3_*, SMTP_ADDRESS) live in v3/.example/.env and are loaded into the
             # example process by its main() — deliberately NOT set here as container-wide

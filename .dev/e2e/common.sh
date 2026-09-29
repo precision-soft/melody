@@ -122,6 +122,16 @@ CHECK_SECTION_FAILURE_BASELINE_INTEGER=0
 RUN_IN_DEV_OUTPUT_STRING=""
 RUN_IN_DEV_STATUS_INTEGER=0
 
+# the dev entrypoint rotates the supervised v3 example's journal by size and pauses while the hold file next to it is
+# younger than two hours. The sections count and read journal lines across a run, and a rotation between two of those
+# reads would move the lines into the renamed file, so every run refreshes the hold when it starts.
+e2e_hold_journal_rotation() {
+    local LOG_DIRECTORY_STRING="${REPOSITORY_ROOT_DIRECTORY_STRING}/v3/.example/var/log"
+
+    mkdir -p "${LOG_DIRECTORY_STRING}"
+    touch "${LOG_DIRECTORY_STRING}/.rotation-hold"
+}
+
 e2e_require_dev_service() {
     require_docker
     require_docker_daemon
@@ -131,6 +141,8 @@ e2e_require_dev_service() {
     fi
 
     ensure_service_running "${E2E_SERVICE_NAME_STRING}"
+
+    e2e_hold_journal_rotation
 
     e2e_ensure_example_databases
     e2e_ensure_example_postgres_databases

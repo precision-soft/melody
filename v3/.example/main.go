@@ -6,12 +6,18 @@ import (
     "github.com/precision-soft/melody/v3/.example/config"
     "github.com/precision-soft/melody/v3/application"
     melodyexception "github.com/precision-soft/melody/v3/exception"
+    melodylogging "github.com/precision-soft/melody/v3/logging"
 )
 
 func main() {
     /* the signal context gives the application a graceful shutdown window on the first SIGINT or SIGTERM; a second signal during a hung shutdown forces the process down */
     ctx, stop := application.NewSignalContext()
     defer stop()
+
+    /* Boot and Run recover their own panics; a refusal raised before Boot — the catalogue this example opens while it is wired — or after it, by the boot services and the arming below, reaches no such recovery. It is recorded here as an emergency, on the standard error because the journal does not exist yet or is closed by then, and the process exits 1 with the same final line a refusal inside Run leaves, instead of a bare goroutine dump and exit 2. */
+    defer func() {
+        melodylogging.LogOnRecoverAndExit(melodylogging.EmergencyLogger(), recover(), 1)
+    }()
 
     app := application.NewApplication(
         ctx,

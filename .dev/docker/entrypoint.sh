@@ -35,6 +35,52 @@ fi
 
 cd "${EXAMPLE_DIR}"
 
+# bound the supervised example's journal. The example logs at debug, and the dev prometheus scrapes /metrics every
+# few seconds, so the file grows by every request's dispatch records with nothing else rotating it. Past
+# MELODY_DEV_LOG_ROTATE_BYTES the file is renamed to <file>.1 (one generation, replaced at the next rotation) and the
+# serving process is sent SIGHUP, which the framework's file journal answers by reopening its path. Only a major whose
+# serving process arms that reopen can be rotated this way: a process that does not would take SIGHUP's terminating
+# disposition, so the value is 0 (off) unless the service sets it. The target is the child of the supervisor's own run
+# command started in this directory, never a cli process the e2e harness runs beside it. A hold file next to the
+# journal, touched by the harness when a run starts, pauses the rotation for two hours, because the harness counts
+# and reads journal lines across its sections and a rotation in the middle would move them out of the file it reads.
+LOG_ROTATE_BYTES="${MELODY_DEV_LOG_ROTATE_BYTES:-0}"
+LOG_FILE="${MELODY_DEV_LOG_FILE:-${EXAMPLE_DIR}/var/log/dev.log}"
+LOG_ROTATE_HOLD_FILE="$(dirname "${LOG_FILE}")/.rotation-hold"
+
+serving_process_id() {
+    local candidate
+    local run_process_id
+    for candidate in /proc/[0-9]*; do
+        [[ "${RUN_COMMAND} " = "$(tr '\0' ' ' <"${candidate}/cmdline" 2>/dev/null)" ]] || continue
+        [[ "${EXAMPLE_DIR}" = "$(readlink "${candidate}/cwd" 2>/dev/null)" ]] || continue
+        run_process_id="${candidate#/proc/}"
+        pgrep -P "${run_process_id}" | head -n 1
+        return 0
+    done
+}
+
+if [[ "${LOG_ROTATE_BYTES}" =~ ^[0-9]+$ ]] && [[ 0 -lt "${LOG_ROTATE_BYTES}" ]]; then
+    (
+        while true; do
+            sleep 30
+            [[ -f "${LOG_FILE}" ]] || continue
+            [[ "${LOG_ROTATE_BYTES}" -lt "$(stat -c %s "${LOG_FILE}")" ]] || continue
+            [[ -z "$(find "${LOG_ROTATE_HOLD_FILE}" -mmin -120 2>/dev/null)" ]] || continue
+            serving_pid="$(serving_process_id)"
+            [[ -n "${serving_pid}" ]] || continue
+            mv -f "${LOG_FILE}" "${LOG_FILE}.1" || continue
+            # the process runs as root; the file it reopens is created here first, owned as the renamed one was, so the
+            # journal in the bind-mounted tree stays writable by the host user who owned it
+            : >"${LOG_FILE}" && chown "$(stat -c %u:%g "${LOG_FILE}.1")" "${LOG_FILE}"
+            kill -HUP "${serving_pid}" \
+                && echo "[melody-dev] journal rotated past ${LOG_ROTATE_BYTES} bytes ($(date '+%H:%M:%S')); ${LOG_FILE}.1 holds the previous one" \
+                || echo "[melody-dev] journal renamed but process ${serving_pid} did not take SIGHUP; the example's next start opens a fresh ${LOG_FILE}"
+        done
+    ) &
+    echo "[melody-dev] journal rotation armed at ${LOG_ROTATE_BYTES} bytes for ${LOG_FILE}"
+fi
+
 # build the example frontend bundle (TypeScript -> public/assets/app.js) so the
 # example is functional in the browser on startup and picks up local .ts edits.
 # The bundle is NOT committed — it is generated from assets/app.ts and git-ignored — so a build that

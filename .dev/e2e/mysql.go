@@ -259,6 +259,32 @@ func assertMysqlProductAuditTrail(client *http.Client, baseUrl string, database 
         productId,
         adminIdentifier,
     )
+    assertMysqlProductDeleteCarriesNoBeforeImage(client, baseUrl, database, productId)
+}
+
+/* the product is registered without the delete before-image, so its delete records the operation and no field: the trail says the row went, and the cost of loading and locking it first is not paid. The user entity, which captures, is the other half, read when the redaction probe account is removed */
+func assertMysqlProductDeleteCarriesNoBeforeImage(client *http.Client, baseUrl string, database *bun.DB, productId string) {
+    requireMysqlWrite(client, "DELETE", baseUrl, "/products/api/delete/"+productId+"/", "", "delete the audit probe")
+
+    /* the probe is gone from the table, so the cleanup that finds probes by name no longer reaches its trail: it is removed here, on the failure path as well, or the next product minted under the recycled identifier would inherit these entries */
+    removeTrailOnFailure := pushFailureCleanup(func() {
+        removeExampleV3AuditTrail(mysqlLabel, database, "product", productId)
+    })
+    defer func() {
+        removeTrailOnFailure()
+        removeExampleV3AuditTrail(mysqlLabel, database, "product", productId)
+    }()
+
+    trail := readMysqlAuditTrail(database, "product", productId)
+    if 3 != len(trail) || "DELETE" != trail[2].Operation {
+        fail("%s: after the delete the trail of %s holds %d entries, wanted INSERT, UPDATE and DELETE", mysqlLabel, productId, len(trail))
+    }
+
+    deleteChanges := decodeMysqlChanges(trail[2])
+    if 0 != len(deleteChanges) {
+        fail("%s: the DELETE entry of %s records %d field(s) although the product does not capture a before-image: %s", mysqlLabel, productId, len(deleteChanges), trail[2].Changes)
+    }
+    pass("the delete of %s through its door is recorded with no field, as an entity that does not capture its before-image", productId)
 }
 
 /* assertMysqlPasswordRedactedInTrail changes the password of an account the section creates for the purpose. It is never a seeded account: the seeded credentials are what every other section signs in with, and a run that left one of them changed would take the whole harness down with it on the next execution. */
@@ -396,7 +422,34 @@ func updateMysqlUserProbePassword(client *http.Client, baseUrl string, userId st
 func removeMysqlUserProbe(client *http.Client, baseUrl string, database *bun.DB, userId string) {
     requireMysqlWrite(client, "DELETE", baseUrl, "/users/api/delete/"+userId+"/", "", "remove the redaction probe account")
 
+    /* the account is gone, so its trail is removed on the failure path as well: an assertion failing below would otherwise leave entries the next account minted under the recycled identifier inherits */
+    removeTrailOnFailure := pushFailureCleanup(func() {
+        removeExampleV3AuditTrail(mysqlLabel, database, "user", userId)
+    })
+    defer removeTrailOnFailure()
+
+    assertMysqlUserDeleteCarriesItsBeforeImage(database, userId)
+
     removeExampleV3AuditTrail(mysqlLabel, database, "user", userId)
+}
+
+/* the user entity captures its delete before-image, so the DELETE entry carries what the account held: its identifier and roles as old values with no new one, and the password as the redaction marker, never the hash — the trail of a deleted account is what recovers who it was and what it could do */
+func assertMysqlUserDeleteCarriesItsBeforeImage(database *bun.DB, userId string) {
+    trail := readMysqlAuditTrail(database, "user", userId)
+    if 0 == len(trail) || "DELETE" != trail[len(trail)-1].Operation {
+        fail("%s: the trail of the deleted account %s does not end on a DELETE entry (%d entries)", mysqlLabel, userId, len(trail))
+    }
+
+    deleteEntry := trail[len(trail)-1]
+    deleteChanges := decodeMysqlChanges(deleteEntry)
+
+    identifierChange := mysqlChangeOf(deleteChanges, "id")
+    rolesChange := mysqlChangeOf(deleteChanges, "roles")
+    passwordChange := mysqlChangeOf(deleteChanges, "password")
+    if userId != fmt.Sprintf("%v", identifierChange.Old) || nil != identifierChange.New || "" == fmt.Sprintf("%v", rolesChange.Old) || nil == rolesChange.Old || "<redacted>" != fmt.Sprintf("%v", passwordChange.Old) {
+        fail("%s: the DELETE entry of %s does not carry the account's before-image (id, roles, redacted password): %s", mysqlLabel, userId, deleteEntry.Changes)
+    }
+    pass("the delete of account %s records its before-image: the identifier and the roles %v as old values, the password redacted", userId, rolesChange.Old)
 }
 
 /* requireMysqlWrite performs one write and reports the body. A refusal is named for what it is, because a write that never reached the nomenclature would leave every assertion below measuring an empty trail. */

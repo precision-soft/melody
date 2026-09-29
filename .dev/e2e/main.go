@@ -31,7 +31,8 @@ Sections:
   - MAIL                   (mailpit)  — smtp transport sends a whole session under the per-step deadline; mailpit confirms receipt
   - EXAMPLE OVER HTTP      (example)  — forwarded-client-ip trust boundary and the rate limit over real HTTP
   - THREE HOSTS            (example)  — the load balancer's three vhosts each reach their own major, told apart by which catalogue table the write lands in
-  - OPENAPI SERVED         (example)  — the document the SERVING process builds: the booted routes, a typed response's component schema, every $ref resolving
+  - OPENAPI SERVED         (example)  — the document the SERVING process builds: the booted routes, a typed response's component schema, every $ref resolving, a request body's validate constraints
+  - ENCRYPT ROUND TRIP     (example)  — the served cipher: the gcm marker and key id, the value decrypted back, a fresh ciphertext per call
   - SCOPED SERVICE         (example + mysql) — the request-scoped journal trail: the row a write leaves proves the event listener and the flush middleware held ONE instance, its request id proves none was carried to the next request
   - CATALOG NOTIFICATION   (example + mysql) — two live sockets on the RUNNING application; one catalogue write and both are told the same thing, so a change reaches every open page rather than one of them
   - TRANSLATION            (example)  — both catalogues, all three ICU plural branches, the locale fallback chain, and the token firewall's own json entry point
@@ -209,6 +210,10 @@ func main() {
 
         section("OPENAPI SERVED (live example application)")
         runOpenApiCheck(baseUrl)
+        sections++
+
+        section("ENCRYPT ROUND TRIP (live example application)")
+        runEncryptRoundTripOverHttp(baseUrl)
         sections++
 
         section("SCOPED SERVICE (live example application)")

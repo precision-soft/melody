@@ -11,6 +11,7 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v2/.example/entity"
     "github.com/precision-soft/melody/v2/.example/repository"
     "github.com/precision-soft/melody/v2/.example/security"
     "github.com/precision-soft/melody/v2/.example/service"
@@ -21,6 +22,7 @@ import (
     melodyevent "github.com/precision-soft/melody/v2/event"
     melodyeventcontract "github.com/precision-soft/melody/v2/event/contract"
     melodyhttp "github.com/precision-soft/melody/v2/http"
+    melodyhttpcontract "github.com/precision-soft/melody/v2/http/contract"
     melodylogging "github.com/precision-soft/melody/v2/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v2/logging/contract"
     melodyruntime "github.com/precision-soft/melody/v2/runtime"
@@ -160,7 +162,7 @@ func loginRuntimeRefusingEveryCredential(t *testing.T) (melodyruntimecontract.Ru
     t.Helper()
 
     containerInstance := melodycontainer.NewContainer()
-    failureList := registerLoginFailureRecorder(t, containerInstance)
+    failureList := registerLoginFailureRecorder(t, containerInstance, nil)
 
     registerErr := melodycontainer.Register[*service.UserService](
         containerInstance,
@@ -210,8 +212,8 @@ func TestLoginHandler_ReadsTheFormCredentialsFromTheBodyNotTheQuery(t *testing.T
     }
 }
 
-/* registerLoginFailureRecorder registers an event dispatcher that records the failure each security.login.failure event carries, the one listener the login door's refusal must reach. */
-func registerLoginFailureRecorder(t *testing.T, containerInstance melodycontainercontract.Container) *[]error {
+/* registerLoginFailureRecorder registers an event dispatcher that records the failure each security.login.failure event carries, the one listener the login door's refusal must reach; the listener answers listenerErr, so a non-nil one fails the dispatch. */
+func registerLoginFailureRecorder(t *testing.T, containerInstance melodycontainercontract.Container, listenerErr error) *[]error {
     t.Helper()
 
     failureList := make([]error, 0, 1)
@@ -224,7 +226,7 @@ func registerLoginFailureRecorder(t *testing.T, containerInstance melodycontaine
                 failureList = append(failureList, failure.Error())
             }
 
-            return nil
+            return listenerErr
         },
         0,
     )
@@ -284,4 +286,104 @@ func TestLoginHandler_RaisesTheLoginFailureOnRefusedCredentials(t *testing.T) {
     if true == strings.Contains((*failureList)[0].Error(), "wrong") || true == strings.Contains((*failureList)[0].Error(), "nobody") {
         t.Fatalf("expected the failure to name neither credential, got %q", (*failureList)[0].Error())
     }
+}
+
+/* a login failure the dispatch cannot deliver still answers the refusal: the door journals the dispatch failure as the cause and keeps the 401, as the framework's token source does, rather than turning a refused password into a 500 */
+func TestLoginHandler_KeepsTheRefusalWhenTheLoginFailureDispatchFails(t *testing.T) {
+    containerInstance := melodycontainer.NewContainer()
+    failureList := registerLoginFailureRecorder(t, containerInstance, errors.New("login failure listener refused"))
+
+    registerErr := melodycontainer.Register[*service.UserService](
+        containerInstance,
+        service.ServiceUserService,
+        func(resolver melodycontainercontract.Resolver) (*service.UserService, error) {
+            return service.NewUserService(&acceptingAuthenticationRepository{}, &passThroughCache{}, nil), nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("register user service: %v", registerErr)
+    }
+
+    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+
+    response := postLoginCredentials(t, runtimeInstance, "nobody", "wrong")
+
+    if nethttp.StatusUnauthorized != response.StatusCode() {
+        t.Fatalf("expected the refused login answered 401 when its failure could not be dispatched, got %d", response.StatusCode())
+    }
+
+    if 1 != len(*failureList) {
+        t.Fatalf("expected the login failure dispatched once, got %d", len(*failureList))
+    }
+}
+
+/* accepted credentials raise no login failure: the request carries no session, so the door stops after the authentication with its 500, and the only event it could have raised by then is the one this test refuses */
+func TestLoginHandler_RaisesNoLoginFailureOnAcceptedCredentials(t *testing.T) {
+    passwordHash, hashErr := security.HashPassword("secret")
+    if nil != hashErr {
+        t.Fatalf("hash password: %v", hashErr)
+    }
+
+    containerInstance := melodycontainer.NewContainer()
+    failureList := registerLoginFailureRecorder(t, containerInstance, nil)
+
+    registerErr := melodycontainer.Register[*service.UserService](
+        containerInstance,
+        service.ServiceUserService,
+        func(resolver melodycontainercontract.Resolver) (*service.UserService, error) {
+            return service.NewUserService(
+                &acceptingAuthenticationRepository{
+                    user: &entity.User{Id: "user-accepted", Username: "admin", Password: passwordHash, Roles: []string{"ROLE_USER"}},
+                },
+                &passThroughCache{},
+                nil,
+            ), nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("register user service: %v", registerErr)
+    }
+
+    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+
+    response := postLoginCredentials(t, runtimeInstance, "admin", "secret")
+
+    if nethttp.StatusInternalServerError != response.StatusCode() {
+        t.Fatalf("expected the accepted login to stop at the missing session with 500, got %d", response.StatusCode())
+    }
+
+    if 0 != len(*failureList) {
+        t.Fatalf("expected no login failure for accepted credentials, got %d", len(*failureList))
+    }
+}
+
+/* acceptingAuthenticationRepository answers the one account it holds for its username, and no account for any other. */
+type acceptingAuthenticationRepository struct {
+    repository.UserRepository
+    user *entity.User
+}
+
+func (instance *acceptingAuthenticationRepository) FindByUsername(ctx context.Context, username string) (*entity.User, bool, error) {
+    if nil == instance.user || instance.user.Username != username {
+        return nil, false, nil
+    }
+
+    return instance.user, true, nil
+}
+
+/* postLoginCredentials posts the credentials as the login form sends them and answers the door's response. */
+func postLoginCredentials(t *testing.T, runtimeInstance melodyruntimecontract.Runtime, username string, password string) melodyhttpcontract.Response {
+    t.Helper()
+
+    httpRequest := httptest.NewRequest(nethttp.MethodPost, "/login", bytes.NewBufferString("username="+username+"&password="+password))
+    httpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+    request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("login-dispatch-test", time.Now()))
+
+    response, handlerErr := LoginHandler()(runtimeInstance, httptest.NewRecorder(), request)
+    if nil != handlerErr {
+        t.Fatalf("login handler: %v", handlerErr)
+    }
+
+    return response
 }

@@ -123,7 +123,7 @@ e2e_require_dev_service
 # mismatch message prints both numbers, so the count to move to is in the failure itself. A run that took one of
 # the degraded early-exit branches (an unreachable supervised app, a cold-cache timeout) legitimately executes
 # fewer checks; it is already red from the check_fail that branch raised
-EXPECTED_CHECK_COUNT_INTEGER=189
+EXPECTED_CHECK_COUNT_INTEGER=224
 readonly EXPECTED_CHECK_COUNT_INTEGER
 
 # state the scope in the output, so a reader never has to infer which major these checks covered
@@ -455,6 +455,74 @@ fi
 check_section_end "CRON CRONTAB-NO-USER TEMPLATE" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
+# V3 CRON GENERATE — the destination, the binary and the heartbeat a bare generate resolves on its own
+# ---------------------------------------------------------------------------------------------------
+
+check_section_start "V3 CRON GENERATE" "${TAG_VALIDATE}" "e2e"
+
+# a built binary in a directory of its own, beside a copy of the example's .env, so the project directory is the
+# workspace: a generate with no --out writes where the destination parameter points under it, every entry names the
+# binary that ran the generate, since neither --binary nor its parameter is set, and the heartbeat the example's
+# environment opts into is one more entry touching a file under the logs directory. The k8s arm refuses a namespace
+# that is not an RFC 1123 label before any manifest is written, naming it
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "WORK_DIRECTORY=/tmp/example-cron-generate-e2e
+    rm -rf \"\${WORK_DIRECTORY}\"
+    mkdir -p \"\${WORK_DIRECTORY}\"
+    if ! go build -o \"\${WORK_DIRECTORY}/example-cron\" . >/tmp/example-cron-build.log 2>&1; then
+        echo build_failed=1
+        exit 0
+    fi
+    cp .env \"\${WORK_DIRECTORY}/.env\"
+    cd \"\${WORK_DIRECTORY}\" || exit 1
+    ./example-cron melody:cron:generate >/tmp/example-cron-generate.log 2>&1
+    echo \"generate_exit=\$?\"
+    if [ -s generated_conf/cron/crontab ]; then echo destination_written=1; else echo destination_written=0; fi
+    grep -v '^#' generated_conf/cron/crontab 2>/dev/null | grep -c \"^[^ ]* [^ ]* [^ ]* [^ ]* [^ ]* [^ ]* \${WORK_DIRECTORY}/example-cron \" | sed 's/^/entries_on_the_binary=/'
+    grep -v '^#' generated_conf/cron/crontab 2>/dev/null | grep -v \"\${WORK_DIRECTORY}/example-cron \" | grep -v '/heartbeat.crontab\$' | grep -c '[a-z]' | sed 's/^/entries_elsewhere=/'
+    grep -c \"^\* \* \* \* \* [^ ]* /bin/touch \${WORK_DIRECTORY}/var/log/cron/heartbeat.crontab\$\" generated_conf/cron/crontab 2>/dev/null | sed 's/^/heartbeat_entries=/'
+    ./example-cron melody:cron:generate --template k8s --image example:e2e --namespace Bad_NS --out \"\${WORK_DIRECTORY}/k8s.yaml\" >/tmp/example-cron-generate.log 2>&1
+    echo \"k8s_bad_namespace_exit=\$?\"
+    if grep -q 'k8s namespace \"Bad_NS\" is not a valid RFC 1123 label' /tmp/example-cron-generate.log; then echo k8s_bad_namespace_named=1; else echo k8s_bad_namespace_named=0; fi
+    if [ -e \"\${WORK_DIRECTORY}/k8s.yaml\" ]; then echo k8s_manifest_written=1; else echo k8s_manifest_written=0; fi
+    cd / && rm -rf \"\${WORK_DIRECTORY}\" /tmp/example-cron-build.log /tmp/example-cron-generate.log"
+V3_CRON_GENERATE_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+printf '%s\n' "${V3_CRON_GENERATE_OUTPUT_STRING}"
+
+cron_generate_has() {
+    printf '%s' "${V3_CRON_GENERATE_OUTPUT_STRING}" | grep -qx "${1}"
+}
+
+cron_generate_value() {
+    printf '%s' "${V3_CRON_GENERATE_OUTPUT_STRING}" | grep -o "^${1}=.*" | head -1 || true
+}
+
+if cron_generate_has 'generate_exit=0' && cron_generate_has 'destination_written=1'; then
+    check_pass "melody:cron:generate with no --out writes generated_conf/cron/crontab, where the destination parameter points"
+else
+    check_fail "the bare generate did not write the parameter's destination ($(cron_generate_value generate_exit) $(cron_generate_value destination_written))"
+fi
+
+if [[ 0 -lt "$(cron_generate_value entries_on_the_binary | cut -d= -f2)" ]] && cron_generate_has 'entries_elsewhere=0'; then
+    check_pass "every generated command entry runs the binary that ran the generate ($(cron_generate_value entries_on_the_binary | cut -d= -f2) entries), none some other path"
+else
+    check_fail "the entries do not name the running binary ($(cron_generate_value entries_on_the_binary) $(cron_generate_value entries_elsewhere))"
+fi
+
+if cron_generate_has 'heartbeat_entries=1'; then
+    check_pass "the heartbeat the environment opts into is one every-minute entry touching heartbeat.crontab under the logs directory"
+else
+    check_fail "the generated crontab carries no heartbeat entry under the logs directory ($(cron_generate_value heartbeat_entries))"
+fi
+
+if cron_generate_has 'k8s_bad_namespace_exit=1' && cron_generate_has 'k8s_bad_namespace_named=1' && cron_generate_has 'k8s_manifest_written=0'; then
+    check_pass "the k8s template refuses the namespace Bad_NS as not an RFC 1123 label, naming it, and writes no manifest"
+else
+    check_fail "the k8s template did not refuse Bad_NS ($(cron_generate_value k8s_bad_namespace_exit) $(cron_generate_value k8s_bad_namespace_named) $(cron_generate_value k8s_manifest_written))"
+fi
+
+check_section_end "V3 CRON GENERATE" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
 # CRON IN-PROCESS RUNNER — the same Configuration drives melody:cron:run, which ticks in-process
 # ---------------------------------------------------------------------------------------------------
 
@@ -595,6 +663,15 @@ check_section_start "OUTBOX FACTORIES END-TO-END" "${TAG_VALIDATE}" "e2e"
 # half is a separate cli process, so store and relay factories are exercised across process boundaries.
 # The sent count is read before and after: /outbox/status going green on rows sent by EARLIER runs would
 # be a vacuous pass, so the assertion is that the count GREW, not that it exists
+# the relay publishes onto the broker's outbox_notice queue, which nothing in the development stack consumes, so the
+# queue is emptied out of band before the run: every message it holds afterwards is this run's, and the broker is not
+# left one message fuller by every run
+outbox_queue_depth() {
+    docker_compose_no_log exec -T rabbitmq rabbitmqctl list_queues -q name messages </dev/null 2>/dev/null | awk '"outbox_notice" == $1 { print $2 }' || true
+}
+docker_compose_no_log exec -T rabbitmq rabbitmqctl purge_queue -q outbox_notice </dev/null >/dev/null 2>&1 || true
+OUTBOX_QUEUE_BEFORE_STRING="$(outbox_queue_depth)"
+
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "ANONYMOUS_STATUS=\$(wget -q -S -O /dev/null \"\${EXAMPLE_BASE_URL}/outbox/status\" 2>&1 | sed -n 's/^ *HTTP\/[0-9.]* \([0-9]*\).*/\1/p' | head -1)
     echo \"anonymous_status=\${ANONYMOUS_STATUS:-none}\"
 ${EXAMPLE_SIGN_IN_SNIPPET}
@@ -663,6 +740,23 @@ if printf '%s' "${OUTBOX_OUTPUT_STRING}" | grep -q '"sent":' \
     check_pass "/outbox/status shows the sent count grew (${OUTBOX_BEFORE_SENT_INTEGER:-0} -> ${OUTBOX_AFTER_SENT_INTEGER:-0})"
 else
     check_fail "the sent count did not grow (${OUTBOX_BEFORE_SENT_INTEGER:-0} -> ${OUTBOX_AFTER_SENT_INTEGER:-0}) — the relay published nothing"
+fi
+
+# the message the relay handed the broker, read out of band: the queue holds exactly the one this run published, its
+# message id is the outbox row's own — the key a consumer deduplicates redeliveries on — and the row is the one the
+# store marked sent. It is taken with an acknowledgement, so the queue is left empty
+OUTBOX_QUEUE_AFTER_STRING="$(outbox_queue_depth)"
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "AUTHORIZATION=\"Authorization: Basic \$(printf 'guest:guest' | base64)\"
+    wget -q -O - --header=\"\${AUTHORIZATION}\" --header='Content-Type: application/json' --post-data='{\"count\":1,\"ackmode\":\"ack_requeue_false\",\"encoding\":\"auto\"}' 'http://rabbitmq:15672/api/queues/%2F/outbox_notice/get' 2>/dev/null"
+OUTBOX_MESSAGE_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+OUTBOX_MESSAGE_ID_STRING="$(printf '%s' "${OUTBOX_MESSAGE_STRING}" | grep -o '"message_id":"melody-outbox-[0-9]*"' | head -1 | grep -o '[0-9]*"$' | tr -d '"' || true)"
+OUTBOX_ROW_STATUS_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT status FROM melody_outbox WHERE id = '${OUTBOX_MESSAGE_ID_STRING:-0}'")"
+OUTBOX_QUEUE_LEFT_STRING="$(outbox_queue_depth)"
+if [[ "0" == "${OUTBOX_QUEUE_BEFORE_STRING}" ]] && [[ "1" == "${OUTBOX_QUEUE_AFTER_STRING}" ]] && [[ -n "${OUTBOX_MESSAGE_ID_STRING}" ]] \
+    && [[ "sent" == "${OUTBOX_ROW_STATUS_STRING}" ]] && printf '%s' "${OUTBOX_MESSAGE_STRING}" | grep -q 'stack-e2e' && [[ "0" == "${OUTBOX_QUEUE_LEFT_STRING}" ]]; then
+    check_pass "the relayed notice reached outbox_notice as the one message there, carrying melody-outbox-${OUTBOX_MESSAGE_ID_STRING}, the id of the row the store marked sent (read out of band)"
+else
+    check_fail "the relayed notice was not the one message on the broker under its row's id (queue ${OUTBOX_QUEUE_BEFORE_STRING:-?} -> ${OUTBOX_QUEUE_AFTER_STRING:-?} -> ${OUTBOX_QUEUE_LEFT_STRING:-?}, message id ${OUTBOX_MESSAGE_ID_STRING:-<none>}, row ${OUTBOX_ROW_STATUS_STRING:-<none>})"
 fi
 
 check_section_end "OUTBOX FACTORIES END-TO-END" "${TAG_VALIDATE}" "e2e"
@@ -757,7 +851,8 @@ ${EXAMPLE_SIGN_OUT_SNIPPET}
     wait \${CONSUME_PID}
     echo \"consume_status=\$?\"
     AFTER_HANDLED=\$(grep -c 'welcome email sent' var/log/dev.log 2>/dev/null || true)
-    echo \"after_handled=\${AFTER_HANDLED:-0}\""
+    echo \"after_handled=\${AFTER_HANDLED:-0}\"
+    grep 'welcome email sent' var/log/dev.log 2>/dev/null | tail -1 | sed 's/^/welcome_record=/'"
 MESSAGE_BUS_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 
 printf '%s\n' "${MESSAGE_BUS_OUTPUT_STRING}"
@@ -820,6 +915,16 @@ else
     check_fail "the marker moved by $((${MESSAGE_BUS_AFTER_INTEGER:-0} - ${MESSAGE_BUS_INLINE_INTEGER:-0})) after the consume (${MESSAGE_BUS_INLINE_INTEGER:-0} -> ${MESSAGE_BUS_AFTER_INTEGER:-0}), wanted exactly 1"
 fi
 
+# the record the consumer wrote, as the file journal writes every record: one json object per line whose message and
+# level come first, a UTC stamp at full nanosecond width (so the stamps sort as text) and the context carrying the id
+# of the consumer's process, which is what ties a line to the process that handled the message
+MESSAGE_BUS_WELCOME_RECORD_STRING="$(printf '%s' "${MESSAGE_BUS_OUTPUT_STRING}" | grep -o '^welcome_record=.*' | head -1 | cut -d= -f2- || true)"
+if printf '%s' "${MESSAGE_BUS_WELCOME_RECORD_STRING}" | grep -qE '^\{"message":"welcome email sent","level":"info","time":"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{9}Z","context":\{.*"processId":"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"'; then
+    check_pass "the consumer's record is one json line: message, level, a full-width UTC stamp and the consumer's process id"
+else
+    check_fail "the consumer's record is not in the journal's json form (${MESSAGE_BUS_WELCOME_RECORD_STRING:-<none>})"
+fi
+
 check_section_end "MESSAGE BUS ASYNC TRANSPORT" "${TAG_VALIDATE}" "e2e"
 
 fi
@@ -836,6 +941,12 @@ check_section_start "ENCRYPT FACTORY COMMAND" "${TAG_VALIDATE}" "e2e"
 # factory-resolved database. The marker count is read before and after — the log file persists across
 # runs, so an old marker would be a vacuous pass. The processed row count in that line is legitimately
 # zero when the table holds no plaintext rows, so it is not asserted
+# one row the migration has something to do on: planted out of band with both columns in plaintext, for a user with
+# no enrollment of its own so no real secret is touched, read back after the run and deleted. The finish record then
+# counts exactly the one row, and the columns carry the encryption marker instead of the text that went in
+ENCRYPT_PLANT_USER_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT id FROM melody_example_v3_user WHERE id NOT IN (SELECT user_identifier FROM melody_example_v3_two_factor) ORDER BY id LIMIT 1")"
+e2e_mysql_scalar "melody_example_v3" "INSERT INTO melody_example_v3_two_factor (user_identifier, secret, recovery_codes, created_at) VALUES ('${ENCRYPT_PLANT_USER_STRING:-none}', 'PLAINTEXT-SECRET-E2E', 'plaintext-recovery-e2e', NOW())" >/dev/null
+
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "BEFORE_COUNT=\$(grep -c 'encrypt database migration finished' var/log/dev.log 2>/dev/null || true); go run . melody:encrypt:database --table melody_example_v3_two_factor --primary-key user_identifier --column secret --column recovery_codes --mode encrypt >/tmp/encrypt-database.log 2>&1; echo status=\$?; AFTER_COUNT=\$(grep -c 'encrypt database migration finished' var/log/dev.log 2>/dev/null || true); echo \"migration_finished_before=\${BEFORE_COUNT:-0}\"; echo \"migration_finished_after=\${AFTER_COUNT:-0}\""
 ENCRYPT_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 
@@ -852,6 +963,16 @@ if [[ "${ENCRYPT_MARKER_AFTER_INTEGER:-0}" -gt "${ENCRYPT_MARKER_BEFORE_INTEGER:
     check_pass "the bulk migration ran to completion over the factory-resolved database (${ENCRYPT_MARKER_BEFORE_INTEGER:-0} -> ${ENCRYPT_MARKER_AFTER_INTEGER:-0})"
 else
     check_fail "the migration-finished marker did not appear (${ENCRYPT_MARKER_BEFORE_INTEGER:-0} -> ${ENCRYPT_MARKER_AFTER_INTEGER:-0}), so nothing proves the bulk path ran"
+fi
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "grep 'encrypt database migration finished' var/log/dev.log 2>/dev/null | tail -1 | grep -o '\"rows\":[0-9]*' | sed 's/^/finished_/'"
+ENCRYPT_ROWS_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+ENCRYPT_PLANTED_STATE_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT CONCAT(LEFT(secret, 11) = CONCAT('<ENC>', CHAR(0), 'gcm1', CHAR(0)), LEFT(recovery_codes, 11) = CONCAT('<ENC>', CHAR(0), 'gcm1', CHAR(0)), secret = 'PLAINTEXT-SECRET-E2E') FROM melody_example_v3_two_factor WHERE user_identifier = '${ENCRYPT_PLANT_USER_STRING:-none}'")"
+e2e_mysql_scalar "melody_example_v3" "DELETE FROM melody_example_v3_two_factor WHERE user_identifier = '${ENCRYPT_PLANT_USER_STRING:-none}'" >/dev/null
+if [[ -n "${ENCRYPT_PLANT_USER_STRING}" ]] && printf '%s' "${ENCRYPT_ROWS_STRING}" | grep -qx 'finished_"rows":1' && [[ "110" == "${ENCRYPT_PLANTED_STATE_STRING}" ]]; then
+    check_pass "the plaintext row planted out of band is the one row the migration processed, and both its columns now carry the encryption marker"
+else
+    check_fail "the planted plaintext row was not encrypted as the one row processed (user ${ENCRYPT_PLANT_USER_STRING:-<none>}, ${ENCRYPT_ROWS_STRING:-<no finish record>}, secret/codes marked and still plain: ${ENCRYPT_PLANTED_STATE_STRING:-<no row>})"
 fi
 
 check_section_end "ENCRYPT FACTORY COMMAND" "${TAG_VALIDATE}" "e2e"
@@ -982,6 +1103,152 @@ else
 fi
 
 check_section_end "GRACEFUL SIGNAL SHUTDOWN" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
+# V3 DATABASE HANDLES ON EXIT — a graceful stop closes the connections the bunorm registry opened
+# ---------------------------------------------------------------------------------------------------
+
+check_section_start "V3 DATABASE HANDLES ON EXIT" "${TAG_VALIDATE}" "e2e"
+
+# the mysql driver names its process in every connection's attributes, so the connections one process holds are
+# counted out of band by its pid, apart from every other process on the same user and host. The process is started
+# detached, so the count can be read from the harness while it serves, and stopped by one SIGINT in a second call.
+# The count alone cannot tell a close from a death, since the kernel closes a dead process's sockets as well; the
+# server's Aborted_clients can, because it counts the clients that left without saying goodbye, and a killed process
+# moves it by one where a registry that closed its pool leaves it where it was
+V3_HANDLES_ABORTED_STATEMENT_STRING="SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Aborted_clients'"
+V3_HANDLES_ABORTED_BEFORE_STRING="$(e2e_mysql_scalar "melody_example_v3" "${V3_HANDLES_ABORTED_STATEMENT_STRING}")"
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "WORK_DIRECTORY=/tmp/example-handles-e2e
+    rm -rf \"\${WORK_DIRECTORY}\"
+    mkdir -p \"\${WORK_DIRECTORY}\"
+    if ! go build -o \"\${WORK_DIRECTORY}/example-handles\" . >/tmp/example-handles-build.log 2>&1; then
+        echo build_failed=1
+        exit 0
+    fi
+    cp .env \"\${WORK_DIRECTORY}/.env\"
+    cp -r public \"\${WORK_DIRECTORY}/public\"
+    printf 'MELODY_HTTP_ADDRESS=:18086\n' > \"\${WORK_DIRECTORY}/.env.local\"
+    cd \"\${WORK_DIRECTORY}\" || exit 1
+    setsid sh -c './example-handles >/tmp/example-handles.log 2>&1 & echo \$! > example-handles.pid; wait \$!; echo \$? > example-handles.exit' >/dev/null 2>&1 &
+    READY=0
+    for _ in \$(seq 1 150); do
+        if wget -q -O /dev/null http://127.0.0.1:18086/health 2>/dev/null; then
+            READY=1
+            break
+        fi
+        sleep 0.2
+    done
+    echo \"handles_ready=\${READY}\"
+    echo \"handles_pid=\$(cat example-handles.pid 2>/dev/null)\""
+V3_HANDLES_START_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+V3_HANDLES_PID_STRING="$(printf '%s' "${V3_HANDLES_START_STRING}" | grep -o '^handles_pid=[0-9]*' | cut -d= -f2 || true)"
+V3_HANDLES_COUNT_STATEMENT_STRING="SELECT COUNT(*) FROM performance_schema.session_connect_attrs WHERE ATTR_NAME='_pid' AND ATTR_VALUE='${V3_HANDLES_PID_STRING:-none}'"
+V3_HANDLES_SERVING_STRING="$(e2e_mysql_scalar "melody_example_v3" "${V3_HANDLES_COUNT_STATEMENT_STRING}")"
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "cd /tmp/example-handles-e2e || exit 0
+    kill -INT \$(cat example-handles.pid) 2>/dev/null
+    for _ in \$(seq 1 150); do
+        if [ -f example-handles.exit ]; then
+            break
+        fi
+        sleep 0.2
+    done
+    if [ ! -f example-handles.exit ]; then
+        kill -KILL \$(cat example-handles.pid) 2>/dev/null || true
+    fi
+    echo \"handles_exit=\$(cat example-handles.exit 2>/dev/null)\"
+    cd / && rm -rf /tmp/example-handles-e2e /tmp/example-handles.log /tmp/example-handles-build.log"
+V3_HANDLES_STOP_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+V3_HANDLES_AFTER_STRING="$(e2e_mysql_scalar "melody_example_v3" "${V3_HANDLES_COUNT_STATEMENT_STRING}")"
+V3_HANDLES_ABORTED_AFTER_STRING="$(e2e_mysql_scalar "melody_example_v3" "${V3_HANDLES_ABORTED_STATEMENT_STRING}")"
+
+if printf '%s' "${V3_HANDLES_START_STRING}" | grep -qx 'handles_ready=1' && [[ -n "${V3_HANDLES_PID_STRING}" ]] \
+    && [[ "${V3_HANDLES_SERVING_STRING}" =~ ^[0-9]+$ ]] && [[ 0 -lt ${V3_HANDLES_SERVING_STRING} ]] \
+    && printf '%s' "${V3_HANDLES_STOP_STRING}" | grep -qx 'handles_exit=0' && [[ "0" == "${V3_HANDLES_AFTER_STRING}" ]] \
+    && [[ -n "${V3_HANDLES_ABORTED_BEFORE_STRING}" ]] && [[ "${V3_HANDLES_ABORTED_BEFORE_STRING}" == "${V3_HANDLES_ABORTED_AFTER_STRING}" ]]; then
+    check_pass "a graceful stop closed the ${V3_HANDLES_SERVING_STRING} mysql connection(s) the process held while serving, none of them aborted (read out of band by its pid and the server's Aborted_clients)"
+else
+    check_fail "the process did not close its connections (ready/pid ${V3_HANDLES_START_STRING:-<none>}, serving ${V3_HANDLES_SERVING_STRING:-?}, ${V3_HANDLES_STOP_STRING:-<no exit>}, after ${V3_HANDLES_AFTER_STRING:-?}, Aborted_clients ${V3_HANDLES_ABORTED_BEFORE_STRING:-?} -> ${V3_HANDLES_ABORTED_AFTER_STRING:-?})"
+fi
+
+check_section_end "V3 DATABASE HANDLES ON EXIT" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
+# V3 TRACE EXPORT — spans reach the collector over OTLP, and the ones still batched are flushed on the way out
+# ---------------------------------------------------------------------------------------------------
+
+check_section_start "V3 TRACE EXPORT" "${TAG_VALIDATE}" "e2e"
+
+# the development collector prints every span it receives, so its own log is the out-of-band read. A request carrying
+# a trace context of the harness's own is found there under that trace id and the example's service name. The flush
+# is read on a process of its own: its last request is answered well inside the exporter's batch interval and the
+# process is stopped at once, so the span can only reach the collector if the teardown flushes the batch; the same
+# arm stopped by SIGKILL, which runs no teardown, is the control, and its span never arrives
+new_trace_id() {
+    od -An -tx1 -N16 /dev/urandom | tr -d ' \n'
+}
+V3_TRACE_SERVED_STRING="$(new_trace_id)"
+V3_TRACE_FLUSHED_STRING="$(new_trace_id)"
+V3_TRACE_KILLED_STRING="$(new_trace_id)"
+V3_TRACE_SINCE_STRING="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "wget -q -O /dev/null --header='traceparent: 00-${V3_TRACE_SERVED_STRING}-00f067aa0ba902b7-01' \"\${EXAMPLE_BASE_URL}/health\" 2>/dev/null
+    WORK_DIRECTORY=/tmp/example-trace-e2e
+    rm -rf \"\${WORK_DIRECTORY}\"
+    mkdir -p \"\${WORK_DIRECTORY}\"
+    if ! go build -o \"\${WORK_DIRECTORY}/example-trace\" . >/tmp/example-trace-build.log 2>&1; then
+        echo build_failed=1
+        exit 0
+    fi
+    cp .env \"\${WORK_DIRECTORY}/.env\"
+    cp -r public \"\${WORK_DIRECTORY}/public\"
+    printf 'MELODY_HTTP_ADDRESS=:18087\n' > \"\${WORK_DIRECTORY}/.env.local\"
+    cd \"\${WORK_DIRECTORY}\" || exit 1
+    for ARM in INT:${V3_TRACE_FLUSHED_STRING} KILL:${V3_TRACE_KILLED_STRING}; do
+        SIGNAL=\${ARM%%:*}
+        TRACE=\${ARM#*:}
+        ./example-trace >/tmp/example-trace.log 2>&1 &
+        APP_PID=\$!
+        READY=0
+        for _ in \$(seq 1 150); do
+            if wget -q -O /dev/null http://127.0.0.1:18087/health 2>/dev/null; then
+                READY=1
+                break
+            fi
+            sleep 0.2
+        done
+        echo \"trace_ready_\${SIGNAL}=\${READY}\"
+        sleep 6
+        wget -q -O /dev/null --header=\"traceparent: 00-\${TRACE}-00f067aa0ba902b7-01\" http://127.0.0.1:18087/health 2>/dev/null
+        kill -\${SIGNAL} \${APP_PID} 2>/dev/null
+        wait \${APP_PID} 2>/dev/null
+        echo \"trace_exit_\${SIGNAL}=\$?\"
+    done
+    cd / && rm -rf \"\${WORK_DIRECTORY}\" /tmp/example-trace.log /tmp/example-trace-build.log"
+V3_TRACE_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+printf '%s\n' "${V3_TRACE_OUTPUT_STRING}"
+
+sleep 7
+V3_TRACE_COLLECTOR_LOG_STRING="$(docker_compose_no_log --profile all logs --no-log-prefix --since "${V3_TRACE_SINCE_STRING}" otel-collector 2>/dev/null || true)"
+trace_seen() {
+    printf '%s' "${V3_TRACE_COLLECTOR_LOG_STRING}" | grep -c "Trace ID *: ${1}" || true
+}
+
+if [[ "1" == "$(trace_seen "${V3_TRACE_SERVED_STRING}")" ]] && printf '%s' "${V3_TRACE_COLLECTOR_LOG_STRING}" | grep -q 'service.name: Str(melody.example)'; then
+    check_pass "a request carrying a trace context reached the collector as one span under that trace id, from the melody.example service"
+else
+    check_fail "the served request's span did not reach the collector (trace ${V3_TRACE_SERVED_STRING} seen $(trace_seen "${V3_TRACE_SERVED_STRING}") times)"
+fi
+
+if printf '%s' "${V3_TRACE_OUTPUT_STRING}" | grep -qx 'trace_ready_INT=1' && printf '%s' "${V3_TRACE_OUTPUT_STRING}" | grep -qx 'trace_exit_INT=0' \
+    && printf '%s' "${V3_TRACE_OUTPUT_STRING}" | grep -qx 'trace_ready_KILL=1' && printf '%s' "${V3_TRACE_OUTPUT_STRING}" | grep -qx 'trace_exit_KILL=137' \
+    && [[ "1" == "$(trace_seen "${V3_TRACE_FLUSHED_STRING}")" ]] && [[ "0" == "$(trace_seen "${V3_TRACE_KILLED_STRING}")" ]]; then
+    check_pass "the span of a request answered inside the batch interval reaches the collector when SIGINT stops the process, and is lost when SIGKILL does: the teardown flushed it"
+else
+    check_fail "the teardown did not flush the batched span ($(printf '%s' "${V3_TRACE_OUTPUT_STRING}" | grep -o '^trace_[a-z_A-Z]*=[0-9]*' | tr '\n' ' '); flushed seen $(trace_seen "${V3_TRACE_FLUSHED_STRING}"), killed seen $(trace_seen "${V3_TRACE_KILLED_STRING}"))"
+fi
+
+check_section_end "V3 TRACE EXPORT" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
 # TEARDOWN BUDGET — MELODY_TEARDOWN_TIMEOUT declared in .env reaches the clean shutdown's shield
@@ -1376,6 +1643,66 @@ run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "WORK_DIRECTORY=/tmp/example-bo
     rm -f var/log/dev.log
     MYSQL_HOST=nope ./example-boot debug:parameters --format=json 2>/dev/null | tr -d ' \n\t' | grep -o '\"name\":\"MYSQL_HOST\"[^}]*' | head -1 | sed 's/^/process_env_parameter=/'
     if grep -q 'process environment variable is ignored.*\"environmentVariable\":\"MYSQL_HOST\"' var/log/dev.log 2>/dev/null; then echo process_env_warned=1; else echo process_env_warned=0; fi
+    printf 'MELODY_ENV=prod\n' > .env.local
+    ./example-boot debug:container >/tmp/example-boot.log 2>&1
+    echo \"prod_debug_container_exit=\$?\"
+    if grep -q 'cli command not found' /tmp/example-boot.log; then echo prod_debug_container_named=1; else echo prod_debug_container_named=0; fi
+    ./example-boot debug:router --limit=1 >/tmp/example-boot.log 2>&1
+    echo \"prod_debug_router_exit=\$?\"
+    printf 'MYSQL_DATABASE=nope\nMELODY_HTTP_ADDRESS=:18085\n' > .env.local
+    timeout 60 ./example-boot --mode=http >/tmp/example-boot.log 2>&1
+    echo \"missing_database_exit=\$?\"
+    if grep -q '\"level\":\"emergency\".*to database .nope.' /tmp/example-boot.log; then echo missing_database_emergency=1; else echo missing_database_emergency=0; fi
+    if grep -q '^melody: exiting with code 1 after unrecovered error: database connection failed' /tmp/example-boot.log; then echo missing_database_certified=1; else echo missing_database_certified=0; fi
+    if grep -q 'goroutine 1 \[running\]' /tmp/example-boot.log; then echo missing_database_dumped=1; else echo missing_database_dumped=0; fi
+    rm -f .env.local
+    printf 'PGSQL_DATABASE=nope\nMELODY_HTTP_ADDRESS=:18085\n' > .env.local
+    rm -rf var/log
+    ./example-boot --mode=http >/tmp/example-boot-http.log 2>&1 &
+    APP_PID=\$!
+    READY=0
+    for _ in \$(seq 1 150); do
+        if wget -q -O /dev/null http://127.0.0.1:18085/health 2>/dev/null; then
+            READY=1
+            break
+        fi
+        if ! kill -0 \${APP_PID} 2>/dev/null; then
+            break
+        fi
+        sleep 0.2
+    done
+    echo \"archive_http_ready=\${READY}\"
+    COOKIE=\$(wget -q -S -O /dev/null --post-data='username=editor&password=editor' --header='Accept: application/json' http://127.0.0.1:18085/login/ 2>&1 | sed -n 's/^ *Set-Cookie: *\([^;]*\).*/\1/p' | head -1)
+    wget -q -O /dev/null --header \"Cookie: \${COOKIE}\" --header 'Accept: application/json' --header 'X-Request-Id: claimed-by-the-e2e-client' http://127.0.0.1:18085/reports/api/history/ 2>/dev/null
+    ACCESS_LINE=\$(grep '\"message\":\"request completed\"' var/log/dev.log | grep '\"path\":\"/reports/api/history/\"' | tail -1)
+    ACCESS_ID=\$(printf '%s' \"\${ACCESS_LINE}\" | grep -o '\"requestId\":\"[^\"]*\"' | head -1)
+    if printf '%s' \"\${ACCESS_LINE}\" | grep -q '\"statusCode\":500'; then echo archive_answered_500=1; else echo archive_answered_500=0; fi
+    echo \"archive_error_records=\$(grep '\"message\":\"handler answered a server error\"' var/log/dev.log | grep -c \"\${ACCESS_ID:-no-access-line}\")\"
+    if grep '\"message\":\"handler answered a server error\"' var/log/dev.log | grep -q 'causeChain.*database ..nope.. does not exist'; then echo archive_cause_named=1; else echo archive_cause_named=0; fi
+    echo \"archive_claim_journaled=\$(grep -c 'claimed-by-the-e2e-client' var/log/dev.log)\"
+    mv var/log/dev.log var/log/dev.log.1
+    ROTATED_SIZE=\$(wc -c < var/log/dev.log.1)
+    kill -HUP \${APP_PID}
+    for _ in \$(seq 1 25); do
+        wget -q -O /dev/null http://127.0.0.1:18085/health 2>/dev/null
+        if [ -s var/log/dev.log ]; then
+            break
+        fi
+        sleep 0.2
+    done
+    if [ -s var/log/dev.log ]; then echo hup_reopened=1; else echo hup_reopened=0; fi
+    if [ \"\${ROTATED_SIZE}\" = \"\$(wc -c < var/log/dev.log.1)\" ]; then echo hup_rotated_unchanged=1; else echo hup_rotated_unchanged=0; fi
+    if kill -0 \${APP_PID} 2>/dev/null; then echo hup_alive=1; else echo hup_alive=0; fi
+    kill -INT \${APP_PID} 2>/dev/null || true
+    for _ in \$(seq 1 150); do
+        if ! kill -0 \${APP_PID} 2>/dev/null; then
+            break
+        fi
+        sleep 0.2
+    done
+    kill -KILL \${APP_PID} 2>/dev/null || true
+    wait \${APP_PID} 2>/dev/null || true
+    rm -f .env.local
     cd \"\${EMPTY_DIRECTORY}\" || exit 1
     ./example-boot --mode=http >/tmp/example-boot.log 2>&1
     echo \"empty_dotenv_http_exit=\$?\"
@@ -1474,6 +1801,49 @@ else
         check_pass "MYSQL_HOST keeps the .env value (mysql) while the process environment says nope"
     else
         check_fail "MYSQL_HOST did not keep the .env value ($(boot_output_value process_env_parameter))"
+    fi
+
+    # the debug family builds services and prints parameters, so outside development it is not registered at all,
+    # while debug:router, the one that reads nothing but the route table, stays: the second arm is what makes the
+    # first a filter on the environment rather than a broken binary
+    if boot_output_has 'prod_debug_container_exit=2' && boot_output_has 'prod_debug_container_named=1' && boot_output_has 'prod_debug_router_exit=0'; then
+        check_pass "under MELODY_ENV=prod debug:container is not a command (exit 2) while debug:router still answers"
+    else
+        check_fail "the debug family was not filtered outside development ($(boot_output_value prod_debug_container_exit) $(boot_output_value prod_debug_container_named) $(boot_output_value prod_debug_router_exit))"
+    fi
+
+    # the example opens its catalogue while it is wired, before Boot, where no recovery of the framework runs: the
+    # refusal must still leave the emergency record naming the database and the exit line of a refusal inside Run,
+    # with exit 1, rather than a goroutine dump and exit 2
+    if boot_output_has 'missing_database_exit=1' && boot_output_has 'missing_database_emergency=1' && boot_output_has 'missing_database_certified=1' && boot_output_has 'missing_database_dumped=0'; then
+        check_pass "a catalogue that cannot be opened refuses the boot with exit 1, an emergency record naming the database and the exit line, no goroutine dump"
+    else
+        check_fail "the refused catalogue did not end in a recorded exit ($(boot_output_value missing_database_exit) $(boot_output_value missing_database_emergency) $(boot_output_value missing_database_certified) $(boot_output_value missing_database_dumped))"
+    fi
+
+    # a 500 a door answers through the presenter is journaled by the presenter and marked logged, so the kernel files no
+    # second record: the one record is read by the request id of the access line that answered 500, and its chain
+    # carries the driver's refusal of the missing archive database
+    if boot_output_has 'archive_http_ready=1' && boot_output_has 'archive_answered_500=1' && boot_output_has 'archive_error_records=1' && boot_output_has 'archive_cause_named=1'; then
+        check_pass "an archive that cannot be opened answers 500 with exactly one server error record, its cause chain naming the missing database"
+    else
+        check_fail "the 500 was not journaled once with its cause ($(boot_output_value archive_http_ready) $(boot_output_value archive_answered_500) $(boot_output_value archive_error_records) $(boot_output_value archive_cause_named))"
+    fi
+
+    # the request carried an X-Request-Id of the client's own; the journal ties the records by the id the kernel minted,
+    # so the claim appears in none of them
+    if boot_output_has 'archive_answered_500=1' && boot_output_has 'archive_claim_journaled=0'; then
+        check_pass "the journal carries the minted request id, never the X-Request-Id the client claimed"
+    else
+        check_fail "the client's claimed request id reached the journal ($(boot_output_value archive_claim_journaled))"
+    fi
+
+    # rename-based rotation: after the rename the process still writes the old descriptor, SIGHUP makes the serving
+    # process reopen its path, and the renamed file stops growing while the fresh one takes the next request
+    if boot_output_has 'hup_reopened=1' && boot_output_has 'hup_rotated_unchanged=1' && boot_output_has 'hup_alive=1'; then
+        check_pass "SIGHUP reopens the journal after a rename: a fresh file takes the next request, the renamed one stops growing, the process lives"
+    else
+        check_fail "SIGHUP did not reopen the journal ($(boot_output_value hup_reopened) $(boot_output_value hup_rotated_unchanged) $(boot_output_value hup_alive))"
     fi
 fi
 
@@ -1667,6 +2037,97 @@ else
     check_fail "the manifest zones did not filter /health (frontend,public counts: ${V3_MANIFEST_COUNTS_STRING:-<none>})"
 fi
 
+# the standard flags every listing command shares, read on debug:router because its route table is fixed by the
+# code: the order, the window and the two refusals the flag validators own, the pretty form of the one document, and
+# the verbose table. Each arm is read against the plain ascending listing of the same process, so a flag that did
+# nothing would answer the control's value
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "PATTERNS=\$(go run . debug:router --format=json 2>/dev/null | tr -d ' \n\t' | grep -o '\"pattern\":\"[^\"]*\"')
+    printf '%s\n' \"\${PATTERNS}\" | sed -n '1p' | sed 's/^/asc_first=/'
+    printf '%s\n' \"\${PATTERNS}\" | sed -n '2p' | sed 's/^/asc_second=/'
+    printf '%s\n' \"\${PATTERNS}\" | sed -n '\$p' | sed 's/^/asc_last=/'
+    go run . debug:router --format=json --order=desc 2>/dev/null | tr -d ' \n\t' | grep -o '\"pattern\":\"[^\"]*\"' | head -1 | sed 's/^/desc_first=/'
+    go run . debug:router --format=json --offset=1 --limit=1 2>/dev/null | tr -d ' \n\t' | grep -o '\"pattern\":\"[^\"]*\"' | tr '\n' ',' | sed 's/^/window=/'
+    echo
+    go run . debug:router --limit=-1 >/tmp/router-flags.log 2>&1
+    echo \"negative_limit_exit=\$?\"
+    if grep -q 'limit may not be negative' /tmp/router-flags.log; then echo negative_limit_named=1; else echo negative_limit_named=0; fi
+    go run . debug:router --format=bogus >/tmp/router-flags.log 2>&1
+    echo \"bogus_format_exit=\$?\"
+    if grep -q 'unsupported output format \"bogus\"' /tmp/router-flags.log; then echo bogus_format_named=1; else echo bogus_format_named=0; fi
+    go run . debug:router --format=json-pretty 2>/dev/null >/tmp/router-pretty.json
+    echo \"pretty_lines=\$(wc -l </tmp/router-pretty.json)\"
+    go run . debug:router --format=json 2>/dev/null | tr -d ' \n\t' | grep -o '\"data\":.*' | md5sum | cut -c1-32 | sed 's/^/json_data=/'
+    tr -d ' \n\t' </tmp/router-pretty.json | grep -o '\"data\":.*' | md5sum | cut -c1-32 | sed 's/^/pretty_data=/'
+    echo \"verbose_columns=\$(go run . debug:router --limit=1 --verbose --table-width=400 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | grep -c '| requirements | defaults | attributes')\"
+    echo \"plain_columns=\$(go run . debug:router --limit=1 --table-width=400 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | grep -c '| requirements')\"
+    rm -f /tmp/router-flags.log /tmp/router-pretty.json"
+ROUTER_FLAGS_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+
+router_flags_value() {
+    printf '%s' "${ROUTER_FLAGS_OUTPUT_STRING}" | grep -o "^${1}=.*" | head -1 | cut -d= -f2- || true
+}
+
+if [[ -n "$(router_flags_value asc_last)" ]] && [[ "$(router_flags_value asc_first)" != "$(router_flags_value asc_last)" ]] && [[ "$(router_flags_value asc_last)" == "$(router_flags_value desc_first)" ]]; then
+    check_pass "debug:router --order=desc opens on the route the ascending listing closes on ($(router_flags_value desc_first))"
+else
+    check_fail "debug:router --order=desc did not reverse the listing (asc $(router_flags_value asc_first)..$(router_flags_value asc_last), desc first $(router_flags_value desc_first))"
+fi
+
+if [[ -n "$(router_flags_value asc_second)" ]] && [[ "$(router_flags_value asc_second)," == "$(router_flags_value window)" ]]; then
+    check_pass "debug:router --offset=1 --limit=1 answers exactly the second route of the listing"
+else
+    check_fail "debug:router --offset=1 --limit=1 did not answer the second route alone (second $(router_flags_value asc_second), window $(router_flags_value window))"
+fi
+
+if [[ "0" != "$(router_flags_value negative_limit_exit)" ]] && [[ "1" == "$(router_flags_value negative_limit_named)" ]] && [[ "0" != "$(router_flags_value bogus_format_exit)" ]] && [[ "1" == "$(router_flags_value bogus_format_named)" ]]; then
+    check_pass "debug:router refuses --limit=-1 and --format=bogus with a non-zero exit, each naming the refused value"
+else
+    check_fail "the flag validators did not refuse (limit $(router_flags_value negative_limit_exit)/$(router_flags_value negative_limit_named), format $(router_flags_value bogus_format_exit)/$(router_flags_value bogus_format_named))"
+fi
+
+if [[ 1 -lt "$(router_flags_value pretty_lines)" ]] && [[ -n "$(router_flags_value json_data)" ]] && [[ "$(router_flags_value json_data)" == "$(router_flags_value pretty_data)" ]]; then
+    check_pass "--format=json-pretty spreads the same document over $(router_flags_value pretty_lines) lines"
+else
+    check_fail "--format=json-pretty is not the json document indented ($(router_flags_value pretty_lines) lines, data $(router_flags_value json_data) vs $(router_flags_value pretty_data))"
+fi
+
+if [[ "1" == "$(router_flags_value verbose_columns)" ]] && [[ "0" == "$(router_flags_value plain_columns)" ]]; then
+    check_pass "debug:router --verbose adds the requirements, defaults and attributes columns the plain table leaves out"
+else
+    check_fail "debug:router --verbose did not add the detail columns (verbose $(router_flags_value verbose_columns), plain $(router_flags_value plain_columns))"
+fi
+
+# the failure the sweep reports carries the context the resolution raised it with, redacted: the unregistered type the
+# scoped trail asks for is named, and nothing of a stack or a trace is handed to the document
+if printf '%s' "${V3_CONTAINER_BUILD_JSON_STRING}" | grep -qF 'serviceType\":\"*http.RequestContext' \
+    && ! printf '%s' "${V3_CONTAINER_BUILD_JSON_STRING}" | grep -qE '(trace|stack|panicStack)(\\)?":'; then
+    check_pass "debug:container --build names the unresolved type in the failure's context and carries no stack or trace"
+else
+    check_fail "the --build failure context did not name the type or carried a stack (${V3_CONTAINER_BUILD_JSON_STRING:-<empty>})"
+fi
+
+# the listing a console process prints: the example's required kernel.request listener is in the table, and the two
+# security listeners, which only the http serving process registers, are named apart rather than left out
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . debug:events --format=json --verbose 2>/dev/null"
+V3_EVENTS_VERBOSE_JSON_STRING="$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | tr -d '\n\t')"
+if printf '%s' "${V3_EVENTS_VERBOSE_JSON_STRING}" | tr -d ' ' | grep -q '"eventName":"kernel.request","order":[0-9]*,"priority":-*[0-9]*,"required":true,[^}]*registerRequiredRequestContextListener' \
+    && printf '%s' "${V3_EVENTS_VERBOSE_JSON_STRING}" | grep -o '"servingProcessListeners": *\[.*' | grep -q 'security access control listener'; then
+    check_pass "debug:events lists the example's required kernel.request listener and names the access control listener as the serving process's"
+else
+    check_fail "debug:events did not carry the required listener and the serving process's listeners (${V3_EVENTS_VERBOSE_JSON_STRING:-<empty>})"
+fi
+
+# --build asks the chain to be constructed rather than described: every entry the example registers must build
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . debug:middleware --build --format=json 2>/dev/null; echo \"status=\$?\""
+V3_MIDDLEWARE_BUILD_STRING="$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | tr -d ' \n\t')"
+V3_MIDDLEWARE_BUILT_INTEGER="$(printf '%s' "${V3_MIDDLEWARE_BUILD_STRING}" | { grep -o '"status":"built"' || true; } | wc -l | tr -d ' ')"
+V3_MIDDLEWARE_TOTAL_STRING="$(printf '%s' "${V3_MIDDLEWARE_BUILD_STRING}" | grep -o '"total":[0-9]*' | head -1 | cut -d: -f2 || true)"
+if printf '%s' "${V3_MIDDLEWARE_BUILD_STRING}" | grep -q 'status=0$' && [[ 0 -lt "${V3_MIDDLEWARE_BUILT_INTEGER}" ]] && [[ "${V3_MIDDLEWARE_TOTAL_STRING}" == "${V3_MIDDLEWARE_BUILT_INTEGER}" ]]; then
+    check_pass "debug:middleware --build exits zero with all ${V3_MIDDLEWARE_BUILT_INTEGER} entries of the chain built"
+else
+    check_fail "debug:middleware --build did not build the whole chain (built ${V3_MIDDLEWARE_BUILT_INTEGER} of ${V3_MIDDLEWARE_TOTAL_STRING:-?}: ${V3_MIDDLEWARE_BUILD_STRING:-<empty>})"
+fi
+
 check_section_end "V3 DEBUG COMMANDS" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
@@ -1801,7 +2262,88 @@ else
     check_fail "the v3 user repository resolution did not restore the directory (status ${RUN_IN_DEV_OUTPUT_STRING:-<empty>}, rows ${V3_USER_ROW_COUNT_STRING:-<no answer>})"
 fi
 
+# the manager a status reads is chosen per call: --manager archive answers the archive's postgres where the bare
+# command answers the catalogue's mysql, a manager the registry does not hold is one json failure document naming the
+# registered ones, and the text form names the connection it reports as the migration's own
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . db:status --format=json 2>/dev/null | tr -d ' \n\t' | grep -o '\"port\":[0-9]*' | head -1 | sed 's/^/default_/'
+    go run . db:status --manager archive --format=json 2>/dev/null | tr -d ' \n\t' | grep -o '\"port\":[0-9]*' | head -1 | sed 's/^/archive_/'
+    go run . db:status --manager nope --format=json >/tmp/migrate-status.json 2>/dev/null
+    echo \"unknown_manager_exit=\$?\"
+    echo \"unknown_manager_documents=\$(grep -c '^{' /tmp/migrate-status.json)\"
+    tr -d ' \n\t' </tmp/migrate-status.json | grep -o '\"error\":{\"code\":\"[^\"]*\"' | head -1 | sed 's/^/unknown_manager_/'
+    if tr -d ' \n\t' </tmp/migrate-status.json | grep -q '\"registered\":\[\"archive\",\"default\"\],\"requested\":\"nope\"'; then echo unknown_manager_named=1; else echo unknown_manager_named=0; fi
+    go run . db:status 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | grep -c '| manager *| default (dedicated migration connection)' | sed 's/^/dedicated_label=/'
+    rm -f /tmp/migrate-status.json"
+V3_MIGRATE_MANAGER_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+if printf '%s' "${V3_MIGRATE_MANAGER_STRING}" | grep -qx 'default_"port":3306' && printf '%s' "${V3_MIGRATE_MANAGER_STRING}" | grep -qx 'archive_"port":5432'; then
+    check_pass "db:status --manager archive reports the archive's postgres (5432) where the bare command reports the catalogue's mysql (3306)"
+else
+    check_fail "--manager did not choose the database the status reads ($(printf '%s' "${V3_MIGRATE_MANAGER_STRING}" | grep -o '^\(default\|archive\)_.*' | tr '\n' ' '))"
+fi
+
+if printf '%s' "${V3_MIGRATE_MANAGER_STRING}" | grep -qx 'unknown_manager_exit=1' && printf '%s' "${V3_MIGRATE_MANAGER_STRING}" | grep -qx 'unknown_manager_documents=1' \
+    && printf '%s' "${V3_MIGRATE_MANAGER_STRING}" | grep -qx 'unknown_manager_"error":{"code":"migrate.failed"' && printf '%s' "${V3_MIGRATE_MANAGER_STRING}" | grep -qx 'unknown_manager_named=1'; then
+    check_pass "db:status --manager nope --format=json exits 1 with one failure document naming the registered managers and the one requested"
+else
+    check_fail "the unknown manager was not refused in one json document ($(printf '%s' "${V3_MIGRATE_MANAGER_STRING}" | grep -o '^unknown_manager_.*' | tr '\n' ' '))"
+fi
+
+if printf '%s' "${V3_MIGRATE_MANAGER_STRING}" | grep -qx 'dedicated_label=1'; then
+    check_pass "db:status names the manager it reports as the migration's dedicated connection"
+else
+    check_fail "db:status did not label the dedicated migration connection ($(printf '%s' "${V3_MIGRATE_MANAGER_STRING}" | grep -o '^dedicated_label=.*'))"
+fi
+
 check_section_end "V3 DATABASE MIGRATIONS" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
+# V3 MIGRATION LOCK HELD — a lock row another process left is waited on, then refused with its remedy
+# ---------------------------------------------------------------------------------------------------
+
+check_section_start "V3 MIGRATION LOCK HELD" "${TAG_VALIDATE}" "e2e"
+
+# the lock is only waited on while there is something left to migrate, so the probe is a database of its own, empty,
+# whose lock table holds the row a crashed migration leaves: the insert of the lock row answers the duplicate key the
+# driver reports, which is read as a held lock and waited on for the whole window, and the refusal names the command
+# that clears it. The row is read out of band afterwards — the refusal must not have taken it — and the database is
+# dropped. The name falls under the grant the example databases carry, so the example's own user reaches it
+V3_LOCK_PROBE_DATABASE_STRING="melody_example_v3_lockprobe"
+e2e_mysql_scalar "mysql" "DROP DATABASE IF EXISTS \`${V3_LOCK_PROBE_DATABASE_STRING}\`; CREATE DATABASE \`${V3_LOCK_PROBE_DATABASE_STRING}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci; CREATE TABLE \`${V3_LOCK_PROBE_DATABASE_STRING}\`.bun_migration_locks (id bigint NOT NULL AUTO_INCREMENT, table_name varchar(255) DEFAULT NULL, PRIMARY KEY (id), UNIQUE KEY table_name (table_name)); INSERT INTO \`${V3_LOCK_PROBE_DATABASE_STRING}\`.bun_migration_locks (table_name) VALUES ('bun_migrations')" >/dev/null
+V3_LOCK_ROW_BEFORE_STRING="$(e2e_mysql_scalar "${V3_LOCK_PROBE_DATABASE_STRING}" "SELECT COUNT(*) FROM bun_migration_locks")"
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "WORK_DIRECTORY=/tmp/example-lock-held-e2e
+    rm -rf \"\${WORK_DIRECTORY}\"
+    mkdir -p \"\${WORK_DIRECTORY}\"
+    if ! go build -o \"\${WORK_DIRECTORY}/example-lock\" . >/tmp/example-lock-build.log 2>&1; then
+        echo build_failed=1
+        exit 0
+    fi
+    cp .env \"\${WORK_DIRECTORY}/.env\"
+    cd \"\${WORK_DIRECTORY}\" || exit 1
+    printf 'MYSQL_DATABASE=${V3_LOCK_PROBE_DATABASE_STRING}\n' > .env.local
+    STARTED_AT=\$(date +%s)
+    timeout 90 ./example-lock app:info >/tmp/example-lock.log 2>&1
+    echo \"lock_exit=\$?\"
+    echo \"lock_waited_seconds=\$(( \$(date +%s) - STARTED_AT ))\"
+    if grep -q '^melody: exiting with code 1 after unrecovered error: migration: the migration lock is held' /tmp/example-lock.log; then echo lock_refusal_certified=1; else echo lock_refusal_certified=0; fi
+    if grep -q 'the migration lock is held.*\"unlockCommand\":\"db:unlock\"' var/log/dev.log 2>/dev/null; then echo lock_remedy_journaled=1; else echo lock_remedy_journaled=0; fi
+    cd / && rm -rf \"\${WORK_DIRECTORY}\" /tmp/example-lock.log /tmp/example-lock-build.log"
+V3_LOCK_HELD_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+V3_LOCK_ROW_AFTER_STRING="$(e2e_mysql_scalar "${V3_LOCK_PROBE_DATABASE_STRING}" "SELECT COUNT(*) FROM bun_migration_locks")"
+e2e_mysql_scalar "mysql" "DROP DATABASE IF EXISTS \`${V3_LOCK_PROBE_DATABASE_STRING}\`" >/dev/null
+printf '%s\n' "${V3_LOCK_HELD_OUTPUT_STRING}"
+
+V3_LOCK_WAITED_STRING="$(printf '%s' "${V3_LOCK_HELD_OUTPUT_STRING}" | grep -o '^lock_waited_seconds=[0-9]*' | cut -d= -f2 || true)"
+if [[ "1" == "${V3_LOCK_ROW_BEFORE_STRING}" ]] && printf '%s' "${V3_LOCK_HELD_OUTPUT_STRING}" | grep -qx 'lock_exit=1' \
+    && [[ "${V3_LOCK_WAITED_STRING}" =~ ^[0-9]+$ ]] && [[ 25 -le ${V3_LOCK_WAITED_STRING} ]] \
+    && printf '%s' "${V3_LOCK_HELD_OUTPUT_STRING}" | grep -qx 'lock_refusal_certified=1' && printf '%s' "${V3_LOCK_HELD_OUTPUT_STRING}" | grep -qx 'lock_remedy_journaled=1' \
+    && [[ "1" == "${V3_LOCK_ROW_AFTER_STRING}" ]]; then
+    check_pass "a lock row left in an unmigrated database is waited on for ${V3_LOCK_WAITED_STRING}s, then refused with exit 1 naming db:unlock, the row left in place (read out of band)"
+else
+    check_fail "the held migration lock was not waited on and refused with its remedy (row before ${V3_LOCK_ROW_BEFORE_STRING:-?}, after ${V3_LOCK_ROW_AFTER_STRING:-?}; $(printf '%s' "${V3_LOCK_HELD_OUTPUT_STRING}" | grep -o '^lock_[a-z_]*=.*' | tr '\n' ' '))"
+fi
+
+check_section_end "V3 MIGRATION LOCK HELD" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
 # V3 ROLE GRANT — example:grant:role writes the role through the repository's atomic door, on mysql
@@ -2000,7 +2542,169 @@ else
     check_fail "v3 example:cache:clear left the cached product list standing (read out of redis: ${V3_CACHE_COUNT_BEFORE_STRING:-<no answer>} -> ${V3_CACHE_COUNT_AFTER_STRING:-<no answer>})"
 fi
 
+# eight signed listings race on the empty key: Remember runs the loader on one of them and hands its answer to the
+# other seven, so the database sees ONE execution of the listing's select, read out of performance_schema as root
+# beside the one key the race left in redis. With the stampede protection switched off the same race runs the select
+# four to seven times, which is what makes the single execution the coalescing's doing and not the requests' pacing
+V3_CACHE_LIST_DIGEST_STATEMENT_STRING="SELECT COALESCE(SUM(COUNT_STAR),0) FROM performance_schema.events_statements_summary_by_digest WHERE SCHEMA_NAME='melody_example_v3' AND DIGEST_TEXT LIKE 'SELECT%FROM \`melody_example_v3_product\` AS \`product\` ORDER BY%'"
+V3_CACHE_PRODUCT_LIST_KEYS_COMMAND_STRING='P="melody-example-v3:cache:*example-product-list"; printf "*2\r\n\$4\r\nKEYS\r\n\$${#P}\r\n${P}\r\n" | nc -w 2 redis 6379 | tr -d "\r" | grep -v "^[*$]" | sort'
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:cache:clear >/dev/null 2>&1; ${V3_CACHE_PRODUCT_LIST_KEYS_COMMAND_STRING}"
+V3_CACHE_KEYS_AFTER_CLEAR_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+V3_CACHE_DIGEST_BEFORE_STRING="$(e2e_mysql_scalar "melody_example_v3" "${V3_CACHE_LIST_DIGEST_STATEMENT_STRING}")"
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "${EXAMPLE_SIGN_IN_SNIPPET}
+    for _ in 1 2 3 4 5 6 7 8; do
+        wget -q -O /dev/null --header=\"\${SESSION_COOKIE_HEADER}\" --header='Accept: application/json' \"\${EXAMPLE_BASE_URL}/products/api/read/\" 2>/dev/null &
+    done
+    wait
+${EXAMPLE_SIGN_OUT_SNIPPET}
+    ${V3_CACHE_PRODUCT_LIST_KEYS_COMMAND_STRING}"
+V3_CACHE_KEYS_AFTER_RACE_STRING="$(printf '%s\n' "${RUN_IN_DEV_OUTPUT_STRING}" | grep 'example-product-list' || true)"
+V3_CACHE_DIGEST_AFTER_STRING="$(e2e_mysql_scalar "melody_example_v3" "${V3_CACHE_LIST_DIGEST_STATEMENT_STRING}")"
+V3_CACHE_FRESH_KEY_STRING="$(comm -13 <(printf '%s\n' "${V3_CACHE_KEYS_AFTER_CLEAR_STRING}" | grep 'example-product-list' | sort) <(printf '%s\n' "${V3_CACHE_KEYS_AFTER_RACE_STRING}" | sort) || true)"
+V3_CACHE_FRESH_KEY_COUNT_INTEGER="$(printf '%s' "${V3_CACHE_FRESH_KEY_STRING}" | grep -c 'example-product-list' || true)"
+
+if [[ "${V3_CACHE_DIGEST_BEFORE_STRING}" =~ ^[0-9]+$ ]] && [[ "${V3_CACHE_DIGEST_AFTER_STRING}" =~ ^[0-9]+$ ]] \
+    && [[ 1 -eq $((V3_CACHE_DIGEST_AFTER_STRING - V3_CACHE_DIGEST_BEFORE_STRING)) ]] && [[ 1 -eq ${V3_CACHE_FRESH_KEY_COUNT_INTEGER} ]]; then
+    check_pass "eight concurrent listings on an empty cache ran the listing's select once and left one key (read out of performance_schema and redis)"
+else
+    check_fail "the concurrent listings were not coalesced (select executions ${V3_CACHE_DIGEST_BEFORE_STRING:-?} -> ${V3_CACHE_DIGEST_AFTER_STRING:-?}, fresh keys ${V3_CACHE_FRESH_KEY_COUNT_INTEGER:-?})"
+fi
+
+# a payload the serializer cannot decode is a miss, not a failure: a corrupt value planted out of band under the key
+# the race just filled is answered by recomputing, and the recompute's write replaces it, so the listing answers 200
+# and the key holds a value of another length afterwards
+V3_CACHE_CORRUPT_PAYLOAD_STRING='not-a-gob-payload'
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "K='$(printf '%s' "${V3_CACHE_FRESH_KEY_STRING}" | head -1)'
+    V='${V3_CACHE_CORRUPT_PAYLOAD_STRING}'
+    printf \"*3\r\n\\\$3\r\nSET\r\n\\\$\${#K}\r\n\${K}\r\n\\\$\${#V}\r\n\${V}\r\n\" | nc -w 2 redis 6379 | tr -d '\r' | sed 's/^/planted=/'
+    printf \"*2\r\n\\\$6\r\nSTRLEN\r\n\\\$\${#K}\r\n\${K}\r\n\" | nc -w 2 redis 6379 | tr -d '\r:' | sed 's/^/length_planted=/'
+${EXAMPLE_SIGN_IN_SNIPPET}
+    wget -q -O- --header=\"\${SESSION_COOKIE_HEADER}\" --header='Accept: application/json' \"\${EXAMPLE_BASE_URL}/products/api/read/\" 2>/dev/null | grep -o '\"success\":true' | head -1 | sed 's/^/listing=/'
+${EXAMPLE_SIGN_OUT_SNIPPET}
+    printf \"*2\r\n\\\$6\r\nSTRLEN\r\n\\\$\${#K}\r\n\${K}\r\n\" | nc -w 2 redis 6379 | tr -d '\r:' | sed 's/^/length_healed=/'"
+V3_CACHE_HEAL_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+V3_CACHE_LENGTH_PLANTED_STRING="$(printf '%s' "${V3_CACHE_HEAL_OUTPUT_STRING}" | grep -o '^length_planted=[0-9]*' | cut -d= -f2 || true)"
+V3_CACHE_LENGTH_HEALED_STRING="$(printf '%s' "${V3_CACHE_HEAL_OUTPUT_STRING}" | grep -o '^length_healed=[0-9]*' | cut -d= -f2 || true)"
+if printf '%s' "${V3_CACHE_HEAL_OUTPUT_STRING}" | grep -q '^planted=+OK' && [[ "${#V3_CACHE_CORRUPT_PAYLOAD_STRING}" == "${V3_CACHE_LENGTH_PLANTED_STRING}" ]] \
+    && printf '%s' "${V3_CACHE_HEAL_OUTPUT_STRING}" | grep -q '^listing="success":true' \
+    && [[ "${V3_CACHE_LENGTH_HEALED_STRING}" =~ ^[0-9]+$ ]] && [[ 0 -lt ${V3_CACHE_LENGTH_HEALED_STRING} ]] && [[ "${V3_CACHE_LENGTH_PLANTED_STRING}" != "${V3_CACHE_LENGTH_HEALED_STRING}" ]]; then
+    check_pass "a corrupt payload planted under the product list is answered as a miss and replaced (${V3_CACHE_LENGTH_PLANTED_STRING} -> ${V3_CACHE_LENGTH_HEALED_STRING} bytes, listing 200)"
+else
+    check_fail "the corrupt payload did not heal (${V3_CACHE_HEAL_OUTPUT_STRING:-<empty>})"
+fi
+
 check_section_end "V3 CACHE CLEAR" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
+# V3 PLATFORM CHECK — the readiness door takes the shared lock and leaves no object behind
+# ---------------------------------------------------------------------------------------------------
+
+check_section_start "V3 PLATFORM CHECK" "${TAG_VALIDATE}" "e2e"
+
+# the door takes the redis lease named example.platform.check before it touches storage, so a lease another holder
+# owns turns it away with 409, the one status only a refused acquire answers; the lease is planted out of band over RESP with a token of the harness's own and
+# removed after, and the 200 on either side of it is the control. The storage half is read out of band too: the
+# probe object the door writes and deletes must be absent from the bucket afterwards, read unsigned from localstack,
+# where an object the harness put there itself reads 200 through the same request
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "${EXAMPLE_SIGN_IN_SNIPPET}
+    platform_status() {
+        wget -q -S -O /dev/null --header=\"\${SESSION_COOKIE_HEADER}\" --header='Accept: application/json' \"\${EXAMPLE_BASE_URL}/platform/check\" 2>&1 | sed -n 's/^ *HTTP\/[0-9.]* \([0-9]*\).*/\1/p' | head -1
+    }
+    redis_command() {
+        ARGUMENTS=\"*\$#\r\n\"
+        for ARGUMENT in \"\$@\"; do
+            ARGUMENTS=\"\${ARGUMENTS}\\\$\${#ARGUMENT}\r\n\${ARGUMENT}\r\n\"
+        done
+        printf \"\${ARGUMENTS}\" | nc -w 2 redis 6379 | tr -d '\r'
+    }
+    echo \"platform_before=\$(platform_status)\"
+    echo \"lease_planted=\$(redis_command SET example.platform.check held-by-the-e2e-harness NX PX 15000)\"
+    echo \"platform_held=\$(platform_status)\"
+    echo \"lease_removed=\$(redis_command DEL example.platform.check)\"
+    echo \"platform_after=\$(platform_status)\"
+${EXAMPLE_SIGN_OUT_SNIPPET}
+    BUCKET=\$(grep '^S3_BUCKET=' .env | cut -d= -f2)
+    echo \"probe_object=\$(wget -q -S -O /dev/null \"http://localstack:4566/\${BUCKET}/example/platform-check.txt\" 2>&1 | sed -n 's/^ *HTTP\/[0-9.]* \([0-9]*\).*/\1/p' | head -1)\"
+    printf 'control' > /tmp/platform-control.txt
+    wget -q -O /dev/null --method=PUT --body-file=/tmp/platform-control.txt \"http://localstack:4566/\${BUCKET}/example/e2e-platform-control.txt\" 2>/dev/null \
+        || printf 'PUT /%s/example/e2e-platform-control.txt HTTP/1.1\r\nHost: localstack:4566\r\nContent-Length: 7\r\nConnection: close\r\n\r\ncontrol' \"\${BUCKET}\" | nc -w 2 localstack 4566 >/dev/null
+    echo \"control_object=\$(wget -q -S -O /dev/null \"http://localstack:4566/\${BUCKET}/example/e2e-platform-control.txt\" 2>&1 | sed -n 's/^ *HTTP\/[0-9.]* \([0-9]*\).*/\1/p' | head -1)\"
+    printf 'DELETE /%s/example/e2e-platform-control.txt HTTP/1.1\r\nHost: localstack:4566\r\nConnection: close\r\n\r\n' \"\${BUCKET}\" | nc -w 2 localstack 4566 >/dev/null
+    echo \"control_removed=\$(wget -q -S -O /dev/null \"http://localstack:4566/\${BUCKET}/example/e2e-platform-control.txt\" 2>&1 | sed -n 's/^ *HTTP\/[0-9.]* \([0-9]*\).*/\1/p' | head -1)\"
+    rm -f /tmp/platform-control.txt"
+V3_PLATFORM_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+printf '%s\n' "${V3_PLATFORM_OUTPUT_STRING}"
+
+platform_output_has() {
+    printf '%s' "${V3_PLATFORM_OUTPUT_STRING}" | grep -qx "${1}"
+}
+
+if platform_output_has 'platform_before=200' && platform_output_has 'lease_planted=+OK' && platform_output_has 'platform_held=409' \
+    && platform_output_has 'lease_removed=:1' && platform_output_has 'platform_after=200'; then
+    check_pass "the platform check answers 409 while its lease is held out of band, and 200 on either side of it"
+else
+    check_fail "the platform check did not honour the held lease ($(printf '%s' "${V3_PLATFORM_OUTPUT_STRING}" | grep -o '^\(platform\|lease\)_[a-z_]*=.*' | tr '\n' ' '))"
+fi
+
+if platform_output_has 'probe_object=404' && platform_output_has 'control_object=200' && platform_output_has 'control_removed=404'; then
+    check_pass "the platform check left no probe object in the bucket, where an object the harness put there reads back (read out of band)"
+else
+    check_fail "the bucket read did not show the probe object gone beside a visible control ($(printf '%s' "${V3_PLATFORM_OUTPUT_STRING}" | grep -o '^\(probe\|control\)_object=.*' | tr '\n' ' '))"
+fi
+
+check_section_end "V3 PLATFORM CHECK" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
+# V3 MAILER SEND — the console door hands one message to the smtp relay, read back out of mailpit
+# ---------------------------------------------------------------------------------------------------
+
+check_section_start "V3 MAILER SEND" "${TAG_VALIDATE}" "e2e"
+
+# the command's own exit is not the evidence: the relay's inbox is, read over mailpit's api by a subject carrying a
+# nonce, so a message another run left cannot answer for this one. The parsed message carries both bodies, decoded,
+# and the raw source their structure: the two alternatives under the related part that holds the inline logo. The
+# message is deleted after, so the inbox is left as it was found
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "NONCE=\$(date +%s%N)
+    go run . mailer:send --to ada@example.com --subject e2e-mailer-\${NONCE} --text hello-\${NONCE} >/tmp/mailer-send.log 2>&1
+    echo \"send_exit=\$?\"
+    SEARCH=''
+    for _ in \$(seq 1 25); do
+        SEARCH=\$(wget -q -O - \"\${MAILPIT_API_URL}/api/v1/search?query=subject:e2e-mailer-\${NONCE}\" 2>/dev/null)
+        if printf '%s' \"\${SEARCH}\" | grep -q '\"messages_count\":1'; then
+            break
+        fi
+        sleep 0.2
+    done
+    printf '%s' \"\${SEARCH}\" | grep -o '\"messages_count\":[0-9]*' | sed 's/^\"messages_count\":/received=/'
+    ID=\$(printf '%s' \"\${SEARCH}\" | grep -o '\"ID\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4)
+    MESSAGE=\$(wget -q -O - \"\${MAILPIT_API_URL}/api/v1/message/\${ID}\" 2>/dev/null)
+    if printf '%s' \"\${MESSAGE}\" | grep -q \"\\\"Text\\\":\\\"hello-\${NONCE}\"; then echo text_body=1; else echo text_body=0; fi
+    if printf '%s' \"\${MESSAGE}\" | sed -n 's/.*\"HTML\":\"\(.*\)\",\"Size\".*/\1/p' | grep -q \"hello-\${NONCE}\"; then echo html_body=1; else echo html_body=0; fi
+    RAW=\$(wget -q -O - \"\${MAILPIT_API_URL}/api/v1/message/\${ID}/raw\" 2>/dev/null)
+    printf '%s\n' \"\${RAW}\" | grep -i '^Content-Type:' | sed 's/;.*//' | tr -d '\r' | tr '\n' ',' | sed 's/^/structure=/'
+    echo
+    BODY=\"{\\\"IDs\\\":[\\\"\${ID}\\\"]}\"
+    printf 'DELETE /api/v1/messages HTTP/1.1\r\nHost: mailpit\r\nContent-Type: application/json\r\nContent-Length: %s\r\nConnection: close\r\n\r\n%s' \"\${#BODY}\" \"\${BODY}\" | nc -w 2 mailpit 8025 >/dev/null
+    rm -f /tmp/mailer-send.log"
+V3_MAILER_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+printf '%s\n' "${V3_MAILER_OUTPUT_STRING}"
+
+if printf '%s' "${V3_MAILER_OUTPUT_STRING}" | grep -qx 'send_exit=0' && printf '%s' "${V3_MAILER_OUTPUT_STRING}" | grep -qx 'received=1' \
+    && printf '%s' "${V3_MAILER_OUTPUT_STRING}" | grep -qx 'text_body=1' && printf '%s' "${V3_MAILER_OUTPUT_STRING}" | grep -qx 'html_body=1'; then
+    check_pass "mailer:send delivered one message to the relay, carrying the text in both its plain and html bodies (read out of mailpit)"
+else
+    check_fail "mailer:send did not deliver the message it was given ($(printf '%s' "${V3_MAILER_OUTPUT_STRING}" | grep -o '^\(send_exit\|received\|text_body\|html_body\)=.*' | tr '\n' ' '))"
+fi
+
+if printf '%s' "${V3_MAILER_OUTPUT_STRING}" | grep -q '^structure=.*Content-Type: multipart/alternative,Content-Type: text/plain,Content-Type: text/html,'; then
+    check_pass "the message is multipart/alternative, a plain part then an html part"
+else
+    check_fail "the message is not a plain and an html alternative ($(printf '%s' "${V3_MAILER_OUTPUT_STRING}" | grep -o '^structure=.*'))"
+fi
+
+check_section_end "V3 MAILER SEND" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
 # V3 TWO-FACTOR RELEASE — the enrollment table the reset just recreated cascades its rows with the account
@@ -2150,6 +2854,27 @@ else
     check_fail "an unconfigured refresh exited ${V3_UNCONFIGURED_STATUS_INTEGER:-<no status>} saying ${V3_UNCONFIGURED_OUTPUT_STRING:-<empty>}"
 fi
 
+# the export client refuses a redirect rather than following it: the sink answered from /v1/moved-sink is a 307 to the
+# real sink, so a client that followed would still deliver and report success. The refusal is read on both sides —
+# the command reports the export as not done and fails, and the balancer's own log, read out of band, holds the one
+# POST it answered 307 and no request at all to the sink it redirected to
+docker_compose_no_log exec -T "${E2E_SERVICE_NAME_STRING}" \
+    bash -c "printf 'APP_REPORTING_EXPORT_ENDPOINT=http://rates.melody.localhost.precision-soft.com/v1/moved-sink\n' > ${EXAMPLE_ENV_LOCAL_PATH_STRING}" </dev/null
+V3_REDIRECT_SINCE_STRING="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "set -o pipefail; go run . catalog:report:refresh 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | grep '|'"
+V3_REDIRECT_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+V3_REDIRECT_STATUS_INTEGER="${RUN_IN_DEV_STATUS_INTEGER}"
+sleep 1
+V3_REDIRECT_BALANCER_LOG_STRING="$(docker_compose_no_log logs --no-log-prefix --since "${V3_REDIRECT_SINCE_STRING}" load-balancer 2>/dev/null | grep -E '"POST /v1/(moved-sink|report-sink) ' || true)"
+V3_REDIRECT_ANSWERED_INTEGER="$(printf '%s\n' "${V3_REDIRECT_BALANCER_LOG_STRING}" | grep -c '"POST /v1/moved-sink HTTP/1.1" 307 ' || true)"
+V3_REDIRECT_FOLLOWED_INTEGER="$(printf '%s\n' "${V3_REDIRECT_BALANCER_LOG_STRING}" | grep -c '/v1/report-sink' || true)"
+if [[ "0" != "${V3_REDIRECT_STATUS_INTEGER}" ]] && printf '%s' "${V3_REDIRECT_OUTPUT_STRING}" | grep -qE '\|  false +\|' \
+    && [[ "1" == "${V3_REDIRECT_ANSWERED_INTEGER}" ]] && [[ "0" == "${V3_REDIRECT_FOLLOWED_INTEGER}" ]]; then
+    check_pass "an export answered with a 307 is refused, not followed: the refresh fails with EXPORTED false and the balancer saw no request to the sink it redirected to"
+else
+    check_fail "the redirected export was not refused (status ${V3_REDIRECT_STATUS_INTEGER}, output ${V3_REDIRECT_OUTPUT_STRING:-<empty>}, balancer 307s ${V3_REDIRECT_ANSWERED_INTEGER:-?}, sink requests ${V3_REDIRECT_FOLLOWED_INTEGER:-?})"
+fi
+
 restore_example_env_local
 
 check_section_end "V3 EXCHANGE RATES" "${TAG_VALIDATE}" "e2e"
@@ -2268,6 +2993,26 @@ if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q '401'; then
     check_pass "an anonymous caller is refused the archive listing"
 else
     check_fail "the archive listing answered ${RUN_IN_DEV_OUTPUT_STRING:-<no answer>} to an anonymous caller, wanted 401"
+fi
+
+# the listing's limit is a query value read through the bag: the first value of a repeated key is the one taken,
+# and a value that is not a positive whole number is refused. The control is the same listing without a limit, which
+# holds at least the two readings the refreshes above recorded, so a limit that did nothing would answer more than one
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "${EXAMPLE_SIGN_IN_SNIPPET}
+    for QUERY in 'limit=1' 'limit=1&limit=5' ''; do
+        COUNT=\$(wget -q -O- --header=\"\${SESSION_COOKIE_HEADER}\" --header='Accept: application/json' \"\${EXAMPLE_BASE_URL}/reports/api/history/?\${QUERY}\" 2>/dev/null | grep -o '\"taken_at\"' | wc -l | tr -d ' ')
+        echo \"readings_\$(printf '%s' \"\${QUERY:-none}\" | tr '=&' '__')=\${COUNT}\"
+    done
+    wget -q -S -O /dev/null --header=\"\${SESSION_COOKIE_HEADER}\" --header='Accept: application/json' \"\${EXAMPLE_BASE_URL}/reports/api/history/?limit=x\" 2>&1 | sed -n 's/^ *HTTP\/[0-9.]* \([0-9]*\).*/status_limit_x=\1/p' | head -1
+${EXAMPLE_SIGN_OUT_SNIPPET}"
+V3_HISTORY_LIMIT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+if printf '%s' "${V3_HISTORY_LIMIT_STRING}" | grep -qx 'readings_limit_1=1' \
+    && printf '%s' "${V3_HISTORY_LIMIT_STRING}" | grep -qx 'readings_limit_1_limit_5=1' \
+    && printf '%s' "${V3_HISTORY_LIMIT_STRING}" | grep -qx 'status_limit_x=400' \
+    && [[ 2 -le "$(printf '%s' "${V3_HISTORY_LIMIT_STRING}" | grep -o '^readings_none=[0-9]*' | cut -d= -f2 || echo 0)" ]]; then
+    check_pass "the archive listing honours ?limit=1, takes the first of a repeated limit and refuses ?limit=x with 400, where the bare listing holds more"
+else
+    check_fail "the archive listing's limit did not hold ($(printf '%s' "${V3_HISTORY_LIMIT_STRING}" | grep -o '^\(readings\|status\)_[a-z0-9_]*=[0-9]*' | tr '\n' ' '))"
 fi
 
 check_section_end "V3 READING ARCHIVE" "${TAG_VALIDATE}" "e2e"

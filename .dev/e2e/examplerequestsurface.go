@@ -16,6 +16,7 @@ func runExampleRequestSurfaceAssertions(major exampleMajor) {
     assertExampleErrorEnvelopeCarriesTheMintedRequestId(major)
     assertExampleStaticSurfaceServesNoDotfile(major)
     assertExampleMalformedSessionCookieIsAnonymous(major)
+    assertExampleRefusingAcceptKeepsTheErrorStatus(major)
 }
 
 /* the control is the same route spelled canonically: an anonymous caller is answered 401 there, so a 400 on the doubled slash or the climbing segment is the canonical-path refusal answering first, not the firewall */
@@ -158,4 +159,21 @@ func exampleAllowNames(allow string, wantedList ...string) bool {
     }
 
     return true
+}
+
+/* an Accept that refuses every media type does not turn an error the framework renders into a 406: the error's own status is the signal, so it is kept and served the default json body. The door is the canonical-path refusal, which the kernel renders itself — the example's firewall and presenter answer their own errors without negotiating. The control is the same request accepting json; the refusing arm spells the refusal both ways, every registered type at q=0 and the wildcard at q=0 */
+func assertExampleRefusingAcceptKeepsTheErrorStatus(major exampleMajor) {
+    client := newExampleClient(major)
+    path := "/" + exampleUserRoute
+
+    for _, accept := range []string{"application/json", "application/json;q=0, text/plain;q=0", "*/*;q=0"} {
+        refused := client.call("GET", path, accept, "", "")
+        if http.StatusBadRequest != refused.statusCode {
+            fail("[%s] %s with Accept %q answered %d, wanted the refusal's 400 kept rather than a 406", major.label, path, accept, refused.statusCode)
+        }
+        if false == strings.HasPrefix(refused.headerList.Get("Content-Type"), "application/json") || false == json.Valid([]byte(refused.body)) {
+            fail("[%s] the 400 under Accept %q is not the default json body (%q): %s", major.label, accept, refused.headerList.Get("Content-Type"), exampleTruncate(refused.body))
+        }
+    }
+    pass("[%s] an Accept refusing every media type keeps the kernel's 400 and its json body, as accepting json does", major.label)
 }

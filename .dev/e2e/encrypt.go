@@ -140,3 +140,39 @@ func driverValueString(value driver.Value, valueErr error) string {
 
     return ""
 }
+
+/* encryptRoundTripRoute is the example's public door that encrypts one fixed value with the configured cipher and decrypts it back (config/http.go). */
+const encryptRoundTripRoute = "/encrypt/roundtrip"
+
+/* runEncryptRoundTripOverHttp reads the served cipher through the example's own door: the ciphertext carries the marker the bulk migration writes, with the gcm scheme and the key id the example configures, and never the value itself, and the value decrypts back. Two calls must answer two ciphertexts, since every encryption draws a fresh nonce — a door answering one constant would pass every other assertion here. */
+func runEncryptRoundTripOverHttp(baseUrl string) {
+    const label = "encrypt round trip"
+    client := newLiveExampleClient(baseUrl)
+
+    ciphertextList := make([]string, 0, 2)
+    for range 2 {
+        response := client.get(label, encryptRoundTripRoute)
+        requireLiveExampleStatus(label, encryptRoundTripRoute, response, 200)
+
+        var document struct {
+            Plaintext  string `json:"plaintext"`
+            Ciphertext string `json:"ciphertext"`
+            Decrypted  string `json:"decrypted"`
+            RoundTrip  bool   `json:"roundTrip"`
+        }
+        if decodeErr := json.Unmarshal(response.body, &document); nil != decodeErr {
+            fail("%s: %s answered a body that is not json (%v): %s", label, encryptRoundTripRoute, decodeErr, exampleTruncate(response.bodyText()))
+        }
+        if "" == document.Plaintext || false == strings.HasPrefix(document.Ciphertext, "<ENC>\x00gcm1\x00example-2026:") || true == strings.Contains(document.Ciphertext, document.Plaintext) {
+            fail("%s: the ciphertext %q does not carry the gcm marker and key id, or carries the value %q", label, document.Ciphertext, document.Plaintext)
+        }
+        if document.Plaintext != document.Decrypted || false == document.RoundTrip {
+            fail("%s: %q decrypted to %q (roundTrip %v)", label, document.Plaintext, document.Decrypted, document.RoundTrip)
+        }
+        ciphertextList = append(ciphertextList, document.Ciphertext)
+    }
+    if ciphertextList[0] == ciphertextList[1] {
+        fail("%s: two encryptions of one value answered the same ciphertext %q — no fresh nonce per call", label, ciphertextList[0])
+    }
+    pass("%s: the served cipher answers the gcm marker and key id, decrypts back, and draws a fresh ciphertext per call", encryptRoundTripRoute)
+}

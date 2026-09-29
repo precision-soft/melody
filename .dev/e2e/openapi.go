@@ -19,6 +19,9 @@ const openApiExpectedTitle = "Melody Example API"
 const openApiDescribedOperationCount = 2
 
 /* the operation the section pins. It is chosen because it is the one the example describes with a TYPED response, so it proves both halves of the generator at once: the operation exists because the ROUTER reported the route, and its response body references a component schema because the REGISTRY described the handler's own type. A generator that lost the registry would still emit the operation, with the bare "default" response every undescribed route gets — which is exactly the regression the $ref assertion catches. */
+/* openApiValidatedPath is the operation whose request body the example describes from a type carrying validate tags (the product create), as the document spells its path. */
+const openApiValidatedPath = "/products/api/create"
+
 const (
     openApiPinnedPath      = "/i18n/greeting"
     openApiPinnedMethod    = "get"
@@ -49,6 +52,7 @@ func runOpenApiCheck(baseUrl string) {
     assertOpenApiInfo(document)
     assertOpenApiBootedRoutes(document)
     assertOpenApiReferencesResolve(document)
+    assertOpenApiRequestSchemaCarriesTheValidateConstraints(document)
 }
 
 func assertOpenApiInfo(document map[string]any) {
@@ -260,4 +264,63 @@ func openApiSortedKeys(node map[string]any) []string {
     sort.Strings(keys)
 
     return keys
+}
+
+
+/* the product create body is described from the request type's validate tags, so the schema the operation references carries them as json schema: the fields notBlank marks are required, and the length, pattern and bound constraints land on their properties. The schema is reached through the operation's own reference, because two request types share the name CreateRequest and the generator suffixes the second */
+func assertOpenApiRequestSchemaCarriesTheValidateConstraints(document map[string]any) {
+    paths, _ := document["paths"].(map[string]any)
+    pathItem, _ := paths[openApiValidatedPath].(map[string]any)
+    operation, _ := pathItem["post"].(map[string]any)
+    requestBody, _ := operation["requestBody"].(map[string]any)
+    content, _ := requestBody["content"].(map[string]any)
+    mediaType, _ := content["application/json"].(map[string]any)
+    schemaReference, _ := mediaType["schema"].(map[string]any)
+    reference, _ := schemaReference["$ref"].(string)
+    if false == strings.HasPrefix(reference, "#/components/schemas/") {
+        fail("%s: post %s references no request schema (%q)", openApiLabel, openApiValidatedPath, reference)
+    }
+
+    components, _ := document["components"].(map[string]any)
+    schemas, _ := components["schemas"].(map[string]any)
+    schema, _ := schemas[strings.TrimPrefix(reference, "#/components/schemas/")].(map[string]any)
+    properties, _ := schema["properties"].(map[string]any)
+
+    requiredList := map[string]bool{}
+    if requiredValues, isList := schema["required"].([]any); true == isList {
+        for _, value := range requiredValues {
+            if name, isString := value.(string); true == isString {
+                requiredList[name] = true
+            }
+        }
+    }
+    for _, name := range []string{"name", "description", "categoryId", "price", "currencyId"} {
+        if false == requiredList[name] {
+            fail("%s: %s does not require %q, which the request type marks notBlank (required %v)", openApiLabel, reference, name, schema["required"])
+        }
+    }
+    if true == requiredList["id"] || true == requiredList["stock"] {
+        fail("%s: %s requires an optional field (required %v)", openApiLabel, reference, schema["required"])
+    }
+
+    expectedList := []struct {
+        property string
+        keyword  string
+        value    any
+    }{
+        {"name", "minLength", float64(2)},
+        {"name", "maxLength", float64(120)},
+        {"id", "maxLength", float64(60)},
+        {"id", "pattern", `^\S+$`},
+        {"price", "minimum", float64(0)},
+        {"price", "exclusiveMinimum", true},
+        {"stock", "minimum", float64(-1)},
+    }
+    for _, expected := range expectedList {
+        property, _ := properties[expected.property].(map[string]any)
+        if expected.value != property[expected.keyword] {
+            fail("%s: %s.%s carries %s %v, wanted %v from the validate tag", openApiLabel, reference, expected.property, expected.keyword, property[expected.keyword], expected.value)
+        }
+    }
+    pass("post %s references %s, which requires the notBlank fields and carries the length, pattern and bound constraints of the validate tags", openApiValidatedPath, reference)
 }
