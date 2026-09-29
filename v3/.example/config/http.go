@@ -69,11 +69,13 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     router.HandleNamed(route.LoginPageName, "GET", route.LoginPagePattern, handler.LoginPageHandler())
 
+    secondFactorReplayGuard := instance.buildSecondFactorReplayGuard(kernelInstance.Clock())
+
     /* login-submit and logout are exposed to the route manifest (window.melodyRoutes) because the frontend resolves their URLs by name — the login form posts to route("example.login.submit") and the nav logs out via route("example.logout"); an unexposed route would make the client throw "unknown route". */
     /* the sign-in submit spends the same per-address budget as the nomenclature's writes: a password guessed in a loop is refused with 429 once the budget runs out, whichever replica each guess reaches */
     router.HandleWithOptions(
         route.LoginSubmitPattern,
-        instance.throttledWrite(handler.LoginHandler()),
+        instance.throttledWrite(handler.LoginHandler(instance.buildLoginAuthentication(kernelInstance.Clock(), secondFactorReplayGuard))),
         melodyhttp.NewRouteOptions(route.LoginSubmitName, []string{"POST"}, "", nil, nil, nil, nil, 0, melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)),
     )
     router.HandleWithOptions(
@@ -88,10 +90,10 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     router.HandleNamed(route.InternalWhoamiName, "POST", route.InternalWhoamiPattern, handlerinternalauth.WhoamiHandler())
 
-    /* the two doors resolve the store at each request (see two_factor.go), so they stand whenever the catalogue does: a store its migration refused answers 503 until it heals, rather than leaving the routes unregistered until the process restarts */
+    /* the two doors resolve the store at each request (see two_factor.go), so they stand whenever the catalogue does: a store its migration refused answers 503 until it heals, rather than leaving the routes unregistered until the process restarts. The verification door burns an accepted code in the memory the sign-in reads, so a code is spent once across both. */
     if nil != instance.database {
         router.HandleNamed("example.twofactor.enroll", "POST", "/twofactor/enroll", handlertwofactor.EnrollHandler(twofactor.StoreFromRuntime))
-        router.HandleNamed("example.twofactor.verify", "POST", "/twofactor/verify", handlertwofactor.VerifyHandler(twofactor.StoreFromRuntime))
+        router.HandleNamed("example.twofactor.verify", "POST", "/twofactor/verify", handlertwofactor.VerifyHandler(twofactor.StoreFromRuntime, secondFactorReplayGuard))
     }
 
     /* the outbox handlers hold container.Lazy handles built at route-registration time: the store and relay services (provided by the outbox module's factories, see configure.go) are resolved at the first request, so registering the routes never touches the outbox schema or the transport. */

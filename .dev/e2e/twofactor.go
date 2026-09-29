@@ -43,7 +43,7 @@ type twoFactorEnrollPayload struct {
 
    Two arms guard the door rather than the codes. The anonymous one is the reason the route is not public any more: unauthenticated, the enrollment door handed out a secret for any identifier the caller named, the administrator's included. The re-enrollment one is what makes an account whose authenticator is lost recoverable — and what lets this section run twice against the same seeded identifier.
 
-   The section signs in, so it goes through the throttled login door: the budget the EXAMPLE OVER HTTP section deliberately exhausts is reset first. */
+   The section signs in, so it goes through the throttled login door: the budget the EXAMPLE OVER HTTP section deliberately exhausts is reset first. Once the editor is enrolled, the login door itself asks for the second factor (assertTwoFactorSignIn). */
 func runTwoFactorCheck(baseUrl string, redisAddress string) {
     resetExampleRateLimitCounters(twoFactorLabel, redisAddress, twoFactorRateLimitPrefix)
 
@@ -52,6 +52,13 @@ func runTwoFactorCheck(baseUrl string, redisAddress string) {
     client := newSignedInLiveExampleClient(baseUrl, exampleHttpEditorUsername, exampleHttpEditorPassword)
 
     first := assertTwoFactorEnrollment(client)
+
+    /* os.Exit runs no deferred function, and an editor left enrolled answers every later sign-in of this run and of the next one with the second-factor challenge */
+    removeEnrollmentOnFailure := pushFailureCleanup(func() {
+        cleanUpTwoFactorEnrollment(first.UserIdentifier)
+    })
+    defer removeEnrollmentOnFailure()
+
     enrollment := assertTwoFactorReEnrollmentReplacesTheSecret(client, first)
 
     user := enrollment.UserIdentifier
@@ -65,6 +72,8 @@ func runTwoFactorCheck(baseUrl string, redisAddress string) {
     assertTwoFactorVerifyRefused(client, twoFactorSpacedCode(code), "the same code replayed with whitespace inserted")
 
     assertTwoFactorRecoveryCodeRedeemsOnce(client, user, enrollment.RecoveryCodes[0])
+
+    assertTwoFactorSignIn(baseUrl, redisAddress, enrollment, code)
 
     cleanUpTwoFactorEnrollment(user)
 }

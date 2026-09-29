@@ -263,3 +263,42 @@ func TestAsIdAlreadyExists_LeavesEveryOtherFailureAlone(t *testing.T) {
         }
     }
 }
+
+
+/* several processes may reach an empty table at once: a row the primary key refuses as taken was seeded by another one and is skipped, and the rest of the seed still lands */
+func TestSeedRowsSkippingTaken_SkipsARowAnotherProcessSeededFirst(t *testing.T) {
+    rowList := []*string{new(string), new(string), new(string)}
+    *rowList[0], *rowList[1], *rowList[2] = "prod-1", "prod-2", "prod-3"
+
+    inserted := make([]string, 0, 3)
+
+    seedErr := seedRowsSkippingTaken(rowList, func(row *string) error {
+        if "prod-2" == *row {
+            return fmt.Errorf("insert failed: %w", fmt.Errorf("Error 1062 (23000): Duplicate entry 'prod-2' for key 'melody_example_v3_product.PRIMARY'"))
+        }
+
+        inserted = append(inserted, *row)
+
+        return nil
+    })
+
+    if nil != seedErr || 2 != len(inserted) || "prod-3" != inserted[1] {
+        t.Fatalf("expected the taken row skipped and the rest inserted, got %v %v", inserted, seedErr)
+    }
+}
+
+func TestSeedRowsSkippingTaken_EndsTheSeedOnAnyOtherFailure(t *testing.T) {
+    refusal := errors.New("connection refused")
+    rowList := []*string{new(string), new(string)}
+
+    calls := 0
+    seedErr := seedRowsSkippingTaken(rowList, func(row *string) error {
+        calls++
+
+        return refusal
+    })
+
+    if false == errors.Is(seedErr, refusal) || 1 != calls {
+        t.Fatalf("expected the first failure to end the seed, got %v after %d inserts", seedErr, calls)
+    }
+}

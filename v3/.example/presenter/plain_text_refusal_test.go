@@ -122,3 +122,17 @@ func TestApiSuccessKeepsTheSerializerRenderingForATextPlainClient(t *testing.T) 
         t.Fatalf("expected the success envelope left to the serializer, got %q", body)
     }
 }
+
+/* a refusal that tells the client how to go on keeps it for a text/plain client, beneath the status line, as the json client reads it in the envelope's payload */
+func TestApiErrorWithPayloadWritesThePayloadBeneathTheStatusLine(t *testing.T) {
+    runtimeInstance, request := textNegotiatingRequest(t)
+
+    response := ApiErrorWithPayload(runtimeInstance, request, nethttp.StatusUnauthorized, map[string]any{"factor": "totp"}, "second factor required")
+
+    body := responseBodyOf(t, response)
+    lines := strings.Split(strings.TrimSuffix(body, "\n"), "\n")
+
+    if nethttp.StatusUnauthorized != response.StatusCode() || "401 second factor required" != lines[0] || "factor: totp" != lines[1] || "request id: refusal-test" != lines[2] {
+        t.Fatalf("expected the status line, the payload and then the request id, got %d %q", response.StatusCode(), body)
+    }
+}

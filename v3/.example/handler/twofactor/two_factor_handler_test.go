@@ -28,7 +28,7 @@ func TestEnrollHandlerRefusesACallerWithoutAToken(t *testing.T) {
 func TestVerifyHandlerRefusesACallerWithoutAToken(t *testing.T) {
     request, runtimeInstance := twoFactorRequest(t, "/twofactor/verify?user=admin")
 
-    response, handlerErr := VerifyHandler(nil)(runtimeInstance, httptest.NewRecorder(), request)
+    response, handlerErr := VerifyHandler(nil, nil)(runtimeInstance, httptest.NewRecorder(), request)
     assertTwoFactorUnauthorized(t, "the verification door", response, handlerErr)
 }
 
@@ -102,7 +102,7 @@ func TestVerifyHandlerChecksTheTokensEnrollmentWhateverTheRequestNames(t *testin
         map[string]string{melodysecurity.DefaultTotpCodeHeaderName: code},
     )
 
-    response, handlerErr := VerifyHandler(fixedStore(store))(runtimeInstance, httptest.NewRecorder(), request)
+    response, handlerErr := VerifyHandler(fixedStore(store), nil)(runtimeInstance, httptest.NewRecorder(), request)
     if nil != handlerErr || nil == response || nethttp.StatusOK != response.StatusCode() {
         t.Fatalf("expected the token's own code to verify with 200, got %v, %v, reads %q", response, handlerErr, connector.recorded())
     }
@@ -124,7 +124,7 @@ func TestVerifyHandlerRedeemsAgainstTheTokensEnrollmentWhateverTheRequestNames(t
         map[string]string{melodysecurity.DefaultTotpRecoveryHeaderName: "recovery-one"},
     )
 
-    response, handlerErr := VerifyHandler(fixedStore(store))(runtimeInstance, httptest.NewRecorder(), request)
+    response, handlerErr := VerifyHandler(fixedStore(store), nil)(runtimeInstance, httptest.NewRecorder(), request)
     if nil != handlerErr || nil == response || nethttp.StatusOK != response.StatusCode() {
         t.Fatalf("expected the token's own recovery code to be redeemed with 200, got %v, %v, statements %q", response, handlerErr, connector.recorded())
     }
@@ -195,7 +195,7 @@ func TestVerifyHandlerAnswersAStoreRefusalWith503AndVerifiesOnceItHeals(t *testi
 
     store, _ := enrolledStore(t, "alice", secret)
     storeSource, _ := healingStore(store, errors.New("the catalogue database refused the migration"))
-    handler := VerifyHandler(storeSource)
+    handler := VerifyHandler(storeSource, nil)
 
     headers := map[string]string{melodysecurity.DefaultTotpCodeHeaderName: code}
 
@@ -209,5 +209,36 @@ func TestVerifyHandlerAnswersAStoreRefusalWith503AndVerifiesOnceItHeals(t *testi
     response, handlerErr = handler(runtimeInstance, httptest.NewRecorder(), request)
     if nil != handlerErr || nil == response || nethttp.StatusOK != response.StatusCode() {
         t.Fatalf("expected the next request to verify once the store resolves, got %v, %v", response, handlerErr)
+    }
+}
+
+/* a code the sign-in already burned in the shared guard is refused here: the door writes the nonce the framework's second-factor authenticator writes, so the code is spent once across both doors */
+func TestVerifyHandlerRefusesACodeTheSignInAlreadyBurnedInTheSharedGuard(t *testing.T) {
+    secret, secretErr := totp.GenerateSecret()
+    if nil != secretErr {
+        t.Fatalf("generating the fixture secret failed: %v", secretErr)
+    }
+
+    code, codeErr := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
+    if nil != codeErr {
+        t.Fatalf("generating the fixture code failed: %v", codeErr)
+    }
+
+    store, _ := enrolledStore(t, "alice", secret)
+    request, runtimeInstance := authenticatedTwoFactorRequest(
+        t,
+        "/twofactor/verify",
+        "alice",
+        map[string]string{melodysecurity.DefaultTotpCodeHeaderName: code},
+    )
+
+    sharedGuard := melodysecurity.NewMemoryNonceGuard()
+    if seen, rememberErr := sharedGuard.Remember(runtimeInstance, "2fa:alice:"+totp.NormalizeCode(code), time.Minute); nil != rememberErr || true == seen {
+        t.Fatalf("burning the code as the sign-in does failed: %v %v", seen, rememberErr)
+    }
+
+    response, handlerErr := VerifyHandler(fixedStore(store), sharedGuard)(runtimeInstance, httptest.NewRecorder(), request)
+    if nil != handlerErr || nil == response || nethttp.StatusUnauthorized != response.StatusCode() {
+        t.Fatalf("expected a code the shared guard holds refused with 401, got %v, %v", response, handlerErr)
     }
 }

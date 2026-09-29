@@ -33,9 +33,22 @@ func isPlainTextMediaType(contentType string) bool {
     return "text/plain" == mediaType
 }
 
-/* plainTextRefusal writes the status and the public errors first, then the request id, the time and the rest of the context in key order, and the debug trace one frame per line. */
+/* plainTextRefusal writes the status and the public errors first, then what the refusal's payload tells the client to present next, then the request id, the time and the rest of the context in key order, and the debug trace one frame per line. */
 func plainTextRefusal(statusCode int, payload apiResponse, contentType string) melodyhttpcontract.Response {
     lines := []string{fmt.Sprintf("%d %s", statusCode, strings.Join(payload.Errors, "; "))}
+
+    /* a refusal that tells the client how to go on carries it in its payload, which the text/plain client reads beneath the status line as the json client reads it in the envelope */
+    if refusalPayload, isMap := payload.Payload.(map[string]any); true == isMap {
+        payloadKeys := make([]string, 0, len(refusalPayload))
+        for key := range refusalPayload {
+            payloadKeys = append(payloadKeys, key)
+        }
+        sort.Strings(payloadKeys)
+
+        for _, key := range payloadKeys {
+            lines = appendRefusalEntry(lines, "", key, refusalPayload[key])
+        }
+    }
 
     remaining := make(map[string]any, len(payload.Context))
     for key, value := range payload.Context {

@@ -69,6 +69,27 @@ func ApiError(
     )
 }
 
+/* ApiErrorWithPayload renders a refusal that tells the client how to go on: the payload names what the client must present next, beside the public message. */
+func ApiErrorWithPayload(
+    runtimeInstance melodyruntimecontract.Runtime,
+    request melodyhttpcontract.Request,
+    statusCode int,
+    payload map[string]any,
+    errors ...string,
+) melodyhttpcontract.Response {
+    return buildApiResponse(
+        runtimeInstance,
+        request,
+        statusCode,
+        apiResponse{
+            Success: false,
+            Payload: payload,
+            Errors:  normalizeErrors(errors),
+            Context: buildErrorContext(request, statusCode, nil, debugMode(runtimeInstance)),
+        },
+    )
+}
+
 /* ApiErrorWithErr renders a refusal whose cause the handler holds. The cause travels in the body only under the development environment. A status of the server's own class is journaled here at error, because the kernel journals a returned failure and never a Response; a client's refusal below 500 is not journaled. */
 func ApiErrorWithErr(
     runtimeInstance melodyruntimecontract.Runtime,

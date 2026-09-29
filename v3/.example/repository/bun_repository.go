@@ -67,8 +67,15 @@ func seedIfEmptyAudited[Row any](ctx context.Context, database *bun.DB, tracker 
         return nil
     }
 
-    for _, row := range buildRows() {
-        insertErr := tracker.Insert(auditContext(ctx), auditEntity, idOf(row), row)
+    return seedRowsSkippingTaken(buildRows(), func(row *Row) error {
+        return tracker.Insert(auditContext(ctx), auditEntity, idOf(row), row)
+    })
+}
+
+/* seedRowsSkippingTaken inserts the rows one by one and skips a row whose identifier the primary key refuses as taken: another process that reached the empty table first seeded it. Any other failure ends the seed. */
+func seedRowsSkippingTaken[Row any](rowList []*Row, insert func(row *Row) error) error {
+    for _, row := range rowList {
+        insertErr := insert(row)
         if true == errors.Is(asIdAlreadyExists(insertErr), ErrIdAlreadyExists) {
             continue
         }

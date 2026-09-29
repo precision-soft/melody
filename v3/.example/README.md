@@ -23,6 +23,8 @@ Conceptually, the example models a minimal admin-style catalog application:
 
 Sign-in and every signed-in request read the account from the repository, past the cached user records: a role granted or taken away applies on the next request, and a deleted account or a changed password ends the sessions opened before it, since a session carries a version of the password hash it was opened under. When the repository cannot be read, the request is answered as anonymous and the session is kept for the next one.
 
+An account enrolled in a second factor (`POST /twofactor/enroll`) signs in with it: the login door authenticates through the framework's `AuthenticatorManager` over a `TotpSecondFactorAuthenticator`, whose first factor is the password. The password alone is answered `401` with `{"factor":"totp"}` in the payload and raises no login failure, since nothing was refused; the form then reveals a code field and posts the code on `X-2FA-Code`, or a single-use recovery code on `X-2FA-Recovery-Code`. A wrong, spent or replayed code is refused as a wrong password is, `invalid credentials` and one `security.login.failure`. An accepted code is burned in one memory the login door and `POST /twofactor/verify` share, in redis when the example has one, so a code is spent once across both. The authenticator does not limit guesses, so an account whose password was accepted may present five codes in fifteen minutes before even a right one is refused `429`; a caller without the password spends nothing of it, and an accepted code gives it back. An account with no enrollment signs in on its password, as before.
+
 ## Seeded credentials
 
 For convenience, the example ships with a few predefined users:

@@ -113,6 +113,12 @@ func assertMysqlEncryptedAtRest(baseUrl string, database *bun.DB) {
 
     defer removeMysqlEnrollment(database, user)
 
+    /* os.Exit runs no deferred function, and an administrator left enrolled answers every later administrator sign-in with the second-factor challenge */
+    removeEnrollmentOnFailure := pushFailureCleanup(func() {
+        removeMysqlEnrollment(database, user)
+    })
+    defer removeEnrollmentOnFailure()
+
     stored := readMysqlEnrollmentSecret(database, user)
 
     if 0 == len(stored) {

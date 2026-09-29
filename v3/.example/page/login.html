@@ -31,6 +31,12 @@
                             <input autocomplete="current-password" class="form-control" id="password" name="password" type="password" value="admin"/>
                         </div>
 
+                        <div class="mb-3 d-none" id="secondFactor">
+                            <label class="form-label" for="code" id="codeLabel">Authenticator code</label>
+                            <input autocomplete="one-time-code" class="form-control" id="code" inputmode="numeric" name="code" type="text"/>
+                            <a class="small link-secondary" href="#" id="useRecoveryCode">Use a recovery code instead</a>
+                        </div>
+
                         <button class="btn btn-primary w-100" type="submit">Login</button>
                     </form>
 
@@ -56,34 +62,64 @@
             return;
         }
 
+        const secondFactor = $('#secondFactor');
+        const codeInput = $('#code');
+        let factorHeader = 'X-2FA-Code';
+
+        /* an account with a second factor is answered 401 naming the factor: the form reveals the code field and the next submit carries it on the header the framework's authenticator reads */
+        $('#useRecoveryCode').on('click', (event) => {
+            event.preventDefault();
+
+            factorHeader = 'X-2FA-Recovery-Code';
+            $('#codeLabel').text('Recovery code');
+            codeInput.attr('inputmode', 'text').val('').trigger('focus');
+        });
+
         form.on('submit', async (event) => {
             event.preventDefault();
 
             window.melodyExample.ui.setStatus('Logging in...');
 
-            try {
-                const username = String(form.find('input[name="username"]').val() ?? '').trim();
-                const password = String(form.find('input[name="password"]').val() ?? '').trim();
+            const username = String(form.find('input[name="username"]').val() ?? '').trim();
+            const password = String(form.find('input[name="password"]').val() ?? '').trim();
+            const code = String(codeInput.val() ?? '').trim();
 
-                const result = await window.melodyExample.http.postJson(
-                    window.melodyExample.routing.route('example.login.submit'),
-                    {
-                        username: username,
-                        password: password
-                    }
-                );
+            const headers = {Accept: 'application/json'};
+            if (false === secondFactor.hasClass('d-none') && '' !== code) {
+                headers[factorHeader] = code;
+            }
+
+            try {
+                const body = await $.ajax({
+                    url: window.melodyExample.routing.route('example.login.submit'),
+                    method: 'POST',
+                    headers: headers,
+                    contentType: 'application/json',
+                    dataType: 'json',
+                    data: JSON.stringify({username: username, password: password})
+                });
 
                 window.melodyExample.ui.setStatus('');
 
-                const redirectUrl = String(result?.payload?.redirectUrl ?? '').trim();
+                const redirectUrl = String(body?.payload?.redirectUrl ?? '').trim();
                 if ('' !== redirectUrl) {
                     window.location.href = redirectUrl;
                     return;
                 }
 
                 window.location.href = window.melodyExample.routing.route('example.products.list.page');
-            } catch (err) {
-                window.melodyExample.ui.setStatus(String(err?.message ?? 'login failed'), 'danger');
+            } catch (ajaxErr) {
+                const answer = ajaxErr?.responseJSON ?? null;
+
+                if ('totp' === String(answer?.payload?.factor ?? '')) {
+                    secondFactor.removeClass('d-none');
+                    codeInput.val('').trigger('focus');
+                    window.melodyExample.ui.setStatus('Enter the code from your authenticator app.');
+                    return;
+                }
+
+                codeInput.val('');
+                window.melodyExample.ui.setStatus(String(answer?.errors?.[0] ?? ajaxErr?.statusText ?? 'login failed'), 'danger');
             }
         });
     });

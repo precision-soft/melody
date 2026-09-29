@@ -11,6 +11,7 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     examplesecurity "github.com/precision-soft/melody/v3/.example/security"
     melodysecurity "github.com/precision-soft/melody/v3/security"
+    melodysecuritycontract "github.com/precision-soft/melody/v3/security/contract"
     "github.com/precision-soft/melody/v3/security/totp"
 )
 
@@ -63,9 +64,11 @@ func EnrollHandler(storeSource store2fa.StoreSource) melodyhttpcontract.Handler 
     }
 }
 
-/* VerifyHandler verifies a second factor for the caller's own enrollment: a TOTP code on X-2FA-Code against the stored secret, or a single-use recovery code on X-2FA-Recovery-Code redeemed atomically; 200 on success, 401 on a wrong or replayed factor. An accepted code is burned in a replay guard keyed on the normalized code, since Verify normalizes before comparing. */
-func VerifyHandler(storeSource store2fa.StoreSource) melodyhttpcontract.Handler {
-    replayGuard := melodysecurity.NewMemoryNonceGuard()
+/* VerifyHandler verifies a second factor for the caller's own enrollment: a TOTP code on X-2FA-Code against the stored secret, or a single-use recovery code on X-2FA-Recovery-Code redeemed atomically; 200 on success, 401 on a wrong or replayed factor. An accepted code is burned in the replay guard keyed on the normalized code, since Verify normalizes before comparing, under the nonce the framework's second-factor authenticator writes: handed the guard the sign-in reads, a code is spent once across both doors. A nil guard is one of this door's own. */
+func VerifyHandler(storeSource store2fa.StoreSource, replayGuard melodysecuritycontract.NonceGuard) melodyhttpcontract.Handler {
+    if nil == replayGuard {
+        replayGuard = melodysecurity.NewMemoryNonceGuard()
+    }
 
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         user, authenticated := enrolledIdentifier(runtimeInstance)

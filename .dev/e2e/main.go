@@ -357,14 +357,16 @@ func pushFailureCleanup(cleanup func()) func() {
 }
 
 func runFailureCleanup() {
-    for index := len(failureCleanupList) - 1; 0 <= index; index-- {
-        cleanup := failureCleanupList[index]
+    /* the list is detached before it runs: a teardown step that fails itself reaches fail, which would otherwise run the same list again from the top, the failing step included */
+    cleanupList := failureCleanupList
+    failureCleanupList = nil
+
+    for index := len(cleanupList) - 1; 0 <= index; index-- {
+        cleanup := cleanupList[index]
         if nil == cleanup {
             continue
         }
 
         cleanup()
     }
-
-    failureCleanupList = nil
 }

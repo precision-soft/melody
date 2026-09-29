@@ -33,6 +33,9 @@ import (
     melodysecurity "github.com/precision-soft/melody/v3/security"
     melodysecuritycontract "github.com/precision-soft/melody/v3/security/contract"
     melodysession "github.com/precision-soft/melody/v3/session"
+    melodyhttpmiddleware "github.com/precision-soft/melody/v3/http/middleware"
+    melodysessioncontract "github.com/precision-soft/melody/v3/session/contract"
+    "github.com/precision-soft/melody/v3/security/totp"
 )
 
 /* the cause the login door can really reach names internals: a repository error carries the schema, the table and the database address, and the endpoint is unauthenticated */
@@ -118,7 +121,7 @@ func loginResponseBody(t *testing.T, runtimeInstance melodyruntimecontract.Runti
         melodyhttp.NewRequestContext("login-test", time.Now()),
     )
 
-    response, handlerErr := LoginHandler()(runtimeInstance, httptest.NewRecorder(), request)
+    response, handlerErr := LoginHandler(passwordOnlyLogin())(runtimeInstance, httptest.NewRecorder(), request)
     if nil != handlerErr {
         t.Fatalf("login handler: %v", handlerErr)
     }
@@ -287,7 +290,7 @@ func TestLoginHandler_ReadsTheFormCredentialsFromTheBodyNotTheQuery(t *testing.T
 
         request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("login-form-test", time.Now()))
 
-        response, handlerErr := LoginHandler()(runtimeInstance, httptest.NewRecorder(), request)
+        response, handlerErr := LoginHandler(passwordOnlyLogin())(runtimeInstance, httptest.NewRecorder(), request)
         if nil != handlerErr {
             t.Fatalf("login handler: %v", handlerErr)
         }
@@ -399,7 +402,7 @@ func TestLoginHandler_RaisesTheLoginFailureOnRefusedCredentials(t *testing.T) {
 
     request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("login-failure-test", time.Now()))
 
-    response, handlerErr := LoginHandler()(runtimeInstance, httptest.NewRecorder(), request)
+    response, handlerErr := LoginHandler(passwordOnlyLogin())(runtimeInstance, httptest.NewRecorder(), request)
     if nil != handlerErr {
         t.Fatalf("login handler: %v", handlerErr)
     }
@@ -555,10 +558,360 @@ func postLoginCredentials(t *testing.T, runtimeInstance melodyruntimecontract.Ru
 
     request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("login-dispatch-test", time.Now()))
 
-    response, handlerErr := LoginHandler()(runtimeInstance, httptest.NewRecorder(), request)
+    response, handlerErr := LoginHandler(passwordOnlyLogin())(runtimeInstance, httptest.NewRecorder(), request)
     if nil != handlerErr {
         t.Fatalf("login handler: %v", handlerErr)
     }
 
     return response
+}
+
+/* passwordOnlyLogin is the sign-in chain of an application with no second factor wired: the password alone, checked through the user service of the request's container. */
+func passwordOnlyLogin() LoginAuthenticator {
+    return security.NewLoginAuthentication(
+        melodysecurity.NewAuthenticatorManager(security.NewPasswordAuthenticator(checkPasswordThroughUserService)),
+        nil,
+    )
+}
+
+func checkPasswordThroughUserService(runtimeInstance melodyruntimecontract.Runtime, username string, password string) (*entity.User, bool, error) {
+    return service.MustGetUserService(runtimeInstance.Container()).AuthenticateByUsernameAndPassword(runtimeInstance.Context(), username, password)
+}
+
+const (
+    secondFactorTestSecret       = "JBSWY3DPEHPK3PXP"
+    secondFactorTestRecoveryCode = "recovery-code-one"
+    secondFactorTestAllowance    = 3
+)
+
+/* enrollmentDouble holds the one enrollment the second-factor pins sign in against, and redeems each recovery code once. */
+type enrollmentDouble struct {
+    enrolled      map[string]string
+    recoveryCodes map[string][]string
+}
+
+func (instance *enrollmentDouble) FindTotpSecret(runtimeInstance melodyruntimecontract.Runtime, userIdentifier string) (string, bool, error) {
+    secret, enrolled := instance.enrolled[userIdentifier]
+
+    return secret, enrolled, nil
+}
+
+func (instance *enrollmentDouble) RedeemRecoveryCode(runtimeInstance melodyruntimecontract.Runtime, userIdentifier string, code string) (bool, error) {
+    remaining := make([]string, 0, len(instance.recoveryCodes[userIdentifier]))
+    redeemed := false
+
+    for _, candidate := range instance.recoveryCodes[userIdentifier] {
+        if candidate == code && false == redeemed {
+            redeemed = true
+
+            continue
+        }
+
+        remaining = append(remaining, candidate)
+    }
+
+    instance.recoveryCodes[userIdentifier] = remaining
+
+    return redeemed, nil
+}
+
+/* secondFactorLogin is the sign-in as the application wires it with a database: the password, the per-account budget in front of the second factor, and the framework's TOTP authenticator over the enrollments, on a frozen clock. The editor is enrolled; the user is not. */
+type secondFactorLogin struct {
+    runtimeInstance melodyruntimecontract.Runtime
+    authentication  LoginAuthenticator
+    failureList     *[]error
+    clock           *melodyclock.FrozenClock
+    sessionManager  melodysessioncontract.Manager
+}
+
+func newSecondFactorLogin(t *testing.T) *secondFactorLogin {
+    t.Helper()
+
+    editorHash, editorHashErr := security.HashPassword("editor")
+    if nil != editorHashErr {
+        t.Fatalf("hash password: %v", editorHashErr)
+    }
+
+    userHash, userHashErr := security.HashPassword("user")
+    if nil != userHashErr {
+        t.Fatalf("hash password: %v", userHashErr)
+    }
+
+    containerInstance := melodycontainer.NewContainer()
+    failureList := registerLoginFailureRecorder(t, containerInstance, nil, nil)
+
+    accounts := &accountDirectory{
+        accountList: []*entity.User{
+            {Id: "user-2", Username: "editor", Password: editorHash, Roles: []string{"ROLE_EDITOR"}},
+            {Id: "user-1", Username: "user", Password: userHash, Roles: []string{"ROLE_USER"}},
+        },
+    }
+
+    registerErr := melodycontainer.Register[*service.UserService](
+        containerInstance,
+        service.ServiceUserService,
+        func(resolver melodycontainercontract.Resolver) (*service.UserService, error) {
+            return service.NewUserService(accounts, nil, nil), nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("register user service: %v", registerErr)
+    }
+
+    sessionManager := melodysession.NewManager(melodysession.NewInMemoryStorage(), time.Hour)
+    registerSessionErr := melodycontainer.Register[melodysessioncontract.Manager](
+        containerInstance,
+        melodysession.ServiceSessionManager,
+        func(resolver melodycontainercontract.Resolver) (melodysessioncontract.Manager, error) {
+            return sessionManager, nil
+        },
+    )
+    if nil != registerSessionErr {
+        t.Fatalf("register session manager: %v", registerSessionErr)
+    }
+
+    registerUrlGeneratorErr := melodycontainer.Register[melodyhttpcontract.UrlGenerator](
+        containerInstance,
+        melodyhttp.ServiceUrlGenerator,
+        func(resolver melodycontainercontract.Resolver) (melodyhttpcontract.UrlGenerator, error) {
+            return melodyhttp.NewUrlGenerator(melodyhttp.NewRouter().RouteRegistry()), nil
+        },
+    )
+    if nil != registerUrlGeneratorErr {
+        t.Fatalf("register url generator: %v", registerUrlGeneratorErr)
+    }
+
+    clockInstance := melodyclock.NewFrozenClock(time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC))
+
+    password := security.NewPasswordAuthenticator(checkPasswordThroughUserService)
+    budget := security.NewSecondFactorBudget(
+        password,
+        melodyhttpmiddleware.NewSlidingWindowLimiterWithClock(clockInstance, secondFactorTestAllowance, 15*time.Minute),
+        melodysecurity.DefaultTotpCodeHeaderName,
+        melodysecurity.DefaultTotpRecoveryHeaderName,
+    )
+
+    secondFactor := melodysecurity.NewTotpSecondFactorAuthenticator(
+        melodysecurity.TotpSecondFactorAuthenticatorConfig{
+            Primary: budget,
+            Enrollments: &enrollmentDouble{
+                enrolled:      map[string]string{"user-2": secondFactorTestSecret},
+                recoveryCodes: map[string][]string{"user-2": {secondFactorTestRecoveryCode}},
+            },
+            ReplayGuard: melodysecurity.NewMemoryNonceGuardWithClock(clockInstance),
+            Clock:       clockInstance,
+        },
+    )
+
+    return &secondFactorLogin{
+        runtimeInstance: melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance),
+        authentication:  security.NewLoginAuthentication(melodysecurity.NewAuthenticatorManager(secondFactor), budget),
+        failureList:     failureList,
+        clock:           clockInstance,
+        sessionManager:  sessionManager,
+    }
+}
+
+/* post signs in with the credentials and the second-factor headers given, on a request carrying a fresh session, and answers the response with the session the request carries afterwards. */
+func (instance *secondFactorLogin) post(t *testing.T, username string, password string, headerList map[string]string) (melodyhttpcontract.Response, melodysessioncontract.Session) {
+    t.Helper()
+
+    httpRequest := httptest.NewRequest(nethttp.MethodPost, "/login", bytes.NewBufferString("username="+username+"&password="+password))
+    httpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+    for name, value := range headerList {
+        httpRequest.Header.Set(name, value)
+    }
+
+    request := melodyhttp.NewRequest(httpRequest, nil, instance.runtimeInstance, melodyhttp.NewRequestContext("login-second-factor-test", time.Now()))
+    request.Attributes().Set(melodyhttp.RequestAttributeSession, instance.sessionManager.NewSession())
+
+    response, handlerErr := LoginHandler(instance.authentication)(instance.runtimeInstance, httptest.NewRecorder(), request)
+    if nil != handlerErr {
+        t.Fatalf("login handler: %v", handlerErr)
+    }
+
+    if true == request.Attributes().Has(security.RequestAttributeLoginPassword) {
+        t.Fatal("expected the password to leave the request once the authenticators read it")
+    }
+
+    return response, getSessionFromRequest(request)
+}
+
+func (instance *secondFactorLogin) currentCode(t *testing.T) string {
+    t.Helper()
+
+    code, codeErr := totp.GenerateCodeAt(secondFactorTestSecret, instance.clock.Now(), totp.Config{})
+    if nil != codeErr {
+        t.Fatalf("generate code: %v", codeErr)
+    }
+
+    return code
+}
+
+/* requireLoginAnswer reads the body once and requires the status and every fragment in it. */
+func requireLoginAnswer(t *testing.T, response melodyhttpcontract.Response, statusCode int, fragmentList ...string) {
+    t.Helper()
+
+    body, readErr := io.ReadAll(response.BodyReader())
+    if nil != readErr {
+        t.Fatalf("read response body: %v", readErr)
+    }
+
+    if statusCode != response.StatusCode() {
+        t.Fatalf("expected %d, got %d %s", statusCode, response.StatusCode(), body)
+    }
+
+    for _, fragment := range fragmentList {
+        if false == strings.Contains(string(body), fragment) {
+            t.Fatalf("expected the %d answer to carry %q, got %s", statusCode, fragment, body)
+        }
+    }
+}
+
+/* an accepted password of an enrolled account, with no code, is the challenge: 401 naming the factor, and no login failure, since nothing is refused */
+func TestLoginHandler_AnswersTheChallengeWithoutAFailureForAnEnrolledAccountWithoutACode(t *testing.T) {
+    login := newSecondFactorLogin(t)
+
+    response, _ := login.post(t, "editor", "editor", nil)
+
+    requireLoginAnswer(t, response, nethttp.StatusUnauthorized, `"factor":"totp"`, "second factor required")
+
+    if 0 != len(*login.failureList) {
+        t.Fatalf("expected no login failure for an outstanding second factor, got %d", len(*login.failureList))
+    }
+}
+
+/* a wrong code is a refused sign-in: the same 401 a refused password answers, and one login failure */
+func TestLoginHandler_RefusesAWrongCodeAsAFailedSignIn(t *testing.T) {
+    login := newSecondFactorLogin(t)
+
+    wrongCode := "000000"
+    if wrongCode == login.currentCode(t) {
+        wrongCode = "111111"
+    }
+
+    response, _ := login.post(t, "editor", "editor", map[string]string{melodysecurity.DefaultTotpCodeHeaderName: wrongCode})
+
+    requireLoginAnswer(t, response, nethttp.StatusUnauthorized, "invalid credentials")
+
+    if 1 != len(*login.failureList) {
+        t.Fatalf("expected one login failure for a refused code, got %d", len(*login.failureList))
+    }
+}
+
+/* the right code signs the enrolled account in under its own identity; the same code presented again is a replay and is refused */
+func TestLoginHandler_SignsInWithTheRightCodeOnceAndRefusesItsReplay(t *testing.T) {
+    login := newSecondFactorLogin(t)
+    code := login.currentCode(t)
+
+    response, sessionInstance := login.post(t, "editor", "editor", map[string]string{melodysecurity.DefaultTotpCodeHeaderName: code})
+
+    requireLoginAnswer(t, response, nethttp.StatusOK, "redirectUrl")
+
+    if "user-2" != sessionInstance.String(security.SessionKeySecurityUserId) {
+        t.Fatalf("expected the session to name user-2, got %q", sessionInstance.String(security.SessionKeySecurityUserId))
+    }
+
+    replay, _ := login.post(t, "editor", "editor", map[string]string{melodysecurity.DefaultTotpCodeHeaderName: code})
+
+    requireLoginAnswer(t, replay, nethttp.StatusUnauthorized, "invalid credentials")
+
+    if 1 != len(*login.failureList) {
+        t.Fatalf("expected one login failure, for the replay alone, got %d", len(*login.failureList))
+    }
+}
+
+/* a recovery code signs the enrolled account in once; spent, it is refused */
+func TestLoginHandler_SignsInWithARecoveryCodeOnce(t *testing.T) {
+    login := newSecondFactorLogin(t)
+    recoveryHeader := map[string]string{melodysecurity.DefaultTotpRecoveryHeaderName: secondFactorTestRecoveryCode}
+
+    first, _ := login.post(t, "editor", "editor", recoveryHeader)
+    requireLoginAnswer(t, first, nethttp.StatusOK, "redirectUrl")
+
+    second, _ := login.post(t, "editor", "editor", recoveryHeader)
+    requireLoginAnswer(t, second, nethttp.StatusUnauthorized, "invalid credentials")
+}
+
+/* an account with no enrollment signs in on its password alone, as before the second factor was wired */
+func TestLoginHandler_SignsInAnAccountWithoutEnrollmentOnItsPassword(t *testing.T) {
+    login := newSecondFactorLogin(t)
+
+    response, sessionInstance := login.post(t, "user", "user", nil)
+
+    requireLoginAnswer(t, response, nethttp.StatusOK, "redirectUrl")
+
+    if "user-1" != sessionInstance.String(security.SessionKeySecurityUserId) {
+        t.Fatalf("expected the session to name user-1, got %q", sessionInstance.String(security.SessionKeySecurityUserId))
+    }
+}
+
+/* once an account has presented its budget of codes, even the right code is refused 429 before it is read; a caller without the password spends nothing of it, and a right code gives the budget back */
+func TestLoginHandler_RefusesTheRightCodeOnceTheAccountSpentItsBudget(t *testing.T) {
+    login := newSecondFactorLogin(t)
+
+    wrongCode := "000000"
+    if wrongCode == login.currentCode(t) {
+        wrongCode = "111111"
+    }
+
+    for attempt := 0; attempt < secondFactorTestAllowance+2; attempt++ {
+        refused, _ := login.post(t, "editor", "wrong-password", map[string]string{melodysecurity.DefaultTotpCodeHeaderName: wrongCode})
+        requireLoginAnswer(t, refused, nethttp.StatusUnauthorized, "invalid credentials")
+    }
+
+    for attempt := 0; attempt < secondFactorTestAllowance; attempt++ {
+        refused, _ := login.post(t, "editor", "editor", map[string]string{melodysecurity.DefaultTotpCodeHeaderName: wrongCode})
+        requireLoginAnswer(t, refused, nethttp.StatusUnauthorized, "invalid credentials")
+    }
+
+    spent, _ := login.post(t, "editor", "editor", map[string]string{melodysecurity.DefaultTotpCodeHeaderName: login.currentCode(t)})
+    requireLoginAnswer(t, spent, nethttp.StatusTooManyRequests, "too many attempts")
+
+    challenge, _ := login.post(t, "editor", "editor", nil)
+    requireLoginAnswer(t, challenge, nethttp.StatusUnauthorized, "second factor required")
+}
+
+/* a right code gives the account its budget back, so the codes mistyped before it do not count against the next sign-in */
+func TestLoginHandler_GivesTheBudgetBackOnAnAcceptedCode(t *testing.T) {
+    login := newSecondFactorLogin(t)
+
+    wrongCode := "000000"
+    if wrongCode == login.currentCode(t) {
+        wrongCode = "111111"
+    }
+
+    for attempt := 0; attempt < secondFactorTestAllowance-1; attempt++ {
+        refused, _ := login.post(t, "editor", "editor", map[string]string{melodysecurity.DefaultTotpCodeHeaderName: wrongCode})
+        requireLoginAnswer(t, refused, nethttp.StatusUnauthorized, "invalid credentials")
+    }
+
+    accepted, _ := login.post(t, "editor", "editor", map[string]string{melodysecurity.DefaultTotpCodeHeaderName: login.currentCode(t)})
+    requireLoginAnswer(t, accepted, nethttp.StatusOK, "redirectUrl")
+
+    for attempt := 0; attempt < secondFactorTestAllowance-1; attempt++ {
+        refused, _ := login.post(t, "editor", "editor", map[string]string{melodysecurity.DefaultTotpCodeHeaderName: wrongCode})
+        requireLoginAnswer(t, refused, nethttp.StatusUnauthorized, "invalid credentials")
+    }
+
+    login.clock.Advance(30 * time.Second)
+
+    again, _ := login.post(t, "editor", "editor", map[string]string{melodysecurity.DefaultTotpCodeHeaderName: login.currentCode(t)})
+    requireLoginAnswer(t, again, nethttp.StatusOK, "redirectUrl")
+}
+
+/* accountDirectory answers the accounts it holds by username. */
+type accountDirectory struct {
+    repository.UserRepository
+    accountList []*entity.User
+}
+
+func (instance *accountDirectory) FindByUsername(ctx context.Context, username string) (*entity.User, bool, error) {
+    for _, account := range instance.accountList {
+        if username == account.Username {
+            return account, true, nil
+        }
+    }
+
+    return nil, false, nil
 }

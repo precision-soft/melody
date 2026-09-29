@@ -10,7 +10,6 @@ import (
     "github.com/precision-soft/melody/v3/.example/presenter"
     "github.com/precision-soft/melody/v3/.example/route"
     "github.com/precision-soft/melody/v3/.example/security"
-    "github.com/precision-soft/melody/v3/.example/service"
     melodyevent "github.com/precision-soft/melody/v3/event"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
@@ -26,7 +25,12 @@ func LoginPageHandler() melodyhttpcontract.Handler {
     }
 }
 
-func LoginHandler() melodyhttpcontract.Handler {
+/* LoginAuthenticator is the chain the sign-in door authenticates through: security.LoginAuthentication, the password and, where it is wired, the second factor in front of the session. */
+type LoginAuthenticator interface {
+    Authenticate(request melodyhttpcontract.Request) (melodysecuritycontract.Token, error)
+}
+
+func LoginHandler(authentication LoginAuthenticator) melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         type adminLoginRequest struct {
             Username string `json:"username"`
@@ -61,19 +65,30 @@ func LoginHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "invalid credentials input"), nil
         }
 
-        userService := service.MustGetUserService(runtimeInstance.Container())
+        /* the door keeps owning the body: the authenticators read the credentials it parsed, and the password leaves the request as soon as they have */
+        request.Attributes().Set(security.RequestAttributeLoginUsername, username)
+        request.Attributes().Set(security.RequestAttributeLoginPassword, password)
 
-        user, authenticated, authenticationErr := userService.AuthenticateByUsernameAndPassword(
-            runtimeInstance.Context(),
-            username,
-            password,
-        )
+        token, authenticationErr := authentication.Authenticate(request)
+
+        request.Attributes().Remove(security.RequestAttributeLoginPassword)
+
+        if true == errors.Is(authenticationErr, security.ErrSecondFactorBudgetSpent) {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusTooManyRequests, "too many attempts"), nil
+        }
+
         if nil != authenticationErr {
             /* the cause names internals and this door is unauthenticated, so it stays out of the errors list; ApiErrorWithErr journals it and keeps it in the debug-gated context */
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "authentication failed", authenticationErr), nil
         }
 
-        if false == authenticated {
+        if nil == token || false == token.IsAuthenticated() {
+            /* an accepted password whose second factor was never presented is not a failed sign-in, the framework's own sentence for TwoFactorRejection: it is answered with the challenge and announced to nobody */
+            if nil != token && true == security.SecondFactorOutstanding(token) {
+                return presenter.ApiErrorWithPayload(runtimeInstance, request, nethttp.StatusUnauthorized, map[string]any{"factor": "totp"}, "second factor required"), nil
+            }
+
+            /* a refused password and a refused second factor answer alike, so the refusal tells a guesser nothing the challenge did not */
             if dispatchErr := dispatchLoginFailure(runtimeInstance, request); nil != dispatchErr {
                 /* the refusal keeps its status, as the framework's token source keeps it, and the dispatch failure is journaled here under the token source's message: ApiErrorWithErr journals a server-class status only, so a 401 would carry the cause nowhere outside the debug context */
                 presenter.JournalRefusalCause(runtimeInstance, request, nethttp.StatusUnauthorized, "invalid credentials", "security login failure event dispatch failed", dispatchErr)
@@ -82,6 +97,11 @@ func LoginHandler() melodyhttpcontract.Handler {
             }
 
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusUnauthorized, "invalid credentials"), nil
+        }
+
+        user, accountKnown := security.LoginAccount(request)
+        if false == accountKnown || token.UserIdentifier() != user.Id {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "authentication failed"), nil
         }
 
         sessionInstance := getSessionFromRequest(request)

@@ -12,6 +12,10 @@ import (
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
     melodysession "github.com/precision-soft/melody/v3/session"
     melodysessioncontract "github.com/precision-soft/melody/v3/session/contract"
+    melodyclock "github.com/precision-soft/melody/v3/clock"
+    melodyhttpmiddleware "github.com/precision-soft/melody/v3/http/middleware"
+    melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
+    melodysecurity "github.com/precision-soft/melody/v3/security"
 )
 
 /* The shared test material of the package lives here, and only here: this is the one test file the layout rule exempts from having a source of its own. */
@@ -68,4 +72,47 @@ func refusingAccountLookup(request melodyhttpcontract.Request, userId string) (*
 /* withCurrentCredential writes the credential version of testPasswordHash, so a test that drives an earlier guard is not also refused for a missing version */
 func withCurrentCredential(sessionInstance melodysessioncontract.Session) {
     sessionInstance.Set(SessionKeySecurityCredentialVersion, SessionCredentialVersion(testPasswordHash))
+}
+
+/* passwordRequest is a request carrying the credentials the sign-in door sets; an empty one is left unset. */
+func passwordRequest(t *testing.T, username string, password string) melodyhttpcontract.Request {
+    t.Helper()
+
+    request := plainRequest(t)
+    if "" != username {
+        request.Attributes().Set(RequestAttributeLoginUsername, username)
+    }
+    if "" != password {
+        request.Attributes().Set(RequestAttributeLoginPassword, password)
+    }
+
+    return request
+}
+
+const budgetTestAllowance = 2
+
+/* budgetOverPassword is the budget over a password check that accepts "secret" for the editor and refuses anything else. */
+func budgetOverPassword() *SecondFactorBudget {
+    password := NewPasswordAuthenticator(func(runtimeInstance melodyruntimecontract.Runtime, username string, password string) (*entity.User, bool, error) {
+        if "secret" != password {
+            return nil, false, nil
+        }
+
+        return entity.NewUser("user-"+username, username, testPasswordHash, []string{"ROLE_EDITOR"}), true, nil
+    })
+
+    limiter := melodyhttpmiddleware.NewSlidingWindowLimiterWithClock(melodyclock.NewFrozenClock(time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)), budgetTestAllowance, time.Minute)
+
+    return NewSecondFactorBudget(password, limiter, melodysecurity.DefaultTotpCodeHeaderName, melodysecurity.DefaultTotpRecoveryHeaderName)
+}
+
+func budgetRequestWithHeader(t *testing.T, password string, headerName string) melodyhttpcontract.Request {
+    t.Helper()
+
+    request := passwordRequest(t, "editor", password)
+    if "" != headerName {
+        request.HttpRequest().Header.Set(headerName, "123456")
+    }
+
+    return request
 }
