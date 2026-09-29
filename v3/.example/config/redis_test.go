@@ -5,6 +5,8 @@ import (
     "testing"
     "time"
 
+    melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
+    melodyrueidiscache "github.com/precision-soft/melody/integrations/rueidis/v3/cache"
     examplecache "github.com/precision-soft/melody/v3/.example/cache"
 )
 
@@ -27,5 +29,21 @@ func TestCacheKeyPrefix_CarriesTheLayoutTokenInsideTheNamespace(t *testing.T) {
 func TestCatalogWriteThrottle_AllowsThirtyWritesAMinute(t *testing.T) {
     if 30 != catalogWriteAllowance || time.Minute != catalogWriteWindow {
         t.Fatalf("expected thirty writes a minute, got %d per %s", catalogWriteAllowance, catalogWriteWindow)
+    }
+}
+
+func TestRedisInfrastructure_ProvidesTheTokenStoreAndTheCacheModules(t *testing.T) {
+    modules := newRedisInfrastructure(nil, nil).Modules()
+
+    if 2 != len(modules) {
+        t.Fatalf("expected the token store and the cache modules, got %d modules", len(modules))
+    }
+
+    if _, isTokenStore := modules[0].(*melodyrueidis.Module); false == isTokenStore {
+        t.Fatalf("expected the rueidis module first, got %T", modules[0])
+    }
+
+    if _, isCache := modules[1].(*melodyrueidiscache.Module); false == isCache {
+        t.Fatalf("expected the rueidis cache module second, got %T", modules[1])
     }
 }

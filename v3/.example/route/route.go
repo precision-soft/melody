@@ -46,20 +46,32 @@ const (
 
     CurrenciesPrefix = "/currencies"
 
-    CurrenciesApiReadAllName    = "example.currencies.api.read.all"
-    CurrenciesApiReadAllPattern = CurrenciesPrefix + "/api/read/"
+    /* the currency api doors are registered through one route group, which joins its prefix onto the relative patterns and its name prefix onto the relative names; the full patterns and names the access control and the route manifest read are spelled from the same parts */
+    CurrenciesApiGroupPrefix     = CurrenciesPrefix + "/api"
+    CurrenciesApiGroupNamePrefix = "example.currencies.api."
 
-    CurrenciesApiCreatePrefix  = CurrenciesPrefix + "/api/create"
-    CurrenciesApiCreateName    = "example.currencies.api.create"
-    CurrenciesApiCreatePattern = CurrenciesApiCreatePrefix + "/"
+    CurrenciesApiReadAllRelativeName    = "read.all"
+    CurrenciesApiReadAllRelativePattern = "/read/"
+    CurrenciesApiReadAllName            = CurrenciesApiGroupNamePrefix + CurrenciesApiReadAllRelativeName
+    CurrenciesApiReadAllPattern         = CurrenciesApiGroupPrefix + CurrenciesApiReadAllRelativePattern
 
-    CurrenciesApiUpdatePrefix  = CurrenciesPrefix + "/api/update"
-    CurrenciesApiUpdateName    = "example.currencies.api.update"
-    CurrenciesApiUpdatePattern = CurrenciesApiUpdatePrefix + "/:id/"
+    CurrenciesApiCreateRelativeName    = "create"
+    CurrenciesApiCreateRelativePattern = "/create/"
+    CurrenciesApiCreatePrefix          = CurrenciesApiGroupPrefix + "/create"
+    CurrenciesApiCreateName            = CurrenciesApiGroupNamePrefix + CurrenciesApiCreateRelativeName
+    CurrenciesApiCreatePattern         = CurrenciesApiGroupPrefix + CurrenciesApiCreateRelativePattern
 
-    CurrenciesApiDeletePrefix  = CurrenciesPrefix + "/api/delete"
-    CurrenciesApiDeleteName    = "example.currencies.api.delete"
-    CurrenciesApiDeletePattern = CurrenciesApiDeletePrefix + "/:id/"
+    CurrenciesApiUpdateRelativeName    = "update"
+    CurrenciesApiUpdateRelativePattern = "/update/:id/"
+    CurrenciesApiUpdatePrefix          = CurrenciesApiGroupPrefix + "/update"
+    CurrenciesApiUpdateName            = CurrenciesApiGroupNamePrefix + CurrenciesApiUpdateRelativeName
+    CurrenciesApiUpdatePattern         = CurrenciesApiGroupPrefix + CurrenciesApiUpdateRelativePattern
+
+    CurrenciesApiDeleteRelativeName    = "delete"
+    CurrenciesApiDeleteRelativePattern = "/delete/:id/"
+    CurrenciesApiDeletePrefix          = CurrenciesApiGroupPrefix + "/delete"
+    CurrenciesApiDeleteName            = CurrenciesApiGroupNamePrefix + CurrenciesApiDeleteRelativeName
+    CurrenciesApiDeletePattern         = CurrenciesApiGroupPrefix + CurrenciesApiDeleteRelativePattern
 
     UsersPrefix = "/users"
 
@@ -100,7 +112,8 @@ const (
     I18nPrefix = "/i18n"
 
     I18nGreetingName    = "example.i18n.greeting"
-    I18nGreetingPattern = I18nPrefix + "/greeting/"
+    /* the locale is the path's first segment, which the router validates against I18nGreetingLocaleList: a locale the list does not name matches no route */
+    I18nGreetingPattern = "/:_locale" + I18nPrefix + "/greeting/"
 
     EventsPrefix = "/events"
 
@@ -134,3 +147,8 @@ const (
     DeviceIdentityName    = "example.device.identity"
     DeviceIdentityPattern = DevicePrefix + "/identity/"
 )
+
+/* I18nGreetingLocaleList names the locales the greeting is served in: the two catalogues and the Romanian of Romania, which the translator answers from the ro catalogue */
+func I18nGreetingLocaleList() []string {
+    return []string{"en", "ro", "ro-RO"}
+}

@@ -12,6 +12,7 @@ import (
     melodyconfigcontract "github.com/precision-soft/melody/v3/config/contract"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodyexception "github.com/precision-soft/melody/v3/exception"
+    melodyexceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
     examplejournal "github.com/precision-soft/melody/v3/.example/journal"
@@ -107,6 +108,42 @@ func journalServerError(
         return
     }
 
+    logContext := refusalLogContext(request, statusCode, publicMessage, causeErr)
+
+    /* a client that left mid-request is not a server failure: the kernel files a returned context.Canceled as "request cancelled by client" at warning, and a 500 answered for the same cause is filed the same way */
+    if true == errors.Is(causeErr, context.Canceled) && true == requestContextIsDone(request) {
+        examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Warning("handler answered a server error to a client that left", logContext)
+    } else {
+        examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Error("handler answered a server error", logContext)
+    }
+
+    _ = melodyexception.MarkLogged(causeErr)
+}
+
+/* JournalRefusalCause writes the record a refusal below 500 leaves when a step of the server failed behind it: the client keeps the status it earned, and the failure is journaled at error under journalMessage with the route and the cause, marked logged. */
+func JournalRefusalCause(
+    runtimeInstance melodyruntimecontract.Runtime,
+    request melodyhttpcontract.Request,
+    statusCode int,
+    publicMessage string,
+    journalMessage string,
+    causeErr error,
+) {
+    if nil == causeErr || nil == runtimeInstance {
+        return
+    }
+
+    examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Error(journalMessage, refusalLogContext(request, statusCode, publicMessage, causeErr))
+
+    _ = melodyexception.MarkLogged(causeErr)
+}
+
+func refusalLogContext(
+    request melodyhttpcontract.Request,
+    statusCode int,
+    publicMessage string,
+    causeErr error,
+) melodyexceptioncontract.Context {
     logContext := melodyexception.LogContext(causeErr, map[string]any{
         "statusCode":    statusCode,
         "publicMessage": publicMessage,
@@ -117,14 +154,7 @@ func journalServerError(
         logContext["path"] = melodyhttp.RequestPathAsRouted(request.HttpRequest().URL.EscapedPath())
     }
 
-    /* a client that left mid-request is not a server failure: the kernel files a returned context.Canceled as "request cancelled by client" at warning, and a 500 answered for the same cause is filed the same way */
-    if true == errors.Is(causeErr, context.Canceled) && true == requestContextIsDone(request) {
-        examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Warning("handler answered a server error to a client that left", logContext)
-    } else {
-        examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Error("handler answered a server error", logContext)
-    }
-
-    _ = melodyexception.MarkLogged(causeErr)
+    return logContext
 }
 
 /* requestContextIsDone answers whether the request's own context has ended, telling a client that left from a context.Canceled raised by something else. */
@@ -265,13 +295,13 @@ func buildApiResponse(
         }
 
         if nil == err && nil != serializerInstance {
-            return serializeWith(statusCode, payload, serializerInstance)
+            return renderEnvelopeWith(statusCode, payload, serializerInstance)
         }
     }
 
     serializerInstance := melodyserializer.SerializerFromRuntime(runtimeInstance)
     if nil != serializerInstance {
-        return serializeWith(statusCode, payload, serializerInstance)
+        return renderEnvelopeWith(statusCode, payload, serializerInstance)
     }
 
     return fallbackJsonResponse(statusCode, payload)

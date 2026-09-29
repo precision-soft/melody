@@ -1,10 +1,13 @@
 package config
 
 import (
+    "path/filepath"
+
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
     "github.com/precision-soft/melody/v3/.example/cache"
     "github.com/precision-soft/melody/v3/.example/generated"
     "github.com/precision-soft/melody/v3/.example/persistence"
+    "github.com/precision-soft/melody/v3/.example/repository"
     "github.com/precision-soft/melody/v3/.example/subscriber"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     melodycache "github.com/precision-soft/melody/v3/cache"
@@ -19,6 +22,8 @@ import (
     melodymessagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
     melodyopenapi "github.com/precision-soft/melody/v3/openapi"
     melodysecuritycontract "github.com/precision-soft/melody/v3/security/contract"
+    melodysession "github.com/precision-soft/melody/v3/session"
+    melodysessioncontract "github.com/precision-soft/melody/v3/session/contract"
     melodytranslation "github.com/precision-soft/melody/v3/translation"
     melodytranslationcontract "github.com/precision-soft/melody/v3/translation/contract"
     bun "github.com/uptrace/bun"
@@ -32,6 +37,7 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
 
     instance.registerCatalogStorageService(registrar)
     instance.registerArchiveStorageService(registrar)
+    repository.RegisterSeeders(registrar)
 
     /* the two outbound clients, each env-gated on the endpoint it points at: an application configured
        with neither registers no client and opens no pool */
@@ -39,6 +45,8 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
     instance.registerReportExportHttpClientService(registrar)
 
     instance.registerServerSentEventHubService(registrar)
+
+    instance.registerSessionStorage(registrar)
 
     if nil == instance.redisClient {
         opaqueTokenStore := instance.opaqueTokenStore
@@ -111,6 +119,12 @@ var _ melodyapplicationcontract.ServiceModule = (*Module)(nil)
 func (instance *Module) registerServerSentEventHubService(registrar melodyapplicationcontract.ServiceRegistrar) {
     serverSentEventHub := instance.serverSentEventHub
 
+    /* the redis backplane was installed on the hub before any container existed, a capture no resolution records: without the edge the teardown could close the connection before the hub drains the backplane's subscription. It is declared only when redis is wired, since the armed parallel teardown refuses an edge to a service never registered */
+    registerOptionList := []melodycontainercontract.RegisterOption{}
+    if nil != instance.redisClient {
+        registerOptionList = append(registerOptionList, melodycontainer.WithTeardownDependency(melodyrueidis.ServiceConnection))
+    }
+
     registrar.RegisterService(
         subscriber.ServiceCatalogNotificationHub,
         func(resolver melodycontainercontract.Resolver) (*melodyhttp.ServerSentEventHub, error) {
@@ -124,6 +138,7 @@ func (instance *Module) registerServerSentEventHubService(registrar melodyapplic
 
             return serverSentEventHub, nil
         },
+        registerOptionList...,
     )
 }
 
@@ -145,6 +160,34 @@ func (instance *Module) registerMessageBusServices(registrar melodyapplicationco
         /* the dispatch bus already claims the contract.Bus type; the consume bus is resolved by name only, so it must not also register under the shared type. */
         melodycontainer.WithoutTypeRegistration(),
     )
+}
+
+/* registerSessionStorage swaps the framework's in-memory default for the file-backed storage when the environment names a file, so a signed-in session survives a restart — the development supervisor restarts the example on every saved change — and the storage drops a session once MELODY_HTTP_SESSION_TTL has passed without a request. An empty value keeps the in-memory default. */
+func (instance *Module) registerSessionStorage(registrar melodyapplicationcontract.ServiceRegistrar) {
+    sessionFilePath := resolvedSessionFilePath(instance.environmentValue(environmentKeySessionFile), instance.configuration.Kernel().ProjectDir())
+    if "" == sessionFilePath {
+        return
+    }
+
+    registrar.RegisterService(
+        melodysession.ServiceSessionStorage,
+        func(resolver melodycontainercontract.Resolver) (melodysessioncontract.Storage, error) {
+            return melodysession.NewFileStorageFromPath(sessionFilePath)
+        },
+    )
+}
+
+/* resolvedSessionFilePath keeps the empty value empty — the switch that says "in-memory" — and anchors a relative path to the project directory rather than the working directory, so a console run and the http process read the same file. */
+func resolvedSessionFilePath(sessionFilePath string, projectDirectory string) string {
+    if "" == sessionFilePath {
+        return ""
+    }
+
+    if false == filepath.IsAbs(sessionFilePath) {
+        return filepath.Join(projectDirectory, sessionFilePath)
+    }
+
+    return sessionFilePath
 }
 
 /* registerCatalogStorageService publishes the handle every repository is built on, registered with or without a connection because the generated wiring resolves the repository constructors' arguments by type. The handle is resolved rather than captured, so the container records the edge that teardown reads (storage, handle, registry, journal) and the registry's logger swap runs at the first repository resolution. */

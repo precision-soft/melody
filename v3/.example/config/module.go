@@ -52,12 +52,18 @@ type Module struct {
     metricsMiddleware melodyhttpcontract.Middleware
     metricsHandler    nethttp.Handler
 
+    /* metricsToken is the bearer credential the scraper presents on /metrics; empty leaves the exposition public */
+    metricsToken string
+
+    /* lifecycleDecorator counts every request at the seam around the kernel handler, the short-circuits the metrics middleware never sees included */
+    lifecycleDecorator melodyapplicationcontract.HttpHandlerDecorator
+
     redisClient rueidis.Client
 
     /* redisConnection owns the eagerly opened client; registered through the rueidis module, it is what lets the container teardown close the connection the raw client cannot answer for */
     redisConnection *melodyrueidis.Connection
 
-    /* catalogWriteThrottle is nil when the environment gave the example no redis: there is then no shared counter, and the nomenclature's writes go through unthrottled rather than being refused. */
+    /* catalogWriteThrottle counts in redis when the environment gives the example one, shared by every replica, and in this process otherwise; it is nil only until the routes are registered */
     catalogWriteThrottle melodyhttpcontract.Middleware
 
     storageClient *minio.Client
@@ -96,6 +102,7 @@ func NewExampleModule(ctx context.Context, configuration melodyconfigcontract.Co
     moduleInstance.buildMessageBus()
     moduleInstance.buildTokenAuth()
     moduleInstance.buildInternalAuth()
+    moduleInstance.buildMetricsAuth()
     moduleInstance.buildImpersonation()
     moduleInstance.buildTranslation()
     moduleInstance.buildOpenApi()
@@ -124,6 +131,8 @@ const (
     environmentKeyPgsqlInsecure = "PGSQL_INSECURE"
 
     environmentKeyRedisAddress = "REDIS_ADDRESS"
+    environmentKeySessionFile  = "APP_SESSION_FILE"
+    environmentKeyMetricsToken = "APP_METRICS_TOKEN"
 
     environmentKeyAmqpDsn = "AMQP_DSN"
 

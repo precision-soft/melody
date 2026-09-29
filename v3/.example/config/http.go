@@ -20,6 +20,7 @@ import (
     "github.com/precision-soft/melody/v3/.example/route"
     "github.com/precision-soft/melody/v3/.example/twofactor"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
+    melodyclockcontract "github.com/precision-soft/melody/v3/clock/contract"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
@@ -32,6 +33,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     router := kernelInstance.HttpRouter()
 
     kernelInstance.HttpKernel().SetNotFoundHandler(handler.NotFoundHandler())
+    kernelInstance.HttpKernel().SetForwardedHeadersPolicy(exampleForwardedHeadersPolicy())
 
     /* the health and openapi routes opt into the frontend route manifest (melody:routes:manifest) as working proof of the export: exposed + zoned public, so the TypeScript RouteGenerator can build their URLs by name */
     router.HandleWithOptions(
@@ -61,14 +63,17 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     if nil != instance.redisClient {
         instance.buildCatalogWriteThrottle()
+    } else {
+        instance.buildInProcessCatalogWriteThrottle(kernelInstance.Clock())
     }
 
     router.HandleNamed(route.LoginPageName, "GET", route.LoginPagePattern, handler.LoginPageHandler())
 
     /* login-submit and logout are exposed to the route manifest (window.melodyRoutes) because the frontend resolves their URLs by name — the login form posts to route("example.login.submit") and the nav logs out via route("example.logout"); an unexposed route would make the client throw "unknown route". */
+    /* the sign-in submit spends the same per-address budget as the nomenclature's writes: a password guessed in a loop is refused with 429 once the budget runs out, whichever replica each guess reaches */
     router.HandleWithOptions(
         route.LoginSubmitPattern,
-        handler.LoginHandler(),
+        instance.throttledWrite(handler.LoginHandler()),
         melodyhttp.NewRouteOptions(route.LoginSubmitName, []string{"POST"}, "", nil, nil, nil, nil, 0, melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)),
     )
     router.HandleWithOptions(
@@ -104,7 +109,11 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
         router.HandleNamed("example.storage.get", "GET", "/storage/object", handlerstorage.GetHandler(instance.storage))
     }
 
-    router.HandleNamed(route.I18nGreetingName, "GET", route.I18nGreetingPattern, handleri18n.GreetingHandler())
+    router.HandleWithOptions(
+        route.I18nGreetingPattern,
+        handleri18n.GreetingHandler(),
+        melodyhttp.NewRouteOptions(route.I18nGreetingName, []string{"GET"}, "", nil, nil, nil, route.I18nGreetingLocaleList(), 0, nil),
+    )
 
     router.HandleNamed(route.EventsStreamName, "GET", route.EventsStreamPattern, handlerevent.StreamHandler())
     router.HandleNamed(route.EventsPublishName, "POST", route.EventsPublishPattern, handlerevent.PublishHandler(instance.messageBusDispatch))
@@ -113,10 +122,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     router.HandleWithOptions(route.CategoriesApiReadAllPattern, handlercategory.ApiReadAllHandler(), frontendRoute(route.CategoriesApiReadAllName, "GET"))
     router.HandleWithOptions(route.ReportsApiHistoryPattern, handlerreport.ApiHistoryHandler(), frontendRoute(route.ReportsApiHistoryName, "GET"))
 
-    router.HandleWithOptions(route.CurrenciesApiReadAllPattern, handlercurrency.ApiReadAllHandler(), frontendRoute(route.CurrenciesApiReadAllName, "GET"))
-    router.HandleWithOptions(route.CurrenciesApiCreatePattern, instance.throttledWrite(handlercurrency.ApiCreateHandler()), frontendRoute(route.CurrenciesApiCreateName, "POST"))
-    router.HandleWithOptions(route.CurrenciesApiUpdatePattern, instance.throttledWrite(handlercurrency.ApiUpdateHandler()), frontendRoute(route.CurrenciesApiUpdateName, "PUT"))
-    router.HandleWithOptions(route.CurrenciesApiDeletePattern, instance.throttledWrite(handlercurrency.ApiDeleteHandler()), frontendRoute(route.CurrenciesApiDeleteName, "DELETE"))
+    instance.registerCurrencyApiRoutes(router)
 
     router.HandleWithOptions(route.ProductsListPagePattern, handlerproduct.ListPageHandler(), frontendRoute(route.ProductsListPageName, "GET"))
     router.HandleWithOptions(route.ProductsCreatePagePattern, handlerproduct.CreatePageHandler(), frontendRoute(route.ProductsCreatePageName, "GET"))
@@ -138,6 +144,16 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 }
 
 /* frontendRoute marks a route as exposed in the frontend zone so its URL is generatable by name from the route manifest (window.melodyRoutes) that the admin SPA resolves data-route / route(...) calls against. */
+/* registerCurrencyApiRoutes registers the four currency api doors through one route group, which prefixes their patterns and names; the writes sit behind the catalogue's write budget */
+func (instance *Module) registerCurrencyApiRoutes(router melodyhttpcontract.Router) {
+    currencyApi := router.Group(route.CurrenciesApiGroupPrefix)
+    currencyApi.WithNamePrefix(route.CurrenciesApiGroupNamePrefix)
+    currencyApi.HandleWithOptions(route.CurrenciesApiReadAllRelativePattern, handlercurrency.ApiReadAllHandler(), frontendRoute(route.CurrenciesApiReadAllRelativeName, "GET"))
+    currencyApi.HandleWithOptions(route.CurrenciesApiCreateRelativePattern, instance.throttledWrite(handlercurrency.ApiCreateHandler()), frontendRoute(route.CurrenciesApiCreateRelativeName, "POST"))
+    currencyApi.HandleWithOptions(route.CurrenciesApiUpdateRelativePattern, instance.throttledWrite(handlercurrency.ApiUpdateHandler()), frontendRoute(route.CurrenciesApiUpdateRelativeName, "PUT"))
+    currencyApi.HandleWithOptions(route.CurrenciesApiDeleteRelativePattern, instance.throttledWrite(handlercurrency.ApiDeleteHandler()), frontendRoute(route.CurrenciesApiDeleteRelativeName, "DELETE"))
+}
+
 func frontendRoute(name string, method string) melodyhttpcontract.RouteOptions {
     return melodyhttp.NewRouteOptions(name, []string{method}, "", nil, nil, nil, nil, 0, melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZoneFrontend))
 }
@@ -164,9 +180,18 @@ func (instance *Module) buildCatalogWriteThrottle() {
     instance.catalogWriteThrottle = melodyhttpmiddleware.RateLimitMiddleware(rateLimitConfig)
 }
 
-/* throttledWrite puts an endpoint that changes the nomenclature behind the shared per-address budget. The reads are left alone deliberately: a catalogue is meant to be browsed, and it is the writes that a runaway script turns into damage.
+/* buildInProcessCatalogWriteThrottle arms the write budget of a process that runs without redis: a sliding window per client address held in this process, bounded in the addresses it tracks. It limits this process only — behind a balancer every replica would allow a budget of its own, which is why a deployment runs the redis budget — but a single process keeps its writes and its sign-ins throttled rather than unthrottled. */
+func (instance *Module) buildInProcessCatalogWriteThrottle(clockInstance melodyclockcontract.Clock) {
+    limiter := melodyhttpmiddleware.NewSlidingWindowLimiterWithClock(clockInstance, catalogWriteAllowance, catalogWriteWindow)
+    limiter.SetMaxKeys(inProcessWriteThrottleMaxAddresses)
 
-   Without redis there is no limiter and the handler is returned untouched, which is the same rule the rest of the example follows — an integration the environment did not give it is absent rather than broken. */
+    rateLimitConfig := melodyhttpmiddleware.NewRateLimitConfig(limiter, nil, nil)
+    rateLimitConfig.SetClientIpResolver(instance.trustedProxyResolver.Resolve)
+
+    instance.catalogWriteThrottle = melodyhttpmiddleware.RateLimitMiddleware(rateLimitConfig)
+}
+
+/* throttledWrite puts an endpoint that changes the nomenclature, or signs a caller in, behind the per-address budget. The reads are left alone deliberately: a catalogue is meant to be browsed, and it is the writes that a runaway script turns into damage. The budget counts in redis when the example has one and in this process otherwise; a route registered before the budget is built is returned untouched. */
 func (instance *Module) throttledWrite(next melodyhttpcontract.Handler) melodyhttpcontract.Handler {
     if nil == instance.catalogWriteThrottle {
         return next

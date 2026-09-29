@@ -7,6 +7,7 @@ import (
     "github.com/precision-soft/melody/v3/.example/persistence"
     "github.com/precision-soft/melody/v3/.example/repository"
     examplesecurity "github.com/precision-soft/melody/v3/.example/security"
+    melodyapplication "github.com/precision-soft/melody/v3/application"
     melodyclockcontract "github.com/precision-soft/melody/v3/clock/contract"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
@@ -60,23 +61,24 @@ func (instance *CatalogJournalService) Record(
     return appendErr
 }
 
-/* ActorFromRuntime names whoever is behind the change. A scheduled command, a console run and an unauthenticated request are recorded as the system rather than as an empty actor. */
+/* CatalogJournalActorProcessPrefix prefixes the process id of a console run named as the actor of a change */
+const CatalogJournalActorProcessPrefix = "process:"
+
+/* ActorFromRuntime names whoever is behind the change: the signed-in user; a console run, as process:<id>, the identifier its journal records carry, so the audit trail says which run granted a role; and an unauthenticated request or a run with no process context, as the system rather than an empty actor. */
 func ActorFromRuntime(runtimeInstance melodyruntimecontract.Runtime) string {
     token, found := examplesecurity.TokenFromRuntime(runtimeInstance)
-    if false == found {
-        return repository.CatalogJournalActorSystem
+    if true == found && true == token.IsAuthenticated() {
+        identifier := strings.TrimSpace(token.UserIdentifier())
+        if "" != identifier {
+            return identifier
+        }
     }
 
-    if false == token.IsAuthenticated() {
-        return repository.CatalogJournalActorSystem
+    if processContext := melodyapplication.ProcessContextFromResolver(runtimeInstance.Scope()); nil != processContext {
+        return CatalogJournalActorProcessPrefix + processContext.ProcessId()
     }
 
-    identifier := strings.TrimSpace(token.UserIdentifier())
-    if "" == identifier {
-        return repository.CatalogJournalActorSystem
-    }
-
-    return identifier
+    return repository.CatalogJournalActorSystem
 }
 
 func MustGetCatalogJournalService(resolver melodycontainercontract.Resolver) *CatalogJournalService {

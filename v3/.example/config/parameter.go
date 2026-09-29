@@ -51,7 +51,7 @@ func (instance *Module) RegisterParameters(registrar melodyapplicationcontract.P
     }
 
     /* the credentials melody registers from .env are marked here, so debug:parameters redacts them and every template that reads them; AMQP_DSN carries its credentials inline. No parameter assembles a template from the MYSQL_* or PGSQL_* keys, because those are the switches the readme says to remove. */
-    for _, environmentKey := range []string{environmentKeyMysqlPassword, environmentKeyPgsqlPassword, environmentKeyS3SecretKey, environmentKeyAmqpDsn} {
+    for _, environmentKey := range []string{environmentKeyMysqlPassword, environmentKeyPgsqlPassword, environmentKeyS3SecretKey, environmentKeyAmqpDsn, environmentKeyMetricsToken} {
         instance.markEnvironmentSecret(registrar, environmentKey, nil)
     }
 }

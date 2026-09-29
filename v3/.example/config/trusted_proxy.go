@@ -17,6 +17,20 @@ import (
     melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
+/* exampleForwardedHeadersPolicy is the list the kernel believes a forwarded scheme from, which decides whether the session cookie is marked Secure behind a proxy that terminates tls. It is a static list of the private ranges and loopback, read at boot, where the rate limit's key goes through trustedProxyResolver, which trusts the balancer alone by name: a peer that forges X-Forwarded-Proto marks only its own cookie Secure, so the scheme can take the wide list a restarted balancer keeps matching, while a forged client address would choose whose budget a request spends and takes the narrow one. */
+func exampleForwardedHeadersPolicy() melodyhttpcontract.ForwardedHeadersPolicy {
+    return melodyhttpcontract.ForwardedHeadersPolicy{
+        TrustForwardedHeaders: true,
+        TrustedProxyList: []string{
+            "127.0.0.0/8",
+            "::1/128",
+            "10.0.0.0/8",
+            "172.16.0.0/12",
+            "192.168.0.0/16",
+        },
+    }
+}
+
 /* trustedProxyRefreshInterval is how long a resolved list is believed before its names are looked up again: the compose balancer keeps its service name across a restart and loses its address. A minute is the longest a restarted balancer goes untrusted, for one lookup a minute on the request path, off the lock. */
 const trustedProxyRefreshInterval = time.Minute
 

@@ -5,11 +5,13 @@ import (
     "context"
     "errors"
     "fmt"
+    "reflect"
     "strings"
     "sync"
     "testing"
     "time"
 
+    melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
     "github.com/precision-soft/melody/v3/.example/generated"
     "github.com/precision-soft/melody/v3/.example/persistence"
     "github.com/precision-soft/melody/v3/.example/reporting"
@@ -22,6 +24,7 @@ import (
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodylogging "github.com/precision-soft/melody/v3/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
+    rueidis "github.com/redis/rueidis"
     bun "github.com/uptrace/bun"
 )
 
@@ -214,5 +217,110 @@ func TestGeneratedServices_ConcurrentScopesKeepRequestStateSeparate(t *testing.T
 
     if 20 != counts["request-alpha"] || 20 != counts["request-beta"] || 40 != len(entries) {
         t.Fatalf("expected twenty entries per request and forty in all, got %v and %d", counts, len(entries))
+    }
+}
+
+func TestRegisterSeeders_CollectsTheSeedersInTheOrderTheirReferencesNeed(t *testing.T) {
+    containerInstance := melodycontainer.NewContainer()
+    repository.RegisterSeeders(containerInstance)
+
+    typeLister, isTypeLister := any(containerInstance).(melodycontainercontract.TypeLister)
+    if false == isTypeLister {
+        t.Fatal("expected the container to enumerate its registered types")
+    }
+
+    references := typeLister.ReferencesImplementing(reflect.TypeOf((*repository.Seeder)(nil)).Elem())
+
+    collected := make([]string, 0, len(references))
+    for _, reference := range references {
+        collected = append(collected, reference.ServiceName)
+    }
+
+    expected := []string{
+        repository.ServiceCategorySeeder,
+        repository.ServiceCurrencySeeder,
+        repository.ServiceProductSeeder,
+        repository.ServiceUserSeeder,
+    }
+
+    if strings.Join(expected, ",") != strings.Join(collected, ",") {
+        t.Fatalf("expected the seeders collected as %v, got %v", expected, collected)
+    }
+}
+
+/* stubRedisClient stands for a wired redis client; the hub's registration reads only whether one is there */
+type stubRedisClient struct {
+    rueidis.Client
+}
+
+type closeableConnectionStub struct{}
+
+func (instance *closeableConnectionStub) Close() error {
+    return nil
+}
+
+func hubTeardownDependencies(t *testing.T, redisWired bool) []string {
+    t.Helper()
+
+    containerInstance := melodycontainer.NewContainer()
+    containerInstance.MustRegister(
+        melodylogging.ServiceLogger,
+        func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
+            return melodylogging.NewNopLogger(), nil
+        },
+    )
+
+    moduleInstance := &Module{}
+    moduleInstance.buildServerSentEvent()
+
+    if true == redisWired {
+        moduleInstance.redisClient = stubRedisClient{}
+        containerInstance.MustRegister(
+            melodyrueidis.ServiceConnection,
+            func(resolver melodycontainercontract.Resolver) (*closeableConnectionStub, error) {
+                return &closeableConnectionStub{}, nil
+            },
+        )
+        _ = melodycontainer.MustFromResolver[*closeableConnectionStub](containerInstance, melodyrueidis.ServiceConnection)
+    }
+
+    moduleInstance.registerServerSentEventHubService(containerRegistrar{Container: containerInstance})
+    _ = melodycontainer.MustFromResolver[*melodyhttp.ServerSentEventHub](containerInstance, subscriber.ServiceCatalogNotificationHub)
+
+    planner, isPlanner := any(containerInstance).(interface {
+        TeardownPlan() []melodycontainercontract.TeardownPlanEntry
+    })
+    if false == isPlanner {
+        t.Fatal("expected the container to answer its teardown plan")
+    }
+
+    for _, entry := range planner.TeardownPlan() {
+        if "service:"+subscriber.ServiceCatalogNotificationHub == entry.NodeKey {
+            return entry.Dependencies
+        }
+    }
+
+    t.Fatal("expected the hub in the teardown plan")
+
+    return nil
+}
+
+func TestRegisterServerSentEventHubService_ClosesTheHubBeforeTheRedisConnectionItsBackplaneCaptured(t *testing.T) {
+    dependencies := hubTeardownDependencies(t, true)
+
+    for _, dependency := range dependencies {
+        if "service:"+melodyrueidis.ServiceConnection == dependency {
+            return
+        }
+    }
+
+    t.Fatalf("expected the hub closed before the redis connection, got the dependencies %v", dependencies)
+}
+
+func TestRegisterServerSentEventHubService_DeclaresNoRedisEdgeWithoutRedis(t *testing.T) {
+    for _, dependency := range hubTeardownDependencies(t, false) {
+        if "service:"+melodyrueidis.ServiceConnection == dependency {
+            t.Fatalf("expected no edge to a redis connection that is not wired, got %v", dependency)
+        }
     }
 }

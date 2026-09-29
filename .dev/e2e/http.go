@@ -50,10 +50,11 @@ report a budget it had not measured.
 
 The section runs when EXAMPLE_BASE_URL is set and needs REDIS_ADDRESS to clear the counters first. */
 func runExampleHttpCheck(baseUrl string, loadBalancerUrl string, redisAddress string) {
-    resetExampleRateLimitCounters("example http", redisAddress, exampleRateLimitPrefix)
-
+    /* the sign-in spends the same per-address budget the section counts, so it runs before the counters are cleared: the count below starts at zero */
     client := newExampleHttpClient()
     signInExampleHttpEditor(client, baseUrl, "")
+
+    resetExampleRateLimitCounters("example http", redisAddress, exampleRateLimitPrefix)
 
     /* a spoofed forwarded address from an untrusted peer must not mint a fresh budget: every call below is counted against the loopback peer address, so the budget is spent once and stays spent */
     spentAt := 0

@@ -34,9 +34,12 @@ func runInternalAuthCheck(baseUrl string) {
 
     assertInternalAuthAcceptedAndReplayed(client)
     assertInternalAuthRejected(client, "no internal-auth header at all", internalAuthRoute, nil, "")
+    /* the machine firewall carries its own rule for every path under /internal: an unsigned call to a path no route serves is refused by the firewall's entry point, not answered 404 by routing it would reach if no rule claimed it */
+    assertInternalAuthRejected(client, "an unsigned call to an unrouted path under /internal", "/internal/not-routed/", nil, "")
     assertInternalAuthTamperedSignature(client)
     assertInternalAuthBodyMismatch(client)
     assertInternalAuthQueryMismatch(client)
+    assertInternalAuthRefusesAnEnvelopePastTheHorizon(client)
 }
 
 /* assertInternalAuthAcceptedAndReplayed covers the positive and the replay in one place because they must share one envelope: the replay negative is only meaningful for an envelope that was ACCEPTED first. */
@@ -219,4 +222,27 @@ func internalAuthOutputNamesHeader(output string) bool {
     }
 
     return false
+}
+
+/* the firewall bounds how far ahead an envelope's expiry may sit (MaxFutureExpiry, five minutes), since its nonce guard remembers each nonce until its envelope expires: an envelope minted for an hour is refused, and one minted for four minutes, inside the horizon, is accepted — the control that the refusal is the horizon's and not the --ttl flag's */
+func assertInternalAuthRefusesAnEnvelopePastTheHorizon(client *liveExampleClient) {
+    call := func(envelope string) int {
+        return client.call(internalAuthLabel, liveExampleRequest{
+            method:     "POST",
+            path:       internalAuthRoute,
+            headerList: map[string]string{internalAuthHeaderName: envelope},
+        }).statusCode
+    }
+
+    insideEnvelope, insideElapsed := mintInternalAuthEnvelope("--ttl", "4m")
+    if status := call(insideEnvelope); http.StatusOK != status {
+        fail("%s: an envelope minted for four minutes answered %d, wanted 200 inside the five-minute horizon%s", internalAuthLabel, status, exampleMintDelayDiagnostic(insideElapsed))
+    }
+
+    pastEnvelope, _ := mintInternalAuthEnvelope("--ttl", "1h")
+    if status := call(pastEnvelope); http.StatusUnauthorized != status {
+        fail("%s: an envelope minted for an hour answered %d, wanted 401 past the five-minute horizon", internalAuthLabel, status)
+    }
+
+    pass("an envelope minted for four minutes is accepted and one minted for an hour is refused 401: the firewall bounds the expiry horizon")
 }

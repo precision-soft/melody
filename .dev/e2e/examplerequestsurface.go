@@ -3,6 +3,8 @@ package main
 import (
     "encoding/json"
     "net/http"
+    "os"
+    "path/filepath"
     "strings"
 )
 
@@ -10,13 +12,17 @@ import (
 const exampleRequestSurfaceClaimedRequestId = "e2e-claimed-request-id"
 
 /* runExampleRequestSurfaceAssertions drives the request surface the example serves beyond the shared sections, anonymously: a path spelled other than canonically is refused before the firewall reads it, the method doors answer HEAD, OPTIONS and a 405 with the methods the route allows, the error envelope names the request the kernel filed, the static surface serves no dotfile and a malformed session cookie is an anonymous caller rather than a failure. */
-func runExampleRequestSurfaceAssertions(major exampleMajor) {
+func runExampleRequestSurfaceAssertions(major exampleMajor, application *exampleApplication) {
     assertExampleNonCanonicalPathsAreRefusedBeforeTheFirewall(major)
     assertExampleMethodDoors(major)
     assertExampleErrorEnvelopeCarriesTheMintedRequestId(major)
     assertExampleStaticSurfaceServesNoDotfile(major)
     assertExampleMalformedSessionCookieIsAnonymous(major)
     assertExampleRefusingAcceptKeepsTheErrorStatus(major)
+    assertExampleRequestBodyLimit(major)
+    assertExampleExcludedStaticPaths(major, application)
+    assertExampleOnePathDoorsArePublicForTheirOwnSpelling(major)
+    assertExampleSessionCookieFollowsTheForwardedScheme(major)
 }
 
 /* the control is the same route spelled canonically: an anonymous caller is answered 401 there, so a 400 on the doubled slash or the climbing segment is the canonical-path refusal answering first, not the firewall */
@@ -161,7 +167,7 @@ func exampleAllowNames(allow string, wantedList ...string) bool {
     return true
 }
 
-/* an Accept that refuses every media type does not turn an error the framework renders into a 406: the error's own status is the signal, so it is kept and served the default json body. The door is the canonical-path refusal, which the kernel renders itself — the example's firewall and presenter answer their own errors without negotiating. The control is the same request accepting json; the refusing arm spells the refusal both ways, every registered type at q=0 and the wildcard at q=0 */
+/* an Accept that refuses every media type does not turn an error the framework renders into a 406: the error's own status is the signal, so it is kept and served the default json body. The door is the canonical-path refusal, which the kernel renders itself — the example's firewall answers its own errors in json and its presenter keeps a refusal's status on a refusing Accept by its own rule. The control is the same request accepting json; the refusing arm spells the refusal both ways, every registered type at q=0 and the wildcard at q=0 */
 func assertExampleRefusingAcceptKeepsTheErrorStatus(major exampleMajor) {
     client := newExampleClient(major)
     path := "/" + exampleUserRoute
@@ -176,4 +182,153 @@ func assertExampleRefusingAcceptKeepsTheErrorStatus(major exampleMajor) {
         }
     }
     pass("[%s] an Accept refusing every media type keeps the kernel's 400 and its json body, as accepting json does", major.label)
+}
+
+/* a client that negotiates text/plain reads an error as lines on every major, both where the kernel renders it (the canonical-path refusal) and where the example's presenter does (the not-found handler behind the public asset prefix): the plain-text serializer handed the envelope printed a Go map or the envelope's fields bare. The control is the same two requests accepting json, answered by a json body */
+func assertExampleTextPlainErrorsAreReadable(major exampleMajor) {
+    client := newExampleClient(major)
+
+    doors := []struct {
+        path       string
+        statusCode int
+        statusLine string
+    }{
+        {path: "/" + exampleUserRoute, statusCode: http.StatusBadRequest, statusLine: "400 bad request"},
+        {path: "/assets/zz-e2e-missing.js", statusCode: http.StatusNotFound, statusLine: "404 not found"},
+    }
+
+    for _, door := range doors {
+        control := client.call("GET", door.path, "application/json", "", "")
+        if door.statusCode != control.statusCode || false == json.Valid([]byte(control.body)) {
+            fail("[%s] %s accepting json answered %d %s, wanted %d with a json body as the control", major.label, door.path, control.statusCode, exampleTruncate(control.body), door.statusCode)
+        }
+
+        answered := client.call("GET", door.path, "text/plain", "", "")
+        if door.statusCode != answered.statusCode || false == strings.HasPrefix(answered.headerList.Get("Content-Type"), "text/plain") {
+            fail("[%s] %s accepting text/plain answered %d %q, wanted %d text/plain", major.label, door.path, answered.statusCode, answered.headerList.Get("Content-Type"), door.statusCode)
+        }
+
+        lines := strings.Split(strings.TrimSuffix(answered.body, "\n"), "\n")
+        if door.statusLine != lines[0] || true == strings.Contains(answered.body, "map[") || true == strings.Contains(answered.body, "{false") {
+            fail("[%s] %s accepting text/plain is not written as lines starting %q: %s", major.label, door.path, door.statusLine, exampleTruncate(answered.body))
+        }
+
+        requestIdLine := "request id: " + answered.headerList.Get("X-Request-Id")
+        timeLines := 0
+        requestIdLines := 0
+        for _, line := range lines {
+            if true == strings.HasPrefix(line, "time: ") {
+                timeLines++
+            }
+            if requestIdLine == line {
+                requestIdLines++
+            }
+        }
+        if 1 != timeLines {
+            fail("[%s] %s accepting text/plain carries %d time lines, wanted one: %s", major.label, door.path, timeLines, exampleTruncate(answered.body))
+        }
+
+        /* the kernel's envelope names the request id on the third major only; the presenter's context names it on every major */
+        wantsRequestId := 3 == major.number || http.StatusNotFound == door.statusCode
+        if true == wantsRequestId && 1 != requestIdLines {
+            fail("[%s] %s accepting text/plain does not name the request id %q of its response header: %s", major.label, door.path, requestIdLine, exampleTruncate(answered.body))
+        }
+    }
+    pass("[%s] a text/plain client reads the kernel's 400 and the presenter's 404 as lines naming the status, the time and the request id, where json clients read json", major.label)
+}
+
+/* the example bounds every request body at 64 KiB (MELODY_HTTP_MAX_REQUEST_BODY_BYTES): a product create past it is refused 413 in the envelope before the door binds it, where a body just under it reaches the validation and is refused 400 for the empty name. The control writes nothing, so the section spends no write of the nomenclature */
+func assertExampleRequestBodyLimit(major exampleMajor) {
+    editor := newExampleClient(major)
+
+    signIn := editor.call("POST", exampleLoginRoute, "application/json", "application/x-www-form-urlencoded", "username="+exampleEditorUsername+"&password="+exampleEditorPassword)
+    if http.StatusOK != signIn.statusCode {
+        fail("[%s] the seeded editor could not sign in (%d) to drive the body limit: %s", major.label, signIn.statusCode, exampleTruncate(signIn.body))
+    }
+
+    underLimit := `{"name":"","color":"` + strings.Repeat("x", 60*1024) + `"}`
+    control := editor.call("POST", exampleProductCreateRoute, "application/json", "application/json", underLimit)
+    if http.StatusBadRequest != control.statusCode {
+        fail("[%s] a %d-byte create under the body limit answered %d, wanted the validation's 400 as the control: %s", major.label, len(underLimit), control.statusCode, exampleTruncate(control.body))
+    }
+
+    pastLimit := `{"name":"","color":"` + strings.Repeat("x", 128*1024) + `"}`
+    refused := editor.call("POST", exampleProductCreateRoute, "application/json", "application/json", pastLimit)
+    if http.StatusRequestEntityTooLarge != refused.statusCode || false == strings.Contains(refused.body, "payload too large") {
+        fail("[%s] a %d-byte create past the body limit answered %d, wanted 413 payload too large: %s", major.label, len(pastLimit), refused.statusCode, exampleTruncate(refused.body))
+    }
+    pass("[%s] a create past the 64 KiB body limit is refused 413 payload too large, where one just under it reaches the validation's 400", major.label)
+}
+
+/* the file server answers ahead of routing, behind the firewall, so a file under public/ named like one of the application's doors would be served to a signed-in caller in place of the door. The example reserves its doors' prefixes (MELODY_STATIC_EXCLUDED_PATHS), so a file planted in the workspace's public/storage/object is not served on /storage/object: the storage door answers, or the not-found handler where no object store is wired, but never the planted content. The control is the workspace's own public/test.txt, still served, so the static surface is on */
+func assertExampleExcludedStaticPaths(major exampleMajor, application *exampleApplication) {
+    const plantedContent = "planted-e2e-static-shadow"
+
+    plantedPath := filepath.Join(filepath.Dir(application.logPath), "public", "storage", "object")
+    if mkdirErr := os.MkdirAll(filepath.Dir(plantedPath), 0o755); nil != mkdirErr {
+        fail("[%s] plant a file under the workspace's public/storage: %v", major.label, mkdirErr)
+    }
+    if writeErr := os.WriteFile(plantedPath, []byte(plantedContent), 0o644); nil != writeErr {
+        fail("[%s] plant a file under the workspace's public/storage: %v", major.label, writeErr)
+    }
+    defer func() {
+        _ = os.RemoveAll(filepath.Dir(plantedPath))
+    }()
+
+    editor := newExampleClient(major)
+    signIn := editor.call("POST", exampleLoginRoute, "application/json", "application/x-www-form-urlencoded", "username="+exampleEditorUsername+"&password="+exampleEditorPassword)
+    if http.StatusOK != signIn.statusCode {
+        fail("[%s] the seeded editor could not sign in (%d) to drive the excluded static paths: %s", major.label, signIn.statusCode, exampleTruncate(signIn.body))
+    }
+
+    control := editor.call("GET", "/test.txt", "", "", "")
+    if http.StatusOK != control.statusCode {
+        fail("[%s] /test.txt answered %d, wanted the static surface's 200 as the control", major.label, control.statusCode)
+    }
+
+    shadowed := editor.call("GET", "/storage/object?key=zz-e2e-absent", "application/json", "", "")
+    if true == strings.Contains(shadowed.body, plantedContent) || false == json.Valid([]byte(shadowed.body)) {
+        fail("[%s] /storage/object answered %d with the file planted under public/ instead of the door: %s", major.label, shadowed.statusCode, exampleTruncate(shadowed.body))
+    }
+    pass("[%s] a file planted under public/storage is not served in place of the /storage door (answered %d in json), while /test.txt is still served", major.label, shadowed.statusCode)
+}
+
+/* the example opens a door that is one path with an exact rule: /health and /openapi.json are public, and a neighbouring spelling a prefix rule would have opened — /healthz, /openapiXjson, where the unescaped dot of a regex matched any character — falls to the catch-all and is refused an anonymous caller */
+func assertExampleOnePathDoorsArePublicForTheirOwnSpelling(major exampleMajor) {
+    client := newExampleClient(major)
+
+    for _, path := range []string{exampleHealthRoute, "/openapi.json"} {
+        control := client.call("GET", path, "application/json", "", "")
+        if http.StatusOK != control.statusCode {
+            fail("[%s] %s answered %d to an anonymous caller, wanted its public 200 as the control", major.label, path, control.statusCode)
+        }
+    }
+
+    for _, path := range []string{"/healthz", "/health/extra", "/openapiXjson"} {
+        refused := client.call("GET", path, "application/json", "", "")
+        if http.StatusUnauthorized != refused.statusCode {
+            fail("[%s] %s answered %d to an anonymous caller, wanted the catch-all's 401: a prefix rule opened it", major.label, path, refused.statusCode)
+        }
+    }
+    pass("[%s] /health and /openapi.json are public, and /healthz, /health/extra and /openapiXjson are refused 401 by the catch-all", major.label)
+}
+
+/* the example trusts the forwarded scheme from the private ranges and loopback, the harness's own peer: a sign-in that arrives with X-Forwarded-Proto: https, as a proxy that terminates tls forwards it, is answered with a Secure session cookie, and the same sign-in without the header is not, which is the control that the header, read from a trusted peer, decides it */
+func assertExampleSessionCookieFollowsTheForwardedScheme(major exampleMajor) {
+    sessionCookieOf := func(headerList map[string]string) string {
+        response := newExampleClient(major).callWithHeaderList("POST", exampleLoginRoute, "application/json", "application/x-www-form-urlencoded", headerList, "username=user&password=user")
+        if http.StatusOK != response.statusCode {
+            fail("[%s] the seeded user could not sign in (%d) to read the session cookie: %s", major.label, response.statusCode, exampleTruncate(response.body))
+        }
+
+        return strings.Join(response.headerList.Values("Set-Cookie"), "; ")
+    }
+
+    forwarded := sessionCookieOf(map[string]string{"X-Forwarded-Proto": "https"})
+    direct := sessionCookieOf(map[string]string{})
+
+    if false == strings.Contains(forwarded, "Secure") || true == strings.Contains(direct, "Secure") {
+        fail("[%s] the session cookie does not follow the forwarded scheme: with X-Forwarded-Proto https %q, without it %q", major.label, forwarded, direct)
+    }
+    pass("[%s] a sign-in forwarded as https gets a Secure session cookie and a plain one does not", major.label)
 }

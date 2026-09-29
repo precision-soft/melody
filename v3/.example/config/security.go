@@ -2,6 +2,8 @@ package config
 
 import (
     "errors"
+    "regexp"
+    "strings"
 
     "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/repository"
@@ -18,20 +20,20 @@ import (
 
 func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) {
     accessControl := melodysecurity.NewAccessControl(
-        /* the index file is the resource the root serves, so it carries the same public rule: MELODY_STATIC_INDEX_FILE makes "/" and "/index.html" two spellings of one page */
-        melodyaccesscontrol.NewRegexRule("^/$", melodyaccesscontrol.RuleConfig{
+        /* the index file is the resource the root serves, so it carries the same public rule: MELODY_STATIC_INDEX_FILE makes "/" and "/index.html" two spellings of one page. A door that is one path is opened by an exact rule, which speaks for that spelling and nothing beneath it or beside it, so a route added later under a similar spelling is not public by accident */
+        melodyaccesscontrol.NewExactRule("/", melodyaccesscontrol.RuleConfig{
             Attributes: []string{melodysecuritycontract.AttributePublicAccess},
         }),
-        melodyaccesscontrol.NewRegexRule("^/index\\.html$", melodyaccesscontrol.RuleConfig{
+        melodyaccesscontrol.NewExactRule("/index.html", melodyaccesscontrol.RuleConfig{
             Attributes: []string{melodysecuritycontract.AttributePublicAccess},
         }),
-        melodyaccesscontrol.NewRegexRule("^/login", melodyaccesscontrol.RuleConfig{
+        melodyaccesscontrol.NewExactRule(route.LoginPagePattern, melodyaccesscontrol.RuleConfig{
             Attributes: []string{melodysecuritycontract.AttributePublicAccess},
         }),
-        melodyaccesscontrol.NewRegexRule("^/logout", melodyaccesscontrol.RuleConfig{
+        melodyaccesscontrol.NewExactRule(route.LogoutPattern, melodyaccesscontrol.RuleConfig{
             Attributes: []string{melodysecuritycontract.AttributePublicAccess},
         }),
-        melodyaccesscontrol.NewRegexRule("^/routes", melodyaccesscontrol.RuleConfig{
+        melodyaccesscontrol.NewExactRule(route.RoutesPattern, melodyaccesscontrol.RuleConfig{
             Attributes: []string{melodysecuritycontract.AttributePublicAccess},
         }),
         melodyaccesscontrol.NewRegexRule("^/assets", melodyaccesscontrol.RuleConfig{
@@ -40,17 +42,18 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         melodyaccesscontrol.NewRegexRule("^/favicon", melodyaccesscontrol.RuleConfig{
             Attributes: []string{melodysecuritycontract.AttributePublicAccess},
         }),
-        melodyaccesscontrol.NewRegexRule("^/i18n", melodyaccesscontrol.RuleConfig{
+        /* public for the locales the greeting is served in and nothing else: an unlisted locale matches no route, so it falls to the catch-all rather than to a public not-found */
+        melodyaccesscontrol.NewRegexRule(i18nGreetingPublicPattern(), melodyaccesscontrol.RuleConfig{
             Attributes: []string{melodysecuritycontract.AttributePublicAccess},
         }),
 
-        melodyaccesscontrol.NewRegexRule("^/health", melodyaccesscontrol.RuleConfig{
+        melodyaccesscontrol.NewExactRule("/health", melodyaccesscontrol.RuleConfig{
             Attributes: []string{melodysecuritycontract.AttributePublicAccess},
         }),
-        melodyaccesscontrol.NewRegexRule("^/metrics", melodyaccesscontrol.RuleConfig{
-            Attributes: []string{melodysecuritycontract.AttributePublicAccess},
+        melodyaccesscontrol.NewExactRule(metricsPath, melodyaccesscontrol.RuleConfig{
+            Attributes: []string{instance.metricsAccessAttribute()},
         }),
-        melodyaccesscontrol.NewRegexRule("^/openapi.json", melodyaccesscontrol.RuleConfig{
+        melodyaccesscontrol.NewExactRule("/openapi.json", melodyaccesscontrol.RuleConfig{
             Attributes: []string{melodysecuritycontract.AttributePublicAccess},
         }),
         /* the platform check holds the distributed lock for its whole timeout and runs three object-storage operations per call, so it carries the reader requirement; public, an anonymous caller could spend the lock and the bucket's request budget with one GET */
@@ -61,7 +64,7 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         melodyaccesscontrol.NewRegexRule("^/messagebus/dispatch", melodyaccesscontrol.RuleConfig{
             Attributes: []string{entity.RoleEditor},
         }),
-        melodyaccesscontrol.NewRegexRule("^/encrypt/roundtrip", melodyaccesscontrol.RuleConfig{
+        melodyaccesscontrol.NewExactRule("/encrypt/roundtrip", melodyaccesscontrol.RuleConfig{
             Attributes: []string{melodysecuritycontract.AttributePublicAccess},
         }),
         /* the enrollment door binds a second factor to an account and returns its secret, and the verification door reads the answer back; behind an authenticated role the account is the caller's own token, so nobody can bind a factor to another account */
@@ -127,10 +130,6 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         melodyaccesscontrol.NewSegmentPrefixRule(route.SecurePrefix, melodyaccesscontrol.RuleConfig{
             Attributes: []string{entity.RoleUser},
         }),
-        melodyaccesscontrol.NewSegmentPrefixRule(route.InternalPrefix, melodyaccesscontrol.RuleConfig{
-            Attributes: []string{internalCallerRole},
-        }),
-
         melodyaccesscontrol.NewRegexRule("^/", melodyaccesscontrol.RuleConfig{
             Attributes: []string{entity.RoleUser},
         }),
@@ -161,16 +160,23 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
 
     override := melodysecurityconfig.NewFirewallOverrideConfiguration()
 
-    /* internal-auth (HMAC) firewall: a stateless machine-to-machine firewall on /internal that verifies the signed envelope a caller service sends and authenticates the call as that service principal. */
+    /* internal-auth (HMAC) firewall: a stateless machine-to-machine firewall on /internal that verifies the signed envelope a caller service sends and authenticates the call as that service principal. It carries its own authorization and reads nothing of the global list (overrideOnly), so the whole policy of the machine door is here: its one rule claims every path under the prefix for the service role. */
     builder.AddStatelessFirewall(
         "internal",
         melodysecurity.NewPathPrefixMatcher(route.InternalPrefix),
         []melodysecuritycontract.Rule{},
         melodysecurity.NewHmacTokenSource(melodysecurity.HmacTokenSourceConfig{
-            Secrets: instance.hmacSecrets,
-            Apps:    instance.hmacApps,
+            Secrets:         instance.hmacSecrets,
+            Apps:            instance.hmacApps,
+            MaxFutureExpiry: internalEnvelopeMaxFutureExpiry,
         }),
         melodysecurityconfig.NewFirewallOverrideConfiguration().
+            WithAccessControl(melodysecurity.NewAccessControl(
+                melodyaccesscontrol.NewSegmentPrefixRule(route.InternalPrefix, melodyaccesscontrol.RuleConfig{
+                    Attributes: []string{internalCallerRole},
+                }),
+            )).
+            WithMergeStrategy(melodysecurityconfig.AccessControlMergeOverrideOnly).
             WithEntryPoint(melodysecurity.NewJsonEntryPoint()).
             WithAccessDeniedHandler(melodysecurity.NewJsonAccessDeniedHandler()),
     )
@@ -200,6 +206,8 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
             WithAccessDeniedHandler(melodysecurity.NewJsonAccessDeniedHandler()),
     )
 
+    instance.registerMetricsFirewall(builder)
+
     builder.AddFirewall(
         "main",
         melodysecurity.NewPathPrefixMatcher("/"),
@@ -228,4 +236,57 @@ func sessionUserLookup(request melodyhttpcontract.Request, userId string) (*enti
     }
 
     return userRepository.FindById(runtimeInstance.Context(), userId)
+}
+
+/* i18nGreetingPublicPattern opens the i18n prefix under each locale the greeting route serves, spelled from the route's own list so the rule and the route cannot drift apart */
+func i18nGreetingPublicPattern() string {
+    quotedLocaleList := make([]string, 0, len(route.I18nGreetingLocaleList()))
+    for _, locale := range route.I18nGreetingLocaleList() {
+        quotedLocaleList = append(quotedLocaleList, regexp.QuoteMeta(locale))
+    }
+
+    return "^/(" + strings.Join(quotedLocaleList, "|") + ")" + regexp.QuoteMeta(route.I18nPrefix) + "(/|$)"
+}
+
+
+const (
+    metricsPath = "/metrics"
+
+    /* metricsScraperRole is the one role the metrics credential carries: it reads the exposition and nothing else */
+    metricsScraperRole = "ROLE_MONITOR"
+)
+
+/* metricsAccessAttribute is what /metrics requires: the scraper's role when a metrics token is configured, public otherwise */
+func (instance *Module) metricsAccessAttribute() string {
+    if "" == instance.metricsToken {
+        return melodysecuritycontract.AttributePublicAccess
+    }
+
+    return metricsScraperRole
+}
+
+/* registerMetricsFirewall declares the stateless door the scraper authenticates on: prometheus 2.x presents a credential only as an Authorization header, so the door reads Authorization and accepts exactly Bearer followed by the configured token, as the scraper named prometheus holding the scraper role. It is registered before "main", since matching is first-registered-wins and "main" matches every path; a missing or wrong credential authenticates as nobody and the json entry point answers 401. An empty token leaves the door unwired and /metrics public. */
+func (instance *Module) registerMetricsFirewall(builder *melodysecurityconfig.Builder) {
+    if "" == instance.metricsToken {
+        return
+    }
+
+    builder.AddStatelessFirewall(
+        "metrics",
+        melodysecurity.NewPathPrefixMatcher(metricsPath),
+        []melodysecuritycontract.Rule{},
+        melodysecurity.NewAuthenticatorTokenSource(
+            melodysecurity.NewAuthenticatorManager(
+                melodysecurity.NewApiKeyHeaderAuthenticator(
+                    "Authorization",
+                    "Bearer "+instance.metricsToken,
+                    "prometheus",
+                    []string{metricsScraperRole},
+                ),
+            ),
+        ),
+        melodysecurityconfig.NewFirewallOverrideConfiguration().
+            WithEntryPoint(melodysecurity.NewJsonEntryPoint()).
+            WithAccessDeniedHandler(melodysecurity.NewJsonAccessDeniedHandler()),
+    )
 }

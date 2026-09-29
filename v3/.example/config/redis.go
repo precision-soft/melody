@@ -4,8 +4,11 @@ import (
     "time"
 
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
+    melodyrueidiscache "github.com/precision-soft/melody/integrations/rueidis/v3/cache"
     examplecache "github.com/precision-soft/melody/v3/.example/cache"
+    melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     "github.com/precision-soft/melody/v3/exception"
+    rueidis "github.com/redis/rueidis"
 )
 
 const (
@@ -19,6 +22,9 @@ const (
 
     /* the window the write allowance is counted over */
     catalogWriteWindow = time.Minute
+
+    /* the addresses the in-process budget tracks without redis; past it an unseen address is refused rather than growing the map */
+    inProcessWriteThrottleMaxAddresses = 10000
 )
 
 /* cacheKeyPrefix is the cache namespace with the layout token of the cached types inside it: the entities are gob-encoded under keys with no expiry, and gob decodes an older payload into a newer struct with the new field at zero, silently. A build reads only under the prefix of its own layout; the entries an older build left stand orphaned until example:db:reset clears the namespace, which the readme says. */
@@ -49,3 +55,39 @@ func (instance *Module) buildRedis() {
     /* the constructor installs the backplane on the hub and that installation is its whole effect here: the hub is the only holder, and its Shutdown is what drains the publishes in flight and closes the backplane's listen goroutine and subscription. The composition root keeps no reference of its own, because a second holder is a second closer. */
     melodyrueidis.NewServerSentEventBackplane(client, instance.serverSentEventHub)
 }
+
+/* redisInfrastructure is the one switch for a process that has redis: the token store and the cache backend live on the same client, so they are registered together or not at all, rather than as two registrations that must stay paired by hand. */
+type redisInfrastructure struct {
+    client     rueidis.Client
+    connection *melodyrueidis.Connection
+}
+
+func newRedisInfrastructure(client rueidis.Client, connection *melodyrueidis.Connection) *redisInfrastructure {
+    return &redisInfrastructure{
+        client:     client,
+        connection: connection,
+    }
+}
+
+func (instance *redisInfrastructure) Modules() []melodyapplicationcontract.Module {
+    return []melodyapplicationcontract.Module{
+        melodyrueidis.NewModule(melodyrueidis.ModuleConfig{
+            Client:       instance.client,
+            Connection:   instance.connection,
+            AsTokenStore: true,
+            TokenStoreOptions: []melodyrueidis.TokenStoreOption{
+                melodyrueidis.WithTokenStorePrefix(redisTokenStoreKeyPrefix),
+            },
+        }),
+        melodyrueidiscache.NewModule(melodyrueidiscache.ModuleConfig{
+            Client: instance.client,
+            Prefix: cacheKeyPrefix(),
+            /* the backend's context-less doors run unbounded without this; a store that stops answering would hold a request-path read for good */
+            BackendOptions: []melodyrueidiscache.BackendOption{
+                melodyrueidiscache.WithCommandTimeout(time.Second),
+            },
+        }),
+    }
+}
+
+var _ melodyapplicationcontract.ModuleProvider = (*redisInfrastructure)(nil)

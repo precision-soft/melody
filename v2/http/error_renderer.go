@@ -3,9 +3,13 @@ package http
 import (
     "fmt"
     "html"
+    "mime"
     nethttp "net/http"
+    "reflect"
+    "sort"
     "strings"
     "time"
+    "unicode"
 
     "github.com/precision-soft/melody/v2/exception"
     exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
@@ -79,6 +83,10 @@ func renderNegotiatedErrorPayload(
         return jsonErrorResponseFromPayload(statusCode, message, payload)
     }
 
+    if true == isPlainTextMediaType(serializerInstance.ContentType()) {
+        return plainTextErrorResponse(statusCode, message, payload, serializerInstance.ContentType())
+    }
+
     serializedBytes, serializeErr := serializeErrorPayloadSafely(serializerInstance, payload)
     if nil != serializeErr {
         return jsonErrorResponseFromPayload(statusCode, message, payload)
@@ -148,4 +156,154 @@ func serializeErrorPayloadSafely(serializerInstance serializercontract.Serialize
     }()
 
     return serializerInstance.Serialize(payload)
+}
+
+/* isPlainTextMediaType answers whether a serializer's content type is text/plain, whatever its parameters, so an application's own text serializer takes the same door as the framework's. */
+func isPlainTextMediaType(contentType string) bool {
+    mediaType, _, err := mime.ParseMediaType(contentType)
+    if nil != err {
+        return false
+    }
+
+    return "text/plain" == mediaType
+}
+
+/* plainTextErrorResponse writes the error envelope for a text/plain client as lines: the status and the message first, then the request id, the time and every other entry in key order, a map indented beneath its key and a list one item per line. A plain-text serializer has no shape for a map and would print a Go map dump. */
+func plainTextErrorResponse(statusCode int, message string, payload map[string]any, contentType string) httpcontract.Response {
+    lines := []string{fmt.Sprintf("%d %s", statusCode, message)}
+
+    remaining := make(map[string]any, len(payload))
+    for key, value := range payload {
+        remaining[key] = value
+    }
+    delete(remaining, "status")
+
+    /* the error object carries the message the first line already names; its other entries, the debug context and cause, are listed beside the envelope's */
+    if errorObject, isMap := remaining["error"].(map[string]any); true == isMap {
+        delete(remaining, "error")
+        for key, value := range errorObject {
+            if "message" == key {
+                continue
+            }
+
+            remaining[key] = value
+        }
+    } else if errorMessage, isString := remaining["error"].(string); true == isString && errorMessage == message {
+        delete(remaining, "error")
+    }
+
+    for _, leadingKey := range []string{"requestId", "time"} {
+        value, exists := remaining[leadingKey]
+        if false == exists {
+            continue
+        }
+
+        lines = appendPlainTextEntry(lines, "", leadingKey, value)
+        delete(remaining, leadingKey)
+    }
+
+    keys := make([]string, 0, len(remaining))
+    for key := range remaining {
+        keys = append(keys, key)
+    }
+    sort.Strings(keys)
+
+    for _, key := range keys {
+        lines = appendPlainTextEntry(lines, "", key, remaining[key])
+    }
+
+    response := NewResponse(statusCode, []byte(strings.Join(lines, "\n")+"\n"))
+    if nil == response.headers {
+        response.headers = make(nethttp.Header)
+    }
+    response.headers.Set("Content-Type", contentType)
+
+    return response
+}
+
+func appendPlainTextEntry(lines []string, indent string, key string, value any) []string {
+    label := indent + plainTextLabel(key) + ":"
+
+    if nil == value {
+        return append(lines, label)
+    }
+
+    switch typedValue := value.(type) {
+    case string:
+        return append(lines, labelled(label, typedValue))
+    case error:
+        return append(lines, labelled(label, typedValue.Error()))
+    case fmt.Stringer:
+        return append(lines, labelled(label, typedValue.String()))
+    }
+
+    reflected := reflect.ValueOf(value)
+    switch reflected.Kind() {
+    case reflect.Map:
+        if reflect.String != reflected.Type().Key().Kind() {
+            break
+        }
+
+        lines = append(lines, label)
+
+        mapKeys := make([]string, 0, reflected.Len())
+        for _, mapKey := range reflected.MapKeys() {
+            mapKeys = append(mapKeys, mapKey.String())
+        }
+        sort.Strings(mapKeys)
+
+        for _, mapKey := range mapKeys {
+            lines = appendPlainTextEntry(lines, indent+"  ", mapKey, reflected.MapIndex(reflect.ValueOf(mapKey).Convert(reflected.Type().Key())).Interface())
+        }
+
+        return lines
+    case reflect.Slice, reflect.Array:
+        if reflect.Uint8 == reflected.Type().Elem().Kind() {
+            break
+        }
+
+        lines = append(lines, label)
+        for index := 0; index < reflected.Len(); index++ {
+            lines = append(lines, indent+"  - "+plainTextItem(reflected.Index(index).Interface()))
+        }
+
+        return lines
+    }
+
+    return append(lines, labelled(label, fmt.Sprint(value)))
+}
+
+/* labelled writes an entry on its label's line, the bare label when the value is empty */
+func labelled(label string, text string) string {
+    if "" == text {
+        return label
+    }
+
+    return label + " " + text
+}
+
+func plainTextItem(value any) string {
+    switch typedValue := value.(type) {
+    case string:
+        return typedValue
+    case error:
+        return typedValue.Error()
+    case fmt.Stringer:
+        return typedValue.String()
+    }
+
+    return fmt.Sprint(value)
+}
+
+/* plainTextLabel spells a camel-cased envelope key as words: requestId reads request id. */
+func plainTextLabel(key string) string {
+    var builder strings.Builder
+    for index, character := range key {
+        if 0 < index && true == unicode.IsUpper(character) {
+            builder.WriteRune(' ')
+        }
+        builder.WriteRune(unicode.ToLower(character))
+    }
+
+    return builder.String()
 }

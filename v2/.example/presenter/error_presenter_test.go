@@ -534,3 +534,51 @@ func TestBuildErrorContextCarriesTheMintedRequestIdNotTheClaimedOne(t *testing.T
         t.Fatalf("expected the minted request id in the error context, got %v", errorContext["requestId"])
     }
 }
+
+/* a refusal below 500 whose cause is a failure of the server keeps its status and leaves one record at error under the name the caller gives, with the cause, the status and the route, and the cause marked logged */
+func TestJournalRefusalCauseWritesOneRecordAndMarksTheCauseLogged(t *testing.T) {
+    runtimeInstance, request, logger := runtimeWithJournal(t)
+
+    cause := melodyexception.NewError(causeSecret, nil, nil)
+
+    JournalRefusalCause(runtimeInstance, request, nethttp.StatusUnauthorized, "invalid credentials", "security login failure event dispatch failed", cause)
+
+    lines := logger.allLines()
+    if 1 != len(lines) {
+        t.Fatalf("the refusal wrote %d records, wanted exactly one", len(lines))
+    }
+
+    if "error" != lines[0].level || "security login failure event dispatch failed" != lines[0].message {
+        t.Fatalf("the record is %q at %s, wanted the named record at error", lines[0].message, lines[0].level)
+    }
+
+    if nethttp.StatusUnauthorized != lines[0].context["statusCode"] || "invalid credentials" != lines[0].context["publicMessage"] {
+        t.Fatalf("the record does not name the kept refusal: %v", lines[0].context)
+    }
+
+    if false == strings.Contains(fmt.Sprintf("%v", lines[0].context), causeSecret) {
+        t.Fatalf("the record carries no cause: %v", lines[0].context)
+    }
+
+    if false == melodyexception.IsAlreadyLogged(cause) {
+        t.Fatal("the journaled cause is not marked logged")
+    }
+}
+
+func TestJournalRefusalCauseWritesNothingWithoutACause(t *testing.T) {
+    runtimeInstance, request, logger := runtimeWithJournal(t)
+
+    JournalRefusalCause(runtimeInstance, request, nethttp.StatusUnauthorized, "invalid credentials", "security login failure event dispatch failed", nil)
+
+    if 0 != len(logger.allLines()) {
+        t.Fatalf("a refusal without a cause wrote %d records", len(logger.allLines()))
+    }
+}
+
+/* allLines answers every record, whatever its message */
+func (instance *recordingLogger) allLines() []recordedLine {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return append([]recordedLine(nil), instance.records...)
+}

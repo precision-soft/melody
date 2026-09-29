@@ -3,6 +3,7 @@ package http
 import (
     "context"
     "encoding/json"
+    "errors"
     nethttp "net/http"
     "strings"
     "testing"
@@ -200,4 +201,154 @@ func (instance *panickingSerializer) Deserialize(payload []byte, target any) err
 
 func (instance *panickingSerializer) ContentType() string {
     return "application/x-panic"
+}
+
+func newErrorRendererTextAndJsonRuntime() runtimecontract.Runtime {
+    return newErrorRendererTestRuntime(
+        logging.NewNopLogger(),
+        map[string]serializercontract.Serializer{
+            "application/json": serializer.NewJsonSerializer(),
+            "text/plain":       serializer.NewPlainTextSerializer(),
+        },
+    )
+}
+
+func plainTextErrorLinesWithoutTime(t *testing.T, body string, timeIndex int) []string {
+    t.Helper()
+
+    if false == strings.HasSuffix(body, "\n") {
+        t.Fatalf("expected the body to end with a newline, got %q", body)
+    }
+
+    lines := strings.Split(strings.TrimSuffix(body, "\n"), "\n")
+    kept := make([]string, 0, len(lines))
+    timeLines := 0
+    for index, line := range lines {
+        if true == strings.HasPrefix(line, "time: ") {
+            timeLines++
+
+            if timeIndex != index {
+                t.Fatalf("expected the time on line %d, got it on line %d of %q", timeIndex, index, body)
+            }
+
+            continue
+        }
+
+        kept = append(kept, line)
+    }
+
+    if 1 != timeLines {
+        t.Fatalf("expected exactly one time line, got %d in %q", timeLines, body)
+    }
+
+    return kept
+}
+
+func TestRenderErrorResponse_AnswersATextPlainClientWithReadableLines(t *testing.T) {
+    request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/fail", "text/plain")
+
+    response := renderErrorResponse(newErrorRendererTextAndJsonRuntime(), request, nethttp.StatusBadRequest, "bad request", nil)
+
+    if nethttp.StatusBadRequest != response.StatusCode() {
+        t.Fatalf("expected the error status, got %d", response.StatusCode())
+    }
+
+    if "text/plain; charset=utf-8" != response.Headers().Get("Content-Type") {
+        t.Fatalf("expected the plain text content type, got %q", response.Headers().Get("Content-Type"))
+    }
+
+    body := readResponseBody(t, response)
+    if true == strings.Contains(body, "map[") {
+        t.Fatalf("expected no Go map dump, got %q", body)
+    }
+
+    lines := strings.Split(strings.TrimSuffix(body, "\n"), "\n")
+    if 3 != len(lines) || "400 bad request" != lines[0] || "request id: test" != lines[1] || false == strings.HasPrefix(lines[2], "time: ") {
+        t.Fatalf("expected the status line, the request id and the time, got %q", body)
+    }
+}
+
+func TestRenderErrorResponse_ListsTheDebugEntriesOfATextPlainErrorByKey(t *testing.T) {
+    request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/fail", "text/plain")
+
+    response := renderErrorResponse(
+        newErrorRendererTextAndJsonRuntime(),
+        request,
+        nethttp.StatusUnprocessableEntity,
+        "invalid payload",
+        map[string]any{
+            "validationErrors": []error{errors.New("name: is required"), errors.New("price: must be positive")},
+            "context":          map[string]any{"limit": 3, "field": "name", "route": ""},
+            "cause":            "decoder refused the body",
+        },
+    )
+
+    expected := []string{
+        "422 invalid payload",
+        "request id: test",
+        "cause: decoder refused the body",
+        "context:",
+        "  field: name",
+        "  limit: 3",
+        "  route:",
+        "validation errors:",
+        "  - name: is required",
+        "  - price: must be positive",
+    }
+
+    lines := plainTextErrorLinesWithoutTime(t, readResponseBody(t, response), 2)
+    if strings.Join(expected, "\n") != strings.Join(lines, "\n") {
+        t.Fatalf("expected\n%s\ngot\n%s", strings.Join(expected, "\n"), strings.Join(lines, "\n"))
+    }
+}
+
+func TestRenderErrorResponse_KeepsTheJsonEnvelopeForAJsonClientBesideThePlainTextSerializer(t *testing.T) {
+    request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/fail", "application/json")
+
+    response := renderErrorResponse(newErrorRendererTextAndJsonRuntime(), request, nethttp.StatusBadRequest, "bad request", nil)
+
+    if false == strings.HasPrefix(response.Headers().Get("Content-Type"), "application/json") {
+        t.Fatalf("expected the json content type, got %q", response.Headers().Get("Content-Type"))
+    }
+
+    payload := map[string]any{}
+    if unmarshalErr := json.Unmarshal([]byte(readResponseBody(t, response)), &payload); nil != unmarshalErr {
+        t.Fatalf("expected a json body, got %v", unmarshalErr)
+    }
+
+    errorObject, isObject := payload["error"].(map[string]any)
+    if false == isObject || "bad request" != errorObject["message"] || "test" != payload["requestId"] || float64(400) != payload["status"] {
+        t.Fatalf("expected the json envelope, got %v", payload)
+    }
+}
+
+func TestIsPlainTextMediaType_ReadsTheMediaTypeWhateverItsParameters(t *testing.T) {
+    cases := map[string]bool{
+        "text/plain":                  true,
+        "text/plain; charset=utf-8":   true,
+        "TEXT/PLAIN; charset=latin-1": true,
+        "text/plainish":               false,
+        "application/json":            false,
+        "":                            false,
+    }
+
+    for contentType, expected := range cases {
+        if expected != isPlainTextMediaType(contentType) {
+            t.Fatalf("expected %v for %q", expected, contentType)
+        }
+    }
+}
+
+func TestPlainTextLabel_SpellsACamelCasedKeyAsWords(t *testing.T) {
+    cases := map[string]string{
+        "requestId":        "request id",
+        "validationErrors": "validation errors",
+        "cause":            "cause",
+    }
+
+    for key, expected := range cases {
+        if expected != plainTextLabel(key) {
+            t.Fatalf("expected %q for %q, got %q", expected, key, plainTextLabel(key))
+        }
+    }
 }

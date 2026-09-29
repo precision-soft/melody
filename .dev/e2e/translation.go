@@ -9,8 +9,10 @@ import (
 
 const translationLabel = "translation"
 
-/* the example's greeting route is public (config/security.go lists ^/i18n), so every probe below is anonymous. The handler reads the locale from the ?locale= QUERY parameter (handler/i18n/greeting_handler.go) and hands it to the translator; ?name= fills the greeting placeholder and ?count= drives the ICU plural. */
-const translationRoute = "/i18n/greeting/"
+/* the example's greeting route carries the locale as its first path segment, validated by the router against the route's list (en, ro, ro-RO), and config/security.go makes the prefix public under exactly those locales, so every probe below is anonymous. The handler serves the locale the route matched (handler/i18n/greeting_handler.go); ?name= fills the greeting placeholder and ?count= drives the ICU plural. */
+func translationRoute(locale string) string {
+    return "/" + locale + "/i18n/greeting/"
+}
 
 /* translationPayload mirrors handler/i18n.GreetingResponse. */
 type translationPayload struct {
@@ -47,14 +49,14 @@ func runTranslationCheck(baseUrl string) {
 
     pass("both catalogues answered all three ICU plural branches, including the exact-zero one")
 
-    assertTranslationFallback(client)
+    assertTranslationUnservedLocale(client)
     assertTranslationRegionFallback(client)
     assertTokenFirewallJsonEntryPoint(client)
 }
 
 func assertTranslationCatalogue(client *liveExampleClient, locale string, name string, expected string) {
     payload := translationPayload{}
-    path := fmt.Sprintf("%s?locale=%s&name=%s&count=1", translationRoute, locale, name)
+    path := fmt.Sprintf("%s?name=%s&count=1", translationRoute(locale), name)
 
     response := client.get(translationLabel, path)
     requireLiveExampleStatus(translationLabel, path, response, http.StatusOK)
@@ -78,7 +80,7 @@ func assertTranslationCatalogue(client *liveExampleClient, locale string, name s
 
 func assertTranslationPlural(client *liveExampleClient, locale string, count int, expected string) {
     payload := translationPayload{}
-    path := fmt.Sprintf("%s?locale=%s&count=%d", translationRoute, locale, count)
+    path := fmt.Sprintf("%s?count=%d", translationRoute(locale), count)
 
     response := client.get(translationLabel, path)
     requireLiveExampleStatus(translationLabel, path, response, http.StatusOK)
@@ -96,48 +98,22 @@ func assertTranslationPlural(client *liveExampleClient, locale string, count int
     }
 }
 
-/* assertTranslationFallback proves the fallback CHAIN rather than the mere absence of an error. An unknown locale must render the default catalogue's message; the failure it guards against is a translator that fell through to returning the message ID itself ("greeting", "cart.items"), which is what a missing-catalogue path degrades to and what a caller then renders straight into a page. */
-func assertTranslationFallback(client *liveExampleClient) {
-    payload := translationPayload{}
-    path := translationRoute + "?locale=de&name=Ada&count=2"
-
-    response := client.get(translationLabel, path)
-    requireLiveExampleStatus(translationLabel, path, response, http.StatusOK)
-    decodeLiveExamplePayload(translationLabel, response, &payload)
-
-    for _, rendered := range []string{payload.Greeting, payload.Cart} {
-        if true == translationLooksLikeMessageIdentifier(rendered) {
-            fail(
-                "%s: an unknown locale rendered the raw message id %q instead of falling back to the default catalogue",
-                translationLabel,
-                rendered,
-            )
+/* assertTranslationUnservedLocale proves the locale is the ROUTE's to validate: a locale the greeting's list does not name matches no route and is not under the public rule, so an anonymous caller is refused by the catch-all instead of being served a fallback, and the old unprefixed spelling, which carried the locale in its query, is refused the same way. The translator's own fallback for an unknown locale is no longer reachable through this door; its unit tests pin it. */
+func assertTranslationUnservedLocale(client *liveExampleClient) {
+    for _, path := range []string{translationRoute("de") + "?name=Ada", "/i18n/greeting/?locale=ro&name=Ada"} {
+        response := client.get(translationLabel, path)
+        if http.StatusUnauthorized != response.statusCode || true == strings.Contains(response.bodyText(), "Ada") {
+            fail("%s: %s answered %d %s, wanted the catch-all's 401 and no greeting", translationLabel, path, response.statusCode, exampleTruncate(response.bodyText()))
         }
     }
 
-    if "Hello, Ada!" != payload.Greeting {
-        fail(
-            "%s: an unknown locale rendered the greeting as %q, wanted the default catalogue's %q",
-            translationLabel,
-            payload.Greeting,
-            "Hello, Ada!",
-        )
-    }
-    if "2 items in your cart" != payload.Cart {
-        fail(
-            "%s: an unknown locale rendered count=2 as %q, wanted the default catalogue's plural form",
-            translationLabel,
-            payload.Cart,
-        )
-    }
-
-    pass("an unknown locale fell back to the default catalogue instead of returning the raw message id")
+    pass("an unlisted locale and the old query spelling are refused 401 by the catch-all rather than served a greeting")
 }
 
 /* assertTranslationRegionFallback is the second link of the chain: a region-qualified locale with no catalogue of its own resolves to its base language. A resolver that only ever matched the whole tag would silently serve every "ro-RO" reader the english text, which is a defect no error surfaces. */
 func assertTranslationRegionFallback(client *liveExampleClient) {
     payload := translationPayload{}
-    path := translationRoute + "?locale=ro-RO&name=Ada&count=1"
+    path := translationRoute("ro-RO") + "?name=Ada&count=1"
 
     response := client.get(translationLabel, path)
     requireLiveExampleStatus(translationLabel, path, response, http.StatusOK)
@@ -156,10 +132,6 @@ func assertTranslationRegionFallback(client *liveExampleClient) {
     }
 
     pass("a region-qualified locale (ro-RO) fell back to its base language catalogue")
-}
-
-func translationLooksLikeMessageIdentifier(rendered string) bool {
-    return "greeting" == rendered || "cart.items" == rendered
 }
 
 /* assertTokenFirewallJsonEntryPoint proves the PER-FIREWALL entry point overrides the global one. The example gives the token firewall on /secure a JsonEntryPoint (config/security.go) while the global entry point redirects to the login page, so a browser-shaped request — Accept: text/html, no credential — must be answered with a 401 json envelope and NOT with a 302 to /login/.

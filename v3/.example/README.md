@@ -14,7 +14,7 @@ Conceptually, the example models a minimal admin-style catalog application:
 
 - Product listing and detail pages
 - Login / logout flow based on sessions
-- A simple role system (`ROLE_USER`, `ROLE_EDITOR`, `ROLE_ADMIN`)
+- A simple role system (`ROLE_USER`, `ROLE_EDITOR`, `ROLE_ADMIN`) ordered by a role hierarchy: the admin is above the editor, the editor above the user
 - HTML pages backed by JSON endpoints (consumed via jQuery)
 - CLI commands that demonstrate Melody’s CLI conventions and container/runtime usage
 - Prices quoted in one currency and readable in another, against exchange rates fetched from an outside provider
@@ -28,8 +28,10 @@ Sign-in and every signed-in request read the account from the repository, past t
 For convenience, the example ships with a few predefined users:
 
 - `user` / `user` — `ROLE_USER`
-- `editor` / `editor` — `ROLE_USER`, `ROLE_EDITOR`
-- `admin` / `admin` — `ROLE_USER`, `ROLE_EDITOR`, `ROLE_ADMIN`
+- `editor` / `editor` — `ROLE_EDITOR`
+- `admin` / `admin` — `ROLE_ADMIN`
+
+Each account holds the one role that names its position; the role hierarchy of [`config/security.go`](./config/security.go) is what lets the admin edit and the editor read, so a role added later is one line of the hierarchy rather than an edit of every account.
 
 ---
 
@@ -153,7 +155,19 @@ Once started, open the application in your browser:
 
 - http://localhost:8080
 
-The application also answers `GET /health` without a session, which is the route a monitoring system or a container orchestrator probes. It is public on purpose, so a probe that had to authenticate is not answered with a redirect to the login page instead of the readiness of the process. The other public rules of [`config/security.go`](./config/security.go) are the login and logout doors, the frontend bundle (`/`, `/index.html`, `/assets`, `/favicon`, `/i18n`, `/routes`), `/metrics`, `/openapi.json` and the cipher round-trip probe, which reads nothing from the caller; every other route carries a role — a door that writes through the example into a backend (the object storage, the outbox, the message bus) carries the write role the catalogue writes carry, and what no rule names falls under the `^/` catch-all, which requires a signed-in user.
+The application also answers `GET /health` without a session, which is the route a monitoring system or a container orchestrator probes. It is public on purpose, so a probe that had to authenticate is not answered with a redirect to the login page instead of the readiness of the process. The other public rules of [`config/security.go`](./config/security.go) are the login and logout doors, the frontend bundle (`/`, `/index.html`, `/assets`, `/favicon`, `/routes`), the greeting under the locales it is served in (`/en/i18n`, `/ro/i18n`, `/ro-RO/i18n`), `/openapi.json` and the cipher round-trip probe, which reads nothing from the caller. A door that is one path is opened by an exact rule, which speaks for that spelling and nothing beneath or beside it: `/health` is public and `/healthz` is not. `/metrics` answers only the scraper presenting `Authorization: Bearer <APP_METRICS_TOKEN>`, which the development prometheus carries; an empty token leaves it public. Every other route carries a role — a door that writes through the example into a backend (the object storage, the outbox, the message bus) carries the write role the catalogue writes carry, and what no rule names falls under the `^/` catch-all, which requires a signed-in user.
+
+The serving settings the [`.env`](./.env) carries:
+
+- a signed-in session is kept in `var/session/session.json` (`APP_SESSION_FILE`), so a browser stays signed in across the restart the development supervisor does on every saved change, and it expires a day after its last request (`MELODY_HTTP_SESSION_TTL=24h`);
+- a request body past 64 KiB is refused with 413 before a door reads it (`MELODY_HTTP_MAX_REQUEST_BODY_BYTES`), the object storage upload included;
+- the bundle's assets are cached for an hour and revalidated by ETag and Last-Modified (`MELODY_STATIC_ENABLE_CACHE`, `MELODY_STATIC_CACHE_MAX_AGE`); a developer who wants every save fetched afresh turns the cache off in `.env.dev.local`, which wins over `.env`;
+- the prefixes of the application's own doors (`/storage`, `/outbox`, `/twofactor`, `/internal`) are never served from `public/` (`MELODY_STATIC_EXCLUDED_PATHS`): the file server answers ahead of routing, so a file dropped there would otherwise be served to a signed-in caller in place of the door;
+- the sign-in submit spends the same per-address write budget as the catalogue's writes, thirty a minute, counted in redis and, without redis, in the process itself;
+- the listings travel gzip-compressed to a client that accepts it;
+- behind a proxy that terminates tls, the scheme it forwards (`X-Forwarded-Proto`) is believed from the private ranges and loopback, so the session cookie is marked `Secure`; the rate limit's client address, which decides whose budget a request spends, is believed from the balancer alone (`APP_TRUSTED_PROXY_LIST`).
+
+The greeting is served at `/:_locale/i18n/greeting/` for `en`, `ro` and `ro-RO`, the last answered from the `ro` catalogue; another locale matches no route. The `/internal` firewall carries its own authorization and reads nothing of the global rules, and it refuses an envelope whose expiry sits more than five minutes ahead; `internal:sign --ttl` mints one for a chosen lifetime, uncapped, so an operator can see that refusal.
 
 > The committed [`.env`](./.env) points the integration endpoints at the dev compose service names (`redis:6379`, `mysql`, …), so the fully-wired experience is [`./dc up:all --build`](#running-fully-against-containers), which runs this same app inside the dev container where those names resolve. A bare host `go run .` needs those services reachable (override the endpoints to the mapped host ports, [see below](#running-the-binary-directly-against-mapped-ports)) — or remove their lines from `.env` to boot with the in-process fallbacks and zero infrastructure.
 
@@ -213,6 +227,8 @@ go run . example:grant:role --role ROLE_ADMIN --user ada    # the command's own 
 go run . --role worker app:info                        # the runtime process role
 ```
 
+A console run has no signed-in user, so the audit trail and the catalogue journal name the run itself as the actor of the grant, `process:<id>`, the process id every journal record of that run carries; a signed-in request names its user, and an unauthenticated one the system.
+
 ---
 
 ## Platform integrations (optional, env-gated)
@@ -221,7 +237,7 @@ The example wires **every v3 platform integration**. Each backend that needs ext
 
 | Integration                                                                                                                                      | Activated by                                 | Falls back to            | Reached at                                    |
 |--------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------|--------------------------|-----------------------------------------------|
-| [`opentelemetry`](../../integrations/opentelemetry/v3/) — Prometheus metrics middleware                                                          | always on                                    | —                        | `GET /metrics`                                |
+| [`opentelemetry`](../../integrations/opentelemetry/v3/) — Prometheus metrics middleware and lifecycle handler decorator                          | always on                                    | —                        | `GET /metrics`                                |
 | [`websocket`](../../integrations/websocket/v3/) — WebSocket bound to the SSE hub                                                                 | always on                                    | —                        | `GET /ws` (and `GET /events/stream` for SSE)  |
 | `encrypt` ([`bunorm/v3/encrypt`](../../integrations/bunorm/v3/encrypt/)) — AES-256-GCM cipher                                                    | always on                                    | —                        | `GET /encrypt/roundtrip`                      |
 | [`amqp`](../../integrations/amqp/v3/) — durable message-bus transport                                                                            | `AMQP_DSN`                                   | in-memory transport      | `POST /messagebus/dispatch`                   |
@@ -231,6 +247,8 @@ The example wires **every v3 platform integration**. Each backend that needs ext
 | [`bunorm`](../../integrations/bunorm/v3/) — bun ORM `*bun.DB`, transparent column encryption, field-level audit trail                            | `MYSQL_HOST`                                 | —                        | every catalogue write: audited and journalled |
 | [`bunorm/migrate`](../../integrations/bunorm/migrate/v3/) — the `db:*` migration command family                                                   | always on (fails at `Run` without a database) | —                        | `db:migrate`, `db:status`, `db:rollback`      |
 | [`bunorm/pgsql`](../../integrations/bunorm/pgsql/v3/) — the reading archive's PostgreSQL database and its advisory lock                           | `PGSQL_HOST`                                  | in-memory archive/lock   | `GET /reports/api/history/`                   |
+
+`GET /metrics` carries two request families built on one meter. The metrics middleware counts the requests the pipeline handles, labelled by route (`http_server_request_count_total`); the handler decorator of [`opentelemetry.NewHandlerDecorator`](../../integrations/opentelemetry/v3/handler_decorator.go), which wraps the whole kernel handler, counts every request by method and status (`http_server_lifecycle_request_count_total`), the ones the firewall refuses before any middleware runs included. A 401 the firewall answers therefore shows in the lifecycle family only. The decorator's tracer is a no-op: the spans are the otlp module's tracing middleware's, and the decorator keeps the caller's trace context so that span stays under it.
 
 The lock service follows a single priority: Redis if configured, otherwise MySQL, otherwise in-memory. Transparent encryption-at-rest is not shown through a route of its own: the two-factor enrollment table stores the shared secret and the recovery codes as `encrypt.EncryptedString` columns, so `POST /twofactor/enroll` writes ciphertext MySQL holds and `POST /twofactor/verify` reads it back to recompute a code. Both act on the caller's own account — the identifier comes from the authenticated token rather than from the request — and enrolling again replaces the enrollment that is there, which is the door an account whose authenticator is lost needs. The enrollment goes with the account: the schema cascades the row on the deletion of its user, and a subscriber releases it on the deletion event ahead of the cache listener — the dispatch stops at the first listener that fails, so a cache outage at that moment cannot leave the row for the next holder of the recycled identifier. `GET /encrypt/roundtrip` reports the ciphertext beside the value that came back, which is the half a stored column cannot show.
 
@@ -427,6 +445,8 @@ keepalive comment every half of it, so a stream that outlives the server's `Writ
 `net/http` arms that deadline once, from the request line, and the first event published after it used to be
 the one lost, on a connection the client still believed open. A write that fails while the client is still
 there is journaled as a frame lost; a client that left is the ordinary end of a stream and journals nothing.
+
+A refusal for a client that asks for `text/plain` is written as lines rather than handed to the plain-text serializer, which would print the envelope's fields bare: the status and the public errors first, then the request id, the time and the rest of the context in key order, and under the development environment the cause's trace one frame per line. A success keeps the serializer's rendering.
 
 ---
 

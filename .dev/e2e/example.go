@@ -42,7 +42,7 @@ type exampleMajor struct {
     /* showcaseProbes and sessionRestartProbe gate the wirings an example carries — cors, gzip, the api-key firewall, per-field validation errors, the identity and grammar doors, the trusted-proxy client address, the file-backed session storage and the static cache validators. The three examples deliberately do not mirror each other, so these are per-major capabilities like integrationDemos, not shared surface, and showcaseProbes names each wiring on its own: the two published examples carry all of them, the third the cors listeners and the per-field validation. */
     showcaseProbes      exampleShowcaseProbes
     sessionRestartProbe bool
-    /* loginThrottleProbe names the majors whose example puts the login submit behind the shared per-address write budget. It is a per-major capability like the two above: v3's example declares the route public and leaves it unthrottled, so asserting the refusal there would assert a wiring it does not carry. */
+    /* loginThrottleProbe names the majors whose example puts the login submit behind the shared per-address write budget; the three examples do. */
     loginThrottleProbe bool
     /* journalOnPostgres names where the major keeps its catalog journal: the v1 example runs two live databases in one process — the catalogue on mysql, the journal on postgres — so its out-of-band journal reads go through the postgres door while the later majors keep reading mysql. */
     journalOnPostgres bool
@@ -57,7 +57,7 @@ type exampleMajor struct {
 var exampleMajorCatalog = []exampleMajor{
     {number: 1, label: "v1", relativeDirectory: ".example", port: 18081, integrationDemos: true, showcaseProbes: exampleShowcaseProbesAll, sessionRestartProbe: true, loginThrottleProbe: true, journalOnPostgres: true},
     {number: 2, label: "v2", relativeDirectory: "v2/.example", port: 18082, integrationDemos: true, showcaseProbes: exampleShowcaseProbesAll, sessionRestartProbe: true, loginThrottleProbe: true},
-    {number: 3, label: "v3", relativeDirectory: "v3/.example", port: 18083, integrationDemos: false, showcaseProbes: exampleShowcaseProbes{cors: true, validation: true}, processServiceInventory: true, shutdownStreamProbe: true, requestSurfaceProbes: true},
+    {number: 3, label: "v3", relativeDirectory: "v3/.example", port: 18083, integrationDemos: false, showcaseProbes: exampleShowcaseProbes{cors: true, gzip: true, validation: true, staticCache: true}, sessionRestartProbe: true, loginThrottleProbe: true, processServiceInventory: true, shutdownStreamProbe: true, requestSurfaceProbes: true},
 }
 
 /* exampleMysqlDsn answers the dsn of one major's own database. The three examples share the development mysql but not a database in it — each holds its schema in melody_example_v<major> — so a harness section that reads what an application wrote has to ask the database that application writes to. MYSQL_DSN carries v3's, the one the supervised sections use, and this swaps the database segment of it for the major being driven.
@@ -596,7 +596,7 @@ func (instance *exampleClient) sessionCookie() *http.Cookie {
 const (
     exampleRoutesRoute        = "/routes/"
     exampleRoutesRouteNoSlash = "/routes"
-    exampleMissingRoute       = "/routes/no-such-route/"
+    exampleMissingRoute       = "/assets/no-such-route/"
     exampleLoginRoute         = "/login/"
     exampleLogoutRoute        = "/logout/"
     exampleHealthRoute        = "/health"
@@ -636,8 +636,10 @@ func runExampleHttpAssertions(major exampleMajor, application *exampleApplicatio
     runExampleShowcaseAssertions(major, application, redisAddress)
 
     if true == major.requestSurfaceProbes {
-        runExampleRequestSurfaceAssertions(major)
+        runExampleRequestSurfaceAssertions(major, application)
     }
+
+    assertExampleTextPlainErrorsAreReadable(major)
 
     /* the demo routes sit under the example's ROLE_USER catch-all, so they are driven here — between the login and the logout — with the session the login flow established */
     if true == major.integrationDemos {

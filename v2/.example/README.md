@@ -266,6 +266,8 @@ Most JSON endpoints return a small, consistent response envelope:
 
 This keeps frontend code predictable and minimizes ad-hoc handling.
 
+A refusal for a client that asks for `text/plain` is written as lines rather than handed to the plain-text serializer, which would print the envelope's fields bare: the status and the public errors first, then the request id, the time and the rest of the context in key order, and under the development environment the cause's trace one frame per line. A success keeps the serializer's rendering.
+
 ---
 
 ## Build modes: embedded vs filesystem

@@ -218,7 +218,8 @@ func runExampleJwtRevocationCheck(
 
     assertExampleSecureIdentity(bearer, survivorToken, http.StatusOK, "a json web token minted for another device before the revocation")
 
-    time.Sleep(1100 * time.Millisecond)
+    /* the example widens a revocation two seconds past its boundary (config/token_auth.go, the skew the replicas' clocks may differ by), and a token's issue instant counts in whole seconds, so the replacement is minted more than three seconds after the revocation to be issued past it */
+    time.Sleep(3200 * time.Millisecond)
 
     replacement, _ := runExampleMintCommand(
         "opaque token revocation",

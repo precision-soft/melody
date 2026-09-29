@@ -22,6 +22,7 @@ require (
 	github.com/uptrace/bun/dialect/mysqldialect v1.2.17
 	github.com/uptrace/bun/dialect/pgdialect v1.2.17
 	github.com/uptrace/bun/driver/pgdriver v1.2.17
+	go.opentelemetry.io/otel/trace v1.44.0
 	golang.org/x/crypto v0.51.0
 )
 
@@ -65,7 +66,6 @@ require (
 	go.opentelemetry.io/otel/metric v1.44.0 // indirect
 	go.opentelemetry.io/otel/sdk v1.44.0 // indirect
 	go.opentelemetry.io/otel/sdk/metric v1.44.0 // indirect
-	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	golang.org/x/mod v0.35.0 // indirect

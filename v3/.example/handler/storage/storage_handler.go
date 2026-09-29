@@ -2,6 +2,7 @@ package storage
 
 import (
     "bytes"
+    "errors"
     "io"
     nethttp "net/http"
 
@@ -25,6 +26,12 @@ func PutHandler(storage *melodyawss3.Storage) melodyhttpcontract.Handler {
         if httpRequest := request.HttpRequest(); nil != httpRequest && nil != httpRequest.Body {
             readBytes, readErr := io.ReadAll(httpRequest.Body)
             if nil != readErr {
+                /* the kernel bounds every body by MELODY_HTTP_MAX_REQUEST_BODY_BYTES; a body past it is the client's too large a payload, answered as the kernel answers it on a bind, not as an unreadable body */
+                var maxBytesErr *nethttp.MaxBytesError
+                if true == errors.As(readErr, &maxBytesErr) {
+                    return presenter.ApiError(runtimeInstance, request, nethttp.StatusRequestEntityTooLarge, "payload too large"), nil
+                }
+
                 return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "could not read the request body"), nil
             }
 

@@ -5,13 +5,15 @@ import (
     "errors"
     "strings"
     "testing"
+    "time"
 
     melodysecurity "github.com/precision-soft/melody/v3/security"
 )
 
-func newInternalSignTestSigner() *melodysecurity.HmacEnvelopeSigner {
+func newInternalSignTestSigner(ttl time.Duration) *melodysecurity.HmacEnvelopeSigner {
     return melodysecurity.NewHmacEnvelopeSigner(melodysecurity.HmacEnvelopeSignerConfig{
         App: "wms-service",
+        Ttl: ttl,
         Secrets: melodysecurity.NewStaticHmacSecretProvider(
             "key-current",
             map[string]melodysecurity.HmacKey{
@@ -22,10 +24,10 @@ func newInternalSignTestSigner() *melodysecurity.HmacEnvelopeSigner {
 }
 
 func TestInternalSignCommandPrintsTheHeaderNameAndValueOnTheCommandWriter(t *testing.T) {
-    signer := newInternalSignTestSigner()
+    signer := newInternalSignTestSigner(0)
     captured := &bytes.Buffer{}
 
-    runErr := NewInternalSignCommand(signer).Run(nil, &flagContext{writer: captured})
+    runErr := NewInternalSignCommand(newInternalSignTestSigner).Run(nil, &flagContext{writer: captured})
     if nil != runErr {
         t.Fatalf("expected the header to be minted, got %v", runErr)
     }
@@ -47,8 +49,39 @@ func TestInternalSignCommandPrintsTheHeaderNameAndValueOnTheCommandWriter(t *tes
 func TestInternalSignCommandAnswersARefusedWrite(t *testing.T) {
     refusal := errors.New("broken pipe")
 
-    runErr := NewInternalSignCommand(newInternalSignTestSigner()).Run(nil, &flagContext{writer: &refusingWriter{refusal: refusal}})
+    runErr := NewInternalSignCommand(newInternalSignTestSigner).Run(nil, &flagContext{writer: &refusingWriter{refusal: refusal}})
     if false == errors.Is(runErr, refusal) {
         t.Fatalf("expected the refused write to fail the command, got %v", runErr)
+    }
+}
+
+func TestInternalSignCommandHandsTheSignerTheTtlAsked(t *testing.T) {
+    cases := map[string]time.Duration{
+        "":    0,
+        "1h":  time.Hour,
+        "45s": 45 * time.Second,
+    }
+
+    for rawTtl, expected := range cases {
+        handed := time.Duration(-1)
+        newSigner := func(ttl time.Duration) *melodysecurity.HmacEnvelopeSigner {
+            handed = ttl
+
+            return newInternalSignTestSigner(ttl)
+        }
+
+        runErr := NewInternalSignCommand(newSigner).Run(nil, &flagContext{stringByName: map[string]string{"ttl": rawTtl}, writer: &bytes.Buffer{}})
+        if nil != runErr || expected != handed {
+            t.Fatalf("expected --ttl %q to hand the signer %s, got %s and %v", rawTtl, expected, handed, runErr)
+        }
+    }
+}
+
+func TestInternalSignCommandRefusesATtlThatIsNotAPositiveDuration(t *testing.T) {
+    for _, rawTtl := range []string{"soon", "-1s", "0s"} {
+        runErr := NewInternalSignCommand(newInternalSignTestSigner).Run(nil, &flagContext{stringByName: map[string]string{"ttl": rawTtl}, writer: &bytes.Buffer{}})
+        if nil == runErr || false == strings.Contains(runErr.Error(), "is not a positive go duration") {
+            t.Fatalf("expected --ttl %q refused, got %v", rawTtl, runErr)
+        }
     }
 }

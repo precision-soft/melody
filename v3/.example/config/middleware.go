@@ -9,12 +9,14 @@ import (
     melodyclockcontract "github.com/precision-soft/melody/v3/clock/contract"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
+    melodyhttpmiddleware "github.com/precision-soft/melody/v3/http/middleware"
     melodykernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
 func (instance *Module) RegisterHttpMiddlewares(kernelInstance melodykernelcontract.Kernel, registrar melodyapplicationcontract.HttpMiddlewareRegistrar) {
-    /* the metrics middleware is contributed by the opentelemetry module (see configure.go); this module adds only the example-specific timing and journal-flush middlewares. */
+    /* the metrics middleware is contributed by the opentelemetry module (see configure.go). The compression wraps the example's own middlewares, so the listings travel gzip-compressed to a client that accepts it, with the headers the inner middlewares set on the response kept; a body under a kilobyte is left as it is. */
+    registrar.Use(melodyhttpmiddleware.DefaultCompressionMiddleware())
     registrar.Use(NewTimingMiddleware(kernelInstance.Clock()))
     registrar.Use(NewCatalogJournalFlushMiddleware())
 }

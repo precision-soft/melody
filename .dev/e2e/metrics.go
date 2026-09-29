@@ -14,20 +14,30 @@ const metricsLabel = "metrics"
 
 const metricsRoute = "/metrics"
 
+/* metricsScrapeToken is the example's APP_METRICS_TOKEN (v3/.example/.env), the credential its development prometheus presents too: /metrics answers no caller without it */
+const metricsScrapeToken = "melody-example-metrics-scrape-token-0001"
+
 /* the metric names are matched by PREFIX rather than by their exact sanitised spelling. The opentelemetry instruments are declared as "http.server.request.count" and "http.server.request.duration" and the prometheus exporter rewrites both — dots to underscores, a "_total" suffix on the counter, the unit folded into the histogram's name ("http_server_request_duration_milliseconds"). Pinning the rewritten spelling would make this section fail on an exporter upgrade that changed a suffix while the metric itself kept working; the integration's own test matches by prefix for the same reason. */
 const (
-    metricsCounterPrefix        = "http_server_request_count"
-    metricsCounterSuffix        = "_total"
-    metricsHistogramPrefix      = "http_server_request_duration"
-    metricsHistogramCountSuffix = "_count"
+    metricsLifecycleCounterPrefix = "http_server_lifecycle_request_count"
+    metricsCounterPrefix          = "http_server_request_count"
+    metricsCounterSuffix          = "_total"
+    metricsHistogramPrefix        = "http_server_request_duration"
+    metricsHistogramCountSuffix   = "_count"
 )
 
 /* metricsProbeRoute is the route this section calls, and metricsControlRoute is the route it must NOT touch. The route LABEL is the pattern the router matched, which carries no trailing slash. */
 const (
     metricsProbeRoute        = "/health"
     metricsProbeRouteLabel   = "/health"
-    metricsControlPath       = "/i18n/greeting/?locale=en&count=1"
-    metricsControlRouteLabel = "/i18n/greeting"
+    metricsControlPath       = "/en/i18n/greeting/?count=1"
+    metricsControlRouteLabel = "/:_locale/i18n/greeting"
+)
+
+/* metricsRefusedRoute is a route the firewall refuses an anonymous caller with 401 before any middleware runs, and metricsRefusedRequestCount is how many such requests the section issues: the lifecycle counter must grow by exactly that many 401s while the middleware's 401 series stays where it was. */
+const (
+    metricsRefusedRoute        = "/categories/api/read/"
+    metricsRefusedRequestCount = 2
 )
 
 /* metricsProbeRequestCount is how many probe requests the section issues; the counter delta must equal it exactly. */
@@ -41,6 +51,15 @@ const metricsScrapeBudget = 30 * time.Second
    The delta assertions are the point. "The counter exists" is satisfied by a middleware that recorded one request and then stopped, and "the counter is above zero" is satisfied by requests from earlier sections. Growing by EXACTLY the number of requests issued is satisfied by neither, and the untouched control route is what separates "the counter grows" from "the counter grows for the route that was called". */
 func runMetricsCheck(baseUrl string) {
     client := newLiveExampleClient(baseUrl)
+
+    /* the exposition is the scraper's alone: a caller without the credential, or with another one, is refused 401 before the baseline is read with it, so these two refusals move no series the deltas below are taken over */
+    for _, headerList := range []map[string]string{{}, {"Authorization": "Bearer not-the-scrape-token"}} {
+        refused := client.call(metricsLabel, liveExampleRequest{method: "GET", path: metricsRoute, headerList: headerList})
+        if http.StatusUnauthorized != refused.statusCode {
+            fail("%s: %s answered %d without the scrape credential (%v), wanted 401", metricsLabel, metricsRoute, refused.statusCode, headerList)
+        }
+    }
+    pass("%s refuses a caller without the scrape credential, or with another one, 401", metricsRoute)
 
     /* the control route is called ONCE here, before the baseline, purely so its series is guaranteed to exist: a control assertion comparing an absent series against an absent series proves nothing at all */
     client.get(metricsLabel, metricsControlPath)
@@ -69,6 +88,14 @@ func runMetricsCheck(baseUrl string) {
     for issued := 1; issued <= metricsProbeRequestCount; issued++ {
         response := client.get(metricsLabel, metricsProbeRoute)
         requireLiveExampleStatus(metricsLabel, metricsProbeRoute, response, http.StatusOK)
+    }
+
+    lifecycleRefusedBefore, _ := metricsStatusCount(baseline, metricsLifecycleCounterPrefix, "401")
+    handledRefusedBefore, _ := metricsStatusCount(baseline, metricsCounterPrefix, "401")
+
+    for issued := 1; issued <= metricsRefusedRequestCount; issued++ {
+        response := client.get(metricsLabel, metricsRefusedRoute)
+        requireLiveExampleStatus(metricsLabel, metricsRefusedRoute, response, http.StatusUnauthorized)
     }
 
     final := readMetricsExposition(client)
@@ -139,11 +166,48 @@ func runMetricsCheck(baseUrl string) {
     }
     pass("the control route %s, which was not called, stayed at %g", metricsControlRouteLabel, controlAfter)
 
+    lifecycleRefusedAfter, lifecycleRefusedFound := metricsStatusCount(final, metricsLifecycleCounterPrefix, "401")
+    if false == lifecycleRefusedFound || metricsRefusedRequestCount != int(lifecycleRefusedAfter-lifecycleRefusedBefore) {
+        fail(
+            "%s: the lifecycle counter's 401 series grew from %g to %g (found %v) over %d refusals of %s, wanted exactly %d — the handler decorator is not counting the firewall's short-circuits",
+            metricsLabel,
+            lifecycleRefusedBefore,
+            lifecycleRefusedAfter,
+            lifecycleRefusedFound,
+            metricsRefusedRequestCount,
+            metricsRefusedRoute,
+            metricsRefusedRequestCount,
+        )
+    }
+
+    handledRefusedAfter, _ := metricsStatusCount(final, metricsCounterPrefix, "401")
+    if handledRefusedBefore != handledRefusedAfter {
+        fail(
+            "%s: the metrics middleware's 401 series moved from %g to %g over refusals the firewall answers before the middleware runs — the lifecycle count is no longer the only one that sees them",
+            metricsLabel,
+            handledRefusedBefore,
+            handledRefusedAfter,
+        )
+    }
+    pass("%d anonymous refusals of %s grew the lifecycle counter's 401 series by exactly %d and left the middleware's 401 series at %g: only the decorator sees a security short-circuit", metricsRefusedRequestCount, metricsRefusedRoute, metricsRefusedRequestCount, handledRefusedAfter)
+
     assertPrometheusScrapesTheExample()
 }
 
+/* metricsStatusCount sums every GET series of a counter family answered with statusCode, whatever its route: the lifecycle family carries no route label, and the middleware's 401s are read across every route. */
+func metricsStatusCount(body string, counterPrefix string, statusCode string) (float64, bool) {
+    return prometheusSeriesSum(body, counterPrefix, metricsCounterSuffix, map[string]string{
+        "http_request_method":       "GET",
+        "http_response_status_code": statusCode,
+    })
+}
+
 func readMetricsExposition(client *liveExampleClient) string {
-    response := client.get(metricsLabel, metricsRoute)
+    response := client.call(metricsLabel, liveExampleRequest{
+        method:     "GET",
+        path:       metricsRoute,
+        headerList: map[string]string{"Authorization": "Bearer " + metricsScrapeToken},
+    })
     requireLiveExampleStatus(metricsLabel, metricsRoute, response, http.StatusOK)
 
     return response.bodyText()

@@ -23,7 +23,7 @@ const openApiDescribedOperationCount = 2
 const openApiValidatedPath = "/products/api/create"
 
 const (
-    openApiPinnedPath      = "/i18n/greeting"
+    openApiPinnedPath      = "/{_locale}/i18n/greeting"
     openApiPinnedMethod    = "get"
     openApiPinnedOperation = "example.i18n.greeting"
     openApiPinnedSchema    = "GreetingResponse"

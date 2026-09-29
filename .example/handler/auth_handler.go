@@ -75,7 +75,9 @@ func LoginHandler() melodyhttpcontract.Handler {
 
         if false == authenticated {
             if dispatchErr := dispatchLoginFailure(runtimeInstance, request); nil != dispatchErr {
-                /* the refusal keeps its status, as the framework's token source keeps it: the dispatch failure is journaled as the cause, not answered as a 500 */
+                /* the refusal keeps its status, as the framework's token source keeps it, and the dispatch failure is journaled here under the token source's message: ApiErrorWithErr journals a server-class status only, so a 401 would carry the cause nowhere outside the debug context */
+                presenter.JournalRefusalCause(runtimeInstance, request, nethttp.StatusUnauthorized, "invalid credentials", "security login failure event dispatch failed", dispatchErr)
+
                 return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusUnauthorized, "invalid credentials", dispatchErr), nil
             }
 

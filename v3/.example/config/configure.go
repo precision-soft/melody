@@ -11,11 +11,10 @@ import (
     melodyopentelemetry "github.com/precision-soft/melody/integrations/opentelemetry/v3"
     melodyotlp "github.com/precision-soft/melody/integrations/opentelemetry/v3/otlp"
     melodyoutbox "github.com/precision-soft/melody/integrations/outbox/v3"
-    melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
-    melodyrueidiscache "github.com/precision-soft/melody/integrations/rueidis/v3/cache"
     melodywebsocket "github.com/precision-soft/melody/integrations/websocket/v3"
     "github.com/precision-soft/melody/v3/.example/migration"
     melodyapplication "github.com/precision-soft/melody/v3/application"
+    melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
 )
 
@@ -25,10 +24,11 @@ func Configure(ctx context.Context, app *melodyapplication.Application) {
 
     /* observability module first so its metrics middleware wraps outermost, ahead of the example timing middleware. */
     app.RegisterModule(melodyopentelemetry.NewModule(melodyopentelemetry.ModuleConfig{
-        Middlewares:      []melodyhttpcontract.Middleware{moduleInstance.metricsMiddleware},
-        MetricsHandler:   moduleInstance.metricsHandler,
-        MetricsPath:      "/metrics",
-        MetricsRouteName: "example.metrics",
+        Middlewares:       []melodyhttpcontract.Middleware{moduleInstance.metricsMiddleware},
+        HandlerDecorators: []melodyapplicationcontract.HttpHandlerDecorator{moduleInstance.lifecycleDecorator},
+        MetricsHandler:    moduleInstance.metricsHandler,
+        MetricsPath:       metricsPath,
+        MetricsRouteName:  "example.metrics",
     }))
 
     app.RegisterModule(moduleInstance)
@@ -79,23 +79,7 @@ func Configure(ctx context.Context, app *melodyapplication.Application) {
     }
 
     if nil != moduleInstance.redisClient {
-        app.RegisterModule(melodyrueidis.NewModule(melodyrueidis.ModuleConfig{
-            Client:       moduleInstance.redisClient,
-            Connection:   moduleInstance.redisConnection,
-            AsTokenStore: true,
-            TokenStoreOptions: []melodyrueidis.TokenStoreOption{
-                melodyrueidis.WithTokenStorePrefix(redisTokenStoreKeyPrefix),
-            },
-        }))
-
-        app.RegisterModule(melodyrueidiscache.NewModule(melodyrueidiscache.ModuleConfig{
-            Client: moduleInstance.redisClient,
-            Prefix: cacheKeyPrefix(),
-            /* the backend's context-less doors run unbounded without this; a store that stops answering would hold a request-path read for good */
-            BackendOptions: []melodyrueidiscache.BackendOption{
-                melodyrueidiscache.WithCommandTimeout(time.Second),
-            },
-        }))
+        app.RegisterModuleProvider(newRedisInfrastructure(moduleInstance.redisClient, moduleInstance.redisConnection))
     }
 }
 

@@ -12,6 +12,7 @@ import (
     melodyconfigcontract "github.com/precision-soft/melody/v2/config/contract"
     melodycontainer "github.com/precision-soft/melody/v2/container"
     melodyexception "github.com/precision-soft/melody/v2/exception"
+    melodyexceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
     melodyhttp "github.com/precision-soft/melody/v2/http"
     melodyhttpcontract "github.com/precision-soft/melody/v2/http/contract"
     melodylogging "github.com/precision-soft/melody/v2/logging"
@@ -144,15 +145,7 @@ func journalServerError(
         return
     }
 
-    logContext := melodyexception.LogContext(causeErr, map[string]any{
-        "statusCode":    statusCode,
-        "publicMessage": publicMessage,
-    })
-
-    if nil != request && nil != request.HttpRequest() && nil != request.HttpRequest().URL {
-        logContext["method"] = request.HttpRequest().Method
-        logContext["path"] = request.HttpRequest().URL.Path
-    }
+    logContext := refusalLogContext(request, statusCode, publicMessage, causeErr)
 
     /* a client that left mid-request is not a failure of the server: the kernel files a returned
        context.Canceled as "request cancelled by client" at warning, and a 500 answered as a Response for
@@ -165,6 +158,43 @@ func journalServerError(
     }
 
     _ = melodyexception.MarkLogged(causeErr)
+}
+
+/* JournalRefusalCause writes the record a refusal below 500 leaves when a step of the server failed behind it: the client keeps the status it earned, and the failure is journaled at error under journalMessage with the route and the cause, marked logged. */
+func JournalRefusalCause(
+    runtimeInstance melodyruntimecontract.Runtime,
+    request melodyhttpcontract.Request,
+    statusCode int,
+    publicMessage string,
+    journalMessage string,
+    causeErr error,
+) {
+    if nil == causeErr || nil == runtimeInstance {
+        return
+    }
+
+    serverErrorLoggerOf(runtimeInstance).Error(journalMessage, refusalLogContext(request, statusCode, publicMessage, causeErr))
+
+    _ = melodyexception.MarkLogged(causeErr)
+}
+
+func refusalLogContext(
+    request melodyhttpcontract.Request,
+    statusCode int,
+    publicMessage string,
+    causeErr error,
+) melodyexceptioncontract.Context {
+    logContext := melodyexception.LogContext(causeErr, map[string]any{
+        "statusCode":    statusCode,
+        "publicMessage": publicMessage,
+    })
+
+    if nil != request && nil != request.HttpRequest() && nil != request.HttpRequest().URL {
+        logContext["method"] = request.HttpRequest().Method
+        logContext["path"] = request.HttpRequest().URL.Path
+    }
+
+    return logContext
 }
 
 /* requestContextIsDone answers whether the request's own context has ended, which is how a client that
@@ -253,13 +283,13 @@ func buildApiResponse(
         }
 
         if nil == err && nil != serializerInstance {
-            return serializeWith(statusCode, payload, serializerInstance)
+            return renderEnvelopeWith(statusCode, payload, serializerInstance)
         }
     }
 
     serializerInstance := melodyserializer.SerializerFromRuntime(runtimeInstance)
     if nil != serializerInstance {
-        return serializeWith(statusCode, payload, serializerInstance)
+        return renderEnvelopeWith(statusCode, payload, serializerInstance)
     }
 
     return fallbackJsonResponse(statusCode, payload)

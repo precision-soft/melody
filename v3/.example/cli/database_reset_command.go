@@ -126,7 +126,7 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
 
         fmt.Fprintln(writer, "catalogue reset: the audit trail was emptied")
 
-        if seedErr := repository.SeedAll(ctx, storage); nil != seedErr {
+        if seedErr := repository.SeedAll(ctx, runtimeInstance.Scope()); nil != seedErr {
             return databaseResetStepFailure("reseeding the nomenclature", "catalogue", databaseLocationLabel(storage.Location()), seedErr)
         }
 

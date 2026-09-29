@@ -123,7 +123,7 @@ e2e_require_dev_service
 # mismatch message prints both numbers, so the count to move to is in the failure itself. A run that took one of
 # the degraded early-exit branches (an unreachable supervised app, a cold-cache timeout) legitimately executes
 # fewer checks; it is already red from the check_fail that branch raised
-EXPECTED_CHECK_COUNT_INTEGER=224
+EXPECTED_CHECK_COUNT_INTEGER=228
 readonly EXPECTED_CHECK_COUNT_INTEGER
 
 # state the scope in the output, so a reader never has to infer which major these checks covered
@@ -1674,6 +1674,9 @@ run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "WORK_DIRECTORY=/tmp/example-bo
     echo \"archive_http_ready=\${READY}\"
     COOKIE=\$(wget -q -S -O /dev/null --post-data='username=editor&password=editor' --header='Accept: application/json' http://127.0.0.1:18085/login/ 2>&1 | sed -n 's/^ *Set-Cookie: *\([^;]*\).*/\1/p' | head -1)
     wget -q -O /dev/null --header \"Cookie: \${COOKIE}\" --header 'Accept: application/json' --header 'X-Request-Id: claimed-by-the-e2e-client' http://127.0.0.1:18085/reports/api/history/ 2>/dev/null
+    SESSION_EXPIRES_AT=\$(grep -o '\"expiresAt\":[0-9]*' var/session/session.json 2>/dev/null | head -1 | cut -d: -f2)
+    if [ -n \"\${SESSION_EXPIRES_AT}\" ]; then echo \"session_seconds_left=\$(( \${SESSION_EXPIRES_AT:0:10} - \$(date +%s) ))\"; else echo session_seconds_left=none; fi
+    echo \"unbounded_ttl_warnings=\$(grep -c 'unbounded session ttl' var/log/dev.log)\"
     ACCESS_LINE=\$(grep '\"message\":\"request completed\"' var/log/dev.log | grep '\"path\":\"/reports/api/history/\"' | tail -1)
     ACCESS_ID=\$(printf '%s' \"\${ACCESS_LINE}\" | grep -o '\"requestId\":\"[^\"]*\"' | head -1)
     if printf '%s' \"\${ACCESS_LINE}\" | grep -q '\"statusCode\":500'; then echo archive_answered_500=1; else echo archive_answered_500=0; fi
@@ -1693,6 +1696,39 @@ run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "WORK_DIRECTORY=/tmp/example-bo
     if [ -s var/log/dev.log ]; then echo hup_reopened=1; else echo hup_reopened=0; fi
     if [ \"\${ROTATED_SIZE}\" = \"\$(wc -c < var/log/dev.log.1)\" ]; then echo hup_rotated_unchanged=1; else echo hup_rotated_unchanged=0; fi
     if kill -0 \${APP_PID} 2>/dev/null; then echo hup_alive=1; else echo hup_alive=0; fi
+    kill -INT \${APP_PID} 2>/dev/null || true
+    for _ in \$(seq 1 150); do
+        if ! kill -0 \${APP_PID} 2>/dev/null; then
+            break
+        fi
+        sleep 0.2
+    done
+    kill -KILL \${APP_PID} 2>/dev/null || true
+    wait \${APP_PID} 2>/dev/null || true
+    rm -f .env.local
+    printf 'REDIS_ADDRESS=\nMELODY_HTTP_ADDRESS=:18085\n' > .env.local
+    ./example-boot --mode=http >/tmp/example-boot-http.log 2>&1 &
+    APP_PID=\$!
+    READY=0
+    for _ in \$(seq 1 150); do
+        if wget -q -O /dev/null http://127.0.0.1:18085/health 2>/dev/null; then
+            READY=1
+            break
+        fi
+        if ! kill -0 \${APP_PID} 2>/dev/null; then
+            break
+        fi
+        sleep 0.2
+    done
+    echo \"no_redis_ready=\${READY}\"
+    REFUSED_COUNT=0
+    LAST_STATUS=none
+    for _ in \$(seq 1 31); do
+        LAST_STATUS=\$(wget -q -S -O /dev/null --post-data='username=user&password=wrong' --header='Accept: application/json' http://127.0.0.1:18085/login/ 2>&1 | sed -n 's/^ *HTTP\/[0-9.]* \([0-9]*\).*/\1/p' | tail -1)
+        if [ \"401\" = \"\${LAST_STATUS}\" ]; then REFUSED_COUNT=\$((REFUSED_COUNT + 1)); fi
+    done
+    echo \"no_redis_login_refused=\${REFUSED_COUNT}\"
+    echo \"no_redis_login_last=\${LAST_STATUS}\"
     kill -INT \${APP_PID} 2>/dev/null || true
     for _ in \$(seq 1 150); do
         if ! kill -0 \${APP_PID} 2>/dev/null; then
@@ -1844,6 +1880,24 @@ else
         check_pass "SIGHUP reopens the journal after a rename: a fresh file takes the next request, the renamed one stops growing, the process lives"
     else
         check_fail "SIGHUP did not reopen the journal ($(boot_output_value hup_reopened) $(boot_output_value hup_rotated_unchanged) $(boot_output_value hup_alive))"
+    fi
+
+    # the sessions of the served process are kept in var/session/session.json and expire a day after their last
+    # request: the file the sign-in above wrote is read out of band, its entry's expiry a day away, and the boot journal
+    # carries no warning of an unbounded in-memory storage
+    SESSION_SECONDS_LEFT_STRING="$(boot_output_value session_seconds_left | sed 's/^session_seconds_left=//')"
+    if [[ "${SESSION_SECONDS_LEFT_STRING}" =~ ^[0-9]+$ ]] && [[ 86000 -lt "${SESSION_SECONDS_LEFT_STRING}" ]] && [[ 86401 -gt "${SESSION_SECONDS_LEFT_STRING}" ]] && boot_output_has 'unbounded_ttl_warnings=0'; then
+        check_pass "the signed-in session is kept in var/session/session.json and expires a day after its request (${SESSION_SECONDS_LEFT_STRING}s left), with no unbounded-ttl warning at boot"
+    else
+        check_fail "the session file does not carry the day's expiry ($(boot_output_value session_seconds_left) $(boot_output_value unbounded_ttl_warnings))"
+    fi
+
+    # without redis the write budget is counted in the process itself: thirty refused sign-ins from one address
+    # are answered 401 and the thirty-first 429, where the budget used to be absent and every guess reached the door
+    if boot_output_has 'no_redis_ready=1' && boot_output_has 'no_redis_login_refused=30' && boot_output_has 'no_redis_login_last=429'; then
+        check_pass "without redis the sign-in is throttled in process: thirty wrong passwords answered 401 and the thirty-first 429"
+    else
+        check_fail "the sign-in is not throttled without redis ($(boot_output_value no_redis_ready) $(boot_output_value no_redis_login_refused) $(boot_output_value no_redis_login_last))"
     fi
 fi
 
@@ -2017,12 +2071,13 @@ else
 fi
 
 # the order the example registers its middlewares in is the order they wrap the handler: the metrics outermost,
-# then the timing that reports the duration, then the journal flush the timing measures. The json listing names each
+# then the compression of the answer, then the timing that reports the duration, then the journal flush the timing
+# measures. The json listing names each
 # by its constructor, so the positions are read off the one document
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . debug:middleware --format=json 2>/dev/null"
-V3_MIDDLEWARE_ORDER_STRING="$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | tr -d ' \n\t' | grep -o 'NewMetricsMiddleware\|NewTimingMiddleware\|NewCatalogJournalFlushMiddleware\|NewTracingMiddleware' | tr '\n' ',' || true)"
-if [[ "NewMetricsMiddleware,NewTimingMiddleware,NewCatalogJournalFlushMiddleware,NewTracingMiddleware," == "${V3_MIDDLEWARE_ORDER_STRING}" ]]; then
-    check_pass "v3 debug:middleware lists metrics, timing, the journal flush and tracing in the order the example registers them"
+V3_MIDDLEWARE_ORDER_STRING="$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | tr -d ' \n\t' | grep -o 'NewMetricsMiddleware\|CompressionMiddleware\|NewTimingMiddleware\|NewCatalogJournalFlushMiddleware\|NewTracingMiddleware' | tr '\n' ',' || true)"
+if [[ "NewMetricsMiddleware,CompressionMiddleware,NewTimingMiddleware,NewCatalogJournalFlushMiddleware,NewTracingMiddleware," == "${V3_MIDDLEWARE_ORDER_STRING}" ]]; then
+    check_pass "v3 debug:middleware lists metrics, compression, timing, the journal flush and tracing in the order the example registers them"
 else
     check_fail "v3 debug:middleware lists the example's middlewares out of order: ${V3_MIDDLEWARE_ORDER_STRING:-<none>}"
 fi
@@ -2365,6 +2420,22 @@ V3_AUTHORITY_STATUS_SNIPPET_STRING="wget -q -S -O /dev/null --header='Cookie: ${
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "${V3_AUTHORITY_STATUS_SNIPPET_STRING}"
 V3_STATUS_BEFORE_GRANT_STRING="$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | sed -n 's/^status=//p' | tail -1)"
 
+# the directory is seeded flat, one role per account, and the role hierarchy is what widens it: the admin's stored
+# roles are ROLE_ADMIN alone, read out of band, and its session still reads the catalogue (ROLE_USER) and the products
+# (ROLE_EDITOR), both granted through the hierarchy the global configuration declares
+V3_ADMIN_ROLES_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT roles FROM melody_example_v3_user WHERE id = 'user-3'")"
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "COOKIE=\$(wget -q -S -O /dev/null --post-data='username=admin&password=admin' --header='Accept: application/json' \"\${EXAMPLE_BASE_URL}/login/\" 2>&1 | sed -n 's/^ *Set-Cookie: *\([^;]*\).*/\1/p' | head -1)
+    for ROUTE in /categories/api/read/ /products/api/read/; do
+        wget -q -S -O /dev/null --header \"Cookie: \${COOKIE}\" --header='Accept: application/json' \"\${EXAMPLE_BASE_URL}\${ROUTE}\" 2>&1 | sed -n 's/^ *HTTP\/[0-9.]* \([0-9]*\).*/status=\1/p' | tail -1
+    done"
+V3_ADMIN_STATUSES_STRING="$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | sed -n 's/^status=//p' | tr '\n' ',')"
+if [[ "ROLE_ADMIN" = "${V3_ADMIN_ROLES_STRING}" && "200,200" = "${V3_ADMIN_STATUSES_STRING%,}" ]]; then
+    check_pass "the admin is stored with ROLE_ADMIN alone and reads the catalogue and the products through the role hierarchy"
+else
+    check_fail "the flat seed or the hierarchy did not hold: admin roles ${V3_ADMIN_ROLES_STRING:-<no answer>}, catalogue and products answered ${V3_ADMIN_STATUSES_STRING:-<none>}"
+fi
+
+V3_GRANT_AUDIT_BEFORE_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT COALESCE(MAX(id), 0) FROM melody_example_v3_audit")"
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:grant:role --role ROLE_EDITOR --user user 2>&1 | sed 's/\x1b\[[0-9;]*m//g'"
 V3_GRANTED_ROLES_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT roles FROM melody_example_v3_user WHERE id = 'user-1'")"
 if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'granted role "ROLE_EDITOR" to user "user"' \
@@ -2372,6 +2443,18 @@ if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'granted role "ROLE_EDITO
     check_pass "v3 example:grant:role wrote the widened role set through the atomic door (row read out of band)"
 else
     check_fail "the v3 grant did not land on the row: output ${RUN_IN_DEV_OUTPUT_STRING:-<empty>}, roles ${V3_GRANTED_ROLES_STRING:-<no answer>}"
+fi
+
+# the audit trail names the console run that granted the role: a run has no signed-in user, so the actor is the
+# run's own process id, the one its journal records carry — read out of band on the audit row and tied to the
+# "starting cli application" record the same process wrote, rather than the bare "system" every run shared
+V3_GRANT_ACTOR_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT actor FROM melody_example_v3_audit WHERE id > ${V3_GRANT_AUDIT_BEFORE_STRING:-0} AND entity = 'user' AND entity_id = 'user-1' ORDER BY id DESC LIMIT 1")"
+V3_GRANT_PROCESS_ID_STRING="${V3_GRANT_ACTOR_STRING#process:}"
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "grep -c '\"message\":\"starting cli application\".*\"processId\":\"${V3_GRANT_PROCESS_ID_STRING:-none}\"' var/log/dev.log"
+if [[ "${V3_GRANT_ACTOR_STRING}" =~ ^process:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] && [[ "1" = "${RUN_IN_DEV_OUTPUT_STRING}" ]]; then
+    check_pass "the grant's audit row names the console run as its actor (${V3_GRANT_ACTOR_STRING}), the process id of the run's own journal record"
+else
+    check_fail "the grant's audit actor is ${V3_GRANT_ACTOR_STRING:-<no row>}, with ${RUN_IN_DEV_OUTPUT_STRING:-<no answer>} journal records starting that process: wanted process:<the run's id> and exactly one"
 fi
 
 # the second run finds the role held by the ROW — the repository is the only arbiter — and writes nothing

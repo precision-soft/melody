@@ -47,21 +47,34 @@ cd "${EXAMPLE_DIR}"
 LOG_ROTATE_BYTES="${MELODY_DEV_LOG_ROTATE_BYTES:-0}"
 LOG_FILE="${MELODY_DEV_LOG_FILE:-${EXAMPLE_DIR}/var/log/dev.log}"
 LOG_ROTATE_HOLD_FILE="$(dirname "${LOG_FILE}")/.rotation-hold"
+# go run names the binary it builds after the package directory; comm keeps the first 15 characters of a process name
+EXAMPLE_BINARY_NAME="$(basename "${EXAMPLE_DIR}")"
+EXAMPLE_BINARY_NAME="${EXAMPLE_BINARY_NAME:0:15}"
 
 serving_process_id() {
     local candidate
     local run_process_id
+    local child_process_id
     for candidate in /proc/[0-9]*; do
         [[ "${RUN_COMMAND} " = "$(tr '\0' ' ' <"${candidate}/cmdline" 2>/dev/null)" ]] || continue
         [[ "${EXAMPLE_DIR}" = "$(readlink "${candidate}/cwd" 2>/dev/null)" ]] || continue
         run_process_id="${candidate#/proc/}"
-        pgrep -P "${run_process_id}" | head -n 1
+        # during a rebuild the child of go run is the compiler, which SIGHUP would kill; only the example's own binary is
+        # the target, and a tick that finds none leaves the rotation to the next one
+        for child_process_id in $(pgrep -P "${run_process_id}"); do
+            [[ "${EXAMPLE_BINARY_NAME}" = "$(cat "/proc/${child_process_id}/comm" 2>/dev/null)" ]] || continue
+            echo "${child_process_id}"
+            return 0
+        done
         return 0
     done
 }
 
 if [[ "${LOG_ROTATE_BYTES}" =~ ^[0-9]+$ ]] && [[ 0 -lt "${LOG_ROTATE_BYTES}" ]]; then
     (
+        # the loop answers every failure itself; under the inherited errexit a failing last command of a list would end
+        # the subshell between the rename and the SIGHUP, leaving the process writing into the renamed file
+        set +e
         while true; do
             sleep 30
             [[ -f "${LOG_FILE}" ]] || continue
@@ -72,7 +85,8 @@ if [[ "${LOG_ROTATE_BYTES}" =~ ^[0-9]+$ ]] && [[ 0 -lt "${LOG_ROTATE_BYTES}" ]];
             mv -f "${LOG_FILE}" "${LOG_FILE}.1" || continue
             # the process runs as root; the file it reopens is created here first, owned as the renamed one was, so the
             # journal in the bind-mounted tree stays writable by the host user who owned it
-            : >"${LOG_FILE}" && chown "$(stat -c %u:%g "${LOG_FILE}.1")" "${LOG_FILE}"
+            : >"${LOG_FILE}" && chown "$(stat -c %u:%g "${LOG_FILE}.1")" "${LOG_FILE}" \
+                || echo "[melody-dev] journal recreated but its owner could not be set; ${LOG_FILE} stays owned by root"
             kill -HUP "${serving_pid}" \
                 && echo "[melody-dev] journal rotated past ${LOG_ROTATE_BYTES} bytes ($(date '+%H:%M:%S')); ${LOG_FILE}.1 holds the previous one" \
                 || echo "[melody-dev] journal renamed but process ${serving_pid} did not take SIGHUP; the example's next start opens a fresh ${LOG_FILE}"
@@ -125,8 +139,10 @@ if [[ "1" = "${REFLEX_ENABLED}" ]] && command -v reflex >/dev/null 2>&1; then
     echo "[melody-dev] reflex hot-reload watching ${EXAMPLE_DIR}"
     echo "[melody-dev] running: ${RUN_COMMAND}"
     # the generated bundle is ignored so an esbuild rebuild does not restart the
-    # Go server (it serves public/assets/app.js from disk on each request anyway).
-    exec reflex -s --all -r '\.go$|\.html$|\.css$|\.js$|\.svg$|(^|/)\.env(\..*)?$|\.ya?ml$|\.json$|\.toml$' -G '.git/' -G 'public/assets/app.js' -- bash -c "
+    # Go server (it serves public/assets/app.js from disk on each request anyway), and
+    # var/ is ignored because it is what the running process writes — its journal and its
+    # sessions file — so a sign-in that saves the sessions does not restart the server.
+    exec reflex -s --all -r '\.go$|\.html$|\.css$|\.js$|\.svg$|(^|/)\.env(\..*)?$|\.ya?ml$|\.json$|\.toml$' -G '.git/' -R '(^|/)var/' -G 'public/assets/app.js' -- bash -c "
         export PATH=\"/usr/local/go/bin:/usr/local/bin:\${PATH}\"
         echo ''
         echo \"[melody-dev] rebuild triggered \$(date '+%Y-%m-%d %H:%M:%S')\"

@@ -300,6 +300,8 @@ func newResetRuntimeWithArchive(
         },
     )
 
+    repository.RegisterSeeders(serviceContainer)
+
     backend := melodycache.NewInMemoryBackend(0, 0, melodyclock.NewSystemClock())
     cacheInstance := &clearCountingCache{Cache: melodycache.NewManagerOwningBackend(backend, melodycache.NewJsonSerializer())}
 

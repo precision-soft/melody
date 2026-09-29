@@ -5,6 +5,7 @@ import (
     "context"
     "encoding/json"
     "errors"
+    "fmt"
     "io"
     nethttp "net/http"
     "net/http/httptest"
@@ -324,7 +325,7 @@ func loginRuntimeRefusingEveryCredential(t *testing.T) (melodyruntimecontract.Ru
     t.Helper()
 
     containerInstance := melodycontainer.NewContainer()
-    failureList := registerLoginFailureRecorder(t, containerInstance, nil)
+    failureList := registerLoginFailureRecorder(t, containerInstance, nil, nil)
 
     registerErr := melodycontainer.Register[*service.UserService](
         containerInstance,
@@ -340,11 +341,15 @@ func loginRuntimeRefusingEveryCredential(t *testing.T) (melodyruntimecontract.Ru
     return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance), failureList
 }
 
-/* registerLoginFailureRecorder registers an event dispatcher that records the failure each security.login.failure event carries, the one listener the login door's refusal must reach; the listener answers listenerErr, so a non-nil one fails the dispatch. */
-func registerLoginFailureRecorder(t *testing.T, containerInstance melodycontainercontract.Container, listenerErr error) *[]error {
+/* registerLoginFailureRecorder registers an event dispatcher that records the failure each security.login.failure event carries, the one listener the login door's refusal must reach; the listener answers listenerErr, so a non-nil one fails the dispatch. A nil logger registers a nop one. */
+func registerLoginFailureRecorder(t *testing.T, containerInstance melodycontainercontract.Container, listenerErr error, logger melodyloggingcontract.Logger) *[]error {
     t.Helper()
 
     failureList := make([]error, 0, 1)
+
+    if nil == logger {
+        logger = melodylogging.NewNopLogger()
+    }
 
     dispatcher := melodyevent.NewEventDispatcher(melodyclock.NewSystemClock())
     dispatcher.AddListener(
@@ -375,7 +380,7 @@ func registerLoginFailureRecorder(t *testing.T, containerInstance melodycontaine
         containerInstance,
         melodylogging.ServiceLogger,
         func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
-            return melodylogging.NewNopLogger(), nil
+            return logger, nil
         },
     )
     if nil != registerLoggerErr {
@@ -419,7 +424,8 @@ func TestLoginHandler_RaisesTheLoginFailureOnRefusedCredentials(t *testing.T) {
 /* a login failure the dispatch cannot deliver still answers the refusal: the door journals the dispatch failure as the cause and keeps the 401, as the framework's token source does, rather than turning a refused password into a 500 */
 func TestLoginHandler_KeepsTheRefusalWhenTheLoginFailureDispatchFails(t *testing.T) {
     containerInstance := melodycontainer.NewContainer()
-    failureList := registerLoginFailureRecorder(t, containerInstance, errors.New("login failure listener refused"))
+    journal := &loginJournalRecordingLogger{Logger: melodylogging.NewNopLogger()}
+    failureList := registerLoginFailureRecorder(t, containerInstance, errors.New("login failure listener refused"), journal)
 
     registerErr := melodycontainer.Register[*service.UserService](
         containerInstance,
@@ -443,6 +449,47 @@ func TestLoginHandler_KeepsTheRefusalWhenTheLoginFailureDispatchFails(t *testing
     if 1 != len(*failureList) {
         t.Fatalf("expected the login failure dispatched once, got %d", len(*failureList))
     }
+
+    dispatchRecords := journal.recordsNamed("security login failure event dispatch failed")
+    if 1 != len(dispatchRecords) {
+        t.Fatalf("expected the dispatch failure journaled once at error, got %d among %+v", len(dispatchRecords), journal.errorRecords)
+    }
+
+    record := dispatchRecords[0]
+
+    if false == strings.Contains(fmt.Sprint(record.context["cause"]), "login failure listener refused") {
+        t.Fatalf("expected the record to carry the listener's refusal as its cause, got %v", record.context)
+    }
+
+    if 401 != record.context["statusCode"] {
+        t.Fatalf("expected the record to name the kept 401, got %v", record.context["statusCode"])
+    }
+}
+
+type loginJournalRecord struct {
+    message string
+    context melodyloggingcontract.Context
+}
+
+/* loginJournalRecordingLogger keeps the error records a door writes; every other level falls to the embedded nop logger */
+type loginJournalRecordingLogger struct {
+    melodyloggingcontract.Logger
+    errorRecords []loginJournalRecord
+}
+
+func (instance *loginJournalRecordingLogger) recordsNamed(message string) []loginJournalRecord {
+    named := make([]loginJournalRecord, 0, 1)
+    for _, record := range instance.errorRecords {
+        if message == record.message {
+            named = append(named, record)
+        }
+    }
+
+    return named
+}
+
+func (instance *loginJournalRecordingLogger) Error(message string, context melodyloggingcontract.Context) {
+    instance.errorRecords = append(instance.errorRecords, loginJournalRecord{message: message, context: context})
 }
 
 /* accepted credentials raise no login failure: the request carries no session, so the door stops after the authentication with its 500, and the only event it could have raised by then is the one this test refuses */
@@ -453,7 +500,7 @@ func TestLoginHandler_RaisesNoLoginFailureOnAcceptedCredentials(t *testing.T) {
     }
 
     containerInstance := melodycontainer.NewContainer()
-    failureList := registerLoginFailureRecorder(t, containerInstance, nil)
+    failureList := registerLoginFailureRecorder(t, containerInstance, nil, nil)
 
     registerErr := melodycontainer.Register[*service.UserService](
         containerInstance,

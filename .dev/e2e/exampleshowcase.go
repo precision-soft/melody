@@ -215,10 +215,24 @@ func assertExampleApiKeyFirewall(major exampleMajor) {
 func assertExampleGzipCompression(major exampleMajor) {
     client := newExampleClient(major)
 
-    identity := client.callWithHeaderList("GET", exampleProductListRoute, "", "", map[string]string{
-        exampleShowcaseApiKeyHeader: exampleShowcaseApiToken,
-        "Accept-Encoding":           "identity",
-    }, "")
+    /* the listing is read through the api-key door where the major carries one, and under a signed-in editor's session where it does not */
+    readHeaders := func(acceptEncoding string) map[string]string {
+        headerList := map[string]string{"Accept-Encoding": acceptEncoding}
+        if true == major.showcaseProbes.apiKey {
+            headerList[exampleShowcaseApiKeyHeader] = exampleShowcaseApiToken
+        }
+
+        return headerList
+    }
+
+    if false == major.showcaseProbes.apiKey {
+        signIn := client.call("POST", exampleLoginRoute, "application/json", "application/x-www-form-urlencoded", "username="+exampleEditorUsername+"&password="+exampleEditorPassword)
+        if http.StatusOK != signIn.statusCode {
+            fail("[%s] the seeded editor could not sign in (%d) to read the listing compressed: %s", major.label, signIn.statusCode, exampleTruncate(signIn.body))
+        }
+    }
+
+    identity := client.callWithHeaderList("GET", exampleProductListRoute, "", "", readHeaders("identity"), "")
 
     if http.StatusOK != identity.statusCode {
         fail("[%s] %s answered %d to the identity read, wanted 200", major.label, exampleProductListRoute, identity.statusCode)
@@ -231,10 +245,7 @@ func assertExampleGzipCompression(major exampleMajor) {
         )
     }
 
-    compressed := client.callWithHeaderList("GET", exampleProductListRoute, "", "", map[string]string{
-        exampleShowcaseApiKeyHeader: exampleShowcaseApiToken,
-        "Accept-Encoding":           "gzip",
-    }, "")
+    compressed := client.callWithHeaderList("GET", exampleProductListRoute, "", "", readHeaders("gzip"), "")
 
     if http.StatusOK != compressed.statusCode {
         fail("[%s] %s answered %d to the gzip read, wanted 200", major.label, exampleProductListRoute, compressed.statusCode)
