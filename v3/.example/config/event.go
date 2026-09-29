@@ -5,6 +5,7 @@ import (
     "strings"
     "time"
 
+    examplesecurity "github.com/precision-soft/melody/v3/.example/security"
     "github.com/precision-soft/melody/v3/.example/subscriber"
     "github.com/precision-soft/melody/v3/.example/twofactor"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
@@ -15,6 +16,7 @@ import (
     melodyhttpmiddleware "github.com/precision-soft/melody/v3/http/middleware"
     melodykernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
+    melodysecuritycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
 func (instance *Module) RegisterEventSubscribers(kernelInstance melodykernelcontract.Kernel) {
@@ -44,6 +46,13 @@ func (instance *Module) registerSubscribers(eventDispatcher melodyeventcontract.
 
     eventDispatcher.AddSubscriber(
         subscriber.NewSecurityAuthenticationEventSubscriber(),
+    )
+
+    /* the device tokens go with the account, from the store the token firewall reads: redis when wired, the process's own otherwise */
+    eventDispatcher.AddSubscriber(
+        subscriber.NewAccessTokenReleaseSubscriber(func(runtimeInstance melodyruntimecontract.Runtime) melodysecuritycontract.RevocableTokenStore {
+            return examplesecurity.TokenStoreFromResolver(runtimeInstance.Container())
+        }),
     )
 
     /* without a database there is no enrollment to release. The release resolves the store at each deletion and fails the deletion when it cannot, and it carries a higher priority than the cache subscriber on the deletion event, because a dispatch ends at the first listener that fails and a cache outage must not leave the enrollment standing */

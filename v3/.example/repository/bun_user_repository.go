@@ -66,7 +66,7 @@ type bunUserRepository struct {
 }
 
 func (instance *bunUserRepository) seedIfEmpty(ctx context.Context) error {
-    return seedIfEmptyRows(ctx, instance.database, func() []*userRow {
+    return seedIfEmptyAudited(ctx, instance.database, instance.tracker, persistence.AuditEntityUser, func() []*userRow {
         seedList := seedUserList()
         rowList := make([]*userRow, 0, len(seedList))
         for _, user := range seedList {
@@ -74,6 +74,8 @@ func (instance *bunUserRepository) seedIfEmpty(ctx context.Context) error {
         }
 
         return rowList
+    }, func(row *userRow) string {
+        return row.Id
     })
 }
 

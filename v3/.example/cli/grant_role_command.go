@@ -12,7 +12,7 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/* GrantRoleCommand grants an application role to an account. Its own --role flag shows that an application command may reuse a name the runtime understands, since the runtime's --mode/--role are recognized only before the command name. It holds the user service through a container.Lazy handle, resolved at the first run rather than when the command is constructed. */
+/* GrantRoleCommand grants an application role to the account named as its argument. Its own --role flag shows that an application command may reuse a name the runtime understands, since the runtime's --mode/--role are recognized only before the command name; the flag is required, so the framework refuses an invocation without it before the command runs, and -r is its short spelling. It holds the user service through a container.Lazy handle, resolved at the first run rather than when the command is constructed. */
 type GrantRoleCommand struct {
     userService *melodycontainer.LazyService[*service.UserService]
 }
@@ -26,18 +26,16 @@ func (instance *GrantRoleCommand) Name() string {
 }
 
 func (instance *GrantRoleCommand) Description() string {
-    return "grants an application role to a user (demonstrates a command-owned --role flag and a lazily-resolved service)"
+    return "grants an application role to the user named as the argument (demonstrates a required command-owned --role flag and a lazily-resolved service)"
 }
 
 func (instance *GrantRoleCommand) Flags() []melodyclicontract.Flag {
     return []melodyclicontract.Flag{
         &melodyclicontract.StringFlag{
-            Name:  "role",
-            Usage: "the application role to grant (this is the command's own flag, not the runtime process role)",
-        },
-        &melodyclicontract.StringFlag{
-            Name:  "user",
-            Usage: "the user to grant the role to",
+            Name:     "role",
+            Usage:    "the application role to grant (this is the command's own flag, not the runtime process role)",
+            Required: true,
+            Aliases:  []string{"r"},
         },
     }
 }
@@ -47,13 +45,13 @@ func (instance *GrantRoleCommand) Run(runtimeInstance melodyruntimecontract.Runt
 
     /* the flag is trimmed and judged against the roles the application knows before anything is read, as the two admin doors normalise what they store: an untrimmed role would never match the no-op check and be appended on every re-run, and a misspelt one would be reported as granted while the voter, which compares exactly, grants nothing */
     role := strings.TrimSpace(commandContext.String("role"))
-    user := commandContext.String("user")
 
-    if "" == role {
-        _, _ = fmt.Fprintln(writer, "no role given; pass --role to grant one")
-
-        return nil
+    arguments := commandContext.Arguments()
+    if 1 != len(arguments) {
+        return fmt.Errorf("name exactly one user to grant the role to, as the argument (got %d)", len(arguments))
     }
+
+    user := arguments[0]
 
     if true == strings.Contains(role, ",") {
         /* the roles column is one comma-joined value, so a role carrying a comma comes back as several on the next read — the same refusal the two admin doors make, at the only other door that writes roles */

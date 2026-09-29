@@ -9,10 +9,34 @@
       "zone": "frontend"
     },
     {
+      "name": "example.currencies.api.create",
+      "pattern": "/currencies/api/create",
+      "methods": [
+        "POST"
+      ],
+      "zone": "frontend"
+    },
+    {
+      "name": "example.currencies.api.delete",
+      "pattern": "/currencies/api/delete/:id",
+      "methods": [
+        "DELETE"
+      ],
+      "zone": "frontend"
+    },
+    {
       "name": "example.currencies.api.read.all",
       "pattern": "/currencies/api/read",
       "methods": [
         "GET"
+      ],
+      "zone": "frontend"
+    },
+    {
+      "name": "example.currencies.api.update",
+      "pattern": "/currencies/api/update/:id",
+      "methods": [
+        "PUT"
       ],
       "zone": "frontend"
     },
@@ -75,6 +99,14 @@
     {
       "name": "example.products.update.page",
       "pattern": "/products/update/:id",
+      "methods": [
+        "GET"
+      ],
+      "zone": "frontend"
+    },
+    {
+      "name": "example.reports.api.export",
+      "pattern": "/reports/api/export",
       "methods": [
         "GET"
       ],

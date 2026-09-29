@@ -3,6 +3,7 @@ package config
 import (
     "context"
     "encoding/json"
+    "time"
 
     amqp "github.com/precision-soft/melody/integrations/amqp/v3"
     outbox "github.com/precision-soft/melody/integrations/outbox/v3"
@@ -11,6 +12,8 @@ import (
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
+    melodylock "github.com/precision-soft/melody/v3/lock"
+    melodylockcontract "github.com/precision-soft/melody/v3/lock/contract"
     melodymessagebus "github.com/precision-soft/melody/v3/messagebus"
     melodymessagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
     bun "github.com/uptrace/bun"
@@ -59,13 +62,30 @@ func (instance *Module) outboxRelayFactory(resolver melodycontainercontract.Reso
         return nil, transportErr
     }
 
+    /* the application's shared locker — redis when wired, then mysql, then the process's own — so several replicas running melody:outbox:relay from cron drain the outbox from one at a time; the claim alone already keeps two from publishing one row */
+    locker, lockerErr := melodycontainer.FromResolver[melodylockcontract.Locker](resolver, melodylock.ServiceLocker)
+    if nil != lockerErr {
+        return nil, lockerErr
+    }
+
     return outbox.NewRelay(outbox.RelayConfig{
         Repository: store,
         Transport:  transport,
         Codec:      &outboxNoticeCodec{},
         BatchSize:  50,
+        Locker:     locker,
+        LockName:   outboxRelayLockName,
+        LockTtl:    outboxRelayLockTtl,
     }), nil
 }
+
+const (
+    /* outboxRelayLockName is the lease every replica's relay contends for, named under this application so two applications on one redis never share it */
+    outboxRelayLockName = "melody-example-v3:outbox:relay"
+
+    /* outboxRelayLockTtl outlives one batch of fifty publishes; the relay refreshes the lease while it drains */
+    outboxRelayLockTtl = 30 * time.Second
+)
 
 /* buildOutboxTransport hands the transport ONLY a dialer, no pre-opened connection: the transport closes a connection it dialed itself, while one opened here and handed over would be owned by nobody — the exact leak registering the transport exists to close. The first publish dials; a bad DSN surfaces there through the relay's own backoff-and-retry loop rather than killing the resolution. */
 func (instance *Module) buildOutboxTransport() (melodymessagebuscontract.Transport, error) {

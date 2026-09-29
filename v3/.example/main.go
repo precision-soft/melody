@@ -5,9 +5,13 @@ package main
 import (
     "github.com/precision-soft/melody/v3/.example/config"
     "github.com/precision-soft/melody/v3/application"
+    melodyclioutput "github.com/precision-soft/melody/v3/cli/output"
     melodyexception "github.com/precision-soft/melody/v3/exception"
     melodylogging "github.com/precision-soft/melody/v3/logging"
 )
+
+/* applicationVersion is this application's own version, set by the build: go build -ldflags "-X main.applicationVersion=<version>". A build that sets nothing reports dev. */
+var applicationVersion = "dev"
 
 func main() {
     /* the signal context gives the application a graceful shutdown window on the first SIGINT or SIGTERM; a second signal during a hung shutdown forces the process down */
@@ -18,6 +22,9 @@ func main() {
     defer func() {
         melodylogging.LogOnRecoverAndExit(melodylogging.EmergencyLogger(), recover(), 1)
     }()
+
+    /* every command document names this version in its meta, and debug:version prints it beside melody's */
+    melodyclioutput.SetApplicationVersion(applicationVersion)
 
     app := application.NewApplication(
         ctx,

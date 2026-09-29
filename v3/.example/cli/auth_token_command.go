@@ -43,6 +43,10 @@ func (instance *AuthTokenCommand) Flags() []melodyclicontract.Flag {
             Name:  "role",
             Usage: "role embedded in the token (repeat for multiple)",
         },
+        &melodyclicontract.StringSliceFlag{
+            Name:  "scope-role",
+            Usage: "role carried in the token's scope claim, the way an OAuth-style issuer grants it (repeat for multiple); given alone, the roles claim is left empty",
+        },
         &melodyclicontract.StringFlag{
             Name:  "device",
             Usage: "device the token is issued to; a revocation can then end this device without ending the others",
@@ -63,9 +67,15 @@ func (instance *AuthTokenCommand) Run(
         user = "example-user"
     }
 
+    /* the scope roles are the issuer's grant, read by the firewall's scope enricher; a token that names only them carries an empty roles claim, so the role it is granted is the scope's and nothing else */
     roles := commandContext.StringSlice("role")
-    if 0 == len(roles) {
+    scopeRoles := commandContext.StringSlice("scope-role")
+    if 0 == len(roles) && 0 == len(scopeRoles) {
         roles = []string{"ROLE_USER"}
+    }
+
+    if nil == roles {
+        roles = []string{}
     }
 
     ttl := int64(commandContext.Int("ttl"))
@@ -85,6 +95,10 @@ func (instance *AuthTokenCommand) Run(
         "roles": roles,
         "iat":   now.Unix(),
         "exp":   now.Add(time.Duration(ttl) * time.Second).Unix(),
+    }
+
+    if 0 < len(scopeRoles) {
+        claims["scope"] = map[string]any{"roles": scopeRoles}
     }
 
     if device := commandContext.String("device"); "" != device {

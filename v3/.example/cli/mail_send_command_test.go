@@ -22,7 +22,7 @@ func TestMailSendCommandReportsTheRecipientOnTheCommandWriter(t *testing.T) {
     mailer := &recordingMailer{}
     captured := &bytes.Buffer{}
 
-    runErr := NewMailSendCommand(mailer).Run(nil, &flagContext{stringByName: map[string]string{"to": "bob@example.com"}, writer: captured})
+    runErr := NewMailSendCommand(mailer).Run(nil, newStringFlagContext(map[string]string{"to": "bob@example.com"}, captured))
     if nil != runErr {
         t.Fatalf("expected the email to be sent, got %v", runErr)
     }

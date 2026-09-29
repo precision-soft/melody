@@ -22,11 +22,13 @@ func (instance *Module) registerRatesHttpClientService(registrar melodyapplicati
         return
     }
 
+    apiKey := instance.environmentValue(environmentKeyRatesApiKey)
+
     registrar.RegisterService(
         service.ServiceRatesHttpClient,
         func(resolver melodycontainercontract.Resolver) (*httpclient.HttpClient, error) {
             /* every target the refresh names is relative to the base url, which carries its trailing slash: the client resolves a target by RFC 3986, so an absolute-path target would replace the base path. A base whose path lacks the slash is refused at construction. */
-            return httpclient.NewHttpClient(ratesHttpClientConfig(baseUrl)), nil
+            return httpclient.NewHttpClient(ratesHttpClientConfig(baseUrl, apiKey)), nil
         },
         outboundClientRegisterOptions()...,
     )
@@ -48,14 +50,20 @@ func (instance *Module) registerReportExportHttpClientService(registrar melodyap
 }
 
 /* ratesHttpClientConfig is the rates client: based on the provider's url, bounded by the outbound budget,
-   asking for json. */
-func ratesHttpClientConfig(baseUrl string) *httpclient.HttpClientConfig {
+   asking for json and presenting the provider's api key on every request when one is configured. The client journals no request header, so the key is not written to the journal. */
+func ratesHttpClientConfig(baseUrl string, apiKey string) *httpclient.HttpClientConfig {
+    headers := map[string]string{
+        "accept": "application/json",
+    }
+
+    if "" != apiKey {
+        headers["x-api-key"] = apiKey
+    }
+
     return httpclient.NewHttpClientConfig(
         baseUrl,
         outboundRequestTimeout,
-        map[string]string{
-            "accept": "application/json",
-        },
+        headers,
     )
 }
 

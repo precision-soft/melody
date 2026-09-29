@@ -72,3 +72,34 @@ func (instance readCloser) Read(payload []byte) (int, error) {
 func (instance readCloser) Close() error {
     return nil
 }
+
+func linkRequest(t *testing.T, target string) *melodyhttp.Request {
+    t.Helper()
+
+    return melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, target, nil), nil, nil, melodyhttp.NewRequestContext("storage-link-test", time.Now()))
+}
+
+func TestLinkTtlOf_AnswersFiveMinutesWhenTheCallerAskedForNone(t *testing.T) {
+    ttl, ttlErr := linkTtlOf(linkRequest(t, "/storage/object/link?key=probe"))
+    if nil != ttlErr || 5*time.Minute != ttl {
+        t.Fatalf("expected the five-minute default, got %s (%v)", ttl, ttlErr)
+    }
+}
+
+func TestLinkTtlOf_ReadsTheCallersSecondsUpToAnHour(t *testing.T) {
+    for raw, expected := range map[string]time.Duration{"1": time.Second, "90": 90 * time.Second, "3600": time.Hour} {
+        ttl, ttlErr := linkTtlOf(linkRequest(t, "/storage/object/link?key=probe&ttl="+raw))
+        if nil != ttlErr || expected != ttl {
+            t.Fatalf("ttl=%s: expected %s, got %s (%v)", raw, expected, ttl, ttlErr)
+        }
+    }
+}
+
+func TestLinkTtlOf_RefusesATtlItCannotServe(t *testing.T) {
+    for _, raw := range []string{"0", "-5", "3601", "5m", "x"} {
+        if _, ttlErr := linkTtlOf(linkRequest(t, "/storage/object/link?key=probe&ttl="+raw)); false == errors.Is(ttlErr, errInvalidLinkTtl) {
+            t.Fatalf("ttl=%s: expected the ttl refused, got %v", raw, ttlErr)
+        }
+    }
+}
+

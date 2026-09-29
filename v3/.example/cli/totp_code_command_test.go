@@ -19,7 +19,7 @@ func TestTotpCodeCommandPrintsTheCodeOnTheCommandWriter(t *testing.T) {
         t.Fatalf("generate the expected code: %v", beforeErr)
     }
 
-    runErr := NewTotpCodeCommand().Run(nil, &flagContext{stringByName: map[string]string{"secret": totpCodeCommandTestSecret}, writer: captured})
+    runErr := NewTotpCodeCommand().Run(nil, newStringFlagContext(map[string]string{"secret": totpCodeCommandTestSecret}, captured))
     if nil != runErr {
         t.Fatalf("expected the code to be printed, got %v", runErr)
     }
@@ -37,7 +37,7 @@ func TestTotpCodeCommandPrintsTheCodeOnTheCommandWriter(t *testing.T) {
 func TestTotpCodeCommandAnswersARefusedWrite(t *testing.T) {
     refusal := errors.New("broken pipe")
 
-    runErr := NewTotpCodeCommand().Run(nil, &flagContext{stringByName: map[string]string{"secret": totpCodeCommandTestSecret}, writer: &refusingWriter{refusal: refusal}})
+    runErr := NewTotpCodeCommand().Run(nil, newStringFlagContext(map[string]string{"secret": totpCodeCommandTestSecret}, &refusingWriter{refusal: refusal}))
     if false == errors.Is(runErr, refusal) {
         t.Fatalf("expected the refused write to fail the command, got %v", runErr)
     }

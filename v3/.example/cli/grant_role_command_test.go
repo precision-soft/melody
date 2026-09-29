@@ -9,6 +9,7 @@ import (
 
     "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/repository"
+    melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
     melodyeventcontract "github.com/precision-soft/melody/v3/event/contract"
 )
 
@@ -158,8 +159,9 @@ func TestGrantRoleCommandRefusesABlankRole(t *testing.T) {
 
     before := storedRoles(t, fixture, "user")
 
-    if runErr := command.Run(fixture.runtime, newFlagContext("   ", "user")); nil != runErr {
-        t.Fatalf("a blank role errored instead of being answered as no role: %v", runErr)
+    runErr := command.Run(fixture.runtime, newFlagContext("   ", "user"))
+    if nil == runErr || false == strings.Contains(runErr.Error(), `role "" is not one this application knows`) {
+        t.Fatalf("expected a blank role refused as a role the application does not know, got %v", runErr)
     }
 
     after := storedRoles(t, fixture, "user")
@@ -302,3 +304,39 @@ func TestGrantRoleCommandSaysTheRoleWasGrantedWhenTheListenersRefuse(t *testing.
         t.Fatalf("expected the committed grant in the directory, it holds %v", after)
     }
 }
+
+func TestGrantRoleCommandRefusesAnythingButOneNamedUser(t *testing.T) {
+    fixture := newCommandFixture(t)
+    command := NewGrantRoleCommand(fixture.lazyUserService())
+
+    before := storedRoles(t, fixture, "user")
+
+    for _, arguments := range [][]string{nil, {"user", "admin"}} {
+        runErr := command.Run(fixture.runtime, &melodyclicontract.StaticContext{
+            StringValues:   map[string]string{"role": entity.RoleEditor},
+            SetFlagNames:   []string{"role"},
+            ArgumentValues: arguments,
+        })
+        if nil == runErr || false == strings.Contains(runErr.Error(), "name exactly one user") {
+            t.Fatalf("expected %q refused for not naming exactly one user, got %v", arguments, runErr)
+        }
+    }
+
+    after := storedRoles(t, fixture, "user")
+    if strings.Join(before, ",") != strings.Join(after, ",") {
+        t.Fatalf("a refused invocation changed the account from %v to %v", before, after)
+    }
+}
+
+func TestGrantRoleCommandRequiresTheRoleFlagAndSpellsItShortAsR(t *testing.T) {
+    flags := NewGrantRoleCommand(nil).Flags()
+    if 1 != len(flags) {
+        t.Fatalf("expected the role flag alone, got %d flags", len(flags))
+    }
+
+    definition := flags[0].Definition()
+    if "role" != definition.Name || true != definition.Required || 1 != len(definition.Aliases) || "r" != definition.Aliases[0] {
+        t.Fatalf("expected --role required with the alias -r, got %+v", definition)
+    }
+}
+

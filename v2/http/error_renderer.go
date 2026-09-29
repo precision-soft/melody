@@ -307,3 +307,14 @@ func plainTextLabel(key string) string {
 
     return builder.String()
 }
+
+/* setResponseHeader sets one header on a rendered response, whose headers may be nil */
+func setResponseHeader(response httpcontract.Response, name string, value string) {
+    headers := response.Headers()
+    if nil == headers {
+        headers = make(nethttp.Header)
+    }
+
+    headers.Set(name, value)
+    response.SetHeaders(headers)
+}

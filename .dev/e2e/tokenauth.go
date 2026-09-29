@@ -40,6 +40,26 @@ func runTokenAuthCheck(baseUrl string) {
     assertTokenAuthRejected(client, "a token signed with the harness's own secret", tokenAuthForeignToken("e2e-token-user", []string{"ROLE_USER"}))
     assertTokenAuthRejected(client, "a token whose signature was flipped", tokenAuthTamperedSignature(token))
     assertTokenAuthRejected(client, "an alg:none token", tokenAuthAlgorithmNoneToken("e2e-token-user", []string{"ROLE_USER"}))
+    assertTokenAuthScopeRolesGrant(client)
+}
+
+/* a token an OAuth-style issuer mints carries its grant in the scope claim, which the firewall's scope enricher reads: minted with --scope-role alone, its roles claim is empty, so the role the principal holds on the route can only be the scope's. The control is a token whose roles claim names no role the route admits and that carries no scope, refused 403 on the same route */
+func assertTokenAuthScopeRolesGrant(client *liveExampleClient) {
+    output, _ := runExampleMintCommand(tokenAuthLabel, "auth:token", "--user", "e2e-scope-user", "--scope-role", "ROLE_USER")
+    scoped := client.call(tokenAuthLabel, liveExampleRequest{method: "GET", path: tokenAuthRoute, headerList: map[string]string{"Authorization": "Bearer " + exampleMintedToken(tokenAuthLabel, output)}})
+    requireLiveExampleStatus(tokenAuthLabel, tokenAuthRoute+" with a token granting ROLE_USER in its scope alone", scoped, http.StatusOK)
+
+    payload := tokenAuthPayload{}
+    decodeLiveExamplePayload(tokenAuthLabel, scoped, &payload)
+    if "e2e-scope-user" != payload.UserIdentifier || false == tokenAuthHasRole(payload.Roles, "ROLE_USER") {
+        fail("%s: the scope-granted token authenticated as %q with roles %v, wanted e2e-scope-user holding the scope's ROLE_USER", tokenAuthLabel, payload.UserIdentifier, payload.Roles)
+    }
+
+    controlOutput, _ := runExampleMintCommand(tokenAuthLabel, "auth:token", "--user", "e2e-scope-user", "--role", "ROLE_NONE")
+    control := client.call(tokenAuthLabel, liveExampleRequest{method: "GET", path: tokenAuthRoute, headerList: map[string]string{"Authorization": "Bearer " + exampleMintedToken(tokenAuthLabel, controlOutput)}})
+    requireLiveExampleStatus(tokenAuthLabel, tokenAuthRoute+" with a token granting no admitted role and no scope", control, http.StatusForbidden)
+
+    pass("a token granting ROLE_USER in its scope claim alone reaches %s holding it, where one granting no admitted role is refused 403", tokenAuthRoute)
 }
 
 func assertTokenAuthAccepted(client *liveExampleClient, token string, mintElapsed time.Duration) {

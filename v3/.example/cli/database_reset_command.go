@@ -11,6 +11,7 @@ import (
     "github.com/precision-soft/melody/v3/.example/migration"
     "github.com/precision-soft/melody/v3/.example/persistence"
     "github.com/precision-soft/melody/v3/.example/repository"
+    "github.com/precision-soft/melody/v3/.example/service"
     melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     "github.com/precision-soft/melody/v3/exception"
@@ -126,7 +127,14 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
 
         fmt.Fprintln(writer, "catalogue reset: the audit trail was emptied")
 
-        if seedErr := repository.SeedAll(ctx, runtimeInstance.Scope()); nil != seedErr {
+        /* the reseed is one audited operation: every seeded row's insert entry joins one audit transaction naming the console run as its actor and this command as what it ran, so the trail a reset leaves is the reseed and says who performed it */
+        actor := service.ActorFromRuntime(runtimeInstance)
+        seedCtx, _, transactionErr := melodyaudit.BeginTransaction(persistence.WithActor(ctx, actor), storage.Database(), actor, map[string]any{"command": instance.Name()})
+        if nil != transactionErr {
+            return databaseResetStepFailure("opening the audit transaction of the reseed", "catalogue", databaseLocationLabel(storage.Location()), transactionErr)
+        }
+
+        if seedErr := repository.SeedAll(seedCtx, runtimeInstance.Scope()); nil != seedErr {
             return databaseResetStepFailure("reseeding the nomenclature", "catalogue", databaseLocationLabel(storage.Location()), seedErr)
         }
 

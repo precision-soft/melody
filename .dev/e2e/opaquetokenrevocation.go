@@ -6,6 +6,7 @@ import (
     "encoding/json"
     "io"
     "net/http"
+    "os"
     "strconv"
     "strings"
     "time"
@@ -178,6 +179,78 @@ func runOpaqueTokenRevocationCheck(baseUrl string, redisAddress string) {
     assertExampleDeviceIdentity(bearer, tokenAfterUserRevocation.Token, http.StatusOK, "a token minted after the user-wide revocation")
 
     pass("a user-wide revocation refuses every device's token while every entry is still in redis — nothing enumerated or deleted anything")
+
+    assertDeletedAccountReleasesItsTokens(administrator, bearer, redisClient, baseUrl, os.Getenv("MYSQL_DSN"), tokenAfterUserRevocation.Token)
+}
+
+/* an account deleted through the admin door takes its device tokens with it: a probe editor signs in, mints a device token that resolves the device route, and once the account is deleted the token's entry is gone from redis, read out of band, and the token is refused. The editor's own token, another account's, is the control left standing. The probe account's audit trail leaves with it, on a failure too: identifiers are minted as the highest suffix plus one, so a later section's account would inherit the entries otherwise */
+func assertDeletedAccountReleasesItsTokens(administrator *http.Client, bearer *liveExampleClient, redisClient rueidis.Client, baseUrl string, mysqlDsn string, otherAccountToken string) {
+    if "" == mysqlDsn {
+        skip("opaque token revocation: MYSQL_DSN is cleared, so the deleted probe account's audit trail could not be removed with it — the deletion's token release was NOT checked")
+
+        return
+    }
+
+    database := openMysql("opaque token revocation", mysqlDsn)
+    defer database.Close()
+
+    username := liveExampleUnique("token-owner")
+    created := postExampleJson(administrator, baseUrl, "/users/api/create/", map[string]any{"username": username, "password": "probe-pass", "roles": []string{"ROLE_EDITOR"}})
+    if http.StatusCreated != created.statusCode {
+        fail("opaque token revocation: creating the probe account answered %d: %s", created.statusCode, created.body)
+    }
+
+    createdUser := struct {
+        Id string `json:"id"`
+    }{}
+    decodeExampleData("opaque token revocation", "/users/api/create/", created.body, &createdUser)
+    if "" == createdUser.Id {
+        fail("opaque token revocation: the probe account's create answered no id: %s", created.body)
+    }
+
+    removeTrailOnFailure := pushFailureCleanup(func() {
+        removeExampleV3AuditTrail("opaque token revocation", database, "user", createdUser.Id)
+    })
+    defer removeTrailOnFailure()
+
+    owner := newExampleHttpClient()
+    signInExampleHttp(owner, baseUrl, "", username, "probe-pass")
+    issued := issueExampleAccessToken(owner, baseUrl, liveExampleUnique("device-deleted"))
+
+    identity := bearer.call("device identity of the probe account", liveExampleRequest{method: "GET", path: "/device/identity/", headerList: map[string]string{"Accept": "application/json", "Authorization": "Bearer " + issued.Token}})
+    if http.StatusOK != identity.statusCode {
+        fail("opaque token revocation: the probe account's token answered %d before the deletion: %s", identity.statusCode, identity.bodyText())
+    }
+
+    request, requestErr := http.NewRequest("DELETE", strings.TrimRight(baseUrl, "/")+"/users/api/delete/"+createdUser.Id+"/", nil)
+    if nil != requestErr {
+        fail("opaque token revocation: build the account deletion: %v", requestErr)
+    }
+    request.Header.Set("Accept", "application/json")
+    deleted, deleteErr := administrator.Do(request)
+    if nil != deleteErr {
+        fail("opaque token revocation: delete the probe account: %v", deleteErr)
+    }
+    _ = deleted.Body.Close()
+    if http.StatusOK != deleted.StatusCode {
+        fail("opaque token revocation: deleting the probe account answered %d", deleted.StatusCode)
+    }
+
+    exists, existsErr := redisClient.Do(context.Background(), redisClient.B().Exists().Key(exampleTokenStoreKeyPrefix+issued.Token).Build()).AsInt64()
+    if nil != existsErr || 0 != exists {
+        fail("opaque token revocation: the deleted account's token entry is still in redis (exists %d, %v)", exists, existsErr)
+    }
+
+    refused := bearer.call("device identity of the deleted account", liveExampleRequest{method: "GET", path: "/device/identity/", headerList: map[string]string{"Accept": "application/json", "Authorization": "Bearer " + issued.Token}})
+    if http.StatusUnauthorized != refused.statusCode {
+        fail("opaque token revocation: the deleted account's token answered %d, wanted 401", refused.statusCode)
+    }
+
+    assertExampleTokenKeyPresent(redisClient, otherAccountToken, "another account's token after the deletion")
+
+    removeExampleV3AuditTrail("opaque token revocation", database, "user", createdUser.Id)
+
+    pass("a deleted account's device token is gone from redis and refused, while another account's token stands")
 }
 
 func runExampleJwtRevocationCheck(

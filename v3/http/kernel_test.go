@@ -12,10 +12,14 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v3/container"
+    containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/event"
     eventcontract "github.com/precision-soft/melody/v3/event/contract"
     "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/serializer"
+    serializercontract "github.com/precision-soft/melody/v3/serializer/contract"
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     "github.com/precision-soft/melody/v3/internal/testhelper"
     "github.com/precision-soft/melody/v3/logging"
@@ -3567,5 +3571,94 @@ func TestRouter_EqualPriorityIsWonByTheFirstRegistration(t *testing.T) {
 
     if "first" != attributes[RouteAttributeName] {
         t.Fatalf("expected the first registration to win the tie, got route %v", attributes[RouteAttributeName])
+    }
+}
+
+/* serveNegotiatedKernelProbe drives one request through a kernel whose container carries a json and a plain-text serializer, the two a client can name in Accept */
+func serveNegotiatedKernelProbe(t *testing.T, method string, target string, accept string) *httptest.ResponseRecorder {
+    t.Helper()
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodPost,
+        "/only-post",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(nethttp.StatusOK, "posted"), nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainer()
+    container.MustRegister[*serializer.SerializerManager](
+        serviceContainer,
+        serializer.ServiceSerializerManager,
+        func(resolver containercontract.Resolver) (*serializer.SerializerManager, error) {
+            return serializer.NewSerializerManager(map[string]serializercontract.Serializer{
+                "application/json": serializer.NewJsonSerializer(),
+                "text/plain":       serializer.NewPlainTextSerializer(),
+            })
+        },
+    )
+
+    request := httptest.NewRequest(method, target, nil)
+    request.Header.Set("Accept", accept)
+    recorder := httptest.NewRecorder()
+    NewKernel(router).ServeHttp(serviceContainer).ServeHTTP(recorder, request)
+
+    return recorder
+}
+
+func TestKernel_AnswersAMethodNotAllowedInTheRepresentationTheClientNegotiated(t *testing.T) {
+    recorder := serveNegotiatedKernelProbe(t, nethttp.MethodGet, "/only-post", "text/plain")
+
+    if nethttp.StatusMethodNotAllowed != recorder.Code {
+        t.Fatalf("expected 405, got %d", recorder.Code)
+    }
+
+    if "text/plain; charset=utf-8" != recorder.Header().Get("Content-Type") {
+        t.Fatalf("expected the plain text content type, got %q", recorder.Header().Get("Content-Type"))
+    }
+
+    if false == strings.HasPrefix(recorder.Body.String(), "405 method not allowed\n") {
+        t.Fatalf("expected the status line first, got %q", recorder.Body.String())
+    }
+
+    if "" == recorder.Header().Get("Allow") || false == strings.Contains(recorder.Header().Get("Allow"), nethttp.MethodPost) {
+        t.Fatalf("expected the Allow header naming POST, got %q", recorder.Header().Get("Allow"))
+    }
+}
+
+func TestKernel_KeepsTheJsonMethodNotAllowedAndItsAllowForAJsonClient(t *testing.T) {
+    recorder := serveNegotiatedKernelProbe(t, nethttp.MethodGet, "/only-post", "application/json")
+
+    if nethttp.StatusMethodNotAllowed != recorder.Code {
+        t.Fatalf("expected 405, got %d", recorder.Code)
+    }
+
+    if false == strings.HasPrefix(recorder.Header().Get("Content-Type"), "application/json") {
+        t.Fatalf("expected json, got %q", recorder.Header().Get("Content-Type"))
+    }
+
+    if false == strings.Contains(recorder.Body.String(), "method not allowed") {
+        t.Fatalf("expected the message in the json body, got %q", recorder.Body.String())
+    }
+
+    if false == strings.Contains(recorder.Header().Get("Allow"), nethttp.MethodPost) {
+        t.Fatalf("expected the Allow header naming POST, got %q", recorder.Header().Get("Allow"))
+    }
+}
+
+func TestKernel_AnswersANotFoundWithoutAHandlerInTheRepresentationTheClientNegotiated(t *testing.T) {
+    recorder := serveNegotiatedKernelProbe(t, nethttp.MethodGet, "/no-such-route", "text/plain")
+
+    if nethttp.StatusNotFound != recorder.Code {
+        t.Fatalf("expected 404, got %d", recorder.Code)
+    }
+
+    if "text/plain; charset=utf-8" != recorder.Header().Get("Content-Type") {
+        t.Fatalf("expected the plain text content type, got %q", recorder.Header().Get("Content-Type"))
+    }
+
+    if false == strings.HasPrefix(recorder.Body.String(), "404 not found\n") {
+        t.Fatalf("expected the status line first, got %q", recorder.Body.String())
     }
 }

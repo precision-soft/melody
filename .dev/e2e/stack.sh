@@ -52,7 +52,8 @@
 #   - V3 ROLE GRANT      example:grant:role writes the widened role set through the repository's atomic door, read out of band; a second grant is answered as held
 #   - V3 DATABASE RESET  example:db:reset refuses without --force, and with it drops the schema, applies it
 #                        again, empties the audit trail the module's table keeps and reseeds all four
-#                        nomenclatures — the one state this application has, restored from the database side
+#                        nomenclatures, the audited ones as one audit transaction of the run — the one state this
+#                        application has, restored from the database side
 #   - V3 SCHEMA DRIFT    a column dropped out of band makes product:list refuse the volume by table and column,
 #                        naming example:db:reset --force, and the command runs again after the reset
 #   - V3 CACHE CLEAR     example:cache:clear empties the shared cache namespace on its own, the databases
@@ -123,7 +124,7 @@ e2e_require_dev_service
 # mismatch message prints both numbers, so the count to move to is in the failure itself. A run that took one of
 # the degraded early-exit branches (an unreachable supervised app, a cold-cache timeout) legitimately executes
 # fewer checks; it is already red from the check_fail that branch raised
-EXPECTED_CHECK_COUNT_INTEGER=228
+EXPECTED_CHECK_COUNT_INTEGER=238
 readonly EXPECTED_CHECK_COUNT_INTEGER
 
 # state the scope in the output, so a reader never has to infer which major these checks covered
@@ -566,6 +567,25 @@ else
     check_fail "the v3 runner's json envelope does not count the four configured entries: ${RUNNER_JSON_STRING:-<empty>}"
 fi
 
+# the information command is the worker's minute heartbeat, so the once-run dispatches it whatever the wall minute
+# (on the hour and the half hour the rates and the reading join it): the envelope names its run under the schedule
+# every minute matches, the journal holds the run's output record under the same run id, and the evaluated minute is
+# stamped in Bucharest, the zone the configuration declares (+02:00 or +03:00 with daylight saving)
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . melody:cron:run --once --format=json 2>/dev/null | tail -1 >/tmp/cron-once.json
+    tr -d ' \n\t' </tmp/cron-once.json | grep -o '\"at\":\"[^\"]*\"' | head -1 | sed 's/^/at=/'
+    RUN_ID=\$(tr -d ' \n\t' </tmp/cron-once.json | grep -o '{\"command\":\"app:info\",\"schedule\":\"\*\*\*\*\*\",\"arguments\":\[\],\"runId\":\"[0-9a-f-]*\",\"durationMilliseconds\":[0-9]*,\"failed\":false' | grep -o '\"runId\":\"[0-9a-f-]*\"' | cut -d'\"' -f4)
+    echo \"heartbeat_run=\${RUN_ID:-none}\"
+    echo \"journaled=\$(grep '\"message\":\"cron: scheduled command output\"' var/log/dev.log | grep -c \"\${RUN_ID:-none}\")\"
+    rm -f /tmp/cron-once.json"
+V3_CRON_HEARTBEAT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+if printf '%s' "${V3_CRON_HEARTBEAT_STRING}" | grep -qE '^at="at":"[0-9T:-]+\+0[23]:00"$' \
+    && printf '%s' "${V3_CRON_HEARTBEAT_STRING}" | grep -qE '^heartbeat_run=[0-9a-f]{8}-' \
+    && printf '%s' "${V3_CRON_HEARTBEAT_STRING}" | grep -qx 'journaled=1'; then
+    check_pass "the once-run dispatched the minute heartbeat app:info, journaled under its run id, on a minute stamped in Bucharest"
+else
+    check_fail "the minute heartbeat did not hold: ${V3_CRON_HEARTBEAT_STRING:-<empty>}"
+fi
+
 check_section_end "CRON IN-PROCESS RUNNER" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
@@ -578,7 +598,7 @@ check_section_start "COMMAND-OWNED ROLE FLAG" "${TAG_VALIDATE}" "e2e"
 # this command rather than the runtime's process-role parser, and it leaves the directory untouched. The
 # command grants for real now, so an assertion built on a successful grant would have to give the role back,
 # and there is no door that revokes one.
-run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:grant:role --role 'ROLE_X,ADMIN' --user ada 2>&1 | sed 's/\x1b\[[0-9;]*m//g'"
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:grant:role --role 'ROLE_X,ADMIN' ada 2>&1 | sed 's/\x1b\[[0-9;]*m//g'"
 GRANT_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 
 if printf '%s' "${GRANT_OUTPUT_STRING}" | grep -q 'role "ROLE_X,ADMIN" must not contain commas'; then
@@ -590,7 +610,7 @@ fi
 # a spelling outside the application's vocabulary is refused by name, before the directory is read: the
 # voter compares a role's spelling exactly, so a misspelt role used to be stored, announced as granted and
 # grant nothing
-run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:grant:role --role ROLE_ADMIM --user ada 2>&1 | sed 's/\x1b\[[0-9;]*m//g'"
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:grant:role --role ROLE_ADMIM ada 2>&1 | sed 's/\x1b\[[0-9;]*m//g'"
 MISSPELT_GRANT_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 
 if printf '%s' "${MISSPELT_GRANT_OUTPUT_STRING}" | grep -q 'role "ROLE_ADMIM" is not one this application knows (ROLE_USER, ROLE_EDITOR, ROLE_ADMIN)'; then
@@ -609,7 +629,7 @@ check_section_start "LAZY SERVICE RESOLUTION" "${TAG_VALIDATE}" "e2e"
 
 # one invocation on purpose: the lazy-resolution marker and the grant line must come from the SAME run,
 # proving the handle resolved inside the command body and the command still completed its work afterwards
-run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:grant:role --role ROLE_ADMIN --user ada 2>&1 | sed 's/\x1b\[[0-9;]*m//g'"
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:grant:role --role ROLE_ADMIN ada 2>&1 | sed 's/\x1b\[[0-9;]*m//g'"
 LAZY_GRANT_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 
 if printf '%s' "${LAZY_GRANT_OUTPUT_STRING}" | grep -q 'user service resolved lazily: user "ada" known=false'; then
@@ -757,6 +777,42 @@ if [[ "0" == "${OUTBOX_QUEUE_BEFORE_STRING}" ]] && [[ "1" == "${OUTBOX_QUEUE_AFT
     check_pass "the relayed notice reached outbox_notice as the one message there, carrying melody-outbox-${OUTBOX_MESSAGE_ID_STRING}, the id of the row the store marked sent (read out of band)"
 else
     check_fail "the relayed notice was not the one message on the broker under its row's id (queue ${OUTBOX_QUEUE_BEFORE_STRING:-?} -> ${OUTBOX_QUEUE_AFTER_STRING:-?} -> ${OUTBOX_QUEUE_LEFT_STRING:-?}, message id ${OUTBOX_MESSAGE_ID_STRING:-<none>}, row ${OUTBOX_ROW_STATUS_STRING:-<none>})"
+fi
+
+# the relay drains under the application's shared locker, so a replica holding the lease keeps every other one idle:
+# with the lease planted out of band in redis under the relay's lock name, a relay run publishes nothing and the row a
+# fresh enqueue wrote stays pending; with the lease removed, the next run publishes it. The broker queue is emptied
+# afterwards, as the section found it
+OUTBOX_LEASE_REFERENCE_STRING="stack-e2e-lease-$(date +%s)"
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "redis_command() {
+        ARGUMENTS=\"*\$#\r\n\"
+        for ARGUMENT in \"\$@\"; do
+            ARGUMENTS=\"\${ARGUMENTS}\\\$\${#ARGUMENT}\r\n\${ARGUMENT}\r\n\"
+        done
+        printf \"\${ARGUMENTS}\" | nc -w 2 redis 6379 | tr -d '\r'
+    }
+${EXAMPLE_SIGN_IN_SNIPPET}
+    wget -q -O /dev/null --post-data='' --header=\"\${SESSION_COOKIE_HEADER}\" \"\${EXAMPLE_BASE_URL}/outbox/enqueue?reference=${OUTBOX_LEASE_REFERENCE_STRING}\" 2>/dev/null || true
+${EXAMPLE_SIGN_OUT_SNIPPET}
+    sleep 2
+    echo \"lease_planted=\$(redis_command SET melody-example-v3:outbox:relay held-by-the-e2e-harness NX PX 30000)\"
+    go run . melody:outbox:relay --limit 1 >/dev/null 2>&1
+    echo \"held_relay_status=\$?\"
+    echo held_run_done=1"
+OUTBOX_LEASE_HELD_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+OUTBOX_LEASE_ROW_WHILE_HELD_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT status FROM melody_outbox WHERE payload LIKE '%${OUTBOX_LEASE_REFERENCE_STRING}%' ORDER BY id DESC LIMIT 1")"
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "printf '*2\r\n\$3\r\nDEL\r\n\$30\r\nmelody-example-v3:outbox:relay\r\n' | nc -w 2 redis 6379 | tr -d '\r' | sed 's/^/lease_removed=/'
+    go run . melody:outbox:relay --limit 1 >/dev/null 2>&1
+    echo \"free_relay_status=\$?\""
+OUTBOX_LEASE_FREE_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+OUTBOX_LEASE_ROW_AFTER_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT status FROM melody_outbox WHERE payload LIKE '%${OUTBOX_LEASE_REFERENCE_STRING}%' ORDER BY id DESC LIMIT 1")"
+docker_compose_no_log exec -T rabbitmq rabbitmqctl purge_queue -q outbox_notice </dev/null >/dev/null 2>&1 || true
+if printf '%s' "${OUTBOX_LEASE_HELD_STRING}" | grep -qx 'lease_planted=+OK' && printf '%s' "${OUTBOX_LEASE_HELD_STRING}" | grep -qx 'held_relay_status=0' \
+    && [[ "pending" == "${OUTBOX_LEASE_ROW_WHILE_HELD_STRING}" ]] && printf '%s' "${OUTBOX_LEASE_FREE_STRING}" | grep -qx 'lease_removed=:1' \
+    && [[ "sent" == "${OUTBOX_LEASE_ROW_AFTER_STRING}" ]]; then
+    check_pass "a relay run while another holder has the outbox lease publishes nothing (the row stays pending), and the next run after the lease is gone publishes it (read out of band)"
+else
+    check_fail "the outbox relay did not honour the shared lease: ${OUTBOX_LEASE_HELD_STRING:-<empty>} ${OUTBOX_LEASE_FREE_STRING:-<empty>}, row while held ${OUTBOX_LEASE_ROW_WHILE_HELD_STRING:-<none>}, after ${OUTBOX_LEASE_ROW_AFTER_STRING:-<none>}"
 fi
 
 check_section_end "OUTBOX FACTORIES END-TO-END" "${TAG_VALIDATE}" "e2e"
@@ -968,6 +1024,23 @@ fi
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "grep 'encrypt database migration finished' var/log/dev.log 2>/dev/null | tail -1 | grep -o '\"rows\":[0-9]*' | sed 's/^/finished_/'"
 ENCRYPT_ROWS_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 ENCRYPT_PLANTED_STATE_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT CONCAT(LEFT(secret, 11) = CONCAT('<ENC>', CHAR(0), 'gcm1', CHAR(0)), LEFT(recovery_codes, 11) = CONCAT('<ENC>', CHAR(0), 'gcm1', CHAR(0)), secret = 'PLAINTEXT-SECRET-E2E') FROM melody_example_v3_two_factor WHERE user_identifier = '${ENCRYPT_PLANT_USER_STRING:-none}'")"
+# the key rotation: the example lists two keys and encrypts under example-2026, so --mode reencrypt --target-key
+# example-2027 moves every encrypted column onto the next key, read out of band on the planted row as the key id the
+# envelope carries after its marker. A target the example does not list is refused before a row is written, the
+# journal naming the key id; both keys stay listed, so every row still decrypts
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . melody:encrypt:database --table melody_example_v3_two_factor --primary-key user_identifier --column secret --column recovery_codes --mode reencrypt --target-key example-2027 >/tmp/encrypt-rotate.log 2>&1; echo rotate_status=\$?
+    go run . melody:encrypt:database --table melody_example_v3_two_factor --primary-key user_identifier --column secret --column recovery_codes --mode reencrypt --target-key no-such-key >/tmp/encrypt-rotate.log 2>&1; echo unknown_status=\$?
+    grep 'encrypt database migration failed' var/log/dev.log | tail -1 | grep -c '\"keyId\":\"no-such-key\".*\"processedRows\":0' | sed 's/^/unknown_named=/'
+    rm -f /tmp/encrypt-rotate.log"
+ENCRYPT_ROTATION_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+ENCRYPT_ROTATED_KEYS_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT CONCAT(SUBSTRING_INDEX(SUBSTRING(secret, 12), ':', 1), '/', SUBSTRING_INDEX(SUBSTRING(recovery_codes, 12), ':', 1)) FROM melody_example_v3_two_factor WHERE user_identifier = '${ENCRYPT_PLANT_USER_STRING:-none}'")"
+if printf '%s' "${ENCRYPT_ROTATION_STRING}" | grep -qx 'rotate_status=0' && [[ "example-2027/example-2027" == "${ENCRYPT_ROTATED_KEYS_STRING}" ]] \
+    && printf '%s' "${ENCRYPT_ROTATION_STRING}" | grep -qx 'unknown_status=1' && printf '%s' "${ENCRYPT_ROTATION_STRING}" | grep -qx 'unknown_named=1'; then
+    check_pass "--mode reencrypt --target-key example-2027 moved both columns of the planted row onto the next key (read out of band), and an unlisted key is refused before a row is written"
+else
+    check_fail "the key rotation did not hold: ${ENCRYPT_ROTATION_STRING:-<empty>}, planted row keys ${ENCRYPT_ROTATED_KEYS_STRING:-<no row>}"
+fi
+
 e2e_mysql_scalar "melody_example_v3" "DELETE FROM melody_example_v3_two_factor WHERE user_identifier = '${ENCRYPT_PLANT_USER_STRING:-none}'" >/dev/null
 if [[ -n "${ENCRYPT_PLANT_USER_STRING}" ]] && printf '%s' "${ENCRYPT_ROWS_STRING}" | grep -qx 'finished_"rows":1' && [[ "110" == "${ENCRYPT_PLANTED_STATE_STRING}" ]]; then
     check_pass "the plaintext row planted out of band is the one row the migration processed, and both its columns now carry the encryption marker"
@@ -1963,6 +2036,19 @@ else
     check_fail "v3 debug:version did not report the framework version (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
 fi
 
+# the application declares its own version, set by the build through -ldflags: a build that sets one reports it in the
+# meta of every document and in debug:version's application row, a build that sets none reports dev, and the melody row
+# stays the framework's
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run -ldflags '-X main.applicationVersion=e2e-2026.09.29' . debug:version --format=json 2>/dev/null | tr -d ' \n\t' | grep -o '\"version\":{\"application\":\"[^\"]*\",\"melody\":\"[^\"]*\"' | head -1 | sed 's/^/stamped=/'
+    go run . debug:version --format=json 2>/dev/null | tr -d ' \n\t' | grep -o '\"version\":{\"application\":\"[^\"]*\"' | head -1 | sed 's/^/unstamped=/'"
+V3_APPLICATION_VERSION_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+if printf '%s' "${V3_APPLICATION_VERSION_STRING}" | grep -qx 'stamped="version":{"application":"e2e-2026.09.29","melody":"v3[^"]*"' \
+    && printf '%s' "${V3_APPLICATION_VERSION_STRING}" | grep -qx 'unstamped="version":{"application":"dev"'; then
+    check_pass "the example reports the version its build stamped through -ldflags, and dev when none was stamped, beside melody's"
+else
+    check_fail "the example's own version did not follow its build (${V3_APPLICATION_VERSION_STRING:-<empty>})"
+fi
+
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . debug:events --format=json 2>/dev/null"
 V3_EVENTS_JSON_STRING="$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | tr -d ' \n\t')"
 if printf '%s' "${V3_EVENTS_JSON_STRING}" | grep -q '"command":"debug:events"'; then
@@ -2092,6 +2178,19 @@ else
     check_fail "the manifest zones did not filter /health (frontend,public counts: ${V3_MANIFEST_COUNTS_STRING:-<none>})"
 fi
 
+# the frontend bundle is built from the committed assets/routes.json, which go generate writes from the route table; a
+# door added without regenerating it is a door the bundle cannot name, so the committed file is held against a fresh
+# export of the same zone
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . melody:routes:manifest --zone frontend --out /tmp/routes-fresh.json >/dev/null 2>&1; echo \"generated_exit=\$?\"
+    if cmp -s /tmp/routes-fresh.json assets/routes.json; then echo manifest_current=1; else echo manifest_current=0; diff /tmp/routes-fresh.json assets/routes.json | head -8; fi
+    rm -f /tmp/routes-fresh.json"
+V3_MANIFEST_FRESHNESS_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+if printf '%s' "${V3_MANIFEST_FRESHNESS_STRING}" | grep -qx 'generated_exit=0' && printf '%s' "${V3_MANIFEST_FRESHNESS_STRING}" | grep -qx 'manifest_current=1'; then
+    check_pass "the committed assets/routes.json is the frontend manifest the route table exports"
+else
+    check_fail "the committed assets/routes.json is not what melody:routes:manifest --zone frontend exports (run go generate): ${V3_MANIFEST_FRESHNESS_STRING:0:400}"
+fi
+
 # the standard flags every listing command shares, read on debug:router because its route table is fixed by the
 # code: the order, the window and the two refusals the flag validators own, the pretty form of the one document, and
 # the verbose table. Each arm is read against the plain ascending listing of the same process, so a flag that did
@@ -2150,6 +2249,50 @@ if [[ "1" == "$(router_flags_value verbose_columns)" ]] && [[ "0" == "$(router_f
     check_pass "debug:router --verbose adds the requirements, defaults and attributes columns the plain table leaves out"
 else
     check_fail "debug:router --verbose did not add the detail columns (verbose $(router_flags_value verbose_columns), plain $(router_flags_value plain_columns))"
+fi
+
+# the static file server answers ahead of routing and the router takes a door with or without its trailing slash, so
+# every door's first segment, and every locale of a localized door, is held against MELODY_STATIC_EXCLUDED_PATHS: a
+# file dropped under public/ with a door's name must never be served in place of the door. The route table is the one
+# debug:router prints; an entry claims what it prefixes and, with a trailing slash, its bare spelling
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "EXCLUDED=\$(grep '^MELODY_STATIC_EXCLUDED_PATHS=' .env | cut -d= -f2-)
+    go run . debug:router --format=json 2>/dev/null | tr -d ' \n\t' | grep -o '\"pattern\":\"[^\"]*\"[^}]*\"locales\":\"[^\"]*\"' \
+        | sed 's/^\"pattern\":\"\([^\"]*\)\".*\"locales\":\"\([^\"]*\)\"$/\1 \2/' \
+        | awk -v excluded=\"\${EXCLUDED}\" '
+            function covered(path,    count, index_, entry, bare) {
+                count = split(excluded, entries, \",\")
+                for (index_ = 1; index_ <= count; index_++) {
+                    entry = entries[index_]
+                    if (\"\" == entry) { continue }
+                    if (substr(path, 1, length(entry)) == entry) { return 1 }
+                    bare = entry
+                    sub(/\/+\$/, \"\", bare)
+                    if (\"\" != bare && path == bare) { return 1 }
+                }
+                return 0
+            }
+            {
+                routes++
+                paths[1] = \$1
+                pathCount = 1
+                if (\$1 ~ /^\/:_locale/) {
+                    pathCount = split(\$2, locales, \",\")
+                    for (localeIndex = 1; localeIndex <= pathCount; localeIndex++) {
+                        paths[localeIndex] = \"/\" locales[localeIndex] substr(\$1, length(\"/:_locale\") + 1)
+                    }
+                }
+                for (pathIndex = 1; pathIndex <= pathCount; pathIndex++) {
+                    if (0 == covered(paths[pathIndex])) { uncovered = uncovered paths[pathIndex] \",\" }
+                }
+            }
+            END { print \"routes=\" routes; print \"uncovered=\" uncovered }'"
+STATIC_EXCLUSION_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+STATIC_EXCLUSION_ROUTES_STRING="$(printf '%s' "${STATIC_EXCLUSION_STRING}" | grep -o '^routes=.*' | cut -d= -f2- || true)"
+STATIC_EXCLUSION_UNCOVERED_STRING="$(printf '%s' "${STATIC_EXCLUSION_STRING}" | grep -o '^uncovered=.*' | cut -d= -f2- || true)"
+if [[ "${STATIC_EXCLUSION_ROUTES_STRING:-0}" -gt 40 ]] && [[ -z "${STATIC_EXCLUSION_UNCOVERED_STRING}" ]] && printf '%s' "${STATIC_EXCLUSION_STRING}" | grep -qx 'uncovered='; then
+    check_pass "every one of the ${STATIC_EXCLUSION_ROUTES_STRING} doors debug:router lists, each locale of the greeting expanded, is claimed by MELODY_STATIC_EXCLUDED_PATHS"
+else
+    check_fail "MELODY_STATIC_EXCLUDED_PATHS leaves doors a file under public/ could shadow (routes ${STATIC_EXCLUSION_ROUTES_STRING:-<none>}, uncovered ${STATIC_EXCLUSION_UNCOVERED_STRING:-<none>}): ${STATIC_EXCLUSION_STRING:0:400}"
 fi
 
 # the failure the sweep reports carries the context the resolution raised it with, redacted: the unregistered type the
@@ -2436,7 +2579,7 @@ else
 fi
 
 V3_GRANT_AUDIT_BEFORE_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT COALESCE(MAX(id), 0) FROM melody_example_v3_audit")"
-run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:grant:role --role ROLE_EDITOR --user user 2>&1 | sed 's/\x1b\[[0-9;]*m//g'"
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:grant:role --role ROLE_EDITOR user 2>&1 | sed 's/\x1b\[[0-9;]*m//g'"
 V3_GRANTED_ROLES_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT roles FROM melody_example_v3_user WHERE id = 'user-1'")"
 if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'granted role "ROLE_EDITOR" to user "user"' \
     && [[ "ROLE_USER,ROLE_EDITOR" = "${V3_GRANTED_ROLES_STRING}" ]]; then
@@ -2457,14 +2600,26 @@ else
     check_fail "the grant's audit actor is ${V3_GRANT_ACTOR_STRING:-<no row>}, with ${RUN_IN_DEV_OUTPUT_STRING:-<no answer>} journal records starting that process: wanted process:<the run's id> and exactly one"
 fi
 
-# the second run finds the role held by the ROW — the repository is the only arbiter — and writes nothing
-run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:grant:role --role ROLE_EDITOR --user user 2>&1 | sed 's/\x1b\[[0-9;]*m//g'"
+# the second run, spelled with the flag's short alias, finds the role held by the ROW — the repository is the only
+# arbiter — and writes nothing
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:grant:role -r ROLE_EDITOR user 2>&1 | sed 's/\x1b\[[0-9;]*m//g'"
 V3_REGRANTED_ROLES_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT roles FROM melody_example_v3_user WHERE id = 'user-1'")"
 if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'already holds role "ROLE_EDITOR"' \
     && [[ "ROLE_USER,ROLE_EDITOR" = "${V3_REGRANTED_ROLES_STRING}" ]]; then
     check_pass "a second grant of the same role is answered as held and appends nothing"
 else
     check_fail "the second grant did not read the row as held: output ${RUN_IN_DEV_OUTPUT_STRING:-<empty>}, roles ${V3_REGRANTED_ROLES_STRING:-<no answer>}"
+fi
+
+# --role is required: an invocation that leaves it out is refused by the framework, naming the flag, before the
+# command runs, and the row is left as the grants above wrote it
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:grant:role user >/tmp/grant-bare.log 2>&1; echo \"bare_exit=\$?\"; if grep -q 'Required flag \"role\" not set' /tmp/grant-bare.log; then echo bare_named=1; else echo bare_named=0; fi; rm -f /tmp/grant-bare.log"
+V3_BARE_GRANT_ROLES_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT roles FROM melody_example_v3_user WHERE id = 'user-1'")"
+if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -qx 'bare_exit=1' && printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -qx 'bare_named=1' \
+    && [[ "ROLE_USER,ROLE_EDITOR" = "${V3_BARE_GRANT_ROLES_STRING}" ]]; then
+    check_pass "example:grant:role without --role is refused before it runs, naming the required flag, and the row is untouched"
+else
+    check_fail "the grant without --role was not refused by the framework: ${RUN_IN_DEV_OUTPUT_STRING:-<empty>}, roles ${V3_BARE_GRANT_ROLES_STRING:-<no answer>}"
 fi
 
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "${V3_AUTHORITY_STATUS_SNIPPET_STRING}"
@@ -2535,15 +2690,21 @@ else
     check_fail "the v3 reset left ${V3_BOOKKEEPING_COUNT_STRING:-<no answer>} bookkeeping row(s) and ${V3_TABLE_COUNT_AFTER_RESET_STRING:-<no answer>} table(s)"
 fi
 
-# the trail's SCHEMA belongs to the audit module, which opens it through its own door, so the reset empties
-# its rows and leaves the table standing. A trail carried across a reset would name entities that no longer
-# exist, over identifiers this example mints as the highest suffix plus one and therefore recycles.
+# the trail's SCHEMA belongs to the audit module, which opens it through its own door, so the reset empties its rows
+# and leaves the table standing, and then writes the reseed into it as ONE audit transaction: a trail carried across a
+# reset would name entities that no longer exist, over identifiers this example mints as the highest suffix plus one
+# and therefore recycles, while the reseed's own entries are the state the trail now accounts for. What is read out of
+# band: the five products and three users seeded, each with its insert entry, all under the one transaction row the
+# reset opened, whose actor is the console run and whose extras name the command
 V3_AUDIT_ROW_COUNT_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT COUNT(*) FROM melody_example_v3_audit")"
+V3_AUDIT_GROUPED_COUNT_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT COUNT(*) FROM melody_example_v3_audit a JOIN melody_audit_transaction t ON t.id = a.transaction_id WHERE a.operation = 'INSERT' AND t.extras LIKE '%example:db:reset%'")"
+V3_AUDIT_TRANSACTION_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT CONCAT(COUNT(*), '|', MIN(actor)) FROM melody_audit_transaction")"
 V3_AUDIT_TABLE_COUNT_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'melody_example_v3' AND table_name = 'melody_example_v3_audit'")"
-if [[ "0" = "${V3_AUDIT_ROW_COUNT_STRING}" ]] && [[ "1" = "${V3_AUDIT_TABLE_COUNT_STRING}" ]]; then
-    check_pass "the v3 reset emptied the audit trail and left its table standing (the rows are the application's, the schema is the module's)"
+if [[ "8" = "${V3_AUDIT_ROW_COUNT_STRING}" ]] && [[ "8" = "${V3_AUDIT_GROUPED_COUNT_STRING}" ]] && [[ "1" = "${V3_AUDIT_TABLE_COUNT_STRING}" ]] \
+    && [[ "${V3_AUDIT_TRANSACTION_STRING}" =~ ^1\|process:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+    check_pass "the v3 reset emptied the trail and wrote the reseed into it as one transaction: 8 insert entries under the run's ${V3_AUDIT_TRANSACTION_STRING#1|} (read out of band)"
 else
-    check_fail "the v3 audit trail holds ${V3_AUDIT_ROW_COUNT_STRING:-<no answer>} row(s) over ${V3_AUDIT_TABLE_COUNT_STRING:-<no answer>} table(s) after the reset"
+    check_fail "the v3 trail after the reset holds ${V3_AUDIT_ROW_COUNT_STRING:-<no answer>} row(s), ${V3_AUDIT_GROUPED_COUNT_STRING:-<no answer>} grouped under the reset, transaction rows ${V3_AUDIT_TRANSACTION_STRING:-<no answer>}, table ${V3_AUDIT_TABLE_COUNT_STRING:-<no answer>}"
 fi
 
 # the reset seeds ALL FOUR nomenclatures through one door, which is what separates it from the lazy seeding
@@ -2676,6 +2837,35 @@ if printf '%s' "${V3_CACHE_HEAL_OUTPUT_STRING}" | grep -q '^planted=+OK' && [[ "
     check_pass "a corrupt payload planted under the product list is answered as a miss and replaced (${V3_CACHE_LENGTH_PLANTED_STRING} -> ${V3_CACHE_LENGTH_HEALED_STRING} bytes, listing 200)"
 else
     check_fail "the corrupt payload did not heal (${V3_CACHE_HEAL_OUTPUT_STRING:-<empty>})"
+fi
+
+# a product read counts itself on the cache backend's own increment: three reads of one product answer counts two
+# apart between the first and the third, the counter is read out of redis as the decimal text of the last answer, and
+# a read of an absent product leaves no counter behind
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "${EXAMPLE_SIGN_IN_SNIPPET}
+    for READ in 1 2 3; do
+        wget -q -O- --header=\"\${SESSION_COOKIE_HEADER}\" --header='Accept: application/json' \"\${EXAMPLE_BASE_URL}/products/api/read/prod-1/\" 2>/dev/null | grep -o '\"views\":[0-9]*' | head -1 | sed \"s/^\\\"views\\\":/views_\${READ}=/\"
+    done
+    wget -q -O /dev/null --header=\"\${SESSION_COOKIE_HEADER}\" --header='Accept: application/json' \"\${EXAMPLE_BASE_URL}/products/api/read/zz-e2e-absent-product/\" 2>/dev/null
+${EXAMPLE_SIGN_OUT_SNIPPET}
+    P='melody-example-v3:cache:*example-product-views-prod-1'
+    K=\$(printf \"*2\r\n\\\$4\r\nKEYS\r\n\\\$\${#P}\r\n\${P}\r\n\" | nc -w 2 redis 6379 | tr -d '\r' | grep -v '^[*\$]' | head -1)
+    printf \"*2\r\n\\\$3\r\nGET\r\n\\\$\${#K}\r\n\${K}\r\n\" | nc -w 2 redis 6379 | tr -d '\r' | grep -v '^\\\$' | head -1 | sed 's/^/stored=/'
+    A='melody-example-v3:cache:*example-product-views-zz-e2e-absent-product'
+    printf \"*2\r\n\\\$4\r\nKEYS\r\n\\\$\${#A}\r\n\${A}\r\n\" | nc -w 2 redis 6379 | head -1 | tr -d '\r*' | sed 's/^/absent_keys=/'"
+V3_PRODUCT_VIEWS_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+v3_product_views_value() {
+    printf '%s' "${V3_PRODUCT_VIEWS_STRING}" | grep -o "^${1}=[0-9]*" | head -1 | cut -d= -f2 || true
+}
+V3_PRODUCT_VIEWS_FIRST_STRING="$(v3_product_views_value views_1)"
+V3_PRODUCT_VIEWS_THIRD_STRING="$(v3_product_views_value views_3)"
+if [[ "${V3_PRODUCT_VIEWS_FIRST_STRING}" =~ ^[0-9]+$ ]] && [[ "${V3_PRODUCT_VIEWS_THIRD_STRING}" =~ ^[0-9]+$ ]] \
+    && [[ 2 -eq $((V3_PRODUCT_VIEWS_THIRD_STRING - V3_PRODUCT_VIEWS_FIRST_STRING)) ]] \
+    && [[ "${V3_PRODUCT_VIEWS_THIRD_STRING}" == "$(v3_product_views_value stored)" ]] \
+    && [[ "0" == "$(v3_product_views_value absent_keys)" ]]; then
+    check_pass "three reads of prod-1 count ${V3_PRODUCT_VIEWS_FIRST_STRING} -> ${V3_PRODUCT_VIEWS_THIRD_STRING}, the counter read out of redis holds the last, and an absent product leaves none"
+else
+    check_fail "the product view counter did not hold ($(printf '%s' "${V3_PRODUCT_VIEWS_STRING}" | grep -o '^\(views_[0-9]\|stored\|absent_keys\)=[0-9]*' | tr '\n' ' '))"
 fi
 
 check_section_end "V3 CACHE CLEAR" "${TAG_VALIDATE}" "e2e"
@@ -2850,6 +3040,20 @@ if [[ "1.0842@2026-09-07T09:00:00Z" = "${V3_REFRESHED_QUOTE_STRING}" ]]; then
     check_pass "the provider's quote landed in the catalogue (cur-usd ${V3_REFRESHED_QUOTE_STRING}, read out of band)"
 else
     check_fail "cur-usd is quoted ${V3_REFRESHED_QUOTE_STRING:-<no answer>}, wanted the provider's 1.0842@2026-09-07T09:00:00Z"
+fi
+
+# the provider serves its rates to a client presenting its api key only, so the refresh above landed because the rates
+# client sent RATES_API_KEY: the same document asked for without the key, or with another, is refused 401 — the control
+# that the provider enforces it — and debug:parameters shows the key redacted, as the credential it is
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "wget -q -S -O /dev/null http://rates.melody.localhost.precision-soft.com/v1/latest 2>&1 | sed -n 's/^ *HTTP\/[0-9.]* \([0-9]*\).*/keyless=\1/p' | head -1
+    wget -q -S -O /dev/null --header='x-api-key: not-the-key' http://rates.melody.localhost.precision-soft.com/v1/latest 2>&1 | sed -n 's/^ *HTTP\/[0-9.]* \([0-9]*\).*/wrong_key=\1/p' | head -1
+    go run . debug:parameters 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | grep -E '^\| RATES_API_KEY ' | grep -c 'e2e-rates-key-0001' | sed 's/^/key_in_clear=/'"
+V3_RATES_KEY_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+if printf '%s' "${V3_RATES_KEY_STRING}" | grep -qx 'keyless=401' && printf '%s' "${V3_RATES_KEY_STRING}" | grep -qx 'wrong_key=401' \
+    && printf '%s' "${V3_RATES_KEY_STRING}" | grep -qx 'key_in_clear=0'; then
+    check_pass "the provider refuses its rates without the api key the refresh sent, and debug:parameters redacts RATES_API_KEY"
+else
+    check_fail "the rates api key did not hold: ${V3_RATES_KEY_STRING:-<empty>}"
 fi
 
 # the reading is stored in both reference frames: the provider's stamp as it came, beside the same instant moved
@@ -3096,6 +3300,32 @@ if printf '%s' "${V3_HISTORY_LIMIT_STRING}" | grep -qx 'readings_limit_1=1' \
     check_pass "the archive listing honours ?limit=1, takes the first of a repeated limit and refuses ?limit=x with 400, where the bare listing holds more"
 else
     check_fail "the archive listing's limit did not hold ($(printf '%s' "${V3_HISTORY_LIMIT_STRING}" | grep -o '^\(readings\|status\)_[a-z0-9_]*=[0-9]*' | tr '\n' ' '))"
+fi
+
+# the export answers the same readings as a csv attachment: signed in, ?limit=2 is a header and two rows, named through
+# Content-Disposition, and the newest reading's headline the json listing answers is the one the csv carries first —
+# the same data through the two doors
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "${EXAMPLE_SIGN_IN_SNIPPET}
+    wget -q -S -O /tmp/readings-export.csv --header=\"\${SESSION_COOKIE_HEADER}\" \"\${EXAMPLE_BASE_URL}/reports/api/export/?limit=2\" 2>/tmp/readings-export.headers
+    sed -n 's/^ *HTTP\/[0-9.]* \([0-9]*\).*/export_status=\1/p' /tmp/readings-export.headers | head -1
+    if grep -qi '^ *Content-Type: text/csv; charset=utf-8' /tmp/readings-export.headers; then echo export_csv=1; else echo export_csv=0; fi
+    if grep -qiE '^ *Content-Disposition: attachment; filename=\"catalog-readings-[0-9]{4}-[0-9]{2}-[0-9]{2}\.csv\"' /tmp/readings-export.headers; then echo export_named=1; else echo export_named=0; fi
+    if head -1 /tmp/readings-export.csv | grep -qx 'taken_at,headline,product_count,journal_count,payload'; then echo export_header=1; else echo export_header=0; fi
+    echo \"export_rows=\$(grep -cE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' /tmp/readings-export.csv)\"
+    HEADLINE=\$(wget -q -O- --header=\"\${SESSION_COOKIE_HEADER}\" --header='Accept: application/json' \"\${EXAMPLE_BASE_URL}/reports/api/history/?limit=1\" 2>/dev/null | grep -o '\"headline\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4)
+    if [ -n \"\${HEADLINE}\" ] && sed -n '2p' /tmp/readings-export.csv | grep -qF \"\${HEADLINE}\"; then echo export_same_newest=1; else echo export_same_newest=0; fi
+    rm -f /tmp/readings-export.csv /tmp/readings-export.headers
+${EXAMPLE_SIGN_OUT_SNIPPET}"
+V3_EXPORT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+if printf '%s' "${V3_EXPORT_STRING}" | grep -qx 'export_status=200' \
+    && printf '%s' "${V3_EXPORT_STRING}" | grep -qx 'export_csv=1' \
+    && printf '%s' "${V3_EXPORT_STRING}" | grep -qx 'export_named=1' \
+    && printf '%s' "${V3_EXPORT_STRING}" | grep -qx 'export_header=1' \
+    && printf '%s' "${V3_EXPORT_STRING}" | grep -qx 'export_rows=2' \
+    && printf '%s' "${V3_EXPORT_STRING}" | grep -qx 'export_same_newest=1'; then
+    check_pass "the archive export answers ?limit=2 as a named csv attachment, a header and two rows, the newest reading the json listing's"
+else
+    check_fail "the archive export did not hold ($(printf '%s' "${V3_EXPORT_STRING}" | grep -o '^export_[a-z_]*=[0-9]*' | tr '\n' ' '))"
 fi
 
 check_section_end "V3 READING ARCHIVE" "${TAG_VALIDATE}" "e2e"

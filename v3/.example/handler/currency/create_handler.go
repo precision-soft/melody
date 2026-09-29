@@ -77,7 +77,7 @@ func apiJsonErrorResponder(
 type CreateRequest struct {
     /* an empty id is minted by the repository; a supplied one becomes a cache key component, whose grammar refuses spaces and newlines */
     Id   string  `json:"id" validate:"max=60,regex=^\\S+$"`
-    Code string  `json:"code" validate:"notBlank,regex=^[A-Z]{3}$"`
+    Code string  `json:"code" validate:"notBlank,currencyCode"`
     Name string  `json:"name" validate:"notBlank,min=2,max=120"`
     Rate float64 `json:"rate" validate:"greaterThan=0"`
 }

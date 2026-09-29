@@ -2,10 +2,15 @@ package main
 
 import (
     "bytes"
+    "io"
     "mime/multipart"
     "net/http"
     "net/url"
+    "regexp"
 )
+
+/* presignedSignaturePattern is a SigV4 signature, the hex of an HMAC-SHA256 */
+var presignedSignaturePattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 const multipartLabel = "multipart body"
 
@@ -53,6 +58,57 @@ func runMultipartCheck(baseUrl string) {
     assertUrlEncodedBodyIsRestoredAfterParsing(client)
     assertMultipartMissingKeyRefused(client)
     assertMultipartUnknownKeyNotFound(client)
+    assertPresignedLinkReadsTheObjectDirectly(client)
+}
+
+/* multipartLinkPayload mirrors the link door's response payload */
+type multipartLinkPayload struct {
+    Key       string `json:"key"`
+    Url       string `json:"url"`
+    ExpiresIn int    `json:"expiresIn"`
+}
+
+/* the link door hands the client a presigned url to the object, read here straight from the object store, the second party, with the bytes the door stored. The development localstack enforces neither the signature nor the expiry (an unsigned url and a zeroed signature both answer 200, and a one-second link still answers after two), so what separates a presigned link from the object's plain url is the url itself: the SigV4 query carrying a 64-hex signature and the ttl the caller asked for as X-Amz-Expires. A ttl past an hour is refused 400 and an absent object 404. */
+func assertPresignedLinkReadsTheObjectDirectly(client *liveExampleClient) {
+    key := liveExampleUnique("e2e-presigned")
+    content := []byte("bytes a presigned link hands out without this application in the path")
+
+    stored := client.call(multipartLabel, liveExampleRequest{method: "POST", path: multipartRoute + "?key=" + url.QueryEscape(key), contentType: "application/octet-stream", body: content})
+    requireLiveExampleStatus(multipartLabel, "the put the link reads", stored, http.StatusOK)
+
+    answered := client.call(multipartLabel, liveExampleRequest{method: "GET", path: multipartRoute + "/link?key=" + url.QueryEscape(key) + "&ttl=60"})
+    requireLiveExampleStatus(multipartLabel, "the presigned link", answered, http.StatusOK)
+
+    link := multipartLinkPayload{}
+    decodeLiveExamplePayload(multipartLabel, answered, &link)
+
+    parsed, parseErr := url.Parse(link.Url)
+    if nil != parseErr || key != link.Key || 60 != link.ExpiresIn {
+        fail("%s: the link door answered %+v (%v), wanted the key, a url and expiresIn 60", multipartLabel, link, parseErr)
+    }
+
+    query := parsed.Query()
+    if "AWS4-HMAC-SHA256" != query.Get("X-Amz-Algorithm") || "60" != query.Get("X-Amz-Expires") || false == presignedSignaturePattern.MatchString(query.Get("X-Amz-Signature")) || "" == query.Get("X-Amz-Credential") {
+        fail("%s: the link %s is not a SigV4 presigned url expiring in 60 seconds", multipartLabel, link.Url)
+    }
+
+    direct, directErr := http.Get(link.Url)
+    if nil != directErr {
+        fail("%s: the presigned link could not be read from the object store: %v", multipartLabel, directErr)
+    }
+    directBody, _ := io.ReadAll(direct.Body)
+    _ = direct.Body.Close()
+    if http.StatusOK != direct.StatusCode || false == bytes.Equal(content, directBody) {
+        fail("%s: the presigned link answered %d %q from the object store, wanted 200 and the bytes the door stored", multipartLabel, direct.StatusCode, directBody)
+    }
+
+    tooLong := client.call(multipartLabel, liveExampleRequest{method: "GET", path: multipartRoute + "/link?key=" + url.QueryEscape(key) + "&ttl=3601"})
+    requireLiveExampleStatus(multipartLabel, "a link asked for past an hour", tooLong, http.StatusBadRequest)
+
+    absent := client.call(multipartLabel, liveExampleRequest{method: "GET", path: multipartRoute + "/link?key=" + url.QueryEscape(key+"-absent")})
+    requireLiveExampleStatus(multipartLabel, "a link to an absent object", absent, http.StatusNotFound)
+
+    pass("%s: the link door hands out a SigV4 url expiring when asked, read from the object store with the stored bytes; past an hour 400, an absent object 404", multipartLabel)
 }
 
 func assertMultipartBodyReachesHandlerIntact(client *liveExampleClient) {

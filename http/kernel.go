@@ -699,8 +699,8 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                             return response, nil
                         }
 
-                        response := JsonErrorResponse(nethttp.StatusMethodNotAllowed, "method not allowed")
-                        response.headers.Set("Allow", strings.Join(normalizedAllowedMethods, ", "))
+                        response := renderErrorResponse(runtimeInstance, request, nethttp.StatusMethodNotAllowed, "method not allowed", nil)
+                        setResponseHeader(response, "Allow", strings.Join(normalizedAllowedMethods, ", "))
                         return response, nil
                     }
                 }
@@ -743,7 +743,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                     return response, nil
                 }
 
-                return JsonErrorResponse(nethttp.StatusNotFound, "not found"), nil
+                return renderErrorResponse(runtimeInstance, request, nethttp.StatusNotFound, "not found", nil), nil
             }
         }
 

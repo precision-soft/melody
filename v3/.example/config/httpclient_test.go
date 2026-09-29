@@ -55,13 +55,18 @@ func TestRegisterReportExportHttpClientService_TheClientDoesNotFollowARedirect(t
    client's own; the export client carries no base, since the endpoint an operator writes names its own host,
    the same budget and accept, and follows no redirect */
 func TestOutboundHttpClientConfigs_CarryTheirBaseTheBudgetAndTheAcceptHeader(t *testing.T) {
-    rates := ratesHttpClientConfig("https://rates.example/v1/")
+    rates := ratesHttpClientConfig("https://rates.example/v1/", "")
     if "https://rates.example/v1/" != rates.BaseUrl() || 3*time.Second != rates.Timeout() || "application/json" != rates.Headers()["Accept"] || 1 != len(rates.Headers()) {
         t.Fatalf("expected the rates client based on the provider, 3s, accept json, got %q %s %v", rates.BaseUrl(), rates.Timeout(), rates.Headers())
     }
 
     if false == rates.FollowsRedirects() {
         t.Fatal("expected the rates client to keep the client's redirect policy")
+    }
+
+    keyed := ratesHttpClientConfig("https://rates.example/v1/", "provider-key")
+    if "provider-key" != keyed.Headers()["X-Api-Key"] || "application/json" != keyed.Headers()["Accept"] || 2 != len(keyed.Headers()) {
+        t.Fatalf("expected the provider's api key beside the accept header, got %v", keyed.Headers())
     }
 
     export := reportExportHttpClientConfig()
@@ -82,10 +87,12 @@ func TestOutboundHttpClientConfigs_CarryTheirBaseTheBudgetAndTheAcceptHeader(t *
 func TestRegisterRatesHttpClientService_ReachesTheProviderUnderItsBaseAndStaysOffTheTypeIndex(t *testing.T) {
     requestedPath := ""
     acceptHeader := ""
+    apiKeyHeader := ""
 
     server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
         requestedPath = request.URL.Path
         acceptHeader = request.Header.Get("accept")
+        apiKeyHeader = request.Header.Get("x-api-key")
         writer.WriteHeader(nethttp.StatusOK)
     }))
     t.Cleanup(server.Close)
@@ -96,6 +103,7 @@ func TestRegisterRatesHttpClientService_ReachesTheProviderUnderItsBaseAndStaysOf
     moduleInstance := moduleWithEnvironment(t, map[string]string{
         parameterRatesBaseUrl:         server.URL + "/v1/",
         parameterReportExportEndpoint: server.URL + "/sink",
+        environmentKeyRatesApiKey:     "provider-key",
     })
     moduleInstance.registerRatesHttpClientService(containerRegistrar{Container: containerInstance})
     moduleInstance.registerReportExportHttpClientService(containerRegistrar{Container: containerInstance})
@@ -110,8 +118,8 @@ func TestRegisterRatesHttpClientService_ReachesTheProviderUnderItsBaseAndStaysOf
         t.Fatalf("expected the provider reached, got %v, %v", response, requestErr)
     }
 
-    if "/v1/latest" != requestedPath || "application/json" != acceptHeader {
-        t.Fatalf("expected /v1/latest asked for json, got %q with accept %q", requestedPath, acceptHeader)
+    if "/v1/latest" != requestedPath || "application/json" != acceptHeader || "provider-key" != apiKeyHeader {
+        t.Fatalf("expected /v1/latest asked for json with the api key, got %q with accept %q and key %q", requestedPath, acceptHeader, apiKeyHeader)
     }
 
     if _, byTypeErr := melodycontainer.FromResolverByType[*httpclient.HttpClient](containerInstance); nil == byTypeErr {

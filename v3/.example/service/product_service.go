@@ -111,6 +111,11 @@ func (instance *ProductService) FindById(id string) (*entity.Product, bool, erro
     return product, true, nil
 }
 
+/* RecordView counts one read of a product and answers the count so far. The counter is the cache backend's atomic increment, shared by every process on the shared cache; it is a hint rather than a ledger, since example:cache:clear and example:db:reset empty the namespace it lives in. */
+func (instance *ProductService) RecordView(id string) (int64, error) {
+    return instance.cache.Increment(CacheKeyProductViews(id), 1)
+}
+
 func (instance *ProductService) Create(
     runtimeInstance melodyruntimecontract.Runtime,
     productId string,

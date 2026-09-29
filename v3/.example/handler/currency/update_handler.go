@@ -58,6 +58,6 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
 }
 
 type updateRequest struct {
-    Code string `json:"code" validate:"notBlank,regex=^[A-Z]{3}$"`
+    Code string `json:"code" validate:"notBlank,currencyCode"`
     Name string `json:"name" validate:"notBlank,min=2,max=120"`
 }

@@ -81,7 +81,7 @@ func auditContext(ctx context.Context) context.Context {
 }
 
 func (instance *bunProductRepository) seedIfEmpty(ctx context.Context) error {
-    return seedIfEmptyRows(ctx, instance.database, func() []*productRow {
+    return seedIfEmptyAudited(ctx, instance.database, instance.tracker, persistence.AuditEntityProduct, func() []*productRow {
         seedList := seedProductList(time.Now())
         rowList := make([]*productRow, 0, len(seedList))
         for _, product := range seedList {
@@ -89,6 +89,8 @@ func (instance *bunProductRepository) seedIfEmpty(ctx context.Context) error {
         }
 
         return rowList
+    }, func(row *productRow) string {
+        return row.Id
     })
 }
 

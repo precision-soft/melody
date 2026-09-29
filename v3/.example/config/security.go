@@ -5,6 +5,7 @@ import (
     "regexp"
     "strings"
 
+    melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
     "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/repository"
     "github.com/precision-soft/melody/v3/.example/route"
@@ -169,6 +170,7 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
             Secrets:         instance.hmacSecrets,
             Apps:            instance.hmacApps,
             MaxFutureExpiry: internalEnvelopeMaxFutureExpiry,
+            NonceGuard:      instance.internalNonceGuard(),
         }),
         melodysecurityconfig.NewFirewallOverrideConfiguration().
             WithAccessControl(melodysecurity.NewAccessControl(
@@ -290,3 +292,16 @@ func (instance *Module) registerMetricsFirewall(builder *melodysecurityconfig.Bu
             WithAccessDeniedHandler(melodysecurity.NewJsonAccessDeniedHandler()),
     )
 }
+
+/* internalNonceGuardPrefix names the nonces this application's internal firewall remembers, so two applications on one redis never refuse each other's envelopes as replays */
+const internalNonceGuardPrefix = "melody-example-v3:nonce"
+
+/* internalNonceGuard is the replay guard of the internal firewall: on redis every replica remembers the nonces every other one accepted, so an envelope accepted by one is refused by all; without redis the source keeps its in-process guard, which a single process is. The envelope horizon bounds how long a nonce is remembered. */
+func (instance *Module) internalNonceGuard() melodysecuritycontract.NonceGuard {
+    if nil == instance.redisClient {
+        return nil
+    }
+
+    return melodyrueidis.NewNonceGuardWithPrefix(instance.redisClient, internalNonceGuardPrefix)
+}
+

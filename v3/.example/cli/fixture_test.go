@@ -149,69 +149,44 @@ func (instance *commandFixture) lazyUserService() *melodycontainer.LazyService[*
     return melodycontainer.Lazy[*service.UserService](instance.container, testUserServiceName)
 }
 
-/* flagContext answers the flags a command declared, and nothing else: the arms below turn on --role and
-   --user alone. Writer answers io.Discard because what a command PRINTS is not what these tests read —
-   they read what the directory holds afterwards. */
-type flagContext struct {
-    stringByName map[string]string
-    boolByName   map[string]bool
-    writer       io.Writer
-}
-
-func newFlagContext(role string, user string) *flagContext {
-    return &flagContext{stringByName: map[string]string{"role": role, "user": user}}
+/* newFlagContext is the grant arm: the role as the flag the command requires, the user as its one argument. Its writer is io.Discard, because what a command PRINTS is not what these tests read — they read what the directory holds afterwards. */
+func newFlagContext(role string, user string) *melodyclicontract.StaticContext {
+    return newFlagContextWithWriter(role, user, nil)
 }
 
 /* newFlagContextWithWriter is the grant arm for a test that reads what the command printed */
-func newFlagContextWithWriter(role string, user string, writer io.Writer) *flagContext {
-    return &flagContext{stringByName: map[string]string{"role": role, "user": user}, writer: writer}
+func newFlagContextWithWriter(role string, user string, writer io.Writer) *melodyclicontract.StaticContext {
+    return &melodyclicontract.StaticContext{
+        StringValues:   map[string]string{"role": role},
+        SetFlagNames:   []string{"role"},
+        ArgumentValues: []string{user},
+        WriterValue:    writer,
+    }
 }
 
 /* newBoolFlagContext is the arm the reset command needs: its only flag is a bool, and what a test of that
    command reads is what the command wrote, so this one carries a writer of its own. */
-func newBoolFlagContext(flagName string, value bool, writer io.Writer) *flagContext {
-    return &flagContext{boolByName: map[string]bool{flagName: value}, writer: writer}
+func newBoolFlagContext(flagName string, value bool, writer io.Writer) *melodyclicontract.StaticContext {
+    return &melodyclicontract.StaticContext{
+        BoolValues:   map[string]bool{flagName: value},
+        SetFlagNames: []string{flagName},
+        WriterValue:  writer,
+    }
 }
 
-func (instance *flagContext) String(flagName string) string {
-    return instance.stringByName[flagName]
-}
-
-func (instance *flagContext) Bool(flagName string) bool {
-    return instance.boolByName[flagName]
-}
-
-func (instance *flagContext) Int(flagName string) int {
-    return 0
-}
-
-func (instance *flagContext) StringSlice(flagName string) []string {
-    return nil
-}
-
-func (instance *flagContext) IsSet(flagName string) bool {
-    if _, exists := instance.stringByName[flagName]; true == exists {
-        return true
+/* newStringFlagContext gives the string flags a run would parse, each reported as set, and the writer the command prints to */
+func newStringFlagContext(stringValues map[string]string, writer io.Writer) *melodyclicontract.StaticContext {
+    setFlagNames := make([]string, 0, len(stringValues))
+    for flagName := range stringValues {
+        setFlagNames = append(setFlagNames, flagName)
     }
 
-    _, exists := instance.boolByName[flagName]
-
-    return exists
-}
-
-func (instance *flagContext) Arguments() []string {
-    return nil
-}
-
-func (instance *flagContext) Writer() io.Writer {
-    if nil == instance.writer {
-        return io.Discard
+    return &melodyclicontract.StaticContext{
+        StringValues: stringValues,
+        SetFlagNames: setFlagNames,
+        WriterValue:  writer,
     }
-
-    return instance.writer
 }
-
-var _ melodyclicontract.Context = (*flagContext)(nil)
 
 /* refusingWriter refuses every write, the shape of a closed pipe the operator's shell stopped reading */
 type refusingWriter struct {

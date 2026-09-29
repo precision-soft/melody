@@ -78,8 +78,27 @@ func (instance *recordingResetConnection) Close() error {
     return nil
 }
 
+/* the audited reseed writes each row and its trail entry in one transaction, so the recording driver opens one and keeps its boundaries in the recorded sequence */
 func (instance *recordingResetConnection) Begin() (driver.Tx, error) {
-    return nil, errors.New("transactions are not supported by the recording driver")
+    instance.recorder.record("BEGIN")
+
+    return &recordingResetTransaction{recorder: instance.recorder}, nil
+}
+
+type recordingResetTransaction struct {
+    recorder *recordingResetConnector
+}
+
+func (instance *recordingResetTransaction) Commit() error {
+    instance.recorder.record("COMMIT")
+
+    return nil
+}
+
+func (instance *recordingResetTransaction) Rollback() error {
+    instance.recorder.record("ROLLBACK")
+
+    return nil
 }
 
 func (instance *recordingResetConnection) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
@@ -547,3 +566,39 @@ func TestDatabaseResetCommandRefusesBeforeTouchingAnythingWhenTheCacheCannotBeRe
         }
     }
 }
+
+func TestDatabaseResetCommandGroupsTheReseedUnderOneAuditTransaction(t *testing.T) {
+    storage, recorder := newRecordingResetStorage("mysql:3306/melody_example_v3")
+    runtimeInstance, _ := newResetRuntimeWithArchive(t, storage, persistence.NewArchiveStorage(nil))
+
+    if runErr := NewDatabaseResetCommand().Run(runtimeInstance, newBoolFlagContext(databaseResetFlagForce, true, &bytes.Buffer{})); nil != runErr {
+        t.Fatalf("expected the reset over the recording handle to complete, got %v", runErr)
+    }
+
+    transactionOpened := -1
+    firstSeededRow := -1
+    groupedEntries := 0
+    for index, statement := range recorder.recorded() {
+        if -1 == transactionOpened && true == strings.HasPrefix(statement, "INSERT INTO `"+melodyaudit.DefaultTransactionTable+"`") && true == strings.Contains(statement, `'{"command":"example:db:reset"}'`) {
+            transactionOpened = index
+        }
+
+        if -1 == firstSeededRow && (true == strings.HasPrefix(statement, "INSERT INTO `melody_example_v3_product`") || true == strings.HasPrefix(statement, "INSERT INTO `melody_example_v3_user`")) {
+            firstSeededRow = index
+        }
+
+        /* the recording driver answers every insert's id as 1, so the transaction's id is 1 */
+        if true == strings.HasPrefix(statement, "INSERT INTO "+persistence.AuditTable+" ") && true == strings.Contains(statement, "VALUES (DEFAULT, 1, ") && true == strings.Contains(statement, "'INSERT'") {
+            groupedEntries++
+        }
+    }
+
+    if -1 == transactionOpened || -1 == firstSeededRow || transactionOpened > firstSeededRow {
+        t.Fatalf("expected the audit transaction naming the command opened before the first seeded row, got transaction %d, first row %d", transactionOpened, firstSeededRow)
+    }
+
+    if 8 != groupedEntries {
+        t.Fatalf("expected the five products and three users seeded each with an insert entry in the transaction, got %d", groupedEntries)
+    }
+}
+

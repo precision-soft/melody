@@ -11,10 +11,14 @@ import (
     "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/handler/category"
     "github.com/precision-soft/melody/v3/.example/handler/currency"
+    examplejournal "github.com/precision-soft/melody/v3/.example/journal"
     "github.com/precision-soft/melody/v3/.example/presenter"
     "github.com/precision-soft/melody/v3/.example/service"
     melodybag "github.com/precision-soft/melody/v3/bag"
+    melodyexception "github.com/precision-soft/melody/v3/exception"
+    melodyexceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
+    melodylogging "github.com/precision-soft/melody/v3/logging"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
@@ -94,6 +98,7 @@ func ApiReadHandler() melodyhttpcontract.Handler {
         }
 
         response.Converted = converted
+        response.Views = recordedViews(runtimeInstance, productService, product.Id)
 
         return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, response), nil
     }
@@ -121,6 +126,29 @@ type readResponse struct {
 
     /* a pointer with omitempty, so a read that asked for no conversion carries no key */
     Converted *ConvertedPriceResponse `json:"converted,omitempty"`
+
+    /* how many times the product has been read, this read included; absent when the counter could not be written */
+    Views *int64 `json:"views,omitempty"`
+}
+
+/* productViewRecorder is the one door of the product service the read handler counts through */
+type productViewRecorder interface {
+    RecordView(id string) (int64, error)
+}
+
+/* recordedViews counts the read and answers the count, or nothing when the cache refused: the counter is a hint, so its failure is journaled at warning and the product is still answered */
+func recordedViews(runtimeInstance melodyruntimecontract.Runtime, recorder productViewRecorder, productId string) *int64 {
+    views, recordErr := recorder.RecordView(productId)
+    if nil != recordErr {
+        examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Warning(
+            "the product view could not be counted",
+            melodyexception.LogContext(recordErr, melodyexceptioncontract.Context{"productId": productId}),
+        )
+
+        return nil
+    }
+
+    return &views
 }
 
 /* ConvertedPriceResponse is the product's price restated in the currency the caller named. RateAsOf is the older of the two quotes the conversion reads, the product's own currency and the one named, so the price is never presented as fresher than either. */

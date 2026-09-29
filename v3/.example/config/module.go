@@ -130,9 +130,11 @@ const (
     environmentKeyPgsqlPassword = "PGSQL_PASSWORD"
     environmentKeyPgsqlInsecure = "PGSQL_INSECURE"
 
-    environmentKeyRedisAddress = "REDIS_ADDRESS"
-    environmentKeySessionFile  = "APP_SESSION_FILE"
-    environmentKeyMetricsToken = "APP_METRICS_TOKEN"
+    environmentKeyRedisAddress      = "REDIS_ADDRESS"
+    environmentKeySessionFile       = "APP_SESSION_FILE"
+    environmentKeyMetricsToken      = "APP_METRICS_TOKEN"
+    environmentKeyEncryptKeys       = "APP_ENCRYPT_KEYS"
+    environmentKeyEncryptCurrentKey = "APP_ENCRYPT_CURRENT_KEY"
 
     environmentKeyAmqpDsn = "AMQP_DSN"
 
@@ -151,6 +153,7 @@ const (
     environmentKeyRequestBudgetPerHour = "APP_REQUEST_BUDGET_PER_HOUR"
     environmentKeyTrustedProxyList     = "APP_TRUSTED_PROXY_LIST"
     environmentKeyRatesBaseUrl         = "RATES_BASE_URL"
+    environmentKeyRatesApiKey          = "RATES_API_KEY"
     environmentKeyRatesBaseCurrency    = "RATES_BASE_CURRENCY"
     environmentKeyReportExportEndpoint = "APP_REPORTING_EXPORT_ENDPOINT"
 

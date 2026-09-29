@@ -1,6 +1,10 @@
 package main
 
 import (
+    "context"
+    "encoding/base64"
+    "encoding/json"
+    "fmt"
     "net/http"
     "strings"
     "time"
@@ -26,13 +30,13 @@ type internalAuthPayload struct {
     } `json:"onBehalfOf,omitempty"`
 }
 
-/* runInternalAuthCheck exercises the cross-app HMAC scheme ACROSS A REAL SERVICE BOUNDARY: the envelope is minted by the example's internal:sign command in one process and verified by the running application in another, over http, through the whole request pipeline. The in-process hmac.go section stays exactly as it is — it drives the token source directly against a live redis nonce guard, which is a different property (a shared, multi-instance guard) and is not reachable through this route, whose firewall is configured without one.
+/* runInternalAuthCheck exercises the cross-app HMAC scheme ACROSS A REAL SERVICE BOUNDARY: the envelope is minted by the example's internal:sign command in one process and verified by the running application in another, over http, through the whole request pipeline. The in-process hmac.go section stays exactly as it is — it drives the token source directly against a live redis nonce guard. This route's firewall carries the shared redis guard too when the example wires redis, and the accepted envelope's nonce is read back out of band under the example's prefix: the replay refusal alone cannot tell the shared guard from the in-process one, since the development stack runs one process.
 
    Every negative mints its OWN envelope. Reusing one would make each negative pass for the wrong reason: the second presentation of any envelope is refused as a replay, so a broken signature check would still look correct. */
-func runInternalAuthCheck(baseUrl string) {
+func runInternalAuthCheck(baseUrl string, redisAddress string) {
     client := newLiveExampleClient(baseUrl)
 
-    assertInternalAuthAcceptedAndReplayed(client)
+    assertInternalAuthAcceptedAndReplayed(client, redisAddress)
     assertInternalAuthRejected(client, "no internal-auth header at all", internalAuthRoute, nil, "")
     /* the machine firewall carries its own rule for every path under /internal: an unsigned call to a path no route serves is refused by the firewall's entry point, not answered 404 by routing it would reach if no rule claimed it */
     assertInternalAuthRejected(client, "an unsigned call to an unrouted path under /internal", "/internal/not-routed/", nil, "")
@@ -43,7 +47,7 @@ func runInternalAuthCheck(baseUrl string) {
 }
 
 /* assertInternalAuthAcceptedAndReplayed covers the positive and the replay in one place because they must share one envelope: the replay negative is only meaningful for an envelope that was ACCEPTED first. */
-func assertInternalAuthAcceptedAndReplayed(client *liveExampleClient) {
+func assertInternalAuthAcceptedAndReplayed(client *liveExampleClient, redisAddress string) {
     envelope, elapsed := mintInternalAuthEnvelope("--actor", "user-42")
 
     response := client.call(internalAuthLabel, liveExampleRequest{
@@ -130,6 +134,8 @@ func assertInternalAuthAcceptedAndReplayed(client *liveExampleClient) {
     }
 
     pass("the same envelope presented a second time was refused with 401 (its nonce was consumed)")
+
+    assertInternalAuthNonceSharedInRedis(envelope, redisAddress)
 
     /* a stale-envelope negative is deliberately NOT asserted here: the envelope's lifetime is exampleHmacEnvelopeLifetime (30s) and internal:sign has no flag to backdate one, so the only way to observe expiry over http would be to sleep 31 seconds inside the run. The expiry check is covered by the framework's own unit tests, which can move the clock. */
 }
@@ -246,3 +252,56 @@ func assertInternalAuthRefusesAnEnvelopePastTheHorizon(client *liveExampleClient
 
     pass("an envelope minted for four minutes is accepted and one minted for an hour is refused 401: the firewall bounds the expiry horizon")
 }
+
+/* internalAuthNoncePrefix is the key prefix the example's shared nonce guard remembers accepted nonces under (config/security.go) */
+const internalAuthNoncePrefix = "melody-example-v3:nonce:"
+
+/* the accepted envelope's nonce is what separates the shared guard from the in-process one: it is read out of the envelope's signed payload and must exist in redis under the example's prefix, remembered at most as long as the envelope lives */
+func assertInternalAuthNonceSharedInRedis(envelope string, redisAddress string) {
+    if "" == redisAddress {
+        fmt.Println("SKIPPED: the shared nonce guard needs REDIS_ADDRESS; without redis the example keeps the in-process guard")
+
+        return
+    }
+
+    partList := strings.Split(envelope, ".")
+    if 3 != len(partList) {
+        fail("%s: the minted envelope is not three dotted parts: %s", internalAuthLabel, envelope)
+    }
+
+    payloadBytes, decodeErr := base64.RawURLEncoding.DecodeString(partList[1])
+    if nil != decodeErr {
+        fail("%s: the envelope's payload is not base64url: %v", internalAuthLabel, decodeErr)
+    }
+
+    payload := struct {
+        Nonce     string `json:"nonce"`
+        ExpiresAt int64  `json:"exp"`
+    }{}
+    if unmarshalErr := json.Unmarshal(payloadBytes, &payload); nil != unmarshalErr || "" == payload.Nonce {
+        fail("%s: the envelope's payload carries no nonce: %v (%s)", internalAuthLabel, unmarshalErr, payloadBytes)
+    }
+
+    redisClient := openRedis(redisAddress)
+    defer redisClient.Close()
+
+    /* the token source namespaces a nonce by its scheme and key id before the guard's prefix, so the key is found by the example's prefix and the nonce rather than spelled from that layout */
+    keyList, keysErr := redisClient.Do(context.Background(), redisClient.B().Keys().Pattern(internalAuthNoncePrefix+"*"+payload.Nonce).Build()).AsStrSlice()
+    if nil != keysErr || 1 != len(keyList) {
+        fail("%s: the accepted nonce %s is remembered under %d keys below %s (%v), wanted exactly one — the firewall is not on the shared guard", internalAuthLabel, payload.Nonce, len(keyList), internalAuthNoncePrefix, keysErr)
+    }
+
+    remainingMilliseconds, ttlErr := redisClient.Do(context.Background(), redisClient.B().Pttl().Key(keyList[0]).Build()).AsInt64()
+    if nil != ttlErr {
+        fail("%s: ask redis for the accepted nonce out of band: %v", internalAuthLabel, ttlErr)
+    }
+
+    /* PTTL answers -2 for a key that does not exist and -1 for one without an expiry */
+    horizonMilliseconds := (payload.ExpiresAt-time.Now().Unix()+1)*1000
+    if 0 >= remainingMilliseconds || horizonMilliseconds < remainingMilliseconds {
+        fail("%s: the accepted nonce under %s answered pttl %d, wanted a key remembered at most as long as the envelope's %d ms — the firewall is not on the shared guard", internalAuthLabel, internalAuthNoncePrefix, remainingMilliseconds, horizonMilliseconds)
+    }
+
+    pass("%s: the accepted envelope's nonce is remembered in redis under %s for %d ms, the shared guard every replica reads", internalAuthLabel, internalAuthNoncePrefix, remainingMilliseconds)
+}
+

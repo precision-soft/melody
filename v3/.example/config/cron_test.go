@@ -4,6 +4,7 @@ import (
     "sort"
     "strings"
     "testing"
+    "time"
 
     melodycron "github.com/precision-soft/melody/integrations/cron/v3"
     "github.com/precision-soft/melody/v3/.example/cli"
@@ -19,7 +20,7 @@ func TestCronConfiguration_SchedulesEachCommandAtItsOwnCadenceUnderTheCatalogueA
         melodycron.CommandName(cli.NewCatalogReportRefreshCommand): "0 * user=catalogue args=",
         melodycron.CommandName(cli.NewProductListCommand):          "0 */6 user=catalogue args=--limit=2",
         melodycron.CommandName(cli.NewCurrencyRefreshRatesCommand): "*/30 * user=catalogue args=",
-        melodycron.CommandName(cli.NewAppInfoCommand):              "0 12 user= args=",
+        melodycron.CommandName(cli.NewAppInfoCommand):              "* * user= args=",
     }
 
     entryList := cronConfiguration("catalogue").Entries()
@@ -62,3 +63,22 @@ func TestCronRunnerCommands_AreTheCommandsTheConfigurationSchedules(t *testing.T
         t.Fatalf("expected the runner handed exactly the scheduled commands, scheduled %v and handed %v", scheduled, handed)
     }
 }
+
+func TestCronConfiguration_EvaluatesOnTheBucharestDayAndBoundsTheRatesRefresh(t *testing.T) {
+    configuration := cronConfiguration("catalogue")
+    if "Europe/Bucharest" != configuration.TimezoneName() {
+        t.Fatalf("expected the schedules evaluated in Europe/Bucharest, got %q", configuration.TimezoneName())
+    }
+
+    for _, entry := range configuration.Entries() {
+        expected := time.Duration(0)
+        if melodycron.CommandName(cli.NewCurrencyRefreshRatesCommand) == entry.CommandName {
+            expected = 5 * time.Minute
+        }
+
+        if expected != entry.Config.Timeout {
+            t.Fatalf("expected %q bounded by %s, got %s", entry.CommandName, expected, entry.Config.Timeout)
+        }
+    }
+}
+

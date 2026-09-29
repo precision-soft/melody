@@ -129,6 +129,9 @@ const (
 
     ReportsApiHistoryName    = "example.reports.api.history"
     ReportsApiHistoryPattern = ReportsPrefix + "/api/history/"
+
+    ReportsApiExportName    = "example.reports.api.export"
+    ReportsApiExportPattern = ReportsPrefix + "/api/export/"
 )
 
 const (

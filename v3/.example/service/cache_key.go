@@ -13,6 +13,7 @@ const (
     CacheKeyUserList     = "example-user-list"
 
     cacheKeyProductByIdPrefix    = "example-product-by-id"
+    cacheKeyProductViewsPrefix   = "example-product-views"
     cacheKeyCategoryByIdPrefix   = "example-category-by-id"
     cacheKeyCurrencyByIdPrefix   = "example-currency-by-id"
     cacheKeyUserByIdPrefix       = "example-user-by-id"
@@ -38,6 +39,11 @@ func cacheKeyPart(value string) string {
 
 func CacheKeyProductById(id string) string {
     return cacheKeyProductByIdPrefix + "-" + cacheKeyPart(id)
+}
+
+/* CacheKeyProductViews names a product's view counter, written by the backend's own increment as decimal text rather than through the serializer, so no entity is ever cached under it */
+func CacheKeyProductViews(id string) string {
+    return cacheKeyProductViewsPrefix + "-" + cacheKeyPart(id)
 }
 
 func CacheKeyCategoryById(id string) string {

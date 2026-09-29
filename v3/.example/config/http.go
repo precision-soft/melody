@@ -107,6 +107,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     if nil != instance.storage {
         router.HandleNamed("example.storage.put", "POST", "/storage/object", handlerstorage.PutHandler(instance.storage))
         router.HandleNamed("example.storage.get", "GET", "/storage/object", handlerstorage.GetHandler(instance.storage))
+        router.HandleNamed("example.storage.link", "GET", "/storage/object/link", handlerstorage.LinkHandler(instance.storage))
     }
 
     router.HandleWithOptions(
@@ -121,6 +122,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     /* every catalog/user route below is exposed in the frontend zone: the admin SPA generates all of their URLs by name from the route manifest (data-route / route(...)), so an unexposed route would make the client throw "unknown route". */
     router.HandleWithOptions(route.CategoriesApiReadAllPattern, handlercategory.ApiReadAllHandler(), frontendRoute(route.CategoriesApiReadAllName, "GET"))
     router.HandleWithOptions(route.ReportsApiHistoryPattern, handlerreport.ApiHistoryHandler(), frontendRoute(route.ReportsApiHistoryName, "GET"))
+    router.HandleWithOptions(route.ReportsApiExportPattern, handlerreport.ApiExportHandler(), frontendRoute(route.ReportsApiExportName, "GET"))
 
     instance.registerCurrencyApiRoutes(router)
 

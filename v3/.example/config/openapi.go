@@ -42,4 +42,11 @@ func (instance *Module) buildOpenApi() {
             200: melodyopenapi.TypeOf[handleri18n.GreetingResponse](),
         },
     })
+
+    /* the export answers a csv attachment, which no json schema describes, so its descriptor names the representation in words and binds no response type */
+    instance.openApiRegistry.Describe(route.ReportsApiExportName, melodyopenapi.Descriptor{
+        Summary:     "Export the reading archive",
+        Description: "The readings of the history door, newest first under the same limit, as a text/csv attachment named catalog-readings-<date>.csv.",
+        Tags:        []string{"reports"},
+    })
 }

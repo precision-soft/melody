@@ -184,28 +184,34 @@ func assertExampleRefusingAcceptKeepsTheErrorStatus(major exampleMajor) {
     pass("[%s] an Accept refusing every media type keeps the kernel's 400 and its json body, as accepting json does", major.label)
 }
 
-/* a client that negotiates text/plain reads an error as lines on every major, both where the kernel renders it (the canonical-path refusal) and where the example's presenter does (the not-found handler behind the public asset prefix): the plain-text serializer handed the envelope printed a Go map or the envelope's fields bare. The control is the same two requests accepting json, answered by a json body */
+/* a client that negotiates text/plain reads an error as lines on every major, both where the kernel renders it (the canonical-path refusal and the 405 of a wrong method, which keeps its Allow) and where the example's presenter does (the not-found handler behind the public asset prefix): the plain-text serializer handed the envelope printed a Go map or the envelope's fields bare. The control is the same two requests accepting json, answered by a json body */
 func assertExampleTextPlainErrorsAreReadable(major exampleMajor) {
     client := newExampleClient(major)
 
     doors := []struct {
+        method     string
         path       string
         statusCode int
         statusLine string
     }{
-        {path: "/" + exampleUserRoute, statusCode: http.StatusBadRequest, statusLine: "400 bad request"},
-        {path: "/assets/zz-e2e-missing.js", statusCode: http.StatusNotFound, statusLine: "404 not found"},
+        {method: "GET", path: "/" + exampleUserRoute, statusCode: http.StatusBadRequest, statusLine: "400 bad request"},
+        {method: "GET", path: "/assets/zz-e2e-missing.js", statusCode: http.StatusNotFound, statusLine: "404 not found"},
+        {method: "POST", path: "/health", statusCode: http.StatusMethodNotAllowed, statusLine: "405 method not allowed"},
     }
 
     for _, door := range doors {
-        control := client.call("GET", door.path, "application/json", "", "")
+        control := client.call(door.method, door.path, "application/json", "", "")
         if door.statusCode != control.statusCode || false == json.Valid([]byte(control.body)) {
             fail("[%s] %s accepting json answered %d %s, wanted %d with a json body as the control", major.label, door.path, control.statusCode, exampleTruncate(control.body), door.statusCode)
         }
 
-        answered := client.call("GET", door.path, "text/plain", "", "")
+        answered := client.call(door.method, door.path, "text/plain", "", "")
         if door.statusCode != answered.statusCode || false == strings.HasPrefix(answered.headerList.Get("Content-Type"), "text/plain") {
             fail("[%s] %s accepting text/plain answered %d %q, wanted %d text/plain", major.label, door.path, answered.statusCode, answered.headerList.Get("Content-Type"), door.statusCode)
+        }
+
+        if http.StatusMethodNotAllowed == door.statusCode && (false == strings.Contains(answered.headerList.Get("Allow"), "GET") || false == strings.Contains(control.headerList.Get("Allow"), "GET")) {
+            fail("[%s] %s %s lost its Allow: text/plain %q, json %q", major.label, door.method, door.path, answered.headerList.Get("Allow"), control.headerList.Get("Allow"))
         }
 
         lines := strings.Split(strings.TrimSuffix(answered.body, "\n"), "\n")
@@ -234,7 +240,7 @@ func assertExampleTextPlainErrorsAreReadable(major exampleMajor) {
             fail("[%s] %s accepting text/plain does not name the request id %q of its response header: %s", major.label, door.path, requestIdLine, exampleTruncate(answered.body))
         }
     }
-    pass("[%s] a text/plain client reads the kernel's 400 and the presenter's 404 as lines naming the status, the time and the request id, where json clients read json", major.label)
+    pass("[%s] a text/plain client reads the kernel's 400, the kernel's 405 with its Allow and the presenter's 404 as lines naming the status, the time and the request id, where json clients read json", major.label)
 }
 
 /* the example bounds every request body at 64 KiB (MELODY_HTTP_MAX_REQUEST_BODY_BYTES): a product create past it is refused 413 in the envelope before the door binds it, where a body just under it reaches the validation and is refused 400 for the empty name. The control writes nothing, so the section spends no write of the nomenclature */

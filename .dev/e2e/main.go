@@ -245,7 +245,7 @@ func main() {
         sections++
 
         section("HMAC OVER HTTP (live example application)")
-        runInternalAuthCheck(baseUrl)
+        runInternalAuthCheck(baseUrl, os.Getenv("REDIS_ADDRESS"))
         sections++
 
         section("TWO-FACTOR (live example application)")

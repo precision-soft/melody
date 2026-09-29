@@ -9,6 +9,7 @@ import (
     "github.com/precision-soft/melody/v3/.example/persistence"
     "github.com/precision-soft/melody/v3/.example/repository"
     "github.com/precision-soft/melody/v3/.example/subscriber"
+    examplevalidation "github.com/precision-soft/melody/v3/.example/validation"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     melodycache "github.com/precision-soft/melody/v3/cache"
     melodycachecontract "github.com/precision-soft/melody/v3/cache/contract"
@@ -26,6 +27,7 @@ import (
     melodysessioncontract "github.com/precision-soft/melody/v3/session/contract"
     melodytranslation "github.com/precision-soft/melody/v3/translation"
     melodytranslationcontract "github.com/precision-soft/melody/v3/translation/contract"
+    melodyvalidation "github.com/precision-soft/melody/v3/validation"
     bun "github.com/uptrace/bun"
 )
 
@@ -34,6 +36,14 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
     if nil != instance.database {
         instance.registerOutboxTransportService(registrar)
     }
+
+    /* the framework registers its validator only when the application has not: this one carries the application's own rules, so every process that binds a request knows them */
+    registrar.RegisterService(
+        melodyvalidation.ServiceValidator,
+        func(resolver melodycontainercontract.Resolver) (*melodyvalidation.Validator, error) {
+            return examplevalidation.NewValidator(), nil
+        },
+    )
 
     instance.registerCatalogStorageService(registrar)
     instance.registerArchiveStorageService(registrar)

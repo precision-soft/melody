@@ -15,8 +15,8 @@ const openApiRoute = "/openapi.json"
 /* openApiExpectedTitle mirrors the Info the example builds in config/openapi.go. Asserting it is what proves the document came from THIS application's registry rather than from a generator default. */
 const openApiExpectedTitle = "Melody Example API"
 
-/* openApiDescribedOperationCount is how many operations config/openapi.go describes by hand (the product create and the i18n greeting). The path count of the served document must exceed it: a document generated from an empty router carries only the described operations, and everything below would then assert on a document that never saw the booted route table. */
-const openApiDescribedOperationCount = 2
+/* openApiDescribedOperationCount is how many operations config/openapi.go describes by hand (the product create, the currency create, the i18n greeting and the reading export). The path count of the served document must exceed it: a document generated from an empty router carries only the described operations, and everything below would then assert on a document that never saw the booted route table. */
+const openApiDescribedOperationCount = 4
 
 /* the operation the section pins. It is chosen because it is the one the example describes with a TYPED response, so it proves both halves of the generator at once: the operation exists because the ROUTER reported the route, and its response body references a component schema because the REGISTRY described the handler's own type. A generator that lost the registry would still emit the operation, with the bare "default" response every undescribed route gets — which is exactly the regression the $ref assertion catches. */
 /* openApiValidatedPath is the operation whose request body the example describes from a type carrying validate tags (the product create), as the document spells its path. */

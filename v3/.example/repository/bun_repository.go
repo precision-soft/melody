@@ -9,6 +9,7 @@ import (
     "sync"
     "time"
 
+    melodyaudit "github.com/precision-soft/melody/integrations/bunorm/v3/audit"
     bun "github.com/uptrace/bun"
 )
 
@@ -51,6 +52,34 @@ func seedIfEmptyRows[Row any](ctx context.Context, database *bun.DB, buildRows f
     return insertErr
 }
 
+
+/* seedIfEmptyAudited fills an empty table of an audited entity row by row through the audit tracker, so every seeded row carries its insert entry, joined to the audit transaction the context names when a reset opened one. A row another process seeded first is skipped, as the bulk seed's ignored duplicate is, since several processes may reach an empty table at once. */
+func seedIfEmptyAudited[Row any](ctx context.Context, database *bun.DB, tracker *melodyaudit.Tracker, auditEntity string, buildRows func() []*Row, idOf func(row *Row) string) error {
+    count, countErr := database.
+        NewSelect().
+        Model((*Row)(nil)).
+        Count(ctx)
+    if nil != countErr {
+        return countErr
+    }
+
+    if 0 < count {
+        return nil
+    }
+
+    for _, row := range buildRows() {
+        insertErr := tracker.Insert(auditContext(ctx), auditEntity, idOf(row), row)
+        if true == errors.Is(asIdAlreadyExists(insertErr), ErrIdAlreadyExists) {
+            continue
+        }
+
+        if nil != insertErr {
+            return insertErr
+        }
+    }
+
+    return nil
+}
 
 /* ErrIdAlreadyExists is the refusal a create answers for a supplied identifier another row holds, whether the read before the insert or the primary key caught it, so the http doors answer 409 rather than 500. */
 var ErrIdAlreadyExists = errors.New("id already exists")

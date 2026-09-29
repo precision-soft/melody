@@ -17,7 +17,7 @@ func TestExclusiveTickCommandPrintsIntoTheCommandsWriter(t *testing.T) {
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 
     output := &bytes.Buffer{}
-    commandContext := &flagContext{stringByName: map[string]string{"hold": "1ms"}, writer: output}
+    commandContext := newStringFlagContext(map[string]string{"hold": "1ms"}, output)
 
     if runErr := NewExclusiveTickCommand().Run(runtimeInstance, commandContext); nil != runErr {
         t.Fatalf("expected the tick to complete, got %v", runErr)

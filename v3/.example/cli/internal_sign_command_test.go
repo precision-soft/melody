@@ -27,7 +27,7 @@ func TestInternalSignCommandPrintsTheHeaderNameAndValueOnTheCommandWriter(t *tes
     signer := newInternalSignTestSigner(0)
     captured := &bytes.Buffer{}
 
-    runErr := NewInternalSignCommand(newInternalSignTestSigner).Run(nil, &flagContext{writer: captured})
+    runErr := NewInternalSignCommand(newInternalSignTestSigner).Run(nil, newStringFlagContext(nil, captured))
     if nil != runErr {
         t.Fatalf("expected the header to be minted, got %v", runErr)
     }
@@ -49,7 +49,7 @@ func TestInternalSignCommandPrintsTheHeaderNameAndValueOnTheCommandWriter(t *tes
 func TestInternalSignCommandAnswersARefusedWrite(t *testing.T) {
     refusal := errors.New("broken pipe")
 
-    runErr := NewInternalSignCommand(newInternalSignTestSigner).Run(nil, &flagContext{writer: &refusingWriter{refusal: refusal}})
+    runErr := NewInternalSignCommand(newInternalSignTestSigner).Run(nil, newStringFlagContext(nil, &refusingWriter{refusal: refusal}))
     if false == errors.Is(runErr, refusal) {
         t.Fatalf("expected the refused write to fail the command, got %v", runErr)
     }
@@ -70,7 +70,7 @@ func TestInternalSignCommandHandsTheSignerTheTtlAsked(t *testing.T) {
             return newInternalSignTestSigner(ttl)
         }
 
-        runErr := NewInternalSignCommand(newSigner).Run(nil, &flagContext{stringByName: map[string]string{"ttl": rawTtl}, writer: &bytes.Buffer{}})
+        runErr := NewInternalSignCommand(newSigner).Run(nil, newStringFlagContext(map[string]string{"ttl": rawTtl}, &bytes.Buffer{}))
         if nil != runErr || expected != handed {
             t.Fatalf("expected --ttl %q to hand the signer %s, got %s and %v", rawTtl, expected, handed, runErr)
         }
@@ -79,7 +79,7 @@ func TestInternalSignCommandHandsTheSignerTheTtlAsked(t *testing.T) {
 
 func TestInternalSignCommandRefusesATtlThatIsNotAPositiveDuration(t *testing.T) {
     for _, rawTtl := range []string{"soon", "-1s", "0s"} {
-        runErr := NewInternalSignCommand(newInternalSignTestSigner).Run(nil, &flagContext{stringByName: map[string]string{"ttl": rawTtl}, writer: &bytes.Buffer{}})
+        runErr := NewInternalSignCommand(newInternalSignTestSigner).Run(nil, newStringFlagContext(map[string]string{"ttl": rawTtl}, &bytes.Buffer{}))
         if nil == runErr || false == strings.Contains(runErr.Error(), "is not a positive go duration") {
             t.Fatalf("expected --ttl %q refused, got %v", rawTtl, runErr)
         }

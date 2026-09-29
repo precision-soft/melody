@@ -5,6 +5,8 @@ import (
     "errors"
     "io"
     nethttp "net/http"
+    "strconv"
+    "time"
 
     melodyawss3 "github.com/precision-soft/melody/integrations/awss3/v3"
     "github.com/precision-soft/melody/v3/.example/presenter"
@@ -68,5 +70,71 @@ func GetHandler(storage *melodyawss3.Storage) melodyhttpcontract.Handler {
 
         return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, map[string]any{"key": key, "content": string(content)}), nil
     }
+}
+
+const (
+    /* linkDefaultTtl is how long a link lives when the caller asked for nothing */
+    linkDefaultTtl = 5 * time.Minute
+
+    /* linkMaximumTtl bounds what a caller may ask for: a link is a bearer credential to the object for as long as it lives */
+    linkMaximumTtl = time.Hour
+)
+
+/* errInvalidLinkTtl is the one refusal of every ttl this door cannot serve */
+var errInvalidLinkTtl = errors.New("ttl must be a whole number of seconds between 1 and 3600")
+
+/* LinkHandler answers a presigned download link to the object stored under the given key, so a client reads the bytes straight from the object store instead of through this application. The object must exist, and the link lives for ?ttl= seconds, five minutes when none is asked. */
+func LinkHandler(storage *melodyawss3.Storage) melodyhttpcontract.Handler {
+    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+        key := melodybag.StringOrDefault(request.Query(), "key", "")
+        if "" == key {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "key query parameter is required"), nil
+        }
+
+        ttl, ttlErr := linkTtlOf(request)
+        if nil != ttlErr {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, ttlErr.Error()), nil
+        }
+
+        exists, existsErr := storage.Exists(runtimeInstance, key)
+        if nil != existsErr {
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not read the object", existsErr), nil
+        }
+
+        if false == exists {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusNotFound, "object not found"), nil
+        }
+
+        link, presignErr := storage.PresignedUrl(runtimeInstance, key, ttl)
+        if nil != presignErr {
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not sign the link", presignErr), nil
+        }
+
+        return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, map[string]any{
+            "key":       key,
+            "url":       link,
+            "expiresIn": int(ttl / time.Second),
+        }), nil
+    }
+}
+
+/* linkTtlOf reads the caller's ttl in seconds, the first value of a repeated key, or answers the default */
+func linkTtlOf(request melodyhttpcontract.Request) (time.Duration, error) {
+    raw := melodybag.StringOrDefault(request.Query(), "ttl", "")
+    if "" == raw {
+        return linkDefaultTtl, nil
+    }
+
+    seconds, parseErr := strconv.Atoi(raw)
+    if nil != parseErr || 0 >= seconds {
+        return 0, errInvalidLinkTtl
+    }
+
+    ttl := time.Duration(seconds) * time.Second
+    if linkMaximumTtl < ttl {
+        return 0, errInvalidLinkTtl
+    }
+
+    return ttl, nil
 }
 

@@ -13,6 +13,7 @@ import (
     "github.com/precision-soft/melody/v3/.example/persistence"
     "github.com/precision-soft/melody/v3/.example/repository"
     "github.com/precision-soft/melody/v3/.example/service"
+    examplevalidation "github.com/precision-soft/melody/v3/.example/validation"
     melodycache "github.com/precision-soft/melody/v3/cache"
     melodyclock "github.com/precision-soft/melody/v3/clock"
     melodyconfig "github.com/precision-soft/melody/v3/config"
@@ -86,7 +87,7 @@ func newCurrencyDoorFixture(t *testing.T) *currencyDoorFixture {
         containerInstance,
         melodyvalidation.ServiceValidator,
         func(resolver melodycontainercontract.Resolver) (*melodyvalidation.Validator, error) {
-            return melodyvalidation.NewValidator(), nil
+            return examplevalidation.NewValidator(), nil
         },
     )
     melodycontainer.MustRegister(

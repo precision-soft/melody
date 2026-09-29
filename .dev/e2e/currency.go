@@ -69,6 +69,26 @@ func assertMysqlCurrencyWrites(client *http.Client, baseUrl string, database *bu
         fail("%s: the refused create on a taken identifier left %+v (found %v), wanted the probe untouched", mysqlLabel, kept, found)
     }
 
+    /* the code is judged by the application's own currencyCode rule, registered on the validator the container serves: a lower-case or a four-letter code is refused 400 on both write doors, the refusal naming the field and the rule's message, and the probe row is left as it was */
+    for _, refusal := range []struct {
+        method string
+        path   string
+        body   string
+    }{
+        {method: "POST", path: "/currencies/api/create/", body: `{"id":"cur-zz-e2e-code","code":"eu","name":"refused","rate":1}`},
+        {method: "PUT", path: "/currencies/api/update/" + mysqlCurrencyProbeId + "/", body: `{"code":"EURO","name":"refused"}`},
+    } {
+        refusedStatus, refusedBody := mysqlWriteStatus(client, refusal.method, baseUrl, refusal.path, refusal.body, "write a currency whose code the rule refuses")
+        if http.StatusBadRequest != refusedStatus || false == strings.Contains(refusedBody, "code: must be a three-letter upper-case ISO 4217 code") {
+            fail("%s: %s %s with a code the rule refuses answered %d: %s, wanted 400 naming the field and the currencyCode rule", mysqlLabel, refusal.method, refusal.path, refusedStatus, exampleTruncate(refusedBody))
+        }
+    }
+
+    unchanged, found := readMysqlCurrencyProbe(database)
+    if false == found || "ZZE" != unchanged.Code || mysqlCurrencyProbeName != unchanged.Name {
+        fail("%s: a refused code changed the probe to %+v (found %v)", mysqlLabel, unchanged, found)
+    }
+
     requireMysqlWrite(client, "PUT", baseUrl, "/currencies/api/update/"+mysqlCurrencyProbeId+"/", `{"code":"ZZE","name":"`+mysqlCurrencyProbeRenamed+`"}`, "rename the currency probe")
 
     renamed, found := readMysqlCurrencyProbe(database)

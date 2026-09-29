@@ -199,3 +199,36 @@ func TestConvertedPriceFor_MarksAnUnusableStoredRateAsTheServersRefusal(t *testi
         t.Errorf("a zero stored rate was refused as the caller's mistake: %v", err)
     }
 }
+
+type stubViewRecorder struct {
+    views     int64
+    recordErr error
+    recorded  []string
+}
+
+func (instance *stubViewRecorder) RecordView(id string) (int64, error) {
+    instance.recorded = append(instance.recorded, id)
+
+    return instance.views, instance.recordErr
+}
+
+func TestRecordedViews_AnswersTheCountTheServiceRecorded(t *testing.T) {
+    recorder := &stubViewRecorder{views: 7}
+
+    views := recordedViews(nil, recorder, "prod-1")
+    if nil == views || 7 != *views {
+        t.Fatalf("expected 7 views, got %v", views)
+    }
+
+    if 1 != len(recorder.recorded) || "prod-1" != recorder.recorded[0] {
+        t.Fatalf("expected one view recorded for prod-1, got %q", recorder.recorded)
+    }
+}
+
+func TestRecordedViews_LeavesTheCountOutWhenTheCacheRefused(t *testing.T) {
+    views := recordedViews(nil, &stubViewRecorder{views: 7, recordErr: errors.New("cache down")}, "prod-1")
+    if nil != views {
+        t.Fatalf("expected no count when the counter could not be written, got %d", *views)
+    }
+}
+

@@ -32,7 +32,7 @@ func TestMessageBusDispatchCommandReportsOnTheCommandWriter(t *testing.T) {
     t.Cleanup(func() { _ = transport.Close() })
     captured := &bytes.Buffer{}
 
-    runErr := NewMessageBusDispatchCommand(&sendingBus{transport: transport}, &acceptingBus{}, transport).Run(fixture.runtime, &flagContext{writer: captured})
+    runErr := NewMessageBusDispatchCommand(&sendingBus{transport: transport}, &acceptingBus{}, transport).Run(fixture.runtime, newStringFlagContext(nil, captured))
     if nil != runErr {
         t.Fatalf("expected the messages to be dispatched and consumed, got %v", runErr)
     }

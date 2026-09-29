@@ -46,9 +46,12 @@ func runTranslationCheck(baseUrl string) {
     assertTranslationPlural(client, "ro", 0, "Coșul este gol")
     assertTranslationPlural(client, "ro", 1, "1 produs în coș")
     assertTranslationPlural(client, "ro", 7, "7 produse în coș")
+    assertTranslationPlural(client, "ro", 20, "20 de produse în coș")
+    assertTranslationPlural(client, "ro", 101, "101 produse în coș")
 
-    pass("both catalogues answered all three ICU plural branches, including the exact-zero one")
+    pass("both catalogues answered their ICU plural branches, the exact-zero one included, and Romanian's few apart from its other")
 
+    assertTranslationSuccessNegotiation(client)
     assertTranslationUnservedLocale(client)
     assertTranslationRegionFallback(client)
     assertTokenFirewallJsonEntryPoint(client)
@@ -213,3 +216,21 @@ func assertTokenFirewallJsonEntryPoint(client *liveExampleClient) {
         response.headerList.Get("WWW-Authenticate"),
     )
 }
+
+/* the success path negotiates as the error path does, through the example's presenter, which already answers a door's result the way the framework's WrapResultHandler would: an Accept refusing every type the manager produces is answered 406 with no body, where an error keeps its own status, and a text/plain client reads the success envelope as the plain-text serializer renders a struct, the %v form, pinned here as it IS: a readable success body is the plain-text serializer rendering structured values, which is the next major's to make, not this one's */
+func assertTranslationSuccessNegotiation(client *liveExampleClient) {
+    path := translationRoute("ro") + "?name=Ada&count=2"
+
+    refused := client.call(translationLabel, liveExampleRequest{method: "GET", path: path, headerList: map[string]string{"Accept": "application/json;q=0, text/plain;q=0"}})
+    if http.StatusNotAcceptable != refused.statusCode || 0 != len(refused.body) {
+        fail("%s: a greeting asked for with every type refused answered %d %q, wanted 406 with no body", translationLabel, refused.statusCode, refused.body)
+    }
+
+    text := client.call(translationLabel, liveExampleRequest{method: "GET", path: path, headerList: map[string]string{"Accept": "text/plain"}})
+    if http.StatusOK != text.statusCode || false == strings.HasPrefix(text.contentType, "text/plain") || "{true {ro Salut, Ada! 2 produse în coș} [] map[] []}" != string(text.body) {
+        fail("%s: a greeting asked for as text/plain answered %d %q %q, wanted 200 and the serializer's rendering of the envelope", translationLabel, text.statusCode, text.contentType, text.body)
+    }
+
+    pass("%s: the greeting answers 406 with no body when every type is refused, and a text/plain client the serializer's %%v rendering of the envelope", translationLabel)
+}
+
