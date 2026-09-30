@@ -3218,3 +3218,44 @@ func TestTransport_SendRoutesThroughTheConfiguredExchangeAndRoutingKey(t *testin
         t.Fatalf("expected the probe queue bound under the routing key to hold a copy of the send, delivered=%v headers=%v", delivered, delivery.Headers)
     }
 }
+
+/* a close of an owned connection under a caller's deadline returns inside it while the client's own shutdown is stalled behind a wedged publish write: the client's close cannot take the connection mutex that shutdown holds, and a channel close cannot take the channel mutex the write holds, so neither is waited for past the deadline. The publish half is held with a write counted in flight, which is what a Send whose write wedged leaves behind. */
+func TestTransport_CloseWithContextReturnsWithinTheDeadlineWhileTheClientShutdownIsStalled(t *testing.T) {
+    wedge := wedgeAPublishOnAFakeBroker(t)
+    wedge.beginClientShutdown(t)
+
+    transport := NewTransport(TransportConfig{
+        Dialer:   func() (*amqp091.Connection, error) { return nil, errors.New("the fake broker is dialed once, by the test") },
+        Queue:    "melody.amqp.test.fake.broker",
+        Registry: NewMessageRegistry(),
+    })
+
+    transport.mutex.Lock()
+    transport.connection = wedge.connection
+    transport.ownsConnection = true
+    transport.publishChannel = wedge.channel
+    transport.mutex.Unlock()
+
+    holdPublishMutex(t, &transport.publishMutex)
+    transport.writesInFlight.Add(1)
+    defer transport.writesInFlight.Add(-1)
+
+    bound := 500 * time.Millisecond
+    closeContext, cancel := context.WithTimeout(context.Background(), bound)
+    defer cancel()
+
+    closeOutcome := make(chan error, 1)
+    started := time.Now()
+    go func() { closeOutcome <- transport.CloseWithContext(closeContext) }()
+
+    select {
+    case closeErr := <-closeOutcome:
+        t.Logf("close returned after %s under a deadline of %s: %v", time.Since(started), bound, closeErr)
+
+        if nil == closeErr {
+            t.Fatal("expected the close that could not finish reported")
+        }
+    case <-time.After(bound + 2*time.Second):
+        t.Fatalf("the close did not return within the deadline %s plus two seconds; it is held behind the client's stalled shutdown", bound)
+    }
+}

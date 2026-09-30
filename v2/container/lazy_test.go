@@ -712,3 +712,50 @@ func TestLazyService_ASingletonsCapturedHandleOutlivesTheRequestThatBuiltIt(t *t
         t.Fatalf("expected the process-lifetime value, got %q", value)
     }
 }
+
+/* distinct types for the three services of the race pin below, since the container registers one provider per type */
+type lazyRaceDependency string
+
+type lazyRaceOther string
+
+type lazyRaceWorker string
+
+/* a provider that hands a Lazy over its own resolver to a goroutine it starts, and resolves another service before it returns, shares its one chain with that goroutine. The use is outside the handle's contract and may be refused or filed under the wrong parent, but the chain is serialised, so under -race it is never a memory race. */
+func TestLazyService_AGoroutineStartedByAProviderDoesNotRaceItsChain(t *testing.T) {
+    for attempt := 0; 20 > attempt; attempt++ {
+        serviceContainer := NewContainer()
+
+        MustRegister[lazyRaceDependency](serviceContainer, "service.dependency", func(resolver containercontract.Resolver) (lazyRaceDependency, error) {
+            return "dependency", nil
+        })
+        MustRegister[lazyRaceOther](serviceContainer, "service.other", func(resolver containercontract.Resolver) (lazyRaceOther, error) {
+            return "other", nil
+        })
+        MustRegister[lazyRaceWorker](serviceContainer, "service.worker", func(resolver containercontract.Resolver) (lazyRaceWorker, error) {
+            handle := Lazy[lazyRaceDependency](resolver, "service.dependency")
+
+            done := make(chan struct{})
+            go func() {
+                defer close(done)
+
+                _, _ = handle.Resolve()
+            }()
+
+            for resolution := 0; 50 > resolution; resolution++ {
+                if _, otherErr := FromResolver[lazyRaceOther](resolver, "service.other"); nil != otherErr {
+                    return "", otherErr
+                }
+            }
+
+            <-done
+
+            return "worker", nil
+        })
+
+        /* the interleaved chain may refuse the worker as circular, the consequence the Lazy contract names; what the pin requires is that the run is no memory race, which -race reports on its own */
+        worker, workerErr := FromResolver[lazyRaceWorker](serviceContainer, "service.worker")
+        if nil == workerErr && "worker" != worker {
+            t.Fatalf("expected the worker's own value when it resolves, got %q", worker)
+        }
+    }
+}

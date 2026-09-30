@@ -250,7 +250,7 @@ func (instance *Transport) Nack(
 /* closeJoinTimeout bounds the three stretches of Close that cannot observe the close signal: the consume goroutine's join, the publish half's join and the close of an owned connection. The consume loop observes closeSignal at every blocking point except inside the caller-supplied dialer, whose return connect rechecks; the publish half holds its mutex across a socket write the client cannot interrupt, and the connection close is an RPC over that socket. It is sized to a full amqp handshake, so every join completes for a dialer with a timeout and a broker that answers, and the bound keeps teardown from hanging when either does not. */
 const closeJoinTimeout = 30 * time.Second
 
-/* Close is bounded on every stretch, in this order: the consume goroutine is joined; the publish half is joined, so a send whose write went out finishes its confirmation instead of the channel shutting under it and reading as a broker nack; an owned connection is cut with a deadline, at once when the join failed over a write genuinely in flight and one publish timeout ahead otherwise; and channels are closed only where that cannot block. The publish join waits one publish timeout, since an in-flight write has at most that much left before the send abandons it. No amqp call runs under instance.mutex. A failed join is read together with writesInFlight, since a healthy confirmation holds the publish half as firmly as a wedged write. The cut of an owned connection is reported; a close the caller left no time for, a shared budget an earlier component spent, is not, since the client then answers an i/o timeout over a live connection. A channel or connection the broker already tore down answers amqp091.ErrClosed, the state Close exists to reach, which is not a failure. */
+/* Close is bounded on every stretch, in this order: the consume goroutine is joined; the publish half is joined, so a send whose write went out finishes its confirmation instead of the channel shutting under it and reading as a broker nack; an owned connection is cut with a deadline, at once when the join failed over a write genuinely in flight and one publish timeout ahead otherwise; and channels are closed only where that cannot block, which leaves the channels of an owned connection whose close did not return within its bound to end with that connection. The publish join waits one publish timeout, since an in-flight write has at most that much left before the send abandons it. No amqp call runs under instance.mutex. A failed join is read together with writesInFlight, since a healthy confirmation holds the publish half as firmly as a wedged write. The cut of an owned connection is reported; a close the caller left no time for, a shared budget an earlier component spent, is not, since the client then answers an i/o timeout over a live connection. A channel or connection the broker already tore down answers amqp091.ErrClosed, the state Close exists to reach, which is not a failure. */
 func (instance *Transport) Close() error {
     return instance.CloseWithContext(context.Background())
 }
@@ -286,10 +286,15 @@ func (instance *Transport) CloseWithContext(closeContext context.Context) error 
 
     var closeErrs []error
 
+    connectionCloseReturned := true
+
     if true == ownsConnection && nil != connection {
-        if connectionCloseErr, reported := instance.closeOwnedConnectionWithin(closeContext, instance.resolvedPublishTimeout(), join, connection); true == reported {
+        connectionCloseErr, reported, returned := instance.closeOwnedConnectionWithin(closeContext, instance.resolvedPublishTimeout(), join, connection)
+        if true == reported {
             closeErrs = append(closeErrs, connectionCloseErr)
         }
+
+        connectionCloseReturned = returned
     }
 
     switch {
@@ -302,6 +307,8 @@ func (instance *Transport) CloseWithContext(closeContext context.Context) error 
         ))
     case false == ownsConnection:
         closeErrs = append(closeErrs, closeChannelsWithin(teardownStretchWithin(closeContext, closeJoinTimeout), consumeChannel, publishChannel)...)
+    case false == connectionCloseReturned:
+        /* the client's close of the owned connection did not return within its bound, so its shutdown is still under way — stalled behind a wedged write, or given no time — and a channel close would queue behind the same send lock; the channels end with the connection when that shutdown completes */
     default:
         closeErrs = append(closeErrs, closeChannels(consumeChannel, publishChannel)...)
     }

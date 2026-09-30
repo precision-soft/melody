@@ -174,11 +174,16 @@ func (instance *ServerSentEventBackplane) CloseWithContext(closeContext context.
         defer instance.publishMutex.Unlock()
     }
 
-    /* the owned connection is closed before the listen join, because subscribe's RPCs observe no context and only this close unblocks a listen goroutine wedged in one; and before the channels, with a deadline, since after the connection shut down a channel close answers ErrClosed without touching the socket */
+    /* the owned connection is closed before the listen join, because subscribe's RPCs observe no context and only this close unblocks a listen goroutine wedged in one; and before the channels, with a deadline, since after the connection shut down a channel close answers ErrClosed without touching the socket; a connection close that did not return within its bound leaves the channels to end with the connection */
+    connectionCloseReturned := true
+
     if true == ownsConnection && nil != connection {
-        if connectionCloseErr, reported := instance.closeOwnedConnectionWithin(closeContext, instance.resolvedCallTimeout(), join, connection); true == reported {
+        connectionCloseErr, reported, returned := instance.closeOwnedConnectionWithin(closeContext, instance.resolvedCallTimeout(), join, connection)
+        if true == reported {
             closeErrs = append(closeErrs, connectionCloseErr)
         }
+
+        connectionCloseReturned = returned
     }
 
     switch {
@@ -192,6 +197,8 @@ func (instance *ServerSentEventBackplane) CloseWithContext(closeContext context.
     case false == ownsConnection:
         /* bounded by the join timeout, as the transport bounds the same operation, and not by the call timeout: under a resource alarm the broker answers a channel close late exactly as it answers a publish late */
         closeErrs = append(closeErrs, closeChannelsWithin(teardownStretchWithin(closeContext, closeJoinTimeout), consumeChannel, publishChannel)...)
+    case false == connectionCloseReturned:
+        /* the client's close of the owned connection did not return within its bound, so its shutdown is still under way — stalled behind a wedged write, or given no time — and a channel close would queue behind the same send lock; the channels end with the connection when that shutdown completes */
     default:
         closeErrs = append(closeErrs, closeChannels(consumeChannel, publishChannel)...)
     }

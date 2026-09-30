@@ -3374,3 +3374,54 @@ func TestFileServer_ATypedNilRequestIsSkippedByBothDoors(t *testing.T) {
         t.Fatalf("expected ServeReader's own refusal to be the one that answered, got %v", readerLogger.warningMessages)
     }
 }
+
+/* the tag a served embedded asset carries follows its bytes through both doors: two assets of the same size and different bytes answer different ETags, so a client revalidating with the one tag is served the other bytes rather than a 304 */
+func TestFileServer_Embedded_ServesANewTagForAChangedAssetOfTheSameSize(t *testing.T) {
+    newEmbeddedServer := func(content string) *FileServer {
+        return NewFileServer(
+            NewOptions(
+                NewFileServerConfig(ModeEmbedded, "", "", "", true, 60, false),
+                "",
+                fstest.MapFS{"app.css": &fstest.MapFile{Data: []byte(content)}},
+            ),
+        )
+    }
+
+    servedTag := func(server *FileServer) string {
+        _, headers, _, served := server.Serve(
+            testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/app.css"),
+            logging.NewNopLogger(),
+        )
+        if false == served {
+            t.Fatalf("expected the asset served")
+        }
+
+        return headers.Get("ETag")
+    }
+
+    streamedTag := func(server *FileServer) string {
+        _, headers, reader, served := server.ServeReader(
+            testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/app.css"),
+            logging.NewNopLogger(),
+        )
+        if false == served {
+            t.Fatalf("expected the asset streamed")
+        }
+        if nil != reader {
+            _ = reader.Close()
+        }
+
+        return headers.Get("ETag")
+    }
+
+    before := newEmbeddedServer("body{color:red}")
+    after := newEmbeddedServer("body{color:tan}")
+
+    if "" == servedTag(before) || servedTag(before) == servedTag(after) {
+        t.Fatalf("expected Serve to tag a changed asset of the same size anew, got %q and %q", servedTag(before), servedTag(after))
+    }
+
+    if "" == streamedTag(before) || streamedTag(before) == streamedTag(after) {
+        t.Fatalf("expected ServeReader to tag a changed asset of the same size anew, got %q and %q", streamedTag(before), streamedTag(after))
+    }
+}

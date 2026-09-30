@@ -1118,3 +1118,43 @@ func TestServerSentEventBackplane_AZeroCallTimeoutIsTheDefaultBudget(t *testing.
         t.Fatalf("expected a backplane built without a call timeout to take the default %v, got %v", defaultServerSentEventBackplaneCallTimeout, resolved)
     }
 }
+
+/* the backplane's twin of the transport's pin: a close of an owned connection under a caller's deadline returns inside it while the client's own shutdown is stalled behind a wedged publish write, neither the client's close nor a channel close being waited for past the deadline */
+func TestServerSentEventBackplane_CloseWithContextReturnsWithinTheDeadlineWhileTheClientShutdownIsStalled(t *testing.T) {
+    wedge := wedgeAPublishOnAFakeBroker(t)
+    wedge.beginClientShutdown(t)
+
+    backplaneContext, backplaneCancel := context.WithCancel(context.Background())
+    backplane := &ServerSentEventBackplane{
+        connection:     wedge.connection,
+        ownsConnection: true,
+        publishChannel: wedge.channel,
+        hub:            melodyhttp.NewServerSentEventHub(),
+        exchange:       "melody.sse.test.fake.broker",
+        ctx:            backplaneContext,
+        cancel:         backplaneCancel,
+    }
+
+    holdPublishMutex(t, &backplane.publishMutex)
+    backplane.writesInFlight.Add(1)
+    defer backplane.writesInFlight.Add(-1)
+
+    bound := 500 * time.Millisecond
+    closeContext, cancel := context.WithTimeout(context.Background(), bound)
+    defer cancel()
+
+    closeOutcome := make(chan error, 1)
+    started := time.Now()
+    go func() { closeOutcome <- backplane.CloseWithContext(closeContext) }()
+
+    select {
+    case closeErr := <-closeOutcome:
+        t.Logf("close returned after %s under a deadline of %s: %v", time.Since(started), bound, closeErr)
+
+        if nil == closeErr {
+            t.Fatal("expected the close that could not finish reported")
+        }
+    case <-time.After(bound + 2*time.Second):
+        t.Fatalf("the close did not return within the deadline %s plus two seconds; it is held behind the client's stalled shutdown", bound)
+    }
+}

@@ -1,8 +1,11 @@
 package static
 
 import (
+    "crypto/sha256"
+    "encoding/hex"
     "fmt"
     "io/fs"
+    "strconv"
     "strings"
 
     "github.com/precision-soft/melody/v2/version"
@@ -49,4 +52,32 @@ func EtagMatchesIfNoneMatch(ifNoneMatch string, etag string) bool {
     }
 
     return false
+}
+
+/* entityTag is the tag the server sends. A file that carries a modification time is tagged by GenerateEtag. One that carries none, every file of an embedded filesystem, is tagged by its size and a digest of its bytes: the build version GenerateEtag falls back to is melody's own, and it does not move when an application ships a changed asset of the same size, so a revalidating client would be answered 304 over stale bytes. The digest is kept per path, since embedded bytes are fixed for the life of the process; a file that cannot be read keeps GenerateEtag's tag. */
+func (instance *FileServer) entityTag(relativePath string, fileInfo fs.FileInfo) string {
+    if nil == fileInfo || false == fileInfo.ModTime().IsZero() {
+        return GenerateEtag(fileInfo, instance.config.weakEtag)
+    }
+
+    cacheKey := relativePath + "\x00" + strconv.FormatInt(fileInfo.Size(), 10)
+    if nil != instance.contentTags {
+        if cached, found := instance.contentTags.Load(cacheKey); true == found {
+            return cached.(string)
+        }
+    }
+
+    content, readErr := fs.ReadFile(instance.fileSystem, relativePath)
+    if nil != readErr {
+        return GenerateEtag(fileInfo, instance.config.weakEtag)
+    }
+
+    digest := sha256.Sum256(content)
+    etag := formatEtag(strconv.FormatInt(fileInfo.Size(), 10)+"-"+hex.EncodeToString(digest[:8]), instance.config.weakEtag)
+
+    if nil != instance.contentTags {
+        instance.contentTags.Store(cacheKey, etag)
+    }
+
+    return etag
 }

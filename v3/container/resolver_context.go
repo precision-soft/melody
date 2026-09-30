@@ -5,6 +5,7 @@ import (
     "runtime"
     "sort"
     "strings"
+    "sync"
     "sync/atomic"
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
@@ -39,6 +40,8 @@ func newScopeResolverContext(containerInstance *container, scopeInstance *scope)
 
 /* resolutionStack is the live chain of node keys one resolution is building, shared by every view of it so the cycle detection reads one chain. types runs parallel to keys, the canonical type of a type node and nil for a name node, compared by identity. */
 type resolutionStack struct {
+    /* mutex serialises the chain: it belongs to one resolution, but a goroutine a provider starts before it returns can reach it through a retained view (container.Lazy) while the provider still resolves on it. That use is outside the Lazy contract and may read an interleaved chain; the mutex keeps it from being a memory race. */
+    mutex sync.Mutex
     keys  []string
     types []reflect.Type
 }
@@ -48,6 +51,15 @@ func newResolutionStack() *resolutionStack {
         keys:  make([]string, 0, 8),
         types: make([]reflect.Type, 0, 8),
     }
+}
+
+/* chainWithRepeatLocked spells the chain with the key that closes a cycle appended; the caller holds the mutex */
+func (instance *resolutionStack) chainWithRepeatLocked(repeatedKey string) string {
+    parts := make([]string, 0, len(instance.keys)+1)
+    parts = append(parts, instance.keys...)
+    parts = append(parts, repeatedKey)
+
+    return strings.Join(parts, " -> ")
 }
 
 type resolverContext struct {
@@ -117,11 +129,26 @@ func (instance *resolverContext) lateResolution() (*resolverContext, func()) {
 
 /* parentNodeKey answers the node a resolution starting here depends on: the node being built, or the owner once its provider returned. */
 func (instance *resolverContext) parentNodeKey() string {
+    instance.stack.mutex.Lock()
+    defer instance.stack.mutex.Unlock()
+
     if 0 < len(instance.stack.keys) {
         return instance.stack.keys[len(instance.stack.keys)-1]
     }
 
     return instance.ownerKey
+}
+
+/* claimRootRequestedKey records the key the resolution started from, once, and answers it; it reads and writes under the chain's mutex, since the views sharing one chain can be used from a goroutine the provider started */
+func (instance *resolverContext) claimRootRequestedKey(requestedKey string) string {
+    instance.stack.mutex.Lock()
+    defer instance.stack.mutex.Unlock()
+
+    if "" == instance.rootRequestedKey {
+        instance.rootRequestedKey = requestedKey
+    }
+
+    return instance.rootRequestedKey
 }
 
 func (instance *resolverContext) scopeVisible() bool {
@@ -205,11 +232,7 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
         return lateResolver.Get(serviceName)
     }
 
-    if "" == instance.rootRequestedKey {
-        instance.rootRequestedKey = serviceName
-    }
-
-    requestedKey := instance.rootRequestedKey
+    requestedKey := instance.claimRootRequestedKey(serviceName)
 
     /* the node key is settled before the push, since a scoped node must not wear the container's key */
     scopedProvider := providerAny(nil)
@@ -426,11 +449,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
         return lateResolver.GetByType(targetType)
     }
 
-    if "" == instance.rootRequestedKey {
-        instance.rootRequestedKey = containerTypeNodeKey(canonicalTargetType)
-    }
-
-    requestedKey := instance.rootRequestedKey
+    requestedKey := instance.claimRootRequestedKey(containerTypeNodeKey(canonicalTargetType))
     typeKey := typeIdentityKey(canonicalTargetType)
 
     /* the scoped registrations are looked up before the node key is settled */
@@ -733,13 +752,16 @@ func (instance *resolverContext) pushKey(creatingKey string, creatingType reflec
         )
     }
 
+    instance.stack.mutex.Lock()
+    defer instance.stack.mutex.Unlock()
+
     for _, key := range instance.stack.keys {
         if key == creatingKey {
             return exception.NewError(
                 "circular service dependency detected",
                 exceptioncontract.Context{
                     "creatingKey": creatingKey,
-                    "stack":       instance.stackStringWithRepeat(creatingKey),
+                    "stack":       instance.stack.chainWithRepeatLocked(creatingKey),
                 },
                 nil,
             )
@@ -753,6 +775,9 @@ func (instance *resolverContext) pushKey(creatingKey string, creatingType reflec
 }
 
 func (instance *resolverContext) popKey() {
+    instance.stack.mutex.Lock()
+    defer instance.stack.mutex.Unlock()
+
     if 0 == len(instance.stack.keys) {
         return
     }
@@ -762,11 +787,10 @@ func (instance *resolverContext) popKey() {
 }
 
 func (instance *resolverContext) stackStringWithRepeat(repeatedKey string) string {
-    parts := make([]string, 0, len(instance.stack.keys)+1)
-    parts = append(parts, instance.stack.keys...)
-    parts = append(parts, repeatedKey)
+    instance.stack.mutex.Lock()
+    defer instance.stack.mutex.Unlock()
 
-    return strings.Join(parts, " -> ")
+    return instance.stack.chainWithRepeatLocked(repeatedKey)
 }
 
 /* TypesImplementing lets a provider collect through the resolver it receives. A resolution seeing its scope collects what the scope reaches; a container provider, its scope suspended, collects only the container's services. */
@@ -793,17 +817,22 @@ func (instance *resolverContext) isResolvingReference(reference containercontrac
         return false
     }
 
+    instance.stack.mutex.Lock()
     if 0 == len(instance.stack.keys) {
+        instance.stack.mutex.Unlock()
+
         return false
     }
 
     topIndex := len(instance.stack.keys) - 1
+    topKey := instance.stack.keys[topIndex]
+    topType := instance.stack.types[topIndex]
+    instance.stack.mutex.Unlock()
 
-    if containerNameNodeKey(reference.ServiceName) == instance.stack.keys[topIndex] {
+    if containerNameNodeKey(reference.ServiceName) == topKey {
         return true
     }
 
-    topType := instance.stack.types[topIndex]
     if nil == topType || topType != reference.ServiceType {
         return false
     }

@@ -10,6 +10,7 @@ import (
     "path"
     "path/filepath"
     "strings"
+    "sync"
     "time"
 
     "github.com/precision-soft/melody/v3/exception"
@@ -24,6 +25,8 @@ import (
 type FileServer struct {
     config     *FileServerConfig
     fileSystem fs.FS
+    /* contentTags keeps the content tag of each file that carries no modification time, see entityTag */
+    contentTags *sync.Map
 }
 
 func NewFileServer(options *Options) *FileServer {
@@ -95,8 +98,9 @@ func NewFileServer(options *Options) *FileServer {
     }
 
     return &FileServer{
-        config:     config,
-        fileSystem: fileSystem,
+        config:      config,
+        fileSystem:  fileSystem,
+        contentTags: &sync.Map{},
     }
 }
 
@@ -467,7 +471,7 @@ func (instance *FileServer) resolveAndOpen(
     notModified := false
 
     if true == instance.config.enableCache {
-        etag := GenerateEtag(fileInfo, instance.config.weakEtag)
+        etag := instance.entityTag(relativePath, fileInfo)
         if "" != etag {
             headers.Set("ETag", etag)
         }

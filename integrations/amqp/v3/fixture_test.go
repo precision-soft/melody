@@ -1,7 +1,10 @@
 package amqp
 
 import (
+    "encoding/binary"
     "errors"
+    "fmt"
+    "io"
     "net"
     "os"
     "runtime"
@@ -339,4 +342,189 @@ func awaitArmedDeadline(t *testing.T, gated *gatedConn) {
     }
 
     t.Fatalf("no deadline was armed on the wedged socket")
+}
+
+/* writeFakeBrokerMethod writes one method frame the way a broker does: the frame header, the class and method ids ahead of the arguments, and the frame end octet. */
+func writeFakeBrokerMethod(conn net.Conn, channelId uint16, classId uint16, methodId uint16, arguments []byte) error {
+    payload := binary.BigEndian.AppendUint16(nil, classId)
+    payload = binary.BigEndian.AppendUint16(payload, methodId)
+    payload = append(payload, arguments...)
+
+    frame := []byte{1}
+    frame = binary.BigEndian.AppendUint16(frame, channelId)
+    frame = binary.BigEndian.AppendUint32(frame, uint32(len(payload)))
+    frame = append(frame, payload...)
+    frame = append(frame, 0xCE)
+
+    _, writeErr := conn.Write(frame)
+
+    return writeErr
+}
+
+/* readFakeBrokerMethod reads one frame the client sent and refuses it unless it is the method the handshake expects next, so a handshake that drifted fails here instead of wedging the test somewhere later. */
+func readFakeBrokerMethod(conn net.Conn, classId uint16, methodId uint16) error {
+    header := make([]byte, 7)
+    if _, readErr := io.ReadFull(conn, header); nil != readErr {
+        return readErr
+    }
+
+    body := make([]byte, binary.BigEndian.Uint32(header[3:7])+1)
+    if _, readErr := io.ReadFull(conn, body); nil != readErr {
+        return readErr
+    }
+
+    if 1 != header[0] || 4 > len(body) || classId != binary.BigEndian.Uint16(body[0:2]) || methodId != binary.BigEndian.Uint16(body[2:4]) {
+        return fmt.Errorf("the fake broker expected method %d.%d, got frame type %d payload %v", classId, methodId, header[0], body)
+    }
+
+    return nil
+}
+
+/* serveFakeBrokerHandshake answers the connection and channel handshake of one client by hand, with heartbeats off, and then stops reading: nothing else is needed for a publish to reach the socket, and a broker that reads nothing more is what the wedge is. */
+func serveFakeBrokerHandshake(conn net.Conn) error {
+    protocolHeader := make([]byte, 8)
+    if _, readErr := io.ReadFull(conn, protocolHeader); nil != readErr {
+        return readErr
+    }
+
+    start := []byte{0, 9}
+    start = binary.BigEndian.AppendUint32(start, 0)
+    start = binary.BigEndian.AppendUint32(start, uint32(len("PLAIN")))
+    start = append(start, "PLAIN"...)
+    start = binary.BigEndian.AppendUint32(start, uint32(len("en_US")))
+    start = append(start, "en_US"...)
+
+    tune := binary.BigEndian.AppendUint16(nil, 2047)
+    tune = binary.BigEndian.AppendUint32(tune, 131072)
+    tune = binary.BigEndian.AppendUint16(tune, 0)
+
+    steps := []func() error{
+        func() error { return writeFakeBrokerMethod(conn, 0, 10, 10, start) },
+        func() error { return readFakeBrokerMethod(conn, 10, 11) },
+        func() error { return writeFakeBrokerMethod(conn, 0, 10, 30, tune) },
+        func() error { return readFakeBrokerMethod(conn, 10, 31) },
+        func() error { return readFakeBrokerMethod(conn, 10, 40) },
+        func() error { return writeFakeBrokerMethod(conn, 0, 10, 41, []byte{0}) },
+        func() error { return readFakeBrokerMethod(conn, 20, 10) },
+        func() error { return writeFakeBrokerMethod(conn, 1, 20, 11, []byte{0, 0, 0, 0}) },
+    }
+
+    for _, step := range steps {
+        if stepErr := step(); nil != stepErr {
+            return stepErr
+        }
+    }
+
+    return nil
+}
+
+/* fakeBrokerWedge is one publish wedged on a connection to a broker faked on a loopback listener: the client socket is a gatedConn, so the write blocks the way it does on a peer that stopped reading, and the broker side of the socket is kept so a test can drop it. */
+type fakeBrokerWedge struct {
+    connection *amqp091.Connection
+    channel    *amqp091.Channel
+    gated      *gatedConn
+    brokerSide net.Conn
+    written    chan struct{}
+}
+
+/* wedgeAPublishOnAFakeBroker dials the fake broker, opens a channel and wedges one publish on its socket write, which the client makes holding the channel mutex. The cleanup closes the client socket, which is the one thing that ends the write whatever the client's own state, and waits for the publish to return, so no goroutine of this test outlives it. */
+func wedgeAPublishOnAFakeBroker(t *testing.T) *fakeBrokerWedge {
+    t.Helper()
+
+    listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+    if nil != listenErr {
+        t.Fatalf("listen: %v", listenErr)
+    }
+    t.Cleanup(func() { _ = listener.Close() })
+
+    brokerSides := make(chan net.Conn, 1)
+    handshakeErrs := make(chan error, 1)
+    go func() {
+        brokerSide, acceptErr := listener.Accept()
+        if nil != acceptErr {
+            handshakeErrs <- acceptErr
+            return
+        }
+
+        brokerSides <- brokerSide
+        handshakeErrs <- serveFakeBrokerHandshake(brokerSide)
+    }()
+
+    var gated *gatedConn
+    connection, dialErr := amqp091.DialConfig("amqp://guest:guest@"+listener.Addr().String()+"/?heartbeat=0", amqp091.Config{
+        Dial: func(network string, address string) (net.Conn, error) {
+            raw, rawErr := net.DialTimeout(network, address, 2*time.Second)
+            if nil != rawErr {
+                return nil, rawErr
+            }
+
+            gated = newGatedConn(raw)
+
+            return gated, nil
+        },
+    })
+    if nil != dialErr {
+        t.Fatalf("dial the fake broker: %v", dialErr)
+    }
+
+    brokerSide := <-brokerSides
+    t.Cleanup(func() { _ = brokerSide.Close() })
+
+    channel, channelErr := connection.Channel()
+    if nil != channelErr {
+        t.Fatalf("open a channel on the fake broker: %v", channelErr)
+    }
+
+    if handshakeErr := <-handshakeErrs; nil != handshakeErr {
+        t.Fatalf("the fake broker handshake failed: %v", handshakeErr)
+    }
+
+    gated.Wedge()
+
+    wedge := &fakeBrokerWedge{connection: connection, channel: channel, gated: gated, brokerSide: brokerSide, written: make(chan struct{})}
+
+    go func() {
+        _ = channel.Publish("", "melody.amqp.test.wedged", false, false, amqp091.Publishing{Body: []byte("wedged")})
+
+        close(wedge.written)
+    }()
+
+    t.Cleanup(func() {
+        _ = gated.Close()
+
+        select {
+        case <-wedge.written:
+        case <-time.After(5 * time.Second):
+            t.Errorf("the wedged publish did not return after its socket was closed")
+        }
+    })
+
+    deadline := time.Now().Add(2 * time.Second)
+    for 0 == gated.BlockedWrites() {
+        if true == time.Now().After(deadline) {
+            t.Fatal("the publish never reached the socket; there is no wedged write to measure")
+        }
+
+        time.Sleep(5 * time.Millisecond)
+    }
+
+    return wedge
+}
+
+/* beginClientShutdown drops the broker side of the socket, so the client's reader fails and runs the client's own shutdown, the path a missed heartbeat takes: the shutdown marks the connection closed, takes the connection mutex and parks on the channel mutex the wedged write holds. The short sleep lets it reach that park after the mark this waits for. */
+func (instance *fakeBrokerWedge) beginClientShutdown(t *testing.T) {
+    t.Helper()
+
+    _ = instance.brokerSide.Close()
+
+    deadline := time.Now().Add(2 * time.Second)
+    for false == instance.connection.IsClosed() {
+        if true == time.Now().After(deadline) {
+            t.Fatal("the client never began its shutdown after the broker side dropped")
+        }
+
+        time.Sleep(5 * time.Millisecond)
+    }
+
+    time.Sleep(50 * time.Millisecond)
 }

@@ -10,6 +10,7 @@ import (
     "path"
     "path/filepath"
     "strings"
+    "sync"
     "time"
 
     "github.com/precision-soft/melody/exception"
@@ -23,6 +24,8 @@ import (
 type FileServer struct {
     config     *FileServerConfig
     fileSystem fs.FS
+    /* contentTags keeps the content tag of each file that carries no modification time, see entityTag */
+    contentTags *sync.Map
 }
 
 func NewFileServer(options *Options) *FileServer {
@@ -94,8 +97,9 @@ func NewFileServer(options *Options) *FileServer {
     }
 
     return &FileServer{
-        config:     config,
-        fileSystem: fileSystem,
+        config:      config,
+        fileSystem:  fileSystem,
+        contentTags: &sync.Map{},
     }
 }
 
@@ -373,12 +377,12 @@ func (instance *FileServer) Serve(
     }
 
     if true == instance.config.enableCache {
-        etag := GenerateEtag(fileInfo, instance.config.weakEtag)
+        etag := instance.entityTag(relativePath, fileInfo)
         if "" != etag {
             headers.Set("ETag", etag)
         }
 
-        /* a filesystem that carries no modification time reports the zero instant, which is not a validator: it is never After anything, so every If-Modified-Since would be answered 304. No Last-Modified header is written, and the entity tag, built from the build version, is the only validator. */
+        /* a filesystem that carries no modification time reports the zero instant, which is not a validator: it is never After anything, so every If-Modified-Since would be answered 304. No Last-Modified header is written, and the entity tag, built from the file's bytes, is the only validator. */
         if false == fileInfo.ModTime().IsZero() {
             lastModified := fileInfo.ModTime().UTC().Format(nethttp.TimeFormat)
             headers.Set("Last-Modified", lastModified)
@@ -689,12 +693,12 @@ func (instance *FileServer) serveForStreaming(
     }
 
     if true == instance.config.enableCache {
-        etag := GenerateEtag(fileInfo, instance.config.weakEtag)
+        etag := instance.entityTag(relativePath, fileInfo)
         if "" != etag {
             headers.Set("ETag", etag)
         }
 
-        /* a filesystem that carries no modification time reports the zero instant, which is not a validator: it is never After anything, so every If-Modified-Since would be answered 304. No Last-Modified header is written, and the entity tag, built from the build version, is the only validator. */
+        /* a filesystem that carries no modification time reports the zero instant, which is not a validator: it is never After anything, so every If-Modified-Since would be answered 304. No Last-Modified header is written, and the entity tag, built from the file's bytes, is the only validator. */
         if false == fileInfo.ModTime().IsZero() {
             lastModified := fileInfo.ModTime().UTC().Format(nethttp.TimeFormat)
             headers.Set("Last-Modified", lastModified)

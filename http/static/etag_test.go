@@ -3,7 +3,9 @@ package static
 import (
     "io/fs"
     "strings"
+    "sync"
     "testing"
+    "testing/fstest"
     "time"
 
     "github.com/precision-soft/melody/version"
@@ -154,3 +156,37 @@ func (instance *staticEtagFileInfo) ModTime() time.Time { return instance.modTim
 func (instance *staticEtagFileInfo) IsDir() bool { return false }
 
 func (instance *staticEtagFileInfo) Sys() any { return nil }
+
+/* an embedded filesystem carries no modification time, so the tag of one of its files moves with the bytes: two assets of the same size and different bytes, under the same melody build, carry different tags, and the same bytes carry the same tag */
+func TestFileServer_AnEmbeddedAssetChangedAtTheSameSizeGetsANewTag(t *testing.T) {
+    tagOf := func(content string) string {
+        server := &FileServer{
+            config:      &FileServerConfig{},
+            fileSystem:  fstest.MapFS{"app.css": &fstest.MapFile{Data: []byte(content)}},
+            contentTags: &sync.Map{},
+        }
+
+        info, statErr := fs.Stat(server.fileSystem, "app.css")
+        if nil != statErr {
+            t.Fatalf("stat: %v", statErr)
+        }
+
+        if false == info.ModTime().IsZero() {
+            t.Fatalf("expected the embedded-shaped file to carry no modification time")
+        }
+
+        return server.entityTag("app.css", info)
+    }
+
+    before := tagOf("body{color:red}")
+    after := tagOf("body{color:tan}")
+    same := tagOf("body{color:red}")
+
+    if before == after {
+        t.Fatalf("expected a changed asset of the same size to get a new tag, both were %s", before)
+    }
+
+    if before != same {
+        t.Fatalf("expected the same bytes to keep the same tag, got %s and %s", before, same)
+    }
+}

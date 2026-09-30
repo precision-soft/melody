@@ -6,6 +6,7 @@ import (
     "sync/atomic"
     "time"
 
+    "github.com/precision-soft/melody/v3/exception"
     amqp091 "github.com/rabbitmq/amqp091-go"
 )
 
@@ -119,8 +120,13 @@ const (
     wedgedWriteOnCallerOwned
 )
 
-/* abandonWedgedWrite is the branch a write that outlived its budget leads to. The owner's state is read and the wedged flag set under the owner's mutex in one critical section. An owned connection is cut with a deadline already passed and the write waited for under closeJoinTimeout, bounded because a Dial-injected conn may ignore deadlines; on a caller-owned connection a goroutine clears the flag when the write returns. */
+/* abandonWedgedWrite is the branch a write that outlived its budget leads to, with the wait for the cut write bounded by closeJoinTimeout. */
 func (instance *publishHalf) abandonWedgedWrite(stateMutex *sync.Mutex, read func() publishOwnerState, written <-chan struct{}) wedgedWriteVerdict {
+    return instance.abandonWedgedWriteWithin(stateMutex, read, written, closeJoinTimeout)
+}
+
+/* abandonWedgedWriteWithin is abandonWedgedWrite under the bound its caller names for the wait on a cut write. The owner's state is read and the wedged flag set under the owner's mutex in one critical section. An owned connection is cut with a deadline already passed and the write waited for under the bound, which is armed at once: the cut runs on a goroutine of its own, because the client's CloseDeadline first takes the connection mutex, and a shutdown the client already began — its reader failed, a missed heartbeat or a peer gone — holds that mutex while it waits for the channel mutex the wedged write holds across the socket call, so a cut made in line would block until the write returns, which on a peer that stopped reading is never inside any budget. In that state nothing in the client can reach the socket, so the write ends only when the operating system fails it, and the goroutine stays parked until then and the client's shutdown completes; that is the connection ending, not a leak of one goroutine per publish, since later publishes queue behind the wedged write and are abandoned in the queue. The wait is bounded as well because a Dial-injected conn may ignore deadlines. On a caller-owned connection a goroutine clears the flag when the write returns. */
+func (instance *publishHalf) abandonWedgedWriteWithin(stateMutex *sync.Mutex, read func() publishOwnerState, written <-chan struct{}, joinBound time.Duration) wedgedWriteVerdict {
     stateMutex.Lock()
     state := read()
     if false == state.closing && false == state.ownsConnection {
@@ -134,9 +140,14 @@ func (instance *publishHalf) abandonWedgedWrite(stateMutex *sync.Mutex, read fun
 
     /* no owner produces an owned connection that is nil, since the transport nils it only inside its close after closing is raised and the backplane never does, so this branch answers the caller-owned verdict with nothing marked */
     if true == state.ownsConnection && nil != state.connection {
-        _ = state.connection.CloseDeadline(time.Now())
+        connection := state.connection
+        cutAt := time.Now()
 
-        timer := time.NewTimer(closeJoinTimeout)
+        go func() {
+            _ = connection.CloseDeadline(cutAt)
+        }()
+
+        timer := time.NewTimer(joinBound)
         defer timer.Stop()
 
         select {
@@ -176,8 +187,8 @@ func (instance *publishHalf) joinPublishWithin(closeContext context.Context, bud
     return publishJoin{joined: joined, writeInFlight: 0 < instance.writesInFlight.Load()}
 }
 
-/* closeOwnedConnectionWithin closes a connection the owner dialed, with a deadline: at once when the join failed over a write genuinely in flight, which is cut deliberately, and one budget ahead otherwise, so a clean close handshake gets its round trip while a socket wedged with nothing in flight still ends inside the budget. It answers whether the close is to be reported: with a zero stretch, a budget an earlier component spent, the client cuts the handshake and answers an i/o timeout over a live connection, which is not reported; a positive stretch that ran out, and the cut, are. */
-func (instance *publishHalf) closeOwnedConnectionWithin(closeContext context.Context, budget time.Duration, join publishJoin, connection *amqp091.Connection) (closeErr error, reported bool) {
+/* closeOwnedConnectionWithin closes a connection the owner dialed, with a deadline: at once when the join failed over a write genuinely in flight, which is cut deliberately, and one budget ahead otherwise, so a clean close handshake gets its round trip while a socket wedged with nothing in flight still ends inside the budget. The client's CloseDeadline runs on a goroutine of its own and is waited for under a bound: the stretch the deadline was armed with, or, for the cut, whose deadline is already behind it, the join timeout within what is left of the caller's deadline. The client's close first takes the connection mutex, and a shutdown the client already began holds it while it waits for the channel mutex a wedged write holds across the socket call, so a close made in line would block until that write returns, past every bound the caller was promised. A close that does not return within the bound answers an error naming it and answers returned false, on which the owner leaves the channels to end with the connection, since a channel close takes the same channel and connection mutexes and would block the same way; the goroutine ends when the client's shutdown completes. It answers whether the close is to be reported: with a zero stretch, a budget an earlier component spent, the client cuts the handshake and answers an i/o timeout over a live connection, which is not reported, and neither is a close the caller left no time to return; a positive stretch that ran out, and the cut, are. */
+func (instance *publishHalf) closeOwnedConnectionWithin(closeContext context.Context, budget time.Duration, join publishJoin, connection *amqp091.Connection) (closeErr error, reported bool, returned bool) {
     cutWedgedWrite := join.wedgedWrite()
 
     closeStretch := time.Duration(0)
@@ -185,7 +196,38 @@ func (instance *publishHalf) closeOwnedConnectionWithin(closeContext context.Con
         closeStretch = teardownStretchWithin(closeContext, budget)
     }
 
-    closeErr = ignoringAlreadyClosed(connection.CloseDeadline(time.Now().Add(closeStretch)))
+    reported = true == cutWedgedWrite || 0 < closeStretch
 
-    return closeErr, true == cutWedgedWrite || 0 < closeStretch
+    closeWait := closeStretch
+    if 0 == closeWait {
+        closeWait = teardownStretchWithin(closeContext, closeJoinTimeout)
+    }
+
+    deadline := time.Now().Add(closeStretch)
+    outcome := make(chan error, 1)
+
+    go func() {
+        outcome <- ignoringAlreadyClosed(connection.CloseDeadline(deadline))
+    }()
+
+    timer := time.NewTimer(closeWait)
+    defer timer.Stop()
+
+    select {
+    case closeErr = <-outcome:
+        return closeErr, reported, true
+    case <-timer.C:
+        /* the close and the timer can become ready in the same instant and select picks at random, so an answer that exists is preferred over an expired bound */
+        select {
+        case closeErr = <-outcome:
+            return closeErr, reported, true
+        default:
+        }
+
+        return exception.NewError(
+            "amqp connection close did not return within the bound; the client's close ends when its shutdown completes",
+            map[string]any{"bound": closeWait.String()},
+            nil,
+        ), reported, false
+    }
 }

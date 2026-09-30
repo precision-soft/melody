@@ -5,6 +5,7 @@ import (
     "runtime"
     "sort"
     "strings"
+    "sync"
     "sync/atomic"
 
     containercontract "github.com/precision-soft/melody/v2/container/contract"
@@ -39,11 +40,22 @@ func newScopeResolverContext(containerInstance *container, scopeInstance *scope)
 
 /* resolutionStack is the live chain of node keys one resolution is in the middle of building, held apart from the context so a provider's own view of the resolution can carry a different owner while still pushing and popping the one chain the cycle detection reads. */
 type resolutionStack struct {
-    keys []string
+    /* mutex serialises the chain: it belongs to one resolution, but a goroutine a provider starts before it returns can reach it through a retained view (container.Lazy) while the provider still resolves on it. That use is outside the Lazy contract and may read an interleaved chain; the mutex keeps it from being a memory race. */
+    mutex sync.Mutex
+    keys  []string
 }
 
 func newResolutionStack() *resolutionStack {
     return &resolutionStack{keys: make([]string, 0, 8)}
+}
+
+/* chainWithRepeatLocked spells the chain with the key that closes a cycle appended; the caller holds the mutex */
+func (instance *resolutionStack) chainWithRepeatLocked(repeatedKey string) string {
+    parts := make([]string, 0, len(instance.keys)+1)
+    parts = append(parts, instance.keys...)
+    parts = append(parts, repeatedKey)
+
+    return strings.Join(parts, " -> ")
 }
 
 type resolverContext struct {
@@ -113,11 +125,26 @@ func (instance *resolverContext) lateResolution() (*resolverContext, func()) {
 
 /* parentNodeKey answers the node a resolution starting here depends on: the node currently being built while a provider is running, and the node that owns this view once it has returned. */
 func (instance *resolverContext) parentNodeKey() string {
+    instance.stack.mutex.Lock()
+    defer instance.stack.mutex.Unlock()
+
     if 0 < len(instance.stack.keys) {
         return instance.stack.keys[len(instance.stack.keys)-1]
     }
 
     return instance.ownerKey
+}
+
+/* claimRootRequestedKey records the key the resolution started from, once, and answers it; it reads and writes under the chain's mutex, since the views sharing one chain can be used from a goroutine the provider started */
+func (instance *resolverContext) claimRootRequestedKey(requestedKey string) string {
+    instance.stack.mutex.Lock()
+    defer instance.stack.mutex.Unlock()
+
+    if "" == instance.rootRequestedKey {
+        instance.rootRequestedKey = requestedKey
+    }
+
+    return instance.rootRequestedKey
 }
 
 /* scopeVisible reports whether this resolution may read the request scope. */
@@ -190,11 +217,7 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
         return lateResolver.Get(serviceName)
     }
 
-    if "" == instance.rootRequestedKey {
-        instance.rootRequestedKey = serviceName
-    }
-
-    requestedKey := instance.rootRequestedKey
+    requestedKey := instance.claimRootRequestedKey(serviceName)
 
     /* whether the name belongs to this scope decides the node key, and the key has to be settled before it is pushed: the resolution stack is what tells the scope's own dependency graph which of its services depends on which, and a scoped node wearing the container's key would be indistinguishable from a container one. */
     scopedProvider := providerAny(nil)
@@ -412,11 +435,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
         return lateResolver.GetByType(targetType)
     }
 
-    if "" == instance.rootRequestedKey {
-        instance.rootRequestedKey = "type:" + typeIdentityKey(canonicalTargetType)
-    }
-
-    requestedKey := instance.rootRequestedKey
+    requestedKey := instance.claimRootRequestedKey("type:" + typeIdentityKey(canonicalTargetType))
     typeKey := typeIdentityKey(canonicalTargetType)
 
     /* the scoped registrations are looked up before the node key is settled, for the reason Get settles its own key early: the key is what the scope's dependency graph is built from. */
@@ -719,13 +738,16 @@ func (instance *resolverContext) pushKey(creatingKey string) error {
         )
     }
 
+    instance.stack.mutex.Lock()
+    defer instance.stack.mutex.Unlock()
+
     for _, key := range instance.stack.keys {
         if key == creatingKey {
             return exception.NewError(
                 "circular service dependency detected",
                 exceptioncontract.Context{
                     "creatingKey": creatingKey,
-                    "stack":       instance.stackStringWithRepeat(creatingKey),
+                    "stack":       instance.stack.chainWithRepeatLocked(creatingKey),
                 },
                 nil,
             )
@@ -738,6 +760,9 @@ func (instance *resolverContext) pushKey(creatingKey string) error {
 }
 
 func (instance *resolverContext) popKey() {
+    instance.stack.mutex.Lock()
+    defer instance.stack.mutex.Unlock()
+
     if 0 == len(instance.stack.keys) {
         return
     }
@@ -746,11 +771,10 @@ func (instance *resolverContext) popKey() {
 }
 
 func (instance *resolverContext) stackStringWithRepeat(repeatedKey string) string {
-    parts := make([]string, 0, len(instance.stack.keys)+1)
-    parts = append(parts, instance.stack.keys...)
-    parts = append(parts, repeatedKey)
+    instance.stack.mutex.Lock()
+    defer instance.stack.mutex.Unlock()
 
-    return strings.Join(parts, " -> ")
+    return instance.stack.chainWithRepeatLocked(repeatedKey)
 }
 
 /* Container answers the container behind this resolution, the door a process-lifetime service uses to replay deferred work after this context's own resolution has ended. */
