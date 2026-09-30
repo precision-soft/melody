@@ -65,20 +65,6 @@ func (instance *Application) RegisterHttpMiddlewareFactories(
     instance.httpMiddlewares.UseFactories(factories...)
 }
 
-/* errorHandlerReporter is the door through which the composition root asks a kernel whether the application installed its own error handler; a kernel without it keeps the framework exception listener. */
-type errorHandlerReporter interface {
-    HasErrorHandler() bool
-}
-
-func kernelHasErrorHandler(httpKernel httpcontract.Kernel) bool {
-    reporter, ok := httpKernel.(errorHandlerReporter)
-    if false == ok {
-        return false
-    }
-
-    return reporter.HasErrorHandler()
-}
-
 /* openRequestScopeReporter is the door through which the shutdown asks a kernel how many requests are still inside it; a kernel without it is not asked. */
 type openRequestScopeReporter interface {
     OpenRequestScopes() int64
@@ -102,7 +88,7 @@ func (instance *Application) bootHttp() {
     }
 }
 
-/* registerKernelHttpListeners wires the kernel's default listeners at the end of Boot in every process shape: they are inert in a console, whose dispatcher then shows the set the serving process runs. The exception listener's condition is not boot-final, so an http process decides it where serving begins. */
+/* registerKernelHttpListeners wires the kernel's default listeners at the end of Boot in every process shape: they are inert in a console, whose dispatcher then shows the set the serving process runs. The exception listener is among them unconditionally: it stands aside at each dispatch for an error handler installed on the kernel, so a handler installed after Boot is consulted, and an application that serves Boot's kernel with its own server gets the framework rendering without calling Run. */
 func (instance *Application) registerKernelHttpListeners() {
     eventDispatcher := instance.kernel.EventDispatcher()
 
@@ -113,27 +99,13 @@ func (instance *Application) registerKernelHttpListeners() {
     http.RegisterKernelResponseNormalizerListener(eventDispatcher)
     http.RegisterKernelTerminateAccessLogListener(eventDispatcher)
 
-    /* a console never reaches runHttp, so it decides here, for the dispatcher the introspection command reads */
-    if config.ModeHttp != instance.runtimeFlags.Mode() {
-        instance.registerKernelExceptionListener()
-    }
-}
-
-/* registerKernelExceptionListener installs the framework's exception renderer unless the application installed an error handler, since a registered listener takes the handler's place entirely. An http process decides where serving begins, because SetErrorHandler stays open on the kernel after Boot, and a handler installed between Boot and Run must be the one consulted. */
-func (instance *Application) registerKernelExceptionListener() {
-    if true == kernelHasErrorHandler(instance.kernel.HttpKernel()) {
-        return
-    }
-
-    http.RegisterKernelExceptionListener(instance.kernel.EventDispatcher(), instance.kernel.DebugMode())
+    http.RegisterKernelExceptionListener(eventDispatcher, instance.kernel.DebugMode())
 }
 
 func (instance *Application) runHttp(
     ctx context.Context,
 ) error {
     configuration := instance.configuration
-
-    instance.registerKernelExceptionListener()
 
     httpKernel := instance.kernel.HttpKernel()
 

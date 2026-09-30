@@ -859,3 +859,32 @@ func (instance *nilMapPanickingError) Error() string {
 
     return "unreachable"
 }
+
+/* the kernel marks the exception it dispatches when an application error handler is installed, and the framework listener stands aside for the marked event so the kernel consults that handler; the same error on an unmarked event is answered as before */
+func TestExceptionListener_StandsAsideForAnInstalledErrorHandler(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    dispatcher := event.NewEventDispatcher(clockInstance)
+    runtimeInstance := newTestRuntime()
+
+    RegisterKernelExceptionListener(dispatcher, false)
+
+    for _, errorHandlerInstalled := range []bool{true, false} {
+        melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(httptest.NewRequest("GET", "/missing", nil))
+
+        exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, exception.NewHttpException(404, "no such product"))
+        exceptionEvent.errorHandlerInstalled = errorHandlerInstalled
+
+        _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+        if nil != dispatchErr {
+            t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+        }
+
+        if true == errorHandlerInstalled && nil != exceptionEvent.Response() {
+            t.Fatalf("expected the listener to stand aside for an installed error handler")
+        }
+
+        if false == errorHandlerInstalled && nil == exceptionEvent.Response() {
+            t.Fatalf("expected the listener to answer an event with no error handler installed")
+        }
+    }
+}

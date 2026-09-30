@@ -3,8 +3,10 @@ package application
 import (
     "context"
     "errors"
+    "io"
     "net"
     nethttp "net/http"
+    "net/http/httptest"
     "slices"
     "strings"
     "sync"
@@ -604,86 +606,7 @@ func TestAwaitHttpServerEnd_TreatsServerClosedAsACleanShutdown(t *testing.T) {
     }
 }
 
-type errorHandlerlessKernel struct{}
-
-func (instance *errorHandlerlessKernel) Use(middlewares ...httpcontract.Middleware) {}
-
-func (instance *errorHandlerlessKernel) SetNotFoundHandler(handler httpcontract.Handler) {}
-
-func (instance *errorHandlerlessKernel) SetErrorHandler(handler httpcontract.ErrorHandler) {}
-
-func (instance *errorHandlerlessKernel) SetForwardedHeadersPolicy(policy httpcontract.ForwardedHeadersPolicy) {
-}
-
-func (instance *errorHandlerlessKernel) SetSessionCookiePolicy(policy httpcontract.SessionCookiePolicy) {
-}
-
-func (instance *errorHandlerlessKernel) SetMethodPolicy(policy httpcontract.MethodPolicy) {
-}
-
-func (instance *errorHandlerlessKernel) ServeHttp(serviceContainer containercontract.Container) nethttp.Handler {
-    return nil
-}
-
-var _ httpcontract.Kernel = (*errorHandlerlessKernel)(nil)
-
-func TestKernelHasErrorHandler_ReadsTheHasDoor(t *testing.T) {
-    bareKernel := http.NewKernel(http.NewRouter())
-
-    if true == kernelHasErrorHandler(bareKernel) {
-        t.Fatalf("expected no error handler on a fresh kernel")
-    }
-
-    bareKernel.SetErrorHandler(
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request, err error) httpcontract.Response {
-            return nil
-        },
-    )
-
-    if false == kernelHasErrorHandler(bareKernel) {
-        t.Fatalf("expected the installed error handler to be reported")
-    }
-
-    if true == kernelHasErrorHandler(&errorHandlerlessKernel{}) {
-        t.Fatalf("expected a kernel without the door to be read as having no handler")
-    }
-}
-
-/* the gate is proven through the boot-end registration itself: after it the exception listener either answers a kernel.exception dispatch or leaves it unanswered, which is the observable difference between the listener registered and skipped. The handler is installed BEFORE the registration runs, because that is the contract — an error handler installed by boot takes the listener's place. */
-func TestRegisterKernelHttpListeners_SkipsTheExceptionListenerWhenAnErrorHandlerIsInstalled(t *testing.T) {
-    applicationInstance := newCacheWarningTestApplication(t, config.ModeHttp, logging.NewNopLogger())
-
-    applicationInstance.kernel.HttpKernel().SetErrorHandler(
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request, err error) httpcontract.Response {
-            return nil
-        },
-    )
-
-    applicationInstance.registerKernelHttpListeners()
-
-    runtimeInstance := runtime.New(
-        context.Background(),
-        applicationInstance.kernel.ServiceContainer().NewScope(),
-        applicationInstance.kernel.ServiceContainer(),
-    )
-
-    exceptionEvent := http.NewKernelExceptionEvent(
-        runtimeInstance,
-        testhelper.NewHttpTestRequest(nethttp.MethodGet, "http://example.com/fail"),
-        exception.NewError("boot gate failure", nil, nil),
-    )
-
-    _, dispatchErr := applicationInstance.kernel.EventDispatcher().DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
-    if nil != dispatchErr {
-        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
-    }
-
-    if nil != exceptionEvent.Response() {
-        t.Fatalf("expected the framework exception listener to be skipped when a handler is installed")
-    }
-}
-
-/* a console never reaches runHttp, so boot-end is where it decides: its dispatcher has to carry the exception listener for the introspection command to report the set a serving process runs */
+/* boot-end registers the framework exception listener in every process shape; a console reads it through the introspection command, which has to report the set a serving process runs */
 func TestRegisterKernelHttpListeners_RegistersTheExceptionListenerWithoutAnErrorHandler(t *testing.T) {
     applicationInstance := newCacheWarningTestApplication(t, config.ModeCli, logging.NewNopLogger())
 
@@ -711,7 +634,7 @@ func TestRegisterKernelHttpListeners_RegistersTheExceptionListenerWithoutAnError
     }
 }
 
-/* what a serving process ends up running is exactly what a console process exposes to the introspection command. The exception listener is the one decision an http process defers to runHttp, because a handler may still be installed after Boot returned; the set has to come out the same either way. */
+/* what a serving process ends up running is exactly what a console process exposes to the introspection command: the exception listener is registered at boot-end in both, and runHttp adds none of its own. */
 func TestRunHttp_ExposesTheSameListenerSetAConsoleProcessInspects(t *testing.T) {
     servingApplication := newCacheWarningTestApplication(t, config.ModeHttp, logging.NewNopLogger())
     servingApplication.registerKernelHttpListeners()
@@ -759,49 +682,119 @@ func registeredListenerNames(t *testing.T, applicationInstance *Application) []s
     return names
 }
 
-/* the kernel accepts SetErrorHandler after Boot returned, and that handler has to take the framework listener's place exactly as one installed before boot ended does; a decision taken at boot-end would accept it and never consult it */
-func TestRunHttp_AnErrorHandlerInstalledAfterBootTakesTheListenersPlace(t *testing.T) {
+/* newServedExceptionTestApplication builds an http-mode application whose kernel serves a request end to end: the container carries the configuration, the session manager and the event dispatcher the request path resolves, and one route answers a 404 HttpException, the error that either the framework exception listener or an installed error handler has to render. */
+func newServedExceptionTestApplication(t *testing.T) *Application {
+    t.Helper()
+
     applicationInstance := newCacheWarningTestApplication(t, config.ModeHttp, logging.NewNopLogger())
+
+    kernelInstance, ok := applicationInstance.kernel.(*testKernel)
+    if false == ok {
+        t.Fatalf("expected the test kernel, got %T", applicationInstance.kernel)
+    }
+
+    kernelInstance.httpRouter.Handle(
+        nethttp.MethodGet,
+        "/missing",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return nil, exception.NewHttpException(nethttp.StatusNotFound, "no such product")
+        },
+    )
+
+    kernelInstance.serviceContainer.MustRegister(
+        config.ServiceConfig,
+        func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
+            return applicationInstance.configuration, nil
+        },
+    )
+    kernelInstance.serviceContainer.MustRegister(
+        session.ServiceSessionManager,
+        func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
+            return session.NewManager(session.NewInMemoryStorage(), 30*time.Minute), nil
+        },
+    )
+    kernelInstance.serviceContainer.MustRegister(
+        event.ServiceEventDispatcher,
+        func(resolver containercontract.Resolver) (eventcontract.EventDispatcher, error) {
+            return kernelInstance.eventDispatcher, nil
+        },
+    )
+
+    return applicationInstance
+}
+
+/* serveMissingOverTheWire serves the kernel the way an application with its own net/http.Server does — Boot's kernel handed to a server, Run never called — and answers the status and body of the one 404 route. */
+func serveMissingOverTheWire(t *testing.T, applicationInstance *Application) (int, string) {
+    t.Helper()
+
+    server := httptest.NewServer(applicationInstance.kernel.HttpKernel().ServeHttp(applicationInstance.kernel.ServiceContainer()))
+    defer server.Close()
+
+    response, requestErr := nethttp.Get(server.URL + "/missing")
+    if nil != requestErr {
+        t.Fatalf("unexpected request error: %v", requestErr)
+    }
+    defer func() {
+        _ = response.Body.Close()
+    }()
+
+    body, readErr := io.ReadAll(response.Body)
+    if nil != readErr {
+        t.Fatalf("unexpected read error: %v", readErr)
+    }
+
+    return response.StatusCode, string(body)
+}
+
+/* the shape the upgrade guide sanctions for different server limits: an application serves Boot's kernel with its own server and never calls Run. The framework exception listener is registered at boot-end in every process shape, so a handler's HttpException keeps its status there instead of falling to the kernel's 500. */
+func TestServeHttp_AnApplicationServingBootsKernelItselfKeepsTheExceptionStatus(t *testing.T) {
+    applicationInstance := newServedExceptionTestApplication(t)
+
+    applicationInstance.registerKernelHttpListeners()
+
+    status, body := serveMissingOverTheWire(t, applicationInstance)
+    if nethttp.StatusNotFound != status {
+        t.Fatalf("expected the HttpException's 404 without Run, got %d: %s", status, body)
+    }
+}
+
+/* SetErrorHandler stays open after Boot, and a handler installed there has to be the one consulted: the kernel marks the exception with the handler it has at the moment of the error and the framework listener stands aside, so no decision taken at boot-end or at Run can leave the handler unconsulted */
+func TestServeHttp_AnErrorHandlerInstalledAfterBootIsConsulted(t *testing.T) {
+    applicationInstance := newServedExceptionTestApplication(t)
 
     applicationInstance.registerKernelHttpListeners()
 
     applicationInstance.kernel.HttpKernel().SetErrorHandler(
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request, err error) httpcontract.Response {
-            return nil
+            return http.TextResponse(nethttp.StatusTeapot, "rendered by the application")
         },
     )
 
-    /* the decision is driven through runHttp rather than through the door it calls: what has to be proved is that serving makes it at all, and a probe that calls the door itself passes over a runHttp that never does */
-    cancelledContext, cancel := context.WithCancel(context.Background())
-    cancel()
-
-    if runErr := applicationInstance.runHttp(cancelledContext); nil != runErr {
-        t.Fatalf("unexpected run http error: %v", runErr)
-    }
-
-    runtimeInstance := runtime.New(
-        context.Background(),
-        applicationInstance.kernel.ServiceContainer().NewScope(),
-        applicationInstance.kernel.ServiceContainer(),
-    )
-
-    exceptionEvent := http.NewKernelExceptionEvent(
-        runtimeInstance,
-        testhelper.NewHttpTestRequest(nethttp.MethodGet, "http://example.com/fail"),
-        exception.NewError("post-boot handler", nil, nil),
-    )
-
-    _, dispatchErr := applicationInstance.kernel.EventDispatcher().DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
-    if nil != dispatchErr {
-        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
-    }
-
-    if nil != exceptionEvent.Response() {
-        t.Fatalf("expected the framework exception listener to stand aside for a handler installed after boot")
+    status, body := serveMissingOverTheWire(t, applicationInstance)
+    if nethttp.StatusTeapot != status || false == strings.Contains(body, "rendered by the application") {
+        t.Fatalf("expected the handler installed after boot to render the error, got %d: %s", status, body)
     }
 }
 
-/* the sister of the test above, and the one that proves serving makes the decision at all: with no handler installed, an http process registers nothing at boot-end, so the framework listener has to arrive at runHttp or the application serves errors with nothing rendering them. With a handler installed both the correct form and a runHttp that never decides register nothing, so that case cannot tell them apart. */
+/* the sister of the test above for a handler installed before boot ended: the listener is registered all the same and stands aside for it */
+func TestServeHttp_AnErrorHandlerInstalledBeforeBootIsConsulted(t *testing.T) {
+    applicationInstance := newServedExceptionTestApplication(t)
+
+    applicationInstance.kernel.HttpKernel().SetErrorHandler(
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request, err error) httpcontract.Response {
+            return http.TextResponse(nethttp.StatusTeapot, "rendered by the application")
+        },
+    )
+
+    applicationInstance.registerKernelHttpListeners()
+
+    status, body := serveMissingOverTheWire(t, applicationInstance)
+    if nethttp.StatusTeapot != status || false == strings.Contains(body, "rendered by the application") {
+        t.Fatalf("expected the handler installed before boot to render the error, got %d: %s", status, body)
+    }
+}
+
+/* an http process that goes through Run serves with the framework exception listener registered at boot-end: with no handler installed, a kernel.exception dispatch is answered after runHttp as it is before it */
 func TestRunHttp_RegistersTheExceptionListenerWhenNoHandlerWasInstalled(t *testing.T) {
     applicationInstance := newCacheWarningTestApplication(t, config.ModeHttp, logging.NewNopLogger())
 
@@ -832,9 +825,32 @@ func TestRunHttp_RegistersTheExceptionListenerWhenNoHandlerWasInstalled(t *testi
     }
 
     if nil == exceptionEvent.Response() {
-        t.Fatalf("expected the framework exception listener to answer once serving began")
+        t.Fatalf("expected the framework exception listener to answer after runHttp")
     }
 }
+
+type errorHandlerlessKernel struct{}
+
+func (instance *errorHandlerlessKernel) Use(middlewares ...httpcontract.Middleware) {}
+
+func (instance *errorHandlerlessKernel) SetNotFoundHandler(handler httpcontract.Handler) {}
+
+func (instance *errorHandlerlessKernel) SetErrorHandler(handler httpcontract.ErrorHandler) {}
+
+func (instance *errorHandlerlessKernel) SetForwardedHeadersPolicy(policy httpcontract.ForwardedHeadersPolicy) {
+}
+
+func (instance *errorHandlerlessKernel) SetSessionCookiePolicy(policy httpcontract.SessionCookiePolicy) {
+}
+
+func (instance *errorHandlerlessKernel) SetMethodPolicy(policy httpcontract.MethodPolicy) {
+}
+
+func (instance *errorHandlerlessKernel) ServeHttp(serviceContainer containercontract.Container) nethttp.Handler {
+    return nil
+}
+
+var _ httpcontract.Kernel = (*errorHandlerlessKernel)(nil)
 
 /* countingHttpKernel is the errorHandlerless kernel plus the one door the shutdown drain reads, so a test can drive the drain against a count it controls rather than against a live server. */
 type countingHttpKernel struct {

@@ -35,6 +35,11 @@ func RegisterKernelExceptionListener(eventDispatcher eventcontract.EventDispatch
                 return nil
             }
 
+            /* an application error handler takes the listener's place: the kernel consults it once the listener leaves the event unanswered, whenever the handler was installed and whatever serves the kernel */
+            if true == exceptionEvent.errorHandlerInstalled {
+                return nil
+            }
+
             if nil == exceptionEvent.Err() {
                 return nil
             }

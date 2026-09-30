@@ -153,6 +153,9 @@ type KernelExceptionEvent struct {
     request  httpcontract.Request
     err      error
     response httpcontract.Response
+
+    /* set by the kernel when an application error handler is installed at the moment of the dispatch, and read by the framework exception listener to stand aside for it; an event built outside the kernel leaves it unset */
+    errorHandlerInstalled bool
 }
 
 func (instance *KernelExceptionEvent) Runtime() runtimecontract.Runtime {

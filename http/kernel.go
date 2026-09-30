@@ -88,12 +88,12 @@ func (instance *Kernel) SetNotFoundHandler(handler httpcontract.Handler) {
     instance.notFoundHandler = handler
 }
 
-/* SetErrorHandler installs the application's own error rendering, and it is read at boot: the application registers the framework exception listener only when no handler is installed by then, because that listener answers every kernel.exception dispatch first and a handler behind it can never run. An installed handler therefore takes over what the listener did — negotiation, the request-id header, the validation errors payload — and when it returns nil the kernel's own default rendering answers instead. */
+/* SetErrorHandler installs the application's own error rendering. The kernel marks every kernel.exception dispatch with whether a handler is installed at that moment, and the framework exception listener stands aside for it, so the handler is consulted whenever it was installed — before Boot, after Boot, or around a kernel the application serves with its own server. An installed handler therefore takes over what the listener did — negotiation, the request-id header, the validation errors payload — and when it returns nil the kernel's own default rendering answers instead. */
 func (instance *Kernel) SetErrorHandler(handler httpcontract.ErrorHandler) {
     instance.errorHandler = handler
 }
 
-/* HasErrorHandler reports whether the application installed an error handler; the composition root reads it before deciding to register the framework exception listener. */
+/* HasErrorHandler reports whether the application installed an error handler. */
 func (instance *Kernel) HasErrorHandler() bool {
     return nil != instance.errorHandler
 }
@@ -429,7 +429,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 reportedErr = exception.Logged(recoveredErr)
             }
 
-            exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, reportedErr)
+            exceptionEvent := instance.newKernelExceptionEvent(runtimeInstance, melodyRequest, reportedErr)
             _, eventKernelExceptionErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
             instance.logEventDispatchError(requestLogger, "kernel exception error", eventKernelExceptionErr)
 
@@ -710,7 +710,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                     if nil != err {
                         reportedErr := logHandlerError(requestLogger, "not found handler error", err, request.HttpRequest())
 
-                        kernelExceptionEvent := NewKernelExceptionEvent(runtimeInstance, request, reportedErr)
+                        kernelExceptionEvent := instance.newKernelExceptionEvent(runtimeInstance, request, reportedErr)
                         instance.dispatchEventKernelException(kernelExceptionEvent, runtimeInstance, requestLogger, eventDispatcher)
 
                         if nil == kernelExceptionEvent.Response() {
@@ -814,7 +814,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         if nil != finalHandlerErr {
             reportedErr := logHandlerError(requestLogger, "controller handler error", finalHandlerErr, request)
 
-            kernelExceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, reportedErr)
+            kernelExceptionEvent := instance.newKernelExceptionEvent(runtimeInstance, melodyRequest, reportedErr)
             instance.dispatchEventKernelException(kernelExceptionEvent, runtimeInstance, requestLogger, eventDispatcher)
 
             if nil == kernelExceptionEvent.Response() {
@@ -905,6 +905,18 @@ func (instance *Kernel) invokeErrorHandlerSafely(
     }()
 
     return instance.errorHandler(runtimeInstance, writer, request, handlerErr)
+}
+
+/* newKernelExceptionEvent builds the kernel.exception payload marked with whether an application error handler is installed now, so the framework exception listener stands aside for a handler installed at any point before the error, whatever serves the kernel. */
+func (instance *Kernel) newKernelExceptionEvent(
+    runtimeInstance runtimecontract.Runtime,
+    request httpcontract.Request,
+    err error,
+) *KernelExceptionEvent {
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, request, err)
+    exceptionEvent.errorHandlerInstalled = nil != instance.errorHandler
+
+    return exceptionEvent
 }
 
 func (instance *Kernel) dispatchEventKernelException(
