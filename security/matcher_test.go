@@ -2,6 +2,7 @@ package security
 
 import (
     nethttp "net/http"
+    "net/http/httptest"
     "testing"
 
     "github.com/precision-soft/melody/http"
@@ -83,5 +84,37 @@ func TestPathPrefixMatcher_ATypedNilRequestDoesNotMatch(t *testing.T) {
 
     if true == matcher.Matches(unassignedRequest) {
         t.Fatalf("expected matcher to not match a typed nil request")
+    }
+}
+
+/* an absolute-form target ("GET http://host") and an authority-form one ("CONNECT host:port") reach the handler with an empty path, which names the root: a firewall on "/" that did not claim it was skipped for the request, its access control with it */
+func TestPathPrefixMatcher_AnEmptyPathIsTheRoot(t *testing.T) {
+    for _, target := range []struct {
+        method string
+        target string
+    }{
+        {method: "GET", target: "http://localhost"},
+        {method: "POST", target: "http://localhost"},
+        {method: "CONNECT", target: "localhost:443"},
+    } {
+        httpRequest := httptest.NewRequest(target.method, target.target, nil)
+        if "" != httpRequest.URL.Path {
+            t.Fatalf("expected %s %s to carry an empty path, got %q", target.method, target.target, httpRequest.URL.Path)
+        }
+
+        request := http.NewRequest(
+            httpRequest,
+            nil,
+            nil,
+            nil,
+        )
+
+        if false == NewPathPrefixMatcher("/").Matches(request) {
+            t.Fatalf("expected the root prefix to claim %s %s", target.method, target.target)
+        }
+
+        if true == NewPathPrefixMatcher("/admin").Matches(request) {
+            t.Fatalf("expected %s %s to stay outside /admin", target.method, target.target)
+        }
     }
 }

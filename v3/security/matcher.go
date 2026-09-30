@@ -37,6 +37,11 @@ func (instance *PathPrefixMatcher) Matches(request httpcontract.Request) bool {
     /* the spelling the router reads, so a firewall written for "/admin/" does not claim "/admin%2Fusers", a one-segment resource the router never routes under "/admin"; the access-control matcher reads the same spelling */
     path := http.RequestPathAsRouted(internal.RequestPathAsSent(request.HttpRequest().URL))
 
+    /* an absolute-form or authority-form request target ("GET http://host", "CONNECT host:port") arrives with an empty path, and it names the root: it is read as the root, the way the access-control matcher reads it, so the firewall that owns "/" is selected for it rather than skipped */
+    if "" == path {
+        path = "/"
+    }
+
     if "" == instance.prefix {
         return true
     }
