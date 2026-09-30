@@ -32,9 +32,10 @@ trap cleanup EXIT
 # and what runs here is the proof that it did.
 #
 # A green `.dev/validate/all.sh --all` stamps the tree hash of the exact worktree content it validated into
-# `.temp/validate-stamp`. This hook recomputes that hash and compares — milliseconds. A match means the
-# content being pushed is byte-identical to what the full gate proved; any edit after the run computes a
-# different hash and is refused by name. The stamp's age is deliberately not judged: identity of content is
+# `.temp/validate-stamp`. This hook compares that hash with the tree of every commit being pushed —
+# milliseconds. A match means the content being pushed is byte-identical to what the full gate proved; a
+# commit of part of the worktree, another branch, or an edit after the run carries a different tree and is
+# refused by name. The stamp's age is deliberately not judged: identity of content is
 # the guarantee, and a clock would only refuse pushes the gate already covers.
 if [[ "" = "$(git config --get core.sshCommand || true)" ]]; then
     git config core.sshCommand "ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20"
@@ -58,6 +59,7 @@ VALIDATION_RUN_LOG_FILE_PATH="${REPOSITORY_ROOT_DIRECTORY_STRING}/.temp/validate
 REMOTE_NAME_STRING="${1:-}"
 PUSHED_UPDATE_COUNT_NUMBER=0
 UNHELD_SHA_COUNT_NUMBER=0
+UNHELD_UPDATE_LIST=()
 while IFS=" " read -r LOCAL_REF_STRING LOCAL_SHA_STRING REMOTE_REF_STRING REMOTE_SHA_STRING; do
     if [[ "" = "${LOCAL_SHA_STRING}" ]]; then
         continue
@@ -68,6 +70,7 @@ while IFS=" " read -r LOCAL_REF_STRING LOCAL_SHA_STRING REMOTE_REF_STRING REMOTE
     fi
     if [[ "" = "${REMOTE_NAME_STRING}" ]] || [[ "" = "$(git for-each-ref --contains "${LOCAL_SHA_STRING}" "refs/remotes/${REMOTE_NAME_STRING}/" 2>/dev/null || true)" ]]; then
         UNHELD_SHA_COUNT_NUMBER=$((UNHELD_SHA_COUNT_NUMBER + 1))
+        UNHELD_UPDATE_LIST+=("${LOCAL_SHA_STRING} ${LOCAL_REF_STRING}")
     fi
 done
 
@@ -118,12 +121,32 @@ if [[ ! "${STAMPED_TREE_HASH_STRING}" =~ ^[0-9a-f]{40}$ ]]; then
     refuse_and_start_validation "malformed validation stamp (${VALIDATION_STAMP_FILE_PATH#${REPOSITORY_ROOT_DIRECTORY_STRING}/})"
 fi
 
+# the stamp is compared with the tree of every commit being sent, not with the worktree: what leaves this
+# machine is the commit, and a commit made of part of the worktree, or a push of another branch, carries a
+# tree the gate never built while the worktree still matches the stamp. A commit whose tree is the worktree's
+# only needs the gate run again when the stamp is stale; any other commit cannot be validated from this
+# worktree at all, and the refusal says so instead of starting a run that would prove something else.
 if ! CURRENT_TREE_HASH_STRING="$(compute_worktree_tree_hash)"; then
     fail "could not compute the worktree hash to check against the validation stamp"
 fi
 
-if [[ "${STAMPED_TREE_HASH_STRING}" != "${CURRENT_TREE_HASH_STRING}" ]]; then
-    refuse_and_start_validation "the worktree changed since the last full validation (stamped ${STAMPED_TREE_HASH_STRING} at ${STAMPED_AT_STRING}, current ${CURRENT_TREE_HASH_STRING})"
-fi
+for UNHELD_UPDATE_STRING in "${UNHELD_UPDATE_LIST[@]}"; do
+    UNHELD_SHA_STRING="${UNHELD_UPDATE_STRING%% *}"
+    UNHELD_REF_STRING="${UNHELD_UPDATE_STRING#* }"
 
-success "pre-push: worktree matches the full validation stamped at ${STAMPED_AT_STRING}"
+    if ! PUSHED_TREE_HASH_STRING="$(git rev-parse --verify --quiet "${UNHELD_SHA_STRING}^{tree}")"; then
+        fail "could not read the tree of ${UNHELD_SHA_STRING} (${UNHELD_REF_STRING}) to check against the validation stamp"
+    fi
+
+    if [[ "${STAMPED_TREE_HASH_STRING}" = "${PUSHED_TREE_HASH_STRING}" ]]; then
+        continue
+    fi
+
+    if [[ "${CURRENT_TREE_HASH_STRING}" = "${PUSHED_TREE_HASH_STRING}" ]]; then
+        refuse_and_start_validation "the commit being pushed on ${UNHELD_REF_STRING} (${UNHELD_SHA_STRING}) is the worktree, which changed since the last full validation (stamped ${STAMPED_TREE_HASH_STRING} at ${STAMPED_AT_STRING}, current ${CURRENT_TREE_HASH_STRING})"
+    fi
+
+    fail "the commit being pushed on ${UNHELD_REF_STRING} (${UNHELD_SHA_STRING}) carries tree ${PUSHED_TREE_HASH_STRING}, which neither the last full validation (${STAMPED_TREE_HASH_STRING} at ${STAMPED_AT_STRING}) nor the worktree (${CURRENT_TREE_HASH_STRING}) is — a commit of part of the worktree, or another branch; commit the validated worktree whole, or check the commit out and run the gate on it"
+done
+
+success "pre-push: every commit being pushed carries the tree the full validation stamped at ${STAMPED_AT_STRING}"
