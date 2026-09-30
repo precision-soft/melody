@@ -55,7 +55,7 @@ func (instance EncryptedString) Value() (driver.Value, error) {
         return nil, cipherErr
     }
 
-    encoded, encryptErr := cipherInstance.Encrypt(string(instance))
+    encoded, encryptErr := sealColumnValue(cipherInstance, string(instance), false)
     if nil != encryptErr {
         return nil, encryptErr
     }

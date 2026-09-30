@@ -229,6 +229,29 @@ func (instance *aes256Cipher) Decrypt(encoded string) (string, error) {
     return opened.plaintext, nil
 }
 
+/* valueSealer is the door the column types seal through. An application value is always sealed as data, even when it is itself one of this cipher's seals: a column an attacker can write and later read back in the clear would otherwise hand back the plaintext of any seal of the compartment, from any row, column or table. Encrypt keeps its documented pass-through for the Migrator, which re-runs over columns already sealed. A Cipher implemented outside this package does not carry the door and is sealed through its own Encrypt. */
+type valueSealer interface {
+    sealValue(plaintext string, deterministic bool) (string, error)
+}
+
+func (instance *aes256Cipher) sealValue(plaintext string, deterministic bool) (string, error) {
+    return instance.seal(plaintext, instance.keys.CurrentKeyId(), deterministic)
+}
+
+/* sealColumnValue seals the value a column type writes, through valueSealer when the cipher carries it */
+func sealColumnValue(cipherInstance Cipher, plaintext string, deterministic bool) (string, error) {
+    sealer, isSealer := cipherInstance.(valueSealer)
+    if true == isSealer {
+        return sealer.sealValue(plaintext, deterministic)
+    }
+
+    if true == deterministic {
+        return cipherInstance.EncryptDeterministic(plaintext)
+    }
+
+    return cipherInstance.Encrypt(plaintext)
+}
+
 /* the write side is deliberately lenient: a marker-shaped value passes through only when it authenticates under a key still in the set, so a retired key's seal is not encrypted twice, and anything else is application data and is sealed under the current key */
 func (instance *aes256Cipher) isPassThroughCiphertext(value string) bool {
     if false == hasEncryptionMarker(value) {

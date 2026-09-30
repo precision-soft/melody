@@ -45,7 +45,7 @@ func (instance EncryptedDeterministicString) Value() (driver.Value, error) {
         return nil, cipherErr
     }
 
-    encoded, encryptErr := cipherInstance.EncryptDeterministic(string(instance))
+    encoded, encryptErr := sealColumnValue(cipherInstance, string(instance), true)
     if nil != encryptErr {
         return nil, encryptErr
     }

@@ -276,3 +276,36 @@ func TestEncryptedStringFor_FormatRedactsNumericVerbs(t *testing.T) {
         }
     }
 }
+
+/* a column an attacker can write and later read back must not decrypt a seal handed to it as data: the seal of another row's secret, stored through this column, is read back as that seal and never as the secret */
+func TestEncryptedStringFor_ASealWrittenAsDataIsSealedAndReadBackAsTheSeal(t *testing.T) {
+    useCompartmentCiphers(t)
+
+    crmCipher, cipherErr := refCipher[crmCipherRef]()
+    if nil != cipherErr {
+        t.Fatalf("cipher: %v", cipherErr)
+    }
+
+    otherRowsSeal, sealErr := crmCipher.Encrypt("another customer's iban")
+    if nil != sealErr {
+        t.Fatalf("seal: %v", sealErr)
+    }
+
+    stored, valueErr := EncryptedStringFor[crmCipherRef](otherRowsSeal).Value()
+    if nil != valueErr {
+        t.Fatalf("value: %v", valueErr)
+    }
+
+    if otherRowsSeal == string(stored.([]byte)) {
+        t.Fatalf("expected the seal to be sealed as data, it was stored verbatim")
+    }
+
+    var loaded EncryptedStringFor[crmCipherRef]
+    if scanErr := loaded.Scan(stored); nil != scanErr {
+        t.Fatalf("scan: %v", scanErr)
+    }
+
+    if otherRowsSeal != string(loaded) {
+        t.Fatalf("expected the column to read back the seal it was given, got %q", string(loaded))
+    }
+}
