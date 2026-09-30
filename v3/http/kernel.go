@@ -111,7 +111,7 @@ func (instance *Kernel) SetNotFoundHandler(handler httpcontract.Handler) {
     instance.notFoundHandler = handler
 }
 
-/* SetErrorHandler installs the application's own error rendering. The kernel marks every kernel.exception dispatch with whether a handler is installed, and the framework exception listener stands aside for it, so the handler takes over negotiation, the request-id header and the validation payload whether it was installed before or after Boot, and whatever serves the kernel. When it returns nil, the kernel's default rendering answers. */
+/* SetErrorHandler installs the application's own error rendering for the errors the kernel itself raises: a handler's error, the not-found handler's error, a recovered panic. The kernel marks the kernel.exception event it builds with whether a handler is installed, and the framework exception listener stands aside for it, so the handler takes over negotiation, the request-id header and the validation payload whether it was installed before or after Boot, and whatever serves the kernel. When it returns nil, the kernel's default rendering answers. A refusal a kernel.request listener dispatches itself — the security firewall's and access control's — is rendered by the framework exception listener, not by this handler. */
 func (instance *Kernel) SetErrorHandler(handler httpcontract.ErrorHandler) {
     instance.refuseMutationWhileServing("SetErrorHandler")
 
