@@ -4,11 +4,13 @@ import (
     "encoding/json"
     "fmt"
     "reflect"
+    "runtime"
     "strings"
     "sync"
     "sync/atomic"
     "testing"
     "time"
+    "unicode/utf8"
 
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/internal/testhelper"
@@ -2489,5 +2491,229 @@ func TestValidator_APackageErrorUnderAFieldOfItsOwnIsAnsweredVerbatimUnderEveryP
 
     if 2 != len(errors) || "custom" != errors[0].Field() || "custom" != errors[1].Field() {
         t.Fatalf("expected the constraint's own field kept verbatim under both paths, got %v", errors)
+    }
+}
+
+/* hugeMapKeyBody spells a json object whose one member holds a map under a key of keyLength bytes, above a list of count copies of element. */
+func hugeMapKeyBody(member string, keyLength int, element string, count int) []byte {
+    builder := strings.Builder{}
+    builder.WriteString(`{"` + member + `":{"`)
+    builder.WriteString(strings.Repeat("a", keyLength))
+    builder.WriteString(`":[`)
+    for index := 0; index < count; index++ {
+        if 0 < index {
+            builder.WriteString(",")
+        }
+        builder.WriteString(element)
+    }
+    builder.WriteString(`]}}`)
+
+    return []byte(builder.String())
+}
+
+/* validationAllocation answers the bytes one Validate call allocates, read from the runtime's cumulative counter, with the call's error. */
+func validationAllocation(validator *Validator, payload any) (uint64, error) {
+    runtime.GC()
+
+    var before runtime.MemStats
+    runtime.ReadMemStats(&before)
+
+    err := validator.Validate(payload)
+
+    var after runtime.MemStats
+    runtime.ReadMemStats(&after)
+
+    return after.TotalAlloc - before.TotalAlloc, err
+}
+
+/* hugeMapKeyAllocationCeiling is the linear budget of the pins below: a hundred times the body, since a walk spends a path segment of a few dozen bytes per element of two. A walk that copies the path of the parent into each element spends the length of that path per element, over a thousand times the body at these sizes. */
+const hugeMapKeyAllocationCeiling = 100
+
+func TestValidator_AHugeMapKeyAboveAListOfStringsCostsAllocationLinearInTheBody(t *testing.T) {
+    type payload struct {
+        Tags map[string][]string `json:"tags"`
+    }
+
+    body := hugeMapKeyBody("tags", 128*1024, `""`, 40000)
+
+    target := payload{}
+    if err := json.Unmarshal(body, &target); nil != err {
+        t.Fatalf("unexpected decode error: %v", err)
+    }
+
+    allocated, err := validationAllocation(NewValidator(), &target)
+    if nil != err {
+        t.Fatalf("expected no error, got %v", err)
+    }
+
+    t.Logf("body %d bytes, allocated %d bytes, ceiling %d bytes", len(body), allocated, hugeMapKeyAllocationCeiling*len(body))
+
+    if uint64(hugeMapKeyAllocationCeiling*len(body)) < allocated {
+        t.Fatalf("expected at most %d bytes allocated for a %d-byte body, got %d", hugeMapKeyAllocationCeiling*len(body), len(body), allocated)
+    }
+}
+
+func TestValidator_AHugeMapKeyUnderAnInterfaceFieldCostsAllocationLinearInTheBody(t *testing.T) {
+    type payload struct {
+        Metadata any `json:"metadata"`
+    }
+
+    body := hugeMapKeyBody("metadata", 128*1024, `0`, 60000)
+
+    target := payload{}
+    if err := json.Unmarshal(body, &target); nil != err {
+        t.Fatalf("unexpected decode error: %v", err)
+    }
+
+    allocated, err := validationAllocation(NewValidator(), &target)
+    if nil != err {
+        t.Fatalf("expected no error, got %v", err)
+    }
+
+    t.Logf("body %d bytes, allocated %d bytes, ceiling %d bytes", len(body), allocated, hugeMapKeyAllocationCeiling*len(body))
+
+    if uint64(hugeMapKeyAllocationCeiling*len(body)) < allocated {
+        t.Fatalf("expected at most %d bytes allocated for a %d-byte body, got %d", hugeMapKeyAllocationCeiling*len(body), len(body), allocated)
+    }
+}
+
+func TestValidator_AHugeMapKeyAboveFailingElementsKeepsTheErrorsAndTheirAllocationSmall(t *testing.T) {
+    type item struct {
+        Name string `json:"name" validate:"notBlank"`
+    }
+    type payload struct {
+        Groups map[string][]item `json:"groups"`
+    }
+
+    body := hugeMapKeyBody("groups", 128*1024, `{}`, 2000)
+
+    target := payload{}
+    if err := json.Unmarshal(body, &target); nil != err {
+        t.Fatalf("unexpected decode error: %v", err)
+    }
+
+    allocated, err := validationAllocation(NewValidator(), &target)
+    errors := requireValidationErrors(t, err)
+
+    if 2000 != len(errors) {
+        t.Fatalf("expected 2000 errors, got %d", len(errors))
+    }
+
+    /* the rendered key is bounded, so a field name stays within a few hundred bytes whatever the key's length */
+    for _, validationError := range errors {
+        if 256 < len(validationError.Field()) {
+            t.Fatalf("expected a field name of at most 256 bytes, got %d", len(validationError.Field()))
+        }
+    }
+
+    t.Logf("body %d bytes, allocated %d bytes, ceiling %d bytes", len(body), allocated, hugeMapKeyAllocationCeiling*len(body))
+
+    if uint64(hugeMapKeyAllocationCeiling*len(body)) < allocated {
+        t.Fatalf("expected at most %d bytes allocated for a %d-byte body, got %d", hugeMapKeyAllocationCeiling*len(body), len(body), allocated)
+    }
+}
+
+func TestValidator_ADeepDocumentOfLongKeysAboveAListCostsAllocationLinearInTheBody(t *testing.T) {
+    type payload struct {
+        Metadata any `json:"metadata"`
+    }
+
+    /* twenty nested objects under 128-byte keys, each key whole in the path, above a list: the path of the list is kilobytes long, and walking it costs a copy per element unless the path is spelled lazily */
+    builder := strings.Builder{}
+    builder.WriteString(`{"metadata":`)
+    for level := 0; level < 20; level++ {
+        builder.WriteString(`{"` + strings.Repeat(string(rune('a'+level)), 128) + `":`)
+    }
+    builder.WriteString(`[0`)
+    builder.WriteString(strings.Repeat(`,0`, 60000))
+    builder.WriteString(`]`)
+    builder.WriteString(strings.Repeat(`}`, 20))
+    builder.WriteString(`}`)
+    body := []byte(builder.String())
+
+    target := payload{}
+    if err := json.Unmarshal(body, &target); nil != err {
+        t.Fatalf("unexpected decode error: %v", err)
+    }
+
+    allocated, err := validationAllocation(NewValidator(), &target)
+    if nil != err {
+        t.Fatalf("expected no error, got %v", err)
+    }
+
+    t.Logf("body %d bytes, allocated %d bytes, ceiling %d bytes", len(body), allocated, hugeMapKeyAllocationCeiling*len(body))
+
+    if uint64(hugeMapKeyAllocationCeiling*len(body)) < allocated {
+        t.Fatalf("expected at most %d bytes allocated for a %d-byte body, got %d", hugeMapKeyAllocationCeiling*len(body), len(body), allocated)
+    }
+}
+
+func TestValidator_AMapKeyUpToTheBoundKeepsItsWholeNameInTheErrorField(t *testing.T) {
+    type item struct {
+        Name string `json:"name" validate:"notBlank"`
+    }
+    type payload struct {
+        Groups map[string][]item `json:"groups"`
+    }
+
+    for _, key := range []string{"primary", strings.Repeat("k", maxRenderedMapKeyLength)} {
+        errors := requireValidationErrors(t, NewValidator().Validate(&payload{Groups: map[string][]item{key: {{}}}}))
+
+        expected := "groups[" + key + "][0].name"
+        if 1 != len(errors) || expected != errors[0].Field() {
+            t.Fatalf("expected the field %q, got %v", expected, errors)
+        }
+    }
+}
+
+func TestValidator_AMapKeyOverTheBoundIsTruncatedWithTheMarkerInTheErrorField(t *testing.T) {
+    type item struct {
+        Name string `json:"name" validate:"notBlank"`
+    }
+    type payload struct {
+        Groups map[string][]item `json:"groups"`
+    }
+
+    key := strings.Repeat("k", maxRenderedMapKeyLength+1)
+    errors := requireValidationErrors(t, NewValidator().Validate(&payload{Groups: map[string][]item{key: {{}}}}))
+
+    expected := "groups[" + key[:maxRenderedMapKeyLength] + truncatedMapKeyMarker + "][0].name"
+    if 1 != len(errors) || expected != errors[0].Field() {
+        t.Fatalf("expected the field %q, got %v", expected, errors)
+    }
+}
+
+func TestValidator_AMapKeyTruncatedInsideARuneIsCutOnTheRuneBoundary(t *testing.T) {
+    type payload struct {
+        Groups map[string][]testPayload `json:"groups"`
+    }
+
+    /* one ASCII byte and then two-byte runes, so the bound falls on the second byte of a rune */
+    key := "a" + strings.Repeat("é", maxRenderedMapKeyLength)
+    errors := requireValidationErrors(t, NewValidator().Validate(&payload{Groups: map[string][]testPayload{key: {{}}}}))
+
+    expectedPrefix := "groups[" + key[:maxRenderedMapKeyLength-1] + truncatedMapKeyMarker + "][0]."
+    for _, validationError := range errors {
+        if false == strings.HasPrefix(validationError.Field(), expectedPrefix) || false == utf8.ValidString(validationError.Field()) {
+            t.Fatalf("expected a valid field under %q, got %q", expectedPrefix, validationError.Field())
+        }
+    }
+}
+
+func TestValidationPath_SpellsTheWalksGrammar(t *testing.T) {
+    var root *validationPath
+
+    cases := map[string]*validationPath{
+        "":                root,
+        "name":            root.member("name"),
+        "[0]":             root.element(0),
+        "[key].name":      root.entry(reflect.ValueOf("key")).member("name"),
+        "items[3].tags[x]": root.member("items").element(3).member("tags").entry(reflect.ValueOf("x")),
+    }
+
+    for expected, path := range cases {
+        if expected != path.String() {
+            t.Fatalf("expected %q, got %q", expected, path.String())
+        }
     }
 }
