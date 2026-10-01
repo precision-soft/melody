@@ -123,6 +123,14 @@ Every section below shipped in the `[v2.13.0]` block of [`CHANGELOG.md`](../CHAN
 
 **Remedy.** Close those connections when the shutdown begins, so the drain has something to succeed at. This major has no shutdown-hook door and keeps its `*http.Server` private, so the mechanism is the context: derive each upgraded connection's lifetime from the same context the application hands `Run`, since that context's cancellation is what starts the shutdown. A hub that stops accepting and closes its clients on that cancellation is the shape this takes. If the wait is unwelcome, `MELODY_HTTP_SHUTDOWN_TIMEOUT` bounds it — but the exit status is the point: `net/http`'s own `Shutdown` does not track a connection a handler hijacked, so the clean stop reported before was one melody had not obtained. The handler was still running, and the container was closing under it.
 
+### Validation: an answer holds at most 1,000 errors, and a truncated list or map is reported once
+
+**What changed.** One `Validate` call stops at the first error past 1,000 and closes its answer with one entry under the root field `""` whose code is `errorLimitExceeded` and whose context holds `maxErrors`, so an exhausted answer holds 1,001 entries. The depth cut (`nestingDepthExceeded`) of the members of a list or a map is reported once under the path of the list or the map (`items`), no longer once per element (`items[0]`, `items[1]`, …); a truncated struct field keeps its own entry.
+
+**Symptom.** A client enumerating `validationErrors` may meet the `errorLimitExceeded` entry at the end of a long answer, and a depth-cut entry of a list or a map names the container instead of its elements.
+
+**Remedy.** Treat `errorLimitExceeded` as "more errors exist": show the entries received and ask for the request to be corrected and resent. A client that mapped a depth-cut entry to an element should map it to the container it names.
+
 ### Validation: a negative length bound is refused at construction
 
 **What changed.** `validation.NewMinLength` and `validation.NewMaxLength` panic on a negative bound, naming it. The tag door (`validate:"min=-1"`) already refused the same value and is unchanged.

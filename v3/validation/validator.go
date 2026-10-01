@@ -24,6 +24,12 @@ const maxNestedValidationDepth = 64
 /* maxRenderedMapKeyLength bounds the bytes of a map key an error path spells. A key is chosen by the client and sits in the path of every element beneath it, so an unbounded key puts a full copy of itself into every rule's field name and every recorded error. 128 bytes keeps whole every key an application ordinarily indexes by (a UUID, a 64-byte hex digest, a slug, a header or locale name), and bounds n errors under a longer key at n times the bound. */
 const maxRenderedMapKeyLength = 128
 
+/* maxValidationErrors bounds the errors one Validate call collects. A client chooses how many elements a body holds, so the walk stops at the first error past the bound and the answer closes with one entry of the code errorLimitExceededCode instead. */
+const maxValidationErrors = 1000
+
+/* errorLimitExceededCode is the code of the entry that closes an answer cut at maxValidationErrors. */
+const errorLimitExceededCode = "errorLimitExceeded"
+
 /* truncatedMapKeyMarker closes a map key cut at maxRenderedMapKeyLength, so the field name shows that the key is cut. */
 const truncatedMapKeyMarker = "...(truncated)"
 
@@ -121,10 +127,12 @@ type memoizedValidationError struct {
     context       map[string]any
 }
 
-/* validationWalk is the state of one Validate call: the path-scoped set that closes reference cycles, and the whole-call memo that answers a pointer already walked at the same depth with its first walk's errors, re-spelled under the new path. A walk cut short by an ancestor memoizes only what it saw; the ancestor's errors are reported under its own path. */
+/* validationWalk is the state of one Validate call: the path-scoped set that closes reference cycles, the whole-call memo that answers a pointer already walked at the same depth with its first walk's errors, re-spelled under the new path, and the count of the errors the answer holds, which stops the walk at the first error past maxValidationErrors. A walk cut short by an ancestor memoizes only what it saw; the ancestor's errors are reported under its own path. */
 type validationWalk struct {
-    onPath map[cyclicReference]bool
-    memo   map[validationMemoKey][]memoizedValidationError
+    onPath     map[cyclicReference]bool
+    memo       map[validationMemoKey][]memoizedValidationError
+    errorCount int
+    exceeded   bool
 }
 
 func newValidationWalk() *validationWalk {
@@ -132,6 +140,21 @@ func newValidationWalk() *validationWalk {
         onPath: make(map[cyclicReference]bool),
         memo:   make(map[validationMemoKey][]memoizedValidationError),
     }
+}
+
+/* admit counts the errors a rule, the depth cut or the memo produced into the answer, keeping those within maxValidationErrors; the first one past it marks the walk exceeded, after which nothing further is walked. */
+func (instance *validationWalk) admit(errors ValidationErrors) ValidationErrors {
+    for index := range errors {
+        if maxValidationErrors <= instance.errorCount {
+            instance.exceeded = true
+
+            return errors[:index]
+        }
+
+        instance.errorCount = instance.errorCount + 1
+    }
+
+    return errors
 }
 
 /* remember files the errors of a finished walk under the key, each relative to the walked path. A walk that produced an error of a constraint's own type is not filed, since re-spelling would change that type, so such a node is walked again per path. */
@@ -307,14 +330,30 @@ func (instance *Validator) validateInternal(data any) ValidationErrors {
         return nil
     }
 
-    return instance.validateReflected(reflect.ValueOf(data), nil, 0, newValidationWalk())
+    walk := newValidationWalk()
+
+    errors := instance.validateReflected(reflect.ValueOf(data), nil, 0, walk)
+
+    /* the closing entry keeps an exceeded answer non-empty, so a caller asking only whether the value is valid still refuses it */
+    if true == walk.exceeded {
+        errors = append(errors, NewValidationError(
+            "",
+            "validation stopped after the maximum number of errors",
+            errorLimitExceededCode,
+            map[string]any{
+                "maxErrors": maxValidationErrors,
+            },
+        ))
+    }
+
+    return errors
 }
 
 /* validateReflected drives the recursive cascade: it unwraps pointers and interfaces, skips nil and on-path references, answers a pointer already walked at this depth from the memo, and dispatches structs, slices, arrays and maps to their walkers. A scalar leaf falls through, its tag belonging to the owning struct. */
 func (instance *Validator) validateReflected(value reflect.Value, path *validationPath, depth int, walk *validationWalk) ValidationErrors {
     var errors ValidationErrors
 
-    if false == value.IsValid() {
+    if false == value.IsValid() || true == walk.exceeded {
         return errors
     }
 
@@ -328,14 +367,7 @@ func (instance *Validator) validateReflected(value reflect.Value, path *validati
             return errors
         }
 
-        return append(errors, NewValidationError(
-            path.String(),
-            "this field is nested deeper than validation allows",
-            ErrorNestingDepthExceeded,
-            map[string]any{
-                "maxDepth": maxNestedValidationDepth,
-            },
-        ))
+        return walk.admit(ValidationErrors{nestingDepthExceededError(path)})
     }
 
     switch value.Kind() {
@@ -358,7 +390,7 @@ func (instance *Validator) validateReflected(value reflect.Value, path *validati
         /* the memo is read before the walk and written after it; a pointer on the path never reaches it, so the set above still closes a cycle */
         memoKey := validationMemoKey{pointer: reference.pointer, typ: reference.typ, depth: depth}
         if recalled, walked := walk.recall(memoKey, path); true == walked {
-            return append(errors, recalled...)
+            return append(errors, walk.admit(recalled)...)
         }
 
         walk.onPath[reference] = true
@@ -367,7 +399,10 @@ func (instance *Validator) validateReflected(value reflect.Value, path *validati
 
         delete(walk.onPath, reference)
 
-        walk.remember(memoKey, path, walked)
+        /* a walk the error budget cut short is not a complete walk of the pointer, so it is never answered from the memo */
+        if false == walk.exceeded {
+            walk.remember(memoKey, path, walked)
+        }
 
         return append(errors, walked...)
     case reflect.Struct:
@@ -378,6 +413,43 @@ func (instance *Validator) validateReflected(value reflect.Value, path *validati
         return instance.validateMap(value, path, depth, walk)
     default:
         return errors
+    }
+}
+
+/* nestingDepthExceededError is the entry of the depth cut under the path of the truncated member, or of the sequence or map whose members it truncated. */
+func nestingDepthExceededError(path *validationPath) *ValidationError {
+    return NewValidationError(
+        path.String(),
+        "this field is nested deeper than validation allows",
+        ErrorNestingDepthExceeded,
+        map[string]any{
+            "maxDepth": maxNestedValidationDepth,
+        },
+    )
+}
+
+/* memberReachesTheCut reports whether walking a member at the depth would end in an entry of the depth cut: it unwraps interfaces and pointers as validateReflected does, each a level deeper, and asks the cut's own question once past maxNestedValidationDepth. A sequence or a map then reports the cut once under its own path, since the client chooses how many members it holds. */
+func memberReachesTheCut(value reflect.Value, depth int, walk *validationWalk) bool {
+    for {
+        if false == value.IsValid() || true == holdsNoValidationMember(value) {
+            return false
+        }
+
+        if maxNestedValidationDepth < depth {
+            return typeCanCarryValidationTag(value.Type())
+        }
+
+        if reflect.Interface != value.Kind() && reflect.Ptr != value.Kind() {
+            return false
+        }
+
+        /* a pointer on the descent path is short-circuited by the walk, so it reports nothing */
+        if reflect.Ptr == value.Kind() && true == walk.onPath[cyclicReference{pointer: value.Pointer(), typ: value.Type()}] {
+            return false
+        }
+
+        value = value.Elem()
+        depth = depth + 1
     }
 }
 
@@ -488,7 +560,7 @@ func (instance *Validator) validateStruct(value reflect.Value, path *validationP
                 if true == isPromotedValidationEmbed(field) {
                     /* the embed's own tag runs against the embed value, whose promoted fields a payload populates; an unexported embed's value cannot pass through Interface, so its tag stays out of reach */
                     if true == field.IsExported() {
-                        errors = append(errors, instance.applyFieldRules(field, fieldValue, embeddedFieldPath(field, path))...)
+                        errors = append(errors, instance.applyFieldRules(field, fieldValue, embeddedFieldPath(field, path), walk)...)
                     }
 
                     embeddedType := dereferencedValidationStructType(field.Type)
@@ -547,6 +619,10 @@ func (instance *Validator) validateStruct(value reflect.Value, path *validationP
         }
 
         for _, jsonName := range order {
+            if true == walk.exceeded {
+                return errors
+            }
+
             resolved[jsonName] = true
 
             winner, ok := dominantVisibleField(candidatesByName[jsonName])
@@ -583,16 +659,16 @@ func (instance *Validator) validateVisibleField(
 
     fieldPath := path.member(jsonName)
 
-    errors = append(errors, instance.applyFieldRules(candidate.field, candidate.value, fieldPath)...)
+    errors = append(errors, instance.applyFieldRules(candidate.field, candidate.value, fieldPath, walk)...)
 
     return append(errors, instance.validateReflected(candidate.value, fieldPath, depth+1, walk)...)
 }
 
 /* applyFieldRules spells the path only once the field carries a tag, since every rule and every error names the field. */
-func (instance *Validator) applyFieldRules(field reflect.StructField, value reflect.Value, path *validationPath) ValidationErrors {
+func (instance *Validator) applyFieldRules(field reflect.StructField, value reflect.Value, path *validationPath, walk *validationWalk) ValidationErrors {
     var errors ValidationErrors
 
-    if false == value.IsValid() {
+    if false == value.IsValid() || true == walk.exceeded {
         return errors
     }
 
@@ -618,18 +694,22 @@ func (instance *Validator) applyFieldRules(field reflect.StructField, value refl
             }
         }
 
-        return append(errors, NewValidationError(
+        return walk.admit(ValidationErrors{NewValidationError(
             fieldPath,
             "invalid validation tag syntax",
             ErrorInvalidRuleSyntax,
             context,
-        ))
+        )})
     }
 
     for _, rule := range rules {
+        if true == walk.exceeded {
+            break
+        }
+
         validationError := instance.validateRule(value.Interface(), fieldPath, rule)
         if false == internal.IsNilInterface(validationError) {
-            errors = append(errors, validationError)
+            errors = append(errors, walk.admit(ValidationErrors{validationError})...)
         }
     }
 
@@ -863,7 +943,17 @@ func (instance *Validator) validateSequence(value reflect.Value, path *validatio
         }
     }
 
-    for i := 0; i < value.Len(); i++ {
+    truncated := false
+    for i := 0; i < value.Len() && false == walk.exceeded; i++ {
+        if true == memberReachesTheCut(value.Index(i), depth+1, walk) {
+            if false == truncated {
+                truncated = true
+                errors = append(errors, walk.admit(ValidationErrors{nestingDepthExceededError(path)})...)
+            }
+
+            continue
+        }
+
         elementPath := path.element(i)
 
         errors = append(errors, instance.validateReflected(value.Index(i), elementPath, depth+1, walk)...)
@@ -879,8 +969,18 @@ func (instance *Validator) validateMap(value reflect.Value, path *validationPath
         return errors
     }
 
+    truncated := false
     iterator := value.MapRange()
-    for true == iterator.Next() {
+    for false == walk.exceeded && true == iterator.Next() {
+        if true == memberReachesTheCut(iterator.Value(), depth+1, walk) {
+            if false == truncated {
+                truncated = true
+                errors = append(errors, walk.admit(ValidationErrors{nestingDepthExceededError(path)})...)
+            }
+
+            continue
+        }
+
         elementPath := path.entry(iterator.Key())
 
         errors = append(errors, instance.validateReflected(iterator.Value(), elementPath, depth+1, walk)...)

@@ -121,6 +121,14 @@ A flag kind melody does not ship — a duration, a float — has no alias to rea
 
 **Remedy.** Write the parameter the rule needs: `regex(pattern=^[a-z]+$)`, `max=100`, `lessThan=0`. A pattern genuinely meant to match everything says so explicitly. The contract on [`ParameterizedConstraint`](../validation/contract/constraint.go) now states that the registered instance is a template for `WithParams` and never a fallback configuration.
 
+### Validation: an answer holds at most 1,000 errors, and a truncated list or map is reported once
+
+**What changed.** One `Validate` call stops at the first error past 1,000 and closes its answer with one entry under the root field `""` whose code is `errorLimitExceeded` and whose context holds `maxErrors`, so an exhausted answer holds 1,001 entries. The depth cut (`nestingDepthExceeded`) of the members of a list or a map is reported once under the path of the list or the map (`items`), no longer once per element (`items[0]`, `items[1]`, …); a truncated struct field keeps its own entry.
+
+**Symptom.** A client enumerating `validationErrors` may meet the `errorLimitExceeded` entry at the end of a long answer, and a depth-cut entry of a list or a map names the container instead of its elements.
+
+**Remedy.** Treat `errorLimitExceeded` as "more errors exist": show the entries received and ask for the request to be corrected and resent. A client that mapped a depth-cut entry to an element should map it to the container it names.
+
 ### Validation: a negative length bound is refused at construction
 
 **What changed.** [`validation.NewMinLength`](../validation/constraint_min_length.go) and [`validation.NewMaxLength`](../validation/constraint_max_length.go) panic on a negative bound, naming it. The tag door (`validate:"min=-1"`) refuses the same value with a parse error rather than a panic, because a tag is data a request path reads while a constructor argument is a declaration.

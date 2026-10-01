@@ -2558,7 +2558,8 @@ func TestValidator_AHugeMapKeyAboveFailingElementsKeepsTheErrorsAndTheirAllocati
         Groups map[string][]item `json:"groups"`
     }
 
-    body := hugeMapKeyBody("groups", 128*1024, `{}`, 2000)
+    /* as many failing elements as the error budget holds, so every one of them is answered */
+    body := hugeMapKeyBody("groups", 128*1024, `{}`, maxValidationErrors)
 
     target := payload{}
     if err := json.Unmarshal(body, &target); nil != err {
@@ -2568,8 +2569,8 @@ func TestValidator_AHugeMapKeyAboveFailingElementsKeepsTheErrorsAndTheirAllocati
     allocated, err := validationAllocation(NewValidator(), &target)
     errors := requireValidationErrors(t, err)
 
-    if 2000 != len(errors) {
-        t.Fatalf("expected 2000 errors, got %d", len(errors))
+    if maxValidationErrors != len(errors) {
+        t.Fatalf("expected %d errors, got %d", maxValidationErrors, len(errors))
     }
 
     /* the rendered key is bounded, so a field name stays within a few hundred bytes whatever the key's length */
@@ -2688,5 +2689,252 @@ func TestValidationPath_SpellsTheWalksGrammar(t *testing.T) {
         if expected != path.String() {
             t.Fatalf("expected %q, got %q", expected, path.String())
         }
+    }
+}
+
+/* deepLongKeyDocument spells levels nested objects under 128-byte keys, each key whole in the path, above a list of count copies of element, and answers the path the walk spells for that list. */
+func deepLongKeyDocument(levels int, element string, count int) ([]byte, string) {
+    builder := strings.Builder{}
+    builder.WriteString(`{"metadata":`)
+
+    path := "metadata"
+    for level := 0; level < levels; level++ {
+        key := strings.Repeat(string(rune('a'+level%26)), 128)
+        builder.WriteString(`{"` + key + `":`)
+        path = path + "[" + key + "]"
+    }
+
+    builder.WriteString(`[` + element)
+    builder.WriteString(strings.Repeat(`,`+element, count-1))
+    builder.WriteString(`]`)
+    builder.WriteString(strings.Repeat(`}`, levels))
+    builder.WriteString(`}`)
+
+    return []byte(builder.String()), path
+}
+
+/* thirty levels leave the list at depth 63, so each of its elements holds a list the cut truncates; the cut is reported once under the list's path instead of once per element, each spelling a path of kilobytes */
+func TestValidator_ADeepListOfTruncatedListsAnswersOneDepthCutUnderTheListsPathWithinTheAllocationCeiling(t *testing.T) {
+    type payload struct {
+        Metadata any `json:"metadata"`
+    }
+
+    body, listPath := deepLongKeyDocument(30, `[0]`, 61499)
+
+    target := payload{}
+    if err := json.Unmarshal(body, &target); nil != err {
+        t.Fatalf("unexpected decode error: %v", err)
+    }
+
+    allocated, err := validationAllocation(NewValidator(), &target)
+    errors := requireValidationErrors(t, err)
+
+    t.Logf("body %d bytes, allocated %d bytes, ceiling %d bytes", len(body), allocated, hugeMapKeyAllocationCeiling*len(body))
+
+    if uint64(hugeMapKeyAllocationCeiling*len(body)) < allocated {
+        t.Fatalf("expected at most %d bytes allocated for a %d-byte body, got %d", hugeMapKeyAllocationCeiling*len(body), len(body), allocated)
+    }
+
+    if 1 != len(errors) || ErrorNestingDepthExceeded != errors[0].Code() || listPath != errors[0].Field() {
+        t.Fatalf("expected one depth-cut entry under the list's path, got %d entries, the first of code %q under a %d-byte field", len(errors), errors[0].Code(), len(errors[0].Field()))
+    }
+}
+
+/* buildFreeFormNestingAbove nests levels maps under the key "k", the deepest holding the members given, and answers the path the walk spells for the deepest map. */
+func buildFreeFormNestingAbove(levels int, members map[string]any) (map[string]any, string) {
+    current := members
+    path := "metadata"
+
+    for level := 1; level < levels; level++ {
+        current = map[string]any{"k": current}
+        path = path + "[k]"
+    }
+
+    return current, path
+}
+
+/* thirty-two maps under the metadata field leave the deepest at depth 63, so the members it holds are truncated by the cut */
+func TestValidator_ATruncatedMapOfNonEmptyMembersAnswersOneEntryUnderTheMapsPath(t *testing.T) {
+    metadata, mapPath := buildFreeFormNestingAbove(32, map[string]any{
+        "first":  map[string]any{"leaf": "value"},
+        "second": []any{"value"},
+        "third":  map[string]any{"leaf": "value"},
+    })
+
+    errors := requireValidationErrors(t, NewValidator().Validate(freeFormPayload{Name: "given", Metadata: metadata}))
+
+    if 1 != len(errors) || ErrorNestingDepthExceeded != errors[0].Code() || mapPath != errors[0].Field() {
+        t.Fatalf("expected one depth-cut entry under %q, got %q", mapPath, errors.Error())
+    }
+
+    if maxNestedValidationDepth != errors[0].Context()["maxDepth"] {
+        t.Fatalf("expected the depth-cut context, got %v", errors[0].Context())
+    }
+}
+
+func TestValidator_ATruncatedContainerOfNullOrEmptyMembersAnswersNoEntry(t *testing.T) {
+    metadata, _ := buildFreeFormNestingAbove(32, map[string]any{
+        "absent": nil,
+        "map":    map[string]any{},
+        "list":   []any{},
+    })
+
+    requireNoValidationErrors(t, NewValidator().Validate(freeFormPayload{Name: "given", Metadata: metadata}))
+}
+
+/* the fields of a struct are fixed by its type, not by the client, so each truncated field keeps its own entry under its own path */
+func TestValidator_TruncatedStructFieldsKeepOneEntryPerFieldUnderTheFieldsPath(t *testing.T) {
+    wrapper := &emptyMemberDepthWrapper{
+        Items:   []emptyMemberDepthLeaf{{}},
+        ItemMap: map[string]emptyMemberDepthLeaf{"key": {}},
+    }
+
+    for level := 1; level < 33; level++ {
+        wrapper = &emptyMemberDepthWrapper{Inner: wrapper}
+    }
+
+    errors := requireValidationErrors(t, NewValidator().Validate(*wrapper))
+
+    if 2 != len(errors) {
+        t.Fatalf("expected one entry per truncated field, got %q", errors.Error())
+    }
+
+    expectedPrefix := strings.Repeat("inner.", 32)
+    fields := map[string]bool{errors[0].Field(): true, errors[1].Field(): true}
+    if false == fields[expectedPrefix+"items"] || false == fields[expectedPrefix+"itemMap"] {
+        t.Fatalf("expected the entries under the fields' own paths, got %v", fields)
+    }
+}
+
+type budgetElement struct {
+    Name string `json:"name" validate:"notBlank"`
+}
+
+type budgetPayload struct {
+    Items []budgetElement `json:"items"`
+}
+
+func TestValidator_AsManyErrorsAsTheBudgetHoldsAnswerEveryOneWithoutAClosingEntry(t *testing.T) {
+    errors := requireValidationErrors(t, NewValidator().Validate(budgetPayload{Items: make([]budgetElement, maxValidationErrors)}))
+
+    if maxValidationErrors != len(errors) {
+        t.Fatalf("expected %d entries, got %d", maxValidationErrors, len(errors))
+    }
+
+    for _, validationError := range errors {
+        if errorLimitExceededCode == validationError.Code() {
+            t.Fatalf("expected no closing entry for an answer within the budget")
+        }
+    }
+}
+
+func TestValidator_OneErrorPastTheBudgetClosesTheAnswerWithTheLimitEntry(t *testing.T) {
+    errors := requireValidationErrors(t, NewValidator().Validate(budgetPayload{Items: make([]budgetElement, maxValidationErrors+1)}))
+
+    if maxValidationErrors+1 != len(errors) {
+        t.Fatalf("expected %d entries, got %d", maxValidationErrors+1, len(errors))
+    }
+
+    for _, validationError := range errors[:maxValidationErrors] {
+        if ConstraintNotBlankErrorIsBlank != validationError.Code() {
+            t.Fatalf("expected the budget filled with the rule's errors, got %q", validationError.Code())
+        }
+    }
+
+    closing := errors[maxValidationErrors]
+    if "" != closing.Field() || errorLimitExceededCode != closing.Code() || "errorLimitExceeded" != closing.Code() {
+        t.Fatalf("expected the closing entry at the root with its code, got %q under %q", closing.Code(), closing.Field())
+    }
+
+    if maxValidationErrors != closing.Context()["maxErrors"] {
+        t.Fatalf("expected the closing entry to carry the budget, got %v", closing.Context())
+    }
+}
+
+func TestValidator_AnExceededBudgetStillRefusesTheValue(t *testing.T) {
+    if nil == NewValidator().Validate(budgetPayload{Items: make([]budgetElement, 2*maxValidationErrors)}) {
+        t.Fatalf("expected an exceeded budget to answer an error")
+    }
+}
+
+type alwaysFailingCountingConstraint struct {
+    calls int
+}
+
+func (instance *alwaysFailingCountingConstraint) Validate(value any, field string) validationcontract.ValidationError {
+    instance.calls++
+
+    return NewValidationError(field, "always fails", "alwaysFails", nil)
+}
+
+/* the budget stops the walk, not only the answer: past the first error over the budget no rule runs, so a body of many failing elements costs no more than the budget */
+func TestValidator_AFlatListOfFailingElementsStopsRunningRulesPastTheBudgetWithinTheAllocationCeiling(t *testing.T) {
+    type element struct {
+        Name string `json:"name" validate:"alwaysFailingCounting"`
+    }
+    type payload struct {
+        Items []element `json:"items"`
+    }
+
+    body := []byte(`{"items":[{}` + strings.Repeat(`,{}`, 83332) + `]}`)
+
+    target := payload{}
+    if err := json.Unmarshal(body, &target); nil != err {
+        t.Fatalf("unexpected decode error: %v", err)
+    }
+
+    counting := &alwaysFailingCountingConstraint{}
+    validator := NewValidator()
+    validator.RegisterConstraint("alwaysFailingCounting", counting)
+
+    allocated, err := validationAllocation(validator, &target)
+    errors := requireValidationErrors(t, err)
+
+    t.Logf("body %d bytes, allocated %d bytes, ceiling %d bytes", len(body), allocated, hugeMapKeyAllocationCeiling*len(body))
+
+    if uint64(hugeMapKeyAllocationCeiling*len(body)) < allocated {
+        t.Fatalf("expected at most %d bytes allocated for a %d-byte body, got %d", hugeMapKeyAllocationCeiling*len(body), len(body), allocated)
+    }
+
+    if maxValidationErrors+1 != len(errors) {
+        t.Fatalf("expected %d entries, got %d", maxValidationErrors+1, len(errors))
+    }
+
+    if maxValidationErrors+1 != counting.calls {
+        t.Fatalf("expected the rule to run up to the first error past the budget, it ran %d times", counting.calls)
+    }
+}
+
+/* every door that adds an entry spends the one budget: the depth cut, an unknown rule and a failing rule together */
+func TestValidator_TheBudgetCountsTheErrorsOfEveryDoor(t *testing.T) {
+    type element struct {
+        Name  string `json:"name" validate:"notBlank"`
+        Other string `json:"other" validate:"noSuchRule"`
+    }
+    type payload struct {
+        Metadata map[string]any `json:"metadata"`
+        Items    []element      `json:"items"`
+    }
+
+    errors := requireValidationErrors(t, NewValidator().Validate(payload{
+        Metadata: buildFreeFormNesting(33),
+        Items:    make([]element, maxValidationErrors/2),
+    }))
+
+    if maxValidationErrors+1 != len(errors) {
+        t.Fatalf("expected %d entries, got %d", maxValidationErrors+1, len(errors))
+    }
+
+    codes := map[string]int{}
+    for _, validationError := range errors {
+        codes[validationError.Code()]++
+    }
+
+    if 1 != codes[ErrorNestingDepthExceeded] || 0 == codes[ErrorUnknownRule] || 0 == codes[ConstraintNotBlankErrorIsBlank] || 1 != codes[errorLimitExceededCode] {
+        t.Fatalf("expected the three doors and the closing entry, got %v", codes)
+    }
+
+    if errorLimitExceededCode != errors[maxValidationErrors].Code() {
+        t.Fatalf("expected the closing entry last, got %q", errors[maxValidationErrors].Code())
     }
 }
