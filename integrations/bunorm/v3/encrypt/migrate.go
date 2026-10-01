@@ -71,14 +71,39 @@ func (instance *Migrator) MigrateReencrypt(ctx context.Context, spec TableSpec, 
     return instance.run(ctx, spec, instance.reencryptTransform(spec, targetKeyId))
 }
 
+/* MigrateDecrypt stops the run on a row whose decrypted value is itself marker-shaped: written bare, such a value would be read as a seal by a column type that still decrypts. */
 func (instance *Migrator) MigrateDecrypt(ctx context.Context, spec TableSpec) (int, error) {
     return instance.run(ctx, spec, func(value string) (string, error) {
-        return instance.cipher.Decrypt(value)
+        plaintext, decryptErr := instance.cipher.Decrypt(value)
+        if nil != decryptErr {
+            return "", decryptErr
+        }
+
+        if true == hasEncryptionMarker(plaintext) {
+            return "", exception.NewError(
+                "migrate decrypt found a stored value whose plaintext is itself an encrypted value; written bare it would be read as one, so the row is left sealed",
+                map[string]any{"mode": "decrypt"},
+                nil,
+            )
+        }
+
+        return plaintext, nil
     })
 }
 
-/* encryptTransform reads stored values, so it takes the cipher's strict read side: a marker whose body does not decrypt is damage or a retired key, and the run stops on it, naming the row, instead of sealing over the only copy. A value that decrypts is already sealed: the random mode hands it back unchanged and the deterministic mode converts it in place under its own key, so mode=encrypt is never a key rotation. */
+/* errSealStoredAsDataThroughForeignCipher stops a run on a row whose decrypted value is itself marker-shaped when the cipher is implemented outside this package: its public doors may pass such a value through, which would store the seal bare, so the row is left as it is. */
+func errSealStoredAsDataThroughForeignCipher(keyId string) error {
+    return exception.NewError(
+        "migrate found a stored value whose plaintext is itself an encrypted value, which a cipher implemented outside this package cannot re-seal as data; the row is left as it is",
+        map[string]any{"keyId": keyId},
+        nil,
+    )
+}
+
+/* encryptTransform reads stored values, so it takes the cipher's strict read side: a marker whose body does not decrypt is damage or a retired key, and the run stops on it, naming the row, instead of sealing over the only copy. A value that decrypts is already sealed: the random mode hands it back unchanged and the deterministic mode keeps a deterministic seal and re-seals a random one's decrypted value as data under its own key, so mode=encrypt is never a key rotation and never unwraps a seal stored as data. */
 func (instance *Migrator) encryptTransform(spec TableSpec) func(string) (string, error) {
+    sealer, isSealer := instance.cipher.(valueSealer)
+
     return func(value string) (string, error) {
         keyId, markerShaped, keyIdErr := keyIdOf(value)
         if nil != keyIdErr {
@@ -106,11 +131,27 @@ func (instance *Migrator) encryptTransform(spec TableSpec) func(string) (string,
             return value, nil
         }
 
-        return instance.cipher.EncryptDeterministicWithKeyId(plaintext, keyId)
+        if false == isSealer {
+            if true == hasEncryptionMarker(plaintext) {
+                return "", errSealStoredAsDataThroughForeignCipher(keyId)
+            }
+
+            return instance.cipher.EncryptDeterministicWithKeyId(plaintext, keyId)
+        }
+
+        stored, _ := sealer.authenticatedSeal(value)
+        if true == stored.deterministic {
+            return value, nil
+        }
+
+        return sealer.sealValueWithKeyId(plaintext, keyId, true)
     }
 }
 
+/* reencryptTransform decides on the STORED value alone and seals the value it decrypted as data under the target key, so a seal an application stored as data is rotated as data and never turned back into a bare seal. */
 func (instance *Migrator) reencryptTransform(spec TableSpec, targetKeyId string) func(string) (string, error) {
+    sealer, isSealer := instance.cipher.(valueSealer)
+
     return func(value string) (string, error) {
         currentKeyId, encrypted, keyIdErr := keyIdOf(value)
         if nil != keyIdErr {
@@ -122,6 +163,25 @@ func (instance *Migrator) reencryptTransform(spec TableSpec, targetKeyId string)
         plaintext, decryptErr := instance.cipher.Decrypt(value)
         if nil != decryptErr {
             return "", decryptErr
+        }
+
+        if true == isSealer {
+            if true == spec.Deterministic {
+                return sealer.sealValueWithKeyId(plaintext, targetKeyId, true)
+            }
+
+            if true == sameKey {
+                stored, _ := sealer.authenticatedSeal(value)
+                if false == stored.deterministic {
+                    return value, nil
+                }
+            }
+
+            return sealer.sealValueWithKeyId(plaintext, targetKeyId, false)
+        }
+
+        if true == hasEncryptionMarker(plaintext) {
+            return "", errSealStoredAsDataThroughForeignCipher(currentKeyId)
         }
 
         if true == spec.Deterministic {
@@ -496,7 +556,7 @@ func (instance *Migrator) applyRow(ctx context.Context, spec TableSpec, row migr
 
         transformed, transformErr := transform(value.String)
         if nil != transformErr {
-            return false, exception.NewError("migrate transform failed", map[string]any{"table": spec.Table, "column": column}, transformErr)
+            return false, exception.NewError("migrate transform failed", map[string]any{"table": spec.Table, "column": column, "id": row.primaryKey}, transformErr)
         }
 
         if transformed == value.String {

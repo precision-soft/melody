@@ -118,7 +118,15 @@ func (instance *scriptedSqlStatement) NumInput() int {
     return -1
 }
 
+/* Exec records its arguments beside the queries', so a test can read the value an update wrote */
 func (instance *scriptedSqlStatement) Exec(arguments []driver.Value) (driver.Result, error) {
+    instance.shared.mutex.Lock()
+    instance.shared.queryArguments = append(instance.shared.queryArguments, recordedScriptedQuery{
+        query:     instance.query,
+        arguments: append([]driver.Value(nil), arguments...),
+    })
+    instance.shared.mutex.Unlock()
+
     return driver.RowsAffected(1), nil
 }
 

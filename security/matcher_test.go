@@ -118,3 +118,49 @@ func TestPathPrefixMatcher_AnEmptyPathIsTheRoot(t *testing.T) {
         }
     }
 }
+
+func TestPathPrefixMatcher_TheAsteriskFormIsTheRoot(t *testing.T) {
+    httpRequest := httptest.NewRequest("GET", "*", nil)
+    if "*" != httpRequest.URL.Path {
+        t.Fatalf("expected GET * to carry the path \"*\", got %q", httpRequest.URL.Path)
+    }
+
+    request := http.NewRequest(
+        httpRequest,
+        nil,
+        nil,
+        nil,
+    )
+
+    if false == NewPathPrefixMatcher("/").Matches(request) {
+        t.Fatalf("expected the root prefix to claim GET *")
+    }
+
+    if true == NewPathPrefixMatcher("/admin").Matches(request) {
+        t.Fatalf("expected GET * to stay outside /admin")
+    }
+}
+
+func TestPathPrefixMatcher_APathWithoutItsLeadingSlashIsReadWithIt(t *testing.T) {
+    httpRequest := httptest.NewRequest("GET", "/users", nil)
+    httpRequest.URL.Path = "users"
+
+    request := http.NewRequest(
+        httpRequest,
+        nil,
+        nil,
+        nil,
+    )
+
+    if false == NewPathPrefixMatcher("/users").Matches(request) {
+        t.Fatalf("expected /users to claim the path users")
+    }
+
+    if false == NewPathPrefixMatcher("/").Matches(request) {
+        t.Fatalf("expected the root prefix to claim the path users")
+    }
+
+    if true == NewPathPrefixMatcher("/admin").Matches(request) {
+        t.Fatalf("expected the path users to stay outside /admin")
+    }
+}

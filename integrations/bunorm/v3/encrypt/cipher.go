@@ -229,13 +229,21 @@ func (instance *aes256Cipher) Decrypt(encoded string) (string, error) {
     return opened.plaintext, nil
 }
 
-/* valueSealer is the door the column types seal through. An application value is always sealed as data, even when it is itself one of this cipher's seals: a column an attacker can write and later read back in the clear would otherwise hand back the plaintext of any seal of the compartment, from any row, column or table. Encrypt keeps its documented pass-through for the Migrator, which re-runs over columns already sealed. A Cipher implemented outside this package does not carry the door and is sealed through its own Encrypt. */
+/* valueSealer is the door the column types and the Migrator seal through. A value is always sealed as data, even when it is itself one of this cipher's seals: a column an attacker can write and later read back in the clear would otherwise hand back the plaintext of any seal of the compartment, from any row, column or table. The Migrator classifies the STORED value through authenticatedSeal and seals the value it decrypted through sealValueWithKeyId, so nothing it re-writes is inspected for being a seal. A Cipher implemented outside this package does not carry the door and is sealed through its own Encrypt. */
 type valueSealer interface {
     sealValue(plaintext string, deterministic bool) (string, error)
+
+    sealValueWithKeyId(plaintext string, keyId string, deterministic bool) (string, error)
+
+    authenticatedSeal(value string) (openedSeal, bool)
 }
 
 func (instance *aes256Cipher) sealValue(plaintext string, deterministic bool) (string, error) {
     return instance.seal(plaintext, instance.keys.CurrentKeyId(), deterministic)
+}
+
+func (instance *aes256Cipher) sealValueWithKeyId(plaintext string, keyId string, deterministic bool) (string, error) {
+    return instance.seal(plaintext, keyId, deterministic)
 }
 
 /* sealColumnValue seals the value a column type writes, through valueSealer when the cipher carries it */

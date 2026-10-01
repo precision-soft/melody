@@ -1,6 +1,7 @@
 package application
 
 import (
+    "bufio"
     "context"
     "errors"
     "io"
@@ -28,6 +29,8 @@ import (
     loggingcontract "github.com/precision-soft/melody/v2/logging/contract"
     "github.com/precision-soft/melody/v2/runtime"
     runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
+    "github.com/precision-soft/melody/v2/security"
+    securitycontract "github.com/precision-soft/melody/v2/security/contract"
     "github.com/precision-soft/melody/v2/session"
     sessioncontract "github.com/precision-soft/melody/v2/session/contract"
 )
@@ -1130,5 +1133,91 @@ func TestAwaitHttpServerEnd_DrainsOpenScopesEvenWhenTheShutdownOverran(t *testin
 
     if false == strings.Contains(endErr.Error(), "http shutdown left request scopes open") {
         t.Fatalf("expected the drain to have run and reported the open scopes, got %q", endErr.Error())
+    }
+}
+
+func TestServeHttp_AnAsteriskFormTargetAnswersTheRootFirewallsRefusal(t *testing.T) {
+    applicationInstance := newServedExceptionTestApplication(t)
+
+    kernelInstance, ok := applicationInstance.kernel.(*testKernel)
+    if false == ok {
+        t.Fatalf("expected the test kernel, got %T", applicationInstance.kernel)
+    }
+
+    var handlerRan atomic.Bool
+    markHandler := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        handlerRan.Store(true)
+
+        return http.EmptyResponse(nethttp.StatusOK), nil
+    }
+
+    kernelInstance.httpRouter.Handle(nethttp.MethodGet, "/:slug", markHandler)
+
+    firewall := security.NewCompiledFirewall(
+        "main",
+        security.NewPathPrefixMatcher("/"),
+        "matcher:main",
+        []securitycontract.Rule{},
+        security.NewResolverTokenSource(func(request httpcontract.Request) securitycontract.Token {
+            return security.NewAnonymousToken()
+        }),
+        security.NewAccessControl(
+            security.NewAccessControlRule("/", "ROLE_USER"),
+        ),
+        security.NewAccessDecisionManager(
+            securitycontract.DecisionStrategyAffirmative,
+            security.NewRoleVoter(),
+        ),
+        security.NewRoleHierarchy(map[string][]string{}),
+        nil,
+        nil,
+        "",
+        "",
+        nil,
+        nil,
+        security.SourceFirewall,
+        security.SourceFirewall,
+        security.SourceFirewall,
+        security.SourceNone,
+        security.SourceNone,
+    )
+
+    registry := security.NewFirewallRegistry(
+        security.NewCompiledConfiguration([]*security.CompiledFirewall{firewall}, nil),
+    )
+
+    security.RegisterKernelSecurityResolutionListener(applicationInstance.kernel, registry)
+    security.RegisterKernelAccessControlListener(applicationInstance.kernel, registry)
+    applicationInstance.registerKernelHttpListeners()
+
+    server := httptest.NewServer(applicationInstance.kernel.HttpKernel().ServeHttp(applicationInstance.kernel.ServiceContainer()))
+    defer server.Close()
+
+    for _, requestLine := range []string{"GET /x HTTP/1.1", "GET * HTTP/1.1"} {
+        connection, dialErr := net.Dial("tcp", strings.TrimPrefix(server.URL, "http://"))
+        if nil != dialErr {
+            t.Fatalf("unexpected dial error: %v", dialErr)
+        }
+
+        _, writeErr := connection.Write([]byte(requestLine + "\r\nHost: localhost\r\nConnection: close\r\n\r\n"))
+        if nil != writeErr {
+            t.Fatalf("unexpected write error: %v", writeErr)
+        }
+
+        response, readErr := nethttp.ReadResponse(bufio.NewReader(connection), nil)
+        if nil != readErr {
+            t.Fatalf("unexpected read error for %s: %v", requestLine, readErr)
+        }
+
+        _ = response.Body.Close()
+        _ = connection.Close()
+
+        if nethttp.StatusUnauthorized != response.StatusCode {
+            t.Fatalf("expected %s to answer the root firewall's 401, got %d", requestLine, response.StatusCode)
+        }
+    }
+
+    if true == handlerRan.Load() {
+        t.Fatalf("expected no handler to run for an anonymous request under the root firewall")
     }
 }

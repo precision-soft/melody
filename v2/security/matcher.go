@@ -34,9 +34,9 @@ func (instance *PathPrefixMatcher) Matches(request httpcontract.Request) bool {
 
     path := request.HttpRequest().URL.Path
 
-    /* an absolute-form or authority-form request target ("GET http://host", "CONNECT host:port") arrives with an empty path, and it names the root: it is read as the root, the way the access-control matcher reads it, so the firewall that owns "/" is selected for it rather than skipped */
-    if "" == path {
-        path = "/"
+    /* a request target that does not begin with "/", the empty path of an absolute-form or authority-form target or the asterisk-form "*", is read with the "/" prepended, the way the router and the access-control matcher read it, so the three agree on one spelling and the firewall that owns "/" is selected for it rather than skipped */
+    if false == strings.HasPrefix(path, "/") {
+        path = "/" + path
     }
 
     if "" == instance.prefix {

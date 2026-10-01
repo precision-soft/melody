@@ -1196,3 +1196,301 @@ func TestEncryptMigrate_RefusesARotationToALongerKeyId(t *testing.T) {
         t.Fatalf("expected a re-run of the same rotation to be accepted, got %v", rerunErr)
     }
 }
+
+type sealStoredAsDataCase struct {
+    name             string
+    applicationValue string
+}
+
+/* sealStoredAsDataCases answers the application values a column holds in the pins below: a random and a deterministic seal of another row's plaintext, written as data, and an ordinary plaintext as the control */
+func sealStoredAsDataCases(t *testing.T, cipherInstance Cipher) []sealStoredAsDataCase {
+    t.Helper()
+
+    randomSeal, randomErr := cipherInstance.Encrypt("another account's iban")
+    if nil != randomErr {
+        t.Fatalf("random seal: %v", randomErr)
+    }
+
+    deterministicSeal, deterministicErr := cipherInstance.EncryptDeterministic("another account's iban")
+    if nil != deterministicErr {
+        t.Fatalf("deterministic seal: %v", deterministicErr)
+    }
+
+    return []sealStoredAsDataCase{
+        {name: "a random seal", applicationValue: randomSeal},
+        {name: "a deterministic seal", applicationValue: deterministicSeal},
+        {name: "an ordinary plaintext", applicationValue: "my notes"},
+    }
+}
+
+/* storedColumnValue answers what the column type writes for an application value */
+func storedColumnValue(t *testing.T, applicationValue string, deterministic bool) string {
+    t.Helper()
+
+    var stored driver.Value
+    var valueErr error
+
+    if true == deterministic {
+        stored, valueErr = EncryptedDeterministicString(applicationValue).Value()
+    } else {
+        stored, valueErr = EncryptedString(applicationValue).Value()
+    }
+
+    if nil != valueErr {
+        t.Fatalf("value: %v", valueErr)
+    }
+
+    return string(stored.([]byte))
+}
+
+/* readColumnValue answers what the column type reads back from a stored value */
+func readColumnValue(t *testing.T, stored string, deterministic bool) string {
+    t.Helper()
+
+    if true == deterministic {
+        var loaded EncryptedDeterministicString
+        if scanErr := loaded.Scan([]byte(stored)); nil != scanErr {
+            t.Fatalf("scan: %v", scanErr)
+        }
+
+        return string(loaded)
+    }
+
+    var loaded EncryptedString
+    if scanErr := loaded.Scan([]byte(stored)); nil != scanErr {
+        t.Fatalf("scan: %v", scanErr)
+    }
+
+    return string(loaded)
+}
+
+func newRotationCipher(t *testing.T) Cipher {
+    t.Helper()
+
+    cipherInstance := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1), "v2": newKey(2)}))
+    UseCipher(cipherInstance)
+    t.Cleanup(func() { UseCipher(nil) })
+
+    return cipherInstance
+}
+
+func TestReencryptTransform_RotatesASealStoredAsDataInARandomColumnAsData(t *testing.T) {
+    cipherInstance := newRotationCipher(t)
+    transform := (&Migrator{cipher: cipherInstance}).reencryptTransform(TableSpec{Deterministic: false}, "v2")
+
+    for _, testCase := range sealStoredAsDataCases(t, cipherInstance) {
+        rotated, rotateErr := transform(storedColumnValue(t, testCase.applicationValue, false))
+        if nil != rotateErr {
+            t.Fatalf("%s: rotate: %v", testCase.name, rotateErr)
+        }
+
+        if keyId, _, _ := keyIdOf(rotated); "v2" != keyId {
+            t.Fatalf("%s: expected the rotated value under v2, got %q", testCase.name, keyId)
+        }
+
+        if readBack := readColumnValue(t, rotated, false); testCase.applicationValue != readBack {
+            t.Fatalf("%s: expected the rotated column to read back the value written, got %q", testCase.name, readBack)
+        }
+    }
+}
+
+func TestReencryptTransform_RotatesASealStoredAsDataInADeterministicColumnAsData(t *testing.T) {
+    cipherInstance := newRotationCipher(t)
+    transform := (&Migrator{cipher: cipherInstance}).reencryptTransform(TableSpec{Deterministic: true}, "v2")
+
+    for _, testCase := range sealStoredAsDataCases(t, cipherInstance) {
+        rotated, rotateErr := transform(storedColumnValue(t, testCase.applicationValue, true))
+        if nil != rotateErr {
+            t.Fatalf("%s: rotate: %v", testCase.name, rotateErr)
+        }
+
+        if keyId, _, _ := keyIdOf(rotated); "v2" != keyId {
+            t.Fatalf("%s: expected the rotated value under v2, got %q", testCase.name, keyId)
+        }
+
+        if readBack := readColumnValue(t, rotated, true); testCase.applicationValue != readBack {
+            t.Fatalf("%s: expected the rotated column to read back the value written, got %q", testCase.name, readBack)
+        }
+
+        if false == deterministicCandidateMatches(t, cipherInstance, testCase.applicationValue, rotated) {
+            t.Fatalf("%s: expected the equality lookup to still find the rotated row", testCase.name)
+        }
+    }
+}
+
+/* a re-run meets a deterministic column already converted, and a random column being converted: in neither may the decrypted value reach a door that unwraps it */
+func TestEncryptTransform_DeterministicReRunKeepsASealStoredAsDataAsData(t *testing.T) {
+    cipherInstance := newRotationCipher(t)
+    transform := (&Migrator{cipher: cipherInstance}).encryptTransform(TableSpec{Deterministic: true})
+
+    for _, writtenDeterministic := range []bool{true, false} {
+        for _, testCase := range sealStoredAsDataCases(t, cipherInstance) {
+            stored := storedColumnValue(t, testCase.applicationValue, writtenDeterministic)
+
+            converted, convertErr := transform(stored)
+            if nil != convertErr {
+                t.Fatalf("%s (written deterministic=%v): convert: %v", testCase.name, writtenDeterministic, convertErr)
+            }
+
+            if keyId, _, _ := keyIdOf(converted); "v1" != keyId {
+                t.Fatalf("%s (written deterministic=%v): expected the value kept under v1, got %q", testCase.name, writtenDeterministic, keyId)
+            }
+
+            if readBack := readColumnValue(t, converted, true); testCase.applicationValue != readBack {
+                t.Fatalf("%s (written deterministic=%v): expected the column to read back the value written, got %q", testCase.name, writtenDeterministic, readBack)
+            }
+
+            if false == deterministicCandidateMatches(t, cipherInstance, testCase.applicationValue, converted) {
+                t.Fatalf("%s (written deterministic=%v): expected the equality lookup to find the converted row", testCase.name, writtenDeterministic)
+            }
+        }
+    }
+}
+
+/* a cipher implemented outside this package carries no door that seals as data, and its public doors may pass a seal through: such a value is refused rather than unwrapped, while an ordinary value keeps the public doors */
+func TestMigrate_RefusesASealStoredAsDataThroughAForeignCipher(t *testing.T) {
+    sealingCipher := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)}))
+
+    sealStoredAsData, sealErr := sealingCipher.Encrypt("another account's iban")
+    if nil != sealErr {
+        t.Fatalf("seal: %v", sealErr)
+    }
+
+    migrator := &Migrator{cipher: NewFakeCipher()}
+
+    transforms := map[string]func(string) (string, error){
+        "rotation of a random column":        migrator.reencryptTransform(TableSpec{Deterministic: false}, "v2"),
+        "rotation of a deterministic column": migrator.reencryptTransform(TableSpec{Deterministic: true}, "v2"),
+        "deterministic encrypt re-run":       migrator.encryptTransform(TableSpec{Deterministic: true}),
+    }
+
+    for name, transform := range transforms {
+        refused, refusedErr := transform(sealStoredAsData)
+        if nil == refusedErr {
+            t.Fatalf("%s: expected a seal stored as data to be refused, got %q", name, refused)
+        }
+
+        if false == strings.Contains(refusedErr.Error(), "cannot re-seal as data") {
+            t.Fatalf("%s: expected the foreign-cipher refusal, got: %v", name, refusedErr)
+        }
+
+        if true == strings.Contains(refusedErr.Error(), "another account's iban") {
+            t.Fatalf("%s: expected the refusal to carry no plaintext, got: %v", name, refusedErr)
+        }
+
+        ordinary, ordinaryErr := transform("my notes")
+        if nil != ordinaryErr || "my notes" != ordinary {
+            t.Fatalf("%s: expected an ordinary value through the public doors, got %q (%v)", name, ordinary, ordinaryErr)
+        }
+    }
+}
+
+/* the end-to-end form over the scripted driver: the update writes the rotated seal of the application value, never the bare seal it held */
+func TestMigrateReencrypt_RotatesASealStoredAsDataEndToEnd(t *testing.T) {
+    migrator, stub := newScriptedMigrator(t, nil)
+    cipherInstance := newRotationCipher(t)
+    migrator.cipher = cipherInstance
+
+    cases := sealStoredAsDataCases(t, cipherInstance)
+
+    rows := make([][]driver.Value, 0, len(cases))
+    for index, testCase := range cases {
+        rows = append(rows, []driver.Value{strconv.Itoa(index + 1), storedColumnValue(t, testCase.applicationValue, false)})
+    }
+
+    stub.responses = []scriptedSqlResponse{
+        {fragment: "NOT LIKE", columns: []string{"longest"}, rows: [][]driver.Value{{nil}}},
+        {fragment: "SUBSTRING_INDEX", columns: []string{"longest"}, rows: [][]driver.Value{{int64(100)}}},
+        {
+            fragment: "information_schema.COLUMNS",
+            columns:  []string{"DATA_TYPE", "CHARACTER_MAXIMUM_LENGTH", "CHARACTER_OCTET_LENGTH"},
+            rows:     [][]driver.Value{{"varchar", int64(4096), int64(16384)}},
+        },
+        {fragment: "ORDER BY", columns: []string{"id", "notes"}, rows: rows},
+    }
+
+    processed, runErr := migrator.MigrateReencrypt(context.Background(), TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}}, "v2")
+    if nil != runErr {
+        t.Fatalf("rotate: %v", runErr)
+    }
+
+    if len(cases) != processed {
+        t.Fatalf("expected %d rotated rows, got %d", len(cases), processed)
+    }
+
+    written := make([]string, 0, len(cases))
+    for _, recorded := range stub.recordedArguments() {
+        if true == strings.HasPrefix(recorded.query, "UPDATE ") {
+            written = append(written, recorded.arguments[0].(string))
+        }
+    }
+
+    if len(cases) != len(written) {
+        t.Fatalf("expected %d updates, recorded %d", len(cases), len(written))
+    }
+
+    for index, testCase := range cases {
+        if keyId, _, _ := keyIdOf(written[index]); "v2" != keyId {
+            t.Fatalf("%s: expected the update to write a value under v2, got %q", testCase.name, keyId)
+        }
+
+        if readBack := readColumnValue(t, written[index], false); testCase.applicationValue != readBack {
+            t.Fatalf("%s: expected the rotated row to read back the value written, got %q", testCase.name, readBack)
+        }
+    }
+}
+
+/* written bare, a decrypted value that is itself a seal would be read as one by a column type that still decrypts, so the decrypt run stops on that row, names it, and writes nothing to it */
+func TestMigrateDecrypt_StopsOnARowWhoseDecryptedValueIsASeal(t *testing.T) {
+    migrator, stub := newScriptedMigrator(t, nil)
+    cipherInstance := newRotationCipher(t)
+    migrator.cipher = cipherInstance
+
+    cases := sealStoredAsDataCases(t, cipherInstance)
+
+    stub.responses = []scriptedSqlResponse{
+        {
+            fragment: "ORDER BY",
+            columns:  []string{"id", "notes"},
+            rows: [][]driver.Value{
+                {"1", storedColumnValue(t, "my notes", false)},
+                {"2", storedColumnValue(t, cases[0].applicationValue, false)},
+                {"3", storedColumnValue(t, "more notes", false)},
+            },
+        },
+    }
+
+    processed, runErr := migrator.MigrateDecrypt(context.Background(), TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
+    if nil == runErr {
+        t.Fatalf("expected the decrypt run to stop on the row whose decrypted value is a seal, processed=%d", processed)
+    }
+
+    refusal := errors.Unwrap(runErr)
+    if nil == refusal || false == strings.Contains(refusal.Error(), "itself an encrypted value") {
+        t.Fatalf("expected the refusal to say why, got: %v (cause %v)", runErr, refusal)
+    }
+
+    if true == strings.Contains(fmt.Sprint(exception.LogContext(runErr)), "another account's iban") || true == strings.Contains(fmt.Sprint(exception.LogContext(runErr)), cases[0].applicationValue) {
+        t.Fatalf("expected the refusal to carry no value, got: %v", exception.LogContext(runErr))
+    }
+
+    contextProvider, carriesContext := runErr.(exceptioncontract.ContextProvider)
+    if false == carriesContext || "2" != contextProvider.Context()["id"] {
+        t.Fatalf("expected the refusal to name the row, got %T %v", runErr, runErr)
+    }
+
+    if 1 != processed {
+        t.Fatalf("expected the run to stop after the first row, processed=%d", processed)
+    }
+
+    written := make([]string, 0)
+    for _, recorded := range stub.recordedArguments() {
+        if true == strings.HasPrefix(recorded.query, "UPDATE ") {
+            written = append(written, recorded.arguments[0].(string))
+        }
+    }
+
+    if 1 != len(written) || "my notes" != written[0] {
+        t.Fatalf("expected only the ordinary row decrypted and the refused row left sealed, wrote %q", written)
+    }
+}

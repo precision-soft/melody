@@ -783,3 +783,76 @@ func TestSecurityResolutionListener_AnAbsoluteFormTargetIsResolvedByTheRootFirew
         t.Fatalf("expected authenticated token")
     }
 }
+
+func TestSecurityResolutionListener_AnAsteriskFormTargetIsResolvedByTheRootFirewall(t *testing.T) {
+    for _, path := range []string{"*", "/x", ""} {
+        kernel := newTestKernel()
+        runtimeInstance := newTestRuntime()
+
+        token := NewAuthenticatedToken("user", []string{"ROLE_USER"})
+
+        firewall := NewCompiledFirewall(
+            "main",
+            NewPathPrefixMatcher("/"),
+            "matcher:main",
+            []securitycontract.Rule{},
+            &resolutionListenerTestTokenSource{
+                resolveToken: token,
+                resolveErr:   nil,
+            },
+            NewAccessControl(
+                NewAccessControlRule("/admin", "ROLE_ADMIN"),
+            ),
+            NewAccessDecisionManager(
+                securitycontract.DecisionStrategyAffirmative,
+                NewRoleHierarchyVoter(
+                    NewRoleHierarchy(map[string][]string{}),
+                    NewRoleVoter(),
+                ),
+            ),
+            NewRoleHierarchy(map[string][]string{}),
+            nil,
+            nil,
+            "/admin/login",
+            "/admin/logout",
+            nil,
+            nil,
+            SourceFirewall,
+            SourceFirewall,
+            SourceFirewall,
+            SourceNone,
+            SourceNone,
+        )
+
+        registry := NewFirewallRegistry(
+            NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil),
+        )
+
+        registerTestKernelExceptionListener(kernel)
+        RegisterKernelSecurityResolutionListener(kernel, registry)
+
+        request := newSecurityTestRequest("GET", "", nil, runtimeInstance)
+        request.HttpRequest().URL.Path = path
+        requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, request)
+
+        _, err := kernel.EventDispatcher().DispatchName(
+            runtimeInstance,
+            "kernel.request",
+            requestEvent,
+        )
+        if nil != err {
+            t.Fatalf("unexpected error for the path %q: %v", path, err)
+        }
+
+        securityContext, exists := SecurityContextFromRuntime(runtimeInstance)
+        if false == exists || nil == securityContext {
+            t.Fatalf("expected a security context for the path %q", path)
+        }
+        if nil == securityContext.Firewall() || "main" != securityContext.Firewall().Name() {
+            t.Fatalf("expected the root firewall to resolve the path %q", path)
+        }
+        if false == securityContext.Token().IsAuthenticated() {
+            t.Fatalf("expected the root firewall's token source to run for the path %q", path)
+        }
+    }
+}
