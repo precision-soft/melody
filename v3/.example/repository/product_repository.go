@@ -27,6 +27,9 @@ type ProductRepository interface {
     Update(ctx context.Context, product *entity.Product) (bool, error)
 
     DeleteById(ctx context.Context, id string) (bool, error)
+
+    /* PricedIn answers whether any product is priced in the currency, the question a currency delete asks before the foreign key would refuse it */
+    PricedIn(ctx context.Context, currencyId string) (bool, error)
 }
 
 func MustGetProductRepository(resolver melodycontainercontract.Resolver) ProductRepository {
@@ -48,6 +51,15 @@ func NewProductRepository(storage *persistence.CatalogStorage) (ProductRepositor
     ensureAuditSchemaErr := storage.EnsureAuditSchema(context.Background())
     if nil != ensureAuditSchemaErr {
         return nil, ensureAuditSchemaErr
+    }
+
+    /* a product row references its category and its currency by foreign key, so a resolution that reaches an emptied catalogue first seeds the two nomenclatures it names; both seeds change nothing over tables that hold rows */
+    if seedErr := newBunCategoryRepository(storage.Database()).seedIfEmpty(context.Background()); nil != seedErr {
+        return nil, seedErr
+    }
+
+    if seedErr := newBunCurrencyRepository(storage.Database()).seedIfEmpty(context.Background()); nil != seedErr {
+        return nil, seedErr
     }
 
     repositoryInstance := newBunProductRepository(storage)

@@ -129,14 +129,15 @@ func (instance *bunCategoryRepository) Create(ctx context.Context, category *ent
         ctx,
         instance.database,
         categoryIdentifierMintLockName,
+        identifierSequence{prefix: "cat-", identifier: func() string { return category.Id }},
         mintsIdentifier,
-        func() error {
+        func(floor string) error {
             identifierList, identifierErr := instance.identifierList(ctx)
             if nil != identifierErr {
                 return identifierErr
             }
 
-            category.Id = nextCategoryId(identifierList)
+            category.Id = nextCategoryId(append(identifierList, floor))
 
             return nil
         },

@@ -1,11 +1,14 @@
 package repository
 
 import (
+    "errors"
+    "fmt"
     "strings"
     "testing"
     "time"
 
     "github.com/precision-soft/melody/v3/.example/entity"
+    "github.com/precision-soft/melody/v3/.example/migration"
 )
 
 /* the mysql dialect renders a time.Time in the value's own location and the driver reads the column back as UTC, so an instant stamped with an offset would come back shifted by it: the row is built in UTC, the one place an entity becomes a row */
@@ -49,5 +52,17 @@ func TestRenameQuery_WritesTheCodeAndTheNameAlone(t *testing.T) {
 
     if "UPDATE `melody_example_v3_currency` SET `code` = 'USD', `name` = 'Dollar' WHERE (`id` = 'cur-usd')" != rendered {
         t.Fatalf("expected the rename to set the code and the name alone, got:\n%s", rendered)
+    }
+}
+
+func TestAsCurrencyCodeAlreadyExists_MapsTheCodeKeysRefusalAndNothingElse(t *testing.T) {
+    codeRefusal := fmt.Errorf("Error 1062 (23000): Duplicate entry 'EUR' for key 'melody_example_v3_currency.%s'", migration.CurrencyCodeIndexName)
+    if translated := asCurrencyCodeAlreadyExists(fmt.Errorf("insert: %w", codeRefusal)); false == errors.Is(translated, ErrCurrencyCodeAlreadyExists) {
+        t.Errorf("the code key's refusal came back as %v", translated)
+    }
+
+    primaryKeyRefusal := errors.New("Error 1062 (23000): Duplicate entry 'cur-eur' for key 'melody_example_v3_currency.PRIMARY'")
+    if translated := asCurrencyCodeAlreadyExists(primaryKeyRefusal); primaryKeyRefusal != translated {
+        t.Errorf("the primary key's refusal came back as %v", translated)
     }
 }

@@ -59,7 +59,7 @@ func rateRefreshCommandRuntime(t *testing.T, document string, dispatcherOf func(
         cache = cacheOf(cache)
     }
 
-    currencyService := service.NewCurrencyService(currencyRepository, cache, dispatcher, clockInstance)
+    currencyService := service.NewCurrencyService(currencyRepository, mustProductRepository(t), cache, dispatcher, clockInstance)
     refreshService := service.NewRateRefreshService(currencyService, clockInstance, provider.URL+"/v1/", "EUR")
 
     client := httpclient.NewHttpClient(httpclient.NewHttpClientConfig(provider.URL+"/v1/", 2*time.Second, nil))

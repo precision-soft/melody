@@ -177,41 +177,23 @@ func (instance *UserService) Create(
     return user, nil
 }
 
+/* Update writes the change through the repository's locked door: the account is read from the directory, never from the cache, the guard decides on it under the lock, and a field the change leaves out is not written. The event carries the account the door wrote and the name it held before. */
 func (instance *UserService) Update(
     runtimeInstance melodyruntimecontract.Runtime,
     userId string,
-    username string,
-    passwordHash string,
-    roles []string,
+    change repository.UserChange,
+    guard repository.UserGuard,
 ) (*entity.User, bool, error) {
-    ctx := runtimeInstance.Context()
-
-    user, found, findErr := instance.userRepository.FindById(ctx, userId)
-    if nil != findErr {
-        return nil, false, findErr
-    }
-
-    if false == found {
-        return nil, false, nil
-    }
-
-    /* under the in-memory configuration the loaded entity is the repository's stored value, shared with concurrent readers, so the changes land on a copy and a rename the repository refuses leaves the stored account untouched */
-    previousUsername := user.Username
-
-    modified := *user
-    modified.Username = username
-    modified.Password = passwordHash
-    modified.Roles = append([]string{}, roles...)
-
-    updated, updateErr := instance.userRepository.Update(ctx, &modified)
+    before, after, updateErr := instance.userRepository.Update(runtimeInstance.Context(), userId, change, guard)
     if nil != updateErr {
         return nil, false, updateErr
     }
-    if false == updated {
+
+    if nil == before {
         return nil, false, nil
     }
 
-    updatedEvent := event.NewUserUpdatedEvent(&modified, previousUsername)
+    updatedEvent := event.NewUserUpdatedEvent(after, before.Username)
     _, dispatchErr := instance.eventDispatcher.DispatchName(
         runtimeInstance,
         event.UserUpdatedEventName,
@@ -221,33 +203,25 @@ func (instance *UserService) Update(
         return nil, true, dispatchErr
     }
 
-    return &modified, true, nil
+    return after, true, nil
 }
 
+/* DeleteById removes the account through the repository's locked door, the guard deciding on the account the delete removes. */
 func (instance *UserService) DeleteById(
     runtimeInstance melodyruntimecontract.Runtime,
     userId string,
+    guard repository.UserGuard,
 ) (bool, error) {
-    ctx := runtimeInstance.Context()
-
-    user, found, findErr := instance.userRepository.FindById(ctx, userId)
-    if nil != findErr {
-        return false, findErr
-    }
-
-    if false == found {
-        return false, nil
-    }
-
-    deleted, deleteErr := instance.userRepository.DeleteById(ctx, userId)
+    removed, deleteErr := instance.userRepository.DeleteById(runtimeInstance.Context(), userId, guard)
     if nil != deleteErr {
         return false, deleteErr
     }
-    if false == deleted {
+
+    if nil == removed {
         return false, nil
     }
 
-    deletedEvent := event.NewUserDeletedEvent(userId, user.Username)
+    deletedEvent := event.NewUserDeletedEvent(removed.Id, removed.Username)
     _, dispatchErr := instance.eventDispatcher.DispatchName(
         runtimeInstance,
         event.UserDeletedEventName,

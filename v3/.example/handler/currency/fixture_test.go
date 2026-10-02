@@ -67,12 +67,17 @@ func newCurrencyDoorFixture(t *testing.T) *currencyDoorFixture {
         t.Fatalf("build the currency repository: %v", repositoryErr)
     }
 
+    productRepository, productRepositoryErr := repository.NewProductRepository(persistence.NewCatalogStorage(nil))
+    if nil != productRepositoryErr {
+        t.Fatalf("build the product repository: %v", productRepositoryErr)
+    }
+
     clockInstance := melodyclock.NewSystemClock()
     cacheInstance := melodycache.NewManagerOwningBackend(
         melodycache.NewInMemoryBackend(128, time.Minute, clockInstance),
         examplecache.NewGobSerializer(),
     )
-    currencyService := service.NewCurrencyService(currencyRepository, cacheInstance, melodyevent.NewEventDispatcher(clockInstance), clockInstance)
+    currencyService := service.NewCurrencyService(currencyRepository, productRepository, cacheInstance, melodyevent.NewEventDispatcher(clockInstance), clockInstance)
 
     containerInstance := melodycontainer.NewContainer()
 
@@ -218,4 +223,23 @@ func decodeBody(t *testing.T, body string, target any) {
     if decodeErr := json.Unmarshal([]byte(body), target); nil != decodeErr {
         t.Fatalf("decode body %q: %v", body, decodeErr)
     }
+}
+
+/* holdingCode answers the identifiers of every stored currency whose code is the one given, which is the property the code's unique key holds */
+func (instance *currencyDoorFixture) holdingCode(t *testing.T, code string) []string {
+    t.Helper()
+
+    currencies, listErr := instance.currencyRepository.All(context.Background())
+    if nil != listErr {
+        t.Fatalf("list currencies: %v", listErr)
+    }
+
+    holders := make([]string, 0)
+    for _, currency := range currencies {
+        if code == currency.Code {
+            holders = append(holders, currency.Id)
+        }
+    }
+
+    return holders
 }

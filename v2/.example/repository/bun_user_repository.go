@@ -220,80 +220,127 @@ func (instance *bunUserRepository) Create(ctx context.Context, user *entity.User
     )
 }
 
-func (instance *bunUserRepository) Update(ctx context.Context, user *entity.User) (bool, error) {
-    validationErr := validateUser(user)
-    if nil != validationErr {
-        return false, validationErr
-    }
-
-    id := strings.TrimSpace(user.Id)
-    if "" == id {
-        return false, fmt.Errorf("id is required")
-    }
-
-    _, found, findErr := instance.findRowById(ctx, id)
-    if nil != findErr {
-        return false, findErr
-    }
-
-    if false == found {
-        return false, nil
-    }
-
-    takenByAnother, takenErr := instance.usernameTakenByAnother(ctx, user.Username, id)
-    if nil != takenErr {
-        return false, takenErr
-    }
-
-    if true == takenByAnother {
-        return false, ErrUsernameAlreadyExists
-    }
-
-    result, updateErr := instance.database.
-        NewUpdate().
-        Model(newUserRow(user)).
-        WherePK().
-        Exec(ctx)
-    if nil != updateErr {
-        return false, asUsernameAlreadyExists(updateErr)
-    }
-
-    if true == affectedAtLeastOneRow(result) {
-        return true, nil
-    }
-
-    /* MySQL answers the rows an update changed, not the rows it matched, so an update writing the values the row already holds reports none: the row is read again, and only a row that is gone by now is answered as absent */
-    _, stillFound, refindErr := instance.findRowById(ctx, id)
-
-    return stillFound, refindErr
-}
-
-func (instance *bunUserRepository) DeleteById(ctx context.Context, id string) (bool, error) {
+/* Update reads the row locked FOR UPDATE, asks the guard, and writes the change over what it read in the same transaction: a field the change leaves out is the one the row holds, never a copy the caller read earlier. */
+func (instance *bunUserRepository) Update(ctx context.Context, id string, change UserChange, guard UserGuard) (*entity.User, *entity.User, error) {
     trimmedId := strings.TrimSpace(id)
     if "" == trimmedId {
-        return false, fmt.Errorf("id is required")
+        return nil, nil, fmt.Errorf("id is required")
     }
 
-    result, deleteErr := instance.database.
-        NewDelete().
-        Model((*userRow)(nil)).
-        Where("id = ?", trimmedId).
-        Exec(ctx)
-    if nil != deleteErr {
-        return false, deleteErr
+    var beforeAccount *entity.User
+    var afterAccount *entity.User
+    var refusal error
+
+    txErr := instance.database.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+        before, found, lockErr := lockUserRow(ctx, tx, trimmedId)
+        if nil != lockErr || false == found {
+            return lockErr
+        }
+
+        current := before.toEntity()
+        if refusal = admittedBy(guard, current); nil != refusal {
+            return nil
+        }
+
+        changed := change.applyTo(current)
+        if refusal = validateUser(changed); nil != refusal {
+            return nil
+        }
+
+        takenByAnother, takenErr := usernameTakenByAnother(ctx, tx, changed.Username, trimmedId)
+        if nil != takenErr {
+            return takenErr
+        }
+
+        if true == takenByAnother {
+            refusal = ErrUsernameAlreadyExists
+
+            return nil
+        }
+
+        if _, updateErr := tx.NewUpdate().Model(newUserRow(changed)).WherePK().Exec(ctx); nil != updateErr {
+            return updateErr
+        }
+
+        beforeAccount = current
+        afterAccount = changed
+
+        return nil
+    })
+    if nil != refusal {
+        return nil, nil, refusal
     }
 
-    return affectedAtLeastOneRow(result), nil
+    if nil != txErr {
+        return nil, nil, asUsernameAlreadyExists(txErr)
+    }
+
+    return beforeAccount, afterAccount, nil
 }
 
-func (instance *bunUserRepository) usernameTakenByAnother(ctx context.Context, username string, excludedId string) (bool, error) {
+/* DeleteById reads the row locked FOR UPDATE, asks the guard, and removes it in the same transaction; a missing account is an answer, not an error. */
+func (instance *bunUserRepository) DeleteById(ctx context.Context, id string, guard UserGuard) (*entity.User, error) {
+    trimmedId := strings.TrimSpace(id)
+    if "" == trimmedId {
+        return nil, fmt.Errorf("id is required")
+    }
+
+    var removed *entity.User
+    var refusal error
+
+    txErr := instance.database.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+        before, found, lockErr := lockUserRow(ctx, tx, trimmedId)
+        if nil != lockErr || false == found {
+            return lockErr
+        }
+
+        current := before.toEntity()
+        if refusal = admittedBy(guard, current); nil != refusal {
+            return nil
+        }
+
+        if _, deleteErr := tx.NewDelete().Model(before).WherePK().Exec(ctx); nil != deleteErr {
+            return deleteErr
+        }
+
+        removed = current
+
+        return nil
+    })
+    if nil != refusal {
+        return nil, refusal
+    }
+
+    if nil != txErr {
+        return nil, txErr
+    }
+
+    return removed, nil
+}
+
+/* lockUserRow reads the account's row FOR UPDATE inside the caller's transaction; an absent row is an answer, not an error. */
+func lockUserRow(ctx context.Context, tx bun.Tx, id string) (*userRow, bool, error) {
+    row := &userRow{Id: id}
+
+    selectErr := tx.NewSelect().Model(row).WherePK().For("UPDATE").Scan(ctx)
+    if true == errors.Is(selectErr, sql.ErrNoRows) {
+        return nil, false, nil
+    }
+    if nil != selectErr {
+        return nil, false, selectErr
+    }
+
+    return row, true, nil
+}
+
+func usernameTakenByAnother(ctx context.Context, database bun.IDB, username string, excludedId string) (bool, error) {
     wanted := NormalizedUsername(username)
     if "" == wanted {
         return false, nil
     }
 
     /* the same binary collation as FindByUsername, so the uniqueness door and the lookup door refuse and admit the exact same spellings */
-    count, countErr := instance.database.
+    count, countErr := database.
         NewSelect().
         Model((*userRow)(nil)).
         Where("LOWER(username) = (? COLLATE utf8mb4_bin)", wanted).

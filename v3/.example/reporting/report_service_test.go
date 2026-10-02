@@ -300,6 +300,10 @@ func (instance *emptyProductRepository) DeleteById(ctx context.Context, id strin
     return false, nil
 }
 
+func (instance *emptyProductRepository) PricedIn(ctx context.Context, currencyId string) (bool, error) {
+    return false, nil
+}
+
 var _ repository.ProductRepository = (*emptyProductRepository)(nil)
 
 func newReportServiceUnderTest(t *testing.T, clockInstance *melodyclock.FrozenClock, cacheInstance melodycachecontract.Cache) *CatalogReportService {

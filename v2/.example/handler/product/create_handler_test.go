@@ -22,3 +22,11 @@ func TestCreateRefusalStatusAnswersAnyOtherFailureAsTheCatalogues(t *testing.T) 
         t.Fatalf("expected 500, got %d %q", status, message)
     }
 }
+
+func TestCreateRequestTrimmedIsTheSpellingTheDoorValidatesAndStores(t *testing.T) {
+    trimmed := createRequest{Id: " prod-1 ", Name: " X", Description: " d ", CategoryId: " cat-1", CurrencyId: "cur-eur "}.trimmed()
+
+    if "prod-1" != trimmed.Id || "X" != trimmed.Name || "d" != trimmed.Description || "cat-1" != trimmed.CategoryId || "cur-eur" != trimmed.CurrencyId {
+        t.Fatalf("the body was not trimmed field by field: %+v", trimmed)
+    }
+}

@@ -43,3 +43,21 @@ func TestHighestIdSuffixOnAnEmptyList(t *testing.T) {
         t.Fatalf("expected the first identifier, got %q", nextUserId(nil))
     }
 }
+
+func TestRaisedFloorKeepsTheHigherTail(t *testing.T) {
+    if "cur-7" != raisedFloor("cur-7", "cur-3", "cur-") {
+        t.Fatalf("a lower identifier lowered the floor")
+    }
+
+    if "cur-9" != raisedFloor("cur-7", "cur-9", "cur-") {
+        t.Fatalf("a higher identifier did not raise the floor")
+    }
+
+    if "cur-7" != raisedFloor("cur-7", "cur-eur", "cur-") {
+        t.Fatalf("an identifier without a numeric tail moved the floor")
+    }
+
+    if "user-1" != raisedFloor("", "user-1", "user-") {
+        t.Fatalf("the first identifier did not set the floor")
+    }
+}

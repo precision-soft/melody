@@ -103,7 +103,7 @@ func (instance *Store) enrollmentUpsert(enrollment *Enrollment) *bun.InsertQuery
         Set("created_at = VALUES(created_at)")
 }
 
-/* DeleteEnrollment removes an account's second factor, secret and recovery codes together. Identifiers are minted as the highest suffix plus one, so a deleted account's identifier becomes the next account's, which must not start enrolled. Deleting nothing is not a failure. */
+/* DeleteEnrollment removes an account's second factor, secret and recovery codes together. A deleted account's identifier is not minted again, but example:db:reset hands identifiers out anew, and an account must not start enrolled. Deleting nothing is not a failure. */
 func (instance *Store) DeleteEnrollment(
     runtimeInstance melodyruntimecontract.Runtime,
     userIdentifier string,

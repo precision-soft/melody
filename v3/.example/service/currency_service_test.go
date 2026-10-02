@@ -469,7 +469,7 @@ func TestCurrencyServiceUpdate_AFailedReadBackAfterTheWriteStillDispatchesTheEve
     }
 
     refusing := &rereadRefusingCurrencyRepository{CurrencyRepository: currencyRepository}
-    currencyService := NewCurrencyService(refusing, newTtlRecordingCache(), dispatcher.dispatcher, &frozenClock{instant: currencyQuoteInstant})
+    currencyService := NewCurrencyService(refusing, newInMemoryProductRepositoryForTest(t), newTtlRecordingCache(), dispatcher.dispatcher, &frozenClock{instant: currencyQuoteInstant})
 
     _, found, updateErr := currencyService.Update(runtimeInstance, "cur-usd", "USD", "US dollar renamed")
     if nil == updateErr || false == found {

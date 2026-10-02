@@ -12,8 +12,8 @@ import (
    taken for a column, and no table for the statement that only adds the username key */
 func TestExpectedSchemaOf_ReadsTheColumnsTheSetCreates(t *testing.T) {
     catalogue := expectedSchemaOf(schemaUpStatementList)
-    if 7 != len(catalogue) {
-        t.Fatalf("expected the six tables of the catalogue and its fingerprint table, got %d: %v", len(catalogue), catalogue)
+    if 9 != len(catalogue) {
+        t.Fatalf("expected the eight tables of the catalogue and its fingerprint table, got %d: %v", len(catalogue), catalogue)
     }
 
     columnListByTable := map[string][]string{}

@@ -187,6 +187,20 @@ func requestContextIsDone(request melodyhttpcontract.Request) bool {
     return nil != request.HttpRequest().Context().Err()
 }
 
+/* ApiRefusalOfInvalidBody validates a body the door normalised after the binding validated it as sent, and answers the refusal ApiRefusal renders for it, or nil for a valid body: the value the door stores is then the value the rules were checked against, and a name of two runes padded with a space cannot be stored as one. */
+func ApiRefusalOfInvalidBody(
+    runtimeInstance melodyruntimecontract.Runtime,
+    request melodyhttpcontract.Request,
+    body any,
+) melodyhttpcontract.Response {
+    validationErr := melodyvalidation.ValidatorMustFromContainer(runtimeInstance.Container()).Validate(body)
+    if nil == validationErr {
+        return nil
+    }
+
+    return ApiRefusal(runtimeInstance, request, nethttp.StatusBadRequest, "validation failed", validationErr)
+}
+
 /* ApiRefusal renders a refusal a json-binding door made before the handler ran, the decoder's or the validator's. A validation failure is rendered field by field, one errors entry per violated field, the same public collection the framework's exception listener projects. Every other refusal keeps its generic public message with the cause in the debug-gated context, because the decoder's diagnosis names internals. */
 func ApiRefusal(
     runtimeInstance melodyruntimecontract.Runtime,

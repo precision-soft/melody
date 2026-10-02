@@ -260,7 +260,7 @@ func currencyServiceUnderTest(t *testing.T) (*CurrencyService, *recordingDispatc
         },
     )
 
-    return NewCurrencyService(currencyRepository, newTtlRecordingCache(), dispatcher.dispatcher, clockInstance),
+    return NewCurrencyService(currencyRepository, newInMemoryProductRepositoryForTest(t), newTtlRecordingCache(), dispatcher.dispatcher, clockInstance),
         dispatcher,
         melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 }
@@ -282,4 +282,16 @@ func (instance *updateCountingCurrencyRepository) UpdateQuote(ctx context.Contex
     instance.updates.Add(1)
 
     return instance.CurrencyRepository.UpdateQuote(ctx, id, quote)
+}
+
+/* newInMemoryProductRepositoryForTest answers the in-memory product catalogue a currency service reads before a delete */
+func newInMemoryProductRepositoryForTest(t *testing.T) repository.ProductRepository {
+    t.Helper()
+
+    productRepository, productRepositoryErr := repository.NewProductRepository(persistence.NewCatalogStorage(nil))
+    if nil != productRepositoryErr {
+        t.Fatalf("build the product repository: %v", productRepositoryErr)
+    }
+
+    return productRepository
 }

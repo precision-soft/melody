@@ -2,6 +2,8 @@ package cli
 
 import (
     "context"
+    "database/sql"
+    "database/sql/driver"
     "errors"
     "io"
     "sync"
@@ -25,6 +27,8 @@ import (
     melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     melodyruntime "github.com/precision-soft/melody/v3/runtime"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
+    "github.com/uptrace/bun"
+    "github.com/uptrace/bun/dialect/mysqldialect"
 )
 
 const testUserServiceName = "service.test.user"
@@ -51,6 +55,13 @@ func newCommandFixture(t *testing.T) *commandFixture {
    decorated — a dispatcher that refuses is how a command meets listeners whose backend is gone, after the write
    they follow has landed. */
 func newCommandFixtureWithDispatcher(t *testing.T, dispatcherOf func(melodyeventcontract.EventDispatcher) melodyeventcontract.EventDispatcher) *commandFixture {
+    t.Helper()
+
+    return newCommandFixtureOver(t, dispatcherOf, persistence.NewCatalogStorage(bun.NewDB(sql.OpenDB(&undialledConnector{}), mysqldialect.New())))
+}
+
+/* newCommandFixtureOver registers the catalogue handle the composition root registers, which the commands read to tell a deployment with the catalogue database from one whose directory is each process's own memory; the user service under test stays in memory either way */
+func newCommandFixtureOver(t *testing.T, dispatcherOf func(melodyeventcontract.EventDispatcher) melodyeventcontract.EventDispatcher, catalogue *persistence.CatalogStorage) *commandFixture {
     t.Helper()
 
     storage := persistence.NewCatalogStorage(nil).WithAccountSeed()
@@ -126,6 +137,14 @@ func newCommandFixtureWithDispatcher(t *testing.T, dispatcherOf func(melodyevent
         melodylogging.ServiceLogger,
         func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
             return melodylogging.NewNopLogger(), nil
+        },
+    )
+
+    melodycontainer.MustRegister(
+        containerInstance,
+        persistence.ServiceCatalogStorage,
+        func(resolver melodycontainercontract.Resolver) (*persistence.CatalogStorage, error) {
+            return catalogue, nil
         },
     )
 
@@ -297,4 +316,27 @@ func newResetRuntimeWithArchive(
     )
 
     return melodyruntime.New(context.Background(), serviceContainer.NewScope(), serviceContainer), cacheInstance
+}
+
+/* mustProductRepository answers the in-memory product catalogue a currency service reads before a delete */
+func mustProductRepository(t *testing.T) repository.ProductRepository {
+    t.Helper()
+
+    productRepository, productRepositoryErr := repository.NewProductRepository(persistence.NewCatalogStorage(nil))
+    if nil != productRepositoryErr {
+        t.Fatalf("build the product repository: %v", productRepositoryErr)
+    }
+
+    return productRepository
+}
+
+/* undialledConnector stands for a configured database the test never reaches: sql.OpenDB does not dial, and a command that only asks whether the catalogue is persistent issues no statement */
+type undialledConnector struct{}
+
+func (instance *undialledConnector) Connect(ctx context.Context) (driver.Conn, error) {
+    return nil, errors.New("the test database is never dialled")
+}
+
+func (instance *undialledConnector) Driver() driver.Driver {
+    return nil
 }

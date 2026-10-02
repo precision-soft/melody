@@ -29,12 +29,14 @@ const (
 //melody:service ServiceCurrencyService
 func NewCurrencyService(
     currencyRepository repository.CurrencyRepository,
+    productRepository repository.ProductRepository,
     cacheInstance melodycachecontract.Cache,
     eventDispatcher melodyeventcontract.EventDispatcher,
     clockInstance melodyclockcontract.Clock,
 ) *CurrencyService {
     return &CurrencyService{
         currencyRepository: currencyRepository,
+        productRepository:  productRepository,
         cache:              cacheInstance,
         eventDispatcher:    eventDispatcher,
         clock:              clockInstance,
@@ -44,6 +46,7 @@ func NewCurrencyService(
 /* CurrencyService stamps the instant a rate is quoted with the injected clock rather than the wall, so a frozen clock names the exact instant a currency carries. */
 type CurrencyService struct {
     currencyRepository repository.CurrencyRepository
+    productRepository  repository.ProductRepository
     cache              melodycachecontract.Cache
     eventDispatcher    melodyeventcontract.EventDispatcher
     clock              melodyclockcontract.Clock
@@ -134,7 +137,8 @@ func (instance *CurrencyService) FindById(id string) (*entity.Currency, bool, er
                 return nil, findErr
             }
 
-            if false == found {
+            /* the database compares the identifier under its collation, which pads trailing spaces, so a row found for another spelling is answered absent: cached under the spelling asked, it would be a copy no listener drops */
+            if false == found || id != currency.Id {
                 return nil, nil
             }
 
@@ -169,7 +173,8 @@ func (instance *CurrencyService) Create(
         return nil, rateErr
     }
 
-    currency := entity.NewCurrency(currencyId, code, name, rate, quoteInstantOf(instance.clock.Now()))
+    /* the code is stored in the spelling the conversion compares on, so the unique key holds the identity the lookup reads */
+    currency := entity.NewCurrency(currencyId, foldCurrencyCode(code), name, rate, quoteInstantOf(instance.clock.Now()))
 
     createErr := instance.currencyRepository.Create(runtimeInstance.Context(), currency)
     if nil != createErr {
@@ -208,7 +213,7 @@ func (instance *CurrencyService) Update(
 
     /* under the in-memory configuration the loaded entity is the repository's stored value, shared with concurrent readers, so the changes land on a copy and a refused update leaves the stored entity untouched */
     modified := *currency
-    modified.Code = code
+    modified.Code = foldCurrencyCode(code)
     modified.Name = name
 
     updated, updateErr := instance.currencyRepository.Update(ctx, &modified)
@@ -415,6 +420,16 @@ func (instance *CurrencyService) DeleteById(
     runtimeInstance melodyruntimecontract.Runtime,
     currencyId string,
 ) (bool, error) {
+    /* the product table's foreign key refuses the delete on the database; the read answers the same refusal on the configuration without one, and names it before the delete is tried */
+    pricedIn, pricedInErr := instance.productRepository.PricedIn(runtimeInstance.Context(), currencyId)
+    if nil != pricedInErr {
+        return false, pricedInErr
+    }
+
+    if true == pricedIn {
+        return false, repository.ErrCurrencyInUse
+    }
+
     deleted, deleteErr := instance.currencyRepository.DeleteById(runtimeInstance.Context(), currencyId)
     if nil != deleteErr {
         return false, deleteErr

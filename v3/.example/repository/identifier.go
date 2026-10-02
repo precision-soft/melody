@@ -33,3 +33,12 @@ func highestIdSuffix(identifierList []string, prefix string) int64 {
 
     return highest
 }
+
+/* raisedFloor answers whichever of the floor and the identifier carries the higher numeric tail under the prefix: the in-memory repositories keep, under their lock, the highest identifier they ever stored, which the database keeps in its identifier sequence, so a deleted entity's identifier is not minted again */
+func raisedFloor(floor string, identifier string, prefix string) string {
+    if highestIdSuffix([]string{identifier}, prefix) > highestIdSuffix([]string{floor}, prefix) {
+        return identifier
+    }
+
+    return floor
+}

@@ -16,6 +16,8 @@ func newInMemoryCategoryRepository() CategoryRepository {
 type inMemoryCategoryRepository struct {
     mutex      sync.RWMutex
     categories []*entity.Category
+    /* mintFloor is the highest identifier this repository ever stored, see raisedFloor */
+    mintFloor  string
 }
 
 /* the slice is a shallow copy: the entity pointers stay shared with the repository, so a caller that mutates an entity in place bypasses the lock */
@@ -59,7 +61,7 @@ func (instance *inMemoryCategoryRepository) Create(ctx context.Context, category
     }
 
     if "" == strings.TrimSpace(category.Id) {
-        category.Id = nextCategoryId(instance.identifierListLocked())
+        category.Id = nextCategoryId(append(instance.identifierListLocked(), instance.mintFloor))
     }
 
     _, exists := instance.findByIdLocked(category.Id)
@@ -68,6 +70,7 @@ func (instance *inMemoryCategoryRepository) Create(ctx context.Context, category
     }
 
     instance.categories = append(instance.categories, category)
+    instance.mintFloor = raisedFloor(instance.mintFloor, category.Id, "cat-")
     return nil
 }
 

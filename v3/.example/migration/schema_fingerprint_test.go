@@ -103,8 +103,8 @@ func TestSchemaFingerprintOf_MovesWithEveryStatement(t *testing.T) {
         }
     }
 
-    if schemaFingerprintOf(schemaUpStatementList...) == catalogueSchemaFingerprint {
-        t.Error("the catalogue's fingerprint does not cover the username key it adds after its tables")
+    if schemaFingerprintOf(schemaUpStatementList...) != catalogueSchemaFingerprint {
+        t.Error("the catalogue's fingerprint is not the one of the statements the set runs")
     }
 }
 
@@ -170,8 +170,8 @@ func TestUpSchemaFinishesARunItBeganAndDidNotFinish(t *testing.T) {
     if 0 != countRecorded(recordedList, "INSERT INTO `"+SchemaFingerprintTableName+"`") {
         t.Fatalf("expected the row already building not to be written again, got %q", recordedList)
     }
-    if 6 != countRecorded(recordedList, "CREATE TABLE IF NOT EXISTS `melody_example_v3_") {
-        t.Fatalf("expected the six tables of the set created again, tolerantly, got %q", recordedList)
+    if 8 != countRecorded(recordedList, "CREATE TABLE IF NOT EXISTS `melody_example_v3_") {
+        t.Fatalf("expected the eight tables of the set created again, tolerantly, got %q", recordedList)
     }
     if "UPDATE `"+SchemaFingerprintTableName+"` SET `state` = 'built' WHERE `set_name` = 'catalogue'" != recordedList[len(recordedList)-1] {
         t.Fatalf("expected the run to end by sealing the row, got %q", recordedList)
@@ -245,4 +245,15 @@ func countRecorded(recordedList []string, fragment string) int {
     }
 
     return count
+}
+
+/* the conversion finds a currency by its code, so the schema holds one row per code, compared byte for byte */
+func TestCurrencyTableHoldsTheCodeUnique(t *testing.T) {
+    if false == strings.Contains(createCurrencyTableSql, "UNIQUE KEY `"+CurrencyCodeIndexName+"` (`code`)") {
+        t.Fatalf("the currency table declares no unique key on the code: %s", createCurrencyTableSql)
+    }
+
+    if false == strings.Contains(createCurrencyTableSql, "`code` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL") {
+        t.Fatalf("the code is not compared byte for byte: %s", createCurrencyTableSql)
+    }
 }

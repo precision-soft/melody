@@ -36,6 +36,8 @@ Passwords are stored as **bcrypt hashes** ([`security/password_hasher.go`](./sec
 
 **These accounts are seeded into an empty table in every environment, and their passwords are in this README.** They are a development convenience, not accounts to deploy: an application built from this example removes them, or changes their passwords, before it serves anyone. (The third major's example seeds them in development only.)
 
+The admin update and delete doors read the account from the repository, under the row's lock, never from the cached user records: an update writes only the fields its body names, so a password or a role list it leaves out keeps what the directory holds at that instant, and the refusal of a peer administrator is decided on the account the write changes. The product doors validate the body in the spelling they store, trimmed, so a name of one character padded with a space is refused rather than stored. One spelling is known to fold differently: the lookup and the unique check fold a username in the database with `LOWER()`, while the cache keys fold it in Go, and the two disagree for a few scripts (the Georgian Mtavruli capitals) — a name written in them can stand beside its folded twin. The third major's example stores the folded name in a column of its own; here it is recorded rather than migrated.
+
 ---
 
 ## Structure overview

@@ -19,8 +19,10 @@ func newInMemoryUserRepository(seedsAccounts bool) UserRepository {
 }
 
 type inMemoryUserRepository struct {
-    mutex sync.RWMutex
-    users []*entity.User
+    mutex     sync.RWMutex
+    users     []*entity.User
+    /* mintFloor is the highest identifier this repository ever stored, see raisedFloor */
+    mintFloor string
 }
 
 /* the slice is a shallow copy: the entity pointers stay shared with the repository, so a caller that mutates an entity in place bypasses the lock */
@@ -46,7 +48,7 @@ func (instance *inMemoryUserRepository) Create(ctx context.Context, user *entity
     }
 
     if "" == strings.TrimSpace(user.Id) {
-        user.Id = nextUserId(instance.identifierListLocked())
+        user.Id = nextUserId(append(instance.identifierListLocked(), instance.mintFloor))
     }
 
     /* an occupied id is refused, as in the sibling repositories, since a second row under it could be neither read nor removed by id */
@@ -55,42 +57,53 @@ func (instance *inMemoryUserRepository) Create(ctx context.Context, user *entity
     }
 
     instance.users = append(instance.users, user)
+    instance.mintFloor = raisedFloor(instance.mintFloor, user.Id, "user-")
 
     return nil
 }
 
-func (instance *inMemoryUserRepository) Update(ctx context.Context, user *entity.User) (bool, error) {
+/* Update lays the change over a copy of the stored account under the repository's mutex, the stored value being shared with every reader. */
+func (instance *inMemoryUserRepository) Update(ctx context.Context, id string, change UserChange, guard UserGuard) (*entity.User, *entity.User, error) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    validationErr := validateUser(user)
-    if nil != validationErr {
-        return false, validationErr
-    }
-
-    id := strings.TrimSpace(user.Id)
-    if "" == id {
-        return false, fmt.Errorf("id is required")
+    trimmedId := strings.TrimSpace(id)
+    if "" == trimmedId {
+        return nil, nil, fmt.Errorf("id is required")
     }
 
     for index, existing := range instance.users {
-        if nil == existing {
+        if nil == existing || trimmedId != existing.Id {
             continue
         }
 
-        if id != existing.Id {
-            continue
+        if guardErr := admittedBy(guard, existing); nil != guardErr {
+            return nil, nil, guardErr
         }
 
-        if true == instance.usernameTakenByAnotherLocked(user.Username, id) {
-            return false, ErrUsernameAlreadyExists
+        changed := change.applyTo(existing)
+
+        validationErr := validateUser(changed)
+        if nil != validationErr {
+            return nil, nil, validationErr
         }
 
-        instance.users[index] = user
-        return true, nil
+        if true == instance.usernameTakenByAnotherLocked(changed.Username, trimmedId) {
+            return nil, nil, ErrUsernameAlreadyExists
+        }
+
+        before := *existing
+        before.Roles = append([]string{}, existing.Roles...)
+        instance.users[index] = changed
+
+        /* the caller receives a copy: the stored value is shared with every reader */
+        answered := *changed
+        answered.Roles = append([]string{}, changed.Roles...)
+
+        return &before, &answered, nil
     }
 
-    return false, nil
+    return nil, nil, nil
 }
 
 /* GrantRole appends under the repository's mutex onto a copy of the stored account, since the stored value is shared with every reader. */
@@ -129,29 +142,33 @@ func (instance *inMemoryUserRepository) GrantRole(ctx context.Context, id string
     return nil, GrantRoleAccountAbsent, nil
 }
 
-func (instance *inMemoryUserRepository) DeleteById(ctx context.Context, id string) (bool, error) {
+func (instance *inMemoryUserRepository) DeleteById(ctx context.Context, id string, guard UserGuard) (*entity.User, error) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
     trimmedId := strings.TrimSpace(id)
     if "" == trimmedId {
-        return false, fmt.Errorf("id is required")
+        return nil, fmt.Errorf("id is required")
     }
 
     for index, user := range instance.users {
-        if nil == user {
+        if nil == user || trimmedId != user.Id {
             continue
         }
 
-        if trimmedId != user.Id {
-            continue
+        if guardErr := admittedBy(guard, user); nil != guardErr {
+            return nil, guardErr
         }
 
         instance.users = append(instance.users[:index], instance.users[index+1:]...)
-        return true, nil
+
+        removed := *user
+        removed.Roles = append([]string{}, user.Roles...)
+
+        return &removed, nil
     }
 
-    return false, nil
+    return nil, nil
 }
 
 func (instance *inMemoryUserRepository) FindById(ctx context.Context, id string) (*entity.User, bool, error) {

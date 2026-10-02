@@ -135,18 +135,19 @@ func (instance *bunCurrencyRepository) Create(ctx context.Context, currency *ent
         }
     }
 
-    return insertWithMintedIdentifier(
+    return asCurrencyCodeAlreadyExists(insertWithMintedIdentifier(
         ctx,
         instance.database,
         currencyIdentifierMintLockName,
+        identifierSequence{prefix: "cur-", identifier: func() string { return currency.Id }},
         mintsIdentifier,
-        func() error {
+        func(floor string) error {
             identifierList, identifierErr := instance.identifierList(ctx)
             if nil != identifierErr {
                 return identifierErr
             }
 
-            currency.Id = nextCurrencyId(identifierList)
+            currency.Id = nextCurrencyId(append(identifierList, floor))
 
             return nil
         },
@@ -158,7 +159,7 @@ func (instance *bunCurrencyRepository) Create(ctx context.Context, currency *ent
 
             return insertErr
         },
-    )
+    ))
 }
 
 func (instance *bunCurrencyRepository) Update(ctx context.Context, currency *entity.Currency) (bool, error) {
@@ -183,7 +184,7 @@ func (instance *bunCurrencyRepository) Update(ctx context.Context, currency *ent
 
     result, updateErr := instance.renameQuery(currency).Exec(ctx)
     if nil != updateErr {
-        return false, updateErr
+        return false, asCurrencyCodeAlreadyExists(updateErr)
     }
 
     if true == affectedAtLeastOneRow(result) {
@@ -247,7 +248,7 @@ func (instance *bunCurrencyRepository) DeleteById(ctx context.Context, id string
         Where("id = ?", normalizedId).
         Exec(ctx)
     if nil != deleteErr {
-        return false, deleteErr
+        return false, asCurrencyInUse(deleteErr)
     }
 
     return affectedAtLeastOneRow(result), nil

@@ -22,6 +22,8 @@ type userRow struct {
 
     Id       string `bun:"id,pk"`
     Username string `bun:"username,notnull"`
+    /* the name as NormalizedUsername folds it, derived from Username on every write and never read back into the entity */
+    UsernameNormalized string `bun:"username_normalized,notnull"`
     /* the trail records that the password changed and never its values: a history of credentials is what an audit trail must not become */
     Password string `bun:"password,notnull" audit:"redact"`
     Roles    string `bun:"roles,notnull"`
@@ -29,10 +31,11 @@ type userRow struct {
 
 func newUserRow(user *entity.User) *userRow {
     return &userRow{
-        Id:       user.Id,
-        Username: user.Username,
-        Password: user.Password,
-        Roles:    strings.Join(user.Roles, ","),
+        Id:                 user.Id,
+        Username:           user.Username,
+        UsernameNormalized: NormalizedUsername(user.Username),
+        Password:           user.Password,
+        Roles:              strings.Join(user.Roles, ","),
     }
 }
 
@@ -191,14 +194,15 @@ func (instance *bunUserRepository) Create(ctx context.Context, user *entity.User
         ctx,
         instance.database,
         userIdentifierMintLockName,
+        identifierSequence{prefix: "user-", identifier: func() string { return user.Id }},
         mintsIdentifier,
-        func() error {
+        func(floor string) error {
             identifierList, identifierErr := instance.identifierList(ctx)
             if nil != identifierErr {
                 return identifierErr
             }
 
-            user.Id = nextUserId(identifierList)
+            user.Id = nextUserId(append(identifierList, floor))
 
             return nil
         },
@@ -210,41 +214,91 @@ func (instance *bunUserRepository) Create(ctx context.Context, user *entity.User
     return asUsernameAlreadyExists(insertErr)
 }
 
-func (instance *bunUserRepository) Update(ctx context.Context, user *entity.User) (bool, error) {
-    validationErr := validateUser(user)
-    if nil != validationErr {
-        return false, validationErr
+/* Update reads the row locked FOR UPDATE, asks the guard, and writes the change over what it read in the same transaction, the GrantRole door's shape: an admin update and a grant of the same account serialise on the row, and a field the change leaves out is the one the row holds, never a copy the caller read earlier. The audit entry is recorded through the same transaction. */
+func (instance *bunUserRepository) Update(ctx context.Context, id string, change UserChange, guard UserGuard) (*entity.User, *entity.User, error) {
+    trimmedId := strings.TrimSpace(id)
+    if "" == trimmedId {
+        return nil, nil, fmt.Errorf("id is required")
     }
 
-    id := strings.TrimSpace(user.Id)
-    if "" == id {
-        return false, fmt.Errorf("id is required")
+    var beforeAccount *entity.User
+    var afterAccount *entity.User
+    var refusal error
+
+    txErr := instance.database.RunInTx(auditContext(ctx), nil, func(ctx context.Context, tx bun.Tx) error {
+        before, found, lockErr := lockUserRow(ctx, tx, trimmedId)
+        if nil != lockErr || false == found {
+            return lockErr
+        }
+
+        current := before.toEntity()
+        if refusal = admittedBy(guard, current); nil != refusal {
+            return nil
+        }
+
+        changed := change.applyTo(current)
+        if refusal = validateUser(changed); nil != refusal {
+            return nil
+        }
+
+        takenByAnother, takenErr := usernameTakenByAnother(ctx, tx, changed.Username, trimmedId)
+        if nil != takenErr {
+            return takenErr
+        }
+
+        if true == takenByAnother {
+            refusal = ErrUsernameAlreadyExists
+
+            return nil
+        }
+
+        after := newUserRow(changed)
+        if _, updateErr := tx.NewUpdate().Model(after).WherePK().Exec(ctx); nil != updateErr {
+            return updateErr
+        }
+
+        recordErr := instance.recorder.RecordUpdate(melodyaudit.WithDatabase(ctx, tx), persistence.AuditEntityUser, trimmedId, before, after)
+        if nil != recordErr {
+            return recordErr
+        }
+
+        beforeAccount = current
+        afterAccount = after.toEntity()
+
+        return nil
+    })
+    if nil != refusal {
+        return nil, nil, refusal
     }
 
-    _, found, findErr := instance.findRowById(ctx, id)
-    if nil != findErr {
-        return false, findErr
+    if nil != txErr {
+        if usernameErr := asUsernameAlreadyExists(txErr); true == errors.Is(usernameErr, ErrUsernameAlreadyExists) {
+            return nil, nil, usernameErr
+        }
+
+        return nil, nil, exception.NewError(
+            "updating the "+persistence.AuditEntityUser+" "+trimmedId+" did not complete",
+            exceptioncontract.Context{"entity": persistence.AuditEntityUser, "operation": "update", "id": trimmedId},
+            txErr,
+        )
     }
 
-    if false == found {
-        return false, nil
+    return beforeAccount, afterAccount, nil
+}
+
+/* lockUserRow reads the account's row FOR UPDATE inside the caller's transaction; an absent row is an answer, not an error. */
+func lockUserRow(ctx context.Context, tx bun.Tx, id string) (*userRow, bool, error) {
+    row := &userRow{Id: id}
+
+    selectErr := tx.NewSelect().Model(row).WherePK().For("UPDATE").Scan(ctx)
+    if true == errors.Is(selectErr, sql.ErrNoRows) {
+        return nil, false, nil
+    }
+    if nil != selectErr {
+        return nil, false, selectErr
     }
 
-    takenByAnother, takenErr := instance.usernameTakenByAnother(ctx, user.Username, id)
-    if nil != takenErr {
-        return false, takenErr
-    }
-
-    if true == takenByAnother {
-        return false, ErrUsernameAlreadyExists
-    }
-
-    updateErr := instance.tracker.Update(auditContext(ctx), persistence.AuditEntityUser, id, newUserRow(user))
-    if nil != updateErr {
-        return false, asUsernameAlreadyExists(updateErr)
-    }
-
-    return true, nil
+    return row, true, nil
 }
 
 /* GrantRole reads the row locked FOR UPDATE and writes the widened set in the same transaction, so a grant and an admin update of the same account serialise on the row; the audit entry is recorded through the same transaction. */
@@ -258,14 +312,9 @@ func (instance *bunUserRepository) GrantRole(ctx context.Context, id string, rol
     var account *entity.User
 
     txErr := instance.database.RunInTx(auditContext(ctx), nil, func(ctx context.Context, tx bun.Tx) error {
-        before := &userRow{Id: trimmedId}
-
-        selectErr := tx.NewSelect().Model(before).WherePK().For("UPDATE").Scan(ctx)
-        if true == errors.Is(selectErr, sql.ErrNoRows) {
-            return nil
-        }
-        if nil != selectErr {
-            return selectErr
+        before, found, lockErr := lockUserRow(ctx, tx, trimmedId)
+        if nil != lockErr || false == found {
+            return lockErr
         }
 
         current := before.toEntity()
@@ -316,33 +365,53 @@ func (instance *bunUserRepository) GrantRole(ctx context.Context, id string, rol
     return account, outcome, nil
 }
 
-func (instance *bunUserRepository) DeleteById(ctx context.Context, id string) (bool, error) {
+/* DeleteById reads the row locked FOR UPDATE, asks the guard, and removes it in the same transaction, the trail keeping the roles it held; a missing account is an answer, not an error. */
+func (instance *bunUserRepository) DeleteById(ctx context.Context, id string, guard UserGuard) (*entity.User, error) {
     trimmedId := strings.TrimSpace(id)
     if "" == trimmedId {
-        return false, fmt.Errorf("id is required")
+        return nil, fmt.Errorf("id is required")
     }
 
-    /* the account is opted into a captured before-image, so the tracker locks the row before removing it and the trail keeps the roles it held; a missing account is an answer, not an error */
-    _, found, findErr := instance.findRowById(ctx, trimmedId)
-    if nil != findErr {
-        return false, findErr
+    var removed *entity.User
+    var refusal error
+
+    txErr := instance.database.RunInTx(auditContext(ctx), nil, func(ctx context.Context, tx bun.Tx) error {
+        before, found, lockErr := lockUserRow(ctx, tx, trimmedId)
+        if nil != lockErr || false == found {
+            return lockErr
+        }
+
+        current := before.toEntity()
+        if refusal = admittedBy(guard, current); nil != refusal {
+            return nil
+        }
+
+        if _, deleteErr := tx.NewDelete().Model(before).WherePK().Exec(ctx); nil != deleteErr {
+            return deleteErr
+        }
+
+        recordErr := instance.recorder.RecordDelete(melodyaudit.WithDatabase(ctx, tx), persistence.AuditEntityUser, trimmedId, before)
+        if nil != recordErr {
+            return recordErr
+        }
+
+        removed = current
+
+        return nil
+    })
+    if nil != refusal {
+        return nil, refusal
     }
 
-    if false == found {
-        return false, nil
+    if nil != txErr {
+        return nil, exception.NewError(
+            "deleting the "+persistence.AuditEntityUser+" "+trimmedId+" did not complete",
+            exceptioncontract.Context{"entity": persistence.AuditEntityUser, "operation": "delete", "id": trimmedId},
+            txErr,
+        )
     }
 
-    deleteErr := instance.tracker.Delete(
-        auditContext(ctx),
-        persistence.AuditEntityUser,
-        trimmedId,
-        &userRow{Id: trimmedId},
-    )
-    if nil != deleteErr {
-        return false, deleteErr
-    }
-
-    return true, nil
+    return removed, nil
 }
 
 /* ErrUsernameAlreadyExists is the refusal both write doors answer for a name another account holds, whether the preceding read or the unique index caught it, so the http doors answer 400 rather than 500. */
@@ -363,6 +432,13 @@ func asUsernameAlreadyExists(writeErr error) error {
 
 /* errorChainNamesKey answers whether any link of the chain, every branch of a joined error included, is the driver's duplicate refusal for the named index, read from the refusal's key clause rather than searched for in the text. The walk visits at most errorChainLinkLimit links across all branches, so a chain that closes on itself ends instead of exhausting the stack. */
 func errorChainNamesKey(err error, indexName string) bool {
+    return errorChainHolds(err, func(text string) bool {
+        return duplicateRefusalNamesKey(text, indexName)
+    })
+}
+
+/* errorChainHolds answers whether any link of the chain, every branch of a joined error included, has a text the predicate accepts, visiting at most errorChainLinkLimit links */
+func errorChainHolds(err error, holds func(text string) bool) bool {
     remainingLinks := errorChainLinkLimit
 
     var walk func(link error) bool
@@ -372,7 +448,7 @@ func errorChainNamesKey(err error, indexName string) bool {
         }
         remainingLinks--
 
-        if true == duplicateRefusalNamesKey(link.Error(), indexName) {
+        if true == holds(link.Error()) {
             return true
         }
 
@@ -414,13 +490,13 @@ func duplicateRefusalNamesKey(text string, indexName string) bool {
     return key == indexName || true == strings.HasSuffix(key, "."+indexName)
 }
 
-func (instance *bunUserRepository) usernameTakenByAnother(ctx context.Context, username string, excludedId string) (bool, error) {
+func usernameTakenByAnother(ctx context.Context, database bun.IDB, username string, excludedId string) (bool, error) {
     wanted := NormalizedUsername(username)
     if "" == wanted {
         return false, nil
     }
 
-    count, countErr := instance.usernameTakenByAnotherQuery(wanted, excludedId).Count(ctx)
+    count, countErr := usernameTakenByAnotherQuery(database, wanted, excludedId).Count(ctx)
     if nil != countErr {
         return false, countErr
     }
@@ -428,21 +504,21 @@ func (instance *bunUserRepository) usernameTakenByAnother(ctx context.Context, u
     return 0 < count, nil
 }
 
-/* the comparison is forced onto the binary collation because the column's own folds accents while NormalizedUsername, the spelling the cache keys and the invalidation listeners share, folds case alone; under the column's collation this door would match users the invalidation cannot address */
+/* the lookup compares the column the application folded, under its binary collation, so it admits exactly the spellings NormalizedUsername makes one: the cache keys and the invalidation listeners fold through the same function */
 func (instance *bunUserRepository) userByUsernameQuery(row *userRow, wanted string) *bun.SelectQuery {
     return instance.database.
         NewSelect().
         Model(row).
-        Where("LOWER(username) = (? COLLATE utf8mb4_bin)", wanted).
+        Where("username_normalized = ?", wanted).
         Limit(1)
 }
 
-/* the same binary collation as userByUsernameQuery, so the uniqueness door and the lookup door admit the same spellings */
-func (instance *bunUserRepository) usernameTakenByAnotherQuery(wanted string, excludedId string) *bun.SelectQuery {
-    return instance.database.
+/* the same column as userByUsernameQuery, so the uniqueness door and the lookup door admit the same spellings */
+func usernameTakenByAnotherQuery(database bun.IDB, wanted string, excludedId string) *bun.SelectQuery {
+    return database.
         NewSelect().
         Model((*userRow)(nil)).
-        Where("LOWER(username) = (? COLLATE utf8mb4_bin)", wanted).
+        Where("username_normalized = ?", wanted).
         Where("id != ?", excludedId)
 }
 

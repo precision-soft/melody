@@ -124,7 +124,7 @@ e2e_require_dev_service
 # mismatch message prints both numbers, so the count to move to is in the failure itself. A run that took one of
 # the degraded early-exit branches (an unreachable supervised app, a cold-cache timeout) legitimately executes
 # fewer checks; it is already red from the check_fail that branch raised
-EXPECTED_CHECK_COUNT_INTEGER=240
+EXPECTED_CHECK_COUNT_INTEGER=242
 readonly EXPECTED_CHECK_COUNT_INTEGER
 
 # state the scope in the output, so a reader never has to infer which major these checks covered
@@ -2363,13 +2363,13 @@ fi
 check_section_end "V3 DEBUG COMMANDS" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
-# V3 DATABASE MIGRATIONS — the db:* family and the composition root run one migration over six tables
+# V3 DATABASE MIGRATIONS — the db:* family and the composition root run one migration over eight tables
 # ---------------------------------------------------------------------------------------------------
 
 check_section_start "V3 DATABASE MIGRATIONS" "${TAG_VALIDATE}" "e2e"
 
-# THIS SECTION EMPTIES LIVE TABLES MID-FLIGHT: the rollback drops all six tables of the v3 example's own
-# melody_example_v3 database — the four catalogue ones, the journal, and the two-factor enrollment table
+# THIS SECTION EMPTIES LIVE TABLES MID-FLIGHT: the rollback drops all eight tables of the v3 example's own
+# melody_example_v3 database — the four catalogue ones, the session index, the identifier sequence, the journal, and the two-factor enrollment table
 # neither frozen major carries. Every later step exists to put the state back — the next boot restores the
 # schema, and the two resolutions after it reseed the catalogue and the user directory — so the section must
 # run to its end whatever the intermediate verdicts, which check_fail already guarantees. The journal is
@@ -2383,11 +2383,11 @@ check_section_start "V3 DATABASE MIGRATIONS" "${TAG_VALIDATE}" "e2e"
 # up-to-date schema, and what the checks below read is the database itself rather than a command's word for
 # it: the count of the example's own tables before and after each step.
 #
-# The six are named one by one rather than matched on a prefix: the audit registry's own table is called
-# melody_example_v3_audit and would be counted by any LIKE that catches the six, while it belongs to the
+# The eight are named one by one rather than matched on a prefix: the audit registry's own table is called
+# melody_example_v3_audit and would be counted by any LIKE that catches the eight, while it belongs to the
 # framework module that opens it and correctly survives a rollback of this set. Its survival is the check's
 # quiet half — a set that had claimed it would take it down with the rest.
-V3_EXAMPLE_TABLE_COUNT_STATEMENT_STRING="SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'melody_example_v3' AND table_name IN ('melody_example_v3_category', 'melody_example_v3_currency', 'melody_example_v3_product', 'melody_example_v3_user', 'melody_example_v3_catalog_journal', 'melody_example_v3_two_factor')"
+V3_EXAMPLE_TABLE_COUNT_STATEMENT_STRING="SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'melody_example_v3' AND table_name IN ('melody_example_v3_category', 'melody_example_v3_currency', 'melody_example_v3_product', 'melody_example_v3_user', 'melody_example_v3_user_session', 'melody_example_v3_identifier_sequence', 'melody_example_v3_catalog_journal', 'melody_example_v3_two_factor')"
 
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . db:init >/dev/null 2>&1; echo status=\$?"
 if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'status=0'; then
@@ -2476,10 +2476,10 @@ else
 fi
 
 V3_TABLE_COUNT_AFTER_RESTORE_STRING="$(e2e_mysql_scalar "melody_example_v3" "${V3_EXAMPLE_TABLE_COUNT_STATEMENT_STRING}")"
-if [[ "6" = "${V3_TABLE_COUNT_AFTER_RESTORE_STRING}" ]]; then
-    check_pass "the operator's set and the application's are one: all six tables are back (read out of band)"
+if [[ "8" = "${V3_TABLE_COUNT_AFTER_RESTORE_STRING}" ]]; then
+    check_pass "the operator's set and the application's are one: all eight tables are back (read out of band)"
 else
-    check_fail "the restored schema holds ${V3_TABLE_COUNT_AFTER_RESTORE_STRING:-<no answer>} of the six v3 example tables"
+    check_fail "the restored schema holds ${V3_TABLE_COUNT_AFTER_RESTORE_STRING:-<no answer>} of the eight v3 example tables"
 fi
 
 # the user table has no command of its own; resolving the user repository by name through debug:container
@@ -2696,8 +2696,8 @@ V3_TABLE_COUNT_AFTER_REFUSAL_STRING="$(e2e_mysql_scalar "melody_example_v3" "${V
 
 if printf '%s' "${V3_RESET_REFUSAL_STRING}" | grep -q 'nothing was touched' \
     && printf '%s' "${V3_RESET_REFUSAL_STRING}" | grep -q 'melody_example_v3_two_factor' \
-    && [[ "6" = "${V3_TABLE_COUNT_AFTER_REFUSAL_STRING}" ]]; then
-    check_pass "v3 example:db:reset without --force names what it would drop and drops nothing (6 tables still standing)"
+    && [[ "8" = "${V3_TABLE_COUNT_AFTER_REFUSAL_STRING}" ]]; then
+    check_pass "v3 example:db:reset without --force names what it would drop and drops nothing (8 tables still standing)"
 else
     check_fail "the v3 reset refusal did not hold (${V3_RESET_REFUSAL_STRING:-<empty>}, tables ${V3_TABLE_COUNT_AFTER_REFUSAL_STRING:-<no answer>})"
 fi
@@ -2718,16 +2718,15 @@ fi
 # that the whole table was dropped and recreated rather than appended to.
 V3_BOOKKEEPING_COUNT_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT COUNT(*) FROM bun_migrations")"
 V3_TABLE_COUNT_AFTER_RESET_STRING="$(e2e_mysql_scalar "melody_example_v3" "${V3_EXAMPLE_TABLE_COUNT_STATEMENT_STRING}")"
-if [[ "1" = "${V3_BOOKKEEPING_COUNT_STRING}" ]] && [[ "6" = "${V3_TABLE_COUNT_AFTER_RESET_STRING}" ]]; then
-    check_pass "the v3 reset left one bookkeeping row and all six tables (read out of band)"
+if [[ "1" = "${V3_BOOKKEEPING_COUNT_STRING}" ]] && [[ "8" = "${V3_TABLE_COUNT_AFTER_RESET_STRING}" ]]; then
+    check_pass "the v3 reset left one bookkeeping row and all eight tables (read out of band)"
 else
     check_fail "the v3 reset left ${V3_BOOKKEEPING_COUNT_STRING:-<no answer>} bookkeeping row(s) and ${V3_TABLE_COUNT_AFTER_RESET_STRING:-<no answer>} table(s)"
 fi
 
 # the trail's SCHEMA belongs to the audit module, which opens it through its own door, so the reset empties its rows
 # and leaves the table standing, and then writes the reseed into it as ONE audit transaction: a trail carried across a
-# reset would name entities that no longer exist, over identifiers this example mints as the highest suffix plus one
-# and therefore recycles, while the reseed's own entries are the state the trail now accounts for. What is read out of
+# reset would name entities that no longer exist, while the reseed's own entries are the state the trail now accounts for. What is read out of
 # band: the five products and three users seeded, each with its insert entry, all under the one transaction row the
 # reset opened, whose actor is the console run and whose extras name the command
 V3_AUDIT_ROW_COUNT_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT COUNT(*) FROM melody_example_v3_audit")"
@@ -2785,6 +2784,28 @@ if [[ 0 -eq ${RUN_IN_DEV_STATUS_INTEGER} ]]; then
     check_pass "v3 product:list runs again once example:db:reset --force brought the volume to the present schema"
 else
     check_fail "v3 product:list after the reset answered status ${RUN_IN_DEV_STATUS_INTEGER}: ${RUN_IN_DEV_OUTPUT_STRING:-<empty>}"
+fi
+
+# the columns alone do not show a key or a constraint changed under the same names, which is how the amended
+# migration reaches a volume built before it: the set records the hash of the statements it built the volume
+# with, and a volume holding another hash is refused by name. The section writes another hash out of band.
+e2e_mysql_scalar "melody_example_v3" "UPDATE melody_example_v3_schema_fingerprint SET fingerprint = REPEAT('0', 64) WHERE set_name = 'catalogue'" >/dev/null
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "set -o pipefail; go run . product:list 2>&1 | sed 's/\x1b\[[0-9;]*m//g'"
+if [[ 0 -ne ${RUN_IN_DEV_STATUS_INTEGER} ]] \
+    && printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'built from another schema than this code' \
+    && printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'run example:db:reset --force'; then
+    check_pass "v3 product:list over a volume built from another schema refuses it by its fingerprint and names the reset"
+else
+    check_fail "v3 product:list over a volume with another fingerprint answered status ${RUN_IN_DEV_STATUS_INTEGER}: ${RUN_IN_DEV_OUTPUT_STRING:-<empty>}"
+fi
+
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . example:db:reset --force >/dev/null 2>&1"
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "set -o pipefail; go run . product:list 2>&1 | sed 's/\x1b\[[0-9;]*m//g'"
+if [[ 0 -eq ${RUN_IN_DEV_STATUS_INTEGER} ]]; then
+    check_pass "v3 product:list runs again once example:db:reset --force rebuilt the volume under this code's fingerprint"
+else
+    check_fail "v3 product:list after the fingerprint reset answered status ${RUN_IN_DEV_STATUS_INTEGER}: ${RUN_IN_DEV_OUTPUT_STRING:-<empty>}"
 fi
 
 check_section_end "V3 SCHEMA DRIFT" "${TAG_VALIDATE}" "e2e"

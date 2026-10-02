@@ -74,8 +74,8 @@ var archiveSchemaSetRecord = schemaSetRecord{
 }
 
 /* catalogueSchemaFingerprint and archiveSchemaFingerprint are the fingerprints of the schema each set builds: every
-   statement that shapes it, the constraint the catalogue adds after its tables included. */
-var catalogueSchemaFingerprint = schemaFingerprintOf(append(append([]string{}, schemaUpStatementList...), createUserUsernameIndexSql)...)
+   statement that shapes it, each constraint declared with its table. */
+var catalogueSchemaFingerprint = schemaFingerprintOf(schemaUpStatementList...)
 
 var archiveSchemaFingerprint = schemaFingerprintOf(archiveUpStatementList...)
 

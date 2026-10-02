@@ -18,20 +18,28 @@ import (
 func ApiCreateHandler() melodyhttpcontract.Handler {
     createProduct := melodyhttp.JsonHandler(
         func(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, dto CreateRequest) (melodyhttpcontract.Response, error) {
+            dto = dto.trimmed()
+            if refusal := presenter.ApiRefusalOfInvalidBody(runtimeInstance, request, dto); nil != refusal {
+                return refusal, nil
+            }
+
             productService := service.MustGetProductService(runtimeInstance.Container())
 
             product, createErr := productService.Create(
                 runtimeInstance,
-                strings.TrimSpace(dto.Id),
-                strings.TrimSpace(dto.Name),
-                strings.TrimSpace(dto.Description),
-                strings.TrimSpace(dto.CategoryId),
+                dto.Id,
+                dto.Name,
+                dto.Description,
+                dto.CategoryId,
                 dto.Price,
-                strings.TrimSpace(dto.CurrencyId),
+                dto.CurrencyId,
                 dto.Stock,
             )
             if nil != createErr {
                 status, message := createRefusalStatus(createErr)
+                if nethttp.StatusInternalServerError != status {
+                    return presenter.ApiError(runtimeInstance, request, status, message), nil
+                }
 
                 return presenter.ApiErrorWithErr(runtimeInstance, request, status, message, createErr), nil
             }
@@ -73,11 +81,30 @@ type CreateRequest struct {
     Stock       int64   `json:"stock" validate:"greaterThan=-1"`
 }
 
-/* createRefusalStatus answers the status and the public message of a refused create: a supplied identifier another product holds is a conflict, any other failure is the catalogue's */
+/* createRefusalStatus answers the status and the public message of a refused write: a supplied identifier another product holds is a conflict, a category or a currency that names nothing is the caller's 400, any other failure is the catalogue's */
 func createRefusalStatus(createErr error) (int, string) {
     if true == errors.Is(createErr, repository.ErrIdAlreadyExists) {
         return nethttp.StatusConflict, "id already exists"
     }
 
+    if true == errors.Is(createErr, repository.ErrUnknownCategory) {
+        return nethttp.StatusBadRequest, "categoryId: the category does not exist"
+    }
+
+    if true == errors.Is(createErr, repository.ErrUnknownCurrency) {
+        return nethttp.StatusBadRequest, "currencyId: the currency does not exist"
+    }
+
     return nethttp.StatusInternalServerError, "failed to create product"
+}
+
+/* trimmed answers the body as the door stores it, so it is validated in that spelling */
+func (instance CreateRequest) trimmed() CreateRequest {
+    instance.Id = strings.TrimSpace(instance.Id)
+    instance.Name = strings.TrimSpace(instance.Name)
+    instance.Description = strings.TrimSpace(instance.Description)
+    instance.CategoryId = strings.TrimSpace(instance.CategoryId)
+    instance.CurrencyId = strings.TrimSpace(instance.CurrencyId)
+
+    return instance
 }

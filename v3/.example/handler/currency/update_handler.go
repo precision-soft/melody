@@ -1,11 +1,13 @@
 package currency
 
 import (
+    "errors"
     nethttp "net/http"
     "strings"
 
     "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/presenter"
+    "github.com/precision-soft/melody/v3/.example/repository"
     "github.com/precision-soft/melody/v3/.example/service"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
@@ -32,14 +34,23 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
 
         updateCurrency := melodyhttp.JsonHandler(
             func(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, dto updateRequest) (melodyhttpcontract.Response, error) {
+                dto = dto.trimmed()
+                if refusal := presenter.ApiRefusalOfInvalidBody(runtimeInstance, request, dto); nil != refusal {
+                    return refusal, nil
+                }
+
                 currencyService := service.MustGetCurrencyService(runtimeInstance.Container())
 
                 currency, found, updateErr := currencyService.Update(
                     runtimeInstance,
                     id,
-                    strings.TrimSpace(dto.Code),
-                    strings.TrimSpace(dto.Name),
+                    dto.Code,
+                    dto.Name,
                 )
+                if true == errors.Is(updateErr, repository.ErrCurrencyCodeAlreadyExists) {
+                    return presenter.ApiError(runtimeInstance, request, nethttp.StatusConflict, "code already exists"), nil
+                }
+
                 if nil != updateErr {
                     return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to update currency", updateErr), nil
                 }
@@ -60,4 +71,12 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
 type updateRequest struct {
     Code string `json:"code" validate:"notBlank,currencyCode"`
     Name string `json:"name" validate:"notBlank,min=2,max=120"`
+}
+
+/* trimmed answers the body as the door stores it, so it is validated in that spelling */
+func (instance updateRequest) trimmed() updateRequest {
+    instance.Code = strings.TrimSpace(instance.Code)
+    instance.Name = strings.TrimSpace(instance.Name)
+
+    return instance
 }

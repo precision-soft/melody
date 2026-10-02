@@ -233,8 +233,9 @@ func TestInsertWithMintedIdentifier_AnswersThePrimaryKeysRefusalOfASuppliedIdent
         context.Background(),
         nil,
         productIdentifierMintLockName,
+        identifierSequence{prefix: "prod-", identifier: func() string { return "prod-supplied" }},
         false,
-        func() error {
+        func(floor string) error {
             t.Fatalf("expected no mint for a supplied identifier")
 
             return nil
@@ -300,5 +301,41 @@ func TestSeedRowsSkippingTaken_EndsTheSeedOnAnyOtherFailure(t *testing.T) {
 
     if false == errors.Is(seedErr, refusal) || 1 != calls {
         t.Fatalf("expected the first failure to end the seed, got %v after %d inserts", seedErr, calls)
+    }
+}
+
+/* the mint continues past the floor the sequence keeps, not past the highest identifier present, and the create raises the sequence to what it stored */
+func TestInsertWithMintedIdentifier_MintsPastTheSequenceAndRecordsWhatItStored(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = func(query string) ([]string, [][]driver.Value, error) {
+        if true == strings.Contains(query, "GET_LOCK") {
+            return []string{"lock"}, [][]driver.Value{{int64(1)}}, nil
+        }
+
+        if true == strings.Contains(query, "highest_suffix") && true == strings.Contains(query, "'cat-'") {
+            return []string{"highest_suffix"}, [][]driver.Value{{int64(7)}}, nil
+        }
+
+        if true == strings.Contains(query, "melody_example_v3_category") {
+            return []string{"id"}, [][]driver.Value{{"cat-3"}}, nil
+        }
+
+        return []string{}, nil, nil
+    }
+
+    category := entity.NewCategory("", "Probe")
+    if createErr := (&bunCategoryRepository{database: database}).Create(context.Background(), category); nil != createErr {
+        t.Fatalf("create: %v", createErr)
+    }
+
+    if "cat-8" != category.Id {
+        t.Fatalf("expected the mint past the sequence's cat-7, got %q (recorded %v)", category.Id, recorder.recordedQueries())
+    }
+
+    recorded := recorder.firstMatching(func(query string) bool {
+        return true == strings.HasPrefix(query, "INSERT INTO `melody_example_v3_identifier_sequence`")
+    })
+    if false == strings.Contains(recorded, "'cat-', 8") || false == strings.Contains(recorded, "GREATEST") {
+        t.Fatalf("expected the sequence raised to cat-8 and never lowered, got %q", recorded)
     }
 }

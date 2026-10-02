@@ -7,6 +7,7 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/v3/.example/entity"
+    "github.com/precision-soft/melody/v3/.example/persistence"
     melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
 )
 
@@ -71,5 +72,20 @@ func TestUserCreateCommand_RefusesAnEmptyPasswordAnUnknownRoleAndATakenName(t *t
     users, _ := fixture.userRepository.All(context.Background())
     if 3 != len(users) {
         t.Fatalf("expected the directory to keep its three accounts, got %d", len(users))
+    }
+}
+
+/* without the catalogue database the account would live in the console's own memory and end with it, so the command refuses before anything is read or written */
+func TestUserCreateCommand_RefusesWithoutTheCatalogueDatabase(t *testing.T) {
+    fixture := newCommandFixtureOver(t, nil, persistence.NewCatalogStorage(nil))
+    command := NewUserCreateCommand(fixture.lazyUserService(), strings.NewReader("a-first-admin-password\n"))
+
+    runErr := command.Run(fixture.runtime, newFlagContext(entity.RoleAdmin, "operator"))
+    if nil == runErr || false == strings.Contains(runErr.Error(), "needs the catalogue database") {
+        t.Fatalf("expected the refusal naming the database, got %v", runErr)
+    }
+
+    if _, found, _ := fixture.userRepository.FindByUsername(context.Background(), "operator"); true == found {
+        t.Fatalf("a refused create wrote the account")
     }
 }

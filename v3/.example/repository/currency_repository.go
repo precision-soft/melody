@@ -2,6 +2,7 @@ package repository
 
 import (
     "context"
+    "errors"
     "fmt"
     "strings"
 
@@ -74,6 +75,22 @@ func validateCurrency(currency *entity.Currency) error {
     }
 
     return nil
+}
+
+/* ErrCurrencyCodeAlreadyExists is the refusal both write doors answer for a code another currency holds, whether the in-memory check or the unique key caught it, so the http doors answer 409 rather than 500. */
+var ErrCurrencyCodeAlreadyExists = errors.New("currency code already exists")
+
+/* asCurrencyCodeAlreadyExists maps the code's unique key refusal onto ErrCurrencyCodeAlreadyExists, read from the key clause down the whole chain of causes; any other failure is answered untouched. */
+func asCurrencyCodeAlreadyExists(writeErr error) error {
+    if nil == writeErr {
+        return nil
+    }
+
+    if false == errorChainNamesKey(writeErr, migration.CurrencyCodeIndexName) {
+        return writeErr
+    }
+
+    return ErrCurrencyCodeAlreadyExists
 }
 
 func nextCurrencyId(existingIdList []string) string {

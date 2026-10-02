@@ -77,7 +77,8 @@ func (instance *CategoryService) FindById(id string) (*entity.Category, bool, er
                 return nil, findErr
             }
 
-            if false == found {
+            /* the database compares the identifier under its collation, which pads trailing spaces, so a row found for another spelling is answered absent: cached under the spelling asked, it would be a copy no listener drops */
+            if false == found || id != category.Id {
                 return nil, nil
             }
 

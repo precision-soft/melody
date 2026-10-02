@@ -19,7 +19,7 @@ const (
     scopedServiceProbeNameOther = "e2e scoped trail probe two"
 )
 
-/* scopedServiceProbeNames are the products this section writes. They are removed with everything the application recorded about them, because the example recycles a freed identifier into the next probe. */
+/* scopedServiceProbeNames are the products this section writes. They are removed with everything the application recorded about them, so a run leaves the trail as it found it. */
 var scopedServiceProbeNames = []string{scopedServiceProbeNameFirst, scopedServiceProbeNameOther}
 
 /* scopedJournalRow is one row of the application's journal, read through the harness's own connection rather than through any route the application serves. */

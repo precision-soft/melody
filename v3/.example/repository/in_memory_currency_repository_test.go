@@ -176,3 +176,27 @@ func TestInMemoryCurrencyRepositoryUpdateKeepsAQuoteWrittenAfterTheRenameRead(t 
         t.Fatalf("expected the new name over the refresh's quote, got %s at %v, %s", final.Name, final.Rate, final.RateAsOf)
     }
 }
+
+/* the highest minted currency deleted, the next create does not adopt its identifier, and with it the products still priced in it */
+func TestInMemoryCurrencyRepositoryNeverMintsADeletedIdentifierAgain(t *testing.T) {
+    ctx := context.Background()
+    repositoryInstance := newInMemoryCurrencyRepository()
+
+    first := entity.NewCurrency("", "CHF", "Swiss Franc", 0.94, currencyProbeQuoteInstant)
+    if createErr := repositoryInstance.Create(ctx, first); nil != createErr {
+        t.Fatalf("create: %v", createErr)
+    }
+
+    if _, deleteErr := repositoryInstance.DeleteById(ctx, first.Id); nil != deleteErr {
+        t.Fatalf("delete: %v", deleteErr)
+    }
+
+    second := entity.NewCurrency("", "JPY", "Yen", 160, currencyProbeQuoteInstant)
+    if createErr := repositoryInstance.Create(ctx, second); nil != createErr {
+        t.Fatalf("create: %v", createErr)
+    }
+
+    if first.Id == second.Id {
+        t.Fatalf("the deleted identifier %q was minted again", first.Id)
+    }
+}

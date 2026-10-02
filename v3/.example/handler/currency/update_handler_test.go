@@ -59,3 +59,30 @@ func TestApiUpdateDoorRenamesTheCurrencyAndKeepsItsRate(t *testing.T) {
         t.Fatalf("expected the rename in the repository and the rate kept, got %+v", stored)
     }
 }
+
+func TestApiUpdateDoorAnswersACodeAnotherCurrencyHoldsAsAConflict(t *testing.T) {
+    fixture := newCurrencyDoorFixture(t)
+
+    status, body := fixture.call(t, ApiUpdateHandler(), fixture.runtimeFor(entity.RoleEditor), nethttp.MethodPut, `{"code":"EUR","name":"Not the Euro"}`, map[string]string{"id": "cur-usd"})
+    if nethttp.StatusConflict != status {
+        t.Fatalf("expected 409 for a rename onto a taken code, got %d with body %q", status, body)
+    }
+
+    if stored, _ := fixture.stored(t, "cur-usd"); "USD" != stored.Code {
+        t.Fatalf("a refused rename changed the code to %q", stored.Code)
+    }
+
+    status, body = fixture.call(t, ApiUpdateHandler(), fixture.runtimeFor(entity.RoleEditor), nethttp.MethodPut, `{"code":"EUR","name":"Euro"}`, map[string]string{"id": "cur-eur"})
+    if nethttp.StatusOK != status {
+        t.Fatalf("expected a currency to keep its own code, got %d with body %q", status, body)
+    }
+}
+
+func TestApiUpdateDoorValidatesTheTrimmedBody(t *testing.T) {
+    fixture := newCurrencyDoorFixture(t)
+
+    status, body := fixture.call(t, ApiUpdateHandler(), fixture.runtimeFor(entity.RoleEditor), nethttp.MethodPut, `{"code":"USD","name":"X "}`, map[string]string{"id": "cur-usd"})
+    if nethttp.StatusBadRequest != status {
+        t.Fatalf("expected 400 for a name that is one rune once trimmed, got %d with body %q", status, body)
+    }
+}

@@ -142,8 +142,27 @@ func (instance *fakeConnection) Close() error {
     return nil
 }
 
+/* Begin opens a transaction the recorder sees as BEGIN, COMMIT and ROLLBACK, so a door that runs its own transaction is proven on the statements it issued inside it */
 func (instance *fakeConnection) Begin() (driver.Tx, error) {
-    return nil, errors.New("transactions are not supported by the fake driver")
+    instance.recorder.record("BEGIN")
+
+    return &fakeTransaction{recorder: instance.recorder}, nil
+}
+
+type fakeTransaction struct {
+    recorder *queryRecorder
+}
+
+func (instance *fakeTransaction) Commit() error {
+    instance.recorder.record("COMMIT")
+
+    return nil
+}
+
+func (instance *fakeTransaction) Rollback() error {
+    instance.recorder.record("ROLLBACK")
+
+    return nil
 }
 
 func (instance *fakeConnection) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
@@ -235,6 +254,7 @@ var (
     _ driver.ExecerContext  = (*fakeConnection)(nil)
     _ driver.QueryerContext = (*fakeConnection)(nil)
     _ driver.Connector      = (*fakeConnector)(nil)
+    _ driver.Tx             = (*fakeTransaction)(nil)
 )
 
 /* concurrentRounds is shared by the four in-memory suites in this package. */

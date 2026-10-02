@@ -42,16 +42,16 @@ func (instance *countingUserRepository) Create(ctx context.Context, user *entity
     return nil
 }
 
-func (instance *countingUserRepository) Update(ctx context.Context, user *entity.User) (bool, error) {
-    return false, nil
+func (instance *countingUserRepository) Update(ctx context.Context, id string, change repository.UserChange, guard repository.UserGuard) (*entity.User, *entity.User, error) {
+    return nil, nil, nil
 }
 
 func (instance *countingUserRepository) GrantRole(ctx context.Context, id string, role string) (*entity.User, repository.GrantRoleOutcome, error) {
     return nil, repository.GrantRoleAccountAbsent, nil
 }
 
-func (instance *countingUserRepository) DeleteById(ctx context.Context, id string) (bool, error) {
-    return false, nil
+func (instance *countingUserRepository) DeleteById(ctx context.Context, id string, guard repository.UserGuard) (*entity.User, error) {
+    return nil, nil
 }
 
 /* an absence is remembered under a key its caller spelled, so it has to lapse: the unauthenticated login
@@ -110,8 +110,8 @@ func TestRememberEntityOrAbsenceLeavesAFoundEntityUnbounded(t *testing.T) {
     }
 
     lastWrite := writes[len(writes)-1]
-    if entityCacheTtl != lastWrite.ttl {
-        t.Fatalf("expected the found value to end unbounded, got %s", lastWrite.ttl)
+    if 10*time.Minute != lastWrite.ttl {
+        t.Fatalf("expected the found value to end under the ten-minute entity bound, got %s", lastWrite.ttl)
     }
 }
 
@@ -268,14 +268,14 @@ func TestRememberEntityOrAbsenceWritesAFoundValueOnceForEveryWaiterOfOneLoad(t *
     }
 
     writes := cacheInstance.writesFor("coalesced-key")
-    unbounded := 0
+    entityWrites := 0
     for _, write := range writes {
         if entityCacheTtl == write.ttl {
-            unbounded = unbounded + 1
+            entityWrites = entityWrites + 1
         }
     }
 
-    if 1 != unbounded {
-        t.Fatalf("expected the found value to be written unbounded exactly once, by the reader that loaded it, got %d unbounded writes among %d", unbounded, len(writes))
+    if 1 != entityWrites {
+        t.Fatalf("expected the found value to be written under the entity bound exactly once, by the reader that loaded it, got %d such writes among %d", entityWrites, len(writes))
     }
 }

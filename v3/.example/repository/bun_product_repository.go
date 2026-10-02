@@ -178,19 +178,20 @@ func (instance *bunProductRepository) Create(ctx context.Context, product *entit
         ctx,
         instance.database,
         productIdentifierMintLockName,
+        identifierSequence{prefix: "prod-", identifier: func() string { return product.Id }},
         mintsIdentifier,
-        func() error {
+        func(floor string) error {
             identifierList, identifierErr := instance.identifierList(ctx)
             if nil != identifierErr {
                 return identifierErr
             }
 
-            product.Id = nextProductId(identifierList)
+            product.Id = nextProductId(append(identifierList, floor))
 
             return nil
         },
         func() error {
-            return instance.tracker.Insert(auditContext(ctx), persistence.AuditEntityProduct, product.Id, newProductRow(product))
+            return asProductReferenceRefusal(instance.tracker.Insert(auditContext(ctx), persistence.AuditEntityProduct, product.Id, newProductRow(product)))
         },
     )
 }
@@ -226,7 +227,7 @@ func (instance *bunProductRepository) Update(ctx context.Context, product *entit
     /* the tracker loads the before-image itself, so the trail records the row as the database held it rather than what the caller passed */
     updateErr := instance.tracker.Update(auditContext(ctx), persistence.AuditEntityProduct, id, newProductRow(product))
     if nil != updateErr {
-        return false, updateErr
+        return false, asProductReferenceRefusal(updateErr)
     }
 
     return true, nil
@@ -259,6 +260,14 @@ func (instance *bunProductRepository) DeleteById(ctx context.Context, id string)
     }
 
     return true, nil
+}
+
+func (instance *bunProductRepository) PricedIn(ctx context.Context, currencyId string) (bool, error) {
+    return instance.database.
+        NewSelect().
+        Model((*productRow)(nil)).
+        Where("currency_id = ?", currencyId).
+        Exists(ctx)
 }
 
 func (instance *bunProductRepository) identifierList(ctx context.Context) ([]string, error) {

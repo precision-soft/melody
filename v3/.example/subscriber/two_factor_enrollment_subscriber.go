@@ -10,7 +10,7 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/* TwoFactorEnrollmentSubscriber releases a second factor with the account it was enrolled for: identifiers are minted as the highest suffix plus one, so an enrollment left behind would enroll the next holder of the identifier. It listens where the deletion is published, so every door that deletes an account releases the factor. The release is a second hand: the enrollment's foreign key cascades the row away with the account, the authoritative release, so a store this listener cannot reach is journaled and the deletion goes on — the dispatcher ends a dispatch at the first listener that fails, and the listeners after this one are the cache's and whatever an application adds. It runs ahead of the cache listener, after the token release. */
+/* TwoFactorEnrollmentSubscriber releases a second factor with the account it was enrolled for: an enrollment left behind would name an account that is gone, and enroll whoever holds the identifier after example:db:reset hands it out again. It listens where the deletion is published, so every door that deletes an account releases the factor. The release is a second hand: the enrollment's foreign key cascades the row away with the account, the authoritative release, so a store this listener cannot reach is journaled and the deletion goes on — the dispatcher ends a dispatch at the first listener that fails, and the listeners after this one are the cache's and whatever an application adds. It runs ahead of the cache listener, after the token release. */
 type TwoFactorEnrollmentSubscriber struct {
     storeSource twofactor.StoreSource
 }

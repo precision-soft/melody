@@ -150,7 +150,7 @@ func createExampleUser(client *exampleClient, username string) (int, string) {
     return response.statusCode, created.Payload.Id
 }
 
-/* removeExampleUsers deletes each probe account through the application, and on the third major the audit trail its writes left, since the identifiers recycle */
+/* removeExampleUsers deletes each probe account through the application, and on the third major the audit trail its writes left, so a run leaves the trail as it found it */
 func removeExampleUsers(label string, client *exampleClient, mysqlDsn string, major exampleMajor, idList []string) {
     var database *bun.DB
     if 3 == major.number {

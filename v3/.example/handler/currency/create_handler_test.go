@@ -131,3 +131,46 @@ func TestApiCreateDoorAnswersATakenIdentifierAsAConflict(t *testing.T) {
         t.Fatalf("expected the first currency kept, got %+v", stored)
     }
 }
+
+func TestApiCreateDoorAnswersATakenCodeAsAConflictAndStoresNoSecondRow(t *testing.T) {
+    fixture := newCurrencyDoorFixture(t)
+
+    status, body := fixture.call(t, ApiCreateHandler(), fixture.runtimeFor(entity.RoleEditor), nethttp.MethodPost, `{"code":"EUR","name":"Euro bis","rate":2}`, nil)
+    if nethttp.StatusConflict != status {
+        t.Fatalf("expected 409 for a taken code, got %d with body %q", status, body)
+    }
+
+    envelope := currencyEnvelope{}
+    decodeBody(t, body, &envelope)
+
+    if 1 != len(envelope.Errors) || "code already exists" != envelope.Errors[0] {
+        t.Fatalf("expected the refusal to name the code, got %v", envelope.Errors)
+    }
+
+    if holders := fixture.holdingCode(t, "EUR"); 1 != len(holders) || "cur-eur" != holders[0] {
+        t.Fatalf("expected EUR held by cur-eur alone, got %v", holders)
+    }
+}
+
+/* the binding validates the body as sent; the door stores it trimmed, so it validates that spelling too: a name of one rune padded to two is refused, not stored */
+func TestApiCreateDoorValidatesTheTrimmedBody(t *testing.T) {
+    fixture := newCurrencyDoorFixture(t)
+
+    status, body := fixture.call(t, ApiCreateHandler(), fixture.runtimeFor(entity.RoleEditor), nethttp.MethodPost, `{"id":"cur-chf","code":"CHF","name":" X","rate":0.94}`, nil)
+    if nethttp.StatusBadRequest != status {
+        t.Fatalf("expected 400 for a name that is one rune once trimmed, got %d with body %q", status, body)
+    }
+
+    if _, found := fixture.stored(t, "cur-chf"); true == found {
+        t.Fatalf("a refused create wrote the currency")
+    }
+
+    status, body = fixture.call(t, ApiCreateHandler(), fixture.runtimeFor(entity.RoleEditor), nethttp.MethodPost, `{"id":"cur-chf","code":"CHF","name":" Franc ","rate":0.94}`, nil)
+    if nethttp.StatusCreated != status {
+        t.Fatalf("expected 201 for a padded name that is valid once trimmed, got %d with body %q", status, body)
+    }
+
+    if stored, _ := fixture.stored(t, "cur-chf"); "Franc" != stored.Name {
+        t.Fatalf("expected the trimmed name stored, got %q", stored.Name)
+    }
+}

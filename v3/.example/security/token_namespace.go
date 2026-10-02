@@ -15,7 +15,7 @@ const ServiceTokenNamespace = "service.example.security.token_namespace"
 /* tokenNamespaceCallTimeout bounds each round trip of a clear, the bound the token store puts on its own */
 const tokenNamespaceCallTimeout = time.Second
 
-/* TokenNamespace is every key the redis token store writes — the device tokens, the per-account indexes and the revocation epochs — under the one prefix the composition root hands it. The store has no door that empties it, and example:db:reset needs one: the reset removes the accounts through no door that publishes a deletion, and identifiers are minted as the highest suffix plus one, so a device token left standing would authenticate as the next holder of its identifier. A store that is the server process's own memory, without redis, is out of a console command's reach and has no namespace here. */
+/* TokenNamespace is every key the redis token store writes — the device tokens, the per-account indexes and the revocation epochs — under the one prefix the composition root hands it. The store has no door that empties it, and example:db:reset needs one: the reset removes the accounts through no door that publishes a deletion, and the reseed hands the identifiers out again, so a device token left standing would authenticate as the next holder of its identifier. A store that is the server process's own memory, without redis, is out of a console command's reach and has no namespace here. */
 type TokenNamespace struct {
     client rueidis.Client
     prefix string

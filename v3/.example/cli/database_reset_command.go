@@ -22,7 +22,7 @@ import (
 
 const databaseResetFlagForce = "force"
 
-/* DatabaseResetCommand brings this example's databases back to the state a fresh volume would be in: the tables its migration sets own are dropped, the bun bookkeeping is recreated, the schema is applied again, the audit trail is emptied and the nomenclature reseeded. An example has one state and no migration that repairs its history, so an older volume is answered here, by a command an operator runs deliberately; it is the application's command because dropping a whole schema is no door a published module should grow. The audit rows are emptied because identifiers are minted as the highest suffix plus one and recycle, so a trail left standing would give the next user-4 the last one's history; the outbox is left alone, its rows being messages still to deliver. */
+/* DatabaseResetCommand brings this example's databases back to the state a fresh volume would be in: the tables its migration sets own are dropped, the bun bookkeeping is recreated, the schema is applied again, the audit trail is emptied and the nomenclature reseeded. An example has one state and no migration that repairs its history, so an older volume is answered here, by a command an operator runs deliberately; it is the application's command because dropping a whole schema is no door a published module should grow. The audit rows are emptied because the identifier sequence is dropped with the schema and the reseed hands the identifiers out again, so a trail left standing would give the next user-4 the last one's history; the outbox is left alone, its rows being messages still to deliver. */
 type DatabaseResetCommand struct{}
 
 func NewDatabaseResetCommand() *DatabaseResetCommand {

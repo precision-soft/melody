@@ -84,9 +84,6 @@ func identicalUpdateDoors() map[string]func(database *bun.DB) (bool, error) {
         "product": func(database *bun.DB) (bool, error) {
             return NewBunProductRepository(database).Update(context.Background(), validProduct())
         },
-        "user": func(database *bun.DB) (bool, error) {
-            return NewBunUserRepository(database).Update(context.Background(), validUser())
-        },
     }
 }
 

@@ -29,6 +29,9 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "invalid json"), nil
         }
 
+        /* the door stores the body trimmed, so it validates that spelling: a name of one rune padded to two is refused, not stored */
+        dto = dto.trimmed()
+
         validatorInstance := melodyvalidation.ValidatorMustFromContainer(runtimeInstance.Container())
 
         validationErrors := validatorInstance.Validate(dto)
@@ -40,12 +43,12 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
 
         product, createErr := productService.Create(
             runtimeInstance,
-            strings.TrimSpace(dto.Id),
-            strings.TrimSpace(dto.Name),
-            strings.TrimSpace(dto.Description),
-            strings.TrimSpace(dto.CategoryId),
+            dto.Id,
+            dto.Name,
+            dto.Description,
+            dto.CategoryId,
             dto.Price,
-            strings.TrimSpace(dto.CurrencyId),
+            dto.CurrencyId,
             dto.Stock,
         )
         if nil != createErr {
@@ -76,4 +79,15 @@ func createRefusalStatus(createErr error) (int, string) {
     }
 
     return nethttp.StatusInternalServerError, "failed to create product"
+}
+
+/* trimmed answers the body as the door stores it */
+func (instance createRequest) trimmed() createRequest {
+    instance.Id = strings.TrimSpace(instance.Id)
+    instance.Name = strings.TrimSpace(instance.Name)
+    instance.Description = strings.TrimSpace(instance.Description)
+    instance.CategoryId = strings.TrimSpace(instance.CategoryId)
+    instance.CurrencyId = strings.TrimSpace(instance.CurrencyId)
+
+    return instance
 }

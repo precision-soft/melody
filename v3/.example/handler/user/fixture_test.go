@@ -118,22 +118,42 @@ func (instance *recordingUserRepository) Create(ctx context.Context, user *entit
     return nil
 }
 
-func (instance *recordingUserRepository) Update(ctx context.Context, user *entity.User) (bool, error) {
+/* Update holds the repository contract the doors rely on: the guard decides on the stored account, and only what the change names is written over it. */
+func (instance *recordingUserRepository) Update(ctx context.Context, id string, change repository.UserChange, guard repository.UserGuard) (*entity.User, *entity.User, error) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
     if nil != instance.writeRefusal {
-        return false, instance.writeRefusal
+        return nil, nil, instance.writeRefusal
     }
 
-    if _, exists := instance.users[user.Id]; false == exists {
-        return false, nil
+    stored, exists := instance.users[id]
+    if false == exists {
+        return nil, nil, nil
     }
 
-    copied := *user
-    instance.users[user.Id] = &copied
+    if nil != guard {
+        if guardErr := guard(stored); nil != guardErr {
+            return nil, nil, guardErr
+        }
+    }
 
-    return true, nil
+    before := *stored
+    changed := *stored
+    if nil != change.Username {
+        changed.Username = *change.Username
+    }
+    if nil != change.PasswordHash {
+        changed.Password = *change.PasswordHash
+    }
+    if nil != change.Roles {
+        changed.Roles = append([]string{}, change.Roles...)
+    }
+    instance.users[id] = &changed
+
+    after := changed
+
+    return &before, &after, nil
 }
 
 func (instance *recordingUserRepository) GrantRole(ctx context.Context, id string, role string) (*entity.User, repository.GrantRoleOutcome, error) {
@@ -158,17 +178,24 @@ func (instance *recordingUserRepository) GrantRole(ctx context.Context, id strin
     return &granted, repository.GrantRoleGranted, nil
 }
 
-func (instance *recordingUserRepository) DeleteById(ctx context.Context, id string) (bool, error) {
+func (instance *recordingUserRepository) DeleteById(ctx context.Context, id string, guard repository.UserGuard) (*entity.User, error) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    if _, exists := instance.users[id]; false == exists {
-        return false, nil
+    stored, exists := instance.users[id]
+    if false == exists {
+        return nil, nil
+    }
+
+    if nil != guard {
+        if guardErr := guard(stored); nil != guardErr {
+            return nil, guardErr
+        }
     }
 
     delete(instance.users, id)
 
-    return true, nil
+    return stored, nil
 }
 
 /* storedRoles reads the roles the repository holds, which is the only reading that answers what an update actually wrote. */
@@ -323,7 +350,12 @@ var _ melodyeventcontract.EventDispatcher = (*silentEventDispatcher)(nil)
 func adminRuntime(t *testing.T, userRepository repository.UserRepository, actorId string, actorRoles []string) melodyruntimecontract.Runtime {
     t.Helper()
 
-    cacheInstance := &valueCache{values: map[string]any{}}
+    return adminRuntimeOverCache(t, userRepository, &valueCache{values: map[string]any{}}, actorId, actorRoles)
+}
+
+/* adminRuntimeOverCache is adminRuntime over a cache the test holds, so a test can plant the stale entry a raced or failed invalidation leaves behind; the dispatcher stays silent, which is that invalidation not happening */
+func adminRuntimeOverCache(t *testing.T, userRepository repository.UserRepository, cacheInstance *valueCache, actorId string, actorRoles []string) melodyruntimecontract.Runtime {
+    t.Helper()
 
     containerInstance := melodycontainer.NewContainer()
 
@@ -429,4 +461,16 @@ func administrator(id string) *entity.User {
 
 func editor(id string) *entity.User {
     return &entity.User{Id: id, Username: id, Password: "hash", Roles: []string{entity.RoleUser, entity.RoleEditor}}
+}
+
+/* stored answers the account the repository holds, the only reading that says what a door wrote */
+func (instance *recordingUserRepository) stored(t *testing.T, id string) *entity.User {
+    t.Helper()
+
+    user, exists, err := instance.FindById(context.Background(), id)
+    if nil != err || false == exists {
+        t.Fatalf("the repository no longer holds %q (err %v)", id, err)
+    }
+
+    return user
 }

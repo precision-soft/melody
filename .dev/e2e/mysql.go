@@ -76,6 +76,7 @@ func runMysqlCheck(baseUrl string, redisAddress string) {
 
     assertMysqlProductAuditTrail(client, baseUrl, database)
     assertMysqlCurrencyWrites(client, baseUrl, database)
+    assertMysqlCatalogueIntegrity(client, baseUrl, database)
     assertMysqlPasswordRedactedInTrail(client, baseUrl, database)
     assertMysqlDeletedAccountReleasesItsEnrollment(client, baseUrl, database)
 }
@@ -272,7 +273,7 @@ func assertMysqlProductAuditTrail(client *http.Client, baseUrl string, database 
 func assertMysqlProductDeleteCarriesNoBeforeImage(client *http.Client, baseUrl string, database *bun.DB, productId string) {
     requireMysqlWrite(client, "DELETE", baseUrl, "/products/api/delete/"+productId+"/", "", "delete the audit probe")
 
-    /* the probe is gone from the table, so the cleanup that finds probes by name no longer reaches its trail: it is removed here, on the failure path as well, or the next product minted under the recycled identifier would inherit these entries */
+    /* the probe is gone from the table, so the cleanup that finds probes by name no longer reaches its trail: it is removed here, on the failure path as well, or the trail would keep entries naming a product that no longer exists */
     removeTrailOnFailure := pushFailureCleanup(func() {
         removeExampleV3AuditTrail(mysqlLabel, database, "product", productId)
     })
@@ -428,7 +429,7 @@ func updateMysqlUserProbePassword(client *http.Client, baseUrl string, userId st
 func removeMysqlUserProbe(client *http.Client, baseUrl string, database *bun.DB, userId string) {
     requireMysqlWrite(client, "DELETE", baseUrl, "/users/api/delete/"+userId+"/", "", "remove the redaction probe account")
 
-    /* the account is gone, so its trail is removed on the failure path as well: an assertion failing below would otherwise leave entries the next account minted under the recycled identifier inherits */
+    /* the account is gone, so its trail is removed on the failure path as well: an assertion failing below would otherwise leave entries naming an account that no longer exists */
     removeTrailOnFailure := pushFailureCleanup(func() {
         removeExampleV3AuditTrail(mysqlLabel, database, "user", userId)
     })

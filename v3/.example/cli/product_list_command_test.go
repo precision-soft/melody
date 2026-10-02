@@ -52,7 +52,7 @@ func TestProductListCommandJournalsANomenclatureItCouldNotRead(t *testing.T) {
     cacheInstance := melodycache.NewManagerOwningBackend(melodycache.NewInMemoryBackend(0, 0, clockInstance), examplecache.NewGobSerializer())
 
     categoryService := service.NewCategoryService(&refusingCategoryRepository{CategoryRepository: categoryRepository}, cacheInstance, nil)
-    currencyService := service.NewCurrencyService(currencyRepository, cacheInstance, nil, clockInstance)
+    currencyService := service.NewCurrencyService(currencyRepository, productRepository, cacheInstance, nil, clockInstance)
     productService := service.NewProductService(productRepository, categoryService, currencyService, cacheInstance, nil, clockInstance)
 
     journal := &bytes.Buffer{}

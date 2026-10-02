@@ -1,11 +1,13 @@
 package currency
 
 import (
+    "errors"
     nethttp "net/http"
     "strings"
 
     "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/presenter"
+    "github.com/precision-soft/melody/v3/.example/repository"
     "github.com/precision-soft/melody/v3/.example/service"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -31,6 +33,10 @@ func ApiDeleteHandler() melodyhttpcontract.Handler {
         currencyService := service.MustGetCurrencyService(runtimeInstance.Container())
 
         deleted, deleteErr := currencyService.DeleteById(runtimeInstance, id)
+        if true == errors.Is(deleteErr, repository.ErrCurrencyInUse) {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusConflict, "a product is priced in this currency"), nil
+        }
+
         if nil != deleteErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to delete currency", deleteErr), nil
         }

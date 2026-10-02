@@ -239,3 +239,27 @@ func TestCreateRefusalStatusAnswersAnyOtherFailureAsTheCatalogues(t *testing.T) 
         t.Fatalf("expected 500, got %d %q", status, message)
     }
 }
+
+/* the binding validates the body as sent; the door stores it trimmed, so it validates that spelling too */
+func TestApiCreateDoorValidatesTheTrimmedBody(t *testing.T) {
+    status, body := callCreateDoor(t, `{"id":"prod-trim","name":" X","description":"d","categoryId":"cat-1","price":1,"currencyId":"cur-eur","stock":1}`)
+    if nethttp.StatusBadRequest != status {
+        t.Fatalf("expected 400 for a name that is one rune once trimmed, got %d with body %q", status, body)
+    }
+
+    if joined := strings.Join(errorListOf(t, body), "\n"); false == strings.Contains(joined, "name: ") {
+        t.Fatalf("expected the refusal to name the name, got %q", joined)
+    }
+}
+
+func TestCreateRefusalStatusAnswersAReferenceThatNamesNothingAsTheCallers(t *testing.T) {
+    for refusal, wanted := range map[error]string{
+        repository.ErrUnknownCategory: "categoryId: the category does not exist",
+        repository.ErrUnknownCurrency: "currencyId: the currency does not exist",
+    } {
+        status, message := createRefusalStatus(fmt.Errorf("create: %w", refusal))
+        if nethttp.StatusBadRequest != status || wanted != message {
+            t.Errorf("%v answered %d %q", refusal, status, message)
+        }
+    }
+}

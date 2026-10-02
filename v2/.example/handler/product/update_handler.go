@@ -36,6 +36,9 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "invalid json"), nil
         }
 
+        /* the door stores the body trimmed, so it validates that spelling: a name of one rune padded to two is refused, not stored */
+        dto = dto.trimmed()
+
         validatorInstance := melodyvalidation.ValidatorMustFromContainer(runtimeInstance.Container())
 
         validationErrors := validatorInstance.Validate(dto)
@@ -48,11 +51,11 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
         product, found, updateErr := productService.Update(
             runtimeInstance,
             id,
-            strings.TrimSpace(dto.Name),
-            strings.TrimSpace(dto.Description),
-            strings.TrimSpace(dto.CategoryId),
+            dto.Name,
+            dto.Description,
+            dto.CategoryId,
             dto.Price,
-            strings.TrimSpace(dto.CurrencyId),
+            dto.CurrencyId,
             dto.Stock,
         )
         if nil != updateErr {
@@ -74,4 +77,14 @@ type updateRequest struct {
     Price       float64 `json:"price" validate:"greaterThan=0"`
     CurrencyId  string  `json:"currencyId" validate:"notBlank"`
     Stock       int64   `json:"stock" validate:"greaterThan=-1"`
+}
+
+/* trimmed answers the body as the door stores it */
+func (instance updateRequest) trimmed() updateRequest {
+    instance.Name = strings.TrimSpace(instance.Name)
+    instance.Description = strings.TrimSpace(instance.Description)
+    instance.CategoryId = strings.TrimSpace(instance.CategoryId)
+    instance.CurrencyId = strings.TrimSpace(instance.CurrencyId)
+
+    return instance
 }

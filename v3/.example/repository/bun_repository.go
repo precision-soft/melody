@@ -10,6 +10,7 @@ import (
     "time"
 
     melodyaudit "github.com/precision-soft/melody/integrations/bunorm/v3/audit"
+    "github.com/precision-soft/melody/v3/.example/migration"
     bun "github.com/uptrace/bun"
 )
 
@@ -110,10 +111,22 @@ const identifierMintLockWait = 10 * time.Second
 /* identifierMintLockReleaseTimeout bounds the release, issued on a fresh context so a request that ended cannot leave the lock held on a pooled connection */
 const identifierMintLockReleaseTimeout = 5 * time.Second
 
-/* insertWithMintedIdentifier mints and inserts under the table's MySQL advisory lock, taken by one create of this process at a time, so two creates never read the same highest identifier: unserialized, every create read the list before any committed, minted the same one, and the primary key refused all but one. GET_LOCK waits on the server and belongs to the session that took it, so the lock is taken and released on one connection pinned for the call, while the mint and the insert run on the handle's pool; a release that cannot be issued ends the session, which releases the lock. A caller-supplied identifier is inserted without the lock. */
-func insertWithMintedIdentifier(ctx context.Context, database *bun.DB, lockName string, mintsIdentifier bool, mint func() error, insert func() error) error {
+/* identifierSequence is what a table's creates keep in the identifier sequence: the prefix its minted identifiers carry, and the identifier a create ended with. */
+type identifierSequence struct {
+    prefix     string
+    identifier func() string
+}
+
+/* insertWithMintedIdentifier mints and inserts under the table's MySQL advisory lock, taken by one create of this process at a time, so two creates never read the same highest identifier: unserialized, every create read the list before any committed, minted the same one, and the primary key refused all but one. GET_LOCK waits on the server and belongs to the session that took it, so the lock is taken and released on one connection pinned for the call, while the mint and the insert run on the handle's pool; a release that cannot be issued ends the session, which releases the lock. A caller-supplied identifier is inserted without the lock.
+
+   The mint is handed the floor the sequence keeps, the highest identifier ever stored under the prefix, and every stored identifier raises it: the highest identifier present is not enough, since deleting the newest entity would hand its identifier, and the history and references that still name it, to the next one. */
+func insertWithMintedIdentifier(ctx context.Context, database *bun.DB, lockName string, sequence identifierSequence, mintsIdentifier bool, mint func(floor string) error, insert func() error) error {
     if false == mintsIdentifier {
-        return asIdAlreadyExists(insert())
+        if insertErr := asIdAlreadyExists(insert()); nil != insertErr {
+            return insertErr
+        }
+
+        return recordStoredIdentifier(ctx, database, sequence.prefix, sequence.identifier())
     }
 
     /* the creates of this process queue here, holding no connection: waiting in GET_LOCK holds a pooled connection, so twenty waiters on a pool of ten would leave the holder none for its read and its insert */
@@ -149,11 +162,57 @@ func insertWithMintedIdentifier(ctx context.Context, database *bun.DB, lockName 
 
     defer releaseIdentifierMintLock(connection, lockName)
 
-    if mintErr := mint(); nil != mintErr {
+    floor, floorErr := mintFloor(ctx, database, sequence.prefix)
+    if nil != floorErr {
+        return floorErr
+    }
+
+    if mintErr := mint(floor); nil != mintErr {
         return mintErr
     }
 
-    return insert()
+    if insertErr := insert(); nil != insertErr {
+        return insertErr
+    }
+
+    return recordStoredIdentifier(ctx, database, sequence.prefix, sequence.identifier())
+}
+
+/* mintFloor answers the identifier the sequence names as the highest ever stored under the prefix, or "" before the first */
+func mintFloor(ctx context.Context, database bun.IDB, prefix string) (string, error) {
+    highest := make([]int64, 0, 1)
+
+    selectErr := database.NewSelect().
+        Table(migration.IdentifierSequenceTableName).
+        Column("highest_suffix").
+        Where("entity = ?", prefix).
+        Scan(ctx, &highest)
+    if nil != selectErr {
+        return "", selectErr
+    }
+
+    if 0 == len(highest) {
+        return "", nil
+    }
+
+    return fmt.Sprintf("%s%d", prefix, highest[0]), nil
+}
+
+/* recordStoredIdentifier raises the prefix's sequence to the identifier's numeric tail, never lowers it; an identifier without one, a seeded cur-eur, leaves it as it is */
+func recordStoredIdentifier(ctx context.Context, database bun.IDB, prefix string, identifier string) error {
+    suffix := highestIdSuffix([]string{identifier}, prefix)
+    if 0 == suffix {
+        return nil
+    }
+
+    _, execErr := database.NewRaw(
+        "INSERT INTO ? (entity, highest_suffix) VALUES (?, ?) ON DUPLICATE KEY UPDATE highest_suffix = GREATEST(highest_suffix, VALUES(highest_suffix))",
+        bun.Ident(migration.IdentifierSequenceTableName),
+        prefix,
+        suffix,
+    ).Exec(ctx)
+
+    return execErr
 }
 
 /* identifierMintGates holds one single-slot gate per lock name, so the creates of one process take the advisory lock one at a time */

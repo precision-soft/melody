@@ -1,6 +1,7 @@
 package user
 
 import (
+    "errors"
     "testing"
 
     "github.com/precision-soft/melody/.example/entity"
@@ -67,19 +68,15 @@ func TestHasRoleAnswersTheExactRole(t *testing.T) {
 }
 
 /* An update names the fields it changes: an omitted username and an omitted password are kept, and roles were the one field an omission REMOVED — the target came back holding the base role alone, an administrator editing their own account included. */
-func TestRolesForUpdateKeepsWhatTheBodyDoesNotName(t *testing.T) {
-    current := []string{entity.RoleUser, entity.RoleEditor}
-
-    kept := rolesForUpdate(nil, current)
-
-    if 2 != len(kept) || entity.RoleUser != kept[0] || entity.RoleEditor != kept[1] {
-        t.Fatalf("the roles the body never named were rewritten to %v", kept)
+func TestRolesForUpdateLeavesTheRolesUnwrittenWhenTheBodyDoesNotNameThem(t *testing.T) {
+    if kept := rolesForUpdate(nil); nil != kept {
+        t.Fatalf("roles the body never named must not be written, got %v", kept)
     }
 }
 
 /* the other half of the same rule: roles the body DOES name replace what the target held */
 func TestRolesForUpdateReplacesWhatTheBodyNames(t *testing.T) {
-    replaced := rolesForUpdate([]string{entity.RoleUser}, []string{entity.RoleUser, entity.RoleEditor})
+    replaced := rolesForUpdate([]string{entity.RoleUser})
 
     if 1 != len(replaced) || entity.RoleUser != replaced[0] {
         t.Fatalf("the roles the body named were not stored, got %v", replaced)
@@ -88,9 +85,25 @@ func TestRolesForUpdateReplacesWhatTheBodyNames(t *testing.T) {
 
 /* a list sent EXPLICITLY empty is an opinion, and the base role is what normalizeRoles answers for it: an account is never left with none */
 func TestRolesForUpdateFallsBackToTheBaseRoleForAnEmptyListTheBodyNames(t *testing.T) {
-    answered := rolesForUpdate([]string{}, []string{entity.RoleUser, entity.RoleEditor})
+    answered := rolesForUpdate([]string{})
 
     if 1 != len(answered) || entity.RoleUser != answered[0] {
         t.Fatalf("an explicitly empty list answered %v", answered)
+    }
+}
+
+func TestRefusingAnotherAdminRefusesAPeerAndAdmitsTheActorAndAnAccountBelow(t *testing.T) {
+    guard := refusingAnotherAdmin("admin-1")
+
+    if refusal := guard(administrator("admin-2")); false == errors.Is(refusal, errAnotherAdmin) {
+        t.Fatalf("a peer administrator was admitted: %v", refusal)
+    }
+
+    if refusal := guard(administrator("admin-1")); nil != refusal {
+        t.Fatalf("the actor's own account was refused: %v", refusal)
+    }
+
+    if refusal := guard(editor("editor-1")); nil != refusal {
+        t.Fatalf("an account below was refused: %v", refusal)
     }
 }

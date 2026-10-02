@@ -1,6 +1,7 @@
 package repository
 
 import (
+    "errors"
     "context"
     "sync"
     "testing"
@@ -52,13 +53,13 @@ func TestInMemoryUserRepositoryConcurrentReadAndDelete(t *testing.T) {
                 return
             }
 
-            _, deleteErr := repositoryInstance.DeleteById(ctx, "user-first")
+            _, deleteErr := repositoryInstance.DeleteById(ctx, "user-first", nil)
             if nil != deleteErr {
                 t.Errorf("delete first: %v", deleteErr)
                 return
             }
 
-            _, deleteErr = repositoryInstance.DeleteById(ctx, "user-second")
+            _, deleteErr = repositoryInstance.DeleteById(ctx, "user-second", nil)
             if nil != deleteErr {
                 t.Errorf("delete second: %v", deleteErr)
                 return
@@ -140,5 +141,44 @@ func TestInMemoryUserRepositoryRefusesAnIdentifierThatIsAlreadyTaken(t *testing.
 
     if false == exists || "zz-first" != found.Username {
         t.Fatalf("expected the identifier to still name the account that took it, got exists=%t user=%v", exists, found)
+    }
+}
+
+/* the update writes only what the change names over the account the repository holds, and a guard's refusal writes nothing */
+func TestInMemoryUserRepositoryUpdateWritesOnlyTheChangeAndHonoursTheGuard(t *testing.T) {
+    ctx := context.Background()
+    repositoryInstance := NewInMemoryUserRepository()
+
+    if createErr := repositoryInstance.Create(ctx, entity.NewUser("user-7", "alice", "H2", []string{entity.RoleUser, entity.RoleEditor})); nil != createErr {
+        t.Fatalf("create: %v", createErr)
+    }
+
+    renamed := "alice-renamed"
+    before, after, updateErr := repositoryInstance.Update(ctx, "user-7", UserChange{Username: &renamed}, nil)
+    if nil != updateErr || nil == before || "alice" != before.Username {
+        t.Fatalf("the update answered before=%+v err=%v", before, updateErr)
+    }
+
+    if "H2" != after.Password || 2 != len(after.Roles) || renamed != after.Username {
+        t.Fatalf("the update wrote %+v; wanted the stored password and roles under the new name", after)
+    }
+
+    refusal := errors.New("refused by the guard")
+    other := "taken-over"
+    if _, _, guardedErr := repositoryInstance.Update(ctx, "user-7", UserChange{Username: &other}, func(current *entity.User) error { return refusal }); false == errors.Is(guardedErr, refusal) {
+        t.Fatalf("the guarded update answered %v", guardedErr)
+    }
+
+    if _, deleteErr := repositoryInstance.DeleteById(ctx, "user-7", func(current *entity.User) error { return refusal }); false == errors.Is(deleteErr, refusal) {
+        t.Fatalf("the guarded delete answered %v", deleteErr)
+    }
+
+    stored, found, _ := repositoryInstance.FindById(ctx, "user-7")
+    if false == found || renamed != stored.Username {
+        t.Fatalf("a refused write changed the account: found=%v %+v", found, stored)
+    }
+
+    if absent, _, _ := repositoryInstance.Update(ctx, "user-absent", UserChange{Username: &other}, nil); nil != absent {
+        t.Fatalf("an absent account answered %+v", absent)
     }
 }

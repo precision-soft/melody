@@ -8,6 +8,7 @@ import (
     "strings"
 
     "github.com/precision-soft/melody/v3/.example/entity"
+    "github.com/precision-soft/melody/v3/.example/persistence"
     "github.com/precision-soft/melody/v3/.example/repository"
     "github.com/precision-soft/melody/v3/.example/security"
     "github.com/precision-soft/melody/v3/.example/service"
@@ -47,6 +48,16 @@ func (instance *UserCreateCommand) Flags() []melodyclicontract.Flag {
 
 func (instance *UserCreateCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext melodyclicontract.Context) error {
     writer := commandContext.Writer()
+
+    storage, storageErr := melodycontainer.FromResolver[*persistence.CatalogStorage](runtimeInstance.Container(), persistence.ServiceCatalogStorage)
+    if nil != storageErr {
+        return storageErr
+    }
+
+    /* without the catalogue database the directory is the memory of each process: an account written here would live in this console process alone and end with it, and the server would never see it, so the command refuses before it reads a password */
+    if false == storage.IsPersistent() {
+        return errors.New("example:user:create needs the catalogue database (MYSQL_*): without one the directory is each process's own memory, and the account would end with this command instead of reaching the server")
+    }
 
     arguments := commandContext.Arguments()
     if 1 < len(arguments) {

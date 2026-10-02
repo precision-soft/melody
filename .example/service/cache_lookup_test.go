@@ -7,6 +7,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/.example/entity"
+    "github.com/precision-soft/melody/.example/repository"
     melodycachecontract "github.com/precision-soft/melody/cache/contract"
 )
 
@@ -169,12 +170,12 @@ func (instance *countingUserRepository) Create(ctx context.Context, user *entity
     return nil
 }
 
-func (instance *countingUserRepository) Update(ctx context.Context, user *entity.User) (bool, error) {
-    return false, nil
+func (instance *countingUserRepository) Update(ctx context.Context, id string, change repository.UserChange, guard repository.UserGuard) (*entity.User, *entity.User, error) {
+    return nil, nil, nil
 }
 
-func (instance *countingUserRepository) DeleteById(ctx context.Context, id string) (bool, error) {
-    return false, nil
+func (instance *countingUserRepository) DeleteById(ctx context.Context, id string, guard repository.UserGuard) (*entity.User, error) {
+    return nil, nil
 }
 
 /* an absence is remembered under a key its caller spelled, so it has to lapse: the unauthenticated login

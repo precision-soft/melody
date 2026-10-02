@@ -2,7 +2,6 @@ package migration
 
 import (
     "context"
-    "database/sql/driver"
     "strings"
     "testing"
 )
@@ -22,28 +21,58 @@ func TestMigrationsHoldOneSchemaMigration(t *testing.T) {
     }
 }
 
-func TestUpSchemaCreatesEveryTableTolerantlyThenTheConstraint(t *testing.T) {
+func TestUpSchemaCreatesEveryTableTolerantly(t *testing.T) {
     database, recorder := newFakeBunDatabase()
-    recorder.queryHook = indexPresenceRows(0)
 
     if upErr := upSchema(context.Background(), database); nil != upErr {
         t.Fatalf("expected the up migration to succeed, got %v", upErr)
     }
 
     assertQueryOrder(t, recorder.recordedQueries(), []string{
-        "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN ('melody_example_v3_schema_fingerprint', 'melody_example_v3_two_factor', 'melody_example_v3_catalog_journal', 'melody_example_v3_user', 'melody_example_v3_product', 'melody_example_v3_currency', 'melody_example_v3_category')",
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN ('melody_example_v3_schema_fingerprint', 'melody_example_v3_two_factor', 'melody_example_v3_catalog_journal', 'melody_example_v3_identifier_sequence', 'melody_example_v3_user_session', 'melody_example_v3_user', 'melody_example_v3_product', 'melody_example_v3_currency', 'melody_example_v3_category')",
         "CREATE TABLE IF NOT EXISTS `melody_example_v3_schema_fingerprint`",
         "INSERT INTO `melody_example_v3_schema_fingerprint` (`set_name`, `fingerprint`, `state`) VALUES ('catalogue', '" + catalogueSchemaFingerprint + "', 'building')",
         "CREATE TABLE IF NOT EXISTS `melody_example_v3_category`",
         "CREATE TABLE IF NOT EXISTS `melody_example_v3_currency`",
         "CREATE TABLE IF NOT EXISTS `melody_example_v3_product`",
         "CREATE TABLE IF NOT EXISTS `melody_example_v3_user`",
+        "CREATE TABLE IF NOT EXISTS `melody_example_v3_user_session`",
+        "CREATE TABLE IF NOT EXISTS `melody_example_v3_identifier_sequence`",
         "CREATE TABLE IF NOT EXISTS `melody_example_v3_catalog_journal`",
         "CREATE TABLE IF NOT EXISTS `melody_example_v3_two_factor`",
-        "information_schema.STATISTICS",
-        "ADD UNIQUE KEY",
         "UPDATE `melody_example_v3_schema_fingerprint` SET `state` = 'built' WHERE `set_name` = 'catalogue'",
     })
+}
+
+/* a product's currency and category are held by the schema: a delete of either is refused while a product names it, and a product cannot name one that does not exist */
+func TestUpSchemaHoldsAProductsReferences(t *testing.T) {
+    for _, wanted := range []string{
+        "CONSTRAINT `" + ProductCurrencyForeignKeyName + "` FOREIGN KEY (`currency_id`) REFERENCES `melody_example_v3_currency` (`id`) ON DELETE RESTRICT",
+        "CONSTRAINT `" + ProductCategoryForeignKeyName + "` FOREIGN KEY (`category_id`) REFERENCES `melody_example_v3_category` (`id`) ON DELETE RESTRICT",
+    } {
+        if false == strings.Contains(createProductTableSql, wanted) {
+            t.Fatalf("expected the product table to declare %s, got %s", wanted, createProductTableSql)
+        }
+    }
+}
+
+/* the username's identity is the column the application folds, held unique byte for byte */
+func TestUpSchemaHoldsTheFoldedUsernameUnique(t *testing.T) {
+    for _, wanted := range []string{
+        "`username_normalized` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL",
+        "UNIQUE KEY `" + UserUsernameIndexName + "` (`username_normalized`)",
+    } {
+        if false == strings.Contains(createUserTableSql, wanted) {
+            t.Fatalf("expected the user table to declare %s, got %s", wanted, createUserTableSql)
+        }
+    }
+}
+
+/* a session row goes with its account */
+func TestUpSchemaTiesASessionRowToItsAccount(t *testing.T) {
+    if false == strings.Contains(createUserSessionTableSql, "FOREIGN KEY (`user_identifier`) REFERENCES `melody_example_v3_user` (`id`) ON DELETE CASCADE") {
+        t.Fatalf("expected the session index to cascade with the account, got %s", createUserSessionTableSql)
+    }
 }
 
 /* the enrollment goes with its account by the SCHEMA: a listener releases it on the deletion event too, but a
@@ -69,116 +98,24 @@ func TestUpSchemaTiesATwoFactorRowToItsAccount(t *testing.T) {
     }
 }
 
-func TestDownSchemaDropsTheConstraintFirstAndTheTablesInReverse(t *testing.T) {
+func TestDownSchemaDropsTheTablesInReverse(t *testing.T) {
     database, recorder := newFakeBunDatabase()
-    recorder.queryHook = indexPresenceRows(1)
 
     if downErr := downSchema(context.Background(), database); nil != downErr {
         t.Fatalf("expected the down migration to succeed, got %v", downErr)
     }
 
     assertQueryOrder(t, recorder.recordedQueries(), []string{
-        "information_schema.STATISTICS",
-        "DROP INDEX",
         "DROP TABLE IF EXISTS `melody_example_v3_schema_fingerprint`",
         "DROP TABLE IF EXISTS `melody_example_v3_two_factor`",
         "DROP TABLE IF EXISTS `melody_example_v3_catalog_journal`",
+        "DROP TABLE IF EXISTS `melody_example_v3_identifier_sequence`",
+        "DROP TABLE IF EXISTS `melody_example_v3_user_session`",
         "DROP TABLE IF EXISTS `melody_example_v3_user`",
         "DROP TABLE IF EXISTS `melody_example_v3_product`",
         "DROP TABLE IF EXISTS `melody_example_v3_currency`",
         "DROP TABLE IF EXISTS `melody_example_v3_category`",
     })
-}
-
-/* indexPresenceRows answers the catalogue question the constraint asks before it touches the table. It has
-   to tolerate a volume whose table already carries the key, the way every table is created IF NOT EXISTS —
-   MySQL has no ADD KEY IF NOT EXISTS, so the tolerance is spelled by asking first. */
-func indexPresenceRows(present int64) func(query string) ([]string, [][]driver.Value, error) {
-    return func(query string) ([]string, [][]driver.Value, error) {
-        if true == strings.Contains(query, "information_schema.STATISTICS") {
-            return []string{"count"}, [][]driver.Value{{present}}, nil
-        }
-
-        return []string{}, nil, nil
-    }
-}
-
-func isUsernameIndexAdd(query string) bool {
-    return strings.HasPrefix(query, "ALTER TABLE") &&
-        strings.Contains(query, "ADD UNIQUE KEY")
-}
-
-func isUsernameIndexDrop(query string) bool {
-    return strings.HasPrefix(query, "ALTER TABLE") &&
-        strings.Contains(query, "DROP INDEX")
-}
-
-/* the expression is the whole point of the constraint: the identity this application gives a username is LOWER(username) compared byte for byte, because NormalizedUsername folds case and nothing else and the lookup door compares on utf8mb4_bin for the same reason. Indexed on the column as it stands, the key would follow the column's own accent-insensitive collation and refuse two names the application holds apart, 'ana' and 'ána', while admitting 'Ana' beside 'ana', which it holds to be one. */
-func TestAddUserUsernameIndexBuildsTheKeyOnTheFoldedSpelling(t *testing.T) {
-    database, recorder := newFakeBunDatabase()
-    recorder.queryHook = indexPresenceRows(0)
-
-    if addErr := addUserUsernameIndex(context.Background(), database); nil != addErr {
-        t.Fatalf("expected the constraint to be added, got %v", addErr)
-    }
-
-    index := recorder.firstIndexMatching(isUsernameIndexAdd)
-    if 0 > index {
-        t.Fatalf("expected the step to add the unique key, recorded: %v", recorder.recordedQueries())
-    }
-
-    statement := recorder.recordedQueries()[index]
-
-    for _, wanted := range []string{
-        "`melody_example_v3_user`",
-        UserUsernameIndexName,
-        "LOWER(`username`)",
-        "CHARACTER SET utf8mb4",
-        "COLLATE utf8mb4_bin",
-    } {
-        if false == strings.Contains(statement, wanted) {
-            t.Fatalf("expected the key to be built on %s, got %q", wanted, statement)
-        }
-    }
-}
-
-/* the tolerance is the half a volume older than this schema depends on: asked for a key it already
-   carries, the migration must do nothing rather than fail the whole set on a duplicate index name. */
-func TestAddUserUsernameIndexLeavesAKeyThatIsAlreadyThere(t *testing.T) {
-    database, recorder := newFakeBunDatabase()
-    recorder.queryHook = indexPresenceRows(1)
-
-    if addErr := addUserUsernameIndex(context.Background(), database); nil != addErr {
-        t.Fatalf("expected the constraint step to succeed, got %v", addErr)
-    }
-
-    if 0 != recorder.countMatching(isUsernameIndexAdd) {
-        t.Fatalf("expected no ALTER when the key is already present, recorded: %v", recorder.recordedQueries())
-    }
-}
-
-func TestDropUserUsernameIndexDropsTheKeyOnlyWhenItIsThere(t *testing.T) {
-    database, recorder := newFakeBunDatabase()
-    recorder.queryHook = indexPresenceRows(1)
-
-    if dropErr := dropUserUsernameIndex(context.Background(), database); nil != dropErr {
-        t.Fatalf("expected the constraint to be dropped, got %v", dropErr)
-    }
-
-    if 1 != recorder.countMatching(isUsernameIndexDrop) {
-        t.Fatalf("expected the key to be dropped, recorded: %v", recorder.recordedQueries())
-    }
-
-    recorder.reset()
-    recorder.queryHook = indexPresenceRows(0)
-
-    if dropErr := dropUserUsernameIndex(context.Background(), database); nil != dropErr {
-        t.Fatalf("expected the drop to succeed on a table without the key, got %v", dropErr)
-    }
-
-    if 0 != recorder.countMatching(isUsernameIndexDrop) {
-        t.Fatalf("expected no DROP when the key is not there, recorded: %v", recorder.recordedQueries())
-    }
 }
 
 /* every column that holds an entity identifier is compared under utf8mb4_bin: the identity of an id is exact everywhere else, in the in-memory repositories and the cache keys, and under the table's default collation a lookup by id would fold case and accents, so an alias spelling would find the row and be cached under a key nothing invalidates */
@@ -201,7 +138,7 @@ func TestUpSchemaComparesEveryIdentifierColumnByteForByte(t *testing.T) {
         }
     }
 
-    if 7 != collated {
-        t.Errorf("%d identifier columns are compared under utf8mb4_bin, wanted 7", collated)
+    if 8 != collated {
+        t.Errorf("%d identifier columns are compared under utf8mb4_bin, wanted 8", collated)
     }
 }

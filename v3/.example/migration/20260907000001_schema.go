@@ -10,10 +10,25 @@ func init() {
     Migrations.MustRegister(upSchema, downSchema)
 }
 
-/* UserUsernameIndexName is the one spelling of the index. The schema owns it, so this step and the repository that maps the driver's duplicate-key refusal onto the public message read the same constant: a name written in two places is a constraint and a refusal that can drift apart. */
-const UserUsernameIndexName = "melody_example_v3_user_username_folded"
+/* CurrencyCodeIndexName is the one spelling of the currency code's unique key, read by the repository that maps its refusal onto a taken code: the conversion finds a currency by its code, so two rows under one code would leave the answer to whichever the listing returns first. */
+const CurrencyCodeIndexName = "melody_example_v3_currency_code"
 
-/* upSchema creates the six tables this example owns and declares the one constraint it needs, in one step: an example has a single state, and a volume in an older shape is brought to it by example:db:reset. The set does not adopt a volume that already holds its tables without recording it (see beginSchemaSet); its statements still tolerate a second run, since the tables are created IF NOT EXISTS and the constraint, MySQL having no ADD KEY IF NOT EXISTS, is added only after the catalogue is asked whether it is there. The constraint comes last because it stands on a table this step creates. */
+/* UserUsernameIndexName is the one spelling of the unique key on the folded username. The schema owns it, so this step and the repository that maps the driver's duplicate-key refusal onto the public message read the same constant: a name written in two places is a constraint and a refusal that can drift apart. */
+const UserUsernameIndexName = "melody_example_v3_user_username_normalized"
+
+/* ProductCurrencyForeignKeyName and ProductCategoryForeignKeyName are the spellings of the two references a product holds, read by the repositories that map the database's refusal: a currency or a category a product names cannot be deleted from under it, and a product cannot name one that does not exist. */
+const (
+    ProductCurrencyForeignKeyName = "melody_example_v3_product_currency"
+    ProductCategoryForeignKeyName = "melody_example_v3_product_category"
+)
+
+/* IdentifierSequenceTableName holds, per entity, the highest identifier suffix ever minted, so a deleted entity's identifier is never handed to the next one: its audit history and anything that still names it would otherwise follow the identifier to the new holder. */
+const IdentifierSequenceTableName = "melody_example_v3_identifier_sequence"
+
+/* UserSessionTableName is the index of the sessions each account holds, which the sign-in door reads to keep an account under its cap; the session storage itself cannot be asked which sessions belong to an account. */
+const UserSessionTableName = "melody_example_v3_user_session"
+
+/* upSchema creates the tables this example owns, every constraint declared with its table, in one step: an example has a single state, and a volume in an older shape is refused by its fingerprint and brought to this one by example:db:reset. The set does not adopt a volume that already holds its tables without recording it (see beginSchemaSet); its statements still tolerate a second run, since the tables are created IF NOT EXISTS. */
 func upSchema(ctx context.Context, database *bun.DB) error {
     if beginErr := beginSchemaSet(ctx, database, catalogueSchemaSetRecord, schemaTableNameList); nil != beginErr {
         return beginErr
@@ -30,19 +45,11 @@ func upSchema(ctx context.Context, database *bun.DB) error {
         }
     }
 
-    if indexErr := addUserUsernameIndex(ctx, database); nil != indexErr {
-        return indexErr
-    }
-
     return sealSchemaSet(ctx, database, catalogueSchemaSetRecord)
 }
 
-/* downSchema reverses upSchema: the constraint goes first, because the table it stands on is one of the ones the drops below take away, and the tables go in the reverse order of their creation. */
+/* downSchema reverses upSchema: the tables go in the reverse order of their creation, so a table is dropped before the one it references. */
 func downSchema(ctx context.Context, database *bun.DB) error {
-    if dropIndexErr := dropUserUsernameIndex(ctx, database); nil != dropIndexErr {
-        return dropIndexErr
-    }
-
     for _, statement := range schemaDownStatementList {
         if _, execErr := database.ExecContext(ctx, statement); nil != execErr {
             return execErr
@@ -66,12 +73,13 @@ const createCategoryTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v3_ca
    is rather than how long ago this application happened to write it. */
 const createCurrencyTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v3_currency` (" +
     "`id` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
-    "`code` VARCHAR(255) NOT NULL, " +
+    "`code` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
     "`name` VARCHAR(255) NOT NULL, " +
     "`rate` DOUBLE NOT NULL, " +
     "`rate_as_of` DATETIME(6) NOT NULL, " +
     "`provider_rate_as_of` DATETIME(6) NOT NULL, " +
-    "PRIMARY KEY (`id`))"
+    "PRIMARY KEY (`id`), " +
+    "UNIQUE KEY `" + CurrencyCodeIndexName + "` (`code`))"
 
 /* the two instants are DATETIME(6) because the model declares them so: a product created and updated inside the same second is ordered by the microseconds, and a DATETIME without them would collapse the pair */
 const createProductTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v3_product` (" +
@@ -84,15 +92,33 @@ const createProductTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v3_pro
     "`stock` BIGINT NOT NULL, " +
     "`created_at` DATETIME(6) NOT NULL, " +
     "`updated_at` DATETIME(6) NOT NULL, " +
-    "PRIMARY KEY (`id`))"
+    "PRIMARY KEY (`id`), " +
+    "CONSTRAINT `" + ProductCurrencyForeignKeyName + "` FOREIGN KEY (`currency_id`) REFERENCES `melody_example_v3_currency` (`id`) ON DELETE RESTRICT, " +
+    "CONSTRAINT `" + ProductCategoryForeignKeyName + "` FOREIGN KEY (`category_id`) REFERENCES `melody_example_v3_category` (`id`) ON DELETE RESTRICT)"
 
-/* the password column holds a bcrypt digest, never a password; the audit registry is told so by the model's own redact tag, and the width is the one the model produced */
+/* the password column holds a bcrypt digest, never a password; the audit registry is told so by the model's own redact tag, and the width is the one the model produced. username_normalized is the name as NormalizedUsername folds it, written by the application: the identity a username has is the one Go's folding gives it, which the cache keys and the listeners share, and MySQL's LOWER() folds some scripts otherwise, so the key and the lookup compare that column byte for byte. */
 const createUserTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v3_user` (" +
     "`id` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
     "`username` VARCHAR(255) NOT NULL, " +
+    "`username_normalized` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
     "`password` VARCHAR(255) NOT NULL, " +
     "`roles` VARCHAR(255) NOT NULL, " +
-    "PRIMARY KEY (`id`))"
+    "PRIMARY KEY (`id`), " +
+    "UNIQUE KEY `" + UserUsernameIndexName + "` (`username_normalized`))"
+
+/* a session row goes with its account, and the index on the account and the instant is the order the sign-in door drops the oldest in */
+const createUserSessionTableSql = "CREATE TABLE IF NOT EXISTS `" + UserSessionTableName + "` (" +
+    "`session_id` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
+    "`user_identifier` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
+    "`created_at` DATETIME(6) NOT NULL, " +
+    "PRIMARY KEY (`session_id`), " +
+    "KEY `melody_example_v3_user_session_account` (`user_identifier`, `created_at`), " +
+    "CONSTRAINT `melody_example_v3_user_session_user` FOREIGN KEY (`user_identifier`) REFERENCES `melody_example_v3_user` (`id`) ON DELETE CASCADE)"
+
+const createIdentifierSequenceTableSql = "CREATE TABLE IF NOT EXISTS `" + IdentifierSequenceTableName + "` (" +
+    "`entity` VARCHAR(64) NOT NULL, " +
+    "`highest_suffix` BIGINT NOT NULL, " +
+    "PRIMARY KEY (`entity`))"
 
 /* the journal lives on mysql beside the catalogue on this major, so the identity column is written in the mysql spelling; v1 keeps the same table on postgres and spells it GENERATED BY DEFAULT AS IDENTITY. The request identifier is this major's own column: an entry names the call that caused it, and it is empty for a change made outside a request. */
 const createCatalogJournalTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v3_catalog_journal` (" +
@@ -105,7 +131,7 @@ const createCatalogJournalTableSql = "CREATE TABLE IF NOT EXISTS `melody_example
     "`recorded_at` DATETIME(6) NOT NULL, " +
     "PRIMARY KEY (`id`))"
 
-/* the two secret columns are VARBINARY because bunorm's EncryptedString writes a sealed byte string, not text, and the widths hold the sealed spelling. The identifier references the user table, so the row goes with its account: identifiers are minted as the highest suffix plus one, a surviving row would enroll the next holder of the identifier with the former holder's secret, and the database releases it whether or not the deletion subscriber runs. Both columns compare under utf8mb4_bin, which is what lets the key be declared. */
+/* the two secret columns are VARBINARY because bunorm's EncryptedString writes a sealed byte string, not text, and the widths hold the sealed spelling. The identifier references the user table, so the row goes with its account: a surviving row would name an account that is gone, and the database releases it whether or not the deletion subscriber runs. Both columns compare under utf8mb4_bin, which is what lets the key be declared. */
 const createTwoFactorTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v3_two_factor` (" +
     "`user_identifier` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
     "`secret` VARBINARY(512) NOT NULL, " +
@@ -114,16 +140,13 @@ const createTwoFactorTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v3_t
     "PRIMARY KEY (`user_identifier`), " +
     "CONSTRAINT `melody_example_v3_two_factor_user` FOREIGN KEY (`user_identifier`) REFERENCES `melody_example_v3_user` (`id`) ON DELETE CASCADE)"
 
-/* the index is on LOWER(username) cast to the binary collation because that expression is the identity this application gives a username: NormalizedUsername folds case and nothing else, and the lookup door compares on utf8mb4_bin. On the column's own utf8mb4_0900_ai_ci the constraint would refuse 'ana' beside 'ána', which the application considers different, and admit 'Ana' beside 'ana', which it considers the same. */
-const createUserUsernameIndexSql = "ALTER TABLE `melody_example_v3_user` " +
-    "ADD UNIQUE KEY `" + UserUsernameIndexName + "` " +
-    "((CAST(LOWER(`username`) AS CHAR(255) CHARACTER SET utf8mb4) COLLATE utf8mb4_bin))"
-
 var schemaUpStatementList = []string{
     createCategoryTableSql,
     createCurrencyTableSql,
     createProductTableSql,
     createUserTableSql,
+    createUserSessionTableSql,
+    createIdentifierSequenceTableSql,
     createCatalogJournalTableSql,
     createTwoFactorTableSql,
     createSchemaFingerprintTableSql,
@@ -137,6 +160,8 @@ var schemaTableNameList = []string{
     SchemaFingerprintTableName,
     "melody_example_v3_two_factor",
     "melody_example_v3_catalog_journal",
+    IdentifierSequenceTableName,
+    UserSessionTableName,
     "melody_example_v3_user",
     "melody_example_v3_product",
     "melody_example_v3_currency",
@@ -152,54 +177,4 @@ func dropStatementList(tableNameList []string) []string {
     }
 
     return statementList
-}
-
-/* every step tolerates a second run of the set, the run it began and did not finish; MySQL has no ADD KEY IF NOT EXISTS, so the tolerance is spelled by asking the catalogue first, or a second run would fail on a duplicate index name. */
-func addUserUsernameIndex(ctx context.Context, database *bun.DB) error {
-    present, presentErr := userUsernameIndexIsPresent(ctx, database)
-    if nil != presentErr {
-        return presentErr
-    }
-
-    if true == present {
-        return nil
-    }
-
-    _, execErr := database.ExecContext(ctx, createUserUsernameIndexSql)
-
-    return execErr
-}
-
-func dropUserUsernameIndex(ctx context.Context, database *bun.DB) error {
-    present, presentErr := userUsernameIndexIsPresent(ctx, database)
-    if nil != presentErr {
-        return presentErr
-    }
-
-    if false == present {
-        return nil
-    }
-
-    _, execErr := database.ExecContext(
-        ctx,
-        "ALTER TABLE `melody_example_v3_user` DROP INDEX `"+UserUsernameIndexName+"`",
-    )
-
-    return execErr
-}
-
-func userUsernameIndexIsPresent(ctx context.Context, database *bun.DB) (bool, error) {
-    count := 0
-
-    queryErr := database.NewRaw(
-        "SELECT COUNT(*) FROM information_schema.STATISTICS "+
-            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?",
-        "melody_example_v3_user",
-        UserUsernameIndexName,
-    ).Scan(ctx, &count)
-    if nil != queryErr {
-        return false, queryErr
-    }
-
-    return 0 < count, nil
 }

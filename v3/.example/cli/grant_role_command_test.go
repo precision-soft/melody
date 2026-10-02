@@ -241,8 +241,7 @@ func TestGrantRoleCommandGrantsARoleTheCachedReadWronglySaysIsHeld(t *testing.T)
     }
 
     /* the directory drops the role behind the memo's back, through a door that dispatches nothing */
-    account.Roles = []string{entity.RoleUser}
-    if _, updateErr := fixture.userRepository.Update(context.Background(), account); nil != updateErr {
+    if _, _, updateErr := fixture.userRepository.Update(context.Background(), account.Id, repository.UserChange{Roles: []string{entity.RoleUser}}, nil); nil != updateErr {
         t.Fatalf("remove the role in the directory: %v", updateErr)
     }
 

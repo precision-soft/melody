@@ -1,6 +1,7 @@
 package user
 
 import (
+    "context"
     "errors"
     "fmt"
     nethttp "net/http"
@@ -9,6 +10,7 @@ import (
 
     "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/repository"
+    "github.com/precision-soft/melody/v3/.example/service"
 )
 
 func TestProtectsAnotherAdminRefusesAPeer(t *testing.T) {
@@ -134,18 +136,14 @@ func TestApiUpdateHandlerRefusesARoleCarryingAComma(t *testing.T) {
 }
 
 /* the same rule, at the door on this major */
-func TestRolesForUpdateKeepsWhatTheBodyDoesNotName(t *testing.T) {
-    current := []string{entity.RoleUser, entity.RoleEditor}
-
-    kept := rolesForUpdate(nil, current)
-
-    if 2 != len(kept) || entity.RoleUser != kept[0] || entity.RoleEditor != kept[1] {
-        t.Fatalf("the roles the body never named were rewritten to %v", kept)
+func TestRolesForUpdateLeavesTheRolesUnwrittenWhenTheBodyDoesNotNameThem(t *testing.T) {
+    if kept := rolesForUpdate(nil); nil != kept {
+        t.Fatalf("roles the body never named must not be written, got %v", kept)
     }
 }
 
 func TestRolesForUpdateReplacesWhatTheBodyNames(t *testing.T) {
-    replaced := rolesForUpdate([]string{entity.RoleUser}, []string{entity.RoleUser, entity.RoleEditor})
+    replaced := rolesForUpdate([]string{entity.RoleUser})
 
     if 1 != len(replaced) || entity.RoleUser != replaced[0] {
         t.Fatalf("the roles the body named were not stored, got %v", replaced)
@@ -153,7 +151,7 @@ func TestRolesForUpdateReplacesWhatTheBodyNames(t *testing.T) {
 }
 
 func TestRolesForUpdateFallsBackToTheBaseRoleForAnEmptyListTheBodyNames(t *testing.T) {
-    answered := rolesForUpdate([]string{}, []string{entity.RoleUser, entity.RoleEditor})
+    answered := rolesForUpdate([]string{})
 
     if 1 != len(answered) || entity.RoleUser != answered[0] {
         t.Fatalf("an explicitly empty list answered %v", answered)
@@ -225,5 +223,72 @@ func TestApiUpdateHandlerAnswersAnyOtherFailedWriteAs500(t *testing.T) {
 
     if nethttp.StatusInternalServerError != statusCode {
         t.Fatalf("a failed write answered %d, wanted 500", statusCode)
+    }
+}
+
+/* the four cells of the write-back: a stale entry of the account primed in the cache or not, a grant landed in the directory behind the cache or not. In every cell an admin who only renames the account leaves the password and the roles the directory holds. */
+func TestApiUpdateHandlerWritesOnlyWhatTheBodyNamesOverTheDirectorysAccount(t *testing.T) {
+    for _, primed := range []bool{true, false} {
+        for _, granted := range []bool{true, false} {
+            userRepository := newRecordingUserRepository(administrator("admin-1"), &entity.User{Id: "user-7", Username: "alice", Password: "H2", Roles: []string{entity.RoleUser}})
+            cacheInstance := &valueCache{values: map[string]any{}}
+
+            if true == primed {
+                cacheInstance.values[service.CacheKeyUserById("user-7")] = &entity.User{Id: "user-7", Username: "alice", Password: "H1", Roles: []string{entity.RoleUser, entity.RoleAdmin}}
+            }
+
+            wantedRoles := []string{entity.RoleUser}
+            if true == granted {
+                if _, _, grantErr := userRepository.GrantRole(context.Background(), "user-7", entity.RoleEditor); nil != grantErr {
+                    t.Fatalf("grant: %v", grantErr)
+                }
+
+                wantedRoles = []string{entity.RoleUser, entity.RoleEditor}
+            }
+
+            runtimeInstance := adminRuntimeOverCache(t, userRepository, cacheInstance, "admin-1", []string{entity.RoleAdmin})
+
+            statusCode, body := callDoor(t, runtimeInstance, ApiUpdateHandler(), nethttp.MethodPut, "/users/api/update/user-7/", map[string]string{"id": "user-7"}, `{"username":"alice-renamed"}`)
+            if nethttp.StatusOK != statusCode {
+                t.Fatalf("primed=%v granted=%v: the update answered %d: %s", primed, granted, statusCode, body)
+            }
+
+            stored := userRepository.stored(t, "user-7")
+            if "H2" != stored.Password || "alice-renamed" != stored.Username || strings.Join(wantedRoles, ",") != strings.Join(stored.Roles, ",") {
+                t.Fatalf("primed=%v granted=%v: the directory holds %+v; wanted H2, alice-renamed, %v", primed, granted, stored, wantedRoles)
+            }
+        }
+    }
+}
+
+func TestApiUpdateHandlerRefusesAPeerAdministratorAndWritesNothing(t *testing.T) {
+    userRepository := newRecordingUserRepository(administrator("admin-1"), administrator("admin-2"))
+    runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})
+
+    statusCode, body := callDoor(t, runtimeInstance, ApiUpdateHandler(), nethttp.MethodPut, "/users/api/update/admin-2/", map[string]string{"id": "admin-2"}, `{"username":"demoted","roles":["ROLE_USER"]}`)
+    if nethttp.StatusForbidden != statusCode {
+        t.Fatalf("an update of a peer administrator answered %d: %s", statusCode, body)
+    }
+
+    stored := userRepository.stored(t, "admin-2")
+    if "admin-2" != stored.Username || 2 != len(stored.Roles) {
+        t.Fatalf("a refused update wrote %+v", stored)
+    }
+
+    statusCode, body = callDoor(t, runtimeInstance, ApiUpdateHandler(), nethttp.MethodPut, "/users/api/update/admin-1/", map[string]string{"id": "admin-1"}, `{"username":"admin-one"}`)
+    if nethttp.StatusOK != statusCode {
+        t.Fatalf("an administrator's update of their own account answered %d: %s", statusCode, body)
+    }
+}
+
+/* the peer decision is taken on the directory: an account the cache still holds as an editor, promoted behind it, is refused */
+func TestApiUpdateHandlerDecidesThePeerRefusalOnTheDirectoryNotTheCache(t *testing.T) {
+    userRepository := newRecordingUserRepository(administrator("admin-1"), administrator("admin-2"))
+    cacheInstance := &valueCache{values: map[string]any{service.CacheKeyUserById("admin-2"): editor("admin-2")}}
+    runtimeInstance := adminRuntimeOverCache(t, userRepository, cacheInstance, "admin-1", []string{entity.RoleAdmin})
+
+    statusCode, body := callDoor(t, runtimeInstance, ApiUpdateHandler(), nethttp.MethodPut, "/users/api/update/admin-2/", map[string]string{"id": "admin-2"}, `{"roles":["ROLE_USER"]}`)
+    if nethttp.StatusForbidden != statusCode {
+        t.Fatalf("a promoted peer the cache still holds as an editor answered %d: %s", statusCode, body)
     }
 }

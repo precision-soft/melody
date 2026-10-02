@@ -15,8 +15,10 @@ func newInMemoryProductRepository() ProductRepository {
 }
 
 type inMemoryProductRepository struct {
-    mutex    sync.RWMutex
-    products []*entity.Product
+    mutex     sync.RWMutex
+    products  []*entity.Product
+    /* mintFloor is the highest identifier this repository ever stored, see raisedFloor */
+    mintFloor string
 }
 
 /* the slice is a shallow copy: the entity pointers stay shared with the repository, so a caller that mutates an entity in place bypasses the lock */
@@ -60,7 +62,7 @@ func (instance *inMemoryProductRepository) Create(ctx context.Context, product *
     }
 
     if "" == strings.TrimSpace(product.Id) {
-        product.Id = nextProductId(instance.identifierListLocked())
+        product.Id = nextProductId(append(instance.identifierListLocked(), instance.mintFloor))
     }
 
     _, exists := instance.findByIdLocked(product.Id)
@@ -77,6 +79,7 @@ func (instance *inMemoryProductRepository) Create(ctx context.Context, product *
     }
 
     instance.products = append(instance.products, product)
+    instance.mintFloor = raisedFloor(instance.mintFloor, product.Id, "prod-")
     return nil
 }
 
@@ -138,6 +141,19 @@ func (instance *inMemoryProductRepository) DeleteById(ctx context.Context, id st
 
         instance.products = append(instance.products[:index], instance.products[index+1:]...)
         return true, nil
+    }
+
+    return false, nil
+}
+
+func (instance *inMemoryProductRepository) PricedIn(ctx context.Context, currencyId string) (bool, error) {
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
+
+    for _, product := range instance.products {
+        if nil != product && currencyId == product.CurrencyId {
+            return true, nil
+        }
     }
 
     return false, nil

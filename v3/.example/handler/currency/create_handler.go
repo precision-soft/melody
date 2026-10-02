@@ -18,13 +18,18 @@ import (
 func ApiCreateHandler() melodyhttpcontract.Handler {
     createCurrency := melodyhttp.JsonHandler(
         func(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, dto CreateRequest) (melodyhttpcontract.Response, error) {
+            dto = dto.trimmed()
+            if refusal := presenter.ApiRefusalOfInvalidBody(runtimeInstance, request, dto); nil != refusal {
+                return refusal, nil
+            }
+
             currencyService := service.MustGetCurrencyService(runtimeInstance.Container())
 
             currency, createErr := currencyService.Create(
                 runtimeInstance,
-                strings.TrimSpace(dto.Id),
-                strings.TrimSpace(dto.Code),
-                strings.TrimSpace(dto.Name),
+                dto.Id,
+                dto.Code,
+                dto.Name,
                 dto.Rate,
             )
             if nil != createErr {
@@ -59,6 +64,10 @@ func createRefusal(
         return presenter.ApiError(runtimeInstance, request, nethttp.StatusConflict, "id already exists")
     }
 
+    if true == errors.Is(createErr, repository.ErrCurrencyCodeAlreadyExists) {
+        return presenter.ApiError(runtimeInstance, request, nethttp.StatusConflict, "code already exists")
+    }
+
     return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to create currency", createErr)
 }
 
@@ -80,4 +89,13 @@ type CreateRequest struct {
     Code string  `json:"code" validate:"notBlank,currencyCode"`
     Name string  `json:"name" validate:"notBlank,min=2,max=120"`
     Rate float64 `json:"rate" validate:"greaterThan=0"`
+}
+
+/* trimmed answers the body as the door stores it, so it is validated in that spelling */
+func (instance CreateRequest) trimmed() CreateRequest {
+    instance.Id = strings.TrimSpace(instance.Id)
+    instance.Code = strings.TrimSpace(instance.Code)
+    instance.Name = strings.TrimSpace(instance.Name)
+
+    return instance
 }

@@ -53,13 +53,13 @@ func TestInMemoryUserRepositoryConcurrentReadAndDelete(t *testing.T) {
                 return
             }
 
-            _, deleteErr := repositoryInstance.DeleteById(ctx, "user-first")
+            _, deleteErr := repositoryInstance.DeleteById(ctx, "user-first", nil)
             if nil != deleteErr {
                 t.Errorf("delete first: %v", deleteErr)
                 return
             }
 
-            _, deleteErr = repositoryInstance.DeleteById(ctx, "user-second")
+            _, deleteErr = repositoryInstance.DeleteById(ctx, "user-second", nil)
             if nil != deleteErr {
                 t.Errorf("delete second: %v", deleteErr)
                 return

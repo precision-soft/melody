@@ -107,10 +107,9 @@ func TestUserService_AuthenticateReadsTheAccountPastTheCache(t *testing.T) {
         t.Fatalf("expected the seeded editor to be cached, got found=%v err=%v", found, findErr)
     }
 
-    modified := *cached
-    modified.Password = security.MustHashPassword("replacement-password")
-    if updated, updateErr := userRepository.Update(context.Background(), &modified); nil != updateErr || false == updated {
-        t.Fatalf("expected the password change to land, got updated=%v err=%v", updated, updateErr)
+    replacementHash := security.MustHashPassword("replacement-password")
+    if before, _, updateErr := userRepository.Update(context.Background(), cached.Id, repository.UserChange{PasswordHash: &replacementHash}, nil); nil != updateErr || nil == before {
+        t.Fatalf("expected the password change to land, got before=%v err=%v", before, updateErr)
     }
 
     if _, authenticated, authenticateErr := userService.AuthenticateByUsernameAndPassword(context.Background(), "editor", "editor"); nil != authenticateErr || true == authenticated {
@@ -121,8 +120,8 @@ func TestUserService_AuthenticateReadsTheAccountPastTheCache(t *testing.T) {
         t.Fatalf("expected the current password to sign in, got authenticated=%v err=%v", authenticated, authenticateErr)
     }
 
-    if deleted, deleteErr := userRepository.DeleteById(context.Background(), modified.Id); nil != deleteErr || false == deleted {
-        t.Fatalf("expected the deletion to land, got deleted=%v err=%v", deleted, deleteErr)
+    if removed, deleteErr := userRepository.DeleteById(context.Background(), cached.Id, nil); nil != deleteErr || nil == removed {
+        t.Fatalf("expected the deletion to land, got removed=%v err=%v", removed, deleteErr)
     }
 
     if _, authenticated, authenticateErr := userService.AuthenticateByUsernameAndPassword(context.Background(), "editor", "replacement-password"); nil != authenticateErr || true == authenticated {
@@ -328,7 +327,7 @@ func TestUserService_UpdateStoresACopyOfTheCallersRoleList(t *testing.T) {
     }
 
     roles := []string{"ROLE_USER", "ROLE_EDITOR"}
-    if _, updated, updateErr := userService.Update(runtimeInstance, target.Id, target.Username, target.Password, roles); nil != updateErr || false == updated {
+    if _, updated, updateErr := userService.Update(runtimeInstance, target.Id, repository.UserChange{Roles: roles}, nil); nil != updateErr || false == updated {
         t.Fatalf("expected the update to land, got updated=%v err=%v", updated, updateErr)
     }
 
@@ -337,5 +336,51 @@ func TestUserService_UpdateStoresACopyOfTheCallersRoleList(t *testing.T) {
     stored, found, findErr := userRepository.FindById(context.Background(), target.Id)
     if nil != findErr || false == found || "ROLE_EDITOR" != stored.Roles[1] {
         t.Fatalf("the caller's slice reached the stored account: %v", stored.Roles)
+    }
+}
+
+/* paddingUserRepository answers a lookup the way MySQL's PAD SPACE collation does: trailing spaces of the identifier asked are ignored */
+type paddingUserRepository struct {
+    repository.UserRepository
+}
+
+func (instance *paddingUserRepository) FindById(ctx context.Context, id string) (*entity.User, bool, error) {
+    return instance.UserRepository.FindById(ctx, strings.TrimRight(id, " "))
+}
+
+func TestFindByIdAnswersARowFoundForAnotherSpellingAsAbsentAndCachesNothing(t *testing.T) {
+    inMemory, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed())
+    if nil != repositoryErr {
+        t.Fatalf("unexpected repository error: %v", repositoryErr)
+    }
+
+    editor, found, findErr := inMemory.FindByUsername(context.Background(), "editor")
+    if nil != findErr || false == found {
+        t.Fatalf("expected the seeded editor, got found=%v err=%v", found, findErr)
+    }
+
+    cacheInstance := newTtlRecordingCache()
+    userService := NewUserService(&paddingUserRepository{UserRepository: inMemory}, cacheInstance, nil)
+
+    if _, padded, paddedErr := userService.FindById(editor.Id + " "); nil != paddedErr || true == padded {
+        t.Fatalf("expected the padded identifier answered absent, got found=%v err=%v", padded, paddedErr)
+    }
+
+    for _, write := range cacheInstance.writesFor(CacheKeyUserById(editor.Id + " ")) {
+        if entityCacheTtl == write.ttl {
+            t.Fatalf("the account was cached under the padded identifier: %+v", write)
+        }
+    }
+
+    if cached, exists, _ := cacheInstance.Get(CacheKeyUserById(editor.Id + " ")); true == exists && nil != cached {
+        t.Fatalf("the padded identifier holds an account in the cache: %+v", cached)
+    }
+
+    if _, canonical, canonicalErr := userService.FindById(editor.Id); nil != canonicalErr || false == canonical {
+        t.Fatalf("expected the canonical identifier found, got found=%v err=%v", canonical, canonicalErr)
+    }
+
+    if 0 == len(cacheInstance.writesFor(CacheKeyUserById(editor.Id))) {
+        t.Fatalf("the canonical identifier was not cached")
     }
 }

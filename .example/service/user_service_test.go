@@ -193,7 +193,8 @@ func TestUpdateCarriesThePreviousUsernameOnTheEvent(t *testing.T) {
     )
     runtimeInstance := melodyruntime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
-    _, updated, updateErr := userService.Update(runtimeInstance, target.Id, "renamed-user", target.Password, target.Roles)
+    renamedUsername := "renamed-user"
+    _, updated, updateErr := userService.Update(runtimeInstance, target.Id, repository.UserChange{Username: &renamedUsername}, nil)
     if nil != updateErr || false == updated {
         t.Fatalf("expected the update to land, got updated=%v err=%v", updated, updateErr)
     }
@@ -221,11 +222,12 @@ func TestUpdateRefusedByTheRepositoryLeavesTheStoredAccountUntouched(t *testing.
     }
 
     taken, renamed := users[0], users[1]
+    takenUsername := taken.Username
 
     serviceContainer := melodycontainer.NewContainer()
     runtimeInstance := melodyruntime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
-    _, updated, updateErr := userService.Update(runtimeInstance, renamed.Id, taken.Username, renamed.Password, renamed.Roles)
+    _, updated, updateErr := userService.Update(runtimeInstance, renamed.Id, repository.UserChange{Username: &takenUsername}, nil)
     if nil == updateErr || true == updated {
         t.Fatalf("expected the rename onto a taken username to be refused, got updated=%v err=%v", updated, updateErr)
     }
@@ -250,10 +252,9 @@ func TestAuthenticateByUsernameAndPasswordReadsTheAccountPastTheCache(t *testing
         t.Fatalf("expected the seeded editor to be cached, got found=%v err=%v", found, findErr)
     }
 
-    modified := *cached
-    modified.Password = security.MustHashPassword("replacement-password")
-    if updated, updateErr := userService.userRepository.Update(context.Background(), &modified); nil != updateErr || false == updated {
-        t.Fatalf("expected the password change to land, got updated=%v err=%v", updated, updateErr)
+    replacementHash := security.MustHashPassword("replacement-password")
+    if before, _, updateErr := userService.userRepository.Update(context.Background(), cached.Id, repository.UserChange{PasswordHash: &replacementHash}, nil); nil != updateErr || nil == before {
+        t.Fatalf("expected the password change to land, got before=%v err=%v", before, updateErr)
     }
 
     if _, authenticated, authenticationErr := userService.AuthenticateByUsernameAndPassword(context.Background(), "editor", "editor"); nil != authenticationErr || true == authenticated {
@@ -264,8 +265,8 @@ func TestAuthenticateByUsernameAndPasswordReadsTheAccountPastTheCache(t *testing
         t.Fatalf("expected the current password to sign in, got authenticated=%v err=%v", authenticated, authenticationErr)
     }
 
-    if deleted, deleteErr := userService.userRepository.DeleteById(context.Background(), modified.Id); nil != deleteErr || false == deleted {
-        t.Fatalf("expected the deletion to land, got deleted=%v err=%v", deleted, deleteErr)
+    if removed, deleteErr := userService.userRepository.DeleteById(context.Background(), cached.Id, nil); nil != deleteErr || nil == removed {
+        t.Fatalf("expected the deletion to land, got removed=%v err=%v", removed, deleteErr)
     }
 
     if _, authenticated, authenticationErr := userService.AuthenticateByUsernameAndPassword(context.Background(), "editor", "replacement-password"); nil != authenticationErr || true == authenticated {
@@ -312,7 +313,7 @@ func TestUpdateStoresACopyOfTheCallersRoleList(t *testing.T) {
     runtimeInstance := melodyruntime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
     roles := []string{"ROLE_USER", "ROLE_EDITOR"}
-    if _, updated, updateErr := userService.Update(runtimeInstance, target.Id, target.Username, target.Password, roles); nil != updateErr || false == updated {
+    if _, updated, updateErr := userService.Update(runtimeInstance, target.Id, repository.UserChange{Roles: roles}, nil); nil != updateErr || false == updated {
         t.Fatalf("expected the update to land, got updated=%v err=%v", updated, updateErr)
     }
 

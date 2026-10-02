@@ -88,7 +88,8 @@ func (instance *ProductService) FindById(id string) (*entity.Product, bool, erro
                 return nil, findErr
             }
 
-            if false == found {
+            /* the database compares the identifier under its collation, which pads trailing spaces, so a row found for another spelling is answered absent: cached under the spelling asked, it would be a copy no listener drops */
+            if false == found || id != product.Id {
                 return nil, nil
             }
 
@@ -111,6 +112,27 @@ func (instance *ProductService) FindById(id string) (*entity.Product, bool, erro
     return product, true, nil
 }
 
+/* refuseUnknownReferences answers the refusal of a write whose category or currency names nothing, read from the repositories rather than the caches. The product table's foreign keys refuse the same write on the database, against a delete that lands between this read and the write; on the configuration without one this read is the check. */
+func (instance *ProductService) refuseUnknownReferences(ctx context.Context, categoryId string, currencyId string) error {
+    if _, found, findErr := instance.categoryService.categoryRepository.FindById(ctx, categoryId); nil != findErr || false == found {
+        if nil != findErr {
+            return findErr
+        }
+
+        return repository.ErrUnknownCategory
+    }
+
+    if _, found, findErr := instance.currencyService.currencyRepository.FindById(ctx, currencyId); nil != findErr || false == found {
+        if nil != findErr {
+            return findErr
+        }
+
+        return repository.ErrUnknownCurrency
+    }
+
+    return nil
+}
+
 /* RecordView counts one read of a product and answers the count so far. The counter is the cache backend's atomic increment, shared by every process on the shared cache; it is a hint rather than a ledger, since example:cache:clear and example:db:reset empty the namespace it lives in. */
 func (instance *ProductService) RecordView(id string) (int64, error) {
     return instance.cache.Increment(CacheKeyProductViews(id), 1)
@@ -126,6 +148,10 @@ func (instance *ProductService) Create(
     currencyId string,
     stock int64,
 ) (*entity.Product, error) {
+    if referenceErr := instance.refuseUnknownReferences(WriteContext(runtimeInstance), categoryId, currencyId); nil != referenceErr {
+        return nil, referenceErr
+    }
+
     now := instance.clock.Now()
     product := entity.NewProduct(
         productId,
@@ -176,6 +202,10 @@ func (instance *ProductService) Update(
 
     if false == found {
         return nil, false, nil
+    }
+
+    if referenceErr := instance.refuseUnknownReferences(ctx, categoryId, currencyId); nil != referenceErr {
+        return nil, false, referenceErr
     }
 
     /* under the in-memory configuration the loaded entity is the repository's stored value, shared with concurrent readers, so the changes land on a copy: a refused update leaves it untouched and no reader sees it half-written */
