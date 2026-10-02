@@ -39,6 +39,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Security
 
+- `go.mod` — the OpenTelemetry Go family (`otel`, `otel/trace`, `otel/metric`, `otel/sdk`, `otel/sdk/metric` and the three `otlptrace` exporters) is required at v1.45.0, which fixes [GO-2026-6505](https://pkg.go.dev/vuln/GO-2026-6505): the exporter wrote its configuration, the collector endpoint url included, into info-level logs. `go.opentelemetry.io/proto/otlp` moves to v1.11.0 and the indirect requirements with it.
 - `go.mod` — `google.golang.org/grpc` is required at v1.83.1, which fixes [GO-2026-6061](https://pkg.go.dev/vuln/GO-2026-6061) and [GO-2026-6348](https://pkg.go.dev/vuln/GO-2026-6348) (heap exhaustion through HTTP/2 DATA frame fragmentation), both reported by govulncheck as reachable from this module through the otlp exporter's transport. The dependency pinning policy keeps the oldest version that compiles, and a reachable advisory is the exception that policy exists to admit
 
 ## [v3.1.0] - 2026-07-06 - Lifecycle Handler Decorator and OTLP Trace Export

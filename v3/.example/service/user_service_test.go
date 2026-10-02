@@ -31,7 +31,7 @@ func TestUserService_FindByUsernameAnswersANameTheTableCannotHoldAsAbsent(t *tes
     manager := melodycache.NewManagerOwningBackend(backend, examplecache.NewGobSerializer())
     t.Cleanup(func() { _ = manager.Close() })
 
-    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil))
+    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed())
     if nil != repositoryErr {
         t.Fatalf("unexpected repository error: %v", repositoryErr)
     }
@@ -61,7 +61,7 @@ func TestUserService_AuthenticateAdmitsTheRightPasswordRefusesAWrongOneAndPaysFo
     manager := melodycache.NewManagerOwningBackend(backend, examplecache.NewGobSerializer())
     t.Cleanup(func() { _ = manager.Close() })
 
-    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil))
+    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed())
     if nil != repositoryErr {
         t.Fatalf("unexpected repository error: %v", repositoryErr)
     }
@@ -95,7 +95,7 @@ func TestUserService_AuthenticateReadsTheAccountPastTheCache(t *testing.T) {
     manager := melodycache.NewManagerOwningBackend(backend, examplecache.NewGobSerializer())
     t.Cleanup(func() { _ = manager.Close() })
 
-    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil))
+    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed())
     if nil != repositoryErr {
         t.Fatalf("unexpected repository error: %v", repositoryErr)
     }
@@ -151,7 +151,7 @@ func TestUserService_AuthenticateAnswersANameTheTableCannotHoldBeforeTheReposito
 
 /* a grant is a write of the account, and the listeners that drop the account's cache entries are subscribed to the updated event the service dispatches, so a grant that dispatched nothing would leave the earlier roles served from the cache for the life of the entry */
 func TestUserService_GrantRoleTellsTheListeners(t *testing.T) {
-    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil))
+    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed())
     if nil != repositoryErr {
         t.Fatalf("unexpected repository error: %v", repositoryErr)
     }
@@ -210,7 +210,7 @@ func (instance *refusingOnceDispatcher) DispatchName(runtimeInstance melodyrunti
 
 /* a grant that committed and whose dispatch then failed leaves the account's cache entries standing, with no expiry, and a re-run that finds the role held dispatches nothing: the already-held answer drops the entries, the heal the unchanged quote has, and the failed dispatch hands back the account it did not announce */
 func TestUserService_GrantRoleHealsTheCacheWhenTheRoleIsAlreadyHeld(t *testing.T) {
-    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil))
+    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed())
     if nil != repositoryErr {
         t.Fatalf("unexpected repository error: %v", repositoryErr)
     }
@@ -260,7 +260,7 @@ func TestUserService_GrantRoleHealsTheCacheWhenTheRoleIsAlreadyHeld(t *testing.T
 
 /* the already-held answer drops the three entries an account is served from, by name: the heal above reads the account by id again and would be satisfied by that one key alone, while the list, served to every reader of the directory, would keep the earlier roles for the life of the cache */
 func TestUserService_GrantRoleAlreadyHeldDropsTheListEntryToo(t *testing.T) {
-    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil))
+    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed())
     if nil != repositoryErr {
         t.Fatalf("unexpected repository error: %v", repositoryErr)
     }
@@ -302,7 +302,7 @@ func TestUserService_GrantRoleAlreadyHeldDropsTheListEntryToo(t *testing.T) {
 
 /* the stored account owns its role list: a caller that goes on writing into the slice it handed Update must not change the account behind the repository */
 func TestUserService_UpdateStoresACopyOfTheCallersRoleList(t *testing.T) {
-    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil))
+    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed())
     if nil != repositoryErr {
         t.Fatalf("unexpected repository error: %v", repositoryErr)
     }

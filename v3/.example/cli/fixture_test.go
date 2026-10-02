@@ -53,7 +53,7 @@ func newCommandFixture(t *testing.T) *commandFixture {
 func newCommandFixtureWithDispatcher(t *testing.T, dispatcherOf func(melodyeventcontract.EventDispatcher) melodyeventcontract.EventDispatcher) *commandFixture {
     t.Helper()
 
-    storage := persistence.NewCatalogStorage(nil)
+    storage := persistence.NewCatalogStorage(nil).WithAccountSeed()
 
     userRepository, repositoryErr := repository.NewUserRepository(storage)
     if nil != repositoryErr {

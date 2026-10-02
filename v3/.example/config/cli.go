@@ -1,10 +1,12 @@
 package config
 
 import (
+    "os"
     "time"
 
     "github.com/precision-soft/melody/v3/.example/cli"
     "github.com/precision-soft/melody/v3/.example/service"
+    "github.com/precision-soft/melody/v3/.example/twofactor"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
     melodycontainer "github.com/precision-soft/melody/v3/container"
@@ -34,6 +36,16 @@ func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.
         /* the grant command holds the user service through a container.Lazy handle, so the resolution waits for the command's first run and this boot-phase composition never races the container. */
         cli.NewGrantRoleCommand(
             melodycontainer.Lazy[*service.UserService](kernelInstance.ServiceContainer(), service.ServiceUserService),
+        ),
+        /* outside development the directory starts empty, so the first account of a deployment is created here; the password is read from standard input, never from an argument */
+        cli.NewUserCreateCommand(
+            melodycontainer.Lazy[*service.UserService](kernelInstance.ServiceContainer(), service.ServiceUserService),
+            os.Stdin,
+        ),
+        /* the enrollment door replaces a second factor only for a request carrying a current one, so an account that lost its authenticator and every recovery code is reset by an operator here */
+        cli.NewTwoFactorResetCommand(
+            melodycontainer.Lazy[*service.UserService](kernelInstance.ServiceContainer(), service.ServiceUserService),
+            twofactor.StoreFromRuntime,
         ),
         /* the generator runs inside the application, so every bind is checked against the parameters this configuration declares */
         melodywiring.NewGenerateCommand(NewWiringBindSet()),

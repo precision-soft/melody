@@ -122,6 +122,40 @@ func runExampleMintCommand(label string, arguments ...string) (string, time.Dura
     return plain, elapsed
 }
 
+/* runExampleMintCommandWithInput is runExampleMintCommand for a command that reads its standard input — example:user:create takes the password there, never as an argument */
+func runExampleMintCommandWithInput(label string, input string, arguments ...string) string {
+    command := exec.Command(exampleMintBinary(), arguments...)
+    command.Dir = exampleMintWorkspacePath
+    command.Env = exampleMintEnvironment()
+    command.Stdin = strings.NewReader(input)
+
+    output, runErr := command.CombinedOutput()
+    plain := exampleStripAnsi(string(output))
+
+    if nil != runErr {
+        fail("%s: %s exited %v:\n%s", label, strings.Join(arguments, " "), runErr, exampleTail(plain, 20))
+    }
+
+    return plain
+}
+
+/* runExampleMintCommandExpectingRefusal runs a command that must refuse, answering what it printed; a command that exits zero fails the section */
+func runExampleMintCommandExpectingRefusal(label string, input string, arguments ...string) string {
+    command := exec.Command(exampleMintBinary(), arguments...)
+    command.Dir = exampleMintWorkspacePath
+    command.Env = exampleMintEnvironment()
+    command.Stdin = strings.NewReader(input)
+
+    output, runErr := command.CombinedOutput()
+    plain := exampleStripAnsi(string(output))
+
+    if nil == runErr {
+        fail("%s: %s exited zero, wanted a refusal:\n%s", label, strings.Join(arguments, " "), exampleTail(plain, 20))
+    }
+
+    return plain
+}
+
 /* exampleMintEnvironment withholds the harness's own backend variables from the mint, exactly as exampleRunEnvironment does for the per-major applications: melody resolves configuration from the .env beside the executable, and a leaked variable would reconfigure the mint away from the configuration the SERVING application runs under — a mint signing with a different secret than the firewall verifies with produces a 401 that looks like a security regression. */
 func exampleMintEnvironment() []string {
     return exampleRunEnvironment()

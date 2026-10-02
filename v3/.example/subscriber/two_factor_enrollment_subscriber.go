@@ -2,13 +2,15 @@ package subscriber
 
 import (
     "github.com/precision-soft/melody/v3/.example/event"
+    examplejournal "github.com/precision-soft/melody/v3/.example/journal"
     "github.com/precision-soft/melody/v3/.example/twofactor"
     melodyevent "github.com/precision-soft/melody/v3/event"
     melodyeventcontract "github.com/precision-soft/melody/v3/event/contract"
+    melodylogging "github.com/precision-soft/melody/v3/logging"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/* TwoFactorEnrollmentSubscriber releases a second factor with the account it was enrolled for: identifiers are minted as the highest suffix plus one, so an enrollment left behind would enroll the next holder of the identifier. It listens where the deletion is published, so every door that deletes an account releases the factor. It runs ahead of the cache listener on the same event, because the dispatcher stops at the first listener that fails and the cache's failure is best-effort; the cascade on the account releases the row as well. */
+/* TwoFactorEnrollmentSubscriber releases a second factor with the account it was enrolled for: identifiers are minted as the highest suffix plus one, so an enrollment left behind would enroll the next holder of the identifier. It listens where the deletion is published, so every door that deletes an account releases the factor. The release is a second hand: the enrollment's foreign key cascades the row away with the account, the authoritative release, so a store this listener cannot reach is journaled and the deletion goes on — the dispatcher ends a dispatch at the first listener that fails, and the listeners after this one are the cache's and whatever an application adds. It runs ahead of the cache listener, after the token release. */
 type TwoFactorEnrollmentSubscriber struct {
     storeSource twofactor.StoreSource
 }
@@ -32,16 +34,27 @@ func (instance *TwoFactorEnrollmentSubscriber) onUserDeleted() melodyeventcontra
             return nil
         }
 
-        /* a store that cannot be resolved fails the deletion rather than passing it with the enrollment standing; the cascade on the account releases the row whenever the database takes the deletion */
         store, storeErr := instance.storeSource(runtimeInstance)
         if nil != storeErr {
-            return storeErr
+            journalUnreleasedEnrollment(runtimeInstance, payloadInstance.UserId(), storeErr)
+
+            return nil
         }
 
-        _, deleteErr := store.DeleteEnrollment(runtimeInstance, payloadInstance.UserId())
+        if _, deleteErr := store.DeleteEnrollment(runtimeInstance, payloadInstance.UserId()); nil != deleteErr {
+            journalUnreleasedEnrollment(runtimeInstance, payloadInstance.UserId(), deleteErr)
+        }
 
-        return deleteErr
+        return nil
     }
+}
+
+/* journalUnreleasedEnrollment records a release this listener could not make; the cascade on the account has released the row whenever the database took the deletion */
+func journalUnreleasedEnrollment(runtimeInstance melodyruntimecontract.Runtime, userId string, cause error) {
+    examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Error(
+        "the second factor of a deleted account was not released by its listener; the cascade on the account releases it",
+        map[string]any{"userId": userId, "error": cause.Error()},
+    )
 }
 
 var _ melodyeventcontract.EventSubscriber = (*TwoFactorEnrollmentSubscriber)(nil)

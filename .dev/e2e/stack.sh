@@ -124,7 +124,7 @@ e2e_require_dev_service
 # mismatch message prints both numbers, so the count to move to is in the failure itself. A run that took one of
 # the degraded early-exit branches (an unreachable supervised app, a cold-cache timeout) legitimately executes
 # fewer checks; it is already red from the check_fail that branch raised
-EXPECTED_CHECK_COUNT_INTEGER=238
+EXPECTED_CHECK_COUNT_INTEGER=240
 readonly EXPECTED_CHECK_COUNT_INTEGER
 
 # state the scope in the output, so a reader never has to infer which major these checks covered
@@ -1670,7 +1670,7 @@ run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "WORK_DIRECTORY=/tmp/example-bo
     ./example-boot --mode=bogus app:info >/tmp/example-boot.log 2>&1
     echo \"mode_bogus_exit=\$?\"
     if grep -q 'invalid mode: --mode is a runtime flag' /tmp/example-boot.log; then echo mode_bogus_named=1; else echo mode_bogus_named=0; fi
-    printf 'MELODY_DEFAULT_MODE=cli\nMELODY_HTTP_ADDRESS=:18085\n' > .env.local
+    printf 'MELODY_DEFAULT_MODE=cli\nMELODY_HTTP_ADDRESS=:18085\nAPP_JWT_SECRET=stack-chosen-signing-secret-of-its-own\n' > .env.local
     ./example-boot >/tmp/example-boot.log 2>&1
     echo \"default_cli_exit=\$?\"
     ./example-boot --mode=http >/tmp/example-boot-http.log 2>&1 &
@@ -1687,6 +1687,12 @@ run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "WORK_DIRECTORY=/tmp/example-bo
         sleep 0.2
     done
     echo \"mode_http_ready=\${READY}\"
+    OWN_TOKEN=\$(./example-boot auth:token --user user-1 --role ROLE_USER 2>/dev/null | grep -oE '[A-Za-z0-9_-]+[.][A-Za-z0-9_-]+[.][A-Za-z0-9_-]+' | tail -1)
+    COMMITTED_TOKEN=\$(\"\${EMPTY_DIRECTORY}/example-boot\" auth:token --user user-1 --role ROLE_USER 2>/dev/null | grep -oE '[A-Za-z0-9_-]+[.][A-Za-z0-9_-]+[.][A-Za-z0-9_-]+' | tail -1)
+    OWN_STATUS=\$(wget -q -S -O /dev/null --header=\"Authorization: Bearer \${OWN_TOKEN}\" http://127.0.0.1:18085/secure/me/ 2>&1 | sed -n 's/^ *HTTP\/[0-9.]* \([0-9]*\).*/\1/p' | head -1)
+    COMMITTED_STATUS=\$(wget -q -S -O /dev/null --header=\"Authorization: Bearer \${COMMITTED_TOKEN}\" http://127.0.0.1:18085/secure/me/ 2>&1 | sed -n 's/^ *HTTP\/[0-9.]* \([0-9]*\).*/\1/p' | head -1)
+    echo \"jwt_own_status=\${OWN_STATUS}\"
+    echo \"jwt_committed_status=\${COMMITTED_STATUS}\"
     kill -INT \${APP_PID} 2>/dev/null || true
     for _ in \$(seq 1 150); do
         if ! kill -0 \${APP_PID} 2>/dev/null; then
@@ -1717,6 +1723,16 @@ run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "WORK_DIRECTORY=/tmp/example-bo
     MYSQL_HOST=nope ./example-boot debug:parameters --format=json 2>/dev/null | tr -d ' \n\t' | grep -o '\"name\":\"MYSQL_HOST\"[^}]*' | head -1 | sed 's/^/process_env_parameter=/'
     if grep -q 'process environment variable is ignored.*\"environmentVariable\":\"MYSQL_HOST\"' var/log/dev.log 2>/dev/null; then echo process_env_warned=1; else echo process_env_warned=0; fi
     printf 'MELODY_ENV=prod\n' > .env.local
+    ./example-boot debug:router --limit=1 >/tmp/example-boot.log 2>&1
+    echo \"prod_committed_encrypt_exit=\$?\"
+    if grep -q 'APP_ENCRYPT_KEYS holds the development value' /tmp/example-boot.log; then echo prod_committed_encrypt_named=1; else echo prod_committed_encrypt_named=0; fi
+    if grep -q 'melody-example-cipher-key' /tmp/example-boot.log; then echo prod_committed_encrypt_leaked=1; else echo prod_committed_encrypt_leaked=0; fi
+    printf 'MELODY_ENV=prod\nAPP_ENCRYPT_KEYS=stack-1:stack-chosen-production-key-32by\nAPP_ENCRYPT_CURRENT_KEY=stack-1\n' > .env.local
+    ./example-boot debug:router --limit=1 >/tmp/example-boot.log 2>&1
+    echo \"prod_committed_jwt_exit=\$?\"
+    if grep -q 'APP_JWT_SECRET holds the development value' /tmp/example-boot.log; then echo prod_committed_jwt_named=1; else echo prod_committed_jwt_named=0; fi
+    if grep -q 'melody-example-signing-secret' /tmp/example-boot.log; then echo prod_committed_jwt_leaked=1; else echo prod_committed_jwt_leaked=0; fi
+    printf 'MELODY_ENV=prod\nAPP_ENCRYPT_KEYS=stack-1:stack-chosen-production-key-32by\nAPP_ENCRYPT_CURRENT_KEY=stack-1\nAPP_JWT_SECRET=stack-chosen-signing-secret-of-its-own\nAPP_INTERNAL_AUTH_SECRET=stack-chosen-internal-secret-of-its-own\n' > .env.local
     ./example-boot debug:container >/tmp/example-boot.log 2>&1
     echo \"prod_debug_container_exit=\$?\"
     if grep -q 'cli command not found' /tmp/example-boot.log; then echo prod_debug_container_named=1; else echo prod_debug_container_named=0; fi
@@ -1855,6 +1871,15 @@ else
         check_fail "--mode=http did not serve over a cli default ($(boot_output_value default_cli_exit) $(boot_output_value mode_http_ready))"
     fi
 
+    # the http arm runs with an APP_JWT_SECRET of its own: a bearer token minted by the empty-env binary, which
+    # signs with the development value .env commits, is refused, and one minted with the configured secret is
+    # served, so the token firewall verifies with the configuration and not with a constant compiled in
+    if boot_output_has 'jwt_own_status=200' && boot_output_has 'jwt_committed_status=401'; then
+        check_pass "with APP_JWT_SECRET of its own the token firewall serves its own token (200) and refuses one signed with the committed development secret (401)"
+    else
+        check_fail "the token firewall did not verify with the configured secret ($(boot_output_value jwt_own_status) $(boot_output_value jwt_committed_status))"
+    fi
+
     if boot_output_has 'empty_dotenv_http_exit=1' && boot_output_has 'empty_dotenv_http_named=1'; then
         check_pass "an empty .env refuses the http boot, exit 1, on the config parameters it cannot resolve"
     else
@@ -1910,6 +1935,15 @@ else
         check_pass "MYSQL_HOST keeps the .env value (mysql) while the process environment says nope"
     else
         check_fail "MYSQL_HOST did not keep the .env value ($(boot_output_value process_env_parameter))"
+    fi
+
+    # outside development the credentials .env commits are public, so a production boot holding one refuses by the
+    # key's name before anything is built, and the refusal carries no byte of the value; the encrypt keys are read
+    # first, the signing secret after them, and the arm below with values of its own is the one that boots
+    if boot_output_has 'prod_committed_encrypt_exit=1' && boot_output_has 'prod_committed_encrypt_named=1' && boot_output_has 'prod_committed_encrypt_leaked=0' && boot_output_has 'prod_committed_jwt_exit=1' && boot_output_has 'prod_committed_jwt_named=1' && boot_output_has 'prod_committed_jwt_leaked=0'; then
+        check_pass "under MELODY_ENV=prod a committed APP_ENCRYPT_KEYS and then a committed APP_JWT_SECRET refuse the boot by name (exit 1), with no byte of the value in the record"
+    else
+        check_fail "a production boot did not refuse the committed credentials by name ($(boot_output_value prod_committed_encrypt_exit) $(boot_output_value prod_committed_encrypt_named) $(boot_output_value prod_committed_encrypt_leaked) $(boot_output_value prod_committed_jwt_exit) $(boot_output_value prod_committed_jwt_named) $(boot_output_value prod_committed_jwt_leaked))"
     fi
 
     # the debug family builds services and prints parameters, so outside development it is not registered at all,

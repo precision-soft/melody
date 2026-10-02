@@ -102,3 +102,26 @@ func (instance containerRegistrar) RegisterService(
 ) {
     instance.MustRegister(serviceName, provider, options...)
 }
+
+/* recoveredRefusal runs a step that refuses by panicking with an error, as the boot refusals do, and answers that error, or nil when the step returned */
+func recoveredRefusal(t *testing.T, step func()) (refusal error) {
+    t.Helper()
+
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            return
+        }
+
+        recoveredError, isError := recovered.(error)
+        if false == isError {
+            t.Fatalf("expected the refusal to be an error, got %v", recovered)
+        }
+
+        refusal = recoveredError
+    }()
+
+    step()
+
+    return nil
+}

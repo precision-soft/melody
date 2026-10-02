@@ -8,6 +8,7 @@ import (
     "github.com/precision-soft/melody/v3/.example/generated"
     "github.com/precision-soft/melody/v3/.example/persistence"
     "github.com/precision-soft/melody/v3/.example/repository"
+    examplesecurity "github.com/precision-soft/melody/v3/.example/security"
     "github.com/precision-soft/melody/v3/.example/subscriber"
     examplevalidation "github.com/precision-soft/melody/v3/.example/validation"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
@@ -57,6 +58,18 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
     instance.registerServerSentEventHubService(registrar)
 
     instance.registerSessionStorage(registrar)
+
+    /* the token store's namespace on redis, which example:db:reset empties; without redis the store is the server process's own memory and has none */
+    if nil != instance.redisClient {
+        redisClient := instance.redisClient
+
+        registrar.RegisterService(
+            examplesecurity.ServiceTokenNamespace,
+            func(resolver melodycontainercontract.Resolver) (*examplesecurity.TokenNamespace, error) {
+                return examplesecurity.NewTokenNamespace(redisClient, redisTokenStoreKeyPrefix), nil
+            },
+        )
+    }
 
     if nil == instance.redisClient {
         opaqueTokenStore := instance.opaqueTokenStore
@@ -203,12 +216,13 @@ func resolvedSessionFilePath(sessionFilePath string, projectDirectory string) st
 /* registerCatalogStorageService publishes the handle every repository is built on, registered with or without a connection because the generated wiring resolves the repository constructors' arguments by type. The handle is resolved rather than captured, so the container records the edge that teardown reads (storage, handle, registry, journal) and the registry's logger swap runs at the first repository resolution. */
 func (instance *Module) registerCatalogStorageService(registrar melodyapplicationcontract.ServiceRegistrar) {
     hasDatabase := nil != instance.database
+    seedsAccounts := instance.isDevelopment()
 
     registrar.RegisterService(
         persistence.ServiceCatalogStorage,
         func(resolver melodycontainercontract.Resolver) (*persistence.CatalogStorage, error) {
             if false == hasDatabase {
-                return persistence.NewCatalogStorage(nil), nil
+                return catalogStorageSeeding(persistence.NewCatalogStorage(nil), seedsAccounts), nil
             }
 
             database, resolveErr := melodycontainer.FromResolver[*bun.DB](resolver, serviceDatabase)
@@ -216,9 +230,18 @@ func (instance *Module) registerCatalogStorageService(registrar melodyapplicatio
                 return nil, resolveErr
             }
 
-            return persistence.NewCatalogStorageAt(database, instance.catalogLocation), nil
+            return catalogStorageSeeding(persistence.NewCatalogStorageAt(database, instance.catalogLocation), seedsAccounts), nil
         },
     )
+}
+
+/* catalogStorageSeeding marks the handle to seed the example's accounts when the kernel runs in development, the one environment their public passwords are accepted in */
+func catalogStorageSeeding(storage *persistence.CatalogStorage, seedsAccounts bool) *persistence.CatalogStorage {
+    if true == seedsAccounts {
+        return storage.WithAccountSeed()
+    }
+
+    return storage
 }
 
 /* registerArchiveStorageService publishes the reading archive's handle in the catalogue handle's shape, registered with or without a connection. The handle is opened here, at the first resolution, so a process that never takes a reading pays no postgres handshake. */

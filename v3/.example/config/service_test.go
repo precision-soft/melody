@@ -19,6 +19,7 @@ import (
     "github.com/precision-soft/melody/v3/.example/subscriber"
     melodyclock "github.com/precision-soft/melody/v3/clock"
     melodyclockcontract "github.com/precision-soft/melody/v3/clock/contract"
+    melodyconfig "github.com/precision-soft/melody/v3/config"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
     melodyhttp "github.com/precision-soft/melody/v3/http"
@@ -42,7 +43,8 @@ func TestRegisterCatalogStorageService_ResolvesTheHandleRatherThanCapturingIt(t 
         },
     )
 
-    moduleInstance := &Module{database: newUndialedDatabase()}
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
+    moduleInstance.database = newUndialedDatabase()
     moduleInstance.registerCatalogStorageService(containerRegistrar{Container: containerInstance})
 
     storage, storageErr := melodycontainer.FromResolver[*persistence.CatalogStorage](containerInstance, persistence.ServiceCatalogStorage)
@@ -65,7 +67,7 @@ func TestRegisterCatalogStorageService_ResolvesTheHandleRatherThanCapturingIt(t 
 func TestRegisterCatalogStorageService_PublishesAHandlelessStorageWithoutADatabase(t *testing.T) {
     containerInstance := melodycontainer.NewContainer()
 
-    moduleInstance := &Module{}
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
     moduleInstance.registerCatalogStorageService(containerRegistrar{Container: containerInstance})
 
     storage, storageErr := melodycontainer.FromResolver[*persistence.CatalogStorage](containerInstance, persistence.ServiceCatalogStorage)
@@ -75,6 +77,39 @@ func TestRegisterCatalogStorageService_PublishesAHandlelessStorageWithoutADataba
 
     if true == storage.IsPersistent() {
         t.Fatal("expected a storage without a handle when no database is configured")
+    }
+}
+
+/* the example's accounts sign in with their names as passwords, so only development seeds them: the handle the composition root publishes is marked in development, with or without a database, and unmarked anywhere else */
+func TestRegisterCatalogStorageService_SeedsTheAccountsInDevelopmentOnly(t *testing.T) {
+    for _, environmentCase := range []struct {
+        environment   string
+        seedsAccounts bool
+    }{
+        {melodyconfig.EnvDevelopment, true},
+        {melodyconfig.EnvProduction, false},
+    } {
+        for _, database := range []*bun.DB{nil, newUndialedDatabase()} {
+            containerInstance := melodycontainer.NewContainer()
+            if nil != database {
+                containerInstance.MustRegister(serviceDatabase, func(resolver melodycontainercontract.Resolver) (*bun.DB, error) {
+                    return database, nil
+                })
+            }
+
+            moduleInstance := moduleWithEnvironment(t, map[string]string{melodyconfig.EnvKey: environmentCase.environment})
+            moduleInstance.database = database
+            moduleInstance.registerCatalogStorageService(containerRegistrar{Container: containerInstance})
+
+            storage, storageErr := melodycontainer.FromResolver[*persistence.CatalogStorage](containerInstance, persistence.ServiceCatalogStorage)
+            if nil != storageErr {
+                t.Fatalf("resolve catalog storage: %v", storageErr)
+            }
+
+            if environmentCase.seedsAccounts != storage.SeedsAccounts() {
+                t.Fatalf("%s, database %v: expected SeedsAccounts %v, got %v", environmentCase.environment, nil != database, environmentCase.seedsAccounts, storage.SeedsAccounts())
+            }
+        }
     }
 }
 

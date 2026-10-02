@@ -131,8 +131,8 @@ func TestTwoFactorEnrollmentSubscriber_ReleasesTheEnrollmentBeforeTheCacheListen
     }
 }
 
-/* the release resolves the store at each deletion, and a store that cannot be resolved fails the deletion rather than passing it with the enrollment standing: the listener hands the refusal back, so the dispatch, and the door that deleted the account, answers it. */
-func TestTwoFactorEnrollmentSubscriber_AStoreThatCannotBeResolvedFailsTheDeletion(t *testing.T) {
+/* the release resolves the store at each deletion, and a store that cannot be resolved is journaled and the deletion goes on: the cascade on the account is the authoritative release, and a dispatch the listener ended would skip every listener after it */
+func TestTwoFactorEnrollmentSubscriber_AStoreThatCannotBeResolvedIsJournaledAndTheDeletionGoesOn(t *testing.T) {
     refusal := errors.New("the catalogue database refused the migration")
     asked := 0
 
@@ -147,8 +147,8 @@ func TestTwoFactorEnrollmentSubscriber_AStoreThatCannotBeResolvedFailsTheDeletio
 
     listener := subscriberInstance.SubscribedEvents()[event.UserDeletedEventName][0].Listener()
     listenErr := listener(runtimeInstance, melodyevent.NewEvent(event.UserDeletedEventName, event.NewUserDeletedEvent("user-4", "dave"), melodyclock.NewSystemClock()))
-    if false == errors.Is(listenErr, refusal) {
-        t.Fatalf("expected the deletion to fail with the store's refusal, got %v", listenErr)
+    if nil != listenErr {
+        t.Fatalf("expected the deletion to go on past a store that cannot be resolved, got %v", listenErr)
     }
 
     if 1 != asked {

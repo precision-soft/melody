@@ -21,7 +21,7 @@ import (
 func TestEnrollHandlerRefusesACallerWithoutAToken(t *testing.T) {
     request, runtimeInstance := twoFactorRequest(t, "/twofactor/enroll?user=admin")
 
-    response, handlerErr := EnrollHandler(nil)(runtimeInstance, httptest.NewRecorder(), request)
+    response, handlerErr := EnrollHandler(nil, nil)(runtimeInstance, httptest.NewRecorder(), request)
     assertTwoFactorUnauthorized(t, "the enrollment door", response, handlerErr)
 }
 
@@ -53,18 +53,21 @@ func TestEnrollHandlerWritesTheTokensRowWhateverTheRequestNames(t *testing.T) {
     store, connector := enrolledStore(t, "", "")
     request, runtimeInstance := authenticatedTwoFactorRequest(t, "/twofactor/enroll?user=admin", "alice", nil)
 
-    response, handlerErr := EnrollHandler(fixedStore(store))(runtimeInstance, httptest.NewRecorder(), request)
+    response, handlerErr := EnrollHandler(fixedStore(store), nil)(runtimeInstance, httptest.NewRecorder(), request)
     if nil != handlerErr || nil == response || nethttp.StatusOK != response.StatusCode() {
         t.Fatalf("expected the enrollment to answer 200, got %v, %v", response, handlerErr)
     }
 
     statements := connector.recorded()
-    if 1 != len(statements) || false == strings.HasPrefix(statements[0], "INSERT INTO ") {
-        t.Fatalf("expected the enrollment to write one row and nothing else, got %q", statements)
+    insertList := insertStatements(statements)
+    if 1 != len(insertList) {
+        t.Fatalf("expected the enrollment to write one row, got %q", statements)
     }
 
-    if false == strings.Contains(statements[0], "'alice'") || true == strings.Contains(statements[0], "'admin'") {
-        t.Fatalf("expected the enrollment to write the token's row and never the one the request named, got %q", statements[0])
+    for _, statement := range statements {
+        if false == strings.Contains(statement, "'alice'") || true == strings.Contains(statement, "'admin'") {
+            t.Fatalf("expected the enrollment to read and write the token's row and never the one the request named, got %q", statement)
+        }
     }
 
     body, readErr := io.ReadAll(response.BodyReader())
@@ -157,7 +160,7 @@ func healingStore(store *store2fa.Store, refusal error) (store2fa.StoreSource, *
 func TestEnrollHandlerAnswersAStoreRefusalWith503AndEnrollsOnceItHeals(t *testing.T) {
     store, connector := enrolledStore(t, "", "")
     storeSource, calls := healingStore(store, errors.New("the catalogue database refused the migration"))
-    handler := EnrollHandler(storeSource)
+    handler := EnrollHandler(storeSource, nil)
 
     request, runtimeInstance := authenticatedTwoFactorRequest(t, "/twofactor/enroll", "alice", nil)
     response, handlerErr := handler(runtimeInstance, httptest.NewRecorder(), request)
@@ -175,7 +178,7 @@ func TestEnrollHandlerAnswersAStoreRefusalWith503AndEnrollsOnceItHeals(t *testin
         t.Fatalf("expected the next request to enroll once the store resolves, got %v, %v", response, handlerErr)
     }
 
-    if 2 != *calls || 1 != len(connector.recorded()) {
+    if 2 != *calls || 1 != len(insertStatements(connector.recorded())) {
         t.Fatalf("expected the store asked once per request and one row written, got %d asks and %q", *calls, connector.recorded())
     }
 }
@@ -240,5 +243,98 @@ func TestVerifyHandlerRefusesACodeTheSignInAlreadyBurnedInTheSharedGuard(t *test
     response, handlerErr := VerifyHandler(fixedStore(store), sharedGuard)(runtimeInstance, httptest.NewRecorder(), request)
     if nil != handlerErr || nil == response || nethttp.StatusUnauthorized != response.StatusCode() {
         t.Fatalf("expected a code the shared guard holds refused with 401, got %v, %v", response, handlerErr)
+    }
+}
+
+/* replacing an enrollment asks for a factor of the one it replaces: a session alone is answered with the challenge and the stored secret is not written, a wrong code is refused the same way, and neither spends what the replay guard holds */
+func TestEnrollHandlerRefusesToReplaceAnEnrollmentWithoutACurrentFactor(t *testing.T) {
+    secret, secretErr := totp.GenerateSecret()
+    if nil != secretErr {
+        t.Fatalf("generating the fixture secret failed: %v", secretErr)
+    }
+
+    for _, headers := range []map[string]string{
+        nil,
+        {melodysecurity.DefaultTotpCodeHeaderName: "000000"},
+        {melodysecurity.DefaultTotpRecoveryHeaderName: "not-a-recovery-code"},
+    } {
+        store, connector := enrolledStore(t, "alice", secret)
+        request, runtimeInstance := authenticatedTwoFactorRequest(t, "/twofactor/enroll", "alice", headers)
+
+        response, handlerErr := EnrollHandler(fixedStore(store), nil)(runtimeInstance, httptest.NewRecorder(), request)
+        if nil != handlerErr || nil == response || nethttp.StatusUnauthorized != response.StatusCode() {
+            t.Fatalf("%v: expected a replacement without a current factor refused with 401, got %v, %v", headers, response, handlerErr)
+        }
+
+        if 0 != len(insertStatements(connector.recorded())) {
+            t.Fatalf("%v: expected the stored secret left unwritten, got %q", headers, connector.recorded())
+        }
+
+        if nil == headers {
+            body, _ := io.ReadAll(response.BodyReader())
+            if false == strings.Contains(string(body), `"factor":"totp"`) || false == strings.Contains(string(body), "second factor required") {
+                t.Fatalf("expected the challenge naming the factor, got %s", body)
+            }
+        }
+    }
+}
+
+/* a current TOTP code replaces the enrollment and is burned in the guard the sign-in and the verification door share: the same code is refused at the verification door afterwards */
+func TestEnrollHandlerReplacesWithACurrentCodeAndBurnsItAcrossTheDoors(t *testing.T) {
+    secret, secretErr := totp.GenerateSecret()
+    if nil != secretErr {
+        t.Fatalf("generating the fixture secret failed: %v", secretErr)
+    }
+
+    code, codeErr := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
+    if nil != codeErr {
+        t.Fatalf("generating the fixture code failed: %v", codeErr)
+    }
+
+    sharedGuard := melodysecurity.NewMemoryNonceGuard()
+    headers := map[string]string{melodysecurity.DefaultTotpCodeHeaderName: code}
+
+    store, connector := enrolledStore(t, "alice", secret)
+    request, runtimeInstance := authenticatedTwoFactorRequest(t, "/twofactor/enroll", "alice", headers)
+    response, handlerErr := EnrollHandler(fixedStore(store), sharedGuard)(runtimeInstance, httptest.NewRecorder(), request)
+    if nil != handlerErr || nil == response || nethttp.StatusOK != response.StatusCode() {
+        t.Fatalf("expected a current code to replace the enrollment with 200, got %v, %v", response, handlerErr)
+    }
+
+    if 1 != len(insertStatements(connector.recorded())) {
+        t.Fatalf("expected the enrollment rewritten once, got %q", connector.recorded())
+    }
+
+    request, runtimeInstance = authenticatedTwoFactorRequest(t, "/twofactor/verify", "alice", headers)
+    response, handlerErr = VerifyHandler(fixedStore(store), sharedGuard)(runtimeInstance, httptest.NewRecorder(), request)
+    if nil != handlerErr || nil == response || nethttp.StatusUnauthorized != response.StatusCode() {
+        t.Fatalf("expected the code the replacement spent refused at the verification door, got %v, %v", response, handlerErr)
+    }
+}
+
+/* a recovery code of the enrollment being replaced is redeemed before the replacement is written */
+func TestEnrollHandlerReplacesWithARecoveryCodeRedeemedFirst(t *testing.T) {
+    store, connector := enrolledStore(t, "alice", "JBSWY3DPEHPK3PXP")
+    request, runtimeInstance := authenticatedTwoFactorRequest(t, "/twofactor/enroll", "alice", map[string]string{melodysecurity.DefaultTotpRecoveryHeaderName: "recovery-one"})
+
+    response, handlerErr := EnrollHandler(fixedStore(store), nil)(runtimeInstance, httptest.NewRecorder(), request)
+    if nil != handlerErr || nil == response || nethttp.StatusOK != response.StatusCode() {
+        t.Fatalf("expected a recovery code to replace the enrollment with 200, got %v, %v, statements %q", response, handlerErr, connector.recorded())
+    }
+
+    statements := connector.recorded()
+    redeemedAt, insertedAt := -1, -1
+    for position, statement := range statements {
+        if -1 == redeemedAt && true == strings.HasPrefix(statement, "UPDATE ") {
+            redeemedAt = position
+        }
+
+        if true == strings.HasPrefix(statement, "INSERT INTO ") {
+            insertedAt = position
+        }
+    }
+
+    if -1 == redeemedAt || redeemedAt > insertedAt {
+        t.Fatalf("expected the recovery code redeemed before the enrollment was rewritten, got %q", statements)
     }
 }

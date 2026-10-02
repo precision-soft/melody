@@ -3,6 +3,7 @@ package config
 import (
     "context"
     nethttp "net/http"
+    "strings"
 
     minio "github.com/minio/minio-go/v7"
     melodyawss3 "github.com/precision-soft/melody/integrations/awss3/v3"
@@ -37,6 +38,8 @@ type Module struct {
 
     hmacSecrets melodysecurity.HmacSecretProvider
     hmacApps    melodysecurity.HmacAppRegistry
+    /* the caller application the internal envelopes are signed for, as APP_INTERNAL_AUTH_APP names it; the signer of internal:sign reads it beside the secret provider */
+    internalAuthApp string
 
     impersonatedUsers melodysecuritycontract.ImpersonatedUserResolver
 
@@ -183,6 +186,16 @@ func (instance *Module) environmentValue(key string) string {
     }
 
     return parameter.String()
+}
+
+/* environmentValueOr reads a key as environmentValue does and answers the fallback for a blank one: the keys that name something rather than grant it, where a blank value means the example's own name. */
+func (instance *Module) environmentValueOr(key string, fallback string) string {
+    value := strings.TrimSpace(instance.environmentValue(key))
+    if "" == value {
+        return fallback
+    }
+
+    return value
 }
 
 func (instance *Module) Name() string {

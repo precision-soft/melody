@@ -7,6 +7,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v3/.example/presenter"
+    "github.com/precision-soft/melody/v3/.example/repository"
     examplesecurity "github.com/precision-soft/melody/v3/.example/security"
     melodyclock "github.com/precision-soft/melody/v3/clock"
     melodyhttp "github.com/precision-soft/melody/v3/http"
@@ -67,6 +68,21 @@ func IssueHandler() melodyhttpcontract.Handler {
             },
             accessTokenLifetime,
         )
+
+        /* the account is read again, from the repository and not the cache, once the token is stored: a deletion that ran between the session's resolution and this write released the account's tokens before this one existed, so the door that wrote it takes it back. A deletion after this read finds the token stored and releases it. */
+        account, accountFound, accountErr := repository.MustGetUserRepository(runtimeInstance.Container()).FindById(runtimeInstance.Context(), principal.UserIdentifier())
+        if nil != accountErr {
+            store.Delete(tokenString)
+
+            return nil, accountErr
+        }
+
+        if false == accountFound || nil == account {
+            store.Delete(tokenString)
+
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusUnauthorized, "unauthorized"), nil
+        }
+
         stored, found, lookupErr := store.Lookup(runtimeInstance, tokenString)
         if nil != lookupErr {
             return nil, lookupErr

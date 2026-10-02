@@ -14,6 +14,7 @@ import (
 
     "github.com/precision-soft/melody/v3/.example/migration"
     "github.com/precision-soft/melody/v3/.example/persistence"
+    examplesecurity "github.com/precision-soft/melody/v3/.example/security"
     melodyaudit "github.com/precision-soft/melody/integrations/bunorm/v3/audit"
     "github.com/precision-soft/melody/v3/exception"
     melodycontainer "github.com/precision-soft/melody/v3/container"
@@ -172,10 +173,11 @@ func newUndialedResetStorage() *persistence.CatalogStorage {
     return persistence.NewCatalogStorage(bun.NewDB(sql.OpenDB(&refusingResetConnector{}), mysqldialect.New()))
 }
 
+/* the recording storage is the development composition root's: marked to seed the example's accounts, so a reset over it reseeds them as a development reset does */
 func newRecordingResetStorage(location string) (*persistence.CatalogStorage, *recordingResetConnector) {
     connector := &recordingResetConnector{}
 
-    return persistence.NewCatalogStorageAt(bun.NewDB(sql.OpenDB(connector), mysqldialect.New()), location), connector
+    return persistence.NewCatalogStorageAt(bun.NewDB(sql.OpenDB(connector), mysqldialect.New()), location).WithAccountSeed(), connector
 }
 
 /* the refusal is for the environment that wired NEITHER database: an archive wired alone is reset alone, which the test after this one proves */
@@ -302,8 +304,8 @@ func TestDatabaseResetPlanNamesTheArchiveOnlyWhenThereIsOne(t *testing.T) {
     catalogue := newUndialedResetStorage()
     archive := persistence.NewArchiveStorage(newUndialedResetStorage().Database())
 
-    withArchive := strings.Join(databaseResetPlanLineList(catalogue, archive), "\n")
-    withoutArchive := strings.Join(databaseResetPlanLineList(catalogue, persistence.NewArchiveStorage(nil)), "\n")
+    withArchive := strings.Join(databaseResetPlanLineList(catalogue, archive, nil), "\n")
+    withoutArchive := strings.Join(databaseResetPlanLineList(catalogue, persistence.NewArchiveStorage(nil), nil), "\n")
 
     for _, table := range migration.ArchiveTableNameList() {
         if false == strings.Contains(withArchive, table) {
@@ -602,3 +604,18 @@ func TestDatabaseResetCommandGroupsTheReseedUnderOneAuditTransaction(t *testing.
     }
 }
 
+
+/* the accounts go with their table through no door that publishes a deletion, so the plan names what happens to the tokens that name them: released from the shared redis when the store lives there, and said to stay in the server's own memory when it does not */
+func TestDatabaseResetPlanNamesWhatHappensToTheDeviceTokens(t *testing.T) {
+    catalogue := newUndialedResetStorage()
+
+    shared := strings.Join(databaseResetPlanLineList(catalogue, persistence.NewArchiveStorage(nil), examplesecurity.NewTokenNamespace(nil, "melody-example-v3:token")), "\n")
+    if false == strings.Contains(shared, "every device token and revocation epoch of the token store on the shared redis") {
+        t.Fatalf("expected the plan to name the release of the device tokens, got %q", shared)
+    }
+
+    local := strings.Join(databaseResetPlanLineList(catalogue, persistence.NewArchiveStorage(nil), nil), "\n")
+    if false == strings.Contains(local, "they stay valid there until it restarts") || true == strings.Contains(local, "every device token and revocation epoch") {
+        t.Fatalf("expected the plan to say the device tokens stay in the server's memory, got %q", local)
+    }
+}

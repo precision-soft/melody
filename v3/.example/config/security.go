@@ -198,11 +198,12 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
             WithAccessDeniedHandler(melodysecurity.NewJsonAccessDeniedHandler()),
     )
 
+    /* the device firewall honours a token only while the account it names exists, with that account's current roles (see deviceAccountEnricher) */
     builder.AddStatelessFirewall(
         "deviceToken",
         melodysecurity.NewPathPrefixMatcher(route.DevicePrefix),
         []melodysecuritycontract.Rule{},
-        melodysecurity.NewBearerTokenSource(instance.opaqueTokenValidator),
+        melodysecurity.NewBearerTokenSourceWithEnricher(instance.opaqueTokenValidator, newDeviceAccountEnricher(repositoryDeviceAccountLookup)),
         melodysecurityconfig.NewFirewallOverrideConfiguration().
             WithEntryPoint(melodysecurity.NewJsonEntryPoint()).
             WithAccessDeniedHandler(melodysecurity.NewJsonAccessDeniedHandler()),

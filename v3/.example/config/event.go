@@ -48,14 +48,14 @@ func (instance *Module) registerSubscribers(eventDispatcher melodyeventcontract.
         subscriber.NewSecurityAuthenticationEventSubscriber(),
     )
 
-    /* the device tokens go with the account, from the store the token firewall reads: redis when wired, the process's own otherwise */
+    /* the tokens go with the account, from the store the token firewalls read: redis when wired, the process's own otherwise. The release outranks every other listener of the deletion, so no outage of theirs leaves a deleted account authenticating */
     eventDispatcher.AddSubscriber(
-        subscriber.NewAccessTokenReleaseSubscriber(func(runtimeInstance melodyruntimecontract.Runtime) melodysecuritycontract.RevocableTokenStore {
+        subscriber.NewAccessTokenReleaseSubscriber(func(runtimeInstance melodyruntimecontract.Runtime) melodysecuritycontract.EpochRevocableTokenStore {
             return examplesecurity.TokenStoreFromResolver(runtimeInstance.Container())
         }),
     )
 
-    /* without a database there is no enrollment to release. The release resolves the store at each deletion and fails the deletion when it cannot, and it carries a higher priority than the cache subscriber on the deletion event, because a dispatch ends at the first listener that fails and a cache outage must not leave the enrollment standing */
+    /* without a database there is no enrollment to release. The release resolves the store at each deletion and journals a store it cannot reach rather than failing the deletion, since the cascade on the account releases the row; it runs after the token release and ahead of the cache subscriber */
     if nil != instance.database {
         eventDispatcher.AddSubscriber(
             subscriber.NewTwoFactorEnrollmentSubscriber(twofactor.StoreFromRuntime),

@@ -234,3 +234,15 @@ func fixedStore(store *store2fa.Store) store2fa.StoreSource {
         return store, nil
     }
 }
+
+/* insertStatements answers the writes among the statements a door issued, in order */
+func insertStatements(statements []string) []string {
+    insertList := make([]string, 0)
+    for _, statement := range statements {
+        if true == strings.HasPrefix(statement, "INSERT INTO ") {
+            insertList = append(insertList, statement)
+        }
+    }
+
+    return insertList
+}

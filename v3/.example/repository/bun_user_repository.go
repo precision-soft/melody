@@ -52,7 +52,7 @@ func (instance *userRow) toEntity() *entity.User {
 }
 
 func newBunUserRepository(storage *persistence.CatalogStorage) *bunUserRepository {
-    return &bunUserRepository{database: storage.Database(), tracker: storage.Tracker(), recorder: storage.Recorder()}
+    return &bunUserRepository{database: storage.Database(), tracker: storage.Tracker(), recorder: storage.Recorder(), seedsAccounts: storage.SeedsAccounts()}
 }
 
 /* bunUserRepository keeps the directory in the database and its history beside it. Every write goes through the audit tracker, the password recorded as changed without its value; GrantRole, which runs its own transaction, records through the recorder inside it. */
@@ -60,12 +60,18 @@ func newBunUserRepository(storage *persistence.CatalogStorage) *bunUserRepositor
 const userIdentifierMintLockName = "melody_example_v3_user.id"
 
 type bunUserRepository struct {
-    database *bun.DB
-    tracker  *melodyaudit.Tracker
-    recorder *melodyaudit.Recorder
+    database      *bun.DB
+    tracker       *melodyaudit.Tracker
+    recorder      *melodyaudit.Recorder
+    seedsAccounts bool
 }
 
+/* seedIfEmpty installs the example's accounts on an empty table, through the trail, when the storage was marked to (see persistence.CatalogStorage.WithAccountSeed); otherwise the directory starts empty and stays so until example:user:create */
 func (instance *bunUserRepository) seedIfEmpty(ctx context.Context) error {
+    if false == instance.seedsAccounts {
+        return nil
+    }
+
     return seedIfEmptyAudited(ctx, instance.database, instance.tracker, persistence.AuditEntityUser, func() []*userRow {
         seedList := seedUserList()
         rowList := make([]*userRow, 0, len(seedList))

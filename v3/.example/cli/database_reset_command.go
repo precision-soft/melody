@@ -11,6 +11,7 @@ import (
     "github.com/precision-soft/melody/v3/.example/migration"
     "github.com/precision-soft/melody/v3/.example/persistence"
     "github.com/precision-soft/melody/v3/.example/repository"
+    examplesecurity "github.com/precision-soft/melody/v3/.example/security"
     "github.com/precision-soft/melody/v3/.example/service"
     melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
     melodycontainer "github.com/precision-soft/melody/v3/container"
@@ -79,7 +80,10 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
         writer = os.Stdout
     }
 
-    printDatabaseResetPlan(writer, storage, archiveStorage)
+    /* the token store's namespace on redis is resolved before the plan is printed, because the plan says whether the device tokens of the removed accounts are released or stay in a server's own memory */
+    tokenNamespace := examplesecurity.TokenNamespaceFromResolver(runtimeInstance.Container())
+
+    printDatabaseResetPlan(writer, storage, archiveStorage, tokenNamespace)
 
     if false == commandContext.Bool(databaseResetFlagForce) {
         fmt.Fprintln(writer, "nothing was touched; pass --force to perform the reset")
@@ -120,6 +124,16 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
         }
 
         fmt.Fprintln(writer, "catalogue reset: the schema was dropped and recreated on "+databaseLocationLabel(storage.Location()))
+
+        /* the accounts went with the schema through no door that publishes their deletion, and the reseed hands their identifiers out again, so the tokens that name them go now, before anything can fail between the drop and the reseed */
+        if nil != tokenNamespace {
+            released, releaseErr := tokenNamespace.Clear(ctx)
+            if nil != releaseErr {
+                return databaseResetStepFailure("releasing the device tokens of the removed accounts", "catalogue", databaseLocationLabel(storage.Location()), releaseErr)
+            }
+
+            fmt.Fprintf(writer, "catalogue reset: the token store released %d keys, every device token and revocation epoch of the removed accounts\n", released)
+        }
 
         if trailErr := clearAuditTrail(ctx, storage); nil != trailErr {
             return databaseResetStepFailure("emptying the audit trail", "catalogue", databaseLocationLabel(storage.Location()), trailErr)
@@ -184,7 +198,7 @@ func databaseResetStepFailure(step string, database string, location string, cau
 /* databaseResetPlanLineList names what the reset reaches, and WHERE. It is a list rather than a series of prints so that what the command SAYS it will destroy is readable by a test without capturing a stream, and it is printed on both paths on purpose: the refusal has to say what the flag would have unleashed, and the run has to leave the same lines in the log of whoever ran it.
 
    Each half names its database as the connection was declared — host, port and schema — because the tables alone do not: with MYSQL_DATABASE pointed at another major's schema the table list reads the same, the drops are no-ops there and the reseed creates this major's tables inside that database. The location is the one line that separates a reset of this example's volume from a reset of whatever the host happens to point at. */
-func databaseResetPlanLineList(storage *persistence.CatalogStorage, archiveStorage *persistence.ArchiveStorage) []string {
+func databaseResetPlanLineList(storage *persistence.CatalogStorage, archiveStorage *persistence.ArchiveStorage, tokenNamespace *examplesecurity.TokenNamespace) []string {
     lineList := []string{"example:db:reset would drop and recreate:"}
 
     if true == storage.IsPersistent() {
@@ -198,8 +212,16 @@ func databaseResetPlanLineList(storage *persistence.CatalogStorage, archiveStora
             lineList,
             "  - the bun bookkeeping tables, so an older set's rows go with them",
             fmt.Sprintf("  - the rows of %s and %s, which this application wrote", persistence.AuditTable, melodyaudit.DefaultTransactionTable),
-            "  and then reseed the nomenclature and clear the cache",
         )
+
+        /* the accounts are removed with their table, so the tokens naming them are named too: on redis they are released, and in a server's own memory the plan says they stay, since a console command cannot reach them */
+        if nil != tokenNamespace {
+            lineList = append(lineList, "  - every device token and revocation epoch of the token store on the shared redis, since the accounts they name are removed")
+        } else {
+            lineList = append(lineList, "  the device tokens live in the running server's own memory (no REDIS_ADDRESS): they stay valid there until it restarts")
+        }
+
+        lineList = append(lineList, "  and then reseed the nomenclature and clear the cache")
     }
 
     /* the archive's tables are read from the archive set's own list, the way the catalogue's are read from the catalogue's: a table added to either schema cannot be left out of the plan by a second copy nobody updated. They are named only when there is an archive, because a plan that promised to drop a table on a database this environment never wired would be a lie in the one direction that matters. */
@@ -229,8 +251,8 @@ func databaseLocationLabel(location string) string {
     return location
 }
 
-func printDatabaseResetPlan(writer io.Writer, storage *persistence.CatalogStorage, archiveStorage *persistence.ArchiveStorage) {
-    for _, line := range databaseResetPlanLineList(storage, archiveStorage) {
+func printDatabaseResetPlan(writer io.Writer, storage *persistence.CatalogStorage, archiveStorage *persistence.ArchiveStorage, tokenNamespace *examplesecurity.TokenNamespace) {
+    for _, line := range databaseResetPlanLineList(storage, archiveStorage, tokenNamespace) {
         fmt.Fprintln(writer, line)
     }
 }

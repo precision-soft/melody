@@ -27,7 +27,7 @@ import (
 func compiledSecurityModule(t *testing.T) *melodysecurityconfig.Builder {
     t.Helper()
 
-    moduleInstance := &Module{}
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
     moduleInstance.buildInternalAuth()
     moduleInstance.buildTokenAuth()
     moduleInstance.buildImpersonation()
@@ -188,7 +188,8 @@ func TestRegisterSecurity_TheInternalFirewallCarriesItsOwnRuleAlone(t *testing.T
 
 /* with a metrics token the exposition is the scraper's alone: a firewall named metrics, registered ahead of main, authenticates exactly "Bearer <token>" as the scraper role, which is what /metrics requires; a wrong credential authenticates as nobody */
 func TestRegisterSecurity_TheMetricsTokenPutsTheExpositionBehindTheScraperRole(t *testing.T) {
-    moduleInstance := &Module{metricsToken: "scrape-secret"}
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
+    moduleInstance.metricsToken = "scrape-secret"
     moduleInstance.buildInternalAuth()
     moduleInstance.buildTokenAuth()
     moduleInstance.buildImpersonation()

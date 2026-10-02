@@ -9,7 +9,12 @@ import (
     "github.com/precision-soft/melody/v3/.example/entity"
 )
 
-func newInMemoryUserRepository() UserRepository {
+/* newInMemoryUserRepository starts from the example's accounts when seedsAccounts says so (see persistence.CatalogStorage.WithAccountSeed) and empty otherwise */
+func newInMemoryUserRepository(seedsAccounts bool) UserRepository {
+    if false == seedsAccounts {
+        return &inMemoryUserRepository{users: []*entity.User{}}
+    }
+
     return &inMemoryUserRepository{users: seedUserList()}
 }
 

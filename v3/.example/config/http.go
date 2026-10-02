@@ -90,9 +90,9 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     router.HandleNamed(route.InternalWhoamiName, "POST", route.InternalWhoamiPattern, handlerinternalauth.WhoamiHandler())
 
-    /* the two doors resolve the store at each request (see two_factor.go), so they stand whenever the catalogue does: a store its migration refused answers 503 until it heals, rather than leaving the routes unregistered until the process restarts. The verification door burns an accepted code in the memory the sign-in reads, so a code is spent once across both. */
+    /* the two doors resolve the store at each request (see two_factor.go), so they stand whenever the catalogue does: a store its migration refused answers 503 until it heals, rather than leaving the routes unregistered until the process restarts. The verification door, and the enrollment door when it replaces an enrollment, burn an accepted code in the memory the sign-in reads, so a code is spent once across all three. */
     if nil != instance.database {
-        router.HandleNamed("example.twofactor.enroll", "POST", "/twofactor/enroll", handlertwofactor.EnrollHandler(twofactor.StoreFromRuntime))
+        router.HandleNamed("example.twofactor.enroll", "POST", "/twofactor/enroll", handlertwofactor.EnrollHandler(twofactor.StoreFromRuntime, secondFactorReplayGuard))
         router.HandleNamed("example.twofactor.verify", "POST", "/twofactor/verify", handlertwofactor.VerifyHandler(twofactor.StoreFromRuntime, secondFactorReplayGuard))
     }
 

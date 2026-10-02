@@ -34,6 +34,8 @@ Passwords are stored as **bcrypt hashes** ([`security/password_hasher.go`](./sec
 `security.HashPassword` at seeding and in the user handlers, `security.PasswordMatches`
 (`bcrypt.CompareHashAndPassword`) at login. The hash is salted, so the same password produces a different stored value on every boot; the credentials above are the stable contract, not the bytes in the table.
 
+**These accounts are seeded into an empty table in every environment, and their passwords are in this README.** They are a development convenience, not accounts to deploy: an application built from this example removes them, or changes their passwords, before it serves anyone. (The third major's example seeds them in development only.)
+
 ---
 
 ## Structure overview

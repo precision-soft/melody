@@ -8,6 +8,7 @@ import (
 )
 
 const (
+    /* the development value of APP_JWT_SECRET, the one .env commits: public, so outside development it refuses the boot */
     exampleJwtSecret = "melody-example-signing-secret-change-me"
 
     /* tokenRevocationEpochSkew widens a revoke-all two seconds past the instant it was drawn: the replicas behind the balancer issue and revoke on clocks that may differ by that much, so a token another node stamped just after the revoke, on a clock behind this one's, is still refused; the price is that a sign-in inside those two seconds signs in once more */
@@ -25,7 +26,7 @@ func exampleJwtConfig(secret []byte) melodysecurity.JwtConfig {
 }
 
 func (instance *Module) buildTokenAuth() {
-    instance.jwtSecret = []byte(exampleJwtSecret)
+    instance.jwtSecret = []byte(instance.credential(environmentKeyJwtSecret, exampleJwtSecret))
     instance.tokenValidator = melodysecurity.NewJwtTokenValidatorWithRevocationEpoch(
         exampleJwtConfig(instance.jwtSecret),
         security.ResolvedTokenStore{},

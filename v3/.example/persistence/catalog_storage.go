@@ -47,6 +47,7 @@ type CatalogStorage struct {
     auditRegistry *melodyaudit.Registry
     tracker       *melodyaudit.Tracker
     recorder      *melodyaudit.Recorder
+    seedsAccounts bool
 }
 
 func NewCatalogStorage(database *bun.DB) *CatalogStorage {
@@ -74,6 +75,18 @@ func NewCatalogStorageAt(database *bun.DB, location string) *CatalogStorage {
         tracker:       melodyaudit.NewTracker(database, recorder),
         recorder:      recorder,
     }
+}
+
+/* WithAccountSeed marks the handle as one whose user directory starts from the example's three accounts — user, editor and admin, each signing in with its name as its password — when it is empty. The composition root marks it in development only: anywhere else those accounts are a door anyone who read the README walks through, so the directory starts empty and its first account comes from example:user:create. A handle nobody marked seeds none. */
+func (instance *CatalogStorage) WithAccountSeed() *CatalogStorage {
+    instance.seedsAccounts = true
+
+    return instance
+}
+
+/* SeedsAccounts answers whether an empty user directory on this handle starts from the example's accounts (see WithAccountSeed). */
+func (instance *CatalogStorage) SeedsAccounts() bool {
+    return instance.seedsAccounts
 }
 
 /* Database is nil when the environment configured no connection. */

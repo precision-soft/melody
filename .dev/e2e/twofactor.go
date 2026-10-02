@@ -6,6 +6,7 @@ import (
     "fmt"
     "net/http"
     "os"
+    "strings"
     "time"
 
     "github.com/precision-soft/melody/v3/security/totp"
@@ -41,7 +42,7 @@ type twoFactorEnrollPayload struct {
 
 /* runTwoFactorCheck enrolls the signed-in editor, verifies a code its own authenticator-app stand-in produced (totp:code), and then attacks the verification four ways. The replay pair is the interesting one: an accepted TOTP code stays arithmetically valid for its whole window, so the only thing stopping a captured code from being reused inside that window is the replay guard — and the SECOND replay proves the guard keys on the NORMALIZED code, which is what makes "409 643" fail to buy a second use of a code already spent as "409643".
 
-   Two arms guard the door rather than the codes. The anonymous one is the reason the route is not public any more: unauthenticated, the enrollment door handed out a secret for any identifier the caller named, the administrator's included. The re-enrollment one is what makes an account whose authenticator is lost recoverable — and what lets this section run twice against the same seeded identifier.
+   Two arms guard the door rather than the codes. The anonymous one is the reason the route is not public any more: unauthenticated, the enrollment door handed out a secret for any identifier the caller named, the administrator's included. The re-enrollment one is what makes an account whose authenticator is lost recoverable, behind a current factor: a session alone is refused with the challenge, a code of the stored secret replaces it — and the cleanup at the end is what lets this section run twice against the same seeded identifier.
 
    The section signs in, so it goes through the throttled login door: the budget the EXAMPLE OVER HTTP section deliberately exhausts is reset first. Once the editor is enrolled, the login door itself asks for the second factor (assertTwoFactorSignIn). */
 func runTwoFactorCheck(baseUrl string, redisAddress string) {
@@ -171,9 +172,40 @@ func assertTwoFactorAnonymousEnrollmentRefused(baseUrl string) {
     pass("the enrollment door refuses an unauthenticated caller, with and without a named identifier")
 }
 
-/* assertTwoFactorReEnrollmentReplacesTheSecret proves the door an account needs when its authenticator is lost: enrolling again answers a NEW secret for the SAME identifier, and the old one stops verifying because the row it lived in is gone. A plain insert answered an opaque 500 here and left the account bound to its first secret for good. */
+/* assertTwoFactorReEnrollmentReplacesTheSecret proves the door an account needs when its authenticator is lost, and its guard. Enrolling again REPLACES the factor, so it asks for a current one: a session alone is answered 401 with the challenge, since a stolen session must not become the thief's second factor; with a code the stored secret produces, it answers a NEW secret for the SAME identifier. A plain insert once answered an opaque 500 here and left the account bound to its first secret for good. */
 func assertTwoFactorReEnrollmentReplacesTheSecret(client *liveExampleClient, previous twoFactorEnrollPayload) twoFactorEnrollPayload {
-    enrollment := assertTwoFactorEnrollment(client)
+    refused := client.call(twoFactorLabel, liveExampleRequest{method: "POST", path: twoFactorEnrollRoute})
+    if http.StatusUnauthorized != refused.statusCode || false == strings.Contains(string(refused.body), `"factor":"totp"`) {
+        fail(
+            "%s: enrolling again on the session alone answered %d, wanted 401 with the totp challenge — a replacement must ask for a current factor: %s",
+            twoFactorLabel,
+            refused.statusCode,
+            string(refused.body),
+        )
+    }
+
+    pass("enrolling again without a current factor was refused with the challenge (401)")
+
+    output, elapsed := runExampleMintCommand(twoFactorLabel, "totp:code", "--secret", previous.Secret)
+    code := exampleMintedTotpCode(twoFactorLabel, output)
+
+    response := client.call(twoFactorLabel, liveExampleRequest{
+        method:     "POST",
+        path:       twoFactorEnrollRoute,
+        headerList: map[string]string{twoFactorCodeHeader: code},
+    })
+    if http.StatusOK != response.statusCode {
+        fail(
+            "%s: enrolling again with a code of the stored secret answered %d, wanted 200%s: %s",
+            twoFactorLabel,
+            response.statusCode,
+            exampleMintDelayDiagnostic(elapsed),
+            string(response.body),
+        )
+    }
+
+    enrollment := twoFactorEnrollPayload{}
+    decodeLiveExamplePayload(twoFactorLabel, response, &enrollment)
 
     if previous.UserIdentifier != enrollment.UserIdentifier {
         fail(
@@ -184,11 +216,11 @@ func assertTwoFactorReEnrollmentReplacesTheSecret(client *liveExampleClient, pre
         )
     }
 
-    if previous.Secret == enrollment.Secret {
-        fail("%s: enrolling again answered the SAME secret, so a lost authenticator still satisfies the factor", twoFactorLabel)
+    if "" == enrollment.Secret || previous.Secret == enrollment.Secret {
+        fail("%s: enrolling again answered the SAME or an empty secret, so a lost authenticator still satisfies the factor", twoFactorLabel)
     }
 
-    pass("enrolling again replaced the secret for %q", enrollment.UserIdentifier)
+    pass("enrolling again with a current code replaced the secret for %q", enrollment.UserIdentifier)
 
     return enrollment
 }

@@ -62,7 +62,7 @@ func MustGetUserRepository(resolver melodycontainercontract.Resolver) UserReposi
 //melody:service ServiceUserRepository
 func NewUserRepository(storage *persistence.CatalogStorage) (UserRepository, error) {
     if false == storage.IsPersistent() {
-        return newInMemoryUserRepository(), nil
+        return newInMemoryUserRepository(storage.SeedsAccounts()), nil
     }
 
     migrateErr := migration.EnsureMigrated(context.Background(), storage.Database())

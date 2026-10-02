@@ -181,6 +181,7 @@ func runOpaqueTokenRevocationCheck(baseUrl string, redisAddress string) {
     pass("a user-wide revocation refuses every device's token while every entry is still in redis — nothing enumerated or deleted anything")
 
     assertDeletedAccountReleasesItsTokens(administrator, bearer, redisClient, baseUrl, os.Getenv("MYSQL_DSN"), tokenAfterUserRevocation.Token)
+    assertConsoleCreatedAccountSignsIn(administrator, baseUrl)
 }
 
 /* an account deleted through the admin door takes its device tokens with it: a probe editor signs in, mints a device token that resolves the device route, and once the account is deleted the token's entry is gone from redis, read out of band, and the token is refused. The editor's own token, another account's, is the control left standing. The probe account's audit trail leaves with it, on a failure too: identifiers are minted as the highest suffix plus one, so a later section's account would inherit the entries otherwise */
@@ -248,9 +249,40 @@ func assertDeletedAccountReleasesItsTokens(administrator *http.Client, bearer *l
 
     assertExampleTokenKeyPresent(redisClient, otherAccountToken, "another account's token after the deletion")
 
+    /* the release also publishes an account-wide boundary at the deletion's instant, which refuses the tokens no store holds — the bearer tokens */
+    if 0 == readExampleEpoch(redisClient, createdUser.Id, "") {
+        fail("opaque token revocation: the deletion published no account-wide boundary for %q", createdUser.Id)
+    }
+
+    /* a token that outlived its account — written after the release, as an issue in flight across the deletion would — is stamped after the boundary, so only the device firewall's account check stands between it and the route: planted out of band for the deleted identifier, it is refused */
+    time.Sleep(50 * time.Millisecond)
+    survivor := liveExampleUnique("survivor")
+    survivorPayload, survivorMarshalErr := json.Marshal(exampleStoredClaims{
+        UserIdentifier:   createdUser.Id,
+        Roles:            []string{"ROLE_USER"},
+        DeviceIdentifier: "survivor",
+        IssuedAt:         time.Now(),
+    })
+    if nil != survivorMarshalErr {
+        fail("opaque token revocation: encode the surviving entry: %v", survivorMarshalErr)
+    }
+
+    if setErr := redisClient.Do(
+        context.Background(),
+        redisClient.B().Set().Key(exampleTokenStoreKeyPrefix+survivor).Value(string(survivorPayload)).Px(5*time.Minute).Build(),
+    ).Error(); nil != setErr {
+        fail("opaque token revocation: plant the surviving entry: %v", setErr)
+    }
+    defer deleteExampleTokenKeys(redisClient, survivor)
+
+    survived := bearer.call("device identity of a token that outlived its account", liveExampleRequest{method: "GET", path: "/device/identity/", headerList: map[string]string{"Accept": "application/json", "Authorization": "Bearer " + survivor}})
+    if http.StatusUnauthorized != survived.statusCode {
+        fail("opaque token revocation: a token stored after its account was deleted answered %d, wanted 401 — the device firewall honours a token whose account is gone", survived.statusCode)
+    }
+
     removeExampleV3AuditTrail("opaque token revocation", database, "user", createdUser.Id)
 
-    pass("a deleted account's device token is gone from redis and refused, while another account's token stands")
+    pass("a deleted account's device token is gone from redis and refused, its account-wide boundary is published, a token stored after the deletion is refused by the account check, and another account's token stands")
 }
 
 func runExampleJwtRevocationCheck(

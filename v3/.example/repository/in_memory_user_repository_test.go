@@ -12,7 +12,7 @@ import (
 
 func TestInMemoryUserRepositoryConcurrentReadAndDelete(t *testing.T) {
     ctx := context.Background()
-    repositoryInstance := newInMemoryUserRepository()
+    repositoryInstance := newInMemoryUserRepository(true)
 
     waitGroup := sync.WaitGroup{}
     waitGroup.Add(2)
@@ -83,7 +83,7 @@ func TestInMemoryUserRepositoryConcurrentReadAndDelete(t *testing.T) {
 
 func TestInMemoryUserRepositoryFindByUsernameIgnoresCase(t *testing.T) {
     ctx := context.Background()
-    repositoryInstance := newInMemoryUserRepository()
+    repositoryInstance := newInMemoryUserRepository(true)
 
     user, found, findErr := repositoryInstance.FindByUsername(ctx, "  ADMIN ")
     if nil != findErr {
@@ -102,7 +102,7 @@ func TestInMemoryUserRepositoryFindByUsernameIgnoresCase(t *testing.T) {
 /* the three sibling repositories, products, categories and currencies, refuse an identifier that is already taken, and so does the user repository: an occupied id appended as a second row could be reached by no door that goes through the id, since FindById and DeleteById find the first. The refusal carries the message the identifier ceiling's rationale promises the caller. */
 func TestInMemoryUserRepositoryRefusesAnIdentifierThatIsAlreadyTaken(t *testing.T) {
     ctx := context.Background()
-    repositoryInstance := newInMemoryUserRepository()
+    repositoryInstance := newInMemoryUserRepository(true)
 
     first := entity.NewUser("user-90", "zz-first", "digest", []string{entity.RoleUser})
     if createErr := repositoryInstance.Create(ctx, first); nil != createErr {
@@ -150,7 +150,7 @@ func TestInMemoryUserRepositoryRefusesAnIdentifierThatIsAlreadyTaken(t *testing.
    reader holding the previous value is not handed a set that grows under it */
 func TestInMemoryUserRepositoryGrantRoleAppendsOnceOntoACopy(t *testing.T) {
     ctx := context.Background()
-    repositoryInstance := newInMemoryUserRepository()
+    repositoryInstance := newInMemoryUserRepository(true)
 
     before, _, _ := repositoryInstance.FindByUsername(ctx, "user")
 
