@@ -1861,6 +1861,21 @@ func TestRequestPathIsCanonical_LeavesNonPathTargetsToTheRouter(t *testing.T) {
     }
 }
 
+func TestRequestPathIsCanonical_JudgesASlashLessPathAsTheMatchersReadIt(t *testing.T) {
+    /* a handler in front of the kernel that strips a prefix hands the path on without its leading slash; the matchers read it with the "/" prepended and the access-control matcher folds it, so a fold is refused as it is with the slash */
+    for _, foldedPath := range []string{"admin/../public", "admin/./x", "admin//x", "./admin", "admin ", "..", "../public"} {
+        if true == requestPathIsCanonical(foldedPath) {
+            t.Fatalf("expected slash-less path %q that folds to be refused", foldedPath)
+        }
+    }
+
+    for _, canonicalPath := range []string{"admin", "admin/x", "admin/x/"} {
+        if false == requestPathIsCanonical(canonicalPath) {
+            t.Fatalf("expected slash-less canonical path %q to pass", canonicalPath)
+        }
+    }
+}
+
 func TestRequestPathAsRouted_KeepsAnEncodedSeparatorInsideItsSegmentAndDecodesTheRest(t *testing.T) {
     for escapedPath, routed := range map[string]string{
         "/":                    "/",

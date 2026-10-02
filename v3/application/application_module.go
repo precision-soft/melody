@@ -144,6 +144,7 @@ func (instance *Application) bootModulesPostConfigurationResolve() {
     if nil != compiledConfiguration {
         instance.securityConfiguration = compiledConfiguration
     }
+    instance.bootWarnings = append(instance.bootWarnings, securityBuilder.BootWarnings()...)
 
     /* one loop per hook: each hook runs across every module before the next begins, the granularity the contracts document, so a module may rely on every sibling's listeners before any middleware registers */
     for _, moduleInstance := range instance.modules {

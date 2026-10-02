@@ -218,7 +218,7 @@ func (instance *markingEnricher) Enrich(
     _ runtimecontract.Runtime,
     _ securitycontract.Claims,
 ) (securitycontract.Claims, error) {
-    return securitycontract.Claims{}, exception.NewError("roles lookup failed", nil, markInfrastructureFailure(errors.New("store is down")))
+    return securitycontract.Claims{}, exception.NewError("roles lookup failed", nil, MarkInfrastructureFailure(errors.New("store is down")))
 }
 
 func TestBearerTokenSource_MarkedEnrichmentFailureLogsAtError(t *testing.T) {

@@ -21,6 +21,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   upload short of its own content length: a single-shot request is refused by the bucket and a multipart upload is aborted, so nothing reaches the key. Bodies declared at or below MinIO's 16 MiB part size are validated in full before any request is issued, since MinIO uploads those as one committed request; memory therefore never scales with the body, and the spool never exceeds the part buffer MinIO itself allocates for the same upload
 - storage: the size check no longer treats a legal `(0, nil)` read as the end of the body — an over-read could go undetected and a silently truncated object was stored with `Put` reporting success — and it no longer spins on one either: consecutive empty reads are bounded and every read honours the runtime context, so a stalled body or a client that walked away fails the put instead of pinning a core and an upload. A correct size, a negative "unknown length" size, a zero declared size, and a body shorter than its declared size all behave exactly as before
 
+### Security
+
+- `storage.go` — **Behavioural change**: every door (`Put`, `Get`, `Delete`, `Exists`, `PresignedUrl`) refuses a key that carries a `..` segment, the backslash read as a separator, and names the segment in the error, before the bucket is asked; `LocalStorage` refuses it the same way. The key was folded instead, so `tenant-b/../tenant-a/secret.txt` addressed `tenant-a/secret.txt`, and an application that isolates its callers by key prefix was crossed by it. A key relying on the fold to address `a/../b` as `b` is now refused: address it as `b`.
+
 ## [v3.0.3] - 2026-07-06 - Standalone Module Resolution Fix
 
 ### Fixed

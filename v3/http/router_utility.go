@@ -269,15 +269,20 @@ func splitNormalizedPath(value string) []string {
     return strings.Split(normalizedPath, "/")
 }
 
-/* requestPathIsCanonical reports whether a request path is spelled the one way the router, the firewall matcher and the access-control matcher read alike. A path that folds through "..", "." or "//", or that carries leading or trailing whitespace, would route to one handler and be authorized against another rule, so it is refused. A trailing slash is normalized away rather than refused, and a target that does not begin with "/" is left to the router unless it begins with whitespace. */
+/* requestPathIsCanonical reports whether a request path is spelled the one way the router, the firewall matcher and the access-control matcher read alike. A path that folds through "..", "." or "//", or that carries leading or trailing whitespace, would route to one handler and be authorized against another rule, so it is refused. A trailing slash is normalized away rather than refused, and a target that does not begin with "/" is judged with the "/" prepended, the spelling the firewall and access-control matchers read it in, unless it begins with whitespace, which is refused. */
 func requestPathIsCanonical(path string) bool {
     /* a path that begins with whitespace is refused before the "/" test below would pass it as not path-routed */
     if "" != path && strings.TrimLeftFunc(path, unicode.IsSpace) != path {
         return false
     }
 
-    if false == strings.HasPrefix(path, "/") {
+    if "" == path {
         return true
+    }
+
+    /* both matchers read a slash-less path with the "/" prepended and the access-control matcher folds it, so "admin/../public" selects the firewall of "/admin" under the rule of "/public"; it is judged as the spelling they read */
+    if false == strings.HasPrefix(path, "/") {
+        path = "/" + path
     }
 
     if strings.TrimSpace(path) != path {

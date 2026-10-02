@@ -7,6 +7,7 @@ import (
     "math"
     "net"
     nethttp "net/http"
+    "net/netip"
     "sort"
     "sync"
     "time"
@@ -426,12 +427,28 @@ func (instance *RateLimitConfig) SetClientIpResolver(resolver ClientIpResolver) 
     instance.clientIpResolver = resolver
 }
 
+/* clientIp answers the client key the limiter counts under: the resolved address, with an IPv6 address aggregated to its /64 by clientIpRateLimitKey */
 func (instance *RateLimitConfig) clientIp(request httpcontract.Request) string {
     if nil != instance.clientIpResolver {
-        return instance.clientIpResolver(request)
+        return clientIpRateLimitKey(instance.clientIpResolver(request))
     }
 
-    return DefaultClientIp(request)
+    return clientIpRateLimitKey(DefaultClientIp(request))
+}
+
+/* clientIpRateLimitKey aggregates an IPv6 address to its /64, the block one host is routinely handed: keyed on the /128, one host rotates through 2^64 addresses, each with a budget of its own, and fills the limiter's key table, which then refuses every new client. An IPv4 address, written bare or mapped into IPv6, keys on itself; a value that is not an address is kept as it is. */
+func clientIpRateLimitKey(clientIp string) string {
+    address, parseErr := netip.ParseAddr(clientIp)
+    if nil != parseErr {
+        return clientIp
+    }
+
+    address = address.WithZone("").Unmap()
+    if true == address.Is4() {
+        return address.String()
+    }
+
+    return netip.PrefixFrom(address, 64).Masked().String()
 }
 
 func RateLimitMiddleware(config *RateLimitConfig) httpcontract.Middleware {

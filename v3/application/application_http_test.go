@@ -8,6 +8,7 @@ import (
     "net"
     nethttp "net/http"
     "net/http/httptest"
+    "os"
     "slices"
     "strings"
     "sync"
@@ -24,6 +25,7 @@ import (
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal"
     "github.com/precision-soft/melody/v3/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     "github.com/precision-soft/melody/v3/logging"
@@ -1442,5 +1444,139 @@ func TestServeHttp_AnAsteriskFormTargetAnswersTheRootFirewallsRefusal(t *testing
 
     if true == handlerRan.Load() {
         t.Fatalf("expected no handler to run for an anonymous request under the root firewall")
+    }
+}
+
+func TestServeHttp_ASlashLessPathThatFoldsIsRefusedBeforeTheFirewallAndTheRouterDisagree(t *testing.T) {
+    applicationInstance := newServedExceptionTestApplication(t)
+
+    kernelInstance, ok := applicationInstance.kernel.(*testKernel)
+    if false == ok {
+        t.Fatalf("expected the test kernel, got %T", applicationInstance.kernel)
+    }
+
+    var handlerRan atomic.Bool
+    markHandler := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        handlerRan.Store(true)
+
+        return http.EmptyResponse(nethttp.StatusOK), nil
+    }
+
+    kernelInstance.httpRouter.Handle(nethttp.MethodGet, "/admin/*rest", markHandler)
+
+    firewall := security.NewCompiledFirewall(
+        "main",
+        security.NewPathPrefixMatcher("/"),
+        "matcher:main",
+        []securitycontract.Rule{},
+        security.NewResolverTokenSource(func(request httpcontract.Request) securitycontract.Token {
+            return security.NewAnonymousToken()
+        }),
+        security.NewAccessControl(
+            security.NewAccessControlRule("/admin", "ROLE_ADMIN"),
+            security.NewAccessControlExactRule("/public", securitycontract.AttributePublicAccess),
+        ),
+        security.NewAccessDecisionManager(
+            securitycontract.DecisionStrategyAffirmative,
+            security.NewRoleVoter(),
+        ),
+        security.NewRoleHierarchy(map[string][]string{}),
+        nil,
+        nil,
+        "",
+        "",
+        nil,
+        nil,
+        security.SourceFirewall,
+        security.SourceFirewall,
+        security.SourceFirewall,
+        security.SourceNone,
+        security.SourceNone,
+    )
+
+    registry := security.NewFirewallRegistry(
+        security.NewCompiledConfiguration([]*security.CompiledFirewall{firewall}, nil),
+    )
+
+    security.RegisterKernelSecurityResolutionListener(applicationInstance.kernel, registry)
+    security.RegisterKernelAccessControlListener(applicationInstance.kernel, registry)
+    applicationInstance.registerKernelHttpListeners()
+
+    /* a handler in front of the kernel that strips a prefix hands "/apiadmin/../public" on as "admin/../public": the router routes it to the catch-all of "/admin" while the access-control matcher folds it to the rule of "/public" */
+    server := httptest.NewServer(nethttp.StripPrefix("/api", applicationInstance.kernel.HttpKernel().ServeHttp(applicationInstance.kernel.ServiceContainer())))
+    defer server.Close()
+
+    for _, testCase := range []struct {
+        requestLine    string
+        expectedStatus int
+    }{
+        {"GET /apiadmin/../public HTTP/1.1", nethttp.StatusBadRequest},
+        {"GET /api/admin/x HTTP/1.1", nethttp.StatusUnauthorized},
+    } {
+        connection, dialErr := net.Dial("tcp", strings.TrimPrefix(server.URL, "http://"))
+        if nil != dialErr {
+            t.Fatalf("unexpected dial error: %v", dialErr)
+        }
+
+        _, writeErr := connection.Write([]byte(testCase.requestLine + "\r\nHost: localhost\r\nConnection: close\r\n\r\n"))
+        if nil != writeErr {
+            t.Fatalf("unexpected write error: %v", writeErr)
+        }
+
+        response, readErr := nethttp.ReadResponse(bufio.NewReader(connection), nil)
+        if nil != readErr {
+            t.Fatalf("unexpected read error for %s: %v", testCase.requestLine, readErr)
+        }
+
+        _ = response.Body.Close()
+        _ = connection.Close()
+
+        if testCase.expectedStatus != response.StatusCode {
+            t.Fatalf("expected %s to answer %d, got %d", testCase.requestLine, testCase.expectedStatus, response.StatusCode)
+        }
+    }
+
+    if true == handlerRan.Load() {
+        t.Fatalf("expected the catch-all of /admin never to run for an anonymous request")
+    }
+}
+
+/* the boot warnings the boot collected from the declarations it compiled are written once into the configured journal on the http path, and not at all by a command */
+func TestRunHttp_WritesTheCollectedBootWarningsOnceAndRunCliDoesNot(t *testing.T) {
+    bootWarning := internal.BootWarning{
+        Name:    "security.firewallShadowed",
+        Message: "the firewall is never selected",
+        Context: loggingcontract.Context{"firewall": "apiAdmin"},
+    }
+
+    httpLogger := &warningRecordingLogger{}
+    httpApplication := newCacheWarningTestApplication(t, config.ModeHttp, httpLogger)
+    httpApplication.bootWarnings = []internal.BootWarning{bootWarning}
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if runErr := httpApplication.runHttp(cancelledContext); nil != runErr {
+        t.Fatalf("unexpected run http error: %v", runErr)
+    }
+
+    if warnings := httpLogger.warningsContaining(bootWarning.Message); 1 != len(warnings) {
+        t.Fatalf("expected the boot warning written once on the http path, got %v", warnings)
+    }
+
+    cliLogger := &warningRecordingLogger{}
+    cliApplication := newCacheWarningTestApplication(t, config.ModeCli, cliLogger)
+    cliApplication.bootWarnings = []internal.BootWarning{bootWarning}
+
+    originalArguments := os.Args
+    os.Args = []string{"melody"}
+    defer func() { os.Args = originalArguments }()
+
+    if runErr := cliApplication.runCli(); nil != runErr {
+        t.Fatalf("unexpected run cli error: %v", runErr)
+    }
+
+    if warnings := cliLogger.warningsContaining(bootWarning.Message); 0 != len(warnings) {
+        t.Fatalf("expected no boot warning on a cli run, got %v", warnings)
     }
 }

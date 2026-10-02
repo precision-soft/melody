@@ -16,6 +16,8 @@ func Middleware(service *Service) httpcontract.Middleware {
 
     return func(next httpcontract.Handler) httpcontract.Handler {
         return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            service.writeBootWarnings(runtimeInstance)
+
             origin := service.RequestOrigin(request)
             allowOrigin := "" != origin && true == service.OriginAllowed(origin)
 

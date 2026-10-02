@@ -314,3 +314,39 @@ func TestRegisterRateLimitRequestListener_TheRefusalIsRenderedThroughTheExceptio
         t.Fatalf("expected the exception listener to render the refusal, got %q", string(body))
     }
 }
+
+func TestRegisterRateLimitRequestListener_AnIpv6ClientSharesOneBudgetAcrossItsSlash64(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+
+    RegisterRateLimitRequestListener(
+        dispatcher,
+        NewRateLimitConfig(NewFixedWindowLimiter(1, time.Minute), nil, nil),
+    )
+
+    runtimeInstance := newRateLimitListenerTestRuntime()
+
+    for _, testCase := range []struct {
+        remoteAddress string
+        refused       bool
+    }{
+        {"[2001:db8:1:2::1]:4711", false},
+        {"[2001:db8:1:2::ffff]:4711", true},
+        {"[2001:db8:1:3::1]:4711", false},
+        {"203.0.113.7:4711", false},
+        {"[::ffff:203.0.113.7]:4711", true},
+        {"203.0.113.8:4711", false},
+    } {
+        request := httptest.NewRequest(nethttp.MethodPost, "/api/item", nil)
+        request.RemoteAddr = testCase.remoteAddress
+
+        requestEvent := http.NewKernelRequestEvent(runtimeInstance, testhelper.NewHttpTestRequestFromHttpRequest(request))
+        _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, requestEvent)
+        if nil != dispatchErr {
+            t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+        }
+
+        if testCase.refused != (nil != requestEvent.Response()) {
+            t.Fatalf("expected %q refused=%v, got response %#v", testCase.remoteAddress, testCase.refused, requestEvent.Response())
+        }
+    }
+}

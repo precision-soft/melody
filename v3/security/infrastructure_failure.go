@@ -17,7 +17,8 @@ func (instance *infrastructureFailure) Unwrap() error {
     return instance.cause
 }
 
-func markInfrastructureFailure(err error) error {
+/* MarkInfrastructureFailure marks err as a failure of the platform the security machinery stands on, a store or a remote that could not answer, rather than a credential that failed its checks. An application's TokenValidator, ClaimsEnricher or resolver returns its error through it so the token sources file the failure as an incident, at Error, where an unmarked error is the routine Info a bad credential earns; the request fails closed to anonymous either way. A nil error stays nil. */
+func MarkInfrastructureFailure(err error) error {
     if nil == err {
         return nil
     }
@@ -25,7 +26,8 @@ func markInfrastructureFailure(err error) error {
     return &infrastructureFailure{cause: err}
 }
 
-func isInfrastructureFailure(err error) bool {
+/* IsInfrastructureFailure reports whether a link of err's cause chain carries the mark of MarkInfrastructureFailure */
+func IsInfrastructureFailure(err error) bool {
     var marker *infrastructureFailure
 
     return errors.As(err, &marker)

@@ -65,13 +65,13 @@ func TestOpaqueTokenValidator_ValidateMarksAStoreFailureAsInfrastructure(t *test
         t.Fatalf("expected the store's own failure to stay in the cause chain, got %v", validateErr)
     }
 
-    if false == isInfrastructureFailure(validateErr) {
+    if false == IsInfrastructureFailure(validateErr) {
         t.Fatalf("expected the failure to be marked as infrastructure, got %v", validateErr)
     }
 
     notFoundErr := NewInMemoryTokenStore()
     _, routineErr := NewOpaqueTokenValidator(notFoundErr).Validate(nil, "opaque-absent")
-    if true == isInfrastructureFailure(routineErr) {
+    if true == IsInfrastructureFailure(routineErr) {
         t.Fatalf("expected an absent token to stay a routine refusal, got %v", routineErr)
     }
 }

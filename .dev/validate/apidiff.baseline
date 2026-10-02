@@ -394,6 +394,11 @@ v3 ~ compatible ~ ./security.NewJwtTokenValidatorWithRevocationEpoch ~ added ~ k
 v3 ~ compatible ~ ./security.NewMemoryNonceGuardWithClock ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./security/totp.OtpauthUri ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./security.TotpSecondFactorAuthenticatorConfig.Clock ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
+v3 ~ compatible ~ ./security/config.BootWarning ~ added ~ keep ~ the shape of one boot warning the declaration holds (verdicts 2, 3 and 4 of 10-02, one mechanism): a stable name, a message and a context naming the configuration and never a secret
+v3 ~ compatible ~ ./security/config.(*Builder).BootWarnings ~ added ~ keep ~ the hazards the compile found and does not refuse (an empty compiled access control, a shadowed firewall, a percent escape in a declared path); the application writes them into the configured journal at the http boot, and the refusals are v4 TBD
+v3 ~ compatible ~ ./security.IsInfrastructureFailure ~ added ~ keep ~ verdict 16 of 10-02: the mark the token sources read is exported, so an application's validator, enricher or resolver reaches the infrastructure-failed branch
+v3 ~ compatible ~ ./security.MarkInfrastructureFailure ~ added ~ keep ~ verdict 16 of 10-02: the door an application's validator, enricher or resolver marks a store outage through, filed at Error instead of the routine Info
+v3 ~ compatible ~ ./security.(*PathPrefixMatcher).Prefix ~ added ~ keep ~ the raw prefix of the framework's firewall matcher, read by the shadowed-firewall boot warning (E6-674) and by an application describing its firewalls
 v3 ~ compatible ~ ./serializer.ErrNotAcceptable ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./session.ErrSessionDeleted ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./session.ErrSessionRotated ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features

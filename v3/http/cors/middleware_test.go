@@ -438,3 +438,48 @@ func TestMiddleware_ANilServiceReadsAsTheDefaultService(t *testing.T) {
         t.Fatalf("expected the default service to allow the origin, got %q", response.Headers().Get("Access-Control-Allow-Origin"))
     }
 }
+
+/* a credentialed service reads an entry without a scheme as admitting its host under any scheme, http included, so each such entry is named once, at the service's first request, in the journal of the runtime that serves it */
+func TestMiddleware_ACredentialedServiceNamesItsSchemelessEntriesOnceAtItsFirstRequest(t *testing.T) {
+    next := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return http.EmptyResponse(nethttp.StatusOK), nil
+    }
+
+    credentialed := NewService(Config{
+        AllowOrigins:     []string{"example.com", "https://secure.example.com", "*.example.org", "https://*.example.net"},
+        AllowCredentials: true,
+    })
+
+    runtimeInstance, logger := runtimeWithWarningRecordingLogger()
+    handler := Middleware(credentialed)(next)
+
+    for range 3 {
+        request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
+        request.Header.Set("Origin", "https://secure.example.com")
+
+        if _, handlerErr := handler(runtimeInstance, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request)); nil != handlerErr {
+            t.Fatalf("unexpected handler error: %v", handlerErr)
+        }
+    }
+
+    entries := logger.entriesOfBootWarning(bootWarningSchemelessCredentialedOrigin)
+    if 2 != len(entries) || "example.com" != entries[0] || "*.example.org" != entries[1] {
+        t.Fatalf("expected the two schemeless entries named once, got %v", entries)
+    }
+
+    for name, silent := range map[string]*Service{
+        "without credentials": NewService(Config{AllowOrigins: []string{"example.com"}}),
+        "with an origin func": NewService(Config{AllowOrigins: []string{"example.com"}, AllowCredentials: true, AllowOriginFunc: func(origin string) bool { return true }}),
+    } {
+        silentRuntime, silentLogger := runtimeWithWarningRecordingLogger()
+
+        request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
+        if _, handlerErr := Middleware(silent)(next)(silentRuntime, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request)); nil != handlerErr {
+            t.Fatalf("%s: unexpected handler error: %v", name, handlerErr)
+        }
+
+        if entries := silentLogger.entriesOfBootWarning(bootWarningSchemelessCredentialedOrigin); 0 != len(entries) {
+            t.Fatalf("%s: expected no boot warning, got %v", name, entries)
+        }
+    }
+}

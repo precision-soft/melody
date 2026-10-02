@@ -6,11 +6,13 @@ import (
     "errors"
     nethttp "net/http"
     "net/http/httptest"
+    "net/url"
     "testing"
     "time"
 
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodyhttp "github.com/precision-soft/melody/v3/http"
+    melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
     melodyruntime "github.com/precision-soft/melody/v3/runtime"
 )
 
@@ -99,6 +101,24 @@ func TestLinkTtlOf_RefusesATtlItCannotServe(t *testing.T) {
     for _, raw := range []string{"0", "-5", "3601", "5m", "x"} {
         if _, ttlErr := linkTtlOf(linkRequest(t, "/storage/object/link?key=probe&ttl="+raw)); false == errors.Is(ttlErr, errInvalidLinkTtl) {
             t.Fatalf("ttl=%s: expected the ttl refused, got %v", raw, ttlErr)
+        }
+    }
+}
+
+/* the object store refuses a key with a ".." segment by name, so every door answers it as the client's error, before the store is asked */
+func TestHandlers_AnswerAKeyWithAParentSegmentWith400BeforeTheStore(t *testing.T) {
+    containerInstance := melodycontainer.NewContainer()
+    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+
+    for name, handler := range map[string]melodyhttpcontract.Handler{"put": PutHandler(nil), "get": GetHandler(nil), "link": LinkHandler(nil)} {
+        for _, key := range []string{"tenant-b/../tenant-a/secret.txt", "..", "a\\..\\b"} {
+            httpRequest := httptest.NewRequest(nethttp.MethodGet, "/storage/object?key="+url.QueryEscape(key), nil)
+            request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("storage-test", time.Now()))
+
+            response, handlerErr := handler(runtimeInstance, httptest.NewRecorder(), request)
+            if nil != handlerErr || nethttp.StatusBadRequest != response.StatusCode() {
+                t.Fatalf("%s %q: expected 400, got %v (%v)", name, key, response, handlerErr)
+            }
         }
     }
 }

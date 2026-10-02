@@ -13,6 +13,7 @@ import (
     clockcontract "github.com/precision-soft/melody/v3/clock/contract"
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/internal"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
@@ -86,6 +87,7 @@ func newJwtTokenValidator(config JwtConfig, epochStore securitycontract.Revocati
         audience:             config.Audience,
         issuer:               config.Issuer,
         epochStore:           epochStore,
+        bootWarnings:         internal.NewBootWarningsOnce(shortJwtSecretBootWarnings(config.Secret)),
     }
 }
 
@@ -122,12 +124,19 @@ type JwtTokenValidator struct {
     audience             string
     issuer               string
     epochStore           securitycontract.RevocationEpochStore
+    bootWarnings         *internal.BootWarningsOnce
+}
+
+func (instance *JwtTokenValidator) writeBootWarnings(logger loggingcontract.Logger) {
+    instance.bootWarnings.Write(logger)
 }
 
 func (instance *JwtTokenValidator) Validate(
     runtimeInstance runtimecontract.Runtime,
     tokenString string,
 ) (securitycontract.Claims, error) {
+    writeBootWarningsAtFirstUse(runtimeInstance, instance)
+
     parts := strings.Split(tokenString, ".")
     if 3 != len(parts) {
         return securitycontract.Claims{}, exception.NewError("jwt has an invalid structure", nil, nil)
@@ -237,7 +246,7 @@ func (instance *JwtTokenValidator) verifyRevocationEpoch(
         return exception.NewError(
             "jwt revocation epoch is unavailable",
             map[string]any{"user": claims.UserIdentifier},
-            markInfrastructureFailure(epochErr),
+            MarkInfrastructureFailure(epochErr),
         )
     }
 

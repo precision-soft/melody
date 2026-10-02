@@ -14,6 +14,7 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal"
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
@@ -151,6 +152,8 @@ func (instance *Application) runHttp(
 
     instance.warnOnUnboundedDefaultSessionStorage(logger)
 
+    instance.writeBootWarnings(logger)
+
     /* net/http starts these on their own goroutines the moment Shutdown is called; each is wrapped to recover a panic through the framework logger and to be counted into shutdownHooksDone, which awaitHttpServerEnd joins */
     var shutdownHooksDone sync.WaitGroup
     for _, hook := range instance.httpShutdownHooks {
@@ -265,6 +268,13 @@ func markHttpRunErrorLogged(err error) error {
     _ = exception.MarkLogged(wrappedErr)
 
     return wrappedErr
+}
+
+/* writeBootWarnings writes, once and from the http path alone, the boot warnings the boot collected from the declarations it compiled, so each hazard reaches the configured journal of a process that serves it */
+func (instance *Application) writeBootWarnings(logger loggingcontract.Logger) {
+    for _, bootWarning := range instance.bootWarnings {
+        internal.WriteBootWarning(logger, bootWarning)
+    }
 }
 
 /* warnOnUnboundedDefaultCacheBackend reports once at boot that the default cache carries no item ceiling: an entry cached without a ttl stays for the life of the process. The constructor's second argument is the sweep interval, not a lifetime. It is raised from the http path alone, since a command exits and takes its map with it. */

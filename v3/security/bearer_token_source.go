@@ -64,7 +64,7 @@ func (instance *BearerTokenSource) Resolve(
         /* the request fails closed to anonymous either way, but a store that cannot answer degrades every bearer at once, so it is logged above a credential that failed its checks */
         logger := logging.LoggerFromRuntime(runtimeInstance)
         if nil != logger {
-            if true == isInfrastructureFailure(validateErr) {
+            if true == IsInfrastructureFailure(validateErr) {
                 logger.Error("bearer token validation infrastructure failed", exception.LogContext(validateErr))
             } else {
                 logger.Info("bearer token rejected", exception.LogContext(validateErr))
@@ -79,7 +79,7 @@ func (instance *BearerTokenSource) Resolve(
         if nil != enrichErr {
             logger := logging.LoggerFromRuntime(runtimeInstance)
             if nil != logger {
-                if true == isInfrastructureFailure(enrichErr) {
+                if true == IsInfrastructureFailure(enrichErr) {
                     logger.Error("bearer token enrichment infrastructure failed", exception.LogContext(enrichErr))
                 } else {
                     logger.Info("bearer token enrichment failed", exception.LogContext(enrichErr))

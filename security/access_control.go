@@ -43,7 +43,7 @@ func normalizeAccessControlAttributes(attributes []string) []string {
     return normalizedAttributes
 }
 
-/* NewAccessControlRule builds a rule bounded to a path segment: "/admin" governs "/admin" and "/admin/panel" but not "/administrator". An empty prefix is refused rather than made a catch-all, and PUBLIC_ACCESS is allowed, since a segment-bounded public rule cannot shadow a bounded denial; NewAccessControlRawPrefixRule is the cross-segment exception. */
+/* NewAccessControlRule builds a rule bounded to a path segment: "/admin" governs "/admin" and "/admin/panel" but not "/administrator". An empty prefix is refused rather than made a catch-all, and PUBLIC_ACCESS is allowed, since a segment-bounded public rule cannot shadow a bounded denial; NewAccessControlRawPrefixRule is the cross-segment exception. The path is written as the router reads it, decoded, with %2F for a separator inside a segment: a percent escape other than %2F claims only a resource whose name holds the percent sign literally. */
 func NewAccessControlRule(pathPrefix string, attributes ...string) AccessControlRule {
     normalizedPrefix := normalizePathPrefix(pathPrefix)
 
@@ -69,7 +69,7 @@ func NewAccessControlRule(pathPrefix string, attributes ...string) AccessControl
     }
 }
 
-/* NewAccessControlRawPrefixRule builds a rule that matches every path beginning with pathPrefix, so "/admin" governs "/administrator" as readily as "/admin/panel". Being the longest match, a raw rule shadows a bounded rule that would deny, so PUBLIC_ACCESS is refused on it. Use NewAccessControlRule unless a cross-segment reach is what the rule means. */
+/* NewAccessControlRawPrefixRule builds a rule that matches every path beginning with pathPrefix, so "/admin" governs "/administrator" as readily as "/admin/panel". Being the longest match, a raw rule shadows a bounded rule that would deny, so PUBLIC_ACCESS is refused on it. Use NewAccessControlRule unless a cross-segment reach is what the rule means. The path is written as the router reads it, decoded, with %2F for a separator inside a segment: a percent escape other than %2F claims only a resource whose name holds the percent sign literally. */
 func NewAccessControlRawPrefixRule(pathPrefix string, attributes ...string) AccessControlRule {
     for _, attribute := range attributes {
         if securitycontract.AttributePublicAccess == strings.TrimSpace(attribute) {
@@ -108,6 +108,7 @@ func newAccessControlPrefixRule(pathPrefix string, attributes []string) AccessCo
     }
 }
 
+/* NewAccessControlExactRule builds a rule that governs one path and nothing beneath it. The path is written as the router reads it, decoded, with %2F for a separator inside a segment: a percent escape other than %2F claims only a resource whose name holds the percent sign literally. */
 func NewAccessControlExactRule(path string, attributes ...string) AccessControlRule {
     normalizedPath := strings.TrimSpace(path)
     if "" == normalizedPath {

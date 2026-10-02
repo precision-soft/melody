@@ -12,25 +12,33 @@ import (
 
 /* Compile turns a Configuration into the compiled form the runtime reads. Configuration has only unexported fields and no constructor, so a caller outside this package can pass only the empty one, which compiles to a nil configuration and a nil error, meaning no security was declared. The public path from a declaration to the runtime is Builder.BuildAndCompile. */
 func Compile(configuration Configuration) (*security.CompiledConfiguration, error) {
+    compiled, _, err := compile(configuration)
+
+    return compiled, err
+}
+
+/* compile is Compile that also answers the firewalls whose effective access control is the empty one it built itself, for the boot warning of Builder.BootWarnings */
+func compile(configuration Configuration) (*security.CompiledConfiguration, []string, error) {
     if 0 == len(configuration.firewalls) {
         /* a global access control declared without any firewall still enforces: the access control listener falls back to it */
         if nil != configuration.global.accessControl {
-            return security.NewCompiledConfiguration(nil, configuration.global.accessControl), nil
+            return security.NewCompiledConfiguration(nil, configuration.global.accessControl), nil, nil
         }
 
-        return nil, nil
+        return nil, nil, nil
     }
 
     compiledFirewalls := make([]*security.CompiledFirewall, 0)
+    emptyAccessControlFirewallNames := make([]string, 0)
     declaredFirewallNames := make(map[string]struct{}, len(configuration.firewalls))
 
     for _, firewall := range configuration.firewalls {
         if "" == firewall.name {
-            return nil, exception.NewError("security firewall name may not be empty", nil, nil)
+            return nil, nil, exception.NewError("security firewall name may not be empty", nil, nil)
         }
 
         if true == internal.IsNilInterface(firewall.matcher) {
-            return nil, exception.NewError(
+            return nil, nil, exception.NewError(
                 "security firewall matcher is nil",
                 exceptioncontract.Context{
                     "firewallName": firewall.name,
@@ -41,7 +49,7 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
 
         for ruleIndex, rule := range firewall.rules {
             if true == internal.IsNilInterface(rule) {
-                return nil, exception.NewError(
+                return nil, nil, exception.NewError(
                     "security firewall rule is nil",
                     exceptioncontract.Context{
                         "firewallName": firewall.name,
@@ -53,7 +61,7 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
         }
 
         if _, declared := declaredFirewallNames[firewall.name]; true == declared {
-            return nil, exception.NewError(
+            return nil, nil, exception.NewError(
                 "security firewall name is already declared",
                 exceptioncontract.Context{
                     "firewallName": firewall.name,
@@ -64,7 +72,7 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
         declaredFirewallNames[firewall.name] = struct{}{}
 
         if true == internal.IsNilInterface(firewall.tokenSource) {
-            return nil, exception.NewError(
+            return nil, nil, exception.NewError(
                 "security firewall token source is nil",
                 exceptioncontract.Context{
                     "firewallName": firewall.name,
@@ -75,7 +83,7 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
 
         if true == firewall.override.stateless {
             if "" != firewall.loginPath || "" != firewall.logoutPath || false == internal.IsNilInterface(firewall.loginHandler) || false == internal.IsNilInterface(firewall.logoutHandler) {
-                return nil, exception.NewError(
+                return nil, nil, exception.NewError(
                     "security stateless firewall may not define login or logout configuration",
                     exceptioncontract.Context{
                         "firewallName": firewall.name,
@@ -85,7 +93,7 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
             }
         } else {
             if "" == firewall.loginPath {
-                return nil, exception.NewError(
+                return nil, nil, exception.NewError(
                     "security firewall login path may not be empty",
                     exceptioncontract.Context{
                         "firewallName": firewall.name,
@@ -95,7 +103,7 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
             }
 
             if "" == firewall.logoutPath {
-                return nil, exception.NewError(
+                return nil, nil, exception.NewError(
                     "security firewall logout path may not be empty",
                     exceptioncontract.Context{
                         "firewallName": firewall.name,
@@ -105,7 +113,7 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
             }
 
             if true == internal.IsNilInterface(firewall.loginHandler) {
-                return nil, exception.NewError(
+                return nil, nil, exception.NewError(
                     "security firewall login handler is nil",
                     exceptioncontract.Context{
                         "firewallName": firewall.name,
@@ -115,7 +123,7 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
             }
 
             if true == internal.IsNilInterface(firewall.logoutHandler) {
-                return nil, exception.NewError(
+                return nil, nil, exception.NewError(
                     "security firewall logout handler is nil",
                     exceptioncontract.Context{
                         "firewallName": firewall.name,
@@ -148,7 +156,7 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
         }
 
         if typedNilErr := refuseTypedNilDependency(firewall.name, "access decision manager", decisionManagerSource, effectiveDecisionManager); nil != typedNilErr {
-            return nil, typedNilErr
+            return nil, nil, typedNilErr
         }
 
         if nil != effectiveRoleHierarchy && false == internal.IsNilInterface(effectiveDecisionManager) {
@@ -183,7 +191,7 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
         }
 
         if typedNilErr := refuseTypedNilDependency(firewall.name, "entry point", entryPointSource, effectiveEntryPoint); nil != typedNilErr {
-            return nil, typedNilErr
+            return nil, nil, typedNilErr
         }
 
         effectiveDeniedHandler := firewall.override.accessDeniedHandler
@@ -198,7 +206,7 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
         }
 
         if typedNilErr := refuseTypedNilDependency(firewall.name, "access denied handler", deniedHandlerSource, effectiveDeniedHandler); nil != typedNilErr {
-            return nil, typedNilErr
+            return nil, nil, typedNilErr
         }
 
         globalAccessControl := configuration.global.accessControl
@@ -211,6 +219,7 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
             effectiveAccessControl = localAccessControl
             if nil == effectiveAccessControl {
                 effectiveAccessControl = security.NewAccessControl()
+                emptyAccessControlFirewallNames = append(emptyAccessControlFirewallNames, firewall.name)
             }
             accessControlSource = security.SourceFirewall
         } else {
@@ -219,6 +228,7 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
                 effectiveAccessControl = localAccessControl
                 if nil == effectiveAccessControl {
                     effectiveAccessControl = security.NewAccessControl()
+                    emptyAccessControlFirewallNames = append(emptyAccessControlFirewallNames, firewall.name)
                 }
                 accessControlSource = security.SourceFirewall
             } else {
@@ -261,7 +271,7 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
     return security.NewCompiledConfiguration(
         compiledFirewalls,
         configuration.global.accessControl,
-    ), nil
+    ), emptyAccessControlFirewallNames, nil
 }
 
 /* refuseTypedNilDependency refuses a dependency that reads as declared and holds a typed nil: the fallback to the global one would be skipped and the first request behind the firewall would dereference it. The refusal names whether the value came from the global configuration or from the firewall's override. */

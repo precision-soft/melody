@@ -21,7 +21,7 @@ type ImpersonationTokenSourceConfig struct {
     /* HeaderName overrides the switch-user header; defaults to DefaultSwitchUserHeaderName. */
     HeaderName string
 
-    /* SwitchRole is the role the admin must hold to be allowed to switch; defaults to contract.RoleAllowedToSwitch. */
+    /* SwitchRole is the role the admin must hold to be allowed to switch; defaults to contract.RoleAllowedToSwitch. The role reaches every identity Users answers, an administrator's included, so a ceiling on whom a holder may become belongs in the resolver: it refuses the identities this admin may not take on. */
     SwitchRole string
 
     /* RoleMode selects whose roles the impersonation token authorizes with: RoleModeImpersonated (the default) takes on the target's roles for their full context, RoleModeImpersonator keeps the admin's own rights. The impersonator stays auditable and propagates between services in either mode. */
@@ -115,7 +115,7 @@ func (instance *ImpersonationTokenSource) Resolve(
                 userErr,
             ))
 
-            if true == isInfrastructureFailure(userErr) {
+            if true == IsInfrastructureFailure(userErr) {
                 logger.Error("switch-user target resolution infrastructure failed", record)
             } else {
                 logger.Info("switch-user denied", record)

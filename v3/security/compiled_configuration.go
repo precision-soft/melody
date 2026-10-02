@@ -151,6 +151,7 @@ func (instance *CompiledFirewall) LogoutPath() string {
     return instance.logoutPath
 }
 
+/* Login runs the firewall's login handler and leaves the session id as it was: the handler that writes an identity into the session rotates the id itself, through http.RegenerateRequestSession, since only it knows when the privilege changes; a login that does not rotate is open to session fixation. */
 func (instance *CompiledFirewall) Login(
     runtimeInstance runtimecontract.Runtime,
     request httpcontract.Request,

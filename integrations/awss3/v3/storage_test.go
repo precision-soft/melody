@@ -96,7 +96,8 @@ func TestNormalizeObjectKey_MatchesLocalStorageContract(t *testing.T) {
         {input: "report.txt", expected: "report.txt"},
         {input: "/report.txt", expected: "report.txt"},
         {input: "a\\b.txt", expected: "a/b.txt"},
-        {input: "uploads/../f.txt", expected: "f.txt"},
+        {input: "uploads/./f.txt", expected: "uploads/f.txt"},
+        {input: "uploads//f.txt", expected: "uploads/f.txt"},
         {input: "nested/dir/file.bin", expected: "nested/dir/file.bin"},
     }
 
@@ -115,6 +116,26 @@ func TestNormalizeObjectKey_RejectsEmptyAndDotKeys(t *testing.T) {
     for _, input := range []string{"", "/", ".", "uploads/.."} {
         if _, err := normalizeObjectKey(input); nil == err {
             t.Fatalf("expected key %q to be rejected as empty or invalid", input)
+        }
+    }
+}
+
+/* a ".." segment is refused by name rather than folded: folded, a key that climbs out of one prefix addresses an object under another */
+func TestNormalizeObjectKey_RefusesAParentSegmentByName(t *testing.T) {
+    for _, input := range []string{"..", "../f.txt", "uploads/../f.txt", "tenant-b/../tenant-a/secret.txt", "tenant-b\\..\\tenant-a\\secret.txt", "a/b/.."} {
+        _, err := normalizeObjectKey(input)
+        if nil == err {
+            t.Fatalf("expected key %q to be refused", input)
+        }
+
+        if false == strings.Contains(err.Error(), `".." segment`) {
+            t.Fatalf("expected key %q to be refused by name, got %q", input, err.Error())
+        }
+    }
+
+    for _, input := range []string{"a..b/f.txt", "reports/..hidden", "f.txt.."} {
+        if _, err := normalizeObjectKey(input); nil != err {
+            t.Fatalf("expected key %q, whose dots are inside a segment, to be accepted, got %v", input, err)
         }
     }
 }
@@ -436,7 +457,7 @@ func TestPut_UploadsTheWholeBodyWhenTheDeclaredSizeMatches(t *testing.T) {
 
         putErr := store.Put(
             newRuntime(),
-            "/invoices/../invoices/2026-07.pdf",
+            "/invoices/./2026-07.pdf",
             testCase.reader,
             int64(len(body)),
             storagecontract.PutOptions{ContentType: "application/pdf"},
@@ -1028,5 +1049,30 @@ func TestSizeCheckedReader_SurfacesAProbeFailureAtTheBoundaryInsteadOfFabricatin
 
     if nil == readErr || false == errors.Is(readErr, fault) {
         t.Fatalf("expected the boundary probe failure to surface rather than read as a clean end, got %v", readErr)
+    }
+}
+
+/* every door refuses a ".." segment by name before the bucket is asked, so a key that climbs out of one prefix never addresses, overwrites, deletes, reports or signs an object under another */
+func TestStorage_RefusesAParentSegmentAtEveryDoorBeforeTouchingTheBucket(t *testing.T) {
+    recorder := newRecordingObjectServer(t)
+    store := recorder.newStorage(t)
+    runtimeInstance := newRuntime()
+
+    key := "tenant-b/../tenant-a/secret.txt"
+
+    _, getErr := store.Get(runtimeInstance, key)
+    putErr := store.Put(runtimeInstance, key, strings.NewReader("B"), 1, storagecontract.PutOptions{})
+    deleteErr := store.Delete(runtimeInstance, key)
+    _, existsErr := store.Exists(runtimeInstance, key)
+    _, presignErr := store.PresignedUrl(runtimeInstance, key, time.Minute)
+
+    for door, doorErr := range map[string]error{"Get": getErr, "Put": putErr, "Delete": deleteErr, "Exists": existsErr, "PresignedUrl": presignErr} {
+        if nil == doorErr || false == strings.Contains(doorErr.Error(), `".." segment`) {
+            t.Fatalf("expected %s of %q to be refused by name, got %v", door, key, doorErr)
+        }
+    }
+
+    if recordedList := recorder.recorded(); 0 != len(recordedList) {
+        t.Fatalf("a refused key must not reach the bucket, got %v", recordedList)
     }
 }

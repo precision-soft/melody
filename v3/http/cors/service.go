@@ -9,6 +9,10 @@ import (
     "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/internal"
+    "github.com/precision-soft/melody/v3/logging"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
+    "github.com/precision-soft/melody/v3/runtime"
+    runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
 type Service struct {
@@ -24,7 +28,12 @@ type Service struct {
     allowHeadersString  string
     exposeHeadersString string
     maxAgeString        string
+
+    bootWarnings *internal.BootWarningsOnce
 }
+
+/* bootWarningSchemelessCredentialedOrigin names the boot warning of a credentialed service holding an entry without a scheme */
+const bootWarningSchemelessCredentialedOrigin = "cors.credentialedOriginWithoutScheme"
 
 type Config struct {
     AllowOrigins     []string
@@ -93,7 +102,47 @@ func NewService(config Config) *Service {
         allowHeadersString:  strings.Join(allowHeaders, ", "),
         exposeHeadersString: strings.Join(exposeHeaders, ", "),
         maxAgeString:        strconv.Itoa(config.MaxAge),
+        bootWarnings:        internal.NewBootWarningsOnce(credentialedOriginBootWarnings(config.AllowCredentials, config.AllowOriginFunc, allowOrigins)),
     }
+}
+
+/* credentialedOriginBootWarnings names every entry a credentialed service reads as admitting its host under any scheme: an entry without a scheme admits "http://" too, so credentials meant for a site served over https are granted to a page served in clear text. An AllowOriginFunc decides alone and is not read. */
+func credentialedOriginBootWarnings(allowCredentials bool, allowOriginFunc func(origin string) bool, allowOrigins []string) []internal.BootWarning {
+    if false == allowCredentials || nil != allowOriginFunc {
+        return nil
+    }
+
+    warnings := make([]internal.BootWarning, 0)
+    for _, allowedOrigin := range allowOrigins {
+        entry := strings.TrimSpace(allowedOrigin)
+        if "" == entry || "*" == entry || true == strings.Contains(entry, "://") {
+            continue
+        }
+
+        warnings = append(warnings, internal.BootWarning{
+            Name:    bootWarningSchemelessCredentialedOrigin,
+            Message: "a credentialed cors service holds an allowed origin without a scheme, which admits that host under any scheme, http included, so a page served in clear text receives the credentialed answer; write the scheme out, https://example.com",
+            Context: loggingcontract.Context{
+                "entry": entry,
+            },
+        })
+    }
+
+    return warnings
+}
+
+/* writeBootWarnings writes the service's boot warnings at its first use, into the journal of the runtime that uses it */
+func (instance *Service) writeBootWarnings(runtimeInstance runtimecontract.Runtime) {
+    if nil == instance.bootWarnings {
+        return
+    }
+
+    logger, loggerErr := runtime.FromRuntime[loggingcontract.Logger](runtimeInstance, logging.ServiceLogger)
+    if nil != loggerErr {
+        return
+    }
+
+    instance.bootWarnings.Write(logger)
 }
 
 /* defaultAllowMethodList is the default DefaultService and the nil-list fallback of NewService share. */

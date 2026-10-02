@@ -394,3 +394,23 @@ func TestRegisterRequestListener_ATypedNilRequestIsLeftAlone(t *testing.T) {
         t.Fatalf("expected no response for a request the listener cannot read")
     }
 }
+
+func TestRegisterListeners_ACredentialedServiceNamesItsSchemelessEntryAtItsFirstRequest(t *testing.T) {
+    service := NewService(Config{AllowOrigins: []string{"example.com"}, AllowCredentials: true})
+
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    RegisterListeners(dispatcher, service)
+
+    runtimeInstance, logger := runtimeWithWarningRecordingLogger()
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
+    requestEvent := http.NewKernelRequestEvent(runtimeInstance, testhelper.NewHttpTestRequestFromHttpRequest(request))
+
+    if _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, requestEvent); nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if entries := logger.entriesOfBootWarning(bootWarningSchemelessCredentialedOrigin); 1 != len(entries) || "example.com" != entries[0] {
+        t.Fatalf("expected the schemeless entry named once, got %v", entries)
+    }
+}

@@ -7,10 +7,17 @@ import (
     "io"
     nethttp "net/http"
     "net/http/httptest"
+    neturl "net/url"
     "os"
     "path/filepath"
     "strings"
     "testing"
+
+    "github.com/precision-soft/melody/v3/event"
+    "github.com/precision-soft/melody/v3/exception"
+    httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/logging"
+    runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
 func TestTextResponse_WritesBodyAndStatus(t *testing.T) {
@@ -643,6 +650,86 @@ func TestConfinedFileResponse_ServesASymlinkWithAnAbsoluteTargetInsideARelativeR
         }
         if closer, isCloser := response.BodyReader().(io.Closer); true == isCloser {
             _ = closer.Close()
+        }
+    }
+}
+
+/* every refusal the client's name causes is the same 404, so the answer says nothing about what lies outside the root and carries no server path; a blank root is the application's fault and stays an error */
+func TestConfinedFileResponse_EveryRefusalTheNameCausesIsANotFound(t *testing.T) {
+    rootDirectory := t.TempDir()
+    outsideDirectory := t.TempDir()
+
+    if writeErr := os.WriteFile(outsideDirectory+"/secret.txt", []byte("the secret"), 0o644); nil != writeErr {
+        t.Fatalf("write error: %v", writeErr)
+    }
+    if writeErr := os.WriteFile(rootDirectory+"/invoice.txt", []byte("the invoice"), 0o644); nil != writeErr {
+        t.Fatalf("write error: %v", writeErr)
+    }
+    if mkdirErr := os.Mkdir(rootDirectory+"/archive", 0o755); nil != mkdirErr {
+        t.Fatalf("mkdir error: %v", mkdirErr)
+    }
+    if symlinkErr := os.Symlink(outsideDirectory+"/secret.txt", rootDirectory+"/escape.txt"); nil != symlinkErr {
+        t.Fatalf("symlink error: %v", symlinkErr)
+    }
+
+    for _, name := range []string{
+        "",
+        "  ",
+        "/etc/passwd",
+        "..",
+        "../" + filepath.Base(outsideDirectory) + "/secret.txt",
+        "escape.txt",
+        "missing.txt",
+        "invoice.txt/inner",
+        "archive",
+    } {
+        _, refuseErr := ConfinedFileResponse(200, rootDirectory, name)
+
+        httpException := exception.AsHttpException(refuseErr)
+        if nil == httpException || nethttp.StatusNotFound != httpException.StatusCode() {
+            t.Fatalf("expected the name %q to be refused with 404, got %v", name, refuseErr)
+        }
+
+        if "not found" != httpException.Message() {
+            t.Fatalf("expected the refusal of %q to carry the one client message, got %q", name, httpException.Message())
+        }
+    }
+
+    _, blankRootErr := ConfinedFileResponse(200, " ", "invoice.txt")
+    if nil == blankRootErr || nil != exception.AsHttpException(blankRootErr) {
+        t.Fatalf("expected a blank root to stay the application's error, got %v", blankRootErr)
+    }
+
+    _, missingRootErr := ConfinedFileResponse(200, rootDirectory+"/no-such-root", "invoice.txt")
+    if nil == missingRootErr || nil != exception.AsHttpException(missingRootErr) {
+        t.Fatalf("expected a root that does not resolve to stay the application's error, got %v", missingRootErr)
+    }
+}
+
+func TestConfinedFileResponse_AServedRefusalAnswers404WithNoServerPathInTheBody(t *testing.T) {
+    rootDirectory := t.TempDir()
+
+    router := NewRouter()
+    router.Handle(nethttp.MethodGet, "/download", func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return ConfinedFileResponse(200, rootDirectory, request.HttpRequest().URL.Query().Get("name"))
+    })
+
+    serviceContainer := newHttpTestContainer()
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger())
+    RegisterKernelExceptionListener(event.EventDispatcherMustFromContainer(serviceContainer), false)
+
+    for _, name := range []string{"missing.txt", "../etc/passwd", "/etc/passwd"} {
+        recorder := httptest.NewRecorder()
+        NewKernel(router).
+            ServeHttp(serviceContainer).
+            ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/download?name="+neturl.QueryEscape(name), nil))
+
+        if nethttp.StatusNotFound != recorder.Code {
+            t.Fatalf("expected the name %q to answer 404, got %d", name, recorder.Code)
+        }
+
+        if true == strings.Contains(recorder.Body.String(), rootDirectory) {
+            t.Fatalf("expected no server path in the body for %q, got %s", name, recorder.Body.String())
         }
     }
 }

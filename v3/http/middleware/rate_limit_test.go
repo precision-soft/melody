@@ -1382,3 +1382,62 @@ func TestSlidingWindowLimiter_AClockMovedBackwardsNeverReplenishesTheBudget(t *t
         t.Fatal("expected the refusal: the live mark must not be cut away by a search over unordered marks")
     }
 }
+
+/* one IPv6 host is routinely handed a /64 and can rotate through it, so the key aggregates an IPv6 address to its /64: keyed on the /128, every request of one host had a budget of its own */
+func TestDefaultKeyExtractor_AggregatesAnIpv6ClientToItsSlash64(t *testing.T) {
+    limiter := NewFixedWindowLimiter(5, time.Minute)
+    config := NewRateLimitConfig(limiter, nil, nil)
+    _ = RateLimitMiddleware(config)
+
+    allowedCount := 0
+    for index := 1; index <= 100; index++ {
+        request := httptest.NewRequest(nethttp.MethodGet, "/api/data", nil)
+        request.RemoteAddr = fmt.Sprintf("[2001:db8:1:2::%x]:4711", index)
+
+        if true == limiter.Allow(config.KeyExtractor()(testhelper.NewHttpTestRequestFromHttpRequest(request))) {
+            allowedCount++
+        }
+    }
+
+    if 5 != allowedCount {
+        t.Fatalf("expected 100 addresses of one /64 to share one budget of 5, got %d allowed", allowedCount)
+    }
+
+    for _, testCase := range []struct {
+        remoteAddress string
+        expectedKey   string
+    }{
+        {"[2001:db8:1:2::1]:4711", "2001:db8:1:2::/64"},
+        {"[2001:db8:1:3::1]:4711", "2001:db8:1:3::/64"},
+        {"[fe80::1%eth0]:4711", "fe80::/64"},
+        {"203.0.113.7:4711", "203.0.113.7"},
+        {"[::ffff:203.0.113.7]:4711", "203.0.113.7"},
+        {"not-an-address", "not-an-address"},
+    } {
+        request := httptest.NewRequest(nethttp.MethodGet, "/api/data", nil)
+        request.RemoteAddr = testCase.remoteAddress
+
+        key := config.KeyExtractor()(testhelper.NewHttpTestRequestFromHttpRequest(request))
+        if testCase.expectedKey != key {
+            t.Fatalf("expected the key of %q to be %q, got %q", testCase.remoteAddress, testCase.expectedKey, key)
+        }
+    }
+}
+
+func TestRateLimitConfig_ClientIpResolver_AnIpv6AddressItResolvesKeysOnItsSlash64(t *testing.T) {
+    request := httptest.NewRequest(nethttp.MethodGet, "/api/data", nil)
+    request.RemoteAddr = "10.0.0.1:4711"
+    request.Header.Set("X-Forwarded-For", "2001:db8:aa:bb:cc:dd:ee:ff")
+
+    config := NewRateLimitConfig(NewFixedWindowLimiter(5, time.Minute), nil, nil)
+    config.SetClientIpResolver(NewForwardedClientIpResolver(httpcontract.ForwardedHeadersPolicy{
+        TrustForwardedHeaders: true,
+        TrustedProxyList:      []string{"10.0.0.0/8"},
+    }))
+    _ = RateLimitMiddleware(config)
+
+    key := config.KeyExtractor()(testhelper.NewHttpTestRequestFromHttpRequest(request))
+    if "2001:db8:aa:bb::/64" != key {
+        t.Fatalf("expected the forwarded IPv6 client to key on its /64, got %q", key)
+    }
+}

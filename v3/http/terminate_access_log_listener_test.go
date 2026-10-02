@@ -315,3 +315,34 @@ func TestRegisterKernelTerminateAccessLogListener_RedactsEveryQueryValue(t *test
         }
     }
 }
+
+func TestRegisterKernelTerminateAccessLogListener_RedactsTheQueryOfTheReferer(t *testing.T) {
+    recordingLogger := &accessLogRecordingLogger{}
+    runtimeInstance := newAccessLogRuntime(recordingLogger)
+
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    RegisterKernelTerminateAccessLogListener(dispatcher)
+
+    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/articles", nil)
+    httpRequest.Header.Set("Referer", "https://example.com/reset?token=super-secret#state=other-secret")
+
+    terminateEvent := NewKernelTerminateEvent(
+        runtimeInstance,
+        testhelper.NewHttpTestRequestFromHttpRequest(httpRequest),
+        NewResponse(nethttp.StatusOK, []byte("ok")),
+    )
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelTerminate, terminateEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    loggedContext, logged := recordingLogger.accessLogContext()
+    if false == logged {
+        t.Fatalf("expected the access log record to be written")
+    }
+
+    if "https://example.com/reset?token=xxxxx" != loggedContext["referer"] {
+        t.Fatalf("expected the referer journaled with its query redacted and its fragment dropped, got %v", loggedContext["referer"])
+    }
+}

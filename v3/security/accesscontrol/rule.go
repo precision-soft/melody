@@ -58,7 +58,7 @@ func (instance Rule) Matching() Matching {
     return MatchingRawPrefix
 }
 
-/* NewRule builds a rule with the matching mode named at the call site. An unspecified mode is refused, since the reach is what an access control rule is for. */
+/* NewRule builds a rule with the matching mode named at the call site. An unspecified mode is refused, since the reach is what an access control rule is for. The path is written as the router reads it, decoded, with %2F for a separator inside a segment: a percent escape other than %2F claims only a resource whose name holds the percent sign literally. A declared path holding one is named in a boot warning. */
 func NewRule(path string, matching Matching, config RuleConfig) Rule {
     switch matching {
     case MatchingExact:
@@ -85,7 +85,7 @@ func NewRule(path string, matching Matching, config RuleConfig) Rule {
     return Rule{}
 }
 
-/* NewExactRule builds a rule that governs one spelling and nothing beneath it: "/admin" claims "/admin" and refuses to speak for "/admin/panel". A trailing slash is folded away, so "/admin/" and "/admin" declare the same rule. */
+/* NewExactRule builds a rule that governs one spelling and nothing beneath it: "/admin" claims "/admin" and refuses to speak for "/admin/panel". A trailing slash is folded away, so "/admin/" and "/admin" declare the same rule. The path is written as the router reads it, decoded, with %2F for a separator inside a segment: a percent escape other than %2F claims only a resource whose name holds the percent sign literally. A declared path holding one is named in a boot warning. */
 func NewExactRule(path string, config RuleConfig) Rule {
     normalizedPath := strings.TrimSpace(path)
     if "" == normalizedPath {
@@ -108,7 +108,7 @@ func NewExactRule(path string, config RuleConfig) Rule {
     }
 }
 
-/* NewSegmentPrefixRule builds a rule bounded to a path segment: "/admin" governs "/admin" and "/admin/panel" but not "/administrator". An empty path is refused rather than made a catch-all; a global rule declares "/". */
+/* NewSegmentPrefixRule builds a rule bounded to a path segment: "/admin" governs "/admin" and "/admin/panel" but not "/administrator". An empty path is refused rather than made a catch-all; a global rule declares "/". The path is written as the router reads it, decoded, with %2F for a separator inside a segment: a percent escape other than %2F claims only a resource whose name holds the percent sign literally. A declared path holding one is named in a boot warning. */
 func NewSegmentPrefixRule(path string, config RuleConfig) Rule {
     normalizedPrefix := normalizePathPrefix(path)
     if "" == normalizedPrefix {
@@ -128,7 +128,7 @@ func NewSegmentPrefixRule(path string, config RuleConfig) Rule {
     }
 }
 
-/* NewRawPrefixRule builds a rule that reaches across segment boundaries: "/admin" governs "/administrator" and "/admin-tools" as readily as "/admin/panel". PUBLIC_ACCESS is refused on it, since a raw public rule, being the longest match, would shadow a bounded denial. A trailing slash is refused, since a raw reach cannot express the segment boundary it spells: "/api/" would claim "/api-internal". Reach for NewSegmentPrefixRule unless the cross-segment reach is what the rule means. */
+/* NewRawPrefixRule builds a rule that reaches across segment boundaries: "/admin" governs "/administrator" and "/admin-tools" as readily as "/admin/panel". PUBLIC_ACCESS is refused on it, since a raw public rule, being the longest match, would shadow a bounded denial. A trailing slash is refused, since a raw reach cannot express the segment boundary it spells: "/api/" would claim "/api-internal". Reach for NewSegmentPrefixRule unless the cross-segment reach is what the rule means. The path is written as the router reads it, decoded, with %2F for a separator inside a segment: a percent escape other than %2F claims only a resource whose name holds the percent sign literally. A declared path holding one is named in a boot warning. */
 func NewRawPrefixRule(path string, config RuleConfig) Rule {
     refusePublicAccess(config.Attributes, "a raw prefix rule; use a segment prefix, exact, or regex rule")
 

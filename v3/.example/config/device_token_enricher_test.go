@@ -7,6 +7,7 @@ import (
 
     "github.com/precision-soft/melody/v3/.example/entity"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
+    melodysecurity "github.com/precision-soft/melody/v3/security"
     melodysecuritycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
@@ -30,9 +31,15 @@ func TestDeviceAccountEnricher_HoldsTheTokenToItsAccount(t *testing.T) {
         t.Fatalf("expected the account's current roles in place of the token's, got %v (%v)", enriched.Roles, enrichErr)
     }
 
-    for _, userIdentifier := range []string{"user-9", "user-broken"} {
-        if _, refusal := enricher.Enrich(nil, melodysecuritycontract.Claims{UserIdentifier: userIdentifier, Roles: []string{entity.RoleAdmin}}); nil == refusal {
+    /* only the directory that cannot answer is an infrastructure failure, which the bearer source files at Error; an account that is gone is the routine refusal */
+    for userIdentifier, infrastructureFailure := range map[string]bool{"user-9": false, "user-broken": true} {
+        _, refusal := enricher.Enrich(nil, melodysecuritycontract.Claims{UserIdentifier: userIdentifier, Roles: []string{entity.RoleAdmin}})
+        if nil == refusal {
             t.Fatalf("%s: expected the token refused", userIdentifier)
+        }
+
+        if infrastructureFailure != melodysecurity.IsInfrastructureFailure(refusal) {
+            t.Fatalf("%s: expected the infrastructure mark to be %v, got %v", userIdentifier, infrastructureFailure, refusal)
         }
     }
 }

@@ -6,6 +6,7 @@ import (
     "io"
     nethttp "net/http"
     "strconv"
+    "strings"
     "time"
 
     melodyawss3 "github.com/precision-soft/melody/integrations/awss3/v3"
@@ -22,6 +23,10 @@ func PutHandler(storage *melodyawss3.Storage) melodyhttpcontract.Handler {
         key := melodybag.StringOrDefault(request.Query(), "key", "")
         if "" == key {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "key query parameter is required"), nil
+        }
+
+        if true == objectKeyCarriesParentSegment(key) {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, objectKeyParentSegmentRefusal), nil
         }
 
         body := []byte{}
@@ -57,6 +62,10 @@ func GetHandler(storage *melodyawss3.Storage) melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "key query parameter is required"), nil
         }
 
+        if true == objectKeyCarriesParentSegment(key) {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, objectKeyParentSegmentRefusal), nil
+        }
+
         reader, getErr := storage.Get(runtimeInstance, key)
         if nil != getErr {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusNotFound, "object not found"), nil
@@ -80,6 +89,19 @@ const (
     linkMaximumTtl = time.Hour
 )
 
+/* objectKeyParentSegmentRefusal is the answer to a key the object store refuses: a ".." segment would climb out of the prefix the key names, so the store refuses it by name and this door answers it as the client's error rather than as a failure of the store */
+const objectKeyParentSegmentRefusal = `key may not carry a ".." segment`
+
+func objectKeyCarriesParentSegment(key string) bool {
+    for _, segment := range strings.Split(strings.ReplaceAll(key, "\\", "/"), "/") {
+        if ".." == segment {
+            return true
+        }
+    }
+
+    return false
+}
+
 /* errInvalidLinkTtl is the one refusal of every ttl this door cannot serve */
 var errInvalidLinkTtl = errors.New("ttl must be a whole number of seconds between 1 and 3600")
 
@@ -89,6 +111,10 @@ func LinkHandler(storage *melodyawss3.Storage) melodyhttpcontract.Handler {
         key := melodybag.StringOrDefault(request.Query(), "key", "")
         if "" == key {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "key query parameter is required"), nil
+        }
+
+        if true == objectKeyCarriesParentSegment(key) {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, objectKeyParentSegmentRefusal), nil
         }
 
         ttl, ttlErr := linkTtlOf(request)

@@ -89,7 +89,7 @@ func (instance FirewallOverrideConfiguration) WithAccessDeniedHandler(accessDeni
     return instance
 }
 
-/* WithMergeStrategy refuses a value that is none of the three named strategies, the empty string included, which the builder reads as an unconfigured override. */
+/* WithMergeStrategy refuses a value that is none of the three named strategies, the empty string included, which the builder reads as an unconfigured override. AccessControlMergeOverrideOnly cuts the global access control off: a firewall that declares none of its own with WithAccessControl is compiled with an empty one, which matches no rule and authorizes every path it claims; declare WithAccessControl(security.NewAccessControl()) when that is meant. */
 func (instance FirewallOverrideConfiguration) WithMergeStrategy(mergeStrategy AccessControlMergeStrategy) FirewallOverrideConfiguration {
     if false == isValidAccessControlMergeStrategy(mergeStrategy) {
         exception.Panic(

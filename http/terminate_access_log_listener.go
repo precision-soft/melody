@@ -99,7 +99,8 @@ func RegisterKernelTerminateAccessLogListener(eventDispatcher eventcontract.Even
 
                 remoteAddr = terminateEvent.Request().HttpRequest().RemoteAddr
                 userAgent = terminateEvent.Request().HttpRequest().UserAgent()
-                referer = terminateEvent.Request().HttpRequest().Referer()
+                /* the Referer is the address of the page the client came from, so a credential in that page's query or fragment reaches this line on every request it links to; it is redacted the same way */
+                referer = internal.RedactRefererForDiagnostics(terminateEvent.Request().HttpRequest().Referer())
             }
 
             loggerInstance.Info(

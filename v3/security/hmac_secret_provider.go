@@ -2,6 +2,8 @@ package security
 
 import (
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/internal"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
 /* HmacSecretProvider resolves the shared secret for the internal-auth HMAC source. CurrentKeyId names the key a signer uses now, Secret looks up the secret for a presented key id, and AppForKeyId names the one application a key id is issued to. Several resolvable keys allow a rotation without a gap. */
@@ -78,6 +80,7 @@ func NewStaticHmacSecretProvider(currentKeyId string, keysByKeyId map[string]Hma
         currentKeyId:   currentKeyId,
         secretsByKeyId: secretsByKeyId,
         appsByKeyId:    appsByKeyId,
+        bootWarnings:   internal.NewBootWarningsOnce(shortHmacSecretBootWarnings(secretsByKeyId)),
     }
 }
 
@@ -85,6 +88,12 @@ type StaticHmacSecretProvider struct {
     currentKeyId   string
     secretsByKeyId map[string][]byte
     appsByKeyId    map[string]string
+    bootWarnings   *internal.BootWarningsOnce
+}
+
+/* writeBootWarnings writes the provider's boot warnings once, at the first envelope a token source resolves with it; a process that only signs has no journal in reach of the provider */
+func (instance *StaticHmacSecretProvider) writeBootWarnings(logger loggingcontract.Logger) {
+    instance.bootWarnings.Write(logger)
 }
 
 func (instance *StaticHmacSecretProvider) CurrentKeyId() string {

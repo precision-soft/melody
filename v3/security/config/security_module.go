@@ -89,7 +89,7 @@ func (instance FirewallOverrideConfiguration) WithAccessDeniedHandler(accessDeni
     return instance
 }
 
-/* WithMergeStrategy refuses a value that is none of the three named strategies, the empty string included, which the builder reads as an unconfigured override. */
+/* WithMergeStrategy refuses a value that is none of the three named strategies, the empty string included, which the builder reads as an unconfigured override. AccessControlMergeOverrideOnly cuts the global access control off: a firewall that declares none of its own with WithAccessControl is compiled with an empty one, which matches no rule and authorizes every path it claims; declare WithAccessControl(security.NewAccessControl()) when that is meant. Such a firewall is named in a boot warning. */
 func (instance FirewallOverrideConfiguration) WithMergeStrategy(mergeStrategy AccessControlMergeStrategy) FirewallOverrideConfiguration {
     if false == isValidAccessControlMergeStrategy(mergeStrategy) {
         exception.Panic(
@@ -144,6 +144,7 @@ type Builder struct {
     globalConfigured bool
     global           GlobalConfiguration
     firewalls        []FirewallConfiguration
+    bootWarnings     []BootWarning
 }
 
 func NewBuilder() *Builder {
@@ -251,7 +252,7 @@ func (instance *Builder) AddStatefulFirewall(
 }
 
 func (instance *Builder) BuildAndCompile() *security.CompiledConfiguration {
-    compiled, err := Compile(
+    compiled, emptyAccessControlFirewallNames, err := compile(
         Configuration{
             global:    instance.global,
             firewalls: instance.firewalls,
@@ -261,7 +262,14 @@ func (instance *Builder) BuildAndCompile() *security.CompiledConfiguration {
         exception.Panic(exception.FromError(err))
     }
 
+    instance.bootWarnings = compileBootWarnings(compiled, emptyAccessControlFirewallNames)
+
     return compiled
+}
+
+/* BootWarnings answers the hazards the last BuildAndCompile found in the declaration, each one a configuration the framework admits and does not refuse; the application writes them into the configured journal once, at the http boot */
+func (instance *Builder) BootWarnings() []BootWarning {
+    return append([]BootWarning{}, instance.bootWarnings...)
 }
 
 func (instance *Builder) addFirewall(

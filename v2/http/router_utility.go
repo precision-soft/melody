@@ -243,15 +243,20 @@ func splitNormalizedPath(value string) []string {
     return strings.Split(normalizedPath, "/")
 }
 
-/* requestPathIsCanonical reports whether a request path is spelled the one way every path consumer reads the same. The router matches the path as sent, the access-control matcher folds "..", "." and "//" through path.Clean and trims whitespace, and the firewall matcher reads the raw path, so a path that folds or trims to a different spelling could route to one handler and be authorized against another rule; refusing it at the kernel keeps them on one spelling, as the static file server does. A trailing slash is not a fold and is normalized away; a target that does not begin with "/" (the asterisk-form, the empty path of an absolute-form or authority-form target, or a path a front handler hands without its leading slash) passes, since the router routes it with the "/" prepended and both matchers read it the same way, and one that begins with whitespace is refused. */
+/* requestPathIsCanonical reports whether a request path is spelled the one way every path consumer reads the same. The router matches the path as sent, the access-control matcher folds "..", "." and "//" through path.Clean and trims whitespace, and the firewall matcher reads the raw path, so a path that folds or trims to a different spelling could route to one handler and be authorized against another rule; refusing it at the kernel keeps them on one spelling, as the static file server does. A trailing slash is not a fold and is normalized away; a target that does not begin with "/" (the asterisk-form, the empty path of an absolute-form or authority-form target, or a path a front handler hands without its leading slash) is judged with the "/" prepended, the spelling the router and both matchers read it in, so "admin/../public" is refused as "/admin/../public" is, and one that begins with whitespace is refused. */
 func requestPathIsCanonical(path string) bool {
     /* a path that begins with whitespace is refused before the "/" test below would let it through: a handler in front of the kernel that rewrites the path, StripPrefix among them, can hand the kernel " /public", which the router routes as its own segment while the access-control matcher trims it to the rule of "/public" */
     if "" != path && strings.TrimLeftFunc(path, unicode.IsSpace) != path {
         return false
     }
 
-    if false == strings.HasPrefix(path, "/") {
+    if "" == path {
         return true
+    }
+
+    /* the router routes a slash-less path with the "/" prepended and both matchers read it so, while the access-control matcher also folds it: "admin/../public" routes to the catch-all of "/admin" under the rule of "/public", so it is judged as the spelling they read */
+    if false == strings.HasPrefix(path, "/") {
+        path = "/" + path
     }
 
     /* leading or trailing whitespace is a fold the consumers do not read alike: the router keeps it, so "/public " reaches a catch-all, while the access-control matcher trims it and answers with the rule of "/public". The trim stays in the matcher, since without it the whitespace spelling has no rule at all, which is a grant too; the spelling is refused here instead */

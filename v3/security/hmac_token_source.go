@@ -120,6 +120,8 @@ func (instance *HmacTokenSource) Resolve(
     runtimeInstance runtimecontract.Runtime,
     request httpcontract.Request,
 ) (securitycontract.Token, error) {
+    writeBootWarningsAtFirstUse(runtimeInstance, instance.secrets)
+
     headerValue := request.Header(instance.headerName)
     if "" == headerValue {
         return NewAnonymousToken(), nil
@@ -305,7 +307,7 @@ func (instance *HmacTokenSource) guardNonce(runtimeInstance runtimecontract.Runt
     seen, rememberErr := instance.nonceGuard.Remember(runtimeInstance, hmacNonceGuardKey(keyId, envelope.Nonce), ttl)
     if nil != rememberErr {
         /* the guard failing to answer is the platform's failure, marked so reject logs it as an incident */
-        return exception.NewError("internal-auth nonce guard failed", nil, markInfrastructureFailure(rememberErr))
+        return exception.NewError("internal-auth nonce guard failed", nil, MarkInfrastructureFailure(rememberErr))
     }
 
     if true == seen {
@@ -360,7 +362,7 @@ func (instance *HmacTokenSource) reject(
     logger := logging.LoggerFromRuntime(runtimeInstance)
     if nil != logger {
         /* every rejection fails closed to anonymous; an infrastructure failure is logged above the Info a bad envelope gets */
-        if true == isInfrastructureFailure(cause) {
+        if true == IsInfrastructureFailure(cause) {
             logger.Error("internal-auth verification infrastructure failed", exception.LogContext(cause))
         } else {
             logger.Info("internal-auth envelope rejected", exception.LogContext(cause))

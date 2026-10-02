@@ -297,8 +297,14 @@ func (instance *LocalStorage) PresignedUrl(
     return "", exception.NewError("presigned urls are not supported by local storage", nil, nil)
 }
 
+/* storageRelativeKey folds a key to the path it names under the base: a backslash reads as a separator, and "." and empty segments and a leading slash fold away. A ".." segment is refused by name rather than folded, since a fold would hand "tenant-b/../tenant-a/secret.txt" the object of "tenant-a/secret.txt" and an application that isolates its callers by key prefix would be crossed by it; the S3 backend refuses it the same way. */
 func storageRelativeKey(key string) (string, error) {
     normalized := strings.ReplaceAll(key, "\\", "/")
+
+    if true == storageKeyCarriesParentSegment(normalized) {
+        return "", exception.NewError("storage key carries a \"..\" segment", map[string]any{"key": key}, nil)
+    }
+
     cleaned := strings.TrimPrefix(filepath.Clean("/"+normalized), "/")
 
     if "" == cleaned || "." == cleaned {
@@ -311,6 +317,17 @@ func storageRelativeKey(key string) (string, error) {
     }
 
     return cleaned, nil
+}
+
+/* storageKeyCarriesParentSegment reports whether a key, its backslashes already read as separators, holds a ".." segment */
+func storageKeyCarriesParentSegment(normalizedKey string) bool {
+    for _, segment := range strings.Split(normalizedKey, "/") {
+        if ".." == segment {
+            return true
+        }
+    }
+
+    return false
 }
 
 /* isStorageTempObjectName matches exactly the names createStorageTempFile gives: the reserved prefix, a sha256 in lowercase hex, a dot, the random part and the suffix. */

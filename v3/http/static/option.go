@@ -78,7 +78,7 @@ func (instance *FileServerConfig) SetAllowedDotPrefixList(allowedDotPrefixList [
     instance.allowedDotPrefixList = copied
 }
 
-/* SetExcludedPathList names the path prefixes the file server declines without looking at the disk, handing them down the chain to the application. An entry is a prefix of the request path as security.NewPathPrefixMatcher reads it, before the strip prefix and any fold, so a firewall rule and this list select the same requests; an empty entry switches the server off. The default excludes nothing. NewFileServer copies the configuration, so this is set before the server is built. */
+/* SetExcludedPathList names the path prefixes the file server declines without looking at the disk, handing them down the chain to the application. An entry is a prefix of the request path as security.NewPathPrefixMatcher reads it, before the strip prefix and any fold, so a firewall rule and this list select the same requests; an empty entry switches the server off. The default excludes nothing. NewFileServer copies the configuration, so this is set before the server is built. An entry is written decoded, as the router reads the path, with %2F for a separator inside a segment: a percent escape other than %2F excludes only a path whose name holds the percent sign literally. */
 func (instance *FileServerConfig) SetExcludedPathList(excludedPathList []string) {
     copied := []string{}
     for _, excludedPath := range excludedPathList {

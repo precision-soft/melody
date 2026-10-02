@@ -31,7 +31,7 @@ func (instance *OpaqueTokenValidator) Validate(
         return securitycontract.Claims{}, exception.NewError(
             "opaque token lookup failed",
             nil,
-            markInfrastructureFailure(lookupErr),
+            MarkInfrastructureFailure(lookupErr),
         )
     }
 

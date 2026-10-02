@@ -44,6 +44,7 @@ type Application struct {
     httpHandlerDecorators []applicationcontract.HttpHandlerDecorator
     httpShutdownHooks     []func()
     securityConfiguration *security.CompiledConfiguration
+    bootWarnings          []internal.BootWarning
     routeRegistry         httpcontract.RouteRegistry
     moduleConfigurations  map[string]any
     bootCollisions        []bootCollision

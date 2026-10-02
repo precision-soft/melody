@@ -14,6 +14,22 @@ An upgrader who needs the old behaviour of any entry below pins the previous pat
 
 ## Unreleased
 
+### Storage: a key that carries a `..` segment is refused
+
+**What changed.** `LocalStorage` and the awss3 `Storage` refuse, at every door, a key that holds a `..` segment once its backslashes are read as separators, with an error that names the segment. They used to fold it: `tenant-b/../tenant-a/secret.txt` addressed `tenant-a/secret.txt` on both backends.
+
+**Symptom.** `Put`, `Get`, `Delete`, `Exists` (and `PresignedUrl` on awss3) answer `storage key carries a ".." segment` or `object storage key carries a ".." segment` for a key they used to fold.
+
+**Remedy.** Address the object by the key it folds to: `b` for `a/../b`. A key built from a client-chosen name should refuse a separator in that name before it reaches the storage.
+
+### HTTP: the rate limiters key an IPv6 client on its /64
+
+**What changed.** The default key of the rate limiters (`RateLimitMiddleware`, `RegisterRateLimitRequestListener`, `SimpleRateLimit`, `IpRateLimit` and the address fallback of `UserRateLimit`, with or without a `ClientIpResolver`) aggregates an IPv6 client address to its /64. An IPv4 address, written bare or mapped into IPv6 (`::ffff:203.0.113.7`), keys on itself as before. One host is routinely handed a /64, so keyed on the /128 it could rotate its source address and receive a fresh budget for every request: 100 requests from 100 addresses of one /64 all passed a budget of 5. With a key ceiling set, the same host also filled the key table, after which every new client was refused.
+
+**Symptom.** IPv6 clients that share a /64 now share one budget, so a deployment whose clients sit behind one IPv6 network may see them refused sooner. `DefaultClientIp` and a `ClientIpResolver` still answer the address itself; only the key the limiter counts under changes.
+
+**Remedy.** Size the budget for the clients of one /64, or key the limiter on something else with `SetKeyExtractor` (an authenticated identity through `UserRateLimit`). There is no opt-out to the /128: it is the defect the change closes.
+
 ### Security: an access control rule path begins with a slash and is canonical, and a raw prefix declares its reach
 
 **What changed.** Every access control rule path that does not begin with a slash, or that carries an empty, `.` or `..` segment, is refused at declaration, by the `accesscontrol` constructors, the builder's `Require` and `AllowAnonymous` and the deprecated `security` constructors; a raw prefix rule that ends with a slash is refused as well, and `accesscontrol.NewControl` refuses the zero `Rule`. The empty raw prefix, the declared fallback, and `/` are unchanged.

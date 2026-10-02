@@ -3,8 +3,10 @@ package http
 import (
     "bytes"
     "encoding/json"
+    "errors"
     "fmt"
     "io"
+    "io/fs"
     "mime"
     nethttp "net/http"
     "net/textproto"
@@ -230,14 +232,29 @@ func AttachmentResponse(statusCode int, path string, filename string) (*Response
     return response, nil
 }
 
-/* ConfinedFileResponse serves a file selected by a name a client may steer, confined to root: an absolute or climbing name is refused, the joined path is resolved through every symlink and must stay under the resolved root, and only a regular file is answered. What remains is the narrow swap window between the resolution and the open. */
+/* ConfinedFileResponse serves a file selected by a name a client may steer, confined to root: an absolute or climbing name is refused, the joined path is resolved through every symlink and must stay under the resolved root, and only a regular file is answered. What remains is the narrow swap window between the resolution and the open. Every refusal the name causes, an empty, absolute, climbing or escaping name, a missing file or one that is not regular, is answered as a 404 HttpException, alike so the answer tells a client nothing about what lies outside the root and no server path reaches its body; the refusal it carries as its cause is shown in debug mode alone. A root that is blank or does not resolve is the application's fault and stays an error, answered 500. */
 func ConfinedFileResponse(statusCode int, rootDirectory string, name string) (*Response, error) {
     resolvedPath, confineErr := confineFileToRoot(rootDirectory, name)
     if nil != confineErr {
         return nil, confineErr
     }
 
-    return FileResponse(statusCode, resolvedPath)
+    response, fileErr := FileResponse(statusCode, resolvedPath)
+    if nil != fileErr {
+        /* the file removed between the resolution and the open is still a name the client asked for that is not there */
+        if true == errors.Is(fileErr, fs.ErrNotExist) {
+            return nil, confinedFileNotFound(fileErr)
+        }
+
+        return nil, fileErr
+    }
+
+    return response, nil
+}
+
+/* confinedFileNotFound answers a refusal the client's name caused as the one 404 every such refusal shares; the refusal is kept as the cause, for the record and for debug mode */
+func confinedFileNotFound(causeErr error) error {
+    return exception.NewHttpExceptionWithCause(nethttp.StatusNotFound, "not found", causeErr)
 }
 
 /* ConfinedAttachmentResponse is ConfinedFileResponse with a Content-Disposition. */
@@ -258,50 +275,57 @@ func confineFileToRoot(rootDirectory string, name string) (string, error) {
         return "", exception.NewError("the file root directory may not be empty", nil, nil)
     }
 
+    /* the root is resolved first, so a root that does not resolve stays the application's error and is never answered as a name the client got wrong */
+    realRoot, evalRootErr := filepath.EvalSymlinks(rootDirectory)
+    if nil != evalRootErr {
+        return "", evalRootErr
+    }
+
+    /* both sides are made absolute: under a relative root a symlink with an absolute target resolves to an absolute path, which filepath.Rel cannot relate to a relative root */
+    absoluteRoot, absoluteRootErr := filepath.Abs(realRoot)
+    if nil != absoluteRootErr {
+        return "", absoluteRootErr
+    }
+
     trimmedName := strings.TrimSpace(name)
     if "" == trimmedName {
-        return "", exception.NewError("the file name may not be empty", nil, nil)
+        return "", confinedFileNotFound(exception.NewError("the file name may not be empty", nil, nil))
     }
 
     if true == filepath.IsAbs(trimmedName) {
-        return "", exception.NewError(
-            "the file name may not be absolute",
-            map[string]any{
-                "name": name,
-            },
-            nil,
+        return "", confinedFileNotFound(
+            exception.NewError(
+                "the file name may not be absolute",
+                map[string]any{
+                    "name": name,
+                },
+                nil,
+            ),
         )
     }
 
     /* the climb is refused rather than folded away */
     cleanedName := filepath.Clean(trimmedName)
     if ".." == cleanedName || true == strings.HasPrefix(cleanedName, ".."+string(os.PathSeparator)) {
-        return "", exception.NewError(
-            "the file name may not climb out of the root directory",
-            map[string]any{
-                "name": name,
-            },
-            nil,
+        return "", confinedFileNotFound(
+            exception.NewError(
+                "the file name may not climb out of the root directory",
+                map[string]any{
+                    "name": name,
+                },
+                nil,
+            ),
         )
     }
 
     fullPath := filepath.Join(rootDirectory, cleanedName)
 
+    /* a name that does not resolve, missing or passing through a file or a directory the process may not read, is a name the client got wrong */
     realPath, evalErr := filepath.EvalSymlinks(fullPath)
     if nil != evalErr {
-        return "", evalErr
+        return "", confinedFileNotFound(evalErr)
     }
 
-    realRoot, evalRootErr := filepath.EvalSymlinks(rootDirectory)
-    if nil != evalRootErr {
-        return "", evalRootErr
-    }
-
-    /* both sides are made absolute first: under a relative root a symlink with an absolute target resolves to an absolute path, which filepath.Rel cannot relate to a relative root */
-    absoluteRoot, absoluteRootErr := filepath.Abs(realRoot)
-    if nil != absoluteRootErr {
-        return "", absoluteRootErr
-    }
     absolutePath, absolutePathErr := filepath.Abs(realPath)
     if nil != absolutePathErr {
         return "", absolutePathErr
@@ -310,28 +334,32 @@ func confineFileToRoot(rootDirectory string, name string) (string, error) {
     /* the containment is read on the relative path rather than as a textual prefix, since "." resolves names without a "./" and "/" would demand "//" */
     relativePath, relativeErr := filepath.Rel(absoluteRoot, absolutePath)
     if nil != relativeErr || ".." == relativePath || true == strings.HasPrefix(relativePath, ".."+string(os.PathSeparator)) {
-        return "", exception.NewError(
-            "the file resolves outside the root directory",
-            map[string]any{
-                "name": name,
-            },
-            nil,
+        return "", confinedFileNotFound(
+            exception.NewError(
+                "the file resolves outside the root directory",
+                map[string]any{
+                    "name": name,
+                },
+                nil,
+            ),
         )
     }
 
     pathInfo, statErr := os.Stat(realPath)
     if nil != statErr {
-        return "", statErr
+        return "", confinedFileNotFound(statErr)
     }
 
     if false == pathInfo.Mode().IsRegular() {
-        return "", exception.NewError(
-            "the confined file is not a regular file",
-            map[string]any{
-                "name": name,
-                "mode": pathInfo.Mode().String(),
-            },
-            nil,
+        return "", confinedFileNotFound(
+            exception.NewError(
+                "the confined file is not a regular file",
+                map[string]any{
+                    "name": name,
+                    "mode": pathInfo.Mode().String(),
+                },
+                nil,
+            ),
         )
     }
 

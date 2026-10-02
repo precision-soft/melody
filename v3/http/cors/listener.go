@@ -36,6 +36,8 @@ func RegisterRequestListener(eventDispatcher eventcontract.EventDispatcher, serv
     eventDispatcher.AddListener(
         kernelcontract.EventKernelRequest,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            service.writeBootWarnings(runtimeInstance)
+
             requestEvent, ok := eventValue.Payload().(*http.KernelRequestEvent)
             if false == ok || nil == requestEvent || true == internal.IsNilInterface(requestEvent.Request()) {
                 return nil
@@ -81,6 +83,8 @@ func RegisterResponseListener(eventDispatcher eventcontract.EventDispatcher, ser
     eventDispatcher.AddListener(
         kernelcontract.EventKernelResponse,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            service.writeBootWarnings(runtimeInstance)
+
             responseEvent, ok := eventValue.Payload().(*http.KernelResponseEvent)
             if false == ok || nil == responseEvent {
                 return nil

@@ -269,7 +269,7 @@ func (instance *failingUserResolver) ResolveImpersonatedUser(
     _ runtimecontract.Runtime,
     _ string,
 ) (securitycontract.Token, error) {
-    return nil, exception.NewError("user store query failed", nil, markInfrastructureFailure(exception.NewError("store is down", nil, nil)))
+    return nil, exception.NewError("user store query failed", nil, MarkInfrastructureFailure(exception.NewError("store is down", nil, nil)))
 }
 
 func TestImpersonation_MarkedResolverFailureLogsAtError(t *testing.T) {

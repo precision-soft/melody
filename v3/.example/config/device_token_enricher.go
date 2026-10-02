@@ -6,6 +6,7 @@ import (
     melodyexception "github.com/precision-soft/melody/v3/exception"
     melodyexceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
+    melodysecurity "github.com/precision-soft/melody/v3/security"
     melodysecuritycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
@@ -31,11 +32,12 @@ func (instance deviceAccountEnricher) Enrich(
     claims melodysecuritycontract.Claims,
 ) (melodysecuritycontract.Claims, error) {
     account, found, lookupErr := instance.lookup(runtimeInstance, claims.UserIdentifier)
+    /* a directory that cannot answer is marked as an infrastructure failure, so the bearer source files it as an incident at Error, apart from the routine refusal of a token whose account is gone */
     if nil != lookupErr {
         return claims, melodyexception.NewError(
             "the account a device token names could not be read",
             melodyexceptioncontract.Context{"userIdentifier": claims.UserIdentifier},
-            lookupErr,
+            melodysecurity.MarkInfrastructureFailure(lookupErr),
         )
     }
 

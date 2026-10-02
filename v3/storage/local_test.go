@@ -85,13 +85,71 @@ func TestLocalStorage_PutCreatesBaseDirectoryOnFirstWrite(t *testing.T) {
     }
 }
 
+/* the refusal is asserted with an object planted where the folded key would land: a key folded rather than refused reads that object, so a pin that only asked for an error passed on the object's absence */
 func TestLocalStorage_RejectsPathTraversal(t *testing.T) {
     local := NewLocalStorage(t.TempDir())
     runtimeInstance := testRuntime()
 
-    _, getErr := local.Get(runtimeInstance, "../../etc/passwd")
+    if putErr := local.Put(runtimeInstance, "etc/passwd", strings.NewReader("clamped"), -1, storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("unexpected put error: %v", putErr)
+    }
+
+    reader, getErr := local.Get(runtimeInstance, "../../etc/passwd")
     if nil == getErr {
-        t.Fatalf("expected path traversal to be rejected")
+        loaded, _ := io.ReadAll(reader)
+        _ = reader.Close()
+
+        t.Fatalf("expected path traversal to be refused, read %q", string(loaded))
+    }
+
+    if false == strings.Contains(getErr.Error(), `".." segment`) {
+        t.Fatalf("expected the traversal refused by name, got %q", getErr.Error())
+    }
+}
+
+/* an application that isolates its callers by key prefix and appends a client-chosen name is crossed by a ".." segment once it folds, so every door refuses it by name and the other prefix's object is neither read, overwritten, deleted nor reported */
+func TestLocalStorage_RefusesAParentSegmentAtEveryDoor(t *testing.T) {
+    local := NewLocalStorage(t.TempDir())
+    runtimeInstance := testRuntime()
+
+    if putErr := local.Put(runtimeInstance, "tenant-a/secret.txt", strings.NewReader("A"), -1, storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("unexpected put error: %v", putErr)
+    }
+
+    for _, key := range []string{"tenant-b/../tenant-a/secret.txt", "tenant-b\\..\\tenant-a\\secret.txt", "../tenant-a/secret.txt", "tenant-a/x/.."} {
+        if _, getErr := local.Get(runtimeInstance, key); nil == getErr || false == strings.Contains(getErr.Error(), `".." segment`) {
+            t.Fatalf("expected Get of %q to be refused by name, got %v", key, getErr)
+        }
+
+        if putErr := local.Put(runtimeInstance, key, strings.NewReader("B"), -1, storagecontract.PutOptions{}); nil == putErr || false == strings.Contains(putErr.Error(), `".." segment`) {
+            t.Fatalf("expected Put of %q to be refused by name, got %v", key, putErr)
+        }
+
+        if deleteErr := local.Delete(runtimeInstance, key); nil == deleteErr || false == strings.Contains(deleteErr.Error(), `".." segment`) {
+            t.Fatalf("expected Delete of %q to be refused by name, got %v", key, deleteErr)
+        }
+
+        exists, existsErr := local.Exists(runtimeInstance, key)
+        if nil == existsErr || false == strings.Contains(existsErr.Error(), `".." segment`) || true == exists {
+            t.Fatalf("expected Exists of %q to be refused by name, got %v, %v", key, exists, existsErr)
+        }
+    }
+
+    reader, getErr := local.Get(runtimeInstance, "tenant-a/secret.txt")
+    if nil != getErr {
+        t.Fatalf("expected the other prefix's object to survive, got %v", getErr)
+    }
+    loaded, _ := io.ReadAll(reader)
+    _ = reader.Close()
+
+    if "A" != string(loaded) {
+        t.Fatalf("expected the other prefix's object unchanged, got %q", string(loaded))
+    }
+
+    for _, key := range []string{"a..b/f.txt", "reports/..hidden", "f.txt..", "tenant-a/./x.txt"} {
+        if putErr := local.Put(runtimeInstance, key, strings.NewReader("ok"), -1, storagecontract.PutOptions{}); nil != putErr {
+            t.Fatalf("expected the key %q, which carries no \"..\" segment, to be stored, got %v", key, putErr)
+        }
     }
 }
 
