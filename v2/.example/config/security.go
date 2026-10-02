@@ -71,8 +71,8 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         melodysecurity.NewResolverTokenSource(security.SessionTokenResolver(sessionUserLookup)),
         route.LoginPagePattern,
         route.LogoutPattern,
-        security.NewSessionLoginHandler(sessionUserLookup),
-        security.NewSessionLogoutHandler(),
+        security.NewSessionLoginHandler(sessionUserLookup, sessionIndexLookup),
+        security.NewSessionLogoutHandler(sessionIndexLookup),
         override,
     )
 }
@@ -116,4 +116,14 @@ func sessionUserLookup(request melodyhttpcontract.Request, userId string) (*enti
     }
 
     return userRepository.FindById(runtimeInstance.Context(), userId)
+}
+
+/* sessionIndexLookup resolves the index of the sessions each account holds, which the sign-in doors keep under its cap and the sign-out doors release */
+func sessionIndexLookup(request melodyhttpcontract.Request) (security.SessionIndex, error) {
+    runtimeInstance := request.RuntimeInstance()
+    if nil == runtimeInstance {
+        return nil, errors.New("the request carries no runtime to resolve the session index through")
+    }
+
+    return melodycontainer.FromResolver[repository.UserSessionRepository](runtimeInstance.Container(), repository.ServiceUserSessionRepository)
 }

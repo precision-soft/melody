@@ -10,7 +10,14 @@ import (
 )
 
 func newInMemoryCategoryRepository() CategoryRepository {
-    return &inMemoryCategoryRepository{categories: seedCategoryList()}
+    categories := seedCategoryList()
+
+    identifierList := make([]string, 0, len(categories))
+    for _, category := range categories {
+        identifierList = append(identifierList, category.Id)
+    }
+
+    return &inMemoryCategoryRepository{categories: categories, mintFloor: seededFloor(identifierList, "cat-")}
 }
 
 type inMemoryCategoryRepository struct {

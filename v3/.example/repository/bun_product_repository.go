@@ -81,6 +81,15 @@ func auditContext(ctx context.Context) context.Context {
 }
 
 func (instance *bunProductRepository) seedIfEmpty(ctx context.Context) error {
+    identifierList := make([]string, 0)
+    for _, product := range seedProductList(time.Now()) {
+        identifierList = append(identifierList, product.Id)
+    }
+
+    if raiseErr := raiseSequenceOverSeeds(ctx, instance.database, "prod-", identifierList); nil != raiseErr {
+        return raiseErr
+    }
+
     return seedIfEmptyAudited(ctx, instance.database, instance.tracker, persistence.AuditEntityProduct, func() []*productRow {
         seedList := seedProductList(time.Now())
         rowList := make([]*productRow, 0, len(seedList))

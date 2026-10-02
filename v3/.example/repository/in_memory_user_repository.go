@@ -15,7 +15,14 @@ func newInMemoryUserRepository(seedsAccounts bool) UserRepository {
         return &inMemoryUserRepository{users: []*entity.User{}}
     }
 
-    return &inMemoryUserRepository{users: seedUserList()}
+    users := seedUserList()
+
+    identifierList := make([]string, 0, len(users))
+    for _, user := range users {
+        identifierList = append(identifierList, user.Id)
+    }
+
+    return &inMemoryUserRepository{users: users, mintFloor: seededFloor(identifierList, "user-")}
 }
 
 type inMemoryUserRepository struct {

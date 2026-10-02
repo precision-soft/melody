@@ -61,3 +61,13 @@ func TestRaisedFloorKeepsTheHigherTail(t *testing.T) {
         t.Fatalf("the first identifier did not set the floor")
     }
 }
+
+func TestSeededFloor_IsTheHighestSeededIdentifier(t *testing.T) {
+    if floor := seededFloor([]string{"prod-2", "prod-10", "prod-9", "other-99"}, "prod-"); "prod-10" != floor {
+        t.Fatalf("expected prod-10, got %q", floor)
+    }
+
+    if floor := seededFloor(nil, "prod-"); "" != floor {
+        t.Fatalf("expected no floor for no seed, got %q", floor)
+    }
+}

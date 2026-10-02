@@ -75,6 +75,15 @@ func (instance *bunUserRepository) seedIfEmpty(ctx context.Context) error {
         return nil
     }
 
+    identifierList := make([]string, 0)
+    for _, user := range seedUserList() {
+        identifierList = append(identifierList, user.Id)
+    }
+
+    if raiseErr := raiseSequenceOverSeeds(ctx, instance.database, "user-", identifierList); nil != raiseErr {
+        return raiseErr
+    }
+
     return seedIfEmptyAudited(ctx, instance.database, instance.tracker, persistence.AuditEntityUser, func() []*userRow {
         seedList := seedUserList()
         rowList := make([]*userRow, 0, len(seedList))

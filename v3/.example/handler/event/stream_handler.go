@@ -7,6 +7,7 @@ import (
     "time"
 
     examplejournal "github.com/precision-soft/melody/v3/.example/journal"
+    examplesecurity "github.com/precision-soft/melody/v3/.example/security"
     "github.com/precision-soft/melody/v3/.example/presenter"
     "github.com/precision-soft/melody/v3/.example/subscriber"
     melodyexception "github.com/precision-soft/melody/v3/exception"
@@ -17,8 +18,8 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/* StreamHandler resolves the hub per request rather than taking it at registration, so the provider that installs the hub's logger runs and the container knows it has a hub to close. */
-func StreamHandler() melodyhttpcontract.Handler {
+/* StreamHandler resolves the hub per request rather than taking it at registration, so the provider that installs the hub's logger runs and the container knows it has a hub to close. The slots are the process's one count of open streams, taken at registration. */
+func StreamHandler(slots *StreamSlots) melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         topic := queryStringOr(request, "topic", CatalogTopic)
 
@@ -36,6 +37,13 @@ func StreamHandler() melodyhttpcontract.Handler {
         if true == hub.IsClosed() {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusServiceUnavailable, "the event stream is shutting down"), nil
         }
+
+        /* the count stands ahead of the writer for the same reason as the gates above: past the cap the client reads a 429 it can back off on, not a committed 200 that ends at once */
+        release, slotTaken := acquireStreamSlot(runtimeInstance, slots)
+        if false == slotTaken {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusTooManyRequests, "too many open event streams"), nil
+        }
+        defer release()
 
         serverSentEventWriter, serverSentEventErr := melodyhttp.NewServerSentEventWriter(writer)
         if nil != serverSentEventErr {
@@ -86,6 +94,20 @@ func StreamHandler() melodyhttpcontract.Handler {
             }
         }
     }
+}
+
+/* acquireStreamSlot takes a slot for the account the request authenticated; the stream route admits authenticated readers alone, so a request without an account takes no slot */
+func acquireStreamSlot(runtimeInstance melodyruntimecontract.Runtime, slots *StreamSlots) (func(), bool) {
+    if nil == slots {
+        return nil, false
+    }
+
+    token, exists := examplesecurity.TokenFromRuntime(runtimeInstance)
+    if false == exists || false == token.IsAuthenticated() || "" == token.UserIdentifier() {
+        return nil, false
+    }
+
+    return slots.Acquire(token.UserIdentifier())
 }
 
 /* defaultKeepaliveInterval is the keepalive of a stream whose server declared no write timeout, so dead-client detection does not depend on a deadline */

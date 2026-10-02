@@ -9,6 +9,10 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v3/.example/entity"
+    "github.com/precision-soft/melody/v3/.example/persistence"
+    "github.com/precision-soft/melody/v3/.example/repository"
+    "github.com/precision-soft/melody/v3/.example/route"
+    melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
     melodyclock "github.com/precision-soft/melody/v3/clock"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
@@ -241,6 +245,77 @@ func TestRegisterSecurity_TheMetricsTokenPutsTheExpositionBehindTheScraperRole(t
         token, _ := metricsFirewall.TokenSource().Resolve(runtimeInstance, request)
         if authenticated != (nil != token && true == token.IsAuthenticated()) {
             t.Fatalf("expected %q authenticated=%v, got %v", credential, authenticated, token)
+        }
+    }
+}
+
+/* the device firewall is wired over the account enricher: a stored device token resolves through the firewall's own source as authenticated, with the roles its account holds NOW, while the account exists, and as nobody once the account is gone */
+func TestRegisterSecurity_TheDeviceFirewallHonoursATokenOnlyWhileItsAccountExists(t *testing.T) {
+    for _, accountExists := range []bool{true, false} {
+        moduleInstance := moduleWithEnvironment(t, map[string]string{})
+        moduleInstance.buildInternalAuth()
+        moduleInstance.buildTokenAuth()
+        moduleInstance.buildImpersonation()
+
+        moduleInstance.opaqueTokenStore.Put("device-token", melodysecuritycontract.Claims{UserIdentifier: "user-2", DeviceIdentifier: "phone", Roles: []string{entity.RoleAdmin}})
+
+        builder := melodysecurityconfig.NewBuilder()
+        moduleInstance.RegisterSecurity(builder)
+
+        var deviceFirewall *melodysecurity.CompiledFirewall
+        for _, firewall := range builder.BuildAndCompile().Firewalls() {
+            if "deviceToken" == firewall.Name() {
+                deviceFirewall = firewall
+            }
+        }
+
+        if nil == deviceFirewall {
+            t.Fatal("expected the device firewall to be compiled")
+        }
+
+        storage := persistence.NewCatalogStorage(nil)
+        if true == accountExists {
+            storage = storage.WithAccountSeed()
+        }
+
+        userRepository, repositoryErr := repository.NewUserRepository(storage)
+        if nil != repositoryErr {
+            t.Fatalf("new user repository: %v", repositoryErr)
+        }
+
+        containerInstance := melodycontainer.NewContainer()
+        opaqueTokenStore := moduleInstance.opaqueTokenStore
+        melodycontainer.MustRegister[melodysecuritycontract.RevocableTokenStore](containerInstance, melodyrueidis.ServiceTokenStore, func(resolver melodycontainercontract.Resolver) (melodysecuritycontract.RevocableTokenStore, error) {
+            return opaqueTokenStore, nil
+        })
+        melodycontainer.MustRegister[repository.UserRepository](containerInstance, repository.ServiceUserRepository, func(resolver melodycontainercontract.Resolver) (repository.UserRepository, error) {
+            return userRepository, nil
+        })
+        melodycontainer.MustRegister[melodyeventcontract.EventDispatcher](containerInstance, melodyevent.ServiceEventDispatcher, func(resolver melodycontainercontract.Resolver) (melodyeventcontract.EventDispatcher, error) {
+            return melodyevent.NewEventDispatcher(melodyclock.NewSystemClock()), nil
+        })
+        melodycontainer.MustRegister[melodyloggingcontract.Logger](containerInstance, melodylogging.ServiceLogger, func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
+            return melodylogging.NewNopLogger(), nil
+        })
+        runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+
+        httpRequest := httptest.NewRequest(nethttp.MethodGet, route.DeviceIdentityPattern, nil)
+        httpRequest.Header.Set("Authorization", "Bearer device-token")
+        request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("device-test", time.Now()))
+
+        token, _ := deviceFirewall.TokenSource().Resolve(runtimeInstance, request)
+        authenticated := nil != token && true == token.IsAuthenticated()
+
+        if false == accountExists {
+            if true == authenticated {
+                t.Fatalf("expected the token of an absent account resolved as nobody, got %v", token.Roles())
+            }
+
+            continue
+        }
+
+        if false == authenticated || 1 != len(token.Roles()) || entity.RoleEditor != token.Roles()[0] {
+            t.Fatalf("expected the token authenticated with the account's current roles [%s], got %v", entity.RoleEditor, token)
         }
     }
 }

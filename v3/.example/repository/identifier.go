@@ -42,3 +42,13 @@ func raisedFloor(floor string, identifier string, prefix string) string {
 
     return floor
 }
+
+/* seededFloor is the floor a repository starts from: the highest identifier of the seed under the prefix, so deleting a seeded entity never hands its identifier to the next create */
+func seededFloor(identifierList []string, prefix string) string {
+    floor := ""
+    for _, identifier := range identifierList {
+        floor = raisedFloor(floor, identifier, prefix)
+    }
+
+    return floor
+}

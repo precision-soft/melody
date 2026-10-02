@@ -1,6 +1,7 @@
 package security
 
 import (
+    "context"
     "errors"
     nethttp "net/http"
     "net/http/httptest"
@@ -8,6 +9,10 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v2/.example/entity"
+    melodyclock "github.com/precision-soft/melody/v2/clock"
+    melodyclockcontract "github.com/precision-soft/melody/v2/clock/contract"
+    melodycontainer "github.com/precision-soft/melody/v2/container"
+    melodycontainercontract "github.com/precision-soft/melody/v2/container/contract"
     melodyhttp "github.com/precision-soft/melody/v2/http"
     melodyhttpcontract "github.com/precision-soft/melody/v2/http/contract"
     melodysession "github.com/precision-soft/melody/v2/session"
@@ -97,4 +102,58 @@ func refusingAccountLookup(request melodyhttpcontract.Request, userId string) (*
 /* withCurrentCredential writes the credential version of testPasswordHash, so a test that drives an earlier guard is not also refused for a missing version */
 func withCurrentCredential(sessionInstance melodysessioncontract.Session) {
     sessionInstance.Set(SessionKeySecurityCredentialVersion, SessionCredentialVersion(testPasswordHash))
+}
+
+/* sessionAdmission is one call the sign-in doors made on the session index */
+type sessionAdmission struct {
+    userId            string
+    previousSessionId string
+    sessionId         string
+    createdAt         time.Time
+}
+
+/* recordingSessionIndex stands in for repository.UserSessionRepository, which this package cannot import: it records what the doors ask of it, and refuses every admission with admitErr when one is set */
+type recordingSessionIndex struct {
+    admitErr     error
+    admittedList []sessionAdmission
+    releasedList []string
+}
+
+func (instance *recordingSessionIndex) Admit(ctx context.Context, userId string, previousSessionId string, sessionId string, createdAt time.Time, release func(sessionId string) error) error {
+    if nil != instance.admitErr {
+        return instance.admitErr
+    }
+
+    instance.admittedList = append(instance.admittedList, sessionAdmission{userId: userId, previousSessionId: previousSessionId, sessionId: sessionId, createdAt: createdAt})
+
+    return nil
+}
+
+func (instance *recordingSessionIndex) Release(ctx context.Context, sessionId string) error {
+    instance.releasedList = append(instance.releasedList, sessionId)
+
+    return nil
+}
+
+func (instance *recordingSessionIndex) lookup(request melodyhttpcontract.Request) (SessionIndex, error) {
+    return instance, nil
+}
+
+/* sessionAdmissionTestInstant is the frozen clock's instant an admission records */
+var sessionAdmissionTestInstant = time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+
+/* registerAdmissionClock gives the container the clock AdmitSession stamps an admission with */
+func registerAdmissionClock(t *testing.T, containerInstance melodycontainercontract.Container) {
+    t.Helper()
+
+    registerErr := melodycontainer.Register[melodyclockcontract.Clock](
+        containerInstance,
+        melodyclock.ServiceClock,
+        func(resolver melodycontainercontract.Resolver) (melodyclockcontract.Clock, error) {
+            return melodyclock.NewFrozenClock(sessionAdmissionTestInstant), nil
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("register clock: %v", registerErr)
+    }
 }

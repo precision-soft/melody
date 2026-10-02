@@ -6,13 +6,16 @@ import (
     nethttp "net/http"
     "strings"
 
+    examplejournal "github.com/precision-soft/melody/v3/.example/journal"
     "github.com/precision-soft/melody/v3/.example/page"
     "github.com/precision-soft/melody/v3/.example/presenter"
     "github.com/precision-soft/melody/v3/.example/route"
     "github.com/precision-soft/melody/v3/.example/security"
     melodyevent "github.com/precision-soft/melody/v3/event"
+    melodyexception "github.com/precision-soft/melody/v3/exception"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
+    melodylogging "github.com/precision-soft/melody/v3/logging"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v3/security"
     melodysecuritycontract "github.com/precision-soft/melody/v3/security/contract"
@@ -30,7 +33,8 @@ type LoginAuthenticator interface {
     Authenticate(request melodyhttpcontract.Request) (melodysecuritycontract.Token, error)
 }
 
-func LoginHandler(authentication LoginAuthenticator) melodyhttpcontract.Handler {
+/* LoginHandler signs an account in and admits the session through sessionIndex, which keeps the account under repository.UserSessionCap. */
+func LoginHandler(authentication LoginAuthenticator, sessionIndex security.SessionIndexLookup) melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         type adminLoginRequest struct {
             Username string `json:"username"`
@@ -109,6 +113,9 @@ func LoginHandler(authentication LoginAuthenticator) melodyhttpcontract.Handler 
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "session is not available"), nil
         }
 
+        /* the id the rotation retires is read first, so its row leaves the index with it */
+        previousSessionId := sessionInstance.Id()
+
         /* the session id is rotated before the authenticated identity is written, against session fixation: a pre-login id the client held must not survive into the authenticated session. RegenerateRequestSession republishes the rotated session on the request, so the identity lands on the id the response emits. */
         rotatedSession, regenerateErr := melodyhttp.RegenerateRequestSession(request)
         if nil != regenerateErr {
@@ -118,6 +125,11 @@ func LoginHandler(authentication LoginAuthenticator) melodyhttpcontract.Handler 
         rotatedSession.Set(security.SessionKeySecurityUserId, user.Id)
         rotatedSession.Set(security.SessionKeySecurityRoles, append([]string{}, user.Roles...))
         rotatedSession.Set(security.SessionKeySecurityCredentialVersion, security.SessionCredentialVersion(user.Password))
+
+        /* past the cap the account's oldest session ends here; a refused admission has cleared the rotated session, so the refusal opens nothing */
+        if admitErr := security.AdmitSession(request, sessionIndex, user.Id, previousSessionId, rotatedSession); nil != admitErr {
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "session admission failed", admitErr), nil
+        }
 
         redirectUrl, _ := melodyhttp.UrlGeneratorMustFromContainer(runtimeInstance.Container()).GeneratePath(route.ProductsListPageName, nil)
 
@@ -146,7 +158,8 @@ func dispatchLoginFailure(runtimeInstance melodyruntimecontract.Runtime, request
     return dispatchErr
 }
 
-func LogoutHandler() melodyhttpcontract.Handler {
+/* LogoutHandler ends the session and takes its row out of sessionIndex, so the account's place is free for its next sign-in. */
+func LogoutHandler(sessionIndex security.SessionIndexLookup) melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         indexUrl := "/"
 
@@ -157,6 +170,14 @@ func LogoutHandler() melodyhttpcontract.Handler {
 
         /* the whole session ends, not only the identity in it: an emptied session would be saved back under the same id with a re-issued cookie, while Clear routes the response path to DeleteSession and to the expired cookie */
         sessionInstance.Clear()
+
+        /* the sign-out stands whatever the index answers; a row it could not remove is journaled and holds its place until a later sign-in drops it as the oldest */
+        if releaseErr := security.ReleaseSession(request, sessionIndex, sessionInstance.Id()); nil != releaseErr {
+            examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Warning(
+                "the signed-out session stays in the session index",
+                melodyexception.LogContext(releaseErr),
+            )
+        }
 
         return presenter.Redirect(runtimeInstance, request, indexUrl), nil
     }

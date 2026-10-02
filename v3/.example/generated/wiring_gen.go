@@ -122,6 +122,23 @@ func RegisterGeneratedServices(registrar containercontract.Registrar) {
 
     melodycontainer.MustRegister(
         registrar,
+        repository.ServiceUserSessionRepository,
+        func(resolver containercontract.Resolver) (repository.UserSessionRepository, error) {
+            var zeroValue repository.UserSessionRepository
+
+            storage, storageErr := melodycontainer.FromResolverByType[*persistence.CatalogStorage](resolver)
+            if nil != storageErr {
+                return zeroValue, storageErr
+            }
+
+            return repository.NewUserSessionRepository(
+                storage,
+            )
+        },
+    )
+
+    melodycontainer.MustRegister(
+        registrar,
         service.ServiceCatalogJournalService,
         func(resolver containercontract.Resolver) (*service.CatalogJournalService, error) {
             journalRepository, journalRepositoryErr := melodycontainer.FromResolverByType[repository.CatalogJournalRepository](resolver)

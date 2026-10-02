@@ -75,12 +75,12 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     /* the sign-in submit spends the same per-address budget as the nomenclature's writes: a password guessed in a loop is refused with 429 once the budget runs out, whichever replica each guess reaches */
     router.HandleWithOptions(
         route.LoginSubmitPattern,
-        instance.throttledWrite(handler.LoginHandler(instance.buildLoginAuthentication(kernelInstance.Clock(), secondFactorReplayGuard))),
+        instance.throttledWrite(handler.LoginHandler(instance.buildLoginAuthentication(kernelInstance.Clock(), secondFactorReplayGuard), sessionIndexLookup)),
         melodyhttp.NewRouteOptions(route.LoginSubmitName, []string{"POST"}, "", nil, nil, nil, nil, 0, melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)),
     )
     router.HandleWithOptions(
         route.LogoutPattern,
-        handler.LogoutHandler(),
+        handler.LogoutHandler(sessionIndexLookup),
         melodyhttp.NewRouteOptions(route.LogoutName, []string{"GET"}, "", nil, nil, nil, nil, 0, melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)),
     )
 
@@ -118,7 +118,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
         melodyhttp.NewRouteOptions(route.I18nGreetingName, []string{"GET"}, "", nil, nil, nil, route.I18nGreetingLocaleList(), 0, nil),
     )
 
-    router.HandleNamed(route.EventsStreamName, "GET", route.EventsStreamPattern, handlerevent.StreamHandler())
+    router.HandleNamed(route.EventsStreamName, "GET", route.EventsStreamPattern, handlerevent.StreamHandler(instance.eventStreamSlots))
     router.HandleNamed(route.EventsPublishName, "POST", route.EventsPublishPattern, handlerevent.PublishHandler(instance.messageBusDispatch))
 
     /* every catalog/user route below is exposed in the frontend zone: the admin SPA generates all of their URLs by name from the route manifest (data-route / route(...)), so an unexposed route would make the client throw "unknown route". */

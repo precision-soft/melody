@@ -10,7 +10,14 @@ import (
 )
 
 func newInMemoryCurrencyRepository() CurrencyRepository {
-    return &inMemoryCurrencyRepository{currencies: seedCurrencyList()}
+    currencies := seedCurrencyList()
+
+    identifierList := make([]string, 0, len(currencies))
+    for _, currency := range currencies {
+        identifierList = append(identifierList, currency.Id)
+    }
+
+    return &inMemoryCurrencyRepository{currencies: currencies, mintFloor: seededFloor(identifierList, "cur-")}
 }
 
 type inMemoryCurrencyRepository struct {

@@ -1,11 +1,14 @@
 package security
 
 import (
+    "context"
     nethttp "net/http"
     "testing"
     "time"
 
+    melodycontainer "github.com/precision-soft/melody/v2/container"
     melodyhttp "github.com/precision-soft/melody/v2/http"
+    melodyruntime "github.com/precision-soft/melody/v2/runtime"
     melodysecuritycontract "github.com/precision-soft/melody/v2/security/contract"
     melodysession "github.com/precision-soft/melody/v2/session"
 )
@@ -30,7 +33,7 @@ func TestSessionLogoutHandlerEndsTheSessionRatherThanEmptyingIt(t *testing.T) {
     request := requestAccepting(t, "")
     request.Attributes().Set(melodyhttp.RequestAttributeSession, sessionInstance)
 
-    result, err := NewSessionLogoutHandler().Logout(nil, request, melodysecuritycontract.LogoutInput{})
+    result, err := NewSessionLogoutHandler(nil).Logout(nil, request, melodysecuritycontract.LogoutInput{})
     if nil != err {
         t.Fatalf("the logout door failed: %v", err)
     }
@@ -63,7 +66,7 @@ func TestSessionLogoutHandlerEndsTheSessionRatherThanEmptyingIt(t *testing.T) {
 
 /* a logout that arrives with no session is refused rather than answered as a success, because the door cannot end what it cannot reach */
 func TestSessionLogoutHandlerRefusesARequestCarryingNoSession(t *testing.T) {
-    result, err := NewSessionLogoutHandler().Logout(nil, requestAccepting(t, ""), melodysecuritycontract.LogoutInput{})
+    result, err := NewSessionLogoutHandler(nil).Logout(nil, requestAccepting(t, ""), melodysecuritycontract.LogoutInput{})
     if nil != err {
         t.Fatalf("the logout door failed: %v", err)
     }
@@ -74,5 +77,24 @@ func TestSessionLogoutHandlerRefusesARequestCarryingNoSession(t *testing.T) {
 
     if nethttp.StatusInternalServerError != result.Response.StatusCode() {
         t.Fatalf("unexpected status: %d", result.Response.StatusCode())
+    }
+}
+
+/* the sign-out releases the row of the session it ends, so the account's place is free for its next sign-in */
+func TestSessionLogoutHandlerReleasesTheSessionsRow(t *testing.T) {
+    request, sessionInstance := requestCarryingSession(t)
+    containerInstance := melodycontainer.NewContainer()
+    request = melodyhttp.NewRequest(request.HttpRequest(), nil, melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance), nil)
+    request.Attributes().Set(melodyhttp.RequestAttributeSession, sessionInstance)
+
+    index := &recordingSessionIndex{}
+
+    _, err := NewSessionLogoutHandler(index.lookup).Logout(nil, request, melodysecuritycontract.LogoutInput{})
+    if nil != err {
+        t.Fatalf("the logout door failed: %v", err)
+    }
+
+    if 1 != len(index.releasedList) || sessionInstance.Id() != index.releasedList[0] {
+        t.Fatalf("expected the row of %q released, got %v", sessionInstance.Id(), index.releasedList)
     }
 }

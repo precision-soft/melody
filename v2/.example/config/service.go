@@ -63,6 +63,11 @@ func (instance *Module) RegisterServices(kernelInstance melodykernelcontract.Ker
     )
 
     registrar.RegisterService(
+        repository.ServiceUserSessionRepository,
+        repository.UserSessionRepositoryProvider(databaseServiceName),
+    )
+
+    registrar.RegisterService(
         service.ServiceCategoryService,
         func(resolver melodycontainercontract.Resolver) (*service.CategoryService, error) {
             categoryRepository := repository.MustGetCategoryRepository(resolver)

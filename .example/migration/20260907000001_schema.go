@@ -13,7 +13,7 @@ func init() {
 /* UserUsernameIndexName is the one spelling of the index. The schema owns it, so this step and the repository that maps the driver's duplicate-key refusal onto the public message read the same constant. */
 const UserUsernameIndexName = "melody_example_v1_user_username_folded"
 
-/* upSchema creates the four catalog tables and the unique key on the folded username in one step: the example has a single state, the present one, and its schema is the statement of that state; a volume in an older shape is brought to it by example:db:reset. Every statement tolerates a volume provisioned before the set and several processes applying it at once. */
+/* upSchema creates the five catalog tables and the unique key on the folded username in one step: the example has a single state, the present one, and its schema is the statement of that state; a volume in an older shape is brought to it by example:db:reset. Every statement tolerates a volume provisioned before the set and several processes applying it at once. */
 func upSchema(ctx context.Context, database *bun.DB) error {
     for _, statement := range schemaUpStatementList {
         if _, execErr := database.ExecContext(ctx, statement); nil != execErr {
@@ -73,11 +73,24 @@ const createUserUsernameIndexSql = "ALTER TABLE `melody_example_v1_user` " +
     "ADD UNIQUE KEY `" + UserUsernameIndexName + "` " +
     "((CAST(LOWER(`username`) AS CHAR(255) CHARACTER SET utf8mb4) COLLATE utf8mb4_bin))"
 
+/* UserSessionTableName is the index of the sessions each account holds, which the sign-in doors read to keep an account under its cap; the session storage itself cannot be asked which sessions belong to an account. */
+const UserSessionTableName = "melody_example_v1_user_session"
+
+/* a session row goes with its account, and the index on the account and the instant is the order the sign-in doors drop the oldest in */
+const createUserSessionTableSql = "CREATE TABLE IF NOT EXISTS `" + UserSessionTableName + "` (" +
+    "`session_id` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
+    "`user_identifier` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
+    "`created_at` DATETIME(6) NOT NULL, " +
+    "PRIMARY KEY (`session_id`), " +
+    "KEY `melody_example_v1_user_session_account` (`user_identifier`, `created_at`), " +
+    "CONSTRAINT `melody_example_v1_user_session_user` FOREIGN KEY (`user_identifier`) REFERENCES `melody_example_v1_user` (`id`) ON DELETE CASCADE)"
+
 var schemaUpStatementList = []string{
     createCategoryTableSql,
     createCurrencyTableSql,
     createProductTableSql,
     createUserTableSql,
+    createUserSessionTableSql,
 }
 
 /* schemaTableNameList names the tables this migration owns, in the order it drops them — the reverse of
@@ -85,6 +98,7 @@ var schemaUpStatementList = []string{
    cannot be left standing by a down that forgot it, and the reset command names the same list to the
    operator rather than a second copy of it. */
 var schemaTableNameList = []string{
+    UserSessionTableName,
     "melody_example_v1_user",
     "melody_example_v1_product",
     "melody_example_v1_currency",

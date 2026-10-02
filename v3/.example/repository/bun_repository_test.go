@@ -11,6 +11,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v3/.example/entity"
+    "github.com/precision-soft/melody/v3/.example/persistence"
     "github.com/uptrace/bun"
 )
 
@@ -337,5 +338,75 @@ func TestInsertWithMintedIdentifier_MintsPastTheSequenceAndRecordsWhatItStored(t
     })
     if false == strings.Contains(recorded, "'cat-', 8") || false == strings.Contains(recorded, "GREATEST") {
         t.Fatalf("expected the sequence raised to cat-8 and never lowered, got %q", recorded)
+    }
+}
+
+func isSequenceRaise(query string) bool {
+    return true == strings.HasPrefix(query, "INSERT INTO `melody_example_v3_identifier_sequence`")
+}
+
+func isCategoryInsert(query string) bool {
+    return true == strings.HasPrefix(query, "INSERT INTO `melody_example_v3_category`")
+}
+
+/* the sequence is raised before the row is stored, on the minted path and on the supplied one: the insert commits on its own, so a raise after it could fail over a stored row */
+func TestInsertWithMintedIdentifier_RaisesTheSequenceBeforeTheInsert(t *testing.T) {
+    for _, supplied := range []string{"", "cat-9"} {
+        database, recorder := newFakeBunDatabase()
+        recorder.queryHook = identifierMintLockAnswering(1)
+
+        if createErr := (&bunCategoryRepository{database: database}).Create(context.Background(), entity.NewCategory(supplied, "Probe")); nil != createErr {
+            t.Fatalf("create %q: %v", supplied, createErr)
+        }
+
+        queries := recorder.recordedQueries()
+        raiseAt, insertAt := indexOfFirstQuery(queries, isSequenceRaise), indexOfFirstQuery(queries, isCategoryInsert)
+        if false == (0 <= raiseAt && raiseAt < insertAt) {
+            t.Fatalf("supplied %q: expected the sequence raised ahead of the insert: %q", supplied, queries)
+        }
+    }
+}
+
+/* a raise that fails stores nothing, so no create answers an error over a row it stored */
+func TestInsertWithMintedIdentifier_AFailedRaiseStoresNothing(t *testing.T) {
+    database, _ := newFakeBunDatabase()
+    _ = database.DB.Close()
+
+    inserted := false
+    insertErr := insertWithMintedIdentifier(
+        context.Background(),
+        database,
+        productIdentifierMintLockName,
+        identifierSequence{prefix: "prod-", identifier: func() string { return "prod-9" }},
+        false,
+        func(floor string) error { return nil },
+        func() error {
+            inserted = true
+
+            return nil
+        },
+    )
+
+    if nil == insertErr || true == inserted {
+        t.Fatalf("expected the failed raise answered with nothing stored, got inserted=%v err=%v", inserted, insertErr)
+    }
+}
+
+/* the seed raises the sequence to its highest identifier ahead of its rows, so the newest seeded entity's identifier is never minted again after its delete */
+func TestBunProductRepositorySeed_RaisesTheSequenceOverTheSeed(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = countingRows(0)
+
+    if seedErr := newBunProductRepository(persistence.NewCatalogStorage(database)).seedIfEmpty(context.Background()); nil != seedErr {
+        t.Fatalf("seed: %v", seedErr)
+    }
+
+    queries := recorder.recordedQueries()
+    raiseAt := indexOfFirstQuery(queries, isSequenceRaise)
+    insertAt := indexOfFirstQuery(queries, func(query string) bool {
+        return true == strings.HasPrefix(query, "INSERT INTO `melody_example_v3_product`")
+    })
+    if 0 > raiseAt || false == strings.Contains(queries[raiseAt], "'prod-', 5") || (0 <= insertAt && insertAt < raiseAt) {
+        t.Fatalf("expected the sequence raised to prod-5 ahead of the seeded rows: %q", queries)
     }
 }

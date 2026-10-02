@@ -11,14 +11,16 @@ import (
 )
 
 /* NewSessionLoginHandler writes the session of an authenticated token from the account the lookup reads, not from the token: the session carries the account's roles and the credential version of its password hash, which SessionTokenResolver checks on every later request. */
-func NewSessionLoginHandler(lookupUser SessionUserLookup) melodysecuritycontract.LoginHandler {
+func NewSessionLoginHandler(lookupUser SessionUserLookup, sessionIndex SessionIndexLookup) melodysecuritycontract.LoginHandler {
     return &sessionLoginHandler{
-        lookupUser: lookupUser,
+        lookupUser:   lookupUser,
+        sessionIndex: sessionIndex,
     }
 }
 
 type sessionLoginHandler struct {
-    lookupUser SessionUserLookup
+    lookupUser   SessionUserLookup
+    sessionIndex SessionIndexLookup
 }
 
 func (instance *sessionLoginHandler) Login(
@@ -51,6 +53,9 @@ func (instance *sessionLoginHandler) Login(
         return nil, errors.New("the authenticated account is not available")
     }
 
+    /* the id the rotation retires is read first, so its row leaves the index with it */
+    previousSessionId := sessionInstance.Id()
+
     /* the session id is rotated before the authenticated identity is written, against session fixation: an id chosen before authentication, possibly seeded by an attacker, must not carry the identity. RegenerateRequestSession carries the values over under a fresh id and republishes it on the request, so the identity lands on the id the response emits. */
     rotatedSession, regenerateErr := melodyhttp.RegenerateRequestSession(request)
     if nil != regenerateErr {
@@ -60,6 +65,11 @@ func (instance *sessionLoginHandler) Login(
     rotatedSession.Set(SessionKeySecurityUserId, userIdentifier)
     rotatedSession.Set(SessionKeySecurityRoles, append([]string{}, user.Roles...))
     rotatedSession.Set(SessionKeySecurityCredentialVersion, SessionCredentialVersion(user.Password))
+
+    /* the same admission as the sign-in door's, so a session opened through the firewall counts against the account's cap too */
+    if admitErr := AdmitSession(request, instance.sessionIndex, userIdentifier, previousSessionId, rotatedSession); nil != admitErr {
+        return nil, admitErr
+    }
 
     response, err := melodyhttp.JsonResponse(http.StatusOK, map[string]any{
         "success": true,

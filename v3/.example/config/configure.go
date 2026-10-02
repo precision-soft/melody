@@ -110,12 +110,15 @@ func (instance *Module) registerHubShutdown(registrar httpShutdownRegistrar) {
     registrar.OnHttpShutdown(instance.serverSentEventHub.Shutdown)
 }
 
+/* websocketRouteName names the /ws route, which StreamSlotMiddleware counts in the event stream's slots */
+const websocketRouteName = "example.websocket"
+
 /* websocketModuleConfig serves the hub over /ws beside the event stream. */
 func (instance *Module) websocketModuleConfig() melodywebsocket.ModuleConfig {
     return melodywebsocket.ModuleConfig{
         Hub:       instance.serverSentEventHub,
         Path:      "/ws",
-        RouteName: "example.websocket",
+        RouteName: websocketRouteName,
         /* IdleTimeout is required: the keepalive ping is the only thing that reaps a tab that went away without a fin. OriginPatterns stays unset on purpose: the upgrade authenticates through the session cookie, which a browser sends cross-site too, so the library's same-origin default is what stops a foreign page riding a visitor's session; a client that sends no Origin header is not origin-checked. */
         Options: melodywebsocket.Options{
             IdleTimeout: 30 * time.Second,

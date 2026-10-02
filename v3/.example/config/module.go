@@ -1,6 +1,7 @@
 package config
 
 import (
+    handlerevent "github.com/precision-soft/melody/v3/.example/handler/event"
     "context"
     nethttp "net/http"
     "strings"
@@ -46,6 +47,8 @@ type Module struct {
     translator melodytranslationcontract.Translator
 
     serverSentEventHub       *melodyhttp.ServerSentEventHub
+    /* eventStreamSlots is the process's one count of the streams held open on the hub, over the event stream door and the websocket route alike */
+    eventStreamSlots *handlerevent.StreamSlots
 
     openApiInfo     melodyopenapi.Info
     openApiRegistry *melodyopenapi.Registry
@@ -94,7 +97,11 @@ type Module struct {
 
 /* NewExampleModule builds the eager half of the wiring. The context is the process's: a signal cancels it, and the database registry binds its lazy opens to it — an open in flight when the process is asked to stop ends with the signal rather than with its retry budget, so a teardown has nothing to wait behind. */
 func NewExampleModule(ctx context.Context, configuration melodyconfigcontract.Configuration) *Module {
-    moduleInstance := &Module{processContext: ctx, configuration: configuration}
+    moduleInstance := &Module{
+        processContext:   ctx,
+        configuration:    configuration,
+        eventStreamSlots: handlerevent.NewStreamSlots(handlerevent.StreamCapPerUser, handlerevent.StreamCapPerProcess),
+    }
     moduleInstance.buildTrustedProxyResolver()
     moduleInstance.buildServerSentEvent()
     moduleInstance.buildObservability()

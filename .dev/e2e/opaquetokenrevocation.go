@@ -182,9 +182,10 @@ func runOpaqueTokenRevocationCheck(baseUrl string, redisAddress string) {
 
     assertDeletedAccountReleasesItsTokens(administrator, bearer, redisClient, baseUrl, os.Getenv("MYSQL_DSN"), tokenAfterUserRevocation.Token)
     assertConsoleCreatedAccountSignsIn(administrator, baseUrl)
+    assertAccountCapsHold(administrator, baseUrl)
 }
 
-/* an account deleted through the admin door takes its device tokens with it: a probe editor signs in, mints a device token that resolves the device route, and once the account is deleted the token's entry is gone from redis, read out of band, and the token is refused. The editor's own token, another account's, is the control left standing. The probe account's audit trail leaves with it, on a failure too: identifiers are minted as the highest suffix plus one, so a later section's account would inherit the entries otherwise */
+/* an account deleted through the admin door takes its device tokens with it: a probe editor signs in, mints a device token that resolves the device route, and once the account is deleted the token's entry is gone from redis, read out of band, and the token is refused. The editor's own token, another account's, is the control left standing. The probe account's audit trail leaves with it, on a failure too: the trail of a deleted account names an identifier no account holds, and the next run would read it otherwise */
 func assertDeletedAccountReleasesItsTokens(administrator *http.Client, bearer *liveExampleClient, redisClient rueidis.Client, baseUrl string, mysqlDsn string, otherAccountToken string) {
     if "" == mysqlDsn {
         skip("opaque token revocation: MYSQL_DSN is cleared, so the deleted probe account's audit trail could not be removed with it — the deletion's token release was NOT checked")

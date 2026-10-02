@@ -62,7 +62,7 @@ func TestUserDeleted_TheTokenReleaseOutranksTheOtherListeners(t *testing.T) {
     }
 }
 
-/* the two-factor release meeting a store it cannot reach and the cache refusing its deletes, the deleted account's device token is still gone and its account revoked; the dispatch fails on the cache, which runs last. The control, the two releases over healthy stores, answers nil with the token and the enrollment released. */
+/* the two-factor release panicking on its store, as a redis-backed store answers an outage, ends the dispatch where it runs, and the cache refuses its deletes behind it: the deleted account's device token is still gone and its account revoked, because the release runs ahead of both. Placed below the two-factor release, the release would be skipped by the panic and the token would stay. The control, the two releases over healthy stores, answers nil with the token and the enrollment released. */
 func TestUserDeleted_AFailingListenerDoesNotLeaveTheDeletedAccountsTokens(t *testing.T) {
     clockInstance := melodyclock.NewSystemClock()
     backend := melodycache.NewInMemoryBackend(128, time.Minute, clockInstance)
@@ -71,14 +71,14 @@ func TestUserDeleted_AFailingListenerDoesNotLeaveTheDeletedAccountsTokens(t *tes
     tokenStore := melodysecurity.NewInMemoryTokenStore()
     tokenStore.Put("token-user-4", melodysecuritycontract.Claims{UserIdentifier: "user-4", DeviceIdentifier: "phone"})
 
-    unreachable := func(runtimeInstance melodyruntimecontract.Runtime) (*twofactor.Store, error) {
-        return nil, errors.New("the catalogue database refused the migration")
+    panicking := func(runtimeInstance melodyruntimecontract.Runtime) (*twofactor.Store, error) {
+        panic(errors.New("the two-factor store is unreachable"))
     }
 
     runtimeInstance := deletionRuntime(t, refusing)
-    _, dispatchErr := deletionDispatcher(tokenStore, unreachable).DispatchName(runtimeInstance, event.UserDeletedEventName, event.NewUserDeletedEvent("user-4", "dave"))
+    _, dispatchErr := deletionDispatcher(tokenStore, panicking).DispatchName(runtimeInstance, event.UserDeletedEventName, event.NewUserDeletedEvent("user-4", "dave"))
     if nil == dispatchErr {
-        t.Fatal("expected the dispatch to fail on the refusing cache")
+        t.Fatal("expected the dispatch to fail on the panicking two-factor release")
     }
 
     if _, found, _ := tokenStore.Lookup(runtimeInstance, "token-user-4"); true == found {

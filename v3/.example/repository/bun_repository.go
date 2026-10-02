@@ -119,14 +119,15 @@ type identifierSequence struct {
 
 /* insertWithMintedIdentifier mints and inserts under the table's MySQL advisory lock, taken by one create of this process at a time, so two creates never read the same highest identifier: unserialized, every create read the list before any committed, minted the same one, and the primary key refused all but one. GET_LOCK waits on the server and belongs to the session that took it, so the lock is taken and released on one connection pinned for the call, while the mint and the insert run on the handle's pool; a release that cannot be issued ends the session, which releases the lock. A caller-supplied identifier is inserted without the lock.
 
-   The mint is handed the floor the sequence keeps, the highest identifier ever stored under the prefix, and every stored identifier raises it: the highest identifier present is not enough, since deleting the newest entity would hand its identifier, and the history and references that still name it, to the next one. */
+   The mint is handed the floor the sequence keeps, the highest identifier ever stored under the prefix, and every identifier raises it before it is stored, the seeded ones included: the highest identifier present is not enough, since deleting the newest entity would hand its identifier, and the history and references that still name it, to the next one. */
 func insertWithMintedIdentifier(ctx context.Context, database *bun.DB, lockName string, sequence identifierSequence, mintsIdentifier bool, mint func(floor string) error, insert func() error) error {
+    /* the sequence is raised BEFORE the insert, on both paths: the insert commits in a transaction of its own, so a raise after it could fail over a stored row, answering an error for an entity that exists and leaving the floor below it. Raised first, a failed insert costs one unused number, and GREATEST keeps the floor from going back. */
     if false == mintsIdentifier {
-        if insertErr := asIdAlreadyExists(insert()); nil != insertErr {
-            return insertErr
+        if recordErr := recordStoredIdentifier(ctx, database, sequence.prefix, sequence.identifier()); nil != recordErr {
+            return recordErr
         }
 
-        return recordStoredIdentifier(ctx, database, sequence.prefix, sequence.identifier())
+        return asIdAlreadyExists(insert())
     }
 
     /* the creates of this process queue here, holding no connection: waiting in GET_LOCK holds a pooled connection, so twenty waiters on a pool of ten would leave the holder none for its read and its insert */
@@ -171,11 +172,11 @@ func insertWithMintedIdentifier(ctx context.Context, database *bun.DB, lockName 
         return mintErr
     }
 
-    if insertErr := insert(); nil != insertErr {
-        return insertErr
+    if recordErr := recordStoredIdentifier(ctx, database, sequence.prefix, sequence.identifier()); nil != recordErr {
+        return recordErr
     }
 
-    return recordStoredIdentifier(ctx, database, sequence.prefix, sequence.identifier())
+    return insert()
 }
 
 /* mintFloor answers the identifier the sequence names as the highest ever stored under the prefix, or "" before the first */
@@ -213,6 +214,16 @@ func recordStoredIdentifier(ctx context.Context, database bun.IDB, prefix string
     ).Exec(ctx)
 
     return execErr
+}
+
+/* raiseSequenceOverSeeds raises the sequence to the highest identifier of the seed under the prefix, on every resolution and ahead of the seed itself, so deleting a seeded entity never hands its identifier to the next create; a volume seeded before the sequence held its floor receives it the same way, and GREATEST makes the raise a no-op once it holds. */
+func raiseSequenceOverSeeds(ctx context.Context, database bun.IDB, prefix string, identifierList []string) error {
+    floor := seededFloor(identifierList, prefix)
+    if "" == floor {
+        return nil
+    }
+
+    return recordStoredIdentifier(ctx, database, prefix, floor)
 }
 
 /* identifierMintGates holds one single-slot gate per lock name, so the creates of one process take the advisory lock one at a time */

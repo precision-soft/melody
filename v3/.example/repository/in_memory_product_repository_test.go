@@ -144,3 +144,22 @@ func TestInMemoryProductRepositoryCreateAnswersATakenIdentifierWithTheSentinel(t
         t.Fatalf("expected the taken identifier's refusal, got %v", createErr)
     }
 }
+
+/* deleting the newest SEEDED product hands its identifier to nobody: the repository starts from the seed's floor */
+func TestInMemoryProductRepositoryCreate_NeverMintsADeletedSeededIdentifier(t *testing.T) {
+    ctx := context.Background()
+    repositoryInstance := newInMemoryProductRepository()
+
+    if _, deleteErr := repositoryInstance.DeleteById(ctx, "prod-5"); nil != deleteErr {
+        t.Fatalf("delete: %v", deleteErr)
+    }
+
+    product := entity.NewProduct("", "probe", "probe", "cat-1", 1, "cur-eur", 1, time.Now(), time.Now())
+    if createErr := repositoryInstance.Create(ctx, product); nil != createErr {
+        t.Fatalf("create: %v", createErr)
+    }
+
+    if "prod-6" != product.Id {
+        t.Fatalf("expected prod-6 after the seeded prod-5 was deleted, got %q", product.Id)
+    }
+}

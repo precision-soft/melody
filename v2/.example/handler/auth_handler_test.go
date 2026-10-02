@@ -20,6 +20,7 @@ import (
     melodycontainer "github.com/precision-soft/melody/v2/container"
     melodycontainercontract "github.com/precision-soft/melody/v2/container/contract"
     melodyclock "github.com/precision-soft/melody/v2/clock"
+    melodyclockcontract "github.com/precision-soft/melody/v2/clock/contract"
     melodyevent "github.com/precision-soft/melody/v2/event"
     melodyeventcontract "github.com/precision-soft/melody/v2/event/contract"
     melodyhttp "github.com/precision-soft/melody/v2/http"
@@ -31,6 +32,7 @@ import (
     melodysecurity "github.com/precision-soft/melody/v2/security"
     melodysecuritycontract "github.com/precision-soft/melody/v2/security/contract"
     melodysession "github.com/precision-soft/melody/v2/session"
+    melodysessioncontract "github.com/precision-soft/melody/v2/session/contract"
 )
 
 /* The logout door is asked what the STORAGE holds afterwards, not what the session object says: deleting the two identity keys leaves the entry modified, so the response path saves it back under the same id and re-issues the cookie, and only a cleared session routes that path to DeleteSession. The response path is run here exactly as the kernel runs it, through SaveSession. */
@@ -58,7 +60,7 @@ func TestLogoutHandlerEndsTheSessionRatherThanEmptyingIt(t *testing.T) {
     request := melodyhttp.NewRequest(httpRequest, nil, nil, nil)
     request.Attributes().Set(melodyhttp.RequestAttributeSession, sessionInstance)
 
-    response, err := LogoutHandler()(nil, httptest.NewRecorder(), request)
+    response, err := LogoutHandler(nil)(nil, httptest.NewRecorder(), request)
     if nil != err {
         t.Fatalf("the logout door failed: %v", err)
     }
@@ -90,7 +92,7 @@ func TestLogoutHandlerToleratesARequestCarryingNoSession(t *testing.T) {
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/logout/", nil)
     request := melodyhttp.NewRequest(httpRequest, nil, nil, nil)
 
-    response, err := LogoutHandler()(nil, httptest.NewRecorder(), request)
+    response, err := LogoutHandler(nil)(nil, httptest.NewRecorder(), request)
     if nil != err {
         t.Fatalf("the logout door failed: %v", err)
     }
@@ -189,7 +191,7 @@ func TestLoginHandler_ReadsTheFormCredentialsFromTheBodyNotTheQuery(t *testing.T
 
         request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("login-form-test", time.Now()))
 
-        response, handlerErr := LoginHandler()(runtimeInstance, httptest.NewRecorder(), request)
+        response, handlerErr := LoginHandler(nil)(runtimeInstance, httptest.NewRecorder(), request)
         if nil != handlerErr {
             t.Fatalf("login handler: %v", handlerErr)
         }
@@ -271,7 +273,7 @@ func TestLoginHandler_RaisesTheLoginFailureOnRefusedCredentials(t *testing.T) {
 
     request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("login-failure-test", time.Now()))
 
-    response, handlerErr := LoginHandler()(runtimeInstance, httptest.NewRecorder(), request)
+    response, handlerErr := LoginHandler(nil)(runtimeInstance, httptest.NewRecorder(), request)
     if nil != handlerErr {
         t.Fatalf("login handler: %v", handlerErr)
     }
@@ -427,10 +429,181 @@ func postLoginCredentials(t *testing.T, runtimeInstance melodyruntimecontract.Ru
 
     request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("login-dispatch-test", time.Now()))
 
-    response, handlerErr := LoginHandler()(runtimeInstance, httptest.NewRecorder(), request)
+    response, handlerErr := LoginHandler(nil)(runtimeInstance, httptest.NewRecorder(), request)
     if nil != handlerErr {
         t.Fatalf("login handler: %v", handlerErr)
     }
 
     return response
+}
+
+/* directoryAuthenticationRepository answers each account it holds for its username */
+type directoryAuthenticationRepository struct {
+    repository.UserRepository
+    userList []*entity.User
+}
+
+func (instance *directoryAuthenticationRepository) FindByUsername(ctx context.Context, username string) (*entity.User, bool, error) {
+    for _, user := range instance.userList {
+        if user.Username == username {
+            return user, true, nil
+        }
+    }
+
+    return nil, false, nil
+}
+
+/* cappedLogin is the sign-in door over a session manager, the clock and the in-memory session index, so a sign-in reaches the admission */
+type cappedLogin struct {
+    runtimeInstance melodyruntimecontract.Runtime
+    sessionManager  melodysessioncontract.Manager
+    sessionIndex    repository.UserSessionRepository
+}
+
+func (instance *cappedLogin) sessionIndexLookup(request melodyhttpcontract.Request) (security.SessionIndex, error) {
+    return instance.sessionIndex, nil
+}
+
+func newCappedLogin(t *testing.T) *cappedLogin {
+    t.Helper()
+
+    containerInstance := melodycontainer.NewContainer()
+    registerLoginFailureRecorder(t, containerInstance, nil, nil)
+
+    userList := make([]*entity.User, 0, 2)
+    for index, username := range []string{"user", "editor"} {
+        passwordHash, hashErr := security.HashPassword(username)
+        if nil != hashErr {
+            t.Fatalf("hash password: %v", hashErr)
+        }
+
+        userList = append(userList, &entity.User{Id: fmt.Sprintf("user-%d", index+1), Username: username, Password: passwordHash, Roles: []string{"ROLE_USER"}})
+    }
+
+    sessionManager := melodysession.NewManager(melodysession.NewInMemoryStorage(), time.Hour)
+
+    melodycontainer.MustRegister(containerInstance, service.ServiceUserService, func(resolver melodycontainercontract.Resolver) (*service.UserService, error) {
+        return service.NewUserService(&directoryAuthenticationRepository{userList: userList}, &passThroughCache{}, nil), nil
+    })
+    melodycontainer.MustRegister(containerInstance, melodysession.ServiceSessionManager, func(resolver melodycontainercontract.Resolver) (melodysessioncontract.Manager, error) {
+        return sessionManager, nil
+    })
+    melodycontainer.MustRegister(containerInstance, melodyhttp.ServiceUrlGenerator, func(resolver melodycontainercontract.Resolver) (melodyhttpcontract.UrlGenerator, error) {
+        return melodyhttp.NewUrlGenerator(melodyhttp.NewRouter().RouteRegistry()), nil
+    })
+    melodycontainer.MustRegister(containerInstance, melodyclock.ServiceClock, func(resolver melodycontainercontract.Resolver) (melodyclockcontract.Clock, error) {
+        return melodyclock.NewFrozenClock(time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)), nil
+    })
+
+    return &cappedLogin{
+        runtimeInstance: melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance),
+        sessionManager:  sessionManager,
+        sessionIndex:    repository.NewInMemoryUserSessionRepository(),
+    }
+}
+
+/* signInAndStore signs the account in on a fresh session and stores the session as the response path would */
+func (instance *cappedLogin) signInAndStore(t *testing.T, username string) string {
+    t.Helper()
+
+    httpRequest := httptest.NewRequest(nethttp.MethodPost, "/login", bytes.NewBufferString("username="+username+"&password="+username))
+    httpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+    request := melodyhttp.NewRequest(httpRequest, nil, instance.runtimeInstance, melodyhttp.NewRequestContext("login-cap-test", time.Now()))
+    request.Attributes().Set(melodyhttp.RequestAttributeSession, instance.sessionManager.NewSession())
+
+    response, handlerErr := LoginHandler(instance.sessionIndexLookup)(instance.runtimeInstance, httptest.NewRecorder(), request)
+    if nil != handlerErr || nil == response || nethttp.StatusOK != response.StatusCode() {
+        t.Fatalf("expected the sign-in of %s answered 200, got %v, %v", username, response, handlerErr)
+    }
+
+    sessionInstance := getSessionFromRequest(request)
+    if saveErr := instance.sessionManager.SaveSession(sessionInstance); nil != saveErr {
+        t.Fatalf("save session: %v", saveErr)
+    }
+
+    return sessionInstance.Id()
+}
+
+/* the cap holds at the sign-in door: the sign-in past repository.UserSessionCap ends the account's oldest session in the storage, keeps its newer ones, and leaves the session of another account alone */
+func TestLoginHandler_TheSignInPastTheCapEndsTheAccountsOldestSession(t *testing.T) {
+    login := newCappedLogin(t)
+
+    editorSessionId := login.signInAndStore(t, "editor")
+
+    sessionIdList := make([]string, 0, repository.UserSessionCap+1)
+    for range repository.UserSessionCap + 1 {
+        sessionIdList = append(sessionIdList, login.signInAndStore(t, "user"))
+    }
+
+    if nil != login.sessionManager.Session(sessionIdList[0]) {
+        t.Fatalf("expected the oldest session of the account ended by the sign-in past the cap")
+    }
+
+    for _, sessionId := range sessionIdList[1:] {
+        if nil == login.sessionManager.Session(sessionId) {
+            t.Fatalf("expected the account's %d newest sessions kept, %q is gone", repository.UserSessionCap, sessionId)
+        }
+    }
+
+    if nil == login.sessionManager.Session(editorSessionId) {
+        t.Fatal("expected the session of another account untouched by this account's cap")
+    }
+}
+
+/* a session the sign-out ended gives its place back: with the account at its cap, the sign-out of one session lets the next sign-in in without ending any of the others */
+func TestLogoutHandler_TheSignOutGivesTheSessionsPlaceBack(t *testing.T) {
+    login := newCappedLogin(t)
+
+    sessionIdList := make([]string, 0, repository.UserSessionCap)
+    for range repository.UserSessionCap {
+        sessionIdList = append(sessionIdList, login.signInAndStore(t, "user"))
+    }
+
+    signedOutSessionId := sessionIdList[len(sessionIdList)-1]
+
+    logoutRequest := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/logout/", nil), nil, login.runtimeInstance, melodyhttp.NewRequestContext("logout-test", time.Now()))
+    logoutRequest.Attributes().Set(melodyhttp.RequestAttributeSession, login.sessionManager.Session(signedOutSessionId))
+
+    if _, logoutErr := LogoutHandler(login.sessionIndexLookup)(login.runtimeInstance, httptest.NewRecorder(), logoutRequest); nil != logoutErr {
+        t.Fatalf("logout handler: %v", logoutErr)
+    }
+
+    login.signInAndStore(t, "user")
+
+    for _, sessionId := range sessionIdList[:len(sessionIdList)-1] {
+        if nil == login.sessionManager.Session(sessionId) {
+            t.Fatalf("expected the sign-in after the sign-out to end none of the account's other sessions, %q is gone", sessionId)
+        }
+    }
+}
+
+/* signing in again on the session a client holds retires that session's id and its place with it: the sign-ins on one browser up to the cap end no other session of the account */
+func TestLoginHandler_SigningInAgainRetiresThePlaceOfTheRotatedSession(t *testing.T) {
+    login := newCappedLogin(t)
+
+    otherSessionId := login.signInAndStore(t, "user")
+
+    sessionInstance := login.sessionManager.NewSession()
+    for range repository.UserSessionCap + 1 {
+        httpRequest := httptest.NewRequest(nethttp.MethodPost, "/login", bytes.NewBufferString("username=user&password=user"))
+        httpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+        request := melodyhttp.NewRequest(httpRequest, nil, login.runtimeInstance, melodyhttp.NewRequestContext("login-again-test", time.Now()))
+        request.Attributes().Set(melodyhttp.RequestAttributeSession, sessionInstance)
+
+        response, handlerErr := LoginHandler(login.sessionIndexLookup)(login.runtimeInstance, httptest.NewRecorder(), request)
+        if nil != handlerErr || nil == response || nethttp.StatusOK != response.StatusCode() {
+            t.Fatalf("expected the sign-in answered 200, got %v, %v", response, handlerErr)
+        }
+
+        sessionInstance = getSessionFromRequest(request)
+        if saveErr := login.sessionManager.SaveSession(sessionInstance); nil != saveErr {
+            t.Fatalf("save session: %v", saveErr)
+        }
+    }
+
+    if nil == login.sessionManager.Session(otherSessionId) {
+        t.Fatal("expected the account's other session kept: the sign-ins on one browser hold one place")
+    }
 }

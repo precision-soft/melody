@@ -44,8 +44,8 @@ func TestEnsureMigratedRunsInitLockMigrateUnlockInOrder(t *testing.T) {
         )
     }
 
-    if createCount := recorder.countMatching(isExampleCreateTable); 5 != createCount {
-        t.Fatalf("expected all five tables to be created, got %d", createCount)
+    if createCount := recorder.countMatching(isExampleCreateTable); 6 != createCount {
+        t.Fatalf("expected all six tables to be created, got %d", createCount)
     }
 }
 
@@ -57,7 +57,7 @@ func TestEnsureMigratedRunsOncePerHandle(t *testing.T) {
     }
 
     /* the first resolution must have DONE the work: without this the test cannot tell once-then-skipped apart from never-at-all, and a guard inverted to skip the first run answers both calls with silence */
-    if createCount := recorder.countMatching(isExampleCreateTable); 5 != createCount {
+    if createCount := recorder.countMatching(isExampleCreateTable); 6 != createCount {
         t.Fatalf("expected the first resolution to apply the set, got %d creates", createCount)
     }
 
@@ -160,7 +160,7 @@ func TestEnsureMigratedRefusesAfterTheRetryWindowNamingTheRemedy(t *testing.T) {
     if retryErr := EnsureMigrated(context.Background(), database); nil != retryErr {
         t.Fatalf("expected the retried resolution to succeed, got %v", retryErr)
     }
-    if createCount := recorder.countMatching(isExampleCreateTable); 5 != createCount {
+    if createCount := recorder.countMatching(isExampleCreateTable); 6 != createCount {
         t.Fatalf("expected the retried resolution to migrate, got %d creates", createCount)
     }
 }
@@ -217,7 +217,7 @@ func TestEnsureMigratedSerializesConcurrentResolutions(t *testing.T) {
     if lockCount := recorder.countMatching(isMigrationLockInsert); 1 != lockCount {
         t.Fatalf("expected exactly one lock acquisition across the resolutions, got %d", lockCount)
     }
-    if createCount := recorder.countMatching(isExampleCreateTable); 5 != createCount {
+    if createCount := recorder.countMatching(isExampleCreateTable); 6 != createCount {
         t.Fatalf("expected the set to be applied exactly once, got %d creates", createCount)
     }
 }

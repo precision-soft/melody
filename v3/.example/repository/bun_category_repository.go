@@ -42,6 +42,15 @@ type bunCategoryRepository struct {
 }
 
 func (instance *bunCategoryRepository) seedIfEmpty(ctx context.Context) error {
+    identifierList := make([]string, 0)
+    for _, category := range seedCategoryList() {
+        identifierList = append(identifierList, category.Id)
+    }
+
+    if raiseErr := raiseSequenceOverSeeds(ctx, instance.database, "cat-", identifierList); nil != raiseErr {
+        return raiseErr
+    }
+
     return seedIfEmptyRows(ctx, instance.database, func() []*categoryRow {
         seedList := seedCategoryList()
         rowList := make([]*categoryRow, 0, len(seedList))

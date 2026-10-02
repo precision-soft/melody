@@ -11,7 +11,14 @@ import (
 )
 
 func newInMemoryProductRepository() ProductRepository {
-    return &inMemoryProductRepository{products: seedProductList(time.Now())}
+    products := seedProductList(time.Now())
+
+    identifierList := make([]string, 0, len(products))
+    for _, product := range products {
+        identifierList = append(identifierList, product.Id)
+    }
+
+    return &inMemoryProductRepository{products: products, mintFloor: seededFloor(identifierList, "prod-")}
 }
 
 type inMemoryProductRepository struct {

@@ -52,6 +52,15 @@ type bunCurrencyRepository struct {
 }
 
 func (instance *bunCurrencyRepository) seedIfEmpty(ctx context.Context) error {
+    identifierList := make([]string, 0)
+    for _, currency := range seedCurrencyList() {
+        identifierList = append(identifierList, currency.Id)
+    }
+
+    if raiseErr := raiseSequenceOverSeeds(ctx, instance.database, "cur-", identifierList); nil != raiseErr {
+        return raiseErr
+    }
+
     return seedIfEmptyRows(ctx, instance.database, func() []*currencyRow {
         seedList := seedCurrencyList()
         rowList := make([]*currencyRow, 0, len(seedList))

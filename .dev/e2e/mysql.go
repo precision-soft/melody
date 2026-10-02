@@ -367,7 +367,7 @@ func updateMysqlProductProbe(client *http.Client, baseUrl string, productId stri
     requireMysqlWrite(client, "PUT", baseUrl, "/products/api/update/"+productId+"/", body, "rename the audit probe")
 }
 
-/* assertMysqlDeletedAccountReleasesItsEnrollment enrolls a second factor on a throwaway account and deletes the account through the admin door, then reads the enrollment table the harness's own way. The example mints identifiers as the highest suffix plus one, so a row that outlives its account is the next holder's second factor: the schema cascades the row with the account and a subscriber releases it ahead of the cache listener, and what is asserted is the state, not either mechanism's word for it. The row is read BEFORE the deletion too, so a release is not confused with an enrollment that never landed. */
+/* assertMysqlDeletedAccountReleasesItsEnrollment enrolls a second factor on a throwaway account and deletes the account through the admin door, then reads the enrollment table the harness's own way. A row that outlives its account is a second factor nobody holds, and before the identifier sequence it was the next holder's: the schema cascades the row with the account and a subscriber releases it ahead of the cache listener, and what is asserted is the state, not either mechanism's word for it. The row is read BEFORE the deletion too, so a release is not confused with an enrollment that never landed. */
 func assertMysqlDeletedAccountReleasesItsEnrollment(client *http.Client, baseUrl string, database *bun.DB) {
     username := liveExampleUnique("e2e-release")
 

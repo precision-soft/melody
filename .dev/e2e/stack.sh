@@ -124,7 +124,7 @@ e2e_require_dev_service
 # mismatch message prints both numbers, so the count to move to is in the failure itself. A run that took one of
 # the degraded early-exit branches (an unreachable supervised app, a cold-cache timeout) legitimately executes
 # fewer checks; it is already red from the check_fail that branch raised
-EXPECTED_CHECK_COUNT_INTEGER=242
+EXPECTED_CHECK_COUNT_INTEGER=244
 readonly EXPECTED_CHECK_COUNT_INTEGER
 
 # state the scope in the output, so a reader never has to infer which major these checks covered
@@ -3040,8 +3040,8 @@ check_section_end "V3 MAILER SEND" "${TAG_VALIDATE}" "e2e"
 
 check_section_start "V3 TWO-FACTOR RELEASE" "${TAG_VALIDATE}" "e2e"
 
-# The example mints identifiers as the highest suffix plus one, so an enrollment row that outlives its account
-# is the next holder's second factor. A subscriber releases the row on the deletion event, and the e2e harness
+# An enrollment row that outlives its account is a second factor for nobody, and was the next holder's while
+# identifiers were minted as the highest present suffix plus one. A subscriber releases the row on the deletion event, and the e2e harness
 # drives that door end to end; what this section reads is the OTHER half, the one that holds when no listener
 # runs at all: the foreign key the schema declares, cascading the row with the account. It sits after the
 # reset because CREATE TABLE IF NOT EXISTS leaves a table an older volume already held as it was — the reset
@@ -3439,7 +3439,7 @@ check_section_end "V1 CRON IN-PROCESS RUNNER" "${TAG_VALIDATE}" "e2e"
 
 check_section_start "V1 DATABASE MIGRATIONS" "${TAG_VALIDATE}" "e2e"
 
-# THIS SECTION EMPTIES LIVE TABLES MID-FLIGHT: the rollback drops the four v1 catalog tables of the v1
+# THIS SECTION EMPTIES LIVE TABLES MID-FLIGHT: the rollback drops the five v1 catalog tables of the v1
 # example's own melody_example_v1 database — the journal lives in its own postgres database and has a section
 # of its own below. Every later step exists to put the state back — the second migrate restores the schema,
 # and the two resolutions after it reseed the catalogue and the user directory — so the section must run to
@@ -3470,7 +3470,7 @@ fi
 
 run_in_dev_capture "${V1_EXAMPLE_DIRECTORY_STRING}" "go run . db:rollback 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
 if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -qi 'rolled back'; then
-    check_pass "v1 db:rollback reverted the last group (the four live catalog tables are dropped until the next step)"
+    check_pass "v1 db:rollback reverted the last group (the five live catalog tables are dropped until the next step)"
 else
     check_fail "v1 db:rollback did not report the reverted group (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
 fi
@@ -3480,6 +3480,16 @@ if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'applied 1 migration'; th
     check_pass "v1 db:migrate re-applied the catalog schema the rollback reverted"
 else
     check_fail "v1 db:migrate did not re-apply the reverted group (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+fi
+
+# the session index the sign-in doors keep each account under its cap with is part of the one schema step:
+# read out of band, with the key that cascades an account's delete, since a table the migration declared
+# but MySQL refused (a foreign key over another collation) would surface only as a 500 at the next sign-in
+V1_SESSION_INDEX_STRING="$(e2e_mysql_scalar "melody_example_v1" "SELECT COUNT(*) FROM information_schema.referential_constraints WHERE constraint_schema = 'melody_example_v1' AND table_name = 'melody_example_v1_user_session' AND referenced_table_name = 'melody_example_v1_user' AND delete_rule = 'CASCADE'")"
+if [[ "1" = "${V1_SESSION_INDEX_STRING}" ]]; then
+    check_pass "the v1 session index is back with the schema, its rows cascading with their account (read out of band)"
+else
+    check_fail "the v1 session index or its cascading key is missing after the migrate (${V1_SESSION_INDEX_STRING:-<no answer>})"
 fi
 
 # a fresh process resolves the product provider, which runs the same migration set programmatically and
@@ -3772,7 +3782,7 @@ check_section_end "V2 CRON IN-PROCESS RUNNER" "${TAG_VALIDATE}" "e2e"
 
 check_section_start "V2 DATABASE MIGRATIONS" "${TAG_VALIDATE}" "e2e"
 
-# THIS SECTION EMPTIES LIVE TABLES MID-FLIGHT: the rollback drops all five tables of the v2 example's own
+# THIS SECTION EMPTIES LIVE TABLES MID-FLIGHT: the rollback drops all six tables of the v2 example's own
 # melody_example_v2 database, the journal among them, because this major keeps the journal beside the
 # catalogue in one set instead of a context of its own. Every later step exists to put the state back —
 # the second migrate restores the schema, and the two resolutions after it reseed the catalogue and the
@@ -3805,7 +3815,7 @@ fi
 
 run_in_dev_capture "${V2_EXAMPLE_DIRECTORY_STRING}" "go run . db:rollback 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
 if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -qi 'rolled back'; then
-    check_pass "v2 db:rollback reverted the last group (the five live tables are dropped until the next step)"
+    check_pass "v2 db:rollback reverted the last group (the six live tables are dropped until the next step)"
 else
     check_fail "v2 db:rollback did not report the reverted group (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
 fi
@@ -3815,6 +3825,16 @@ if printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | grep -q 'applied 1 migration'; th
     check_pass "v2 db:migrate re-applied the schema the rollback reverted"
 else
     check_fail "v2 db:migrate did not re-apply the reverted group (${RUN_IN_DEV_OUTPUT_STRING:-<empty>})"
+fi
+
+# the session index the sign-in doors keep each account under its cap with is part of the one schema step:
+# read out of band, with the key that cascades an account's delete, since a table the migration declared
+# but MySQL refused (a foreign key over another collation) would surface only as a 500 at the next sign-in
+V2_SESSION_INDEX_STRING="$(e2e_mysql_scalar "melody_example_v2" "SELECT COUNT(*) FROM information_schema.referential_constraints WHERE constraint_schema = 'melody_example_v2' AND table_name = 'melody_example_v2_user_session' AND referenced_table_name = 'melody_example_v2_user' AND delete_rule = 'CASCADE'")"
+if [[ "1" = "${V2_SESSION_INDEX_STRING}" ]]; then
+    check_pass "the v2 session index is back with the schema, its rows cascading with their account (read out of band)"
+else
+    check_fail "the v2 session index or its cascading key is missing after the migrate (${V2_SESSION_INDEX_STRING:-<no answer>})"
 fi
 
 # a fresh process resolves the product provider, which runs the same migration set programmatically and

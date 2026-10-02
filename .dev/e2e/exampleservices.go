@@ -65,6 +65,7 @@ var exampleProcessServiceInventory = map[string]processServiceClassification{
     "service.example.seeder.product":                                                {typeName: "repository.seederFunc", category: processServiceStateless},
     "service.example.seeder.user":                                                   {typeName: "repository.seederFunc", category: processServiceStateless},
     "service.example.user.repository":                                               {typeName: "*repository.bunUserRepository", category: processServiceStateless},
+    "service.example.user.session.repository":                                       {typeName: "*repository.bunUserSessionRepository", category: processServiceStateless},
     "service.http.route.registry":                                                   {typeName: "*http.RouteRegistry", category: processServiceBootRegistry},
     "service.http.router":                                                           {typeName: "*http.Router", category: processServiceBootRegistry},
     "service.http.url.generator":                                                    {typeName: "*http.UrlGenerator", category: processServiceStateless},

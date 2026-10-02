@@ -218,8 +218,8 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         melodysecurity.NewResolverTokenSource(security.SessionTokenResolver(sessionUserLookup)),
         route.LoginPagePattern,
         route.LogoutPattern,
-        security.NewSessionLoginHandler(sessionUserLookup),
-        security.NewSessionLogoutHandler(),
+        security.NewSessionLoginHandler(sessionUserLookup, sessionIndexLookup),
+        security.NewSessionLogoutHandler(sessionIndexLookup),
         override,
     )
 }
@@ -239,6 +239,16 @@ func sessionUserLookup(request melodyhttpcontract.Request, userId string) (*enti
     }
 
     return userRepository.FindById(runtimeInstance.Context(), userId)
+}
+
+/* sessionIndexLookup resolves the index of the sessions each account holds, which the sign-in doors keep under its cap and the sign-out doors release */
+func sessionIndexLookup(request melodyhttpcontract.Request) (security.SessionIndex, error) {
+    runtimeInstance := request.RuntimeInstance()
+    if nil == runtimeInstance {
+        return nil, errors.New("the request carries no runtime to resolve the session index through")
+    }
+
+    return melodycontainer.FromResolver[repository.UserSessionRepository](runtimeInstance.Container(), repository.ServiceUserSessionRepository)
 }
 
 /* i18nGreetingPublicPattern opens the i18n prefix under each locale the greeting route serves, spelled from the route's own list so the rule and the route cannot drift apart */

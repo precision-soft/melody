@@ -1,6 +1,7 @@
 package config
 
 import (
+    handlerevent "github.com/precision-soft/melody/v3/.example/handler/event"
     nethttp "net/http"
     "strconv"
 
@@ -19,6 +20,8 @@ func (instance *Module) RegisterHttpMiddlewares(kernelInstance melodykernelcontr
     registrar.Use(melodyhttpmiddleware.DefaultCompressionMiddleware())
     registrar.Use(NewTimingMiddleware(kernelInstance.Clock()))
     registrar.Use(NewCatalogJournalFlushMiddleware())
+    /* the websocket integration's handler accepts the upgrade itself, so its connections are counted in front of it, in the event stream's slots */
+    registrar.Use(handlerevent.StreamSlotMiddleware(instance.eventStreamSlots, websocketRouteName))
 }
 
 /* NewCatalogJournalFlushMiddleware writes what the request changed to the nomenclature before the response is sent, so a failure is the request's failure and a caller reading the journal on its 201 is not racing the write; the scope itself closes after the response has gone. The trail is resolved from the scope the event listeners record into, and the reported count is what the flush wrote, held before less held after, not what the trail held. */

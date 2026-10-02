@@ -38,6 +38,8 @@ func TestSessionLoginHandlerWritesTheIdentityUnderARotatedId(t *testing.T) {
         t.Fatalf("register session manager: %v", registerErr)
     }
 
+    registerAdmissionClock(t, containerInstance)
+
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 
     request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodPost, "/login", nil), nil, runtimeInstance, nil)
@@ -46,7 +48,7 @@ func TestSessionLoginHandlerWritesTheIdentityUnderARotatedId(t *testing.T) {
     arrivedSession.Set("cart", "kept across the login")
     request.Attributes().Set(melodyhttp.RequestAttributeSession, arrivedSession)
 
-    result, loginErr := NewSessionLoginHandler(currentAccountLookup).Login(
+    result, loginErr := NewSessionLoginHandler(currentAccountLookup, (&recordingSessionIndex{}).lookup).Login(
         runtimeInstance,
         request,
         melodysecuritycontract.LoginInput{Token: melodysecurity.NewAuthenticatedToken("user-1", []string{"ROLE_USER"})},
@@ -82,7 +84,7 @@ func TestSessionLoginHandlerWritesTheIdentityUnderARotatedId(t *testing.T) {
 }
 
 func TestSessionLoginHandlerAnswersAServerErrorWithoutASession(t *testing.T) {
-    result, loginErr := NewSessionLoginHandler(currentAccountLookup).Login(
+    result, loginErr := NewSessionLoginHandler(currentAccountLookup, nil).Login(
         nil,
         requestAccepting(t, ""),
         melodysecuritycontract.LoginInput{Token: melodysecurity.NewAuthenticatedToken("user-1", []string{"ROLE_USER"})},
@@ -115,6 +117,8 @@ func loginRequest(t *testing.T) (melodyruntimecontract.Runtime, melodyhttpcontra
         t.Fatalf("register session manager: %v", registerErr)
     }
 
+    registerAdmissionClock(t, containerInstance)
+
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 
     request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodPost, "/login", nil), nil, runtimeInstance, nil)
@@ -127,7 +131,7 @@ func loginRequest(t *testing.T) (melodyruntimecontract.Runtime, melodyhttpcontra
 func TestSessionLoginHandlerAnswersTheLookupsFailure(t *testing.T) {
     runtimeInstance, request := loginRequest(t)
 
-    _, loginErr := NewSessionLoginHandler(refusingAccountLookup).Login(
+    _, loginErr := NewSessionLoginHandler(refusingAccountLookup, nil).Login(
         runtimeInstance,
         request,
         melodysecuritycontract.LoginInput{Token: melodysecurity.NewAuthenticatedToken("user-2", []string{"ROLE_EDITOR"})},
@@ -146,7 +150,7 @@ func TestSessionLoginHandlerOpensASessionThePasswordChangeRevokes(t *testing.T) 
         return account, true, nil
     }
 
-    _, loginErr := NewSessionLoginHandler(lookup).Login(
+    _, loginErr := NewSessionLoginHandler(lookup, (&recordingSessionIndex{}).lookup).Login(
         runtimeInstance,
         request,
         melodysecuritycontract.LoginInput{Token: melodysecurity.NewAuthenticatedToken("user-2", []string{"ROLE_ADMIN"})},
@@ -181,7 +185,7 @@ func TestSessionLoginHandlerRefusesATokenThatIsNotAuthenticated(t *testing.T) {
         t.Run(name, func(t *testing.T) {
             runtimeInstance, request := loginRequest(t)
 
-            _, loginErr := NewSessionLoginHandler(currentAccountLookup).Login(runtimeInstance, request, melodysecuritycontract.LoginInput{Token: token})
+            _, loginErr := NewSessionLoginHandler(currentAccountLookup, nil).Login(runtimeInstance, request, melodysecuritycontract.LoginInput{Token: token})
             if nil == loginErr {
                 t.Fatal("expected the login door to refuse a token that is not authenticated")
             }
@@ -215,7 +219,7 @@ func TestSessionLoginHandlerRefusesAnAccountThatIsNotAvailable(t *testing.T) {
         t.Run(name, func(t *testing.T) {
             runtimeInstance, request := loginRequest(t)
 
-            _, loginErr := NewSessionLoginHandler(lookup).Login(
+            _, loginErr := NewSessionLoginHandler(lookup, nil).Login(
                 runtimeInstance,
                 request,
                 melodysecuritycontract.LoginInput{Token: melodysecurity.NewAuthenticatedToken("user-2", []string{"ROLE_EDITOR"})},
@@ -228,5 +232,48 @@ func TestSessionLoginHandlerRefusesAnAccountThatIsNotAvailable(t *testing.T) {
                 t.Fatal("an identity was written for an account that is not available")
             }
         })
+    }
+}
+
+/* the firewall's sign-in admits the rotated session under the account, naming the id the rotation retired, so a session opened through the firewall counts against the account's cap as one opened at the sign-in door does */
+func TestSessionLoginHandlerAdmitsTheRotatedSessionUnderTheAccount(t *testing.T) {
+    runtimeInstance, request := loginRequest(t)
+    arrivedSessionId := getSession(request).Id()
+
+    index := &recordingSessionIndex{}
+
+    _, loginErr := NewSessionLoginHandler(currentAccountLookup, index.lookup).Login(
+        runtimeInstance,
+        request,
+        melodysecuritycontract.LoginInput{Token: melodysecurity.NewAuthenticatedToken("user-1", []string{"ROLE_USER"})},
+    )
+    if nil != loginErr {
+        t.Fatalf("the login door failed: %v", loginErr)
+    }
+
+    expected := sessionAdmission{userId: "user-1", previousSessionId: arrivedSessionId, sessionId: getSession(request).Id(), createdAt: sessionAdmissionTestInstant}
+    if 1 != len(index.admittedList) || expected != index.admittedList[0] {
+        t.Fatalf("expected one admission %+v, got %+v", expected, index.admittedList)
+    }
+}
+
+/* an admission the index refuses fails the sign-in and clears the rotated session, so the response path stores nothing the cap does not count */
+func TestSessionLoginHandlerRefusedAdmissionOpensNoSession(t *testing.T) {
+    runtimeInstance, request := loginRequest(t)
+
+    admitErr := errors.New("the session index is down")
+    index := &recordingSessionIndex{admitErr: admitErr}
+
+    _, loginErr := NewSessionLoginHandler(currentAccountLookup, index.lookup).Login(
+        runtimeInstance,
+        request,
+        melodysecuritycontract.LoginInput{Token: melodysecurity.NewAuthenticatedToken("user-1", []string{"ROLE_USER"})},
+    )
+    if false == errors.Is(loginErr, admitErr) {
+        t.Fatalf("expected the index's refusal, got %v", loginErr)
+    }
+
+    if false == getSession(request).IsCleared() {
+        t.Fatal("expected the rotated session cleared, so the response path deletes it rather than saving it")
     }
 }

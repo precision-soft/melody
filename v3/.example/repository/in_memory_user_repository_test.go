@@ -187,3 +187,22 @@ func TestInMemoryUserRepositoryGrantRoleAppendsOnceOntoACopy(t *testing.T) {
         t.Fatalf("a grant on a missing account answered %d, %v; wanted GrantRoleAccountAbsent", outcome, grantErr)
     }
 }
+
+/* deleting the newest SEEDED account hands its identifier, and the history that names it, to nobody */
+func TestInMemoryUserRepositoryCreate_NeverMintsADeletedSeededIdentifier(t *testing.T) {
+    ctx := context.Background()
+    repositoryInstance := newInMemoryUserRepository(true)
+
+    if _, deleteErr := repositoryInstance.DeleteById(ctx, "user-3", nil); nil != deleteErr {
+        t.Fatalf("delete: %v", deleteErr)
+    }
+
+    user := entity.NewUser("", "probe", "hash", []string{entity.RoleUser})
+    if createErr := repositoryInstance.Create(ctx, user); nil != createErr {
+        t.Fatalf("create: %v", createErr)
+    }
+
+    if "user-4" != user.Id {
+        t.Fatalf("expected user-4 after the seeded user-3 was deleted, got %q", user.Id)
+    }
+}

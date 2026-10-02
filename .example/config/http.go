@@ -22,8 +22,8 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     router.HandleNamed("example.health", "GET", "/health", handler.HealthHandler())
 
     router.HandleNamed(route.LoginPageName, "GET", route.LoginPagePattern, handler.LoginPageHandler())
-    router.HandleNamed(route.LoginSubmitName, "POST", route.LoginSubmitPattern, instance.throttledWrite(handler.LoginHandler()))
-    router.HandleNamed(route.LogoutName, "GET", route.LogoutPattern, handler.LogoutHandler())
+    router.HandleNamed(route.LoginSubmitName, "POST", route.LoginSubmitPattern, instance.throttledWrite(handler.LoginHandler(sessionIndexLookup)))
+    router.HandleNamed(route.LogoutName, "GET", route.LogoutPattern, handler.LogoutHandler(sessionIndexLookup))
 
     router.HandleNamed(route.RoutesName, "GET", route.RoutesPattern, handler.RoutesHandler())
 
