@@ -26,7 +26,7 @@ func RouterMustFromContainer(serviceContainer containercontract.Container) httpc
     return container.MustFromResolver[httpcontract.Router](serviceContainer, ServiceRouter)
 }
 
-/* RequestContextMustFromResolver resolves the current request's context — its id and start moment. Unlike its three siblings above, it takes a resolver rather than the container, because the service exists only on a request scope: the kernel installs it into the scope of each request, the root container never carries it, and a console process has application.ServiceProcessContext instead. A scoped provider hands its own resolver here; resolving from the container, or from a console process, panics with the service not registered. */
+/* RequestContextMustFromResolver resolves the current request's context, its id and start moment. It takes a resolver rather than the container because the service exists only on a request scope; resolving from the container, or from a console process, panics with the service not registered. */
 func RequestContextMustFromResolver(resolver containercontract.Resolver) httpcontract.RequestContext {
     return container.MustFromResolver[httpcontract.RequestContext](resolver, ServiceRequestContext)
 }

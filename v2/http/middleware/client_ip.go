@@ -10,9 +10,9 @@ import (
 
 const forwardedForHeaderName = "X-Forwarded-For"
 
-/* NewForwardedClientIpResolver returns a ClientIpResolver that walks X-Forwarded-For right-to-left, skipping addresses that match the trusted proxy list, and returns the first untrusted address — the real client as attested by the trusted edge. It reuses the same ForwardedHeadersPolicy handed to Kernel.SetForwardedHeadersPolicy, so there is a single trusted-proxy list to maintain. It falls back to DefaultClientIp — the direct peer — whenever the forwarded chain cannot be trusted: forwarded headers are not trusted by policy, the trusted list is empty, the direct peer is not a trusted proxy (the header is then attacker-controlled), the chain has no parseable untrusted address, or every entry is a trusted proxy. Plug it into a rate-limit config with SetClientIpResolver so per-IP limits behind a reverse proxy key on the client instead of the proxy. */
+/* NewForwardedClientIpResolver returns a ClientIpResolver that walks X-Forwarded-For right to left, skipping trusted proxies, and returns the first untrusted address, the client the trusted edge attests; it reads the same ForwardedHeadersPolicy as Kernel.SetForwardedHeadersPolicy. It falls back to the direct peer whenever the chain cannot be trusted: headers not trusted by policy, an empty trusted list, an untrusted direct peer, no parseable untrusted address, or every entry a trusted proxy. Plug it into a rate-limit config with SetClientIpResolver so per-IP limits behind a reverse proxy key on the client. */
 func NewForwardedClientIpResolver(policy httpcontract.ForwardedHeadersPolicy) ClientIpResolver {
-    /* the trusted list is copied at construction rather than captured live: the closure reads it on every request to pick the limiter key, and a caller reusing its slice after construction would rewrite the trust decision mid-serving as a data race — the same rule Kernel.SetForwardedHeadersPolicy applies to the same list. */
+    /* the trusted list is copied at construction: the closure reads it on every request, and a caller reusing its slice would rewrite the trust decision as a data race, the rule Kernel.SetForwardedHeadersPolicy applies to the same list. */
     copiedTrustedProxyList := make([]string, len(policy.TrustedProxyList))
     copy(copiedTrustedProxyList, policy.TrustedProxyList)
     policy.TrustedProxyList = copiedTrustedProxyList
@@ -57,7 +57,7 @@ func NewForwardedClientIpResolver(policy httpcontract.ForwardedHeadersPolicy) Cl
     }
 }
 
-/* bareAddressFromAuthority reduces a peer address or an X-Forwarded-For entry to the bare address literal netip.ParseAddr accepts. A trusted edge may write any of four shapes: a bare address, host:port, a bracketed IPv6 literal with a port, or a bracketed IPv6 literal without one. net.SplitHostPort covers only the two ported shapes, and netip.ParseAddr rejects the brackets the fourth still carries, so a bracketed literal without a port would be read as garbage — every IPv6 client behind such an edge would then collapse onto the proxy's own rate limit bucket while IPv4 clients kept theirs. Proxies such as IIS/ARR and Azure Application Gateway append the port, so strip it here too and the real client is not mistaken for garbage either way. */
+/* bareAddressFromAuthority reduces a peer address or an X-Forwarded-For entry to the bare literal netip.ParseAddr accepts. A trusted edge may write a bare address, host:port, or a bracketed IPv6 literal with or without a port; net.SplitHostPort covers only the ported shapes and netip.ParseAddr rejects brackets, so the brackets are stripped here, or every IPv6 client behind such an edge would collapse onto the proxy's bucket. */
 func bareAddressFromAuthority(value string) string {
     trimmedValue := strings.TrimSpace(value)
     if "" == trimmedValue {

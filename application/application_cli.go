@@ -42,7 +42,7 @@ func (instance *Application) RegisterCliCommand(command clicontract.Command) {
         )
     }
 
-    /* read through the interface: a typed nil passes a plain comparison and reaches command.Name() three lines below */
+    /* read through the interface: a typed nil passes a plain comparison and reaches command.Name() below */
     if true == internal.IsNilInterface(command) {
         exception.Panic(
             exception.NewError(
@@ -53,7 +53,7 @@ func (instance *Application) RegisterCliCommand(command clicontract.Command) {
         )
     }
 
-    /* the name is judged trimmed because that is the name the command is dispatched under: the cli registration trims before registering, so a padded name accepted raw here would pass this gate and then either collide at every dispatch — two names differing only in padding — or register under a spelling no argv can produce, with the suggestion table blocking every invocation of a command that exists. */
+    /* the name is judged trimmed, the spelling the cli registration dispatches under, so two names differing only in padding cannot both pass */
     commandName := strings.TrimSpace(command.Name())
     if "" == commandName {
         exception.Panic(
@@ -69,7 +69,7 @@ func (instance *Application) RegisterCliCommand(command clicontract.Command) {
 
     for _, existingCommand := range instance.cliCommands {
         if commandName == strings.TrimSpace(existingCommand.Name()) {
-            /* recorded for the aggregated boot report instead of panicking one at a time; the first registration wins until the guaranteed panic ends the boot */
+            /* recorded for the aggregated boot report; the first registration wins until the report ends the boot */
             instance.recordBootCollision(bootCollisionKindCliCommand, commandName)
             return
         }
@@ -97,7 +97,7 @@ func (instance *Application) bootCli() {
                     return instance.httpMiddlewares.buildForInspection(instance.kernel)
                 },
             ),
-            /* the application slot stays empty on purpose: the application's own version arrives through output.SetApplicationVersion, and melody's version filled in here made debug:version print the framework version twice — an application that never declared its version reads <unknown> instead of a lie */
+            /* the application slot stays empty: the application's own version arrives through output.SetApplicationVersion, and one never declared reads <unknown> */
             &debug.VersionCommand{},
         )
     }
@@ -107,7 +107,7 @@ func (instance *Application) bootCli() {
     }
 }
 
-/* securityDeferredListeners feeds the declaration channel of debug:events with what only the serving process wires: the security pair stays http-only by design, so a console dispatcher can never show it and the command says so instead of rendering an absence. A process without a compiled security configuration declares nothing, and the serving process itself declares nothing either — there the pair is registered for real and the dispatcher answers. */
+/* securityDeferredListeners feeds debug:events with the security pair only the serving process wires, so a console dispatcher names it instead of rendering an absence. A process without a compiled security configuration declares nothing, and neither does the serving process, where the pair is registered for real. */
 func (instance *Application) securityDeferredListeners() []debug.DeferredListener {
     if nil == instance.securityConfiguration {
         return nil
@@ -145,7 +145,7 @@ func (instance *Application) runCli(ctx context.Context) error {
 
     scope := serviceContainer.NewScope()
 
-    /* a last-resort net for a panic between the scope's creation and the action dispatch: on every run that reaches the action, the action itself closes the scope and reports a teardown failure beside the command's own error — through the run's returned error, into the exit owner's record — so this second close answers nil and the branch below stays silent. */
+    /* a last-resort net for a panic between the scope's creation and the action dispatch; a run that reaches the action has its scope closed there, so this second close answers nil */
     defer func() {
         scopeCloseErr := scope.Close()
         if nil != scopeCloseErr {
@@ -160,7 +160,7 @@ func (instance *Application) runCli(ctx context.Context) error {
 
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, loggerWithProcess)
 
-    /* the console counterpart of the request context the http kernel installs into each request's scope: the run's identity lives where a scoped service can resolve it, instead of being computed for the logger and thrown away */
+    /* the console counterpart of the request context the http kernel installs, so a scoped service can resolve the run's identity */
     scope.MustOverrideProtectedInstance(ServiceProcessContext, NewProcessContext(processId, time.Now()))
 
     loggerWithProcess.Info("starting cli application", nil)
@@ -177,7 +177,7 @@ func (instance *Application) runCli(ctx context.Context) error {
         availableCommands = append(
             availableCommands,
             commandSuggestion{
-                /* trimmed to the dispatched spelling: the suggestion gate compares the trimmed input against this list, and a raw padded name here would fail the exact match and block a command that exists */
+                /* trimmed to the dispatched spelling, which the suggestion gate compares against */
                 Name:        strings.TrimSpace(command.Name()),
                 Description: command.Description(),
             },
@@ -364,7 +364,7 @@ func suggestCliCommand(
 
         _ = output.Render(os.Stderr, envelope, option)
 
-        /* returned unmarked so the exit path writes it to the application log: the rendered table lives only on stderr, and a run refused here used to be invisible to anything reading the log file */
+        /* returned unmarked so the exit path writes it to the application log; the rendered table lives only on stderr */
         commandNotFoundErr := exception.NewError(
             "cli command not found",
             exceptioncontract.Context{
@@ -434,7 +434,7 @@ func suggestCliCommand(
 
     _ = output.Render(os.Stderr, envelope, option)
 
-    /* returned unmarked so the exit path writes it to the application log: the rendered table lives only on stderr, and a run refused here used to be invisible to anything reading the log file */
+    /* returned unmarked so the exit path writes it to the application log; the rendered table lives only on stderr */
     matchesFoundErr := exception.NewError(
         "cli command not found, matches found",
         exceptioncontract.Context{
@@ -448,7 +448,7 @@ func suggestCliCommand(
     return exception.NewExitError(2, matchesFoundErr)
 }
 
-/* printCliCommandNotFoundHeader writes plain text: the suggestion table below it is rendered under NoColor, and a header carrying ansi sequences around a colorless table would contradict the very option it was rendered with */
+/* printCliCommandNotFoundHeader writes plain text, since the suggestion table below it is rendered under NoColor. The command name comes from argv and is escaped as in every sibling channel, so an embedded carriage return or escape sequence cannot repaint the line. */
 func printCliCommandNotFoundHeader(writer io.Writer, commandName string, startedAt time.Time) {
     const logFiller = "======================================"
 
@@ -456,7 +456,7 @@ func printCliCommandNotFoundHeader(writer io.Writer, commandName string, started
         writer,
         "%s [command not found] [%s] [%s] %s\n",
         logFiller,
-        commandName,
+        internal.EscapeControlCharacters(commandName),
         startedAt.Format(time.DateTime),
         logFiller,
     )

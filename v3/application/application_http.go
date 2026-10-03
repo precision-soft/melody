@@ -5,19 +5,23 @@ import (
     "errors"
     nethttp "net/http"
     "sync"
+    "time"
 
     applicationcontract "github.com/precision-soft/melody/v3/application/contract"
     "github.com/precision-soft/melody/v3/cache"
     "github.com/precision-soft/melody/v3/config"
     "github.com/precision-soft/melody/v3/exception"
+    exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal"
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     "github.com/precision-soft/melody/v3/session"
 )
 
+/* RegisterHttpRoute queues one of the application's own routes. The queue drains before any module's RegisterHttpRoutes runs, so a root route wins the registration-order tie-break against a module route. */
 func (instance *Application) RegisterHttpRoute(
     method string,
     pattern string,
@@ -25,6 +29,17 @@ func (instance *Application) RegisterHttpRoute(
 ) {
     if true == instance.booted {
         exception.Panic(exception.NewError("may not register http routes after boot", nil, nil))
+    }
+
+    /* the queue drains before the module phases, so a registrar queued from inside a module boot hook would never run; the door refuses during the boot window, and a module registers its routes through RegisterHttpRoutes */
+    if true == instance.booting {
+        exception.Panic(
+            exception.NewError(
+                "may not register http routes from inside a module boot hook; a module registers routes through RegisterHttpRoutes",
+                nil,
+                nil,
+            ),
+        )
     }
 
     instance.httpRouteRegistrars = append(
@@ -66,6 +81,15 @@ func (instance *Application) RegisterHttpHandlerDecorator(decorator applicationc
     instance.httpHandlerDecorators = append(instance.httpHandlerDecorators, decorator)
 }
 
+/* decorateHttpHandler wraps the handler the http kernel built in the registered decorators, last to first, so the first registered decorator ends up outermost */
+func (instance *Application) decorateHttpHandler(httpHandler nethttp.Handler) nethttp.Handler {
+    for index := len(instance.httpHandlerDecorators) - 1; 0 <= index; index-- {
+        httpHandler = instance.httpHandlerDecorators[index](httpHandler)
+    }
+
+    return httpHandler
+}
+
 /* OnHttpShutdown registers a callback that runs as soon as the http server begins shutting down, before it waits for connections to drain. It is how an application unwinds handlers the server cannot: `http.Server.Shutdown` neither cancels the contexts of in-flight requests nor tracks hijacked connections, so a Server-Sent Events stream or a websocket blocks the whole shutdown timeout and is then cut mid-flight. Closing the hub those handlers select on (`ServerSentEventHub.Shutdown`) releases them at once. */
 func (instance *Application) OnHttpShutdown(hook func()) {
     if true == instance.booted {
@@ -87,9 +111,8 @@ func (instance *Application) bootHttp() {
     }
 }
 
-func (instance *Application) runHttp(
-    ctx context.Context,
-) error {
+/* registerKernelHttpListeners wires the kernel's default listeners at the end of Boot in every process shape: they are inert in a console, whose dispatcher then shows the set the serving process runs. The exception listener is among them unconditionally: it stands aside at each dispatch for an error handler installed on the kernel, so a handler installed after Boot is consulted, and an application that serves Boot's kernel with its own server gets the framework rendering without calling Run. */
+func (instance *Application) registerKernelHttpListeners() {
     eventDispatcher := instance.kernel.EventDispatcher()
 
     if true == instance.kernel.DebugMode() {
@@ -98,8 +121,13 @@ func (instance *Application) runHttp(
 
     http.RegisterKernelResponseNormalizerListener(eventDispatcher)
     http.RegisterKernelTerminateAccessLogListener(eventDispatcher)
-    http.RegisterKernelExceptionListener(eventDispatcher, instance.kernel.DebugMode())
 
+    http.RegisterKernelExceptionListener(eventDispatcher, instance.kernel.DebugMode())
+}
+
+func (instance *Application) runHttp(
+    ctx context.Context,
+) error {
     configuration := instance.configuration
 
     httpKernel := instance.kernel.HttpKernel()
@@ -107,27 +135,26 @@ func (instance *Application) runHttp(
         instance.httpMiddlewares.all(instance.kernel)...,
     )
 
-    httpHandler := httpKernel.ServeHttp(instance.kernel.ServiceContainer())
-
-    /* wrap last-to-first so the first registered decorator ends up outermost */
-    for index := len(instance.httpHandlerDecorators) - 1; 0 <= index; index-- {
-        httpHandler = instance.httpHandlerDecorators[index](httpHandler)
-    }
+    httpHandler := instance.decorateHttpHandler(httpKernel.ServeHttp(instance.kernel.ServiceContainer()))
 
     httpServer := &nethttp.Server{
         Addr:    configuration.Http().Address(),
         Handler: httpHandler,
     }
 
-    applyHttpServerTimeouts(httpServer, configuration)
+    applyHttpServerTimeouts(httpServer)
 
     logger := logging.LoggerMustFromContainer(instance.kernel.ServiceContainer())
+
+    applyHttpServerErrorLog(httpServer, logger)
 
     instance.warnOnUnboundedDefaultCacheBackend(logger)
 
     instance.warnOnUnboundedDefaultSessionStorage(logger)
 
-    /* net/http runs these the moment Shutdown is called, on their own goroutines, so a streaming handler is released while the server drains the rest; wrapping each one recovers a panicking hook through the framework logger (a bare goroutine would otherwise crash the drain) and counts it into shutdownHooksDone so runHttp can join the hooks before returning */
+    instance.writeBootWarnings(logger)
+
+    /* net/http starts these on their own goroutines the moment Shutdown is called; each is wrapped to recover a panic through the framework logger and to be counted into shutdownHooksDone, which awaitHttpServerEnd joins */
     var shutdownHooksDone sync.WaitGroup
     for _, hook := range instance.httpShutdownHooks {
         httpServer.RegisterOnShutdown(
@@ -147,15 +174,49 @@ func (instance *Application) runHttp(
         errorChannel <- listenAndServeErr
     }()
 
+    return awaitHttpServerEnd(
+        ctx,
+        httpServer,
+        errorChannel,
+        logger,
+        configuration.Http().ShutdownTimeout(),
+        httpKernel,
+        &shutdownHooksDone,
+    )
+}
+
+/* awaitHttpServerEnd waits for the cancelled context or the server's own failure, whichever ends the serving first. The serve error is read on the shutdown branch too, since a listen failing in the same instant may lose the select. A shutdown that outlives its budget surfaces the deadline error and exits non-zero. Shutdown does not account for hijacked connections, so the shutdown hooks and then the open request scopes are joined under the same budget. */
+func awaitHttpServerEnd(
+    ctx context.Context,
+    httpServer *nethttp.Server,
+    errorChannel chan error,
+    logger loggingcontract.Logger,
+    shutdownTimeout time.Duration,
+    httpKernel httpcontract.Kernel,
+    shutdownHooksDone *sync.WaitGroup,
+) error {
     select {
     case <-ctx.Done():
-        shutdownContext, cancel := context.WithTimeout(context.Background(), resolveHttpShutdownTimeout(configuration))
+        shutdownContext, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
         defer cancel()
 
         shutdownErr := httpServer.Shutdown(shutdownContext)
 
-        /* Shutdown starts the shutdown hooks on their own goroutines but never waits for them, and it reports quiescent at once when the only open connections are hijacked (websocket), so join the hooks — within the same shutdown budget — before returning, otherwise the process exits while a hook is still releasing those handlers */
-        waitForHttpShutdownHooks(&shutdownHooksDone, shutdownContext)
+        /* Shutdown never waits for the hooks it starts and reports quiescent at once when only hijacked connections remain, so the hooks are joined within the same budget */
+        waitForHttpShutdownHooks(shutdownHooksDone, shutdownContext)
+
+        /* every phase of the wind-down runs and each failing one contributes its cause: the drain behind a failed Shutdown is the wait a hijacked connection needs */
+        runErrs := make([]error, 0, 3)
+
+        serveErr := <-errorChannel
+        if nil != serveErr && false == errors.Is(serveErr, nethttp.ErrServerClosed) {
+            logger.Error(
+                "http server error",
+                exception.LogContext(serveErr),
+            )
+
+            runErrs = append(runErrs, serveErr)
+        }
 
         if nil != shutdownErr {
             logger.Error(
@@ -163,10 +224,15 @@ func (instance *Application) runHttp(
                 exception.LogContext(shutdownErr),
             )
 
-            return shutdownErr
+            runErrs = append(runErrs, shutdownErr)
         }
 
-        return nil
+        drainErr := awaitOpenRequestScopes(shutdownContext, httpKernel, logger)
+        if nil != drainErr {
+            runErrs = append(runErrs, drainErr)
+        }
+
+        return markHttpWindDownFailure(runErrs)
 
     case err := <-errorChannel:
         if nil != err && false == errors.Is(err, nethttp.ErrServerClosed) {
@@ -175,14 +241,43 @@ func (instance *Application) runHttp(
                 exception.LogContext(err),
             )
 
-            return err
+            return markHttpRunErrorLogged(err)
         }
 
         return nil
     }
 }
 
-/* warnOnUnboundedDefaultCacheBackend reports, once at boot, that the cache melody wired by default carries no item ceiling. Whether an entry ever leaves the map is then decided entirely by the caller: a key cached with a positive ttl is reclaimed by the sweep, and one cached without stays for as long as the process lives, with nothing to evict it under memory pressure. The constructor's second argument sets how often that sweep runs, not how long an entry lives. The warning is raised from the http path alone on purpose: a command runs and exits, taking its map with it, so there is genuinely nothing to warn a cli invocation about, and a warning it cannot act on would only teach it to ignore the ones it can. */
+/* markHttpWindDownFailure answers the wind-down with the causes its phases reported: a lone cause as it stands, two or more joined, since each is independently actionable. */
+func markHttpWindDownFailure(runErrs []error) error {
+    if 0 == len(runErrs) {
+        return nil
+    }
+
+    if 1 == len(runErrs) {
+        return markHttpRunErrorLogged(runErrs[0])
+    }
+
+    return markHttpRunErrorLogged(errors.Join(runErrs...))
+}
+
+/* markHttpRunErrorLogged hands the exit handler an error that already carries its record, so the http failure is rendered once. */
+func markHttpRunErrorLogged(err error) error {
+    wrappedErr := exception.FromError(err)
+
+    _ = exception.MarkLogged(wrappedErr)
+
+    return wrappedErr
+}
+
+/* writeBootWarnings writes, once and from the http path alone, the boot warnings the boot collected from the declarations it compiled, so each hazard reaches the configured journal of a process that serves it */
+func (instance *Application) writeBootWarnings(logger loggingcontract.Logger) {
+    for _, bootWarning := range instance.bootWarnings {
+        internal.WriteBootWarning(logger, bootWarning)
+    }
+}
+
+/* warnOnUnboundedDefaultCacheBackend reports once at boot that the default cache carries no item ceiling: an entry cached without a ttl stays for the life of the process. The constructor's second argument is the sweep interval, not a lifetime. It is raised from the http path alone, since a command exits and takes its map with it. */
 func (instance *Application) warnOnUnboundedDefaultCacheBackend(logger loggingcontract.Logger) {
     if false == instance.unboundedDefaultCacheBackend {
         return
@@ -194,7 +289,7 @@ func (instance *Application) warnOnUnboundedDefaultCacheBackend(logger loggingco
     )
 }
 
-/* wrapHttpShutdownHook adapts a shutdown hook for net/http's RegisterOnShutdown, which starts each hook on its own goroutine and never joins it. The wrapper counts the hook into hooksDone so runHttp can wait for it, and recovers a panicking hook through the framework logger so it is contained like every other extension point instead of hard-crashing the drain on a bare goroutine. */
+/* wrapHttpShutdownHook adapts a shutdown hook for net/http's RegisterOnShutdown, which never joins the goroutine it starts: the wrapper counts the hook into hooksDone and recovers a panic through the framework logger. */
 func wrapHttpShutdownHook(
     hook func(),
     hooksDone *sync.WaitGroup,
@@ -210,7 +305,7 @@ func wrapHttpShutdownHook(
     }
 }
 
-/* recoverHttpShutdownHook contains a panicking shutdown hook by logging it and returning. It keeps its own shape rather than reusing logging.LogOnRecover because it must also strip the exit code an *exception.ExitError carries: a shutdown hook runs on its own goroutine the instant Shutdown begins, while the server is still draining, so nothing it panics with may be allowed to travel on and end the process there — that would cut the in-flight requests the drain exists to finish, skip the remaining hooks and skip Application.Close(). A hook asking for an exit code is therefore recorded as a plain error: the process is already on its way down, and the code a hook cannot deliver is not worth the requests it would cut. */
+/* recoverHttpShutdownHook logs a panicking shutdown hook and returns. Unlike logging.LogOnRecover it strips an *exception.ExitError's code: the hook runs while the server drains, and ending the process there would cut in-flight requests, skip the remaining hooks and skip Application.Close(). */
 func recoverHttpShutdownHook(logger loggingcontract.Logger) {
     recoveredValue := recover()
     if nil == recoveredValue {
@@ -220,7 +315,7 @@ func recoverHttpShutdownHook(logger loggingcontract.Logger) {
     logging.LogError(logger, httpShutdownHookError(recoveredValue))
 }
 
-/* the *exception.ExitError case is listed first because it also satisfies error, and it is unwrapped to the error it carries so the exit code is dropped while the diagnostic is kept */
+/* the *exception.ExitError case comes first because it also satisfies error; it is unwrapped so the code is dropped and the diagnostic kept */
 func httpShutdownHookError(recoveredValue any) *exception.Error {
     switch value := recoveredValue.(type) {
     case *exception.ExitError:
@@ -234,7 +329,12 @@ func httpShutdownHookError(recoveredValue any) *exception.Error {
         return value
 
     case error:
-        return exception.NewError(value.Error(), nil, value)
+        /* built through FromError, which renders the message under a recover: an Error() that panics here would be a second panic on a goroutine nothing above catches */
+        if converted := exception.FromError(value); nil != converted {
+            return converted
+        }
+
+        return exception.NewError("http shutdown hook panicked with a nil error", nil, nil)
 
     default:
         return exception.NewError(
@@ -247,7 +347,7 @@ func httpShutdownHookError(recoveredValue any) *exception.Error {
     }
 }
 
-/* waitForHttpShutdownHooks blocks until every shutdown hook has returned or the shutdown budget is spent. net/http's Shutdown returns as soon as the tracked connections drain — which for hijacked (websocket) connections is immediately — so without this join runHttp would return and the process would exit while a hook is still releasing those handlers. */
+/* waitForHttpShutdownHooks blocks until every shutdown hook has returned or the budget is spent, since Shutdown returns at once for hijacked connections. */
 func waitForHttpShutdownHooks(
     hooksDone *sync.WaitGroup,
     ctx context.Context,
@@ -266,11 +366,64 @@ func waitForHttpShutdownHooks(
     }
 }
 
-/* warnOnUnboundedDefaultSessionStorage reports, once at boot, the one combination in which sessions grow without anything ever reclaiming them: the storage melody wired itself, which lives in this process and which nothing outside it can expire, together with a lifetime of zero, which asks it to keep every entry forever.
+/* openRequestScopeReporter is the door through which the shutdown asks a kernel how many requests are still inside it; a kernel without it is not asked. */
+type openRequestScopeReporter interface {
+    OpenRequestScopes() int64
+}
 
-Either half alone is a deliberate and reasonable choice. A shared storage with no expiry is the operator's to prune, and the in-memory one with a lifetime set reclaims on its own. Together they are neither, and the growth does not come from anything the application wrote: melody mints a session for every request that arrives without a session cookie, so a single write on a public path — a csrf token, a flash message, a locale — turns every such request into a permanent entry, and an unauthenticated caller decides how many arrive.
+/* openRequestScopeCount answers the number of request scopes still open, and -1 for a kernel that cannot be asked, which is not zero: zero means everything drained. */
+func openRequestScopeCount(httpKernel httpcontract.Kernel) int64 {
+    reporter, ok := httpKernel.(openRequestScopeReporter)
+    if false == ok {
+        return -1
+    }
 
-It is raised from the http path alone, the way the cache warning is: a command builds its map, runs and takes it away with it. */
+    return reporter.OpenRequestScopes()
+}
+
+/* awaitOpenRequestScopesInterval is how often the drain re-reads the counter: short enough to add no perceptible delay, long enough not to spin. */
+const awaitOpenRequestScopesInterval = 20 * time.Millisecond
+
+/* awaitOpenRequestScopes holds the exit until every request scope the kernel opened has closed or the shutdown budget runs out, since Shutdown returns nil for a hijacked connection still being served. An expiry is an error, so the process exits non-zero; a kernel that answers -1 is not waited on. */
+func awaitOpenRequestScopes(
+    ctx context.Context,
+    httpKernel httpcontract.Kernel,
+    logger loggingcontract.Logger,
+) error {
+    if 0 > openRequestScopeCount(httpKernel) {
+        return nil
+    }
+
+    ticker := time.NewTicker(awaitOpenRequestScopesInterval)
+    defer ticker.Stop()
+
+    for {
+        openScopes := openRequestScopeCount(httpKernel)
+        if 0 >= openScopes {
+            return nil
+        }
+
+        select {
+        case <-ctx.Done():
+            drainErr := exception.NewError(
+                "http shutdown left request scopes open",
+                exceptioncontract.Context{
+                    "openRequestScopes": openScopes,
+                    "reason":            "a hijacked connection is not drained by the http server's own shutdown, so its handler is still running",
+                },
+                ctx.Err(),
+            )
+
+            logger.Error("http server shutdown error", exception.LogContext(drainErr))
+
+            return drainErr
+
+        case <-ticker.C:
+        }
+    }
+}
+
+/* warnOnUnboundedDefaultSessionStorage reports once at boot the combination in which sessions grow without end: the in-process storage melody wired together with a zero lifetime. Melody mints a session for every request without a cookie, so one write on a public path, a csrf token or a flash message, lets an unauthenticated caller decide how many entries accumulate. It is raised from the http path alone. */
 func (instance *Application) warnOnUnboundedDefaultSessionStorage(logger loggingcontract.Logger) {
     if false == instance.defaultInMemorySessionStorage {
         return

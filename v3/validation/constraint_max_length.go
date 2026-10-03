@@ -14,7 +14,20 @@ const (
     ConstraintMaxLengthErrorTooLong = "tooLong"
 )
 
+/* NewMaxLength panics on a negative bound: a length is never negative, so it is a declaration mistake, and the constraint would refuse every value under an impossible limit. */
 func NewMaxLength(max int) *MaxLength {
+    if 0 > max {
+        exception.Panic(
+            exception.NewError(
+                "max length constraint may not be negative",
+                exceptioncontract.Context{
+                    "max": max,
+                },
+                nil,
+            ),
+        )
+    }
+
     return &MaxLength{max: max}
 }
 
@@ -28,7 +41,12 @@ func (instance *MaxLength) Validate(value any, field string) validationcontract.
         return nil
     }
 
-    stringValue := fmt.Sprintf("%v", resolved)
+    stringValue, isString := resolved.(string)
+    if false == isString {
+        /* a length constraint measures a string, never a Go rendering of another value */
+        return NewValidationError(field, "value must be a string", ConstraintMaxLengthErrorTooLong, nil)
+    }
+
     length := utf8.RuneCountInString(stringValue)
     if length > instance.max {
         return NewValidationError(
@@ -65,6 +83,17 @@ func (instance *MaxLength) WithParams(params map[string]string) (validationcontr
     if false == ok {
         return nil, exception.NewError(
             "invalid max length parameter",
+            exceptioncontract.Context{
+                "value": valueString,
+            },
+            nil,
+        )
+    }
+
+    /* a negative bound is a typo that would reject every value; a tag is data the request path reads, so it is refused as an error here rather than by the constructor's panic */
+    if 0 > parsed {
+        return nil, exception.NewError(
+            "max length parameter must not be negative",
             exceptioncontract.Context{
                 "value": valueString,
             },

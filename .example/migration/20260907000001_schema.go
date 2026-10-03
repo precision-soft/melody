@@ -1,0 +1,140 @@
+package migration
+
+import (
+    "context"
+
+    "github.com/uptrace/bun"
+)
+
+func init() {
+    Migrations.MustRegister(upSchema, downSchema)
+}
+
+/* UserUsernameIndexName is the one spelling of the index. The schema owns it, so this step and the repository that maps the driver's duplicate-key refusal onto the public message read the same constant. */
+const UserUsernameIndexName = "melody_example_v1_user_username_folded"
+
+/* upSchema creates the five catalog tables and the unique key on the folded username in one step: the example has a single state, the present one, and its schema is the statement of that state; a volume in an older shape is brought to it by example:db:reset. Every statement tolerates a volume provisioned before the set and several processes applying it at once. */
+func upSchema(ctx context.Context, database *bun.DB) error {
+    for _, statement := range schemaUpStatementList {
+        if _, execErr := database.ExecContext(ctx, statement); nil != execErr {
+            return execErr
+        }
+    }
+
+    return addUserUsernameIndex(ctx, database)
+}
+
+/* downSchema drops what upSchema created, in reverse order, so the step stays correct once a foreign key is added. */
+func downSchema(ctx context.Context, database *bun.DB) error {
+    for _, statement := range schemaDownStatementList {
+        if _, execErr := database.ExecContext(ctx, statement); nil != execErr {
+            return execErr
+        }
+    }
+
+    return nil
+}
+
+/* the column definitions are those of a live SHOW CREATE TABLE of the bun-built tables, so a volume provisioned before the set and one provisioned by it hold the same schema, with one departure: every column holding an entity identifier is compared under utf8mb4_bin, because an id's identity is exact everywhere else in this application, in the in-memory repositories and in the cache keys, while the default collation folds case and accents. A volume provisioned before this collation keeps its own, since the tables are created IF NOT EXISTS; example:db:reset brings it here. */
+const createCategoryTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v1_category` (" +
+    "`id` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
+    "`name` VARCHAR(255) NOT NULL, " +
+    "PRIMARY KEY (`id`))"
+
+const createCurrencyTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v1_currency` (" +
+    "`id` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
+    "`code` VARCHAR(255) NOT NULL, " +
+    "`name` VARCHAR(255) NOT NULL, " +
+    "PRIMARY KEY (`id`))"
+
+/* the timestamps are DATETIME(6) so the microsecond half of a Go time survives the round trip; DATETIME would silently floor it and the update stamp could compare equal to the creation stamp */
+const createProductTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v1_product` (" +
+    "`id` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
+    "`name` VARCHAR(255) NOT NULL, " +
+    "`description` VARCHAR(255) NOT NULL, " +
+    "`category_id` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
+    "`price` DOUBLE NOT NULL, " +
+    "`currency_id` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
+    "`stock` BIGINT NOT NULL, " +
+    "`created_at` DATETIME(6) NOT NULL, " +
+    "`updated_at` DATETIME(6) NOT NULL, " +
+    "PRIMARY KEY (`id`))"
+
+/* the roles column holds the comma-joined role list the user repository writes; it is a single VARCHAR on purpose, the example having no role table to normalize into */
+const createUserTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v1_user` (" +
+    "`id` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
+    "`username` VARCHAR(255) NOT NULL, " +
+    "`password` VARCHAR(255) NOT NULL, " +
+    "`roles` VARCHAR(255) NOT NULL, " +
+    "PRIMARY KEY (`id`))"
+
+/* the index is on LOWER(username) cast to the binary collation because that expression is the identity this application gives a username: NormalizedUsername folds case and nothing else, and the lookup door compares on utf8mb4_bin. It is what holds a name against two callers that pass the repository's read-then-write check at the same moment. A volume provisioned before the index does not carry it, since the step is recorded as applied by name; example:db:reset brings it here. */
+const createUserUsernameIndexSql = "ALTER TABLE `melody_example_v1_user` " +
+    "ADD UNIQUE KEY `" + UserUsernameIndexName + "` " +
+    "((CAST(LOWER(`username`) AS CHAR(255) CHARACTER SET utf8mb4) COLLATE utf8mb4_bin))"
+
+/* UserSessionTableName is the index of the sessions each account holds, which the sign-in doors read to keep an account under its cap; the session storage itself cannot be asked which sessions belong to an account. */
+const UserSessionTableName = "melody_example_v1_user_session"
+
+/* a session row goes with its account, and the index on the account and the instant is the order the sign-in doors drop the oldest in */
+const createUserSessionTableSql = "CREATE TABLE IF NOT EXISTS `" + UserSessionTableName + "` (" +
+    "`session_id` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
+    "`user_identifier` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
+    "`created_at` DATETIME(6) NOT NULL, " +
+    "PRIMARY KEY (`session_id`), " +
+    "KEY `melody_example_v1_user_session_account` (`user_identifier`, `created_at`), " +
+    "CONSTRAINT `melody_example_v1_user_session_user` FOREIGN KEY (`user_identifier`) REFERENCES `melody_example_v1_user` (`id`) ON DELETE CASCADE)"
+
+var schemaUpStatementList = []string{
+    createCategoryTableSql,
+    createCurrencyTableSql,
+    createProductTableSql,
+    createUserTableSql,
+    createUserSessionTableSql,
+}
+
+/* schemaTableNameList names the tables this migration owns, in the order it drops them — the reverse of
+   the order it creates them in. The drop statements are DERIVED from it, so a table added to the schema
+   cannot be left standing by a down that forgot it, and the reset command names the same list to the
+   operator rather than a second copy of it. */
+var schemaTableNameList = []string{
+    UserSessionTableName,
+    "melody_example_v1_user",
+    "melody_example_v1_product",
+    "melody_example_v1_currency",
+    "melody_example_v1_category",
+}
+
+var schemaDownStatementList = dropStatementList(schemaTableNameList)
+
+func dropStatementList(tableNameList []string) []string {
+    statementList := make([]string, 0, len(tableNameList))
+    for _, table := range tableNameList {
+        statementList = append(statementList, "DROP TABLE IF EXISTS `"+table+"`")
+    }
+
+    return statementList
+}
+
+/* MySQL has no ADD KEY IF NOT EXISTS, so the tolerance of a second run of the set is spelled by asking the catalogue first, or the run would fail on a duplicate index name. */
+func addUserUsernameIndex(ctx context.Context, database *bun.DB) error {
+    count := 0
+
+    queryErr := database.NewRaw(
+        "SELECT COUNT(*) FROM information_schema.STATISTICS "+
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?",
+        "melody_example_v1_user",
+        UserUsernameIndexName,
+    ).Scan(ctx, &count)
+    if nil != queryErr {
+        return queryErr
+    }
+
+    if 0 < count {
+        return nil
+    }
+
+    _, execErr := database.ExecContext(ctx, createUserUsernameIndexSql)
+
+    return execErr
+}

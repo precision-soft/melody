@@ -5,7 +5,7 @@ import (
     "crypto/tls"
     "database/sql"
     "errors"
-    "fmt"
+    "math"
     "net"
     "reflect"
     "strings"
@@ -50,7 +50,7 @@ type Provider struct {
     tunedForMigration bool
 }
 
-/* resolvedTimeoutConfig answers the configuration the connector is built from, with every non-positive field replaced by the constructor default. A zero reaches here far more often from an environment key nobody set than from a caller who means "no deadline", and on this driver a zero read or write deadline means exactly no deadline — so the unset key would disarm the very protection the nil configuration arms, and a negative one would put the deadline in the past, failing every dial instantly with an i/o timeout no network event caused. */
+/* resolvedTimeoutConfig replaces every non-positive field with the constructor default: on this driver a zero read or write deadline means no deadline, so an unset environment key would disarm the protection, and a negative one would fail every dial at once. */
 func (instance *Provider) resolvedTimeoutConfig() *TimeoutConfig {
     defaultConfig := DefaultTimeoutConfig()
 
@@ -143,7 +143,7 @@ func (instance *Provider) Open(params bunorm.ConnectionParameters, logger loggin
     return instance.OpenContext(context.Background(), params, logger)
 }
 
-/* OpenContext opens under the caller's context: an already-cancelled context is refused before the attempt, the retry sleeps watch it alongside the clock, and the configuration hook and the boot ping derive their budgets from it. The one step outside its reach is the dialect handshake bun performs at construction, which queries the server under no caller context and is bounded by the connect timeout alone — so a cancellation arriving mid-attempt is honoured at the next cancellable step rather than instantly. A nil context reads as context.Background(), which is exactly Open. A nil logger reads as the emergency logger rather than a discard sink: the retry loop's terminal branches mark the returned error as logged — a mark the framework's writers honour by not filing the outage again — and the diagnostics routing consumes a process-lifetime once, so both doors need a sink that actually writes. */
+/* OpenContext opens under the caller's context: an already-cancelled context is refused before the attempt, the retry sleeps watch it beside the clock, and the configuration hook and the boot ping derive their budgets from it; the dialect handshake bun runs at construction is bounded by the connect timeout alone, so a mid-attempt cancellation is honoured at the next cancellable step. A nil context reads as context.Background(), which is exactly Open. A nil logger reads as the emergency logger, since the terminal branches mark the returned error as logged and the diagnostics routing consumes a process-lifetime once, so both need a sink that writes. */
 func (instance *Provider) OpenContext(ctx context.Context, params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     if nil == ctx {
         ctx = context.Background()
@@ -230,7 +230,7 @@ func (instance *Provider) openWithRetry(ctx context.Context, params bunorm.Conne
             return database, nil
         }
 
-        /* the caller's own cancellation is not a database outage. The transient classifier reads messages and error types, none of which a cancellation carries, so a SIGTERM that cancelled the open mid-deploy fell through to the terminal branch and paged whoever was on call with "database connection failed with non-transient error" against a perfectly healthy database. It is a clean stop: recorded at warning under its own name and not retried, because the context that would carry the retry is already gone. Only Canceled, never DeadlineExceeded — the ping budget is derived from the connect timeout, so a deadline here can be the database itself. */
+        /* the caller's own cancellation is not a database outage: the transient classifier reads messages and error types a cancellation does not carry, so it is recorded at warning under its own name and not retried. Only Canceled, never DeadlineExceeded, since the ping budget derives from the connect timeout and a deadline here can be the database itself. */
         if true == errors.Is(openErr, context.Canceled) {
             cancelledErr := exception.FromError(openErr)
             logger.Warning(
@@ -273,7 +273,7 @@ func (instance *Provider) openWithRetry(ctx context.Context, params bunorm.Conne
 
         delay := instance.computeBackoffDelay(attempt)
 
-        /* the retry warnings are the first two records the operator sees when a database is down, and they carry the same diagnostic shape as the terminal records above: LogContext lifts the failure's own context — the host and port dialed, the pool sizing, the deadlines that governed the attempt — and its cause chain, where the flattened openErr.Error() handed on a message and nothing to act on */
+        /* the retry warnings carry the terminal records' shape: LogContext lifts the failure's own context, the address dialled, the pool sizing and the deadlines, and its cause chain */
         retryErr := exception.FromError(openErr)
 
         logger.Warning(
@@ -294,8 +294,7 @@ func (instance *Provider) openWithRetry(ctx context.Context, params bunorm.Conne
         case <-ctx.Done():
             delayTimer.Stop()
 
-            /* the same clean stop as the branch above, reached one step later: the cancellation arrived while this attempt was waiting out its backoff. It is recorded here and marked, because an unmarked cancellation travelling up as a bare resolution failure is filed at error by whichever writer meets it — the very record this classification exists to prevent. */
-            /* the cause stays the cancellation — the classification upstream reads it, and an outage put in its place would file a clean stop as an outage — but the failure that was being retried travels STRUCTURED beside it rather than flattened into one string. LogContext lifts that failure's own context and its cause chain, which is the shape the retry warning twenty lines above already hands the operator: the host and port dialled, the pool sizing, the deadlines that governed the attempt. openErr.Error() handed on a message and nothing to act on, the exact aplatizare the comment at retryErr condemns. */
+            /* the same clean stop as the cancelled-open branch, reached while this attempt waits out its backoff: it is recorded and marked here, since an unmarked cancellation travelling up is filed at error by whichever writer meets it. The cause stays the cancellation, which the classification upstream reads, and the failure being retried travels structured beside it through LogContext. */
             cancelledErr := exception.NewError(
                 "database connection retry cancelled by the caller's context",
                 exception.LogContext(
@@ -333,7 +332,7 @@ func (instance *Provider) connectionTlsConfig(host string) *tls.Config {
 }
 
 func (instance *Provider) open(ctx context.Context, params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    /* an already-cancelled context is refused before the attempt: the dialect handshake bun performs at construction queries the server outside any caller context, bounded by the connect timeout alone, so without this refusal a shutdown-cancelled lazy open still paid one full dial against a database that no longer matters. */
+    /* an already-cancelled context is refused before the attempt: the dialect handshake bun performs at construction queries the server outside any caller context, bounded by the connect timeout alone, so without this refusal a shutdown-cancelled lazy open would pay one full dial against a database nothing waits for. */
     if ctxErr := ctx.Err(); nil != ctxErr {
         return nil, exception.NewError(
             "database open cancelled before the attempt",
@@ -342,15 +341,20 @@ func (instance *Provider) open(ctx context.Context, params bunorm.ConnectionPara
         )
     }
 
-    /* the routing lives here because open is the one funnel every door shares — Open, OpenContext, the retry loop and the migration door all pass through it. Routed only on the retry path, the default retry-less open left bun's declaration mistakes on standard error. RouteDiagnostics is once per process, so repeated attempts cost nothing. */
+    /* the routing lives in open, the one funnel every door passes through, Open, OpenContext, the retry loop and the migration door; RouteDiagnostics is once per process, so repeated attempts cost nothing */
     bunorm.RouteDiagnostics(logger)
+
+    /* an empty host is refused before the driver sees it: the address ":port" is the local system to a dialer, so an unset host would connect to whatever listens there with the configured credentials. The database and the user are left to the server, and an empty password is legitimate. */
+    if "" == params.Host {
+        return nil, exception.NewError("mysql database open refused: the host is empty", params.SafeContext(), nil)
+    }
 
     connectionConfig := NewConnectionConfig(params.Host, params.Port, params.Database, params.User, params.Password)
 
     poolConfig := instance.resolvedPoolConfig()
     timeoutConfig := instance.resolvedTimeoutConfig()
 
-    address := fmt.Sprintf("%s:%s", params.Host, params.Port)
+    address := dialAddressOf(params.Host, params.Port)
 
     driverConfig := driver.NewConfig()
     driverConfig.User = params.User
@@ -439,10 +443,11 @@ func (instance *Provider) toConnectionContext(
     }
 }
 
+/* minimumBackoffDelay is the floor under every delay this provider computes: under a millisecond the wait is shorter than the dial it separates, a re-dial storm rather than a backoff. */
+const minimumBackoffDelay = time.Millisecond
+
 func (instance *Provider) computeBackoffDelay(attempt uint32) time.Duration {
-    /* non-positive delays and a multiplier below 1 fall back to the defaults: a negative delay makes
-       time.Sleep return immediately and a sub-1 multiplier decays the delay toward zero, both collapsing
-       the backoff into a re-dial storm; a multiplier of exactly 1 stays a valid constant backoff. */
+    /* non-positive delays and a multiplier below 1 fall back to the defaults: a negative delay makes time.Sleep return immediately and a sub-1 multiplier decays the delay toward zero, both collapsing the backoff into a re-dial storm; a multiplier of exactly 1 stays a valid constant backoff. */
     initialDelay := instance.retryConfig.InitialDelay
     if 0 >= initialDelay {
         initialDelay = 500 * time.Millisecond
@@ -453,35 +458,38 @@ func (instance *Provider) computeBackoffDelay(attempt uint32) time.Duration {
         maxDelay = 5 * time.Second
     }
 
-    /* the not-at-least-1 form is deliberate: NaN fails every comparison, so `1 > NaN` would let a NaN
-       multiplier through, poison the float-space growth below and collapse the backoff into an immediate
-       re-dial storm once the NaN converts to a negative duration. */
+    /* the floor is applied to BOTH bounds, so every branch below returns at least it: raising the initial delay alone would still let a sub-millisecond ceiling cap the result straight back under the floor. */
+    if minimumBackoffDelay > initialDelay {
+        initialDelay = minimumBackoffDelay
+    }
+
+    if minimumBackoffDelay > maxDelay {
+        maxDelay = minimumBackoffDelay
+    }
+
+    /* the not-at-least-1 form is deliberate: NaN fails every comparison, so `1 > NaN` would let a NaN multiplier through, poison the float-space growth below and collapse the backoff into an immediate re-dial storm once the NaN converts to a negative duration. */
     backoffMultiplier := instance.retryConfig.BackoffMultiplier
     if false == (backoffMultiplier >= 1) {
         backoffMultiplier = 2.0
     }
 
-    /* grow the delay in float space and cap at maxDelay as soon as it is reached, before converting to
-       time.Duration — otherwise a large attempt count overflows the float64->int64 conversion to a negative
-       duration, which slips past the `> maxDelay` cap and collapses the backoff to zero (a re-dial storm). */
-    maxDelayFloat := float64(maxDelay)
-    delay := float64(initialDelay)
-
-    for i := uint32(1); i < attempt; i = i + 1 {
-        delay = delay * backoffMultiplier
-        if delay >= maxDelayFloat {
-            return maxDelay
-        }
+    /* the first attempt waits the initial delay, so the growth is over the attempts already made; a zero attempt reads as the first, since it would wrap the unsigned subtraction below */
+    if 0 == attempt {
+        attempt = 1
     }
 
-    if delay >= maxDelayFloat {
+    /* the growth is computed in closed form and capped in float space before the conversion: a large attempt count overflows the float64 to int64 conversion into a negative duration that slips past a > cap, and the not-less-than form keeps an infinite growth capped too */
+    maxDelayFloat := float64(maxDelay)
+    delay := float64(initialDelay) * math.Pow(backoffMultiplier, float64(attempt-1))
+
+    if false == (delay < maxDelayFloat) {
         return maxDelay
     }
 
     return time.Duration(delay)
 }
 
-/* containsTransientMarker matches a marker as a WORD rather than as a bare substring. The short spellings fire inside ordinary identifiers otherwise — "eof" sits inside `Table 'app.geofences' doesn't exist`, "timeout" inside a `session_timeout` column — so a PERMANENT failure was retried for the whole budget and then died under "failed after max retry attempts" instead of "non-transient", costing the delay and telling the operator the wrong thing. A boundary is any character that is not a letter, a digit or an underscore, so the spellings carrying spaces and slashes match exactly as they did. The types io.EOF and net.Error are read above this scan and are unaffected. */
+/* containsTransientMarker matches a marker as a word, bounded by any character that is not a letter, a digit or an underscore, so "eof" inside an identifier such as geofences does not read a permanent failure as transient. */
 func containsTransientMarker(message string, marker string) bool {
     searchStart := 0
 
@@ -596,4 +604,13 @@ func isNilInterface(value any) bool {
     default:
         return false
     }
+}
+
+/* dialAddressOf joins the host and the port the way a dialer reads them: a host carrying a colon is an IPv6 literal and is bracketed unless it already is, and a host name or an IPv4 literal is joined as it is. */
+func dialAddressOf(host string, port string) string {
+    if true == strings.Contains(host, ":") && false == strings.HasPrefix(host, "[") {
+        return "[" + host + "]:" + port
+    }
+
+    return host + ":" + port
 }

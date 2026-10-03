@@ -2,6 +2,7 @@ package serializer
 
 import (
     "errors"
+    "strconv"
     "strings"
     "testing"
 
@@ -245,7 +246,7 @@ func TestResolveByAcceptHeader_WithoutJsonFallsBackToTheFirstConfiguredSerialize
     }
 }
 
-/* a member whose q parameter falls outside the qvalue grammar is dropped whole: the previous leniency kept the member at full acceptance, so application/json;q=abc outweighed the sibling the client actually weighted */
+/* a member whose q parameter falls outside the qvalue grammar is dropped whole, so application/json;q=abc never outweighs the sibling the client actually weighted */
 func TestResolveByAcceptHeader_MalformedQualityDropsTheMember(t *testing.T) {
     manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
         MimeApplicationJson: NewJsonSerializer(),
@@ -274,7 +275,7 @@ func TestResolveByAcceptHeader_MalformedQualityDropsTheMember(t *testing.T) {
     }
 }
 
-/* a comma inside a quoted parameter value stays inside its member: without quote awareness the refusal in text/plain;version="1,2";q=0 detached from the type it covered and the client was served the very representation it refused */
+/* a comma inside a quoted parameter value stays inside its member, so the refusal in text/plain;version="1,2";q=0 stays with the type it covers and that representation is never served */
 func TestResolveByAcceptHeader_QuotedCommaKeepsTheRefusal(t *testing.T) {
     manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
         MimeTextPlain: NewPlainTextSerializer(),
@@ -308,7 +309,7 @@ func TestResolveByAcceptHeader_UnmatchedHeaderStillFallsBackToJson(t *testing.T)
     }
 }
 
-/* a refusal that leaves another registered type merely unmatched is a preference, not a refusal of the whole manager: the flag it replaced was raised by a single refused candidate, so Accept: application/json;q=0 answered 406 against a manager holding plain text beside json — the client was denied the very representation it never rejected. The refused type still may not be served, by the negotiation or by the fallback, so the json-first default has to step aside for it. */
+/* a refusal that leaves another registered type merely unmatched is a preference, not a refusal of the whole manager, so Accept: application/json;q=0 against a manager holding plain text beside json is served plain text rather than 406. The refused type still may not be served, by the negotiation or by the fallback, so the json-first default steps aside for it. */
 func TestResolveByAcceptHeader_ARefusedTypeLeavesTheUnrefusedOneServable(t *testing.T) {
     manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
         MimeApplicationJson: NewJsonSerializer(),
@@ -318,7 +319,7 @@ func TestResolveByAcceptHeader_ARefusedTypeLeavesTheUnrefusedOneServable(t *test
         t.Fatalf("unexpected manager error: %v", managerErr)
     }
 
-    /* the second spelling refuses json through a wildcard rather than by name, so the repair cannot depend on the refusal being exact */
+    /* the second spelling refuses json through a wildcard rather than by name, so the answer cannot depend on the refusal being exact */
     for _, acceptHeader := range []string{"application/json;q=0", "application/*;q=0"} {
         resolved, resolveErr := manager.ResolveByAcceptHeader(acceptHeader)
         if nil != resolveErr {
@@ -330,14 +331,14 @@ func TestResolveByAcceptHeader_ARefusedTypeLeavesTheUnrefusedOneServable(t *test
         }
     }
 
-    /* the refusal of every registered type stays a refusal: without this half the repair could simply have deleted the not-acceptable branch */
+    /* the refusal of every registered type stays a refusal: without this half the not-acceptable branch could simply be deleted */
     _, everyTypeRefusedErr := manager.ResolveByAcceptHeader("*/*;q=0")
     if false == errors.Is(everyTypeRefusedErr, ErrNotAcceptable) {
         t.Fatalf("expected a header refusing every registered type to stay not acceptable, got %v", everyTypeRefusedErr)
     }
 }
 
-/* Get answers false for a mime that normalizes away to nothing, before it ever touches the map. The branch had no test of its own: an empty header value, a whitespace-only one and a bare parameter list all arrive here from the same place — a caller reading a Content-Type off a request that carried none — and without the guard the lookup would run with the empty key, which is exactly the key a manager built from a map with an empty spelling would have had, had the constructor not refused it. */
+/* Get answers false for a mime that normalizes away to nothing, before it ever touches the map. An empty header value, a whitespace-only one and a bare parameter list all arrive here from a caller reading a Content-Type off a request that carried none, and without the guard the lookup would run with the empty key, the key the constructor refuses to register. */
 func TestSerializerManager_Get_RefusesAMimeThatNormalizesToNothing(t *testing.T) {
     manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
         MimeApplicationJson: NewJsonSerializer(),
@@ -376,7 +377,7 @@ func TestSerializerManager_Get_AnswersTheRegisteredSerializerAndMissesTheOthers(
     }
 }
 
-/* the empty manager is the misconfiguration a deployment produces when the serializer map comes from configuration that resolved to nothing. Both error paths belong to it, and they are NOT the same answer: an empty accept header means "anything", so its failure says no default is configured, while a header that named something says nothing was found for that header — and only the second one carries the header in its context, which is the whole diagnostic. Since the fallback was widened, no other test reaches either branch. */
+/* the empty manager is the misconfiguration a deployment produces when the serializer map comes from configuration that resolved to nothing. Both error paths belong to it, and they are NOT the same answer: an empty accept header means "anything", so its failure says no default is configured, while a header that named something says nothing was found for that header, and only the second one carries the header in its context, which is the whole diagnostic. No other test reaches either branch. */
 func TestResolveByAcceptHeader_AnEmptyManagerRefusesBothWays(t *testing.T) {
     manager, managerErr := NewSerializerManager(nil)
     if nil != managerErr {
@@ -508,5 +509,36 @@ func TestResolveByAcceptHeader_AJsonTieWithoutJsonStaysLexicallyFirst(t *testing
     }
     if serializercontract.Serializer(halSerializer) != resolved {
         t.Fatalf("expected a tie without json to keep the lexically first candidate")
+    }
+}
+
+/* acceptListWithTailPast builds an Accept header of one head range, filler ranges and one tail range; with more members than the split cap the tail is what the cap cuts off. */
+func acceptListWithTailPast(head string, fillers int, tail string) string {
+    members := []string{head}
+    for index := 0; index < fillers; index++ {
+        members = append(members, "x/"+strconv.Itoa(index))
+    }
+
+    return strings.Join(append(members, tail), ", ")
+}
+
+/* A header the member cap cut is read as unparsable and refused as not acceptable, since the refusal past the cap (application/json;q=0) is lost with the tail and the wildcard before it would serve json to a client that refused it. The sister list one member short of the cap still honours the refusal and falls to the other type. */
+func TestResolveByAcceptHeader_AHeaderCutAtTheCapIsRefused(t *testing.T) {
+    manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
+        MimeApplicationJson: NewJsonSerializer(),
+        MimeTextPlain:       NewPlainTextSerializer(),
+    })
+    if nil != managerErr {
+        t.Fatalf("unexpected manager error: %v", managerErr)
+    }
+
+    _, resolveErr := manager.ResolveByAcceptHeader(acceptListWithTailPast("*/*;q=1", 63, "application/json;q=0"))
+    if false == errors.Is(resolveErr, ErrNotAcceptable) {
+        t.Fatalf("expected a header cut at the member cap to be refused, got %v", resolveErr)
+    }
+
+    within, resolveErr := manager.ResolveByAcceptHeader(acceptListWithTailPast("*/*;q=1", 62, "application/json;q=0"))
+    if nil != resolveErr || false == strings.HasPrefix(within.ContentType(), MimeTextPlain) {
+        t.Fatalf("expected the refusal within the cap to fall to the plain serializer, got %v / %v", within, resolveErr)
     }
 }

@@ -7,6 +7,8 @@ import (
 )
 
 func NewHttpException(statusCode int, message string) *HttpException {
+    refuseStatusCodeOutOfRange(statusCode)
+
     return &HttpException{
         statusCode: statusCode,
         message:    message,
@@ -15,11 +17,28 @@ func NewHttpException(statusCode int, message string) *HttpException {
 }
 
 func NewHttpExceptionWithCause(statusCode int, message string, causeErr error) *HttpException {
+    refuseStatusCodeOutOfRange(statusCode)
+
     return &HttpException{
         statusCode: statusCode,
         message:    message,
         context:    make(exceptioncontract.Context),
         causeErr:   causeErr,
+    }
+}
+
+/* refuseStatusCodeOutOfRange refuses at construction a status outside 100–599, the classes an http exception can answer with; net/http's WriteHeader would panic deep in the response path below 100 and above 999. */
+func refuseStatusCodeOutOfRange(statusCode int) {
+    if 100 > statusCode || 599 < statusCode {
+        Panic(
+            NewEmergency(
+                "http status code out of range",
+                exceptioncontract.Context{
+                    "statusCode": statusCode,
+                },
+                nil,
+            ),
+        )
     }
 }
 

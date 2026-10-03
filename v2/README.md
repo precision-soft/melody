@@ -4,8 +4,8 @@
 
 # Melody (v2)
 
-> **v2 is stabilized and feature-frozen.** New features land on **v3**; what still arrives here is
-> security work and critical correctness fixes. For new projects use [`../v3/`](../v3/) and its
+> **v2 is stabilized and feature-frozen.** New features land on **v3**; what still arrives here, until
+> v4 is released, is patch-level defect fixes and security work. For new projects use [`../v3/`](../v3/) and its
 > [example](../v3/.example/); an application moving off v2 starts at the "Migrating to v3" section of
 > [`.documentation/UPGRADE.md`](./.documentation/UPGRADE.md). See the repository
 > [`README.md`](../README.md#versions--project-status) for the versioning rationale.
@@ -73,10 +73,10 @@ These are intentionally independent so you can embed one family while keeping th
 
 ```bash
 # filesystem env (default)
-go build -o app ./...
+go build -o app .
 
 # embedded env
-go build -tags melody_env_embedded -o app ./...
+go build -tags melody_env_embedded -o app .
 ```
 
 ---
@@ -99,10 +99,10 @@ go build -tags melody_env_embedded -o app ./...
 
 ```bash
 # filesystem static (default)
-go build -o app ./...
+go build -o app .
 
 # embedded static assets
-go build -tags melody_static_embedded -o app ./...
+go build -tags melody_static_embedded -o app .
 ```
 
 ---
@@ -112,7 +112,7 @@ go build -tags melody_static_embedded -o app ./...
 You can combine the tags to embed both families:
 
 ```bash
-go build -tags "melody_env_embedded melody_static_embedded" -o app ./...
+go build -tags "melody_env_embedded melody_static_embedded" -o app .
 ```
 
 For a complete example that shows the same build-tag matrix applied end-to-end in a userland application, see [`.example/README.md`](./.example/README.md).

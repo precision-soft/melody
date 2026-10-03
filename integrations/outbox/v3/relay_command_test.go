@@ -2,10 +2,15 @@ package outbox
 
 import (
     "context"
+    "io"
     "errors"
+    "fmt"
+    "reflect"
+    "strings"
     "testing"
     "time"
 
+    melodycli "github.com/precision-soft/melody/v3/cli"
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/container"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
@@ -36,20 +41,13 @@ func runRelayCommand(t *testing.T, runtimeInstance runtimecontract.Runtime, rela
 
     relayCommand := NewRelayCommand(relay)
 
-    var runErr error
-    command := &clicontract.CommandContext{
-        Name:  relayCommand.Name(),
-        Flags: relayCommand.Flags(),
-        Action: func(ctx context.Context, commandContext *clicontract.CommandContext) error {
-            runErr = relayCommand.Run(runtimeInstance, commandContext)
+    capturing := &capturingCommand{Command: relayCommand, runtimeInstance: runtimeInstance}
 
-            return nil
-        },
-    }
-
-    if commandErr := command.Run(context.Background(), append([]string{relayCommand.Name()}, arguments...)); nil != commandErr {
+    if commandErr := melodycli.DispatchCommand(context.Background(), capturing, runtimeInstance, append([]string{relayCommand.Name()}, arguments...), io.Discard); nil != commandErr {
         t.Fatalf("unexpected command run error: %v", commandErr)
     }
+
+    runErr := capturing.capturedErr
 
     return runErr
 }
@@ -144,20 +142,13 @@ func TestRelayCommand_RetriesRelayResolutionWithBackoff(t *testing.T) {
 
     relayCommand := NewRelayCommandFromResolver(serviceContainer)
 
-    var runErr error
-    command := &clicontract.CommandContext{
-        Name:  relayCommand.Name(),
-        Flags: relayCommand.Flags(),
-        Action: func(ctx context.Context, commandContext *clicontract.CommandContext) error {
-            runErr = relayCommand.Run(runtimeInstance, commandContext)
+    capturing := &capturingCommand{Command: relayCommand, runtimeInstance: runtimeInstance}
 
-            return nil
-        },
-    }
-
-    if commandErr := command.Run(context.Background(), []string{relayCommand.Name(), "--limit", "3", "--interval", "1ms"}); nil != commandErr {
+    if commandErr := melodycli.DispatchCommand(context.Background(), capturing, runtimeInstance, []string{relayCommand.Name(), "--limit", "3", "--interval", "1ms"}, io.Discard); nil != commandErr {
         t.Fatalf("unexpected command run error: %v", commandErr)
     }
+
+    runErr := capturing.capturedErr
 
     if nil != runErr {
         t.Fatalf("expected the relay command to survive the resolution failures and drain, got %v", runErr)
@@ -237,4 +228,95 @@ func TestNewRelayCommandFromResolver_DefersResolution(t *testing.T) {
     if "melody:outbox:relay" != command.Name() {
         t.Fatalf("unexpected command name %q", command.Name())
     }
+}
+
+/* nilYieldingResolver models a userland decorating resolver that answers nil with no error — the shape the container's own door refuses, which is exactly why the command carries its own guard as latent defense, mirroring lazyRepository.resolveStore. */
+type nilYieldingResolver struct{}
+
+func (instance nilYieldingResolver) Get(serviceName string) (any, error) {
+    return (*Relay)(nil), nil
+}
+func (instance nilYieldingResolver) MustGet(serviceName string) any             { return nil }
+func (instance nilYieldingResolver) GetByType(targetType reflect.Type) (any, error) {
+    return nil, nil
+}
+func (instance nilYieldingResolver) MustGetByType(targetType reflect.Type) any { return nil }
+func (instance nilYieldingResolver) Has(serviceName string) bool               { return true }
+func (instance nilYieldingResolver) HasType(targetType reflect.Type) bool      { return true }
+
+func TestRelayCommand_ANilRelayYieldIsAnErrorNotAPanic(t *testing.T) {
+    relayCommand := NewRelayCommandFromResolver(nilYieldingResolver{})
+
+    relay, resolveErr := relayCommand.resolveRelay()
+
+    if nil != relay {
+        t.Fatalf("expected no relay, got %v", relay)
+    }
+
+    if nil == resolveErr || false == strings.Contains(resolveErr.Error(), "resolved to nil") {
+        t.Fatalf("expected the nil yield reported as an error the run loop can back off on, got %v", resolveErr)
+    }
+}
+
+func TestRelayCommand_AGenuineFailureCoincidingWithAParentDeadlineIsNotSwallowed(t *testing.T) {
+    parentContext, cancelParent := context.WithCancel(context.Background())
+    cancelParent()
+
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(parentContext, serviceContainer.NewScope(), serviceContainer)
+
+    repository := &failingClaimRepository{failuresLeft: 1}
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{}, Codec: &stringCodec{}})
+
+    runErr := runRelayCommand(t, runtimeInstance, relay, []string{"--limit", "1"})
+
+    if nil == runErr || false == strings.Contains(runErr.Error(), "repository down") {
+        t.Fatalf("expected the repository failure surfaced despite the done parent context, got %v", runErr)
+    }
+}
+
+func TestRelayCommand_ACancellationExplainedErrorStillExitsClean(t *testing.T) {
+    parentContext, cancelParent := context.WithCancel(context.Background())
+    cancelParent()
+
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(parentContext, serviceContainer.NewScope(), serviceContainer)
+
+    repository := &cancellationEchoRepository{}
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{}, Codec: &stringCodec{}})
+
+    if runErr := runRelayCommand(t, runtimeInstance, relay, []string{"--limit", "1"}); nil != runErr {
+        t.Fatalf("expected the cancellation-explained failure to exit clean, got %v", runErr)
+    }
+}
+
+/* cancellationEchoRepository answers the claim with the context's own cancellation, the way a driver does mid-drain. */
+type cancellationEchoRepository struct {
+    fakeRepository
+}
+
+func (instance *cancellationEchoRepository) ClaimDueMessages(ctx context.Context, limit int, visibility time.Duration) ([]Pending, error) {
+    if nil != ctx.Err() {
+        return nil, fmt.Errorf("claim aborted: %w", ctx.Err())
+    }
+
+    return instance.fakeRepository.ClaimDueMessages(ctx, limit, visibility)
+}
+
+/* capturingCommand delegates to the command under test and keeps its error, so a test can tell a refused command line — which the dispatch answers — from the command's own failure, which is what it is asserting. */
+type capturingCommand struct {
+    clicontract.Command
+    runtimeInstance runtimecontract.Runtime
+    capturedErr     error
+}
+
+var _ clicontract.Command = (*capturingCommand)(nil)
+
+func (instance *capturingCommand) Run(
+    dispatchedRuntime runtimecontract.Runtime,
+    commandContext clicontract.Context,
+) error {
+    instance.capturedErr = instance.Command.Run(instance.runtimeInstance, commandContext)
+
+    return nil
 }

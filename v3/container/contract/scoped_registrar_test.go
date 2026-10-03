@@ -5,7 +5,7 @@ import (
     "testing"
 )
 
-/* @info The whole discrimination between the two lifetimes rests on the two method sets never overlapping. Go interfaces are structural: the moment ScopedRegistrar carries Register — by embedding Registrar, or by anyone spelling the method — a container registrar satisfies it and a scoped registrar satisfies a Registrar parameter, both without a conversion and both silently. The hooks that hand these registrars out would then accept each other's, and a container provider registered as scoped would be rebuilt and closed once per request without ever failing. */
+/* The whole discrimination between the two lifetimes rests on the two method sets never overlapping. Go interfaces are structural: the moment ScopedRegistrar carries Register — by embedding Registrar, or by anyone spelling the method — a container registrar satisfies it and a scoped registrar satisfies a Registrar parameter, both without a conversion and both silently. The hooks that hand these registrars out would then accept each other's, and a container provider registered as scoped would be rebuilt and closed once per request without ever failing. */
 func TestRegistrarInterfaces_HaveDisjointMethodSets(t *testing.T) {
     registrarType := reflect.TypeOf((*Registrar)(nil)).Elem()
     scopedRegistrarType := reflect.TypeOf((*ScopedRegistrar)(nil)).Elem()

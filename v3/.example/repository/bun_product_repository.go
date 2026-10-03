@@ -14,7 +14,7 @@ import (
     "github.com/uptrace/bun"
 )
 
-/* productRow is the catalogue as the database holds it. The domain entity stays free of storage concerns because it is cached through a gob serializer, so the mapping lives here, beside the repository that performs it. */
+/* productRow is the catalogue as the database holds it; the entity stays free of storage concerns because it is cached through a gob serializer. */
 type productRow struct {
     bun.BaseModel `bun:"table:melody_example_v3_product,alias:product"`
 
@@ -61,13 +61,16 @@ func newBunProductRepository(storage *persistence.CatalogStorage) *bunProductRep
     return &bunProductRepository{database: storage.Database(), tracker: storage.Tracker()}
 }
 
-/* bunProductRepository keeps the catalogue in the database and its history beside it. Every write goes through the audit tracker, which performs the write and records the field-level change in one transaction: an entry that failed to persist rolls the change back with it, so the catalogue never holds a version of a row the trail cannot account for. */
+/* bunProductRepository keeps the catalogue in the database and its history beside it. Every write goes through the audit tracker, which performs it and records the field-level change in one transaction, so the catalogue never holds a version of a row the trail cannot account for. */
+/* productIdentifierMintLockName names the advisory lock the creates of melody_example_v3_product mint their identifiers under */
+const productIdentifierMintLockName = "melody_example_v3_product.id"
+
 type bunProductRepository struct {
     database *bun.DB
     tracker  *melodyaudit.Tracker
 }
 
-/* auditContext names whoever is behind the write for the trail. The actor is put on the context by the service layer, which is the last place that still knows which request it is serving; a write with nobody on the context is a scheduled or console one, and the trail says so rather than leaving the column empty. */
+/* auditContext names whoever is behind the write for the trail; a write with nobody on the context is a scheduled or console one, recorded as the system. */
 func auditContext(ctx context.Context) context.Context {
     actor := persistence.ActorFromContext(ctx)
     if "" == actor {
@@ -77,42 +80,27 @@ func auditContext(ctx context.Context) context.Context {
     return melodyaudit.WithActor(ctx, actor)
 }
 
-/* EnsureSchema creates the table when it is absent and writes the opening catalogue into it when it is empty. The example carries no migration runner, so the repository owns the one table it reads. The seeding insert ignores duplicate keys because several example applications may reach an empty table at the same time, and losing that race is not a failure. */
-func (instance *bunProductRepository) EnsureSchema(ctx context.Context) error {
-    _, createErr := instance.database.
-        NewCreateTable().
-        Model((*productRow)(nil)).
-        IfNotExists().
-        Exec(ctx)
-    if nil != createErr {
-        return createErr
+func (instance *bunProductRepository) seedIfEmpty(ctx context.Context) error {
+    identifierList := make([]string, 0)
+    for _, product := range seedProductList(time.Now()) {
+        identifierList = append(identifierList, product.Id)
     }
 
-    count, countErr := instance.database.
-        NewSelect().
-        Model((*productRow)(nil)).
-        Count(ctx)
-    if nil != countErr {
-        return countErr
+    if raiseErr := raiseSequenceOverSeeds(ctx, instance.database, "prod-", identifierList); nil != raiseErr {
+        return raiseErr
     }
 
-    if 0 < count {
-        return nil
-    }
+    return seedIfEmptyAudited(ctx, instance.database, instance.tracker, persistence.AuditEntityProduct, func() []*productRow {
+        seedList := seedProductList(time.Now())
+        rowList := make([]*productRow, 0, len(seedList))
+        for _, product := range seedList {
+            rowList = append(rowList, newProductRow(product))
+        }
 
-    seedList := seedProductList(time.Now())
-    rowList := make([]*productRow, 0, len(seedList))
-    for _, product := range seedList {
-        rowList = append(rowList, newProductRow(product))
-    }
-
-    _, insertErr := instance.database.
-        NewInsert().
-        Model(&rowList).
-        Ignore().
-        Exec(ctx)
-
-    return insertErr
+        return rowList
+    }, func(row *productRow) string {
+        return row.Id
+    })
 }
 
 func (instance *bunProductRepository) All(ctx context.Context) ([]*entity.Product, error) {
@@ -148,7 +136,7 @@ func (instance *bunProductRepository) FindById(ctx context.Context, id string) (
     return row.toEntity(), true, nil
 }
 
-/* findRowById separates a row that is not there from a query that could not run: only sql.ErrNoRows is an answer, and every other failure is reported. */
+/* findRowById separates a row that is not there from a query that could not run: only sql.ErrNoRows is an answer. */
 func (instance *bunProductRepository) findRowById(ctx context.Context, id string) (*productRow, bool, error) {
     row := &productRow{}
 
@@ -175,22 +163,16 @@ func (instance *bunProductRepository) Create(ctx context.Context, product *entit
         return validationErr
     }
 
-    if "" == strings.TrimSpace(product.Id) {
-        identifierList, identifierErr := instance.identifierList(ctx)
-        if nil != identifierErr {
-            return identifierErr
+    mintsIdentifier := "" == strings.TrimSpace(product.Id)
+    if false == mintsIdentifier {
+        _, exists, existsErr := instance.findRowById(ctx, product.Id)
+        if nil != existsErr {
+            return existsErr
         }
 
-        product.Id = nextProductId(identifierList)
-    }
-
-    _, exists, existsErr := instance.findRowById(ctx, product.Id)
-    if nil != existsErr {
-        return existsErr
-    }
-
-    if true == exists {
-        return fmt.Errorf("id already exists")
+        if true == exists {
+            return ErrIdAlreadyExists
+        }
     }
 
     now := time.Now()
@@ -201,7 +183,26 @@ func (instance *bunProductRepository) Create(ctx context.Context, product *entit
         product.UpdatedAt = now
     }
 
-    return instance.tracker.Insert(auditContext(ctx), persistence.AuditEntityProduct, product.Id, newProductRow(product))
+    return insertWithMintedIdentifier(
+        ctx,
+        instance.database,
+        productIdentifierMintLockName,
+        identifierSequence{prefix: "prod-", identifier: func() string { return product.Id }},
+        mintsIdentifier,
+        func(floor string) error {
+            identifierList, identifierErr := instance.identifierList(ctx)
+            if nil != identifierErr {
+                return identifierErr
+            }
+
+            product.Id = nextProductId(append(identifierList, floor))
+
+            return nil
+        },
+        func() error {
+            return asProductReferenceRefusal(instance.tracker.Insert(auditContext(ctx), persistence.AuditEntityProduct, product.Id, newProductRow(product)))
+        },
+    )
 }
 
 func (instance *bunProductRepository) Update(ctx context.Context, product *entity.Product) (bool, error) {
@@ -232,10 +233,10 @@ func (instance *bunProductRepository) Update(ctx context.Context, product *entit
         product.UpdatedAt = time.Now()
     }
 
-    /* the row is known to be there — it was just read — so the tracker's own load of the before-image cannot come up empty; what it adds is that the recorded before-image is the row as the DATABASE held it rather than whatever the caller passed */
+    /* the tracker loads the before-image itself, so the trail records the row as the database held it rather than what the caller passed */
     updateErr := instance.tracker.Update(auditContext(ctx), persistence.AuditEntityProduct, id, newProductRow(product))
     if nil != updateErr {
-        return false, updateErr
+        return false, asProductReferenceRefusal(updateErr)
     }
 
     return true, nil
@@ -247,7 +248,7 @@ func (instance *bunProductRepository) DeleteById(ctx context.Context, id string)
         return false, fmt.Errorf("id is required")
     }
 
-    /* the tracker deletes by primary key and treats a row that was not there as nothing to do, so whether there was one is asked first: the caller's answer distinguishes a delete that happened from a request for a product that does not exist, and a silent no-op cannot tell them apart */
+    /* the tracker treats a missing row as nothing to do, so its presence is asked first: the caller tells a delete that happened from a request for a product that does not exist */
     _, found, findErr := instance.findRowById(ctx, normalizedId)
     if nil != findErr {
         return false, findErr
@@ -268,6 +269,14 @@ func (instance *bunProductRepository) DeleteById(ctx context.Context, id string)
     }
 
     return true, nil
+}
+
+func (instance *bunProductRepository) PricedIn(ctx context.Context, currencyId string) (bool, error) {
+    return instance.database.
+        NewSelect().
+        Model((*productRow)(nil)).
+        Where("currency_id = ?", currencyId).
+        Exists(ctx)
 }
 
 func (instance *bunProductRepository) identifierList(ctx context.Context) ([]string, error) {

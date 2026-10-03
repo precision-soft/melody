@@ -4,8 +4,6 @@ import (
     "strings"
 
     bagcontract "github.com/precision-soft/melody/v2/bag/contract"
-    "github.com/precision-soft/melody/v2/exception"
-    exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
     "github.com/precision-soft/melody/v2/internal"
 )
 
@@ -25,20 +23,17 @@ func String(parameterBag bagcontract.ParameterBag, name string) (string, bool) {
         return stringValue, true
     }
 
-    /* a string slice read as one string is refused loudly, never guessed at: the request bags keep the single and the repeated key apart by type, so what lands here is a genuine array. The empty string would lose the value and one element would hide the rest; the slice is read with StringSlice or StringAt. */
-    if _, isSlice := value.([]string); true == isSlice {
-        exception.Panic(
-            exception.NewError(
-                "parameter holds a string slice and cannot be read as one string; read it with StringSlice or StringAt",
-                exceptioncontract.Context{
-                    "parameterName": name,
-                },
-                nil,
-            ),
-        )
+    /* the request bags keep the single and the repeated key apart by type, so a []string here is a genuinely repeated key, and it answers its first value, as Input and url.Values.Get do: the shape of a request parameter is the client's choice, and a refusal would turn every read through StringOrDefault or HasNonEmptyString into a 500 any client could raise with one duplicated query key. The whole list is read with StringSlice or StringAt; an empty list is reported unset like nil. */
+    if sliceValue, isSlice := value.([]string); true == isSlice {
+        if 0 == len(sliceValue) {
+            return "", false
+        }
+
+        return sliceValue[0], true
     }
 
-    return "", true
+    /* a present value that is neither a string nor a string slice reports absent rather than present-but-empty, so StringOrDefault, which substitutes the default only for an absent value, answers the default for it as the sibling accessors do. */
+    return "", false
 }
 
 func StringOrDefault(parameterBag bagcontract.ParameterBag, name string, defaultValue string) string {

@@ -2,6 +2,7 @@ package wiring
 
 import (
     "fmt"
+    "io"
     "os"
     "path/filepath"
     "sort"
@@ -9,8 +10,15 @@ import (
     "unicode"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
+    "github.com/precision-soft/melody/v3/cli/output"
     "github.com/precision-soft/melody/v3/config"
+    configcontract "github.com/precision-soft/melody/v3/config/contract"
+    "github.com/precision-soft/melody/v3/container"
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/internal"
+    "github.com/precision-soft/melody/v3/logging"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
+    "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
@@ -33,11 +41,22 @@ func (instance *GenerateCommand) Description() string {
     return "generate the container registrations for the scanned packages"
 }
 
+/* Flags declares the quiet flag beside the command's own, defaulting to true as StandardFlags does: the generated source is the command's essential output, and a banner around a source printed to stdout would be the first bytes of the file. */
 func (instance *GenerateCommand) Flags() []clicontract.Flag {
     return []clicontract.Flag{
         &clicontract.StringFlag{
             Name:  "out",
             Usage: "path to write the generated file to; prints to stdout when empty",
+        },
+        &clicontract.BoolFlag{
+            Name:  output.FlagNameQuiet,
+            Usage: "suppress the run banner around the document (--quiet=false brings it back)",
+            Value: true,
+        },
+        &clicontract.BoolFlag{
+            Name:  output.FlagNameNoColor,
+            Usage: "disable ansi colors",
+            Value: false,
         },
         &clicontract.StringFlag{
             Name:  "package",
@@ -55,7 +74,7 @@ func (instance *GenerateCommand) Flags() []clicontract.Flag {
         },
         &clicontract.BoolFlag{
             Name:  "strict",
-            Usage: "fail when a declared bind matched no constructor argument or a constructor was skipped",
+            Usage: "fail when a declared bind or exclude matched no constructor, or a constructor was skipped",
         },
         &clicontract.BoolFlag{
             Name:  "report-vendor",
@@ -74,7 +93,7 @@ func (instance *GenerateCommand) Flags() []clicontract.Flag {
 
 func (instance *GenerateCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext *clicontract.CommandContext,
+    commandContext clicontract.Context,
 ) error {
     if nil == instance.bindSet {
         return exception.NewError("the wiring generate command requires a bind set", nil, nil)
@@ -107,31 +126,46 @@ func (instance *GenerateCommand) Run(
         return generateErr
     }
 
-    instance.writeReport(commandContext, report)
+    /* the report goes on the writer when the source goes to a file, and into the journal when the writer is the source, so the stdout mode prints a file that compiles */
+    reportWriter := commandContext.Writer()
+    journalWriter := (*journalLineWriter)(nil)
+    if "" == commandContext.String("out") {
+        journalWriter = &journalLineWriter{logger: instance.journal(runtimeInstance), command: instance.Name()}
+        reportWriter = journalWriter
+    }
 
+    instance.writeReport(reportWriter, commandContext, report)
+
+    if nil != journalWriter {
+        journalWriter.flush()
+    }
+
+    /* every strict violation is carried in one refusal, so the error record names all the lost coverage and not only the first violation found */
     if true == commandContext.Bool("strict") {
+        strictContext := make(map[string]any)
+
         if 0 < len(report.UnusedBinds) {
-            return exception.NewError(
-                "declared binds matched no constructor argument",
-                map[string]any{
-                    "binds": strings.Join(report.UnusedBinds, ", "),
-                },
-                nil,
-            )
+            strictContext["binds"] = strings.Join(report.UnusedBinds, ", ")
         }
 
-        /* a skipped constructor is coverage the wiring silently lost; strict exists so a loss has to be acknowledged, which is what //melody:ignore is for */
+        if 0 < len(report.UnusedExcludes) {
+            strictContext["excludes"] = strings.Join(report.UnusedExcludes, ", ")
+        }
+
+        /* a skipped constructor is coverage the wiring lost; strict makes it be acknowledged, which is what //melody:ignore is for */
         if 0 < len(report.Skipped) {
             skippedNames := make([]string, 0, len(report.Skipped))
             for _, skipped := range report.Skipped {
                 skippedNames = append(skippedNames, skipped.Name)
             }
 
+            strictContext["constructors"] = strings.Join(skippedNames, ", ")
+        }
+
+        if 0 < len(strictContext) {
             return exception.NewError(
-                "constructors were skipped",
-                map[string]any{
-                    "constructors": strings.Join(skippedNames, ", "),
-                },
+                "declared binds or excludes matched no constructor, or constructors were skipped",
+                strictContext,
                 nil,
             )
         }
@@ -139,7 +173,7 @@ func (instance *GenerateCommand) Run(
 
     outputPath := commandContext.String("out")
     if "" == outputPath {
-        fmt.Fprint(commandContext.Writer, source)
+        fmt.Fprint(commandContext.Writer(), source)
 
         return nil
     }
@@ -148,47 +182,202 @@ func (instance *GenerateCommand) Run(
         outputPath = filepath.Join(projectDirectory, outputPath)
     }
 
-    makeDirectoryErr := os.MkdirAll(filepath.Dir(outputPath), 0o755)
-    if nil != makeDirectoryErr {
+    /* a generated file inside a scanned directory would be read back by the next scan with a package clause the sources there do not carry, and the package would stop compiling, so the output must not be inside a scanned directory. Containment is read on path components, as the static file server reads it, and a relative path the two cannot be related on is refused. */
+    for _, packageBinding := range instance.bindSet.Packages() {
+        scannedDirectory := packageBinding.Directory()
+        if false == filepath.IsAbs(scannedDirectory) {
+            scannedDirectory = filepath.Join(projectDirectory, scannedDirectory)
+        }
+
+        relativePath, relativeErr := filepath.Rel(scannedDirectory, outputPath)
+        if nil != relativeErr {
+            return exception.NewError(
+                "the output path cannot be related to a scanned package directory",
+                map[string]any{
+                    "out":        outputPath,
+                    "importPath": packageBinding.ImportPath(),
+                    "directory":  scannedDirectory,
+                },
+                relativeErr,
+            )
+        }
+
+        liesOutside := ".." == relativePath || true == strings.HasPrefix(relativePath, ".."+string(filepath.Separator))
+        if false == liesOutside {
+            return exception.NewError(
+                "the output path lies inside a scanned package directory",
+                map[string]any{
+                    "out":        outputPath,
+                    "importPath": packageBinding.ImportPath(),
+                    "directory":  scannedDirectory,
+                },
+                nil,
+            )
+        }
+    }
+
+    /* an existing file that does not open with the generated marker is someone's source, and the write below truncates it; a mistyped --out must not destroy it */
+    existingContent, readErr := os.ReadFile(outputPath)
+    if nil != readErr && false == os.IsNotExist(readErr) {
         return exception.NewError(
-            "could not create the output directory of the generated wiring",
+            "could not inspect the existing output file",
             map[string]any{
                 "out": outputPath,
             },
-            makeDirectoryErr,
+            readErr,
+        )
+    }
+    if nil == readErr && 0 < len(existingContent) && false == strings.HasPrefix(string(existingContent), generatedFileNote) {
+        return exception.NewError(
+            "the output file exists and is not a generated wiring file; remove it or choose another path",
+            map[string]any{
+                "out": outputPath,
+            },
+            nil,
         )
     }
 
-    writeErr := os.WriteFile(outputPath, []byte(source), 0o644)
+    /* written through the framework's atomic writer, so a write that dies partway leaves the previous file intact */
+    writeErr := internal.WriteFileAtomically(outputPath, []byte(source), "generated wiring file")
     if nil != writeErr {
-        return exception.NewError(
-            "could not write the generated wiring",
-            map[string]any{
-                "out": outputPath,
-            },
-            writeErr,
-        )
+        return writeErr
     }
 
-    fmt.Fprintf(commandContext.Writer, "wiring written to %s\n", outputPath)
+    fmt.Fprintf(commandContext.Writer(), "wiring written to %s\n", outputPath)
 
     return nil
 }
 
+/* journalLineWriter carries the report into the journal, one record per line, in stdout mode, where the stream is the generated source. The count of what was registered is information; every other line names coverage the wiring lost and is a warning, so a journal read at warning keeps it. */
+type journalLineWriter struct {
+    logger  loggingcontract.Logger
+    command string
+    pending string
+
+    /* the reach lines are collected and journaled by flush as one record */
+    globalBindReach []string
+}
+
+func (instance *journalLineWriter) Write(payload []byte) (int, error) {
+    instance.pending = instance.pending + string(payload)
+
+    for {
+        lineEnd := strings.IndexByte(instance.pending, '\n')
+        if 0 > lineEnd {
+            break
+        }
+
+        line := instance.pending[:lineEnd]
+        instance.pending = instance.pending[lineEnd+1:]
+        instance.journalLine(line)
+    }
+
+    return len(payload), nil
+}
+
+/* flush journals a last line written without its line end, which the line loop keeps pending */
+func (instance *journalLineWriter) flush() {
+    line := instance.pending
+    instance.pending = ""
+    instance.journalLine(line)
+
+    if 0 == len(instance.globalBindReach) {
+        return
+    }
+
+    reaches := instance.globalBindReach
+    instance.globalBindReach = nil
+
+    instance.logger.Warning(
+        fmt.Sprintf("%d global %s reach constructors by argument name alone", len(reaches), pluralBinds(len(reaches))),
+        loggingcontract.Context{"command": instance.command, "globalBindReach": reaches},
+    )
+}
+
+func pluralBinds(count int) string {
+    if 1 == count {
+        return "bind"
+    }
+
+    return "binds"
+}
+
+/* globalBindReportPrefix is the one line the journal aggregates rather than repeats; the text is the generator's */
+const globalBindReportPrefix = "global bind "
+
+/* informationReportPrefixes are the report lines that state a fact of a scan that worked: the two counts, and the vendor trees stepped over, which cannot hold a service. The reach of a global bind is not among them: it is the only place an operator learns that one word bound many constructors, so its lines are journaled as one warning whose message carries the count and whose context carries them all. */
+var informationReportPrefixes = []string{
+    "registered ",
+    "skipped vendor directory: ",
+}
+
+func (instance *journalLineWriter) journalLine(line string) {
+    if "" == line {
+        return
+    }
+
+    if true == strings.HasPrefix(line, globalBindReportPrefix) {
+        instance.globalBindReach = append(instance.globalBindReach, strings.TrimPrefix(line, globalBindReportPrefix))
+
+        return
+    }
+
+    for _, prefix := range informationReportPrefixes {
+        if true == strings.HasPrefix(line, prefix) {
+            instance.logger.Info(line, loggingcontract.Context{"command": instance.command})
+
+            return
+        }
+    }
+
+    instance.logger.Warning(line, loggingcontract.Context{"command": instance.command})
+}
+
+/* journal answers the application's logger, resolved through the runtime so the scope's logger wins, and the emergency logger when the runtime carries none. The two doors below are copied from the openapi generate command, since sharing them would need an exported symbol. When an empty kernel.log_path makes the journal write to stdout, where the source goes, the emergency journal, stderr, carries the report. */
+func (instance *GenerateCommand) journal(runtimeInstance runtimecontract.Runtime) loggingcontract.Logger {
+    if true == journalSharesStdout(runtimeInstance) {
+        return logging.EmergencyLogger()
+    }
+
+    logger, resolveErr := runtime.FromRuntime[loggingcontract.Logger](runtimeInstance, logging.ServiceLogger)
+    if nil != resolveErr || nil == logger {
+        return logging.EmergencyLogger()
+    }
+
+    return logger
+}
+
+/* journalSharesStdout reads what the container reads when it builds the logger: an empty log path means the journal writes to stdout. The configuration is read tolerantly, answering false when it is absent or fails to resolve. A logger the application substituted is not readable here, so such an application gives the command --out. */
+func journalSharesStdout(runtimeInstance runtimecontract.Runtime) bool {
+    configuration, resolveErr := container.FromResolver[configcontract.Configuration](runtimeInstance.Container(), config.ServiceConfig)
+    if nil != resolveErr || nil == configuration {
+        return false
+    }
+
+    /* the kernel section is read with the same tolerance */
+    kernelConfiguration := configuration.Kernel()
+    if true == internal.IsNilInterface(kernelConfiguration) {
+        return false
+    }
+
+    return "" == kernelConfiguration.LogPath()
+}
+
 /* writeReport prints what the generation covered and, more importantly, what it did not: a skipped constructor and an unmatched bind are both silent losses of coverage unless they are named. */
 func (instance *GenerateCommand) writeReport(
-    commandContext *clicontract.CommandContext,
+    reportWriter io.Writer,
+    commandContext clicontract.Context,
     report *GenerateReport,
 ) {
-    fmt.Fprintf(commandContext.Writer, "registered %d constructors\n", report.ConstructorCount)
+    fmt.Fprintf(reportWriter, "registered %d constructors\n", report.ConstructorCount)
 
     if 0 < report.ScopedConstructorCount {
-        fmt.Fprintf(commandContext.Writer, "registered %d scoped constructors\n", report.ScopedConstructorCount)
+        fmt.Fprintf(reportWriter, "registered %d scoped constructors\n", report.ScopedConstructorCount)
     }
 
     for _, skipped := range report.Skipped {
         fmt.Fprintf(
-            commandContext.Writer,
+            reportWriter,
             "skipped %s (%s:%d): %s\n",
             skipped.Name,
             skipped.File,
@@ -197,22 +386,31 @@ func (instance *GenerateCommand) writeReport(
         )
     }
 
-    /* vendor trees cannot contribute services, so naming them is opt-in: on a large project the list is noise, but a user wondering where a constructor went can ask for it */
+    /* vendor trees cannot contribute services, so naming them is opt-in */
     if true == commandContext.Bool("report-vendor") {
         for _, vendorDirectory := range report.SkippedVendorDirectories {
-            fmt.Fprintf(commandContext.Writer, "skipped vendor directory: %s\n", vendorDirectory)
+            fmt.Fprintf(reportWriter, "skipped vendor directory: %s\n", vendorDirectory)
         }
     }
 
-    /* a build-excluded file holding a candidate is opt-in for the same reason: a foreign-GOOS variant is legitimate noise, but a user missing a service built under a tag can ask which files the scan left out and pass the tag through --tags */
+    /* a build-excluded file holding a candidate is named on request, so a service built under a tag traces back to the tag to pass through --tags */
     if true == commandContext.Bool("report-excluded") {
         for _, excludedFile := range report.ExcludedFiles {
-            fmt.Fprintf(commandContext.Writer, "excluded by build constraints (holds a constructor candidate): %s\n", excludedFile)
+            fmt.Fprintf(reportWriter, "excluded by build constraints (holds a constructor candidate): %s\n", excludedFile)
         }
     }
 
     for _, unused := range report.UnusedBinds {
-        fmt.Fprintf(commandContext.Writer, "bind %s matched no constructor argument\n", unused)
+        fmt.Fprintf(reportWriter, "bind %s matched no constructor argument\n", unused)
+    }
+
+    for _, unused := range report.UnusedExcludes {
+        fmt.Fprintf(reportWriter, "exclude %s matched no constructor\n", unused)
+    }
+
+    /* the command always hands over the running configuration, so this names the case where it declares nothing */
+    if true == report.BindTargetsUnchecked {
+        fmt.Fprint(reportWriter, "bind targets were not checked: the application declares no parameters\n")
     }
 
     reachedNames := make([]string, 0, len(report.GlobalBindReach))
@@ -226,16 +424,25 @@ func (instance *GenerateCommand) writeReport(
         constructors := report.GlobalBindReach[argumentName]
 
         fmt.Fprintf(
-            commandContext.Writer,
-            "global bind %s reaches %d constructors: %s\n",
+            reportWriter,
+            "global bind %s reaches %d %s: %s\n",
             argumentName,
             len(constructors),
+            pluralConstructors(len(constructors)),
             strings.Join(constructors, ", "),
         )
     }
 }
 
-/* splitBuildTags parses the comma-separated tag list. A build context carries plain tag identifiers, not constraint expressions: a negation or a space-separated pair reaches it as a tag no file can ever declare, so the scan would silently behave as if nothing had been passed — the tagged files stay excluded, their services stay missing from the generated wiring, and strict still reports success. Reject the malformed entry here instead, where the mistake is still traceable to what was typed. */
+func pluralConstructors(count int) string {
+    if 1 == count {
+        return "constructor"
+    }
+
+    return "constructors"
+}
+
+/* splitBuildTags parses the comma-separated tag list. A build context carries plain tag identifiers, so a negation or a space-separated pair is refused here: it would match no file, and the tagged services would silently stay missing while strict reports success. */
 func splitBuildTags(tags string) ([]string, error) {
     if "" == tags {
         return nil, nil

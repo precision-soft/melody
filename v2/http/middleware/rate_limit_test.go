@@ -847,7 +847,7 @@ func TestSlidingWindowLimiter_HoldsTheRateWhereTheFixedWindowDoesNot(t *testing.
     }
 }
 
-/* the deprecated spelling must keep working: it is a type alias plus two forwarding constructors, so an application on the old name is unaffected */
+/* the deprecated spelling must keep working: it is a type alias plus two forwarding constructors, so an application on the deprecated name is unaffected */
 func TestTokenBucketLimiter_DeprecatedAliasStillConstructsTheFixedWindowLimiter(t *testing.T) {
     var limiter *FixedWindowLimiter = NewTokenBucketLimiter(2, time.Minute)
 
@@ -872,7 +872,7 @@ func allowingNext() httpcontract.Handler {
     }
 }
 
-/* IpRateLimit builds its config internally and hands back only the middleware, so the resolver the documentation prescribes for a deployment behind a reverse proxy could never be reached: every client shared the proxy's single budget. The additive variant takes the resolver up front. */
+/* IpRateLimit builds its config internally and hands back only the middleware, so the resolver a deployment behind a reverse proxy needs cannot be set on it, and every client would share the proxy's single budget. The additive variant takes the resolver up front. */
 func TestIpRateLimitWithResolver_ChargesTheForwardedClient(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
     handler := IpRateLimitWithResolver(1, resolver)(allowingNext())
@@ -893,7 +893,7 @@ func TestIpRateLimitWithResolver_ChargesTheForwardedClient(t *testing.T) {
     }
 }
 
-/* The direct-peer behaviour of the original helper is correct without a proxy in front and stays exactly as it was, so an application that upgrades keeps compiling and keeps its semantics. */
+/* The direct-peer behaviour of the original helper is correct without a proxy in front, so an application keeps compiling and keeps its semantics. */
 func TestIpRateLimit_StillChargesTheDirectPeer(t *testing.T) {
     handler := IpRateLimit(1)(allowingNext())
 
@@ -928,7 +928,7 @@ func TestSimpleRateLimitWithResolver_ChargesTheForwardedClient(t *testing.T) {
     }
 }
 
-/* UserRateLimit falls back to the client address for a request carrying no user id, so unauthenticated traffic behind a proxy shared one budget — the traffic a limiter is most needed for. */
+/* UserRateLimit falls back to the client address for a request carrying no user id, so without a resolver unauthenticated traffic behind a proxy would share one budget, the traffic a limiter is most needed for. */
 func TestUserRateLimitWithResolver_ChargesTheForwardedClientWhenAnonymous(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
     anonymous := func(request httpcontract.Request) string { return "" }
@@ -1014,7 +1014,7 @@ func TestSlidingWindowLimiter_MaxDurationWindowSurvivesIdlePrune(t *testing.T) {
     }
 }
 
-/* SimpleRateLimit is one of the three helpers an application actually calls, and no test entered it. Its documented semantics are the direct peer — the resolver cannot be set afterwards because the helper builds its config internally — so two clients behind one proxy sharing a budget is the correct behaviour here, and the sentence that says so needs a test that fails if the helper starts reading a forwarded header. */
+/* SimpleRateLimit is one of the three helpers an application actually calls. Its documented semantics are the direct peer (the resolver cannot be set afterwards because the helper builds its config internally), so two clients behind one proxy sharing a budget is the correct behaviour here, and this fails if the helper starts reading a forwarded header. */
 
 func TestSimpleRateLimit_ChargesTheDirectPeer(t *testing.T) {
     handler := SimpleRateLimit(1)(allowingNext())
@@ -1084,7 +1084,7 @@ func TestUserRateLimit_RefusesANilUserIdCallbackAtConstruction(t *testing.T) {
     }
 }
 
-/* UserRateLimit keys on the identity rather than the address, which is the whole point of it: one user must carry one budget across every address they arrive from, and two users sharing an address must not share one. Neither direction had a test on the helper itself. */
+/* UserRateLimit keys on the identity rather than the address, which is the whole point of it: one user carries one budget across every address they arrive from, and two users sharing an address do not share one. */
 
 func TestUserRateLimit_KeysOnTheIdentityRatherThanTheAddress(t *testing.T) {
     identity := "alice"
@@ -1133,7 +1133,7 @@ func TestUserRateLimit_FallsBackToTheAddressWhenAnonymous(t *testing.T) {
     }
 }
 
-/* the resolver accessor is what makes SetClientIpResolver verifiable from outside; it had no test at all, so a setter that stored nowhere would have read as working through every path that only exercises the default. */
+/* the resolver accessor is what makes SetClientIpResolver verifiable from outside: a setter that stored nowhere would read as working through every path that only exercises the default. */
 
 func TestRateLimitConfig_ClientIpResolverAccessorReportsWhatWasSet(t *testing.T) {
     config := NewRateLimitConfig(NewFixedWindowLimiter(1, time.Minute), nil, nil)
@@ -1216,7 +1216,7 @@ func TestRateLimitMiddleware_RefusesANilConfigByName(t *testing.T) {
     _ = RateLimitMiddleware(nil)
 }
 
-/* the middleware's record classifies the caller's cancellation apart from a store failure: at error every disconnect on a rate-limited route paged the operator for a healthy store. */
+/* the middleware's record classifies the caller's cancellation apart from a store failure: at error every disconnect on a rate-limited route would page the operator for a healthy store. */
 func TestRateLimitMiddleware_ACancelledLimiterCallIsRecordedAtWarning(t *testing.T) {
     capture := &rateLimitCaptureLogger{}
 
@@ -1273,7 +1273,9 @@ func (instance *rateLimitCaptureLogger) Error(message string, context loggingcon
     instance.errorCalls++
 }
 
-type alreadyReportingRuntimeLimiter struct{}
+type alreadyReportingRuntimeLimiter struct {
+    allowWithRuntimeCalls int
+}
 
 func (instance *alreadyReportingRuntimeLimiter) Allow(key string) bool {
     return true
@@ -1283,12 +1285,14 @@ func (instance *alreadyReportingRuntimeLimiter) Reset(key string) {
 }
 
 func (instance *alreadyReportingRuntimeLimiter) AllowWithRuntime(runtimeInstance runtimecontract.Runtime, key string) (bool, error) {
+    instance.allowWithRuntimeCalls++
+
     return true, exception.MarkLogged(
         exception.NewError("rate limiter store failure", exceptioncontract.Context{"key": "actor"}, nil),
     )
 }
 
-/* a limiter that filed its own record marks it, and the middleware then writes nothing beside it. The limiter knows the key and the failure mode and has doors with no error return at all, so it is the honest place to file from; without the mark being read here, arming its default turned every refused request during an outage into two identical records — at the moment the journal is under the most load. */
+/* a limiter that filed its own record marks it, and the middleware then writes nothing beside it. The limiter knows the key and the failure mode and has doors with no error return at all, so it is the honest place to file from; unread, the mark would turn every refused request during an outage into two identical records, at the moment the journal is under the most load. */
 func TestRateLimitMiddleware_AFailureTheLimiterAlreadyRecordedIsNotRecordedAgain(t *testing.T) {
     capture := &rateLimitCaptureLogger{}
 
@@ -1297,7 +1301,8 @@ func TestRateLimitMiddleware_AFailureTheLimiterAlreadyRecordedIsNotRecordedAgain
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, capture)
     runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
 
-    middleware := RateLimitMiddleware(NewRateLimitConfig(&alreadyReportingRuntimeLimiter{}, nil, nil))
+    limiter := &alreadyReportingRuntimeLimiter{}
+    middleware := RateLimitMiddleware(NewRateLimitConfig(limiter, nil, nil))
 
     handler := middleware(
         func(
@@ -1312,11 +1317,127 @@ func TestRateLimitMiddleware_AFailureTheLimiterAlreadyRecordedIsNotRecordedAgain
     request := testhelper.NewHttpTestRequest(nethttp.MethodGet, "http://example.com/limited")
     _, _ = handler(runtimeInstance, httptest.NewRecorder(), request)
 
+    /* an empty journal is also what a middleware that never metered the request leaves behind, so the silence means nothing until the limiter says it was asked */
+    if 1 != limiter.allowWithRuntimeCalls {
+        t.Fatalf("expected the middleware to meter the request exactly once, got %d calls", limiter.allowWithRuntimeCalls)
+    }
+
     if 0 != capture.warningCalls || 0 != capture.errorCalls {
         t.Fatalf(
             "a failure the limiter already recorded must not be recorded a second time, got %d warnings %d errors",
             capture.warningCalls,
             capture.errorCalls,
         )
+    }
+}
+
+/* a typed-nil limiter passes the plain comparison, looks live for the guard, and dereferences its nil receiver on the first request the middleware meters; the interface read refuses it at construction under the same name */
+func TestRateLimitMiddleware_RefusesATypedNilLimiterByName(t *testing.T) {
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatalf("expected the typed-nil limiter to be refused at construction")
+        }
+    }()
+
+    _ = RateLimitMiddleware(NewRateLimitConfig((*FixedWindowLimiter)(nil), nil, nil))
+}
+
+/* the listener door shares the middleware door's refusal. The panic is asserted by NAME: with the guard dead, the nil dispatcher passed in the same call panics too, and a recover that accepts any panic would report that second failure as the refusal it is not. */
+func TestRegisterRateLimitRequestListener_RefusesATypedNilLimiterByName(t *testing.T) {
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatalf("expected the typed-nil limiter to be refused at registration")
+        }
+
+        if false == strings.Contains(fmt.Sprintf("%v", recovered), "limiter is required") {
+            t.Fatalf("expected the refusal to name the limiter, got %v", recovered)
+        }
+    }()
+
+    RegisterRateLimitRequestListener(nil, NewRateLimitConfig((*FixedWindowLimiter)(nil), nil, nil))
+}
+
+/* the marks are searched with a binary search, which is entitled to an ordered slice, so the recorded instant is clamped to the last mark. A wall clock moved backwards under the process would otherwise append out of order, and on an unordered slice the search can cut a LIVE mark away and hand the key its budget back, on a limiter the package points at login, one-time codes and password reset. */
+func TestSlidingWindowLimiter_AClockMovedBackwardsNeverReplenishesTheBudget(t *testing.T) {
+    startedAt := time.Now()
+    frozenClock := clock.NewFrozenClock(startedAt)
+    limiter := NewSlidingWindowLimiterWithClock(frozenClock, 2, 12*time.Second)
+
+    frozenClock.TravelTo(startedAt.Add(20 * time.Second))
+    if false == limiter.Allow("key1") {
+        t.Fatal("expected the first request to be admitted")
+    }
+
+    /* the clock answers an earlier instant than one already recorded */
+    frozenClock.TravelTo(startedAt.Add(5 * time.Second))
+    if false == limiter.Allow("key1") {
+        t.Fatal("expected the second request to be admitted; the budget is two")
+    }
+
+    /* the mark at +20s is still inside the twelve second window that opens at +18s, so the budget is spent */
+    frozenClock.TravelTo(startedAt.Add(30 * time.Second))
+    if true == limiter.Allow("key1") {
+        t.Fatal("expected the refusal: the live mark must not be cut away by a search over unordered marks")
+    }
+}
+
+/* one IPv6 host is routinely handed a /64 and can rotate through it, so the key aggregates an IPv6 address to its /64: keyed on the /128, every request of one host had a budget of its own */
+func TestDefaultKeyExtractor_AggregatesAnIpv6ClientToItsSlash64(t *testing.T) {
+    limiter := NewFixedWindowLimiter(5, time.Minute)
+    config := NewRateLimitConfig(limiter, nil, nil)
+    _ = RateLimitMiddleware(config)
+
+    allowedCount := 0
+    for index := 1; index <= 100; index++ {
+        request := httptest.NewRequest(nethttp.MethodGet, "/api/data", nil)
+        request.RemoteAddr = fmt.Sprintf("[2001:db8:1:2::%x]:4711", index)
+
+        if true == limiter.Allow(config.KeyExtractor()(testhelper.NewHttpTestRequestFromHttpRequest(request))) {
+            allowedCount++
+        }
+    }
+
+    if 5 != allowedCount {
+        t.Fatalf("expected 100 addresses of one /64 to share one budget of 5, got %d allowed", allowedCount)
+    }
+
+    for _, testCase := range []struct {
+        remoteAddress string
+        expectedKey   string
+    }{
+        {"[2001:db8:1:2::1]:4711", "2001:db8:1:2::/64"},
+        {"[2001:db8:1:3::1]:4711", "2001:db8:1:3::/64"},
+        {"[fe80::1%eth0]:4711", "fe80::/64"},
+        {"203.0.113.7:4711", "203.0.113.7"},
+        {"[::ffff:203.0.113.7]:4711", "203.0.113.7"},
+        {"not-an-address", "not-an-address"},
+    } {
+        request := httptest.NewRequest(nethttp.MethodGet, "/api/data", nil)
+        request.RemoteAddr = testCase.remoteAddress
+
+        key := config.KeyExtractor()(testhelper.NewHttpTestRequestFromHttpRequest(request))
+        if testCase.expectedKey != key {
+            t.Fatalf("expected the key of %q to be %q, got %q", testCase.remoteAddress, testCase.expectedKey, key)
+        }
+    }
+}
+
+func TestRateLimitConfig_ClientIpResolver_AnIpv6AddressItResolvesKeysOnItsSlash64(t *testing.T) {
+    request := httptest.NewRequest(nethttp.MethodGet, "/api/data", nil)
+    request.RemoteAddr = "10.0.0.1:4711"
+    request.Header.Set("X-Forwarded-For", "2001:db8:aa:bb:cc:dd:ee:ff")
+
+    config := NewRateLimitConfig(NewFixedWindowLimiter(5, time.Minute), nil, nil)
+    config.SetClientIpResolver(NewForwardedClientIpResolver(httpcontract.ForwardedHeadersPolicy{
+        TrustForwardedHeaders: true,
+        TrustedProxyList:      []string{"10.0.0.0/8"},
+    }))
+    _ = RateLimitMiddleware(config)
+
+    key := config.KeyExtractor()(testhelper.NewHttpTestRequestFromHttpRequest(request))
+    if "2001:db8:aa:bb::/64" != key {
+        t.Fatalf("expected the forwarded IPv6 client to key on its /64, got %q", key)
     }
 }

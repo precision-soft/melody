@@ -13,6 +13,7 @@ import (
     "sync/atomic"
     "testing"
     "time"
+    "unicode/utf8"
 
     "github.com/precision-soft/melody/v2/application"
     clicontract "github.com/precision-soft/melody/v2/cli/contract"
@@ -591,7 +592,7 @@ func TestRunnerCommand_LoopTicksWhileAJobIsStillRunning(t *testing.T) {
     }
 }
 
-/* the job holds itself inside Run for completionDelay AFTER the cancellation reaches its child context, so the two events are ordered rather than raced: a loop that abandons its in-flight jobs returns while the job is still sleeping, and the assertion below sees completedCount==0 every time. Without that delay both goroutines wake on the same cancel() and the job wins by luck, so the test passed even with inFlight.Wait() removed. */
+/* the job holds itself inside Run for completionDelay after the cancellation reaches its child context, so the two events are ordered rather than raced: a loop that abandons its in-flight jobs returns while the job still sleeps, and the assertion sees completedCount==0. Without the delay both goroutines wake on the same cancel() and the job can win by luck. */
 func TestRunnerCommand_LoopWaitsForInFlightJobsOnCancellation(t *testing.T) {
     started := make(chan struct{}, 1)
     job := &blockingCommand{commandName: "job:blocking", started: started, completionDelay: 250 * time.Millisecond}
@@ -1670,7 +1671,7 @@ func TestRunnerCommand_WedgedCommandIsAbandonedAndItsScopeReleased(t *testing.T)
     <-job.started
 }
 
-/* an entry that opts out of the deadline keeps the pre-deadline behaviour: the runner waits for the command however long it takes. */
+/* an entry that opts out of the deadline is waited for however long the command takes. */
 func TestRunnerCommand_NegativeTimeoutOptsOutOfTheDeadline(t *testing.T) {
     job := &sleepingCommand{commandName: "job:top", duration: 150 * time.Millisecond}
 
@@ -1709,7 +1710,7 @@ func TestRunnerCommand_CommandInsideItsTimeoutIsUntouched(t *testing.T) {
     }
 }
 
-/* The deadline is opt-in. Every entry configured before it existed leaves Timeout at zero, and a default of one hour would have begun cutting a ninety-minute job short at sixty on the upgrade that introduced it — a run the entry never asked to be bounded and whose scope would then be torn down under it. An entry that wants the bound asks for it. */
+/* the deadline is opt-in: zero leaves the run unbounded, so a job that takes ninety minutes is never cut short at a bound its entry did not ask for, with its scope torn down under it. */
 func TestTimeoutOfEntry_ZeroLeavesTheRunUnbounded(t *testing.T) {
     if 0 != timeoutOfEntry(&ScheduledCommand{Config: &EntryConfig{}}) {
         t.Fatalf("expected an entry that sets no timeout to run unbounded, got %v", timeoutOfEntry(&ScheduledCommand{Config: &EntryConfig{}}))
@@ -1743,7 +1744,7 @@ func TestGracefulTimeoutOf_TakesTheEntrysOwnWindowAndFallsBackToTheRunnerDefault
         t.Fatalf("expected the entry's own window to be used, got %v", runner.gracefulTimeoutOf(entryWithWindow))
     }
 
-    /* a negative window is not an opt-out: without a deadline the window is never reached, and honouring it would tear the scope down the instant the deadline landed */
+    /* a negative window is not an opt-out: the window opens only once a cancellation has reached the command, and honouring it would tear the scope down the instant that cancellation landed */
     entryWithNegativeWindow := &scheduledRunEntry{gracefulTimeout: gracefulTimeoutOfEntry(&ScheduledCommand{Config: &EntryConfig{GracefulTimeout: -time.Second}})}
     if commandUnwindGrace != runner.gracefulTimeoutOf(entryWithNegativeWindow) {
         t.Fatalf("expected a negative window to read as unset, got %v", runner.gracefulTimeoutOf(entryWithNegativeWindow))
@@ -1891,6 +1892,7 @@ func TestResolveAbandonedRun_ACommandThatAlreadyAnsweredReportsItsOwnOutcome(t *
         "test-run-id",
         context.Background(),
         completed,
+        abandonedAfterDeadline,
     )
 
     if false == errors.Is(resolved, commandErr) {
@@ -1912,6 +1914,7 @@ func TestResolveAbandonedRun_ACommandStillRunningIsReportedAbandoned(t *testing.
         "test-run-id",
         context.Background(),
         make(chan error, 1),
+        abandonedAfterDeadline,
     )
 
     if false == errors.Is(resolved, ErrCommandTimeout) {
@@ -1935,7 +1938,7 @@ func TestResolveAbandonedRun_ADeadlineExceededAnswerCarriesBothFailures(t *testi
     completed := make(chan error, 1)
     completed <- commandErr
 
-    resolved := runner.resolveAbandonedRun(newRunnerTestRuntime(context.Background()), entry, "test-run-id", lapsedContext, completed)
+    resolved := runner.resolveAbandonedRun(newRunnerTestRuntime(context.Background()), entry, "test-run-id", lapsedContext, completed, abandonedAfterDeadline)
 
     if false == errors.Is(resolved, commandErr) || false == errors.Is(resolved, ErrCommandTimeout) {
         t.Fatalf("expected both the timeout and the command's own failure, got %v", resolved)
@@ -2225,7 +2228,7 @@ func TestRunnerCommand_InvokeInstallsThePerRunIdentity(t *testing.T) {
     }
 }
 
-/* the runner accepts the standard flags every melody command carries, so the framework's -v rewrite no longer kills it at parse, and it carries its own two beside them. Asserted by name rather than by count: a count passes just as well when a standard flag is swapped for another, which is not what the sentence above claims. */
+/* the runner accepts the standard flags every melody command carries, which the framework's -v rewrite needs at parse, beside its own two. Asserted by name rather than by count, since a count passes when a standard flag is swapped for another. */
 func TestRunnerCommand_CarriesTheStandardFlags(t *testing.T) {
     runner := NewRunnerCommand(NewConfiguration(), RunnerDialectCrontab)
 
@@ -2306,7 +2309,7 @@ func TestInvoke_AnswersTheRunIdBesideTheOutcome(t *testing.T) {
     }
 }
 
-/* the runner's recovery boundary keeps what wakes an operator usefully: the panic value travels as the cause so errors.Is still reaches the failure underneath, and the stack is captured on the goroutine that raised it. Stringified into the context alone, a nightly job that died on the framework's own idiom reached the record as a message and a command name, with no file and no line anywhere. */
+/* the runner's recovery boundary keeps the panic value as the cause, so errors.Is still reaches the failure underneath, and captures the stack on the goroutine that raised it, so the record carries a file and a line. */
 func TestRunnerCommand_APanickingJobKeepsItsCauseAndItsStack(t *testing.T) {
     rootCause := errors.New("dial tcp 10.0.0.7:5432: connect: connection refused")
 
@@ -2492,7 +2495,7 @@ func (instance *outputWritingProbeCommand) Run(runtimeInstance runtimecontract.R
     return writeErr
 }
 
-/* a job's own output belongs in the journal. Due entries run concurrently and every one of them held the same os.Stdout, so several reports arrived interleaved, in colour, and none of them reached the log file the operator reads — the runner's documented promise that it writes nothing to the command output itself was true only of the runner's own lines. */
+/* a job's own output belongs in the journal: due entries run concurrently, and on the shared os.Stdout their reports would interleave and miss the log file the operator reads. */
 func TestRunnerCommand_ScheduledJobOutputIsCapturedIntoTheJournal(t *testing.T) {
     job := &outputWritingProbeCommand{commandName: "job:reporting", output: "SYNCED 42 ROWS\n"}
 
@@ -2598,7 +2601,7 @@ func TestRunnerCommand_ScheduledJobOutputIsBoundedAndSaysWhatItCut(t *testing.T)
     }
 }
 
-/* the writer itself is where two of its rules live, and neither is observable through a job that writes once: the budget is measured against what is already held, so a second write has to see the first, and the full length is always reported because a short write is an io.Writer contract violation the standard library answers with an error the job would then return as its own failure. */
+/* the writer itself is where two of its rules live, and neither is observable through a job that writes once: the budget is counted against what is already held, so a second write has to see the first, and the full length is always reported because a short write breaks the io.Writer contract and the standard library answers it with an error the job would return as its own failure. */
 func TestScheduledOutputCapture_ReportsTheFullLengthAndBoundsWhatItKeeps(t *testing.T) {
     capture := newScheduledOutputCapture()
 
@@ -2636,7 +2639,7 @@ func TestScheduledOutputCapture_ReportsTheFullLengthAndBoundsWhatItKeeps(t *test
     }
 }
 
-/* an entry declares its own posture, because the runner has none to lend it: the dispatch used to hand the child nothing but its command name, so every job ran on the declared defaults of its flags whatever the entry configured, and the manifest generated from the same Configuration ran a different command line. */
+/* an entry declares its own posture, because the runner has none to lend it: the child receives the entry's arguments, so it runs the command line the manifest generated from the same Configuration runs. */
 func TestRunnerCommand_EntryArgumentsReachTheScheduledCommand(t *testing.T) {
     job := &outputWritingProbeCommand{commandName: "job:posture", output: "done\n"}
 
@@ -2677,14 +2680,7 @@ func newCapturingRunnerRuntime(ctx context.Context) (runtimecontract.Runtime, *c
     return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer), captured
 }
 
-/*
-TestRunnerCommand_OnceRendersTheMachineDocument pins the document a deploy step
-reads. The command declared and validated --format=json through StandardFlags
-and then answered zero bytes on every path: `melody:cron:run --once
---format=json | jq` received an empty stream, which is indistinguishable, to
-the step consuming it, from a missing binary. The only observable effect the
-flag had was that the cli banner disappeared.
-*/
+/* TestRunnerCommand_OnceRendersTheMachineDocument pins the document a deploy step reads: `melody:cron:run --once --format=json | jq` receives one document rather than an empty stream a consumer cannot tell from a missing binary. */
 func TestRunnerCommand_OnceRendersTheMachineDocument(t *testing.T) {
     job := newRecordingCommand("job:top")
 
@@ -2829,14 +2825,7 @@ func TestRunnerCommand_OnceRendersTheFailureInsideTheDocument(t *testing.T) {
     }
 }
 
-/*
-TestRunnerCommand_DeclaresWhatItDrives pins the other half of the same silence.
-A scheduler built over a configuration emptied by a refactor, or whose entries
-an environment gate filtered away, ran forever, exited successfully and wrote
-not one byte on any channel: nothing distinguished it from a healthy one, and
-the absence was noticed days later, when the nightly sweep turned out not to
-have run.
-*/
+/* TestRunnerCommand_DeclaresWhatItDrives pins the declaration that makes a scheduler over an empty or filtered configuration visible: without it such a scheduler runs forever, exits successfully and writes nothing on any channel. */
 func TestRunnerCommand_DeclaresWhatItDrives(t *testing.T) {
     job := newRecordingCommand("job:top")
 
@@ -2890,15 +2879,7 @@ func TestRunnerCommand_DeclaresAnEmptyScheduleAsAWarning(t *testing.T) {
     }
 }
 
-/*
-TestRunScheduledCommand_APanicKeepsItsCauseChain pins the record a panicking
-job produces. The recovery boundary joined its rich error onto the (nil) run
-error, and errors.Join answers an Unwrap of []error while exception.LogContext
-anchors cause and causeChain on errors.Unwrap — the single-value form — so the
-record carried the top message and nothing else: not the context naming the
-parameter, not the chain naming what refused. The same failure RETURNED rather
-than raised filed a complete record, which is the difference this closes.
-*/
+/* TestRunScheduledCommand_APanicKeepsItsCauseChain pins the record a panicking job produces: errors.Join answers an Unwrap of []error while exception.LogContext anchors cause and causeChain on errors.Unwrap, so the boundary assigns rather than joins, and the record carries the context naming the parameter and the chain naming what refused. */
 func TestRunScheduledCommand_APanicKeepsItsCauseChain(t *testing.T) {
     dialErr := errors.New("dial tcp 10.0.0.9:5432: connect: connection refused")
 
@@ -2945,7 +2926,7 @@ func TestRunScheduledCommand_APanicKeepsItsCauseChain(t *testing.T) {
         t.Fatalf("expected the chain to reach what refused, got %v", causeChain)
     }
 
-    /* the context of the panic error itself travels under causeContextChain, which is where LogContext files the context of every link below the top one: the ledger and the endpoint are exactly what tells an outage from a credential change from a wiring fault, and none of the three reached any record while the boundary joined */
+    /* the context of the panic error itself travels under causeContextChain, where LogContext files the context of every link below the top one: the ledger and the endpoint tell an outage from a credential change from a wiring fault */
     causeContextChain, isContextChain := record.context["causeContextChain"].([]map[string]any)
     if false == isContextChain || 0 == len(causeContextChain) {
         t.Fatalf("expected the cause context chain in the record, got %v", record.context["causeContextChain"])
@@ -3027,14 +3008,7 @@ func TestTimeoutError_WithoutACommandFailureWrapsTheSentinelAlone(t *testing.T) 
     }
 }
 
-/*
-TestInvoke_ACommandFailureAndAScopeCloseFailureBothSurvive pins the shape that
-replaced the join at the scope-close boundary. The command's own failure stays
-the wrapped one, so its context and its whole cause chain still reach the
-record; the close failure travels beside it in the context, where a join would
-have emptied both — errors.Join answers an Unwrap of []error and
-exception.LogContext anchors cause and causeChain on the single-value form.
-*/
+/* TestInvoke_ACommandFailureAndAScopeCloseFailureBothSurvive pins the scope-close boundary: the command's failure stays the wrapped one, so its context and cause chain reach the record, and the close failure travels beside it in the context, since errors.Join answers an Unwrap of []error and exception.LogContext anchors on the single-value form. */
 func TestInvoke_ACommandFailureAndAScopeCloseFailureBothSurvive(t *testing.T) {
     job := newRecordingCommand("job:top")
     job.runErr = exception.NewError(
@@ -3090,12 +3064,7 @@ func TestInvoke_ACommandFailureAndAScopeCloseFailureBothSurvive(t *testing.T) {
     }
 }
 
-/*
-TestRunLoop_IsSilentOnAMinuteThatDispatchedNothing pins the default posture of
-the scheduler loop's document. A per-minute document for an entry that runs
-once a night would be 1439 lines a day saying nothing, so a minute that
-dispatched nothing is silent unless --report-idle asks for it.
-*/
+/* TestRunLoop_IsSilentOnAMinuteThatDispatchedNothing pins the default posture of the scheduler loop's document. A per-minute document for an entry that runs once a night would be 1439 lines a day saying nothing, so a minute that dispatched nothing is silent unless --report-idle asks for it. */
 func TestRunLoop_IsSilentOnAMinuteThatDispatchedNothing(t *testing.T) {
     buffer, finished, cancel := driveOneIdleLoopMinute(t, false)
     defer cancel()
@@ -3107,11 +3076,7 @@ func TestRunLoop_IsSilentOnAMinuteThatDispatchedNothing(t *testing.T) {
     }
 }
 
-/*
-TestRunLoop_ReportsAnIdleMinuteWhenAsked pins the flag: without it a consumer
-cannot tell a live scheduler with nothing due from a dead one, since both write
-nothing at all.
-*/
+/* TestRunLoop_ReportsAnIdleMinuteWhenAsked pins the flag: without it a consumer cannot tell a live scheduler with nothing due from a dead one, since both write nothing at all. */
 func TestRunLoop_ReportsAnIdleMinuteWhenAsked(t *testing.T) {
     buffer, finished, cancel := driveOneIdleLoopMinute(t, true)
     defer cancel()
@@ -3183,7 +3148,7 @@ func driveOneIdleLoopMinute(t *testing.T, reportIdle bool) (*bytes.Buffer, chan 
     return buffer, finished, cancel
 }
 
-/* the arguments field is a list on every row, empty rather than null for the entry that declares none — which is most of them. A field whose json type changes with the outcome cannot be consumed at all: `jq '.data.ran[].arguments | length'` died on the first argument-less job, in the one document of this family that was left unguarded while its siblings — error, ran, failed, pruned — each got a normalizer of their own. */
+/* the arguments field is a list on every row, empty rather than null for the entry that declares none, so `jq '.data.ran[].arguments | length'` reads every row. */
 func TestRunnerCommand_TheArgumentsFieldIsAListOnEveryRow(t *testing.T) {
     withArguments := newRecordingCommand("job:with")
     withoutArguments := newRecordingCommand("job:without")
@@ -3245,7 +3210,7 @@ func TestRunnerCommand_TheArgumentsFieldIsAListOnEveryRow(t *testing.T) {
     }
 }
 
-/* the classification the row is built from is the classification the record is filed under, because reportRunOutcome takes it instead of computing a second one. It is driven here with a LIVE runtime context and a cancellation error: recomputing would answer "not a shutdown" for both calls, so the run reported cancelled would be filed as a failure and counted as one — which is exactly what a SIGTERM landing between the two reads used to produce, a document saying failed over a process exiting 0. */
+/* the classification the row is built from is the classification the record is filed under, because reportRunOutcome takes it instead of computing a second one. It is driven with a live runtime context and a cancellation error: recomputing would answer "not a shutdown" for both calls, so the run reported cancelled would be filed and counted as a failure, a document saying failed over a process exiting 0. */
 func TestRunnerCommand_ReportRunOutcomeTakesTheClassificationItIsGiven(t *testing.T) {
     runner := NewRunnerCommand(NewConfiguration(), RunnerDialectCrontab)
     entry := &scheduledRunEntry{commandName: "job:probe"}
@@ -3311,7 +3276,7 @@ func TestRunnerCommand_ReportRunOutcomeIsSilentForASuccessfulRun(t *testing.T) {
     }
 }
 
-/* the evaluated minute doubles as the document's timestamp, so the ordinary advance must carry the real local instant — offset and all — while only the minutes a forward jump skipped, which have no local representation, stay utc-materialized. The pseudo-utc rendering used to reach the document as a real instant, off by the whole zone offset and disagreeing with the --once mode. */
+/* the evaluated minute doubles as the document's timestamp, so the ordinary advance carries the real local instant, offset and all, while only the minutes a forward jump skipped, which have no local representation, stay utc-materialized. */
 func TestReconcileWallClockReportsTheCurrentMinuteAsRealLocalTime(t *testing.T) {
     zone := time.FixedZone("probe", 3*3600)
     previousTarget := time.Date(2026, time.August, 15, 3, 29, 0, 0, zone)
@@ -3336,7 +3301,8 @@ func TestReconcileWallClockReportsTheCurrentMinuteAsRealLocalTime(t *testing.T) 
     }
 }
 
-func TestReconcileWallClockKeepsOnlyTheSkippedMinutesUtcMaterialized(t *testing.T) {
+/* the fixed zone has no daylight-saving gap, so every minute a three-minute jump skips exists on its calendar and is reported as the real local instant; a skipped minute never runs the wildcard class. */
+func TestReconcileWallClock_CatchUpMinutesTheZoneHasAreRealLocalTime(t *testing.T) {
     zone := time.FixedZone("probe", 3*3600)
     previousTarget := time.Date(2026, time.August, 15, 3, 0, 0, 0, zone)
     current := time.Date(2026, time.August, 15, 3, 3, 2, 0, zone)
@@ -3347,7 +3313,9 @@ func TestReconcileWallClockKeepsOnlyTheSkippedMinutesUtcMaterialized(t *testing.
     }
 
     expectedCurrent := "2026-08-15T03:03:00+03:00"
+    expectedSkipped := []string{"2026-08-15T03:01:00+03:00", "2026-08-15T03:02:00+03:00"}
 
+    skipped := []string{}
     fixedTimeAtCurrent := 0
     for _, evaluation := range evaluations {
         rendered := evaluation.at.Format(time.RFC3339)
@@ -3360,14 +3328,15 @@ func TestReconcileWallClockKeepsOnlyTheSkippedMinutesUtcMaterialized(t *testing.
             continue
         }
 
-        /* a skipped minute has no local representation to print, so its materialization stays utc — and it must never carry the wildcard class */
-        if false == strings.HasSuffix(rendered, "Z") {
-            t.Fatalf("expected the skipped minute to stay utc-materialized, got %q", rendered)
-        }
-
         if true == evaluation.runWildcard {
             t.Fatalf("a skipped minute must not run wildcard entries, got %q", rendered)
         }
+
+        skipped = append(skipped, rendered)
+    }
+
+    if fmt.Sprintf("%v", expectedSkipped) != fmt.Sprintf("%v", skipped) {
+        t.Fatalf("expected the skipped minutes as real local instants %v, got %v", expectedSkipped, skipped)
     }
 
     if 1 != fixedTimeAtCurrent {
@@ -3395,5 +3364,697 @@ func TestReconcileWallClockReportsTheRepeatedMinuteAsRealLocalTime(t *testing.T)
 
     if false == nextTarget.Equal(previousTarget) {
         t.Fatal("a repeated minute must leave the chain anchored")
+    }
+}
+
+/* ignoringCommand blocks until released and never looks at its context: the shape of a job wedged on a deadline-less read. */
+type ignoringCommand struct {
+    commandName string
+    started     chan struct{}
+    release     chan struct{}
+    completed   atomic.Int64
+}
+
+func newIgnoringCommand(name string) *ignoringCommand {
+    return &ignoringCommand{commandName: name, started: make(chan struct{}, 1), release: make(chan struct{})}
+}
+
+func (instance *ignoringCommand) Name() string {
+    return instance.commandName
+}
+
+func (instance *ignoringCommand) Description() string {
+    return "ignoring command"
+}
+
+func (instance *ignoringCommand) Flags() []clicontract.Flag {
+    return nil
+}
+
+func (instance *ignoringCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+    select {
+    case instance.started <- struct{}{}:
+    default:
+    }
+
+    <-instance.release
+
+    instance.completed.Add(1)
+
+    return nil
+}
+
+func (instance *ignoringCommand) awaitStart(t *testing.T) {
+    t.Helper()
+
+    select {
+    case <-instance.started:
+    case <-time.After(3 * time.Second):
+        t.Fatal("expected the job to start")
+    }
+}
+
+/* awaitWithin runs the given call on a goroutine and fails the test by name when it does not return inside the budget, so a bound the runner lost fails on the timer instead of hanging the suite. */
+func awaitWithin(t *testing.T, budget time.Duration, label string, run func()) {
+    t.Helper()
+
+    done := make(chan struct{})
+    go func() {
+        run()
+        close(done)
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(budget):
+        t.Fatalf("%s did not return within %s", label, budget)
+    }
+}
+
+func newLoggingRunnerTestRuntime(ctx context.Context, logger loggingcontract.Logger) runtimecontract.Runtime {
+    serviceContainer := container.NewContainer()
+    serviceContainer.MustRegister(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return logger, nil
+        },
+    )
+
+    return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+}
+
+func TestWallMinuteTime_AMinuteInsideTheSpringForwardGapStaysUtcMaterialized(t *testing.T) {
+    bucharest, locationErr := time.LoadLocation("Europe/Bucharest")
+    if nil != locationErr {
+        t.Fatalf("could not load the location: %v", locationErr)
+    }
+
+    /* 2026-03-29 03:30 does not exist in Bucharest: the clocks go from 03:00 to 04:00 */
+    gapIndex := wallMinuteIndex(time.Date(2026, time.March, 29, 3, 30, 0, 0, time.UTC))
+
+    materialized := wallMinuteTime(gapIndex, bucharest)
+    if rendered := materialized.Format(time.RFC3339); "2026-03-29T03:30:00Z" != rendered {
+        t.Fatalf("expected the gap minute utc-materialized with its own fields, got %q", rendered)
+    }
+
+    matcher, parseErr := newScheduleMatcher(&Schedule{Minute: "30", Hour: "3"}, RunnerDialectCrontab)
+    if nil != parseErr {
+        t.Fatalf("unexpected error: %v", parseErr)
+    }
+
+    if false == matcher.Matches(materialized) {
+        t.Fatal("a fixed-time entry pinned inside the gap must still match the materialized minute")
+    }
+}
+
+func TestWallMinuteTime_AMinuteTheZoneHasIsItsLocalInstant(t *testing.T) {
+    bucharest, locationErr := time.LoadLocation("Europe/Bucharest")
+    if nil != locationErr {
+        t.Fatalf("could not load the location: %v", locationErr)
+    }
+
+    index := wallMinuteIndex(time.Date(2026, time.March, 29, 4, 1, 0, 0, bucharest))
+
+    if rendered := wallMinuteTime(index, bucharest).Format(time.RFC3339); "2026-03-29T04:01:00+03:00" != rendered {
+        t.Fatalf("expected the real local instant, got %q", rendered)
+    }
+}
+
+/* a suspend that spans the spring-forward walks through both kinds of minute in one catch-up: the ones inside the gap have no local instant and stay utc-materialized, the ones after it are real local time. */
+func TestReconcileWallClock_ACatchUpAcrossTheSpringForwardKeepsOnlyTheGapUtc(t *testing.T) {
+    bucharest, locationErr := time.LoadLocation("Europe/Bucharest")
+    if nil != locationErr {
+        t.Fatalf("could not load the location: %v", locationErr)
+    }
+
+    previousTarget := time.Date(2026, time.March, 29, 2, 59, 0, 0, bucharest)
+    current := time.Date(2026, time.March, 29, 4, 2, 5, 0, bucharest)
+
+    evaluations, _, note := reconcileWallClock(previousTarget, current)
+    if "" != note {
+        t.Fatalf("unexpected note: %s", note)
+    }
+
+    rendered := map[string]bool{}
+    for _, evaluation := range evaluations {
+        rendered[evaluation.at.Format(time.RFC3339)] = true
+    }
+
+    for _, expected := range []string{"2026-03-29T03:00:00Z", "2026-03-29T03:59:00Z", "2026-03-29T04:00:00+03:00", "2026-03-29T04:01:00+03:00", "2026-03-29T04:02:00+03:00"} {
+        if false == rendered[expected] {
+            t.Fatalf("expected %q among the evaluated minutes, got %v", expected, rendered)
+        }
+    }
+
+    for _, unexpected := range []string{"2026-03-29T04:00:00Z", "2026-03-29T04:30:00+03:00"} {
+        if true == rendered[unexpected] {
+            t.Fatalf("did not expect %q among the evaluated minutes", unexpected)
+        }
+    }
+}
+
+func TestRunnerCommand_OnceReportsTheWallMinute(t *testing.T) {
+    job := newRecordingCommand("job:top")
+
+    configuration := NewConfiguration().
+        Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner.now = func() time.Time {
+        return time.Date(2026, time.July, 15, 9, 0, 37, 0, time.FixedZone("probe", 3*3600))
+    }
+
+    buffer := &bytes.Buffer{}
+
+    cliCommand := &urfavecli.Command{
+        Name:   runner.Name(),
+        Flags:  runner.Flags(),
+        Writer: buffer,
+        Action: func(ctx context.Context, commandContext *urfavecli.Command) error {
+            return runner.Run(newRunnerTestRuntime(ctx), commandContext)
+        },
+    }
+
+    if runErr := cliCommand.Run(context.Background(), []string{runner.Name(), "--once", "--format=json"}); nil != runErr {
+        t.Fatalf("unexpected error running --once: %v", runErr)
+    }
+
+    document := struct {
+        Data struct {
+            At string `json:"at"`
+        } `json:"data"`
+    }{}
+    if decodeErr := json.Unmarshal(buffer.Bytes(), &document); nil != decodeErr {
+        t.Fatalf("expected one json document, got %q: %v", buffer.String(), decodeErr)
+    }
+
+    if "2026-07-15T09:00:00+03:00" != document.Data.At {
+        t.Fatalf("expected --once to report the wall minute the loop reports, got %q", document.Data.At)
+    }
+}
+
+func TestRunnerCommand_ShutdownAbandonsAJobThatIgnoresItsCancellation(t *testing.T) {
+    job := newIgnoringCommand("job:ignoring")
+    defer close(job.release)
+
+    configuration := NewConfiguration().
+        Schedule("job:ignoring", &EntryConfig{})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner.unwindGrace = 50 * time.Millisecond
+
+    baseMinute := time.Date(2026, time.July, 15, 9, 29, 0, 0, time.UTC)
+
+    var nowCallCount atomic.Int32
+    runner.now = func() time.Time {
+        callIndex := nowCallCount.Add(1)
+        if 1 == callIndex {
+            return baseMinute.Add(59*time.Second + 990*time.Millisecond)
+        }
+
+        if 2 == callIndex {
+            return baseMinute.Add(59*time.Second + 995*time.Millisecond)
+        }
+
+        return baseMinute.Add(time.Minute + 100*time.Millisecond)
+    }
+
+    captured := &capturingRunnerLogger{}
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    finished := make(chan error, 1)
+    go func() {
+        finished <- runner.runLoop(newLoggingRunnerTestRuntime(ctx, captured))
+    }()
+
+    job.awaitStart(t)
+    cancel()
+
+    awaitWithin(t, 2*time.Second, "the loop over a job ignoring the shutdown", func() { <-finished })
+
+    if 0 != job.completed.Load() {
+        t.Fatal("the job must still be running when the loop returns: it was abandoned, not finished")
+    }
+
+    record, found := captured.recordByMessageProbe("cron: scheduled command ignored the shutdown cancellation for the whole graceful window and is being abandoned; its container scope is closed under it while it may still be running")
+    if false == found {
+        t.Fatalf("expected the shutdown abandon to be announced, got %v", captured.entries)
+    }
+
+    if (50 * time.Millisecond).String() != fmt.Sprintf("%v", record.context["gracefulTimeout"]) {
+        t.Fatalf("expected the warning to name the window, got %v", record.context)
+    }
+}
+
+func TestRunnerCommand_ShutdownAbandonsAJobWhoseDeadlineIsOutOfReach(t *testing.T) {
+    job := newIgnoringCommand("job:ignoring")
+    defer close(job.release)
+
+    configuration := NewConfiguration().
+        Schedule("job:ignoring", &EntryConfig{Schedule: &Schedule{Minute: "0"}, Timeout: time.Hour})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner.unwindGrace = 50 * time.Millisecond
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    completed := make(chan error, 1)
+    go func() {
+        completed <- invokeDiscardingRunId(runner, newRunnerTestRuntime(ctx), runner.entries[0])
+    }()
+
+    job.awaitStart(t)
+    cancel()
+
+    var invokeErr error
+    awaitWithin(t, 2*time.Second, "invoke over a job ignoring the shutdown", func() { invokeErr = <-completed })
+
+    if false == errors.Is(invokeErr, ErrCommandTimeout) {
+        t.Fatalf("expected the abandon to be classified with ErrCommandTimeout, got %v", invokeErr)
+    }
+
+    if true == errors.Is(invokeErr, context.Canceled) {
+        t.Fatalf("an abandoned run must not read as a cancellation the command honoured, got %v", invokeErr)
+    }
+
+    if false == strings.Contains(invokeErr.Error(), "shutdown cancellation") {
+        t.Fatalf("expected the failure to name the shutdown, got %v", invokeErr)
+    }
+}
+
+func TestDispatchDue_AShutdownAbandonedRunIsFailedNotCancelled(t *testing.T) {
+    job := newIgnoringCommand("job:ignoring")
+    defer close(job.release)
+
+    configuration := NewConfiguration().
+        Schedule("job:ignoring", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner.unwindGrace = 50 * time.Millisecond
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
+    wait := runner.dispatchDue(newRunnerTestRuntime(ctx), at, true, true)
+
+    job.awaitStart(t)
+    cancel()
+
+    var report dueReport
+    var runErr error
+    awaitWithin(t, 2*time.Second, "the --once wait over a job ignoring the shutdown", func() { report, runErr = wait() })
+
+    if nil == runErr || false == errors.Is(runErr, ErrCommandTimeout) {
+        t.Fatalf("expected the minute to aggregate the abandon as a failure, got %v", runErr)
+    }
+
+    if 1 != len(report.Ran) {
+        t.Fatalf("expected one run in the document, got %v", report.Ran)
+    }
+
+    if false == report.Ran[0].Failed || true == report.Ran[0].Cancelled {
+        t.Fatalf("an abandoned run is failed, not cancelled: got failed=%v cancelled=%v", report.Ran[0].Failed, report.Ran[0].Cancelled)
+    }
+}
+
+/* the graceful window is a wait, not a kill: a job that unwinds inside it after the shutdown reports its own outcome. */
+func TestRunnerCommand_ShutdownWaitsForAJobThatUnwindsInsideTheGracefulWindow(t *testing.T) {
+    job := newIgnoringCommand("job:ignoring")
+
+    configuration := NewConfiguration().
+        Schedule("job:ignoring", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner.unwindGrace = time.Second
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    completed := make(chan error, 1)
+    go func() {
+        completed <- invokeDiscardingRunId(runner, newRunnerTestRuntime(ctx), runner.entries[0])
+    }()
+
+    job.awaitStart(t)
+    cancel()
+
+    time.Sleep(100 * time.Millisecond)
+    close(job.release)
+
+    var invokeErr error
+    awaitWithin(t, 3*time.Second, "invoke over a job unwinding inside the window", func() { invokeErr = <-completed })
+
+    if nil != invokeErr {
+        t.Fatalf("expected the job's own outcome, got %v", invokeErr)
+    }
+
+    if 1 != job.completed.Load() {
+        t.Fatalf("expected the job to have completed once, got %d", job.completed.Load())
+    }
+}
+
+func TestResolveAbandonedRun_AShutdownAbandonNamesTheShutdownAndIsNotACancellation(t *testing.T) {
+    configuration := NewConfiguration().
+        Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, newRecordingCommand("job:top"))
+    entry := runner.entries[0]
+
+    ctx, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    runtimeInstance := newRunnerTestRuntime(ctx)
+
+    resolved := runner.resolveAbandonedRun(runtimeInstance, entry, "test-run-id", ctx, make(chan error, 1), abandonedAfterShutdown)
+    if nil == resolved {
+        t.Fatal("expected the abandoned run to be reported")
+    }
+
+    if false == strings.Contains(resolved.Error(), "shutdown cancellation") {
+        t.Fatalf("expected the failure to name the shutdown, got %v", resolved)
+    }
+
+    if false == errors.Is(resolved, ErrCommandTimeout) {
+        t.Fatalf("expected the failure to carry the timeout classification, got %v", resolved)
+    }
+
+    if true == isShutdownCancellation(runtimeInstance, resolved) {
+        t.Fatal("an abandoned run must not be classified as a shutdown cancellation the command honoured")
+    }
+}
+
+/* panickingScopeContainer refuses the FIRST scope asked of it and answers the rest, so the minute-mate of the refused run still gets one. */
+type panickingScopeContainer struct {
+    containercontract.Container
+    refused *atomic.Bool
+}
+
+func (instance panickingScopeContainer) NewScope() containercontract.Scope {
+    if true == instance.refused.CompareAndSwap(false, true) {
+        panic("the application's container refused a scope")
+    }
+
+    return instance.Container.NewScope()
+}
+
+type panickingCloseScope struct {
+    containercontract.Scope
+}
+
+func (instance panickingCloseScope) Close() error {
+    panic("the application's scope panicked on close")
+}
+
+type panickingCloseContainer struct {
+    containercontract.Container
+}
+
+func (instance panickingCloseContainer) NewScope() containercontract.Scope {
+    return panickingCloseScope{Scope: instance.Container.NewScope()}
+}
+
+/* panickingLogger panics on every record: the shape of an application logger whose sink is gone. */
+type panickingLogger struct{}
+
+func (instance *panickingLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+    panic("the application's logger panicked on " + message)
+}
+
+func (instance *panickingLogger) Debug(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelDebug, message, context)
+}
+
+func (instance *panickingLogger) Info(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelInfo, message, context)
+}
+
+func (instance *panickingLogger) Warning(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelWarning, message, context)
+}
+
+func (instance *panickingLogger) Error(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelError, message, context)
+}
+
+func (instance *panickingLogger) Emergency(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelEmergency, message, context)
+}
+
+/* errorWithPanickingText is a failure whose Error() panics, the shape the container's own teardown guards against. */
+type errorWithPanickingText struct{}
+
+func (instance errorWithPanickingText) Error() string {
+    panic("the application's error panicked rendering itself")
+}
+
+func dispatchOnePanicProbe(t *testing.T, runtimeInstance runtimecontract.Runtime, job clicontract.Command) (dueReport, error, *recordingCommand) {
+    t.Helper()
+
+    healthy := newRecordingCommand("job:healthy")
+
+    configuration := NewConfiguration().
+        Schedule(job.Name(), &EntryConfig{Schedule: &Schedule{Minute: "0"}}).
+        Schedule("job:healthy", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job, healthy)
+
+    at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
+    wait := runner.dispatchDue(runtimeInstance, at, true, true)
+
+    var report dueReport
+    var runErr error
+    awaitWithin(t, 2*time.Second, "the minute's wait", func() { report, runErr = wait() })
+
+    return report, runErr, healthy
+}
+
+func assertRunnerPanicFiled(t *testing.T, report dueReport, runErr error, healthy *recordingCommand, commandName string, panicText string) {
+    t.Helper()
+
+    if nil == runErr {
+        t.Fatal("expected the minute to aggregate the contained panic as a failure")
+    }
+
+    aggregate, isExceptionError := runErr.(*exception.Error)
+    if false == isExceptionError {
+        t.Fatalf("expected an exception error, got %T", runErr)
+    }
+
+    if false == strings.Contains(fmt.Sprintf("%v", aggregate.Context()["commands"]), commandName) {
+        t.Fatalf("expected %q among the failed commands, got %v", commandName, aggregate.Context()["commands"])
+    }
+
+    var filed *exception.Error
+    found := false
+    for _, run := range report.Ran {
+        if run.Command != commandName {
+            continue
+        }
+
+        found = true
+
+        if false == run.Failed || true == run.Cancelled {
+            t.Fatalf("expected the run filed as failed, got failed=%v cancelled=%v", run.Failed, run.Cancelled)
+        }
+
+        if "" == run.RunId {
+            t.Fatal("expected the filed row to carry the run id")
+        }
+
+        if false == strings.Contains(run.Error, "runner panicked") {
+            t.Fatalf("expected the row to name the contained panic, got %q", run.Error)
+        }
+    }
+
+    if false == found {
+        t.Fatalf("expected %q in the document, got %v", commandName, report.Ran)
+    }
+
+    /* the aggregate wraps the join of the minute's failures; the filed one is the first exception error beneath it */
+    if false == errors.As(errors.Unwrap(runErr), &filed) {
+        t.Fatalf("expected the contained panic beneath the aggregate, got %v", runErr)
+    }
+
+    if false == strings.Contains(fmt.Sprintf("%v", filed.Context()["panicValue"]), panicText) {
+        t.Fatalf("expected the panic value in the failure's context, got %v", filed.Context())
+    }
+
+    if 1 != healthy.runCount {
+        t.Fatalf("expected the healthy command to still run, ran %d", healthy.runCount)
+    }
+}
+
+/* the two runs of the minute race for the one refused scope, so the assertion is on the shape of the minute, not on which entry drew it: one run filed as the runner's own panic, the other completed. */
+func TestDispatchDue_APanicPreparingARunIsFiledAsThatRunsFailure(t *testing.T) {
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), panickingScopeContainer{Container: serviceContainer, refused: &atomic.Bool{}})
+
+    first := newRecordingCommand("job:one")
+    report, runErr, healthy := dispatchOnePanicProbe(t, runtimeInstance, first)
+
+    if nil == runErr || false == strings.Contains(runErr.Error(), "scheduled commands failed") {
+        t.Fatalf("expected the minute to aggregate the contained panic, got %v", runErr)
+    }
+
+    if 2 != len(report.Ran) {
+        t.Fatalf("expected both runs in the document, got %v", report.Ran)
+    }
+
+    failed := 0
+    for _, run := range report.Ran {
+        if false == run.Failed {
+            continue
+        }
+
+        failed++
+
+        if "" == run.RunId || false == strings.Contains(run.Error, "runner panicked") {
+            t.Fatalf("expected the refused run filed with its id and the contained panic, got %+v", run)
+        }
+    }
+
+    if 1 != failed {
+        t.Fatalf("expected exactly one run filed as the runner's panic, got %d", failed)
+    }
+
+    if 1 != first.runCount+healthy.runCount {
+        t.Fatalf("expected the run that got a scope to complete, ran %d and %d", first.runCount, healthy.runCount)
+    }
+
+    var filed *exception.Error
+    if false == errors.As(errors.Unwrap(runErr), &filed) || false == strings.Contains(fmt.Sprintf("%v", filed.Context()["panicValue"]), "refused a scope") {
+        t.Fatalf("expected the panic value beneath the aggregate, got %v", runErr)
+    }
+}
+
+func TestDispatchDue_APanicClosingTheChildScopeIsFiledAsThatRunsFailure(t *testing.T) {
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), panickingCloseContainer{Container: serviceContainer})
+
+    report, runErr, healthy := dispatchOnePanicProbe(t, runtimeInstance, newRecordingCommand("job:one"))
+
+    assertRunnerPanicFiled(t, report, runErr, healthy, "job:one", "panicked on close")
+}
+
+func TestDispatchDue_APanicInTheLoggerIsFiledAsThatRunsFailure(t *testing.T) {
+    failing := newRecordingCommand("job:one")
+    failing.runErr = errors.New("job failed")
+
+    report, runErr, healthy := dispatchOnePanicProbe(t, newLoggingRunnerTestRuntime(context.Background(), &panickingLogger{}), failing)
+
+    assertRunnerPanicFiled(t, report, runErr, healthy, "job:one", "logger panicked")
+}
+
+func TestDispatchDue_AFailureWhoseTextPanicsDoesNotHoldTheMinute(t *testing.T) {
+    failing := newRecordingCommand("job:one")
+    failing.runErr = errorWithPanickingText{}
+
+    report, runErr, healthy := dispatchOnePanicProbe(t, newRunnerTestRuntime(context.Background()), failing)
+
+    assertRunnerPanicFiled(t, report, runErr, healthy, "job:one", "rendering itself")
+}
+
+/* an application that registers its logger under the concrete type of its provider refuses the runner's per-run logger override, as the cli entry point does, and the run fails rather than the process. */
+func TestDispatchDue_ALoggerRegisteredUnderItsConcreteTypeFailsTheRunNotTheProcess(t *testing.T) {
+    serviceContainer := container.NewContainer()
+    serviceContainer.MustRegister(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (*capturingRunnerLogger, error) {
+            return &capturingRunnerLogger{}, nil
+        },
+    )
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    report, runErr, healthy := dispatchOnePanicProbe(t, runtimeInstance, newRecordingCommand("job:one"))
+
+    if nil == runErr {
+        t.Fatal("expected the refused override to be filed as a failure")
+    }
+
+    for _, run := range report.Ran {
+        if false == run.Failed {
+            t.Fatalf("expected every run to be filed as failed under the refused override, got %v", report.Ran)
+        }
+    }
+
+    if 0 != healthy.runCount {
+        t.Fatalf("the healthy command cannot run either: its own override is refused the same way, ran %d", healthy.runCount)
+    }
+}
+
+/* the budget lands in the middle of a two-byte rune: what is kept must still be valid text, so the cut backs off to the rune's start and the whole rune counts as dropped. */
+func TestScheduledOutputCapture_CutsOnARuneBoundary(t *testing.T) {
+    capture := newScheduledOutputCapture()
+
+    filler := strings.Repeat("a", scheduledOutputCaptureLimit-1)
+    if _, writeErr := capture.Write([]byte(filler)); nil != writeErr {
+        t.Fatalf("unexpected error: %v", writeErr)
+    }
+
+    written, writeErr := capture.Write([]byte("é"))
+    if nil != writeErr || 2 != written {
+        t.Fatalf("expected the full length reported, got %d, %v", written, writeErr)
+    }
+
+    kept, dropped := capture.captured()
+    if false == utf8.ValidString(kept) {
+        t.Fatal("expected the kept output to be valid utf-8")
+    }
+
+    if scheduledOutputCaptureLimit-1 != len(kept) {
+        t.Fatalf("expected the cut backed off to the rune start, kept %d bytes", len(kept))
+    }
+
+    if 2 != dropped {
+        t.Fatalf("expected the whole split rune counted as dropped, got %d", dropped)
+    }
+}
+
+/* the contained panic is also recorded, when the logger is not the collaborator that panicked: the row and the aggregate carry it regardless, the record is the operator's line. */
+func TestDispatchDue_AContainedPanicIsRecordedWhenTheLoggerCanWrite(t *testing.T) {
+    captured := &capturingRunnerLogger{}
+    serviceContainer := container.NewContainer()
+    serviceContainer.MustRegister(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return captured, nil
+        },
+    )
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), panickingCloseContainer{Container: serviceContainer})
+
+    _, runErr, _ := dispatchOnePanicProbe(t, runtimeInstance, newRecordingCommand("job:one"))
+    if nil == runErr {
+        t.Fatal("expected the contained panic aggregated as a failure")
+    }
+
+    record, found := captured.recordByMessageProbe("cron runner command failed")
+    if false == found {
+        t.Fatalf("expected the contained panic recorded, got %v", captured.entries)
+    }
+
+    if false == strings.Contains(fmt.Sprintf("%v", record.context), "panicked on close") {
+        t.Fatalf("expected the record to carry the panic value, got %v", record.context)
+    }
+}
+
+/* two entries may schedule one command: ordered by the command alone their rows would keep the order the runs finished in */
+func TestDueRunSortsBefore_OrdersOneCommandsRunsByScheduleThenArguments(t *testing.T) {
+    earlierSchedule := dueRun{Command: "report", Schedule: "*/5 * * * *"}
+    laterSchedule := dueRun{Command: "report", Schedule: "0 * * * *"}
+    if false == dueRunSortsBefore(earlierSchedule, laterSchedule) || true == dueRunSortsBefore(laterSchedule, earlierSchedule) {
+        t.Fatalf("expected two runs of one command ordered by their schedule")
+    }
+
+    fewerArguments := dueRun{Command: "report", Schedule: "0 * * * *", Arguments: []string{"a"}}
+    moreArguments := dueRun{Command: "report", Schedule: "0 * * * *", Arguments: []string{"b"}}
+    if false == dueRunSortsBefore(fewerArguments, moreArguments) || true == dueRunSortsBefore(moreArguments, fewerArguments) {
+        t.Fatalf("expected two runs of one command and schedule ordered by their arguments")
+    }
+
+    if false == dueRunSortsBefore(dueRun{Command: "alpha", Schedule: "9"}, dueRun{Command: "beta", Schedule: "0"}) {
+        t.Fatalf("expected the command to order first")
     }
 }

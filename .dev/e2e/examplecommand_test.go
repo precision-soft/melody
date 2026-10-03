@@ -10,9 +10,7 @@ import (
     security "github.com/precision-soft/melody/v3/security"
 )
 
-/* mintTestOutput reproduces the shape a real mint prints: the boot log as json objects on stdout, then the command
-banner wrapped in ANSI sequences, then the credential, then the closing banner. Everything the extraction has to
-step over is present. */
+/* mintTestOutput reproduces the shape a real mint prints: the boot log as json objects on stdout, then the command banner wrapped in ANSI sequences, then the credential, then the closing banner. Everything the extraction has to step over is present. */
 const mintTestOutput = "{\"message\":\"configuration defaults applied\",\"level\":\"info\"}\n" +
     "{\"message\":\"configuration validated\",\"level\":\"info\"}\n" +
     "\x1b[42m\x1b[2K\x1b[0m\n" +
@@ -22,9 +20,7 @@ const mintTestOutput = "{\"message\":\"configuration defaults applied\",\"level\
     "\n" +
     "\x1b[42m\x1b[2K\x1b[97m====== [auth:token] [finished] [success] ======\x1b[0m\n"
 
-/* The extraction decides which string is handed to the firewall. Picking a boot-log line, or a fragment of a
-banner, produces a 401 that reads exactly like a security regression — so the stripping and the anchoring are worth
-pinning. */
+/* The extraction decides which string is handed to the firewall. Picking a boot-log line, or a fragment of a banner, produces a 401 that reads exactly like a security regression — so the stripping and the anchoring are worth pinning. */
 func TestExampleStripAnsi_RemovesTheBannerSequences(t *testing.T) {
     plain := exampleStripAnsi(mintTestOutput)
 
@@ -44,8 +40,7 @@ func TestExampleMintedToken_TakesTheCredentialAndNotABootLogLine(t *testing.T) {
     }
 }
 
-/* the LAST match is taken on purpose: the boot log is printed above the command body, so a future log line that
-happened to look like a token would otherwise be handed to the firewall in place of the credential. */
+/* the LAST match is taken on purpose: the boot log is printed above the command body, so a future log line that happened to look like a token would otherwise be handed to the firewall in place of the credential. */
 func TestExampleLastLineMatching_PrefersTheLastMatch(t *testing.T) {
     output := "aaa.bbb.ccc\nsome prose\nddd.eee.fff\n"
 
@@ -54,8 +49,7 @@ func TestExampleLastLineMatching_PrefersTheLastMatch(t *testing.T) {
     }
 }
 
-/* the pattern is anchored, so a token-shaped fragment inside a longer line must NOT be extracted: a json log line
-carrying a dotted identifier is the realistic case. */
+/* the pattern is anchored, so a token-shaped fragment inside a longer line must NOT be extracted: a json log line carrying a dotted identifier is the realistic case. */
 func TestExampleCompactTokenPattern_IsAnchoredToWholeLines(t *testing.T) {
     for _, line := range []string{
         `{"message":"resolved a.b.c","level":"info"}`,
@@ -87,9 +81,7 @@ func TestExampleMintedTotpCode_MatchesOnlySixDigitLines(t *testing.T) {
     }
 }
 
-/* the mint environment must withhold the harness's own backend variables: melody resolves configuration from the
-.env beside the executable, and a leaked variable would point the mint at different infrastructure than the SERVING
-application uses — a mint signing with another secret produces a 401 that looks like a security regression. */
+/* the mint environment must withhold the harness's own backend variables: melody resolves configuration from the .env beside the executable, and a leaked variable would point the mint at different infrastructure than the SERVING application uses — a mint signing with another secret produces a 401 that looks like a security regression. */
 func TestExampleMintEnvironment_WithholdsTheHarnessBackendVariables(t *testing.T) {
     for _, variable := range []string{
         "REDIS_ADDRESS",
@@ -120,8 +112,7 @@ func TestExampleMintEnvironment_WithholdsTheHarnessBackendVariables(t *testing.T
     }
 }
 
-/* the diagnostic must stay EMPTY for a mint that finished well inside the credential's lifetime: a caveat attached
-to every 401 would soften a genuine refusal into something a reader dismisses. */
+/* the diagnostic must stay EMPTY for a mint that finished well inside the credential's lifetime: a caveat attached to every 401 would soften a genuine refusal into something a reader dismisses. */
 func TestExampleMintDelayDiagnostic_OnlySpeaksWhenTheMintOutranTheCredential(t *testing.T) {
     if diagnostic := exampleMintDelayDiagnostic(time.Second); "" != diagnostic {
         t.Fatalf("a one-second mint produced the diagnostic %q", diagnostic)
@@ -139,13 +130,9 @@ func TestExampleMintDelayDiagnostic_OnlySpeaksWhenTheMintOutranTheCredential(t *
     }
 }
 
-/* the mirrored lifetime has to match defaultHmacSignerTtl in v3/security/hmac_signer.go: a value larger than the
-real one would let a stale-credential 401 be reported as a genuine refusal.
+/* the mirrored lifetime has to match defaultHmacSignerTtl in v3/security/hmac_signer.go: a value larger than the real one would let a stale-credential 401 be reported as a genuine refusal.
 
-The signer's default is read out of an envelope it actually mints rather than compared against a second literal.
-That constant is unexported, so a test that names 30s twice only says the harness agrees with itself: changing
-defaultHmacSignerTtl to 10s — the exact drift this test exists to catch — left it green. Signing one request with
-Ttl unset and subtracting the envelope's own iat from its exp measures what the framework does. */
+   The signer's default is read out of an envelope it actually mints rather than compared against a second literal. That constant is unexported, so a test that names 30s twice only says the harness agrees with itself: changing defaultHmacSignerTtl to 10s — the exact drift this test exists to catch — left it green. Signing one request with Ttl unset and subtracting the envelope's own iat from its exp measures what the framework does. */
 func TestExampleHmacEnvelopeLifetime_MirrorsTheSignerDefault(t *testing.T) {
     signer := security.NewHmacEnvelopeSigner(security.HmacEnvelopeSignerConfig{
         App: "lifetime-probe",

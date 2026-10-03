@@ -1,11 +1,14 @@
 package security
 
 import (
+    "crypto/sha256"
+    "encoding/hex"
     "strings"
     "testing"
+    "time"
 )
 
-/* Two hashes of one password differing is the property the whole change was made for: the seeded rows carry salted hashes, so equality lives in PasswordMatches and nowhere else. */
+/* Two hashes of one password differ, so the seeded rows carry salted hashes and equality lives in PasswordMatches and nowhere else. */
 func TestHashPasswordSaltsEveryCall(t *testing.T) {
     first, firstErr := HashPassword("editor")
     if nil != firstErr {
@@ -79,5 +82,49 @@ func TestPasswordMaximumBytesIsTheExactBcryptCeiling(t *testing.T) {
 
     if _, hashErr := HashPassword(multiByte); nil == hashErr {
         t.Fatal("nineteen four-byte runes are over the byte ceiling and must be refused")
+    }
+}
+
+/* a value bcrypt cannot read at all: an unsalted sha256 rendered as 64 hex characters stands in for any column this application did not write — truncated, edited by hand, or filled by another tool. What matters is only that bcrypt refuses it on the prefix, before deriving a key. */
+func storedValueBcryptCannotRead(plaintextPassword string) string {
+    digest := sha256.Sum256([]byte(plaintextPassword))
+
+    return hex.EncodeToString(digest[:])
+}
+
+/* the floor sits between the two costs it separates: bcrypt at the default cost spends tens of milliseconds on a comparison it performs, and a stored value it cannot read is refused orders of magnitude faster, so five milliseconds is far from both and neither a loaded machine nor a fast one moves the verdict. */
+const equalizedRefusalFloor = 5 * time.Millisecond
+
+/* a refusal bcrypt reaches without deriving a key, a stored value that is not one of its digests, must still cost what a real comparison costs, or response time would tell an attacker which accounts hold a credential this door refuses whatever is typed. The assertion is on the TIME, because the returned value is correct either way. */
+func TestPasswordMatches_SpendsTheComparisonOnAStoredValueBcryptCannotRead(t *testing.T) {
+    startedAt := time.Now()
+    matched := PasswordMatches(storedValueBcryptCannotRead("admin"), "admin")
+    refusalCost := time.Since(startedAt)
+
+    if true == matched {
+        t.Fatalf("expected a stored value that is not a bcrypt digest to be refused")
+    }
+
+    if equalizedRefusalFloor > refusalCost {
+        t.Fatalf(
+            "expected the refusal to spend the comparison bcrypt skipped, but it answered in %v, under the %v floor",
+            refusalCost,
+            equalizedRefusalFloor,
+        )
+    }
+}
+
+/* DummyPasswordMatch is what an absent username pays, and it is the yardstick the refusal above is equalized against; it runs one comparison against a digest it can read, so the equalizing branch must not fire for it. */
+func TestDummyPasswordMatch_AlwaysRefusesAndPaysOneComparison(t *testing.T) {
+    startedAt := time.Now()
+    matched := DummyPasswordMatch("anything at all")
+    dummyCost := time.Since(startedAt)
+
+    if true == matched {
+        t.Fatalf("expected the equalizing comparison to always refuse")
+    }
+
+    if equalizedRefusalFloor > dummyCost {
+        t.Fatalf("expected the equalizing comparison to cost a real one, got %v", dummyCost)
     }
 }

@@ -2,8 +2,13 @@ package exception
 
 import (
     "errors"
+    "fmt"
+    "strings"
     "sync"
     "testing"
+
+    exceptioncontract "github.com/precision-soft/melody/exception/contract"
+    loggingcontract "github.com/precision-soft/melody/logging/contract"
 )
 
 func TestError_AlreadyLoggedFlag(t *testing.T) {
@@ -117,4 +122,51 @@ func TestError_ConcurrentContextWriteAndRead_IsOrdered(t *testing.T) {
     if nil == sharedError.Context()["serviceName"] {
         t.Fatalf("expected the written key to survive")
     }
+}
+
+/* errors.As and errors.Is call Unwrap on every link, so a typed-nil *Error stored as another error's cause is walked on a nil receiver — FromError(nil) is the natural producer of that link */
+func TestError_UnwrapOnANilReceiverAnswersNil(t *testing.T) {
+    var typedNil *Error
+
+    if nil != typedNil.Unwrap() {
+        t.Fatalf("expected a nil receiver to unwrap to nil")
+    }
+
+    chain := fmt.Errorf("ctx: %w", NewError("outer", nil, typedNil))
+
+    var target *Error
+    if false == errors.As(chain, &target) || "outer" != target.Message() {
+        t.Fatalf("expected the walk to reach the outer error past the typed-nil link, got %v", target)
+    }
+}
+
+/* FromError(nil) answers a typed nil, and errors.Join skips only a nil INTERFACE, so a join holding it calls Error on the nil receiver when rendered; Error answers for the receiver as Unwrap does. */
+func TestError_ErrorOnANilReceiverAnswersInsteadOfDereferencing(t *testing.T) {
+    var typedNil *Error
+
+    if "error carries no value" != typedNil.Error() {
+        t.Fatalf("expected the nil receiver to answer the placeholder message, got %q", typedNil.Error())
+    }
+
+    joined := errors.Join(FromError(nil), errors.New("other"))
+    if false == strings.Contains(joined.Error(), "other") {
+        t.Fatalf("expected the join holding a typed nil to render, got %q", joined.Error())
+    }
+}
+
+/* every accessor answers the nil receiver, as every accessor of ExitError does: a caller that read the typed nil FromError(nil) produces through the interface reached these before any guard. */
+func TestError_EveryAccessorAnswersTheNilReceiver(t *testing.T) {
+    var typedNil *Error
+
+    if "" != typedNil.Message() || nil != typedNil.Context() || nil != typedNil.CauseErr() || true == typedNil.AlreadyLogged() {
+        t.Fatalf("expected the nil receiver answered by every reader")
+    }
+
+    if loggingcontract.LevelError != typedNil.Level() {
+        t.Fatalf("expected the nil receiver to answer the error level, got %v", typedNil.Level())
+    }
+
+    typedNil.SetContext(exceptioncontract.Context{"key": "value"})
+    typedNil.SetContextValue("key", "value")
+    typedNil.MarkAsLogged()
 }

@@ -86,12 +86,18 @@ func (instance *Store) Enqueue(ctx context.Context, executor bun.IDB, message an
 
 /* ClaimDueMessages atomically claims a batch of due rows so that concurrent relay instances — even without a shared Locker — never grab the same row. It requires a backend that supports SELECT … FOR UPDATE SKIP LOCKED (PostgreSQL, or MySQL 8+). It selects due rows FOR UPDATE SKIP LOCKED inside a transaction (so a row another instance is claiming is skipped, not blocked on) and flips them to the in-flight state with available_at pushed out by the visibility timeout. A claimed row is therefore invisible to every other claimer until either the relay resolves it (sent/rescheduled/dead) or the visibility timeout lapses — which re-surfaces rows an instance claimed but crashed before resolving. A due row is one that is pending, or already in-flight but past its visibility deadline. Claiming does NOT touch delivery_attempts — that counter is advanced per row when the relay actually attempts delivery (RecordDeliveryAttempt), so a row the relay never reaches (a batch-mate behind a crashing row) is not charged a delivery attempt it never received. */
 func (instance *Store) ClaimDueMessages(ctx context.Context, limit int, visibility time.Duration) ([]Pending, error) {
+    limit, limitErr := claimLimit(limit)
+    if nil != limitErr {
+        return nil, limitErr
+    }
+
     claimToken, tokenErr := newClaimToken()
     if nil != tokenErr {
         return nil, tokenErr
     }
 
-    rows := make([]Message, 0, limit)
+    /* the limit is only an allocation HINT here, capped on its own: a claim within the clamp can still ask for a hundred thousand rows, and the query's own LIMIT below carries the clamped value. */
+    rows := make([]Message, 0, min(limit, 1024))
 
     claimErr := instance.database.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
         now := time.Now()
@@ -147,7 +153,20 @@ func (instance *Store) ClaimDueMessages(ctx context.Context, limit int, visibili
     return pending, nil
 }
 
-/* newClaimToken returns a fresh, unguessable fencing token for one claim of due messages. Every claim gets a distinct token so that a row re-claimed after its visibility lapsed no longer matches the token a stale run still holds. */
+/* claimLimit holds a claim's limit to what the query can carry: bun writes no LIMIT for a non-positive value and narrows the value to int32 first, so such a value would claim the whole table. A non-positive limit is refused by name, and a value past maximumBatchSize is cut to it, the clamp the relay applies. */
+func claimLimit(limit int) (int, error) {
+    if 0 >= limit {
+        return 0, exception.NewError("outbox claim limit must be positive", map[string]any{"limit": limit}, nil)
+    }
+
+    if maximumBatchSize < limit {
+        return maximumBatchSize, nil
+    }
+
+    return limit, nil
+}
+
+/* newClaimToken returns a fresh, unguessable fencing token for one claim of due messages, distinct per claim, so a row re-claimed after its visibility lapsed does not match the token a stale run still holds. */
 func newClaimToken() (string, error) {
     raw := make([]byte, 16)
     if _, readErr := rand.Read(raw); nil != readErr {
@@ -157,7 +176,7 @@ func newClaimToken() (string, error) {
     return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
-/* RecordDeliveryAttempt increments a single in-flight row's delivery_attempts and returns the post-increment count. Called per row at delivery time (not for the batch at claim time), it charges a delivery attempt only to a row the relay actually reached: a batch-mate behind a row that crashes the relay is never incremented and so is never falsely dead-lettered as poison. The read and write run in one transaction with a row lock (FOR UPDATE) so a concurrent post-visibility claimer cannot lose an increment. A row that is no longer held by this claim — its claim lapsed and another instance re-claimed it (so its claim_token no longer matches), or it was already resolved out of the in-flight state — returns claimed=false so the relay skips it instead of publishing alongside the new owner. Matching on the fencing token, not status alone, is what distinguishes "still mine" from "re-claimed by another run", since a re-claim returns the row to the same in-flight state. */
+/* RecordDeliveryAttempt increments a single in-flight row's delivery_attempts and returns the post-increment count, charging only a row the relay actually reached. The read and write run in one transaction under FOR UPDATE, so a concurrent claimer cannot lose an increment. A row whose claim_token does not match this claim, re-claimed by another instance or already resolved, returns claimed=false so the relay skips it; the token, not the status, tells "still mine" from "re-claimed", since a re-claim returns the row to the same in-flight state. */
 func (instance *Store) RecordDeliveryAttempt(ctx context.Context, id int64, claimToken string) (int, bool, error) {
     deliveryAttempts := 0
     claimed := false
@@ -202,7 +221,7 @@ func (instance *Store) RecordDeliveryAttempt(ctx context.Context, id int64, clai
     return deliveryAttempts, claimed, nil
 }
 
-/* the resolution writes are guarded on both status = in-flight AND the claim's fencing token so only the run whose claim is still current can transition the row. Status alone is insufficient: after a slow run's claim lapsed (visibility timeout) another instance can re-claim the row back to the in-flight state and be actively delivering it, so a status-only write would clobber that new owner (for example reviving a row it already marked sent, or dead-lettering a row it is mid-delivery). Guarding on claim_token makes a stale run's write match no row — a harmless no-op — because the re-claim overwrote the token. */
+/* MarkSent resolves the row as sent. Every resolution write is guarded on status in-flight and on the claim's fencing token, since a lapsed claim can be re-claimed back to in-flight by another instance and a status-only write would clobber that owner; with the token a stale run's write matches no row. */
 func (instance *Store) MarkSent(ctx context.Context, id int64, claimToken string) error {
     _, updateErr := instance.database.NewUpdate().
         Model((*Message)(nil)).

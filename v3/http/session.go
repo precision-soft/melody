@@ -4,13 +4,14 @@ import (
     "github.com/precision-soft/melody/v3/container"
     "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal"
     "github.com/precision-soft/melody/v3/session"
     sessioncontract "github.com/precision-soft/melody/v3/session/contract"
 )
 
 /* RegenerateRequestSession rotates the id of the session the request carries and publishes the rotated session back on the request, which is the whole operation a login handler needs against session fixation: the response path saves that session and emits its cookie. Call it before writing the authenticated identity, and write the identity to the session it returns. The two steps are one call on purpose — rotating without republishing destroys the id the browser holds without ever telling it the new one. */
 func RegenerateRequestSession(request httpcontract.Request) (sessioncontract.Session, error) {
-    if nil == request {
+    if true == internal.IsNilInterface(request) {
         return nil, exception.NewError("request is nil in regenerate request session", nil, nil)
     }
 

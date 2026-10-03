@@ -1,14 +1,30 @@
 package security
 
 import (
+    "fmt"
+
     eventcontract "github.com/precision-soft/melody/v3/event/contract"
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     "github.com/precision-soft/melody/v3/http"
+    httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal"
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
+    "github.com/precision-soft/melody/v3/logging"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
+
+/* exceptionResponseOrFailClosed returns the response the kernel.exception dispatch produced, or a generic fail-closed response when no listener produced one: a nil response written back to the request event is read by the kernel as "no decision" and the request would reach the handler despite being refused. */
+func exceptionResponseOrFailClosed(exceptionEvent *http.KernelExceptionEvent) httpcontract.Response {
+    response := exceptionEvent.Response()
+    if nil == response {
+        return http.JsonErrorResponse(500, "internal_server_error")
+    }
+
+    return response
+}
 
 func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, registry *FirewallRegistry) {
     if nil == registry {
@@ -27,7 +43,8 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                 return nil
             }
 
-            if nil == requestEvent || nil == requestEvent.Request() {
+            /* IsNilInterface and not `nil ==`: a nil pointer of a request type is a non-nil interface, and the path read below dereferences it */
+            if nil == requestEvent || true == internal.IsNilInterface(requestEvent.Request()) {
                 return nil
             }
 
@@ -37,7 +54,8 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
 
             path := ""
             if nil != requestEvent.Request().HttpRequest() && nil != requestEvent.Request().HttpRequest().URL {
-                path = requestEvent.Request().HttpRequest().URL.Path
+                /* the spelling the router matched, not the decoded URL.Path, so a rule cannot claim "/public%2F" as "/public/" while the router serves it through another route */
+                path = http.RequestPathAsRouted(internal.RequestPathAsSent(requestEvent.Request().HttpRequest().URL))
             }
 
             securityContext, exists := SecurityContextFromRuntime(runtimeInstance)
@@ -124,7 +142,8 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
 
             token := securityContext.Token()
 
-            if nil == token {
+            /* IsNilInterface: a typed nil token of the application's own type would read as an authenticated caller */
+            if true == internal.IsNilInterface(token) {
                 _, eventSecurityAuthorizationDeniedErr := eventDispatcher.DispatchName(
                     runtimeInstance,
                     securitycontract.EventSecurityAuthorizationDenied,
@@ -174,7 +193,8 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                     return eventSecurityAuthorizationDeniedErr
                 }
 
-                if nil != entryPoint {
+                /* IsNilInterface: the entry point comes through NewCompiledFirewall unvalidated, and Start below dereferences it */
+                if false == internal.IsNilInterface(entryPoint) {
                     response, startErr := entryPoint.Start(runtimeInstance, requestEvent.Request())
                     if nil != startErr {
                         exceptionEvent := http.NewKernelExceptionEvent(runtimeInstance, requestEvent.Request(), startErr)
@@ -184,12 +204,15 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                             return eventSecurityAuthorizationDeniedErr
                         }
 
-                        requestEvent.SetResponse(exceptionEvent.Response())
+                        requestEvent.SetResponse(exceptionResponseOrFailClosed(exceptionEvent))
                         return nil
                     }
 
-                    requestEvent.SetResponse(response)
-                    return nil
+                    /* an entry point that produced no response falls through to the fail-closed 401, since the kernel reads a nil response as "no decision"; IsNilInterface catches the typed nil SetResponse would normalize to nil */
+                    if false == internal.IsNilInterface(response) {
+                        requestEvent.SetResponse(response)
+                        return nil
+                    }
                 }
 
                 requestEvent.SetResponse(
@@ -202,7 +225,7 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                 return nil
             }
 
-            if nil == accessDecisionManager {
+            if true == internal.IsNilInterface(accessDecisionManager) {
                 exceptionEvent := http.NewKernelExceptionEvent(
                     runtimeInstance,
                     requestEvent.Request(),
@@ -214,7 +237,7 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                     return eventKernelExceptionErr
                 }
 
-                requestEvent.SetResponse(exceptionEvent.Response())
+                requestEvent.SetResponse(exceptionResponseOrFailClosed(exceptionEvent))
 
                 return nil
             }
@@ -233,14 +256,16 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                 return eventSecurityAuthorizationGrantedErr
             }
 
-            if nil != accessDeniedHandler {
+            /* IsNilInterface: the handler comes through NewCompiledFirewall unvalidated, and Handle dereferences it on the refusal path */
+            if false == internal.IsNilInterface(accessDeniedHandler) {
                 response, handlerErr := accessDeniedHandler.Handle(runtimeInstance, requestEvent.Request(), decisionErr)
-                if nil == handlerErr && nil != response {
+                /* IsNilInterface: SetResponse would normalize a typed nil response to nil and serve the denial as a grant; the nil-response branch below catches the same typed nil */
+                if nil == handlerErr && false == internal.IsNilInterface(response) {
                     requestEvent.SetResponse(response)
                     return nil
                 }
 
-                if nil == handlerErr && nil == response {
+                if nil == handlerErr && true == internal.IsNilInterface(response) {
                     decisionErr = exception.NewError(
                         "access denied handler returned nil response",
                         exceptioncontract.Context{
@@ -251,7 +276,15 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                 }
 
                 if nil != handlerErr {
-                    decisionErr = handlerErr
+                    /* the authorization decision stays the cause, so the exception listener resolves the denial status through the chain; the handler error alone would turn a 403 into a 500 */
+                    decisionErr = exception.NewError(
+                        "access denied handler failed",
+                        exceptioncontract.Context{
+                            "reason":       "access_denied_handler_failed",
+                            "handlerError": handlerErr.Error(),
+                        },
+                        decisionErr,
+                    )
                 }
             }
 
@@ -275,17 +308,28 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                 return eventKernelExceptionErr
             }
 
-            requestEvent.SetResponse(exceptionEvent.Response())
+            requestEvent.SetResponse(exceptionResponseOrFailClosed(exceptionEvent))
 
             return nil
         },
         KernelAccessControlListenerPriority,
     )
 
-    /* @important mark access control as a required kernel.request listener: if another listener stops propagation before it runs, the dispatch fails closed rather than letting the request reach the handler with access control silently skipped. A no-op on a dispatcher that does not support required listeners, so this stays optional. */
-    if registrar, ok := eventDispatcher.(eventcontract.RequiredListenerRegistrar); true == ok {
-        registrar.MarkListenerRequired(accessControlRegistration)
+    /* access control is a required kernel.request listener: a listener that stops propagation before it makes the dispatch fail closed. A dispatcher without that capability disarms the guarantee for the whole process, which is reported on the emergency channel because this runs before the configured logger is resolved. */
+    registrar, ok := eventDispatcher.(eventcontract.RequiredListenerRegistrar)
+    if false == ok {
+        logging.EmergencyLogger().Warning(
+            "the event dispatcher cannot mark the access control listener required",
+            loggingcontract.Context{
+                "dispatcherType": fmt.Sprintf("%T", eventDispatcher),
+                "consequence":    "a listener that stops propagation before access control lets the request reach its handler unchecked",
+            },
+        )
+
+        return
     }
+
+    registrar.MarkListenerRequired(accessControlRegistration)
 }
 
 func matchAccessControlRule(accessControl *AccessControl, path string, source Source, firewallName string) (*MatchedAccessControlRule, []string, bool) {
@@ -293,7 +337,7 @@ func matchAccessControlRule(accessControl *AccessControl, path string, source So
         return nil, nil, false
     }
 
-    matchedIndex, matched := accessControl.matchRuleIndex(path)
+    matchedIndex, matched := accessControl.MatchRuleIndex(path)
     if false == matched {
         return nil, nil, false
     }
@@ -301,8 +345,8 @@ func matchAccessControlRule(accessControl *AccessControl, path string, source So
     matchedRuleValue := accessControl.Rules()[matchedIndex]
 
     matchedRule := NewMatchedAccessControlRule(
-        matchedRuleValue.pathPrefix,
-        matchedRuleValue.attributes,
+        matchedRuleValue.PathPrefix(),
+        matchedRuleValue.Attributes(),
         source,
         matchedIndex,
         firewallName,

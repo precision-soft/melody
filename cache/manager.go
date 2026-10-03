@@ -1,6 +1,8 @@
 package cache
 
 import (
+    "fmt"
+    "sort"
     "strconv"
     "strings"
     "time"
@@ -11,7 +13,7 @@ import (
     "github.com/precision-soft/melody/internal"
 )
 
-/* NewManager takes a backend it does not own: Close leaves it open, because a backend handed in was built by someone else and is closed by whoever built it. That is what the container path needs — the backend is a registered service the container closes itself, so a manager that closed it too would close it twice, which a backend wrapping a connection typically reports as a failure on the second call and turns a clean shutdown into a reported one. Use NewManagerOwningBackend to get the cascade back. */
+/* NewManager takes a backend it does not own: Close leaves it open, since whoever built it closes it, as the container does for a registered backend. Use NewManagerOwningBackend for the cascade. */
 func NewManager(
     backend cachecontract.Backend,
     serializer cachecontract.Serializer,
@@ -53,7 +55,7 @@ type Manager struct {
     ownsBackend bool
 }
 
-/* normalizeThirdPartyError reads the error through the interface: a backend or serializer declared with a concrete error type hands back a typed nil boxed into a non-nil interface, which would be treated as the failure it is not — and would panic the first caller that renders it. */
+/* normalizeThirdPartyError reads the error through the interface, since a typed nil boxed into a non-nil interface is no failure and would panic the first caller that renders it. */
 func normalizeThirdPartyError(err error) error {
     if true == internal.IsNilInterface(err) {
         return nil
@@ -62,7 +64,7 @@ func normalizeThirdPartyError(err error) error {
     return err
 }
 
-/* NormalizeStoredValue answers the shape a value stored through this manager reads back as: one serializer round-trip, run locally with no backend involved. Remember consults it so the computing call and the cached calls answer one shape — without it, a callback's int came back float64 and its struct came back a map, but only from the second call on. */
+/* NormalizeStoredValue answers the shape a value stored through this manager reads back as, through one local serializer round-trip, so Remember's computing call and its cached calls answer one shape. */
 func (instance *Manager) NormalizeStoredValue(value any) (any, error) {
     payload, serializeErr := instance.serializer.Serialize(value)
     serializeErr = normalizeThirdPartyError(serializeErr)
@@ -130,7 +132,7 @@ func (instance *Manager) Clear() error {
     return normalizeThirdPartyError(instance.backend.Clear())
 }
 
-/* an entry whose payload does not deserialize is left out of the result the way an absent key is — Get answers the same entry with exists false — and the keys it happened under come back in a DeserializationError beside the values that did decode, so one corrupt entry no longer discards the whole answer and the error names its culprits deterministically. */
+/* Many answers the values of the keys that are present. An entry whose payload does not deserialize is left out as an absent key is, and its keys come back in a DeserializationError beside the values that decoded. */
 func (instance *Manager) Many(keys []string) (map[string]any, error) {
     payloadsByKey, manyErr := instance.backend.Many(keys)
     manyErr = normalizeThirdPartyError(manyErr)
@@ -175,20 +177,53 @@ func (instance *Manager) Many(keys []string) (map[string]any, error) {
     return result, nil
 }
 
+/* serializationErrorText reads the text of a serializer's refusal under a recover, since Serializer is a public contract and the application's Error() may panic; the marker takes the shape the other foreign-error readers use. */
+func serializationErrorText(err error) (text string) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            return
+        }
+
+        text = fmt.Sprintf("serialization error message panicked: %v", recoveredValue)
+    }()
+
+    return err.Error()
+}
+
+/* SetMultiple serializes every entry before the backend sees any, so a refusal writes nothing. The refusal names every refused key under "keys", sorted, with "key" the first of them, and each key's own reason under "causeByKey"; every entry is serialized even after the first refusal, so the list is whole. */
 func (instance *Manager) SetMultiple(items map[string]any, ttl time.Duration) error {
     payloads := make(map[string][]byte, len(items))
+    var refusedKeys []string
+    var refusalByKey map[string]error
     for key, value := range items {
         payload, serializeErr := instance.serializer.Serialize(value)
         serializeErr = normalizeThirdPartyError(serializeErr)
         if nil != serializeErr {
-            return exception.NewError(
-                "cache value serialization failed",
-                exceptioncontract.Context{"key": key},
-                serializeErr,
-            )
+            if nil == refusalByKey {
+                refusalByKey = make(map[string]error)
+            }
+            refusedKeys = append(refusedKeys, key)
+            refusalByKey[key] = serializeErr
+            continue
         }
 
         payloads[key] = payload
+    }
+
+    if 0 < len(refusedKeys) {
+        sort.Strings(refusedKeys)
+
+        causeByKey := make(map[string]string, len(refusedKeys))
+        for _, refusedKey := range refusedKeys {
+            causeByKey[refusedKey] = serializationErrorText(refusalByKey[refusedKey])
+        }
+
+        return exception.NewError(
+            "cache value serialization failed",
+            exceptioncontract.Context{"key": refusedKeys[0], "keys": refusedKeys, "causeByKey": causeByKey},
+            refusalByKey[refusedKeys[0]],
+        )
     }
 
     return normalizeThirdPartyError(instance.backend.SetMultiple(payloads, ttl))
@@ -198,7 +233,7 @@ func (instance *Manager) DeleteMultiple(keys []string) error {
     return normalizeThirdPartyError(instance.backend.DeleteMultiple(keys))
 }
 
-/* the counter operations are backend-native so a distributed backend keeps them atomic, which means they bypass the serializer and store the count as decimal text; a counter key must therefore be read with GetCounter rather than Get, and must not be mixed with Set on the same key */
+/* Increment adds delta to a counter through the backend's native operation, so a distributed backend keeps it atomic. The count bypasses the serializer and is stored as decimal text, so a counter key is read with GetCounter and never mixed with Set. */
 func (instance *Manager) Increment(key string, delta int64) (int64, error) {
     newValue, incrementErr := instance.backend.Increment(key, delta)
 

@@ -1,11 +1,12 @@
 package repository
 
 import (
+    "math"
     "strconv"
     "strings"
 )
 
-/* highestIdSuffix reads the numeric tail of every identifier that carries the given prefix and reports the largest one it could parse, or zero when none of them was a number. The four repositories number their rows the same way and both implementations of each need the answer, so the walk lives here once. */
+/* highestIdSuffix answers the largest numeric tail among the identifiers that carry the prefix, or zero when none parses. */
 func highestIdSuffix(identifierList []string, prefix string) int64 {
     highest := int64(0)
 
@@ -25,5 +26,29 @@ func highestIdSuffix(identifierList []string, prefix string) int64 {
         }
     }
 
+    /* capped one below the int64 ceiling because every caller mints this plus one: a mint at the ceiling collides with the existing row and is refused as "id already exists" rather than wrapping into a negative id */
+    if math.MaxInt64-1 < highest {
+        return math.MaxInt64 - 1
+    }
+
     return highest
+}
+
+/* raisedFloor answers whichever of the floor and the identifier carries the higher numeric tail under the prefix: the in-memory repositories keep, under their lock, the highest identifier they ever stored, which the database keeps in its identifier sequence, so a deleted entity's identifier is not minted again */
+func raisedFloor(floor string, identifier string, prefix string) string {
+    if highestIdSuffix([]string{identifier}, prefix) > highestIdSuffix([]string{floor}, prefix) {
+        return identifier
+    }
+
+    return floor
+}
+
+/* seededFloor is the floor a repository starts from: the highest identifier of the seed under the prefix, so deleting a seeded entity never hands its identifier to the next create */
+func seededFloor(identifierList []string, prefix string) string {
+    floor := ""
+    for _, identifier := range identifierList {
+        floor = raisedFloor(floor, identifier, prefix)
+    }
+
+    return floor
 }

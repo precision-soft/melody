@@ -9,8 +9,7 @@ import (
     "github.com/precision-soft/melody/integrations/bunorm/v3/encrypt"
 )
 
-/* crmCipherRef and billingCipherRef are the zero-size markers that bind a column type to a key compartment;
-each names a cipher installed with encrypt.UseCipherNamed. */
+/* crmCipherRef and billingCipherRef are the zero-size markers that bind a column type to a key compartment; each names a cipher installed with encrypt.UseCipherNamed. */
 type crmCipherRef struct{}
 
 func (instance crmCipherRef) CipherName() string {
@@ -29,11 +28,7 @@ func (instance unregisteredCipherRef) CipherName() string {
     return "unregistered"
 }
 
-/* runEncryptCompartmentCheck exercises the named-cipher registry: two compartments each own their key
-provider, so a column bound to one compartment round-trips through it and its ciphertext is undecryptable by
-the other — the isolation guarantee that merging every key into one provider would silently lose. It also
-asserts the value never leaks in a Stringer, log or JSON rendering, and that an unregistered compartment
-errors rather than falling back to the default cipher. */
+/* runEncryptCompartmentCheck exercises the named-cipher registry: two compartments each own their key provider, so a column bound to one compartment round-trips through it and its ciphertext is undecryptable by the other — the isolation guarantee that merging every key into one provider would silently lose. It also asserts the value never leaks in a Stringer, log or JSON rendering, and that an unregistered compartment errors rather than falling back to the default cipher. */
 func runEncryptCompartmentCheck() {
     crmCipher := encrypt.NewCipher(encrypt.NewStaticKeyProvider("crm-v1", map[string][]byte{
         "crm-v1": []byte("0123456789abcdef0123456789abcdef"),
@@ -128,9 +123,7 @@ func runEncryptCompartmentCheck() {
     pass("encrypt refuses to encrypt for an unregistered compartment")
 }
 
-/* driverValueString renders what a column hands the driver, whichever concrete type it chose: the encrypted
-columns store their ciphertext as bytes, and a Stringer-free []byte would otherwise have to be asserted at
-every call site. */
+/* driverValueString renders what a column hands the driver, whichever concrete type it chose: the encrypted columns store their ciphertext as bytes, and a Stringer-free []byte would otherwise have to be asserted at every call site. */
 func driverValueString(value driver.Value, valueErr error) string {
     if nil != valueErr {
         fail("encrypt: column Value: %v", valueErr)
@@ -146,4 +139,40 @@ func driverValueString(value driver.Value, valueErr error) string {
     fail("encrypt: column Value returned %T, wanted a string or a byte slice", value)
 
     return ""
+}
+
+/* encryptRoundTripRoute is the example's public door that encrypts one fixed value with the configured cipher and decrypts it back (config/http.go). */
+const encryptRoundTripRoute = "/encrypt/roundtrip"
+
+/* runEncryptRoundTripOverHttp reads the served cipher through the example's own door: the ciphertext carries the marker the bulk migration writes, with the gcm scheme and the key id the example configures, and never the value itself, and the value decrypts back. Two calls must answer two ciphertexts, since every encryption draws a fresh nonce — a door answering one constant would pass every other assertion here. */
+func runEncryptRoundTripOverHttp(baseUrl string) {
+    const label = "encrypt round trip"
+    client := newLiveExampleClient(baseUrl)
+
+    ciphertextList := make([]string, 0, 2)
+    for range 2 {
+        response := client.get(label, encryptRoundTripRoute)
+        requireLiveExampleStatus(label, encryptRoundTripRoute, response, 200)
+
+        var document struct {
+            Plaintext  string `json:"plaintext"`
+            Ciphertext string `json:"ciphertext"`
+            Decrypted  string `json:"decrypted"`
+            RoundTrip  bool   `json:"roundTrip"`
+        }
+        if decodeErr := json.Unmarshal(response.body, &document); nil != decodeErr {
+            fail("%s: %s answered a body that is not json (%v): %s", label, encryptRoundTripRoute, decodeErr, exampleTruncate(response.bodyText()))
+        }
+        if "" == document.Plaintext || false == strings.HasPrefix(document.Ciphertext, "<ENC>\x00gcm1\x00example-2026:") || true == strings.Contains(document.Ciphertext, document.Plaintext) {
+            fail("%s: the ciphertext %q does not carry the gcm marker and key id, or carries the value %q", label, document.Ciphertext, document.Plaintext)
+        }
+        if document.Plaintext != document.Decrypted || false == document.RoundTrip {
+            fail("%s: %q decrypted to %q (roundTrip %v)", label, document.Plaintext, document.Decrypted, document.RoundTrip)
+        }
+        ciphertextList = append(ciphertextList, document.Ciphertext)
+    }
+    if ciphertextList[0] == ciphertextList[1] {
+        fail("%s: two encryptions of one value answered the same ciphertext %q — no fresh nonce per call", label, ciphertextList[0])
+    }
+    pass("%s: the served cipher answers the gcm marker and key id, decrypts back, and draws a fresh ciphertext per call", encryptRoundTripRoute)
 }

@@ -1,21 +1,25 @@
 package http
 
 import (
-    "encoding/json"
     nethttp "net/http"
     "reflect"
+    "runtime/debug"
 
     "github.com/precision-soft/melody/v3/exception"
+    exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal"
+    "github.com/precision-soft/melody/v3/logging"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
-    "github.com/precision-soft/melody/v3/validation"
 )
 
+/* JsonHandlerErrorResponder renders the refusals JsonHandler makes before the handler runs. It is handed the failure itself, whose cause carries the decoder's diagnosis and the validation collection under the validationErrors key. A responder that answers no response leaves the refusal to the framework. */
 type JsonHandlerErrorResponder func(
     runtimeInstance runtimecontract.Runtime,
     request httpcontract.Request,
     status int,
     message string,
+    cause error,
 ) (httpcontract.Response, error)
 
 type JsonHandlerOption func(*jsonHandlerOptions)
@@ -25,60 +29,154 @@ type jsonHandlerOptions struct {
 }
 
 func WithJsonHandlerErrorResponder(responder JsonHandlerErrorResponder) JsonHandlerOption {
+    if nil == responder {
+        exception.Panic(
+            exception.NewError("json handler error responder may not be nil", nil, nil),
+        )
+    }
+
     return func(options *jsonHandlerOptions) {
         options.errorResponder = responder
     }
 }
 
+/* JsonHandler binds the request body into Req, validates it and calls handle, reading the body through the door Request.BindJson uses: the configured limit with its 413, the decoder's diagnosis as the refusal's cause, an empty or null body refused. A nil handle is refused at construction. */
 func JsonHandler[Req any](
     handle func(runtimeInstance runtimecontract.Runtime, request httpcontract.Request, body Req) (httpcontract.Response, error),
     options ...JsonHandlerOption,
 ) httpcontract.Handler {
+    if nil == handle {
+        exception.Panic(
+            exception.NewError("json handler may not be nil", nil, nil),
+        )
+    }
+
     settings := &jsonHandlerOptions{}
-    for _, option := range options {
+    for index, option := range options {
+        if nil == option {
+            exception.Panic(
+                exception.NewError(
+                    "json handler option may not be nil",
+                    map[string]any{
+                        "index": index,
+                    },
+                    nil,
+                ),
+            )
+        }
+
         option(settings)
     }
 
     return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         var body Req
 
-        decoder := json.NewDecoder(request.HttpRequest().Body)
-
-        decodeErr := decoder.Decode(&body)
-        if nil != decodeErr {
-            return jsonHandlerError(settings, runtimeInstance, request, nethttp.StatusBadRequest, "invalid json")
+        if bindErr := bindJsonBody(request, &body); nil != bindErr {
+            return jsonHandlerError(settings, runtimeInstance, request, bindErr)
         }
 
-        if true == decoder.More() {
-            return jsonHandlerError(settings, runtimeInstance, request, nethttp.StatusBadRequest, "invalid json")
+        /* a literal null leaves the bound value nil and passes validation, so every nilable kind is refused here, not the pointer alone */
+        if true == boundBodyIsNil(body) {
+            return jsonHandlerError(
+                settings,
+                runtimeInstance,
+                request,
+                exception.NewHttpException(nethttp.StatusBadRequest, "empty request body"),
+            )
         }
 
-        /* a literal `null` body decodes without error and leaves a pointer instantiation nil, which the validator reports valid (it has nothing to walk) and the handler then dereferences — reject it as the invalid body it is */
-        if bodyValue := reflect.ValueOf(body); reflect.Ptr == bodyValue.Kind() && true == bodyValue.IsNil() {
-            return jsonHandlerError(settings, runtimeInstance, request, nethttp.StatusBadRequest, "invalid json")
-        }
-
-        validatorInstance := validation.ValidatorMustFromContainer(runtimeInstance.Container())
-
-        validationErr := validatorInstance.Validate(body)
-        if nil != validationErr {
-            return jsonHandlerError(settings, runtimeInstance, request, nethttp.StatusBadRequest, validationErr.Error())
+        if validationErr := validateBoundBody(runtimeInstance, &body); nil != validationErr {
+            return jsonHandlerError(settings, runtimeInstance, request, validationErr)
         }
 
         return handle(runtimeInstance, request, body)
     }
 }
 
+/* boundBodyIsNil reads every kind a json null can leave nil, reflecting over the typed value; an invalid Value, Req as an unset `any`, reads as nil. */
+func boundBodyIsNil(body any) bool {
+    bodyValue := reflect.ValueOf(body)
+
+    switch bodyValue.Kind() {
+    case reflect.Invalid:
+        return true
+    case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+        return bodyValue.IsNil()
+    }
+
+    return false
+}
+
+/* jsonHandlerError renders a pre-handler refusal through the application's responder, under a guard. A responder that answers no response, or panics, leaves the original refusal standing. */
 func jsonHandlerError(
     settings *jsonHandlerOptions,
     runtimeInstance runtimecontract.Runtime,
     request httpcontract.Request,
-    status int,
-    message string,
+    refusalErr error,
 ) (httpcontract.Response, error) {
-    if nil != settings.errorResponder {
-        return settings.errorResponder(runtimeInstance, request, status, message)
+    if nil == settings.errorResponder {
+        return nil, refusalErr
     }
 
-    return nil, exception.NewHttpException(status, message)
+    status := nethttp.StatusBadRequest
+    message := "bad request"
+    if httpException := exception.AsHttpException(refusalErr); nil != httpException {
+        status = httpException.StatusCode()
+        message = httpException.Message()
+    }
+
+    response, responderErr := invokeJsonHandlerErrorResponderSafely(
+        settings.errorResponder,
+        runtimeInstance,
+        request,
+        status,
+        message,
+        refusalErr,
+    )
+    if nil != responderErr {
+        return nil, responderErr
+    }
+
+    if true == internal.IsNilInterface(response) {
+        return nil, refusalErr
+    }
+
+    return response, nil
+}
+
+/* invokeJsonHandlerErrorResponderSafely runs the responder under the kernel's containment, as invokeErrorHandlerSafely does: a panic is recorded with the stack of the recovering site, and the refusal the responder was asked to render stands. */
+func invokeJsonHandlerErrorResponderSafely(
+    responder JsonHandlerErrorResponder,
+    runtimeInstance runtimecontract.Runtime,
+    request httpcontract.Request,
+    status int,
+    message string,
+    cause error,
+) (response httpcontract.Response, err error) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            return
+        }
+
+        response = nil
+        err = cause
+
+        loggerInstance := logging.LoggerFromRuntime(runtimeInstance)
+        if nil == loggerInstance {
+            return
+        }
+
+        loggerInstance.Error(
+            "json handler error responder panicked",
+            exception.LogContext(
+                RecoverToError(recoveredValue),
+                exceptioncontract.Context{
+                    "panicStack": string(debug.Stack()),
+                },
+            ),
+        )
+    }()
+
+    return responder(runtimeInstance, request, status, message, cause)
 }

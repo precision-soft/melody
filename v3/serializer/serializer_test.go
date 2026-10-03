@@ -2,6 +2,7 @@ package serializer
 
 import (
     "bytes"
+    "strings"
     "testing"
 )
 
@@ -91,6 +92,21 @@ func TestJsonSerializer_Deserialize_NilTarget(t *testing.T) {
     }
 }
 
+func TestJsonSerializer_Deserialize_TypedNilTarget(t *testing.T) {
+    serializer := NewJsonSerializer()
+
+    var target *map[string]any
+
+    err := serializer.Deserialize([]byte("{}"), target)
+    if nil == err {
+        t.Fatalf("expected error")
+    }
+
+    if false == strings.Contains(err.Error(), "deserialize target is nil") {
+        t.Fatalf("expected the package's own nil-target refusal, got: %v", err)
+    }
+}
+
 func TestJsonSerializer_Serialize_UnsupportedType(t *testing.T) {
     serializer := NewJsonSerializer()
 
@@ -143,5 +159,47 @@ func TestJsonSerializer_Serialize_ProducesValidJson(t *testing.T) {
 
     if false == bytes.HasPrefix(bytes.TrimSpace(data), []byte("{")) {
         t.Fatalf("expected json object")
+    }
+}
+
+func TestNewPrettyJsonSerializer_IndentsWhereTheCompactOneDoesNot(t *testing.T) {
+    value := map[string]any{"x": "y"}
+
+    prettyPayload, prettyErr := NewPrettyJsonSerializer().Serialize(value)
+    if nil != prettyErr {
+        t.Fatalf("unexpected error: %v", prettyErr)
+    }
+
+    compactPayload, compactErr := NewJsonSerializer().Serialize(value)
+    if nil != compactErr {
+        t.Fatalf("unexpected error: %v", compactErr)
+    }
+
+    if false == bytes.Contains(prettyPayload, []byte("\n  ")) {
+        t.Fatalf("expected the pretty serializer to indent, got %q", prettyPayload)
+    }
+
+    if true == bytes.Contains(compactPayload, []byte("\n")) {
+        t.Fatalf("expected the compact serializer to stay on one line, got %q", compactPayload)
+    }
+
+    if string(prettyPayload) == string(compactPayload) {
+        t.Fatalf("expected the two serializers to render differently")
+    }
+}
+
+func TestNewPrettyJsonSerializer_RoundTripsThroughTheCompactDeserializer(t *testing.T) {
+    payload, serializeErr := NewPrettyJsonSerializer().Serialize(map[string]any{"x": "y"})
+    if nil != serializeErr {
+        t.Fatalf("unexpected error: %v", serializeErr)
+    }
+
+    var result map[string]any
+    if err := NewJsonSerializer().Deserialize(payload, &result); nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if "y" != result["x"] {
+        t.Fatalf("unexpected round-trip result: %v", result)
     }
 }

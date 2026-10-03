@@ -1,6 +1,6 @@
 package internal
 
-/* ParseQualityValue validates value against the qvalue grammar of RFC 7231 — a zero with up to three decimal digits, or a one with up to three zero decimals — and reports anything outside it as invalid instead of guessing a weight for it. It is the one reader for every q parameter the framework negotiates on: a bare float parse accepts NaN, infinities and out-of-range numbers, so the same malformed header could open, close or silently poison a negotiation depending on which reader saw it. */
+/* ParseQualityValue validates a q parameter against the qvalue grammar of RFC 7231 and reports anything outside it as invalid. Digits past the third are accepted when they are zeros, since they cannot change the weight, and refused otherwise. It is the one reader for every q parameter the framework negotiates on. */
 func ParseQualityValue(value string) (float64, bool) {
     if "" == value {
         return 0, false
@@ -19,7 +19,13 @@ func ParseQualityValue(value string) (float64, bool) {
 
         decimals = decimals[1:]
         if 3 < len(decimals) {
-            return 0, false
+            for index := 3; index < len(decimals); index++ {
+                if '0' != decimals[index] {
+                    return 0, false
+                }
+            }
+
+            decimals = decimals[:3]
         }
     }
 

@@ -29,8 +29,7 @@ func (instance fakeDriver) Open(string) (driver.Conn, error) {
     return nil, errors.New("fake driver never opens")
 }
 
-/* newTestDatabase builds an offline *bun.DB whose schema parsing (table and primary-key metadata)
-   works without a live connection; the dialect logs an undiscoverable version and moves on. */
+/* newTestDatabase builds an offline *bun.DB whose schema parsing (table and primary-key metadata) works without a live connection; the dialect logs an undiscoverable version and moves on. */
 func newTestDatabase() *bun.DB {
     return bun.NewDB(sql.OpenDB(fakeConnector{}), mysqldialect.New())
 }
@@ -136,11 +135,11 @@ type auditedAccount struct {
 
 var auditedAccountColumnList = []string{"id", "name", "email", "balance"}
 
-/* scriptedDatabase answers the statements an audited write issues over a single stored row and records
-   them in order, so a test can assert both what was executed and what the database held. */
+/* scriptedDatabase answers the statements an audited write issues over a single stored row and records them in order, so a test can assert both what was executed and what the database held. */
 type scriptedDatabase struct {
     row        *auditedAccount
     statements []string
+    commitErr  error
 }
 
 type scriptedConnector struct {
@@ -174,11 +173,11 @@ func (instance *scriptedConnection) Close() error {
 }
 
 func (instance *scriptedConnection) Begin() (driver.Tx, error) {
-    return scriptedTransaction{}, nil
+    return scriptedTransaction{commitErr: instance.database.commitErr}, nil
 }
 
 func (instance *scriptedConnection) BeginTx(context.Context, driver.TxOptions) (driver.Tx, error) {
-    return scriptedTransaction{}, nil
+    return scriptedTransaction{commitErr: instance.database.commitErr}, nil
 }
 
 func (instance *scriptedConnection) QueryContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Rows, error) {
@@ -218,10 +217,12 @@ func (instance *scriptedConnection) ExecContext(_ context.Context, query string,
     return scriptedResult{affected: 1}, nil
 }
 
-type scriptedTransaction struct{}
+type scriptedTransaction struct {
+    commitErr error
+}
 
 func (instance scriptedTransaction) Commit() error {
-    return nil
+    return instance.commitErr
 }
 
 func (instance scriptedTransaction) Rollback() error {
@@ -278,7 +279,7 @@ func newScriptedTracker(storedRow *auditedAccount, options ...EntityOptions) (*T
     return NewTracker(database, NewRecorderWithStorage(storage, registry)), scripted, storage
 }
 
-/* @info the default: the caller holds the primary key and nothing else, so the delete claims nothing about the fields it never read — and charges the working database no read to write an audit row */
+/* the default: the caller holds the primary key and nothing else, so the delete claims nothing about the fields it never read — and charges the working database no read to write an audit row */
 func TestTracker_DeleteClaimsNothingItDidNotRead(t *testing.T) {
     tracker, scripted, storage := newScriptedTracker(&auditedAccount{
         Id:      42,
@@ -319,7 +320,7 @@ func TestTracker_DeleteClaimsNothingItDidNotRead(t *testing.T) {
     }
 }
 
-/* @info a delete that matched no row removed nothing, so the trail must not carry a deletion that never happened */
+/* a delete that matched no row removed nothing, so the trail must not carry a deletion that never happened */
 func TestTracker_DeleteRecordsNothingWhenNoRowMatched(t *testing.T) {
     tracker, _, storage := newScriptedTracker(nil)
 
@@ -332,7 +333,7 @@ func TestTracker_DeleteRecordsNothingWhenNoRowMatched(t *testing.T) {
     }
 }
 
-/* @info the opt-in: an entity whose deleted contents must be recoverable pays a select and a row lock for them */
+/* the opt-in: an entity whose deleted contents must be recoverable pays a select and a row lock for them */
 func TestTracker_DeleteCapturesTheStoredRowWhenTheEntityOptsIn(t *testing.T) {
     tracker, scripted, storage := newScriptedTracker(
         &auditedAccount{Id: 42, Name: "real name", Email: "real@example.com", Balance: 9999},
@@ -401,5 +402,76 @@ func TestResolveEntityId_PrefersCallerSuppliedId(t *testing.T) {
     }
     if got := tracker.resolveEntityId("", &single{Id: 99}); "99" != got {
         t.Fatalf("an empty id must be derived from the pk, got %q, want 99", got)
+    }
+}
+
+func TestTracker_RefusesACallerBoundContext(t *testing.T) {
+    database := newTestDatabase()
+    tracker := NewTracker(database, NewRecorderWithStorage(&fakeStorage{}, nil))
+
+    boundCtx := WithDatabase(context.Background(), database)
+
+    insertErr := tracker.Insert(boundCtx, "parityAccount", "1", &parityAccount{Id: 1})
+    if nil == insertErr {
+        t.Fatalf("expected the caller-bound context to be refused")
+    }
+
+    if false == strings.Contains(insertErr.Error(), "refuses a context bound with WithDatabase") {
+        t.Fatalf("expected the refusal to name the misuse and the alternative, got: %v", insertErr)
+    }
+}
+
+func TestTracker_WrapsTheCommitMarginWithTheEntity(t *testing.T) {
+    commitErr := errors.New("driver: commit deadlock")
+    scripted := &scriptedDatabase{commitErr: commitErr}
+    database := bun.NewDB(sql.OpenDB(&scriptedConnector{database: scripted}), mysqldialect.New())
+    tracker := NewTracker(database, NewRecorderWithStorage(&fakeStorage{}, nil))
+
+    insertErr := tracker.Insert(context.Background(), "parityAccount", "1", &parityAccount{Id: 1, Email: "a@example.com"})
+    if nil == insertErr {
+        t.Fatalf("expected the commit failure to surface")
+    }
+
+    if false == strings.Contains(insertErr.Error(), "audited write transaction failed") {
+        t.Fatalf("expected the margin wrap, got: %v", insertErr)
+    }
+
+    if false == errors.Is(insertErr, commitErr) {
+        t.Fatalf("expected the commit cause to stay reachable by identity, got: %v", insertErr)
+    }
+}
+
+/* the closure's own failure must travel unchanged: wrapping it too would break every errors.Is a caller performs on the named inner errors */
+func TestTracker_LeavesTheUnitOfWorkErrorUnwrapped(t *testing.T) {
+    scripted := &scriptedDatabase{}
+    database := bun.NewDB(sql.OpenDB(&scriptedConnector{database: scripted}), mysqldialect.New())
+    saveErr := errors.New("storage refused")
+    tracker := NewTracker(database, NewRecorderWithStorage(&fakeStorage{failWith: saveErr}, nil))
+
+    insertErr := tracker.Insert(context.Background(), "parityAccount", "1", &parityAccount{Id: 1})
+    if saveErr != insertErr {
+        t.Fatalf("expected the unit-of-work error to keep its identity, got: %v", insertErr)
+    }
+}
+
+func TestEntityIdFromModel_EscapesTheCompositeJoin(t *testing.T) {
+    database := newTestDatabase()
+
+    type composite struct {
+        bun.BaseModel `bun:"table:composite"`
+
+        Left  string `bun:"left_part,pk"`
+        Right string `bun:"right_part,pk"`
+    }
+
+    ambiguousLeft := entityIdFromModel(database, &composite{Left: "a:b", Right: "c"})
+    ambiguousRight := entityIdFromModel(database, &composite{Left: "a", Right: "b:c"})
+
+    if ambiguousLeft == ambiguousRight {
+        t.Fatalf("expected the two composite keys to derive distinct ids, both derived %q", ambiguousLeft)
+    }
+
+    if `a\:b:c` != ambiguousLeft {
+        t.Fatalf("expected the colon inside a part to be escaped, got %q", ambiguousLeft)
     }
 }

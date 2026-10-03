@@ -5,7 +5,7 @@ import (
     "strings"
 )
 
-/* highestIdSuffix reads the numeric tail of every identifier that carries the given prefix and reports the largest one it could parse, or zero when none of them was a number. The four repositories number their rows the same way and both implementations of each need the answer, so the walk lives here once. */
+/* highestIdSuffix answers the largest numeric tail among the identifiers that carry the prefix, or zero when none parses. */
 func highestIdSuffix(identifierList []string, prefix string) int64 {
     highest := int64(0)
 

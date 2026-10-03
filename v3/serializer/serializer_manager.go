@@ -7,6 +7,7 @@ import (
 
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
+    "github.com/precision-soft/melody/v3/internal"
     serializercontract "github.com/precision-soft/melody/v3/serializer/contract"
 )
 
@@ -21,6 +22,7 @@ func NewSerializerManager(serializersByMime map[string]serializercontract.Serial
     }
 
     normalizedSerializersByMime := make(map[string]serializercontract.Serializer, len(serializersByMime))
+    rawKeysByNormalizedMime := make(map[string]string, len(serializersByMime))
     for mimeKey, serializerInstance := range serializersByMime {
         normalizedMimeKey := normalizeMime(mimeKey)
         if "" == normalizedMimeKey {
@@ -33,7 +35,8 @@ func NewSerializerManager(serializersByMime map[string]serializercontract.Serial
             )
         }
 
-        if nil == serializerInstance {
+        /* a typed nil is refused with the untyped one, at construction rather than on the request path */
+        if true == internal.IsNilInterface(serializerInstance) {
             return nil, exception.NewError(
                 "serializer instance is nil",
                 exceptioncontract.Context{
@@ -43,6 +46,24 @@ func NewSerializerManager(serializersByMime map[string]serializercontract.Serial
             )
         }
 
+        /* two spellings normalizing to one key are refused, since map order would pick the survivor */
+        occupiedRawKey, occupied := rawKeysByNormalizedMime[normalizedMimeKey]
+        if true == occupied {
+            conflictingKeys := []string{occupiedRawKey, mimeKey}
+            sort.Strings(conflictingKeys)
+
+            return nil, exception.NewError(
+                "serializer mime keys collide after normalization",
+                exceptioncontract.Context{
+                    "mime":         normalizedMimeKey,
+                    "firstMimeKey": conflictingKeys[0],
+                    "otherMimeKey": conflictingKeys[1],
+                },
+                nil,
+            )
+        }
+
+        rawKeysByNormalizedMime[normalizedMimeKey] = mimeKey
         normalizedSerializersByMime[normalizedMimeKey] = serializerInstance
     }
 
@@ -69,10 +90,42 @@ func (instance *SerializerManager) Get(mime string) (serializercontract.Serializ
     return serializerInstance, true
 }
 
+/* defaultSerializer answers the representation served when the header expresses no usable preference: json when registered, otherwise the first serializer in lexical mime order. */
+func (instance *SerializerManager) defaultSerializer() (serializercontract.Serializer, bool) {
+    return instance.defaultSerializerExcluding(nil)
+}
+
+/* defaultSerializerExcluding is defaultSerializer with the types the header refused with q=0 left out. */
+func (instance *SerializerManager) defaultSerializerExcluding(refusedMimes map[string]struct{}) (serializercontract.Serializer, bool) {
+    if _, refused := refusedMimes[MimeApplicationJson]; false == refused {
+        serializerInstance, exists := instance.serializersByMime[MimeApplicationJson]
+        if true == exists {
+            return serializerInstance, true
+        }
+    }
+
+    configuredMimes := make([]string, 0, len(instance.serializersByMime))
+    for configuredMime := range instance.serializersByMime {
+        if _, refused := refusedMimes[configuredMime]; true == refused {
+            continue
+        }
+
+        configuredMimes = append(configuredMimes, configuredMime)
+    }
+
+    if 0 == len(configuredMimes) {
+        return nil, false
+    }
+
+    sort.Strings(configuredMimes)
+
+    return instance.serializersByMime[configuredMimes[0]], true
+}
+
 func (instance *SerializerManager) ResolveByAcceptHeader(acceptHeader string) (serializercontract.Serializer, error) {
     acceptHeader = strings.TrimSpace(acceptHeader)
     if "" == acceptHeader {
-        serializerInstance, exists := instance.serializersByMime[MimeApplicationJson]
+        serializerInstance, exists := instance.defaultSerializer()
         if true == exists {
             return serializerInstance, nil
         }
@@ -80,7 +133,15 @@ func (instance *SerializerManager) ResolveByAcceptHeader(acceptHeader string) (s
         return nil, exception.NewError("no default serializer configured", nil, nil)
     }
 
-    acceptedMimes := parseAcceptHeader(acceptHeader)
+    acceptedMimes, cut := parseAcceptHeader(acceptHeader)
+    if true == cut {
+        return nil, exception.NewError(
+            "the accept header holds more members than the negotiation reads and is refused whole",
+            exceptioncontract.Context{"accept": acceptHeader},
+            ErrNotAcceptable,
+        )
+    }
+
     if 0 == len(acceptedMimes) {
         return nil, exception.NewError(
             "no acceptable mime types in accept header",
@@ -96,11 +157,11 @@ func (instance *SerializerManager) ResolveByAcceptHeader(acceptHeader string) (s
 
     sort.Strings(candidateMimes)
 
-    /* @important each available type takes the quality of the MOST SPECIFIC range that covers it, so an exact range overrides a wildcard regardless of header order; a covered type whose range carries q=0 is refused rather than ignored, and a header that refuses every available type is answered as not acceptable instead of being served the very type it rejected */
+    /* each type takes the quality of the most specific range covering it, so an exact range overrides a wildcard; a type refused with q=0 is never served, and not acceptable is answered only when every type is refused */
     selectedMime := ""
     selectedQuality := 0.0
     selectedSpecificity := 0
-    refusedEveryMatch := false
+    refusedMimes := map[string]struct{}{}
 
     for _, candidateMime := range candidateMimes {
         quality, specificity, matched := acceptQualityFor(acceptedMimes, candidateMime)
@@ -109,7 +170,7 @@ func (instance *SerializerManager) ResolveByAcceptHeader(acceptHeader string) (s
         }
 
         if 0 == quality {
-            refusedEveryMatch = true
+            refusedMimes[candidateMime] = struct{}{}
 
             continue
         }
@@ -125,6 +186,13 @@ func (instance *SerializerManager) ResolveByAcceptHeader(acceptHeader string) (s
         if quality == selectedQuality && specificity > selectedSpecificity {
             selectedMime = candidateMime
             selectedSpecificity = specificity
+
+            continue
+        }
+
+        /* a full tie resolves json first, as the empty header does; other ties keep the lexically first candidate */
+        if quality == selectedQuality && specificity == selectedSpecificity && MimeApplicationJson == candidateMime {
+            selectedMime = candidateMime
         }
     }
 
@@ -132,7 +200,7 @@ func (instance *SerializerManager) ResolveByAcceptHeader(acceptHeader string) (s
         return instance.serializersByMime[selectedMime], nil
     }
 
-    if true == refusedEveryMatch {
+    if len(refusedMimes) == len(candidateMimes) && 0 < len(refusedMimes) {
         return nil, exception.NewError(
             notAcceptableMessage,
             exceptioncontract.Context{"accept": acceptHeader},
@@ -140,7 +208,7 @@ func (instance *SerializerManager) ResolveByAcceptHeader(acceptHeader string) (s
         )
     }
 
-    serializerInstance, exists := instance.serializersByMime[MimeApplicationJson]
+    serializerInstance, exists := instance.defaultSerializerExcluding(refusedMimes)
     if true == exists {
         return serializerInstance, nil
     }

@@ -9,11 +9,15 @@ import (
     melodysecuritycontract "github.com/precision-soft/melody/security/contract"
 )
 
-func NewSessionLogoutHandler() melodysecuritycontract.LogoutHandler {
-    return &sessionLogoutHandler{}
+func NewSessionLogoutHandler(sessionIndex SessionIndexLookup) melodysecuritycontract.LogoutHandler {
+    return &sessionLogoutHandler{
+        sessionIndex: sessionIndex,
+    }
 }
 
-type sessionLogoutHandler struct{}
+type sessionLogoutHandler struct {
+    sessionIndex SessionIndexLookup
+}
 
 func (instance *sessionLogoutHandler) Logout(
     runtimeInstance melodyruntimecontract.Runtime,
@@ -29,8 +33,13 @@ func (instance *sessionLogoutHandler) Logout(
         }, nil
     }
 
-    sessionInstance.Delete(SessionKeySecurityUserId)
-    sessionInstance.Delete(SessionKeySecurityRoles)
+    /* the whole session ends, not only the identity in it: an emptied session would be saved back under the same id with a re-issued cookie, while Clear routes the response path to DeleteSession and to the expired cookie */
+    sessionInstance.Clear()
+
+    /* the sign-out stands whatever the index answers, as at the sign-out door */
+    if releaseErr := ReleaseSession(request, instance.sessionIndex, sessionInstance.Id()); nil != releaseErr {
+        JournalUnreleasedSession(runtimeInstance, releaseErr)
+    }
 
     response, err := melodyhttp.JsonResponse(http.StatusOK, map[string]any{
         "success": true,

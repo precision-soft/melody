@@ -3,16 +3,21 @@ package wiring
 import (
     "bytes"
     "context"
+    "errors"
     "os"
     "path/filepath"
+    "slices"
     "strings"
     "testing"
 
-    clicontract "github.com/precision-soft/melody/v3/cli/contract"
+    melodycli "github.com/precision-soft/melody/v3/cli"
     "github.com/precision-soft/melody/v3/config"
     configcontract "github.com/precision-soft/melody/v3/config/contract"
     "github.com/precision-soft/melody/v3/container"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
+    "github.com/precision-soft/melody/v3/logging"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
+    "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
@@ -105,7 +110,7 @@ func newCommandFixtureRuntime(t *testing.T, projectDirectory string) runtimecont
     return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 }
 
-/* runGenerateCommand drives the command through the cli library rather than around it, so the flags it declares are the flags the arguments are parsed against: a flag the command stops declaring fails here instead of silently reading its zero value. */
+/* runGenerateCommand drives the command through the cli library, so a flag the command stops declaring fails here instead of reading its zero value. Unless the caller gives --out, the source goes to a file and the report to the writer; what comes back is the writer followed by the generated source. */
 func runGenerateCommand(
     t *testing.T,
     projectDirectory string,
@@ -119,19 +124,29 @@ func runGenerateCommand(
 
     output := &bytes.Buffer{}
 
-    commandContext := &clicontract.CommandContext{
-        Name:   command.Name(),
-        Usage:  command.Description(),
-        Flags:  command.Flags(),
-        Writer: output,
-        Action: func(actionContext context.Context, actionCommandContext *clicontract.CommandContext) error {
-            return command.Run(runtimeInstance, actionCommandContext)
-        },
+    outPath := ""
+    if false == slices.Contains(arguments, "--out") {
+        outPath = filepath.Join(t.TempDir(), "wiring_gen.go")
+        arguments = append(arguments, "--out", outPath)
     }
 
-    runErr := commandContext.Run(context.Background(), append([]string{command.Name()}, arguments...))
+    runErr := melodycli.DispatchCommand(
+        context.Background(),
+        command,
+        runtimeInstance,
+        append([]string{command.Name()}, arguments...),
+        output,
+    )
 
-    return output.String(), runErr
+    written := output.String()
+    if "" != outPath {
+        source, readErr := os.ReadFile(outPath)
+        if nil == readErr {
+            written = written + string(source)
+        }
+    }
+
+    return written, runErr
 }
 
 func appBindSet() *BindSet {
@@ -141,7 +156,7 @@ func appBindSet() *BindSet {
     return bindSet
 }
 
-/* @info without the tag the gated constructor is absent from the generated source and the file that holds it is named on request, so a service missing from the wiring traces back to the tag it needs */
+/* without the tag the gated constructor is absent from the generated source and the file that holds it is named on request, so a service missing from the wiring traces back to the tag it needs */
 func TestGenerateCommand_WithoutTheTagTheGatedConstructorIsAbsentAndItsFileIsNamedExcluded(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
 
@@ -168,7 +183,7 @@ func TestGenerateCommand_WithoutTheTagTheGatedConstructorIsAbsentAndItsFileIsNam
     }
 }
 
-/* @important this pins the plumbing of the tags flag into the scan: with the tag dropped on the way to GenerateRequest the gated constructor stays missing from the generated wiring, strict still reports success, and nothing else in the command fails */
+/* this pins the plumbing of the tags flag into the scan: with the tag dropped on the way to GenerateRequest the gated constructor stays missing from the generated wiring, strict still reports success, and nothing else in the command fails */
 func TestGenerateCommand_ThreadsTheTagsFlagIntoTheScan(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
 
@@ -197,7 +212,7 @@ func TestGenerateCommand_ThreadsTheTagsFlagIntoTheScan(t *testing.T) {
     }
 }
 
-/* @info the rejection of a constraint expression has to reach the caller as a failed command, not as a scan that quietly matched no file */
+/* the rejection of a constraint expression has to reach the caller as a failed command, not as a scan that quietly matched no file */
 func TestGenerateCommand_RejectsAConstraintExpressionInTheTagsFlag(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
 
@@ -211,7 +226,7 @@ func TestGenerateCommand_RejectsAConstraintExpressionInTheTagsFlag(t *testing.T)
     }
 }
 
-/* @info a skipped constructor is coverage the wiring lost; it is always reported and strict turns it into a failure */
+/* a skipped constructor is coverage the wiring lost; it is always reported and strict turns it into a failure */
 func TestGenerateCommand_StrictFailsOnASkippedConstructor(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
 
@@ -240,7 +255,55 @@ func TestGenerateCommand_StrictFailsOnASkippedConstructor(t *testing.T) {
     }
 }
 
-/* @info a relative out path is resolved against the project directory, and the source goes to the file instead of the writer */
+/* registered through cli.Register, the command runs inside the run banner, and a command that declares no quiet flag keeps that banner: printed to stdout, the generated source began with the banner's escape sequence; the quiet flag defaults to true here as it does under StandardFlags, and --quiet=false brings the frame back */
+func TestGenerateCommand_TheStdoutSourceIsNotWrappedInTheBanner(t *testing.T) {
+    written := runRegisteredGenerateCommand(t, nil)
+
+    if false == strings.HasPrefix(written, "// Code generated by melody:wiring:generate. DO NOT EDIT.") {
+        t.Fatalf("expected the generated source alone on stdout, got %q", written[:min(len(written), 80)])
+    }
+    if true == strings.Contains(written, "[melody:wiring:generate] [finished]") {
+        t.Fatalf("expected no finish banner after the source, got %q", written)
+    }
+
+    written = runRegisteredGenerateCommand(t, []string{"--quiet=false"})
+
+    if false == strings.Contains(written, "[melody:wiring:generate] [started]") {
+        t.Fatalf("expected the banner back under --quiet=false, got %q", written[:min(len(written), 80)])
+    }
+
+    /* the frame --quiet=false brings back is governed by the other standard flag too: a command declaring --quiet by hand and not --no-color offered a frame that could not be un-coloured */
+    written = runRegisteredGenerateCommand(t, []string{"--quiet=false", "--no-color"})
+
+    if false == strings.Contains(written, "[melody:wiring:generate] [started]") || true == strings.Contains(written, "\x1b[") {
+        t.Fatalf("expected an uncoloured frame under --quiet=false --no-color, got %q", written[:min(len(written), 80)])
+    }
+}
+
+func runRegisteredGenerateCommand(t *testing.T, arguments []string) string {
+    t.Helper()
+
+    projectDirectory := newCommandFixtureProject(t)
+    command := NewGenerateCommand(appBindSet())
+    runtimeInstance := newCommandFixtureRuntime(t, projectDirectory)
+
+    rootCommand := melodycli.NewRoot("app", "desc")
+    buffer := &bytes.Buffer{}
+
+    melodycli.Register(rootCommand, command, runtimeInstance)
+
+    rootCommand.SetWriter(buffer)
+    rootCommand.SetErrorWriter(buffer)
+
+    runErr := rootCommand.Run(context.Background(), append([]string{"app", command.Name()}, arguments...))
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    return buffer.String()
+}
+
+/* a relative out path is resolved against the project directory, and the source goes to the file instead of the writer */
 func TestGenerateCommand_WritesTheGeneratedSourceToTheOutPath(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
 
@@ -293,7 +356,7 @@ func TestGenerateCommand_WritesTheGeneratedSourceToTheOutPath(t *testing.T) {
     }
 }
 
-/* @info a vendor tree cannot contribute services, so naming it is opt-in noise rather than part of every report */
+/* a vendor tree cannot contribute services, so naming it is opt-in noise rather than part of every report */
 func TestGenerateCommand_NamesTheVendorDirectoryOnlyOnRequest(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
 
@@ -317,7 +380,7 @@ func TestGenerateCommand_NamesTheVendorDirectoryOnlyOnRequest(t *testing.T) {
     }
 }
 
-/* @info a build context carries plain tag identifiers; a constraint expression handed to it matches no file, so the scan would behave as if nothing had been passed and strict would still report success */
+/* a build context carries plain tag identifiers; a constraint expression matches no file, so the scan would behave as if no tag were passed while strict reports success */
 func TestSplitBuildTags_RejectsAConstraintExpression(t *testing.T) {
     for _, tags := range []string{"!postgres", "postgres,!mysql", "postgres mysql", "post-gres", "(postgres)"} {
         buildTags, splitErr := splitBuildTags(tags)
@@ -332,7 +395,7 @@ func TestSplitBuildTags_RejectsAConstraintExpression(t *testing.T) {
     }
 }
 
-/* @info the accepted forms follow the go tool's own tag syntax, and surrounding spaces and empty entries stay tolerated */
+/* the accepted forms follow the go tool's own tag syntax, and surrounding spaces and empty entries stay tolerated */
 func TestSplitBuildTags_AcceptsPlainIdentifiers(t *testing.T) {
     buildTags, splitErr := splitBuildTags(" with_postgres , go1.22,, Integration2 ")
     if nil != splitErr {
@@ -359,5 +422,417 @@ func TestSplitBuildTags_EmptyInputYieldsNoTags(t *testing.T) {
 
     if nil != buildTags {
         t.Fatalf("expected an empty tag list to yield no tags, got %v", buildTags)
+    }
+}
+
+/* the run is inspected through its exit and its error record; a refusal naming only the first violation found would attribute the failure to a bind typo while the lost constructor coverage beside it never crosses the process boundary — strict carries every violation in one refusal. */
+func TestGenerateCommand_StrictCarriesEveryViolationInOneRefusal(t *testing.T) {
+    projectDirectory := newCommandFixtureProject(t)
+
+    bindSet := NewBindSet()
+    bindSet.Name("ghostArgument", "app.ghost")
+    bindSet.Package(commandFixtureBrokenImportPath, "broken").Exclude("*Ghost")
+
+    _, strictErr := runGenerateCommand(t, projectDirectory, bindSet, "--strict")
+    if nil == strictErr {
+        t.Fatalf("expected strict to fail")
+    }
+
+    var refusal *exception.Error
+    if false == errors.As(strictErr, &refusal) {
+        t.Fatalf("expected an exception error, got %T", strictErr)
+    }
+
+    refusalContext := refusal.Context()
+
+    binds, _ := refusalContext["binds"].(string)
+    if false == strings.Contains(binds, "ghostArgument") {
+        t.Fatalf("expected the unused bind in the refusal, got %v", refusalContext)
+    }
+
+    excludes, _ := refusalContext["excludes"].(string)
+    if false == strings.Contains(excludes, "*Ghost") {
+        t.Fatalf("expected the unused exclude in the refusal, got %v", refusalContext)
+    }
+
+    skipped, _ := refusalContext["constructors"].(string)
+    if false == strings.Contains(skipped, "NewBroken") {
+        t.Fatalf("expected the skipped constructor in the refusal, got %v", refusalContext)
+    }
+}
+
+/* a generated file inside a scanned directory is read back by the next scan with a package clause the surrounding sources do not carry, so the package stops compiling and the tool cannot regenerate its way out */
+func TestGenerateCommand_RefusesAnOutPathInsideAScannedDirectory(t *testing.T) {
+    projectDirectory := newCommandFixtureProject(t)
+
+    _, runErr := runGenerateCommand(
+        t,
+        projectDirectory,
+        appBindSet(),
+        "--out",
+        filepath.Join("app", "wiring_gen.go"),
+    )
+    if nil == runErr {
+        t.Fatalf("expected the out path inside the scanned directory to be refused")
+    }
+
+    if false == strings.Contains(runErr.Error(), "the output path lies inside a scanned package directory") {
+        t.Fatalf("unexpected error: %v", runErr)
+    }
+}
+
+/* the write truncates before it writes, so a mistyped --out pointing at a hand-written file must be refused: only a file opening with the generated marker — or an absent or empty one — is this command's to replace. */
+func TestGenerateCommand_RefusesToOverwriteAFileWithoutTheGeneratedMarker(t *testing.T) {
+    projectDirectory := newCommandFixtureProject(t)
+
+    writeCommandFixtureFile(t, projectDirectory, "config/module.go", "package config\n\nfunc Wire() {}\n")
+
+    _, runErr := runGenerateCommand(
+        t,
+        projectDirectory,
+        appBindSet(),
+        "--out",
+        filepath.Join("config", "module.go"),
+    )
+    if nil == runErr {
+        t.Fatalf("expected the foreign file to be protected")
+    }
+
+    if false == strings.Contains(runErr.Error(), "is not a generated wiring file") {
+        t.Fatalf("unexpected error: %v", runErr)
+    }
+
+    preserved, readErr := os.ReadFile(filepath.Join(projectDirectory, "config", "module.go"))
+    if nil != readErr || false == strings.Contains(string(preserved), "func Wire()") {
+        t.Fatalf("expected the foreign file preserved, got %q (%v)", string(preserved), readErr)
+    }
+}
+
+/* a file carrying the marker is a previous output of this command and is replaced in place, which is what every regeneration does. */
+func TestGenerateCommand_ReplacesAPreviousGeneratedFile(t *testing.T) {
+    projectDirectory := newCommandFixtureProject(t)
+
+    outArgument := filepath.Join("internal", "generated", "wiring_gen.go")
+
+    for run := 0; run < 2; run++ {
+        _, runErr := runGenerateCommand(t, projectDirectory, appBindSet(), "--out", outArgument)
+        if nil != runErr {
+            t.Fatalf("run %d: %v", run, runErr)
+        }
+    }
+
+    written, readErr := os.ReadFile(filepath.Join(projectDirectory, outArgument))
+    if nil != readErr || false == strings.Contains(string(written), "NewThing") {
+        t.Fatalf("expected the regenerated file, got %v", readErr)
+    }
+}
+
+/* the atomic write lands through a temp file and a rename: the artifact keeps the 0644 mode a direct write gave it, and no temp file survives a successful run beside it. */
+func TestGenerateCommand_AtomicWriteLeavesTheModeAndNoResidue(t *testing.T) {
+    projectDirectory := newCommandFixtureProject(t)
+
+    outArgument := filepath.Join("internal", "generated", "wiring_gen.go")
+
+    _, runErr := runGenerateCommand(t, projectDirectory, appBindSet(), "--out", outArgument)
+    if nil != runErr {
+        t.Fatalf("run: %v", runErr)
+    }
+
+    outputPath := filepath.Join(projectDirectory, outArgument)
+
+    fileInfo, statErr := os.Stat(outputPath)
+    if nil != statErr {
+        t.Fatalf("stat: %v", statErr)
+    }
+
+    if 0o644 != fileInfo.Mode().Perm() {
+        t.Fatalf("expected mode 0644, got %v", fileInfo.Mode().Perm())
+    }
+
+    entries, readDirErr := os.ReadDir(filepath.Dir(outputPath))
+    if nil != readDirErr {
+        t.Fatalf("read dir: %v", readDirErr)
+    }
+
+    for _, entry := range entries {
+        if true == strings.HasSuffix(entry.Name(), ".tmp") {
+            t.Fatalf("expected no temp residue, found %s", entry.Name())
+        }
+    }
+}
+
+/* without strict an unused exclude is not fatal, but it is named on the writer the way an unused bind is — the silent alternative registers the very constructor the pattern was declared to keep out. */
+func TestGenerateCommand_ReportsAnUnusedExcludeOnTheWriter(t *testing.T) {
+    projectDirectory := newCommandFixtureProject(t)
+
+    bindSet := NewBindSet()
+    bindSet.Package(commandFixtureImportPath, "app").Exclude("*Ghost")
+
+    output, runErr := runGenerateCommand(t, projectDirectory, bindSet)
+    if nil != runErr {
+        t.Fatalf("run: %v", runErr)
+    }
+
+    if false == strings.Contains(output, "exclude "+commandFixtureImportPath+".*Ghost matched no constructor") {
+        t.Fatalf("expected the unused exclude named on the writer, got:\n%s", output)
+    }
+}
+
+/* The containment guard read the relative path as text: a directory named ..hidden inside the scanned one started with two dots and passed as outside, and a project directory the output path could not be related to (a relative one against an absolute --out) failed the relation and passed as well. Both are refused now; the sibling directory next to the scanned one stays permitted. */
+func TestGenerateCommand_ReadsTheContainmentOnPathComponents(t *testing.T) {
+    hiddenProject := newCommandFixtureProject(t)
+    if mkdirErr := os.MkdirAll(filepath.Join(hiddenProject, "app", "..hidden"), 0o755); nil != mkdirErr {
+        t.Fatalf("mkdir: %v", mkdirErr)
+    }
+
+    _, runErr := runGenerateCommand(t, hiddenProject, appBindSet(), "--out", filepath.Join("app", "..hidden", "wiring_gen.go"))
+    if nil == runErr || false == strings.Contains(runErr.Error(), "the output path lies inside a scanned package directory") {
+        t.Fatalf("expected a dot-dot-named directory inside the scanned one to be refused, got %v", runErr)
+    }
+
+    relativeProject := newCommandFixtureProject(t)
+    workingDirectory, getwdErr := os.Getwd()
+    if nil != getwdErr {
+        t.Fatalf("getwd: %v", getwdErr)
+    }
+    if chdirErr := os.Chdir(filepath.Dir(relativeProject)); nil != chdirErr {
+        t.Fatalf("chdir: %v", chdirErr)
+    }
+    defer func() {
+        _ = os.Chdir(workingDirectory)
+    }()
+
+    _, runErr = runGenerateCommand(t, filepath.Base(relativeProject), appBindSet(), "--out", filepath.Join(relativeProject, "app", "wiring_gen.go"))
+    if nil == runErr || false == strings.Contains(runErr.Error(), "the output path cannot be related to a scanned package directory") {
+        t.Fatalf("expected an output path the scanned directory cannot be related to to be refused, got %v", runErr)
+    }
+
+    siblingProject := newCommandFixtureProject(t)
+    if mkdirErr := os.MkdirAll(filepath.Join(siblingProject, "appx"), 0o755); nil != mkdirErr {
+        t.Fatalf("mkdir: %v", mkdirErr)
+    }
+
+    if _, runErr = runGenerateCommand(t, siblingProject, appBindSet(), "--out", filepath.Join("appx", "wiring_gen.go")); nil != runErr {
+        t.Fatalf("expected the sibling directory to stay permitted, got %v", runErr)
+    }
+}
+
+type journalCapturingLogger struct {
+    loggingcontract.Logger
+
+    lines    []string
+    warnings []string
+}
+
+func (instance *journalCapturingLogger) Info(message string, context loggingcontract.Context) {
+    instance.lines = append(instance.lines, message)
+}
+
+func (instance *journalCapturingLogger) Warning(message string, context loggingcontract.Context) {
+    instance.warnings = append(instance.warnings, message)
+}
+
+/* in stdout mode the writer IS the generated source, so the report cannot share it: printed ahead of the package clause, the stream redirected into a file was never a compilable Go file, banner or not. The report goes to the journal, one record per line, through the application's logger. */
+func TestGenerateCommand_TheStdoutModeJournalsTheReportAndPrintsTheSourceAlone(t *testing.T) {
+    projectDirectory := newCommandFixtureProject(t)
+    command := NewGenerateCommand(appBindSet())
+    runtimeInstance := newCommandFixtureRuntime(t, projectDirectory)
+
+    journal := &journalCapturingLogger{Logger: logging.NewNopLogger()}
+    container.MustRegister[loggingcontract.Logger](
+        runtimeInstance.Container(),
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return journal, nil
+        },
+    )
+
+    output := &bytes.Buffer{}
+
+    runErr := melodycli.DispatchCommand(
+        context.Background(),
+        command,
+        runtimeInstance,
+        []string{command.Name(), "--report-excluded"},
+        output,
+    )
+    if nil != runErr {
+        t.Fatalf("expected the generation to succeed, got %v", runErr)
+    }
+
+    if false == strings.HasPrefix(output.String(), "// Code generated by melody:wiring:generate. DO NOT EDIT.") {
+        t.Fatalf("expected the source alone on the writer, got %q", output.String()[:min(output.Len(), 80)])
+    }
+
+    if true == strings.Contains(output.String(), "registered 1 constructors") {
+        t.Fatalf("expected the report kept off the source stream, got:\n%s", output.String())
+    }
+
+    if false == slices.Contains(journal.lines, "registered 1 constructors") {
+        t.Fatalf("expected the report journaled line by line, got %v", journal.lines)
+    }
+
+    if false == slices.ContainsFunc(journal.warnings, func(line string) bool { return strings.HasPrefix(line, "excluded by build constraints") }) {
+        t.Fatalf("expected the excluded file named in the journal as a warning, got %v / %v", journal.lines, journal.warnings)
+    }
+}
+
+/* the lines that name lost coverage are warnings, so a journal read at the usual production threshold keeps them: journaled as information, the whole report vanished from an application logger at warning — the branch every deployment with a log path takes */
+func TestGenerateCommand_TheStdoutModeJournalsTheCoverageLossesAboveAWarningThreshold(t *testing.T) {
+    projectDirectory := newCommandFixtureProject(t)
+    command := NewGenerateCommand(appBindSet())
+    runtimeInstance := newCommandFixtureRuntime(t, projectDirectory)
+
+    journal := &bytes.Buffer{}
+    container.MustRegister[loggingcontract.Logger](
+        runtimeInstance.Container(),
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return logging.NewJsonLogger(journal, loggingcontract.LevelWarning), nil
+        },
+    )
+
+    runErr := melodycli.DispatchCommand(
+        context.Background(),
+        command,
+        runtimeInstance,
+        []string{command.Name(), "--report-excluded"},
+        &bytes.Buffer{},
+    )
+    if nil != runErr {
+        t.Fatalf("expected the generation to succeed, got %v", runErr)
+    }
+
+    if false == strings.Contains(journal.String(), "excluded by build constraints") {
+        t.Fatalf("expected the excluded file to survive a warning threshold, got %q", journal.String())
+    }
+
+    if true == strings.Contains(journal.String(), "registered 1 constructors") {
+        t.Fatalf("expected the count of what was registered to stay information below the threshold, got %q", journal.String())
+    }
+}
+
+/* a last line written without its line end is journaled at the flush, not kept pending for ever */
+func TestJournalLineWriter_FlushJournalsALastLineWithoutALineEnd(t *testing.T) {
+    journal := &journalCapturingLogger{Logger: logging.NewNopLogger()}
+    writer := &journalLineWriter{logger: journal, command: "melody:wiring:generate"}
+
+    if _, writeErr := writer.Write([]byte("registered 2 constructors\nbind x matched no constructor argument")); nil != writeErr {
+        t.Fatalf("unexpected write error: %v", writeErr)
+    }
+
+    if false == slices.Contains(journal.lines, "registered 2 constructors") || 0 != len(journal.warnings) {
+        t.Fatalf("expected the ended line journaled and the pending one held, got %v / %v", journal.lines, journal.warnings)
+    }
+
+    writer.flush()
+
+    if false == slices.Contains(journal.warnings, "bind x matched no constructor argument") {
+        t.Fatalf("expected the flush to journal the pending line as a warning, got %v", journal.warnings)
+    }
+}
+
+/* the journal door of this command is the sibling openapi command's, copied: a configuration that resolves but answers no kernel section is read as "not stdout", not dereferenced */
+func TestJournalSharesStdout_AnswersFalseWithoutAKernelSection(t *testing.T) {
+    serviceContainer := container.NewContainer()
+    container.MustRegister[configcontract.Configuration](
+        serviceContainer,
+        config.ServiceConfig,
+        func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
+            return kernelLessConfiguration{}, nil
+        },
+    )
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    if true == journalSharesStdout(runtimeInstance) {
+        t.Fatalf("expected a configuration without a kernel section to be read as not stdout")
+    }
+}
+
+type kernelLessConfiguration struct {
+    configcontract.Configuration
+}
+
+func (instance kernelLessConfiguration) Kernel() configcontract.KernelConfiguration { return nil }
+
+/* the classifier reads what a line IS, not what it is not: the counts and the vendor trees the scan stepped over are facts of a scan that worked, while every line naming lost coverage survives the threshold a deployment reads at. The reach of a global bind is neither — it is a warning the operator needs and one the generator emits per bound argument, so it is aggregated rather than demoted; that half is pinned below. */
+func TestJournalLineWriter_AFactOfAScanThatWorkedStaysInformation(t *testing.T) {
+    journal := &bytes.Buffer{}
+    writer := &journalLineWriter{
+        logger:  logging.NewJsonLogger(journal, loggingcontract.LevelWarning),
+        command: "melody:wiring:generate",
+    }
+
+    for _, line := range []string{
+        "registered 12 constructors",
+        "skipped vendor directory: vendor/github.com/x",
+        "skipped NewThing (thing.go:12): unexported",
+        "bind targets were not checked: the application declares no parameters",
+    } {
+        writer.journalLine(line)
+    }
+    writer.flush()
+
+    kept := journal.String()
+
+    for _, fact := range []string{"registered 12 constructors", "skipped vendor directory"} {
+        if true == strings.Contains(kept, fact) {
+            t.Fatalf("expected %q to stay information below a warning threshold, got %q", fact, kept)
+        }
+    }
+
+    for _, loss := range []string{"skipped NewThing", "bind targets were not checked"} {
+        if false == strings.Contains(kept, loss) {
+            t.Fatalf("expected %q to survive the warning threshold, got %q", loss, kept)
+        }
+    }
+
+    /* a generation with no global bind must not raise the aggregate warning at all */
+    if true == strings.Contains(kept, "reach constructors by argument name") {
+        t.Fatalf("expected no reach warning where no bind reached anything, got %q", kept)
+    }
+}
+
+/* a global bind silently reaches every constructor declaring an argument of that name, which is what the
+   reach report exists to expose — so it has to survive the threshold a deployment journals at. What made
+   it read as noise is that the generator emits one line per bound argument, on every clean generation, so
+   what is cut is the REPETITION and not the warning: however many binds reach however many constructors,
+   the journal carries ONE record, its message naming how many binds and its context carrying every line.
+   Pinned in both directions — one record, and no line of it lost. */
+func TestJournalLineWriter_TheReachOfEveryGlobalBindIsOneWarningNotOnePerBind(t *testing.T) {
+    journal := &bytes.Buffer{}
+    writer := &journalLineWriter{
+        logger:  logging.NewJsonLogger(journal, loggingcontract.LevelWarning),
+        command: "melody:wiring:generate",
+    }
+
+    for _, line := range []string{
+        "global bind logger reaches 2 constructors: NewBilling, NewInvoicing",
+        "global bind clock reaches 1 constructor: NewScheduler",
+        "global bind stageEnv reaches 3 constructors: NewA, NewB, NewC",
+    } {
+        writer.journalLine(line)
+    }
+
+    if 0 != strings.Count(journal.String(), "globalBindReach") {
+        t.Fatalf("expected the reach lines to be held until the report ends, got %q", journal.String())
+    }
+
+    writer.flush()
+
+    kept := journal.String()
+
+    if 1 != strings.Count(kept, "reach constructors by argument name alone") {
+        t.Fatalf("expected exactly one aggregate record for three binds, got %q", kept)
+    }
+
+    if false == strings.Contains(kept, "3 global binds reach constructors by argument name alone") {
+        t.Fatalf("expected the message to name how many binds reached, got %q", kept)
+    }
+
+    for _, reach := range []string{"logger reaches 2 constructors", "clock reaches 1 constructor", "stageEnv reaches 3 constructors"} {
+        if false == strings.Contains(kept, reach) {
+            t.Fatalf("expected %q to survive inside the one record, got %q", reach, kept)
+        }
     }
 }

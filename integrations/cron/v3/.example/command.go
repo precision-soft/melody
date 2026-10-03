@@ -23,7 +23,7 @@ func (instance *BillingCleanupCommand) Flags() []melodyclicontract.Flag {
     return nil
 }
 
-func (instance *BillingCleanupCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
+func (instance *BillingCleanupCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext melodyclicontract.Context) error {
     return nil
 }
 

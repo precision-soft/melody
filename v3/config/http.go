@@ -16,13 +16,17 @@ var (
     defaultLocalePattern = regexp.MustCompile(`^[a-z]{2}(-[A-Za-z]{2})?$`)
 )
 
-/* MinimumSessionTtl is the shortest session lifetime that can still describe a session. Below it the value is not a short session, it is a broken one: the storage purges every lapsed entry on the write that stores the new one, so a ttl smaller than the time that write takes makes SaveSession report success and persist nothing — a login that answers "welcome" and leaves the user logged out. A session also has to survive the response reaching the client and the client coming back, which no sub-second lifetime does, and a second is the finest unit http itself dates anything in. Zero keeps its own meaning of "no expiry" and is not affected. */
+/* MinimumSessionTtl is the shortest session lifetime that can still describe a session: the storage purges every lapsed entry on the write that stores the new one, so a smaller ttl makes SaveSession report success and persist nothing. Zero keeps its meaning of "no expiry". */
 const MinimumSessionTtl = time.Second
 
-/* DefaultSessionTtl is the lifetime a stored session gets when MELODY_HTTP_SESSION_TTL says nothing. It is zero — no expiry — which is what every deployment that predates the setting already had, so upgrading does not start logging users out at a lifetime nobody chose.
-
-Zero is not free of hazard, and the hazard is worth naming here rather than discovering in a memory graph: melody mints a session for every request that arrives without a session cookie, so once an application writes to a session on a public path — a csrf token, a flash message, a locale — an unbounded lifetime turns every cookie-less request into a permanent entry. That is survivable in a shared store an operator can expire, and it is not in the default in-memory one, which is why the application warns at boot when it finds both together rather than quietly picking a lifetime on the deployment's behalf. Set this to what the deployment actually wants. */
+/* DefaultSessionTtl is the lifetime a stored session gets when MELODY_HTTP_SESSION_TTL says nothing: zero, no expiry. Melody mints a session for every request without a session cookie, so once an application writes a session on a public path an unbounded lifetime makes every cookie-less request a permanent entry, which the default in-memory storage cannot expire; the application warns at boot on that combination. Set this to what the deployment wants. */
 const DefaultSessionTtl = 0 * time.Second
+
+/* DefaultSessionTombstoneRetention is how long a deleted session id keeps refusing a write-back when MELODY_HTTP_SESSION_TOMBSTONE_RETENTION says nothing. The window has to cover the longest a request can hold a session snapshot loaded before the delete, since nothing bounds a handler's lifetime; a deployment with slower requests raises it, at one remembered entry per deletion. The record lives in the manager, per process. */
+const DefaultSessionTombstoneRetention = 5 * time.Minute
+
+/* DefaultHttpShutdownTimeout is how long a stopping http server waits for the requests already admitted when MELODY_HTTP_SHUTDOWN_TIMEOUT says nothing. It is far below the write timeout; a deployment whose supervisor grants a longer grace raises it to match. */
+const DefaultHttpShutdownTimeout = 5 * time.Second
 
 func newHttpConfiguration(
     address string,
@@ -34,6 +38,8 @@ func newHttpConfiguration(
     staticCacheMaxAge int,
     staticExcludedPaths []string,
     sessionTtl time.Duration,
+    sessionTombstoneRetention time.Duration,
+    shutdownTimeout time.Duration,
 ) (*httpConfiguration, error) {
     if false == strings.Contains(address, ":") {
         address = ":" + address
@@ -45,15 +51,17 @@ func newHttpConfiguration(
     }
 
     httpConfigurationInstance := &httpConfiguration{
-        address:             address,
-        defaultLocale:       defaultLocale,
-        publicDir:           publicDir,
-        staticIndexFile:     staticIndexFile,
-        maxRequestBodyBytes: maxRequestBodyBytes,
-        staticEnableCache:   staticEnableCache,
-        staticCacheMaxAge:   staticCacheMaxAge,
-        staticExcludedPaths: copiedStaticExcludedPaths,
-        sessionTtl:          sessionTtl,
+        address:                   address,
+        defaultLocale:             defaultLocale,
+        publicDir:                 publicDir,
+        staticIndexFile:           staticIndexFile,
+        maxRequestBodyBytes:       maxRequestBodyBytes,
+        staticEnableCache:         staticEnableCache,
+        staticCacheMaxAge:         staticCacheMaxAge,
+        staticExcludedPaths:       copiedStaticExcludedPaths,
+        sessionTtl:                sessionTtl,
+        sessionTombstoneRetention: sessionTombstoneRetention,
+        shutdownTimeout:           shutdownTimeout,
     }
 
     validateErr := httpConfigurationInstance.validate()
@@ -65,15 +73,17 @@ func newHttpConfiguration(
 }
 
 type httpConfiguration struct {
-    address             string
-    defaultLocale       string
-    publicDir           string
-    staticIndexFile     string
-    maxRequestBodyBytes int
-    staticEnableCache   bool
-    staticCacheMaxAge   int
-    staticExcludedPaths []string
-    sessionTtl          time.Duration
+    address                   string
+    defaultLocale             string
+    publicDir                 string
+    staticIndexFile           string
+    maxRequestBodyBytes       int
+    staticEnableCache         bool
+    staticCacheMaxAge         int
+    staticExcludedPaths       []string
+    sessionTtl                time.Duration
+    sessionTombstoneRetention time.Duration
+    shutdownTimeout           time.Duration
 }
 
 func (instance *httpConfiguration) Address() string {
@@ -104,14 +114,24 @@ func (instance *httpConfiguration) StaticCacheMaxAge() int {
     return instance.staticCacheMaxAge
 }
 
-/* StaticExcludedPaths names the path prefixes the built-in file server declines before it looks at the disk. The built-in server sits outermost in the pipeline, so whatever it declines is what reaches the middleware an application registers with Use: excluding a prefix is how an application takes a part of the url back — to put authentication in front of a directory, to apply a narrower dot-prefix policy, or to serve it from a root of its own. An entry is a prefix of the request path exactly as security.NewPathPrefixMatcher reads one, so the same spelling selects the same requests here and in a firewall rule. The list is returned as a copy because the configuration is read by every request while the caller is free to keep the slice. */
+/* StaticExcludedPaths names the path prefixes the built-in file server declines before it looks at the disk. The file server sits outermost, so a declined prefix reaches the middleware registered with Use, which is how an application takes part of the url back. An entry is a request-path prefix as security.NewPathPrefixMatcher reads one. The list is returned as a copy. */
 func (instance *httpConfiguration) StaticExcludedPaths() []string {
     return append([]string{}, instance.staticExcludedPaths...)
 }
 
-/* SessionTtl is how long a stored session stays valid, DefaultSessionTtl when MELODY_HTTP_SESSION_TTL says nothing. The clock runs from the last write, not from the last request, and reading a session does not refresh it: a session written on every request renews itself, while one written once at login lapses this long after that write however active the visitor was. Zero stores the session without any expiry and is available as an explicit choice. */
+/* SessionTtl is how long a stored session stays valid, DefaultSessionTtl when MELODY_HTTP_SESSION_TTL says nothing. The clock runs from the last write, and reading a session does not refresh it. Zero stores the session without any expiry. */
 func (instance *httpConfiguration) SessionTtl() time.Duration {
     return instance.sessionTtl
+}
+
+/* SessionTombstoneRetention is how long a deleted session id keeps refusing a write-back, DefaultSessionTombstoneRetention when MELODY_HTTP_SESSION_TOMBSTONE_RETENTION says nothing: a request that outlives it can save the deleted session back with the pre-logout identity. Zero and negative fail the boot, since they would disarm the logout defence. */
+func (instance *httpConfiguration) SessionTombstoneRetention() time.Duration {
+    return instance.sessionTombstoneRetention
+}
+
+/* ShutdownTimeout is how long a stopping http server waits for the requests it has admitted before cutting them, DefaultHttpShutdownTimeout when MELODY_HTTP_SHUTDOWN_TIMEOUT says nothing. Exceeding it is a shutdown failure and a non-zero exit; zero and negative fail the boot. */
+func (instance *httpConfiguration) ShutdownTimeout() time.Duration {
+    return instance.shutdownTimeout
 }
 
 func (instance *httpConfiguration) validate() error {
@@ -153,6 +173,16 @@ func (instance *httpConfiguration) validate() error {
     validateSessionTtlErr := instance.validateSessionTtl()
     if nil != validateSessionTtlErr {
         return validateSessionTtlErr
+    }
+
+    validateSessionTombstoneRetentionErr := instance.validateSessionTombstoneRetention()
+    if nil != validateSessionTombstoneRetentionErr {
+        return validateSessionTombstoneRetentionErr
+    }
+
+    validateShutdownTimeoutErr := instance.validateShutdownTimeout()
+    if nil != validateShutdownTimeoutErr {
+        return validateShutdownTimeoutErr
     }
 
     return nil
@@ -286,7 +316,7 @@ func (instance *httpConfiguration) validateStaticCacheMaxAge() error {
     return nil
 }
 
-/* an excluded path is compared against the request path the way security.NewPathPrefixMatcher compares one, so it has to be shaped like the beginning of a path. A request path always starts with a slash, so an entry that does not can never match, and the application that wrote it would go on believing a directory is hers while the file server keeps answering for it. An empty entry is refused for the opposite reason: the prefix comparison matches every path against it, so one stray comma would silently take the whole file server out of service. */
+/* an excluded path must be shaped like the beginning of a request path: an entry without a leading slash can never match, and an empty entry matches every path, taking the whole file server out of service */
 func (instance *httpConfiguration) validateStaticExcludedPaths() error {
     for _, excludedPath := range instance.staticExcludedPaths {
         if "" == excludedPath {
@@ -338,7 +368,39 @@ func (instance *httpConfiguration) validateSessionTtl() error {
     return nil
 }
 
-/* a list arrives as one environment value, and the comma is the separator melody already reads lists with — an accept header, an entity tag list, the redis address list — and the one an .env line carries without quoting. Each entry is trimmed because a list written to stay readable carries spaces the request path never has, so an untrimmed entry would silently match nothing. A value that is empty once trimmed is no list at all rather than a list of one empty entry, which is the difference between naming nothing and naming everything. Nothing here interprets the entry, so a pattern language added later reads through the same key and the same separator. */
+/* only a positive window can refuse anything; zero or negative would disarm the write-back defence, so it is refused rather than normalized */
+func (instance *httpConfiguration) validateSessionTombstoneRetention() error {
+    if 0 >= instance.sessionTombstoneRetention {
+        return exception.NewError(
+            "http session tombstone retention must be positive",
+            exceptioncontract.Context{
+                "sessionTombstoneRetention": instance.sessionTombstoneRetention.String(),
+                "default":                   DefaultSessionTombstoneRetention.String(),
+            },
+            nil,
+        )
+    }
+
+    return nil
+}
+
+/* only a positive duration can describe a wait, and zero has no other meaning here, so zero and negative are refused rather than normalized */
+func (instance *httpConfiguration) validateShutdownTimeout() error {
+    if 0 >= instance.shutdownTimeout {
+        return exception.NewError(
+            "http shutdown timeout must be positive",
+            exceptioncontract.Context{
+                "shutdownTimeout": instance.shutdownTimeout.String(),
+                "default":         DefaultHttpShutdownTimeout.String(),
+            },
+            nil,
+        )
+    }
+
+    return nil
+}
+
+/* a list is one environment value separated by commas, each entry trimmed, since a request path carries no surrounding spaces; a value empty once trimmed is no list at all, not a list of one empty entry that would name everything */
 func splitHttpConfigurationList(value string) []string {
     trimmedValue := strings.TrimSpace(value)
     if "" == trimmedValue {

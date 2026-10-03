@@ -9,8 +9,7 @@ import (
     "github.com/precision-soft/melody/v3/security/totp"
 )
 
-/* NewTotpCodeCommand prints the current TOTP code for a secret — it stands in for the authenticator app a
-user would hold, so the two-factor verification can be driven end-to-end. */
+/* NewTotpCodeCommand prints the current TOTP code for a secret — it stands in for the authenticator app a user would hold, so the two-factor verification can be driven end-to-end. */
 func NewTotpCodeCommand() *TotpCodeCommand {
     return &TotpCodeCommand{}
 }
@@ -36,7 +35,7 @@ func (instance *TotpCodeCommand) Flags() []melodyclicontract.Flag {
 
 func (instance *TotpCodeCommand) Run(
     runtimeInstance melodyruntimecontract.Runtime,
-    commandContext *melodyclicontract.CommandContext,
+    commandContext melodyclicontract.Context,
 ) error {
     secret := commandContext.String("secret")
     if "" == secret {
@@ -48,7 +47,7 @@ func (instance *TotpCodeCommand) Run(
         return codeErr
     }
 
-    fmt.Printf("%s\n", code)
+    _, writeErr := fmt.Fprintf(commandContext.Writer(), "%s\n", code)
 
-    return nil
+    return writeErr
 }

@@ -2,14 +2,13 @@ package container
 
 import (
     "reflect"
+    "strings"
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
 )
 
-/* RegisterScoped adds a service to this one scope, layered over the plan its container was booted with. It is the rare case — a scoped service is normally declared at boot through the container, so every scope gets it — and exists for the caller that only knows what to build once the request is in front of it.
-
-What it registers is built on the first Get through this scope and closed when the scope closes, exactly like a planned scoped service. It is refused when the name is already taken at either level, unless Replacing was declared: a name that answers differently depending on where it is asked from has to be made ambiguous deliberately. */
+/* RegisterScoped adds a service to this one scope, layered over the plan: built on the first Get through the scope and closed with it. A name already taken at either level is refused unless Replacing was declared. */
 func (instance *scope) RegisterScoped(
     serviceName string,
     provider any,
@@ -26,6 +25,17 @@ func (instance *scope) RegisterScoped(
     if nil == provider {
         return exception.NewError(
             "the provider is required to register a scoped service",
+            map[string]any{
+                "serviceName": serviceName,
+            },
+            nil,
+        )
+    }
+
+    /* the "service." namespace is protected from substitution here too */
+    if true == strings.HasPrefix(serviceName, "service.") {
+        return exception.NewError(
+            "service is protected and cannot be registered as a scoped service",
             map[string]any{
                 "serviceName": serviceName,
             },
@@ -73,27 +83,45 @@ func (instance *scope) registerOnScope(
 ) error {
     registerOption := applyRegisterServiceOptions(options)
 
+    /* a scope keeps its own teardown graph, so a declaration at registration is refused in both forms */
+    if 0 < len(registerOption.TeardownDependencyNames) || 0 < len(registerOption.TeardownDependencyTypes) {
+        return exception.NewError(
+            "a scoped registration cannot declare a teardown dependency",
+            map[string]any{
+                "serviceName": serviceName,
+            },
+            ErrScopedTeardownDependencyUnsupported,
+        )
+    }
+
     containerInstance := instance.container.Load()
     if nil == containerInstance {
         return exception.NewError(
             "scope is closed",
             map[string]any{
+                "refusedAt":   "entry",
                 "serviceName": serviceName,
             },
-            nil,
+            ErrScopeClosed,
         )
     }
 
     canonicalType := canonicalServiceType(serviceType)
 
-    /* @important the container is asked first and its lock is released before the scope's is taken, never held across it. Has holds the scope lock and reaches for the container's, so holding the container's while reaching for the scope's closes a cycle the moment a writer queues on the container mutex — Go's RWMutex makes a pending writer block new readers, so the two would wait on each other through it. The window this leaves is a container registration landing between the two locks, which is a registration racing a registration and has no ordering to preserve anyway. */
+    /* the container is asked, and its lock released, before the scope's is taken */
     containerInstance.mutex.RLock()
+    containerIsClosed := containerInstance.isClosed
     _, containerHasName := containerInstance.providers[serviceName]
     containerTypeServiceNames := []string(nil)
     if nil != canonicalType {
         containerTypeServiceNames = containerInstance.typeRegistrationNamesByType[canonicalType]
     }
     containerInstance.mutex.RUnlock()
+
+    /* a closed container is refused, as at the other registration doors */
+    if true == containerIsClosed {
+        return newContainerClosedError(serviceName)
+    }
 
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -102,9 +130,10 @@ func (instance *scope) registerOnScope(
         return exception.NewError(
             "scope is closed",
             map[string]any{
+                "refusedAt":   "lockHandOff",
                 "serviceName": serviceName,
             },
-            nil,
+            ErrScopeClosed,
         )
     }
 
@@ -142,6 +171,10 @@ func (instance *scope) registerOnScope(
 
     instance.ownProviders[serviceName] = provider
 
+    if 0 != registerOption.CollectionPriority {
+        instance.ownCollectionPriorityByName[serviceName] = registerOption.CollectionPriority
+    }
+
     if true == registerOption.ReplacesContainerService {
         instance.ownReplacesContainerService[serviceName] = true
     }
@@ -158,6 +191,7 @@ func (instance *scope) registerOnScope(
         if nil != registerTypeErr {
             delete(instance.ownProviders, serviceName)
             delete(instance.ownReplacesContainerService, serviceName)
+            delete(instance.ownCollectionPriorityByName, serviceName)
 
             return registerTypeErr
         }
@@ -187,6 +221,20 @@ func (instance *scope) registerTypeOnScopeLocked(
         }
 
         return nil
+    }
+
+    /* a type whose identity key another scoped type claimed on this scope is refused, as the container refuses it */
+    if collidingType, collides := instance.scopedTypeIdentityCollision(canonicalType); true == collides {
+        return exception.NewError(
+            "scoped service type identity key collides with a different registered scoped type",
+            map[string]any{
+                "serviceName":  serviceName,
+                "serviceType":  canonicalType.String(),
+                "existingType": collidingType.String(),
+                "identityKey":  typeIdentityKey(canonicalType),
+            },
+            nil,
+        )
     }
 
     if false == replacesContainerService {
@@ -243,7 +291,24 @@ func (instance *scope) registerTypeOnScopeLocked(
     return nil
 }
 
-/* scopedProviderByName yields the provider this scope would build the name from: its own registration first, then the plan its container was booted with. The plan is immutable and shared, so it is read without a lock; only the scope's own registrations need one. */
+/* scopedTypeIdentityCollision reports a different scoped type registered on this scope under the same identity key; the same type is not a collision. */
+func (instance *scope) scopedTypeIdentityCollision(canonicalType reflect.Type) (reflect.Type, bool) {
+    identityKey := typeIdentityKey(canonicalType)
+
+    for registeredType := range instance.ownTypeRegistrationNamesByType {
+        if registeredType == canonicalType {
+            continue
+        }
+
+        if typeIdentityKey(registeredType) == identityKey {
+            return registeredType, true
+        }
+    }
+
+    return nil, false
+}
+
+/* scopedProviderByName yields the provider for a name: this scope's own registration first, then the immutable plan. */
 func (instance *scope) scopedProviderByName(serviceName string) (providerAny, bool) {
     instance.mutex.RLock()
     provider, exists := instance.ownProviders[serviceName]
@@ -258,7 +323,7 @@ func (instance *scope) scopedProviderByName(serviceName string) (providerAny, bo
     return provider, exists
 }
 
-/* scopedTypeRegistrationNames yields the scoped services registered under a type, the scope's own before the plan's. A name found here resolves through the named path, so a scoped service reached by type and by name is one instance. */
+/* scopedTypeRegistrationNames yields the scoped services registered under a type, the scope's own first; a name found here resolves through the named path, so type and name reach one instance. */
 func (instance *scope) scopedTypeRegistrationNames(canonicalType reflect.Type) ([]string, bool) {
     instance.mutex.RLock()
     serviceNames, exists := instance.ownTypeRegistrationNamesByType[canonicalType]
@@ -286,5 +351,3 @@ func (instance *scope) scopedProviderByType(canonicalType reflect.Type) (provide
 
     return provider, exists
 }
-
-var _ containercontract.ScopedRegistrar = (*scope)(nil)

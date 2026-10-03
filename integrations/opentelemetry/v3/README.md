@@ -28,13 +28,20 @@ if nil != meterErr {
 	return meterErr
 }
 
-metricsMiddleware, _ := opentelemetry.NewMetricsMiddleware(meter)
+metricsMiddleware, middlewareErr := opentelemetry.NewMetricsMiddleware(meter)
+if nil != middlewareErr {
+	return middlewareErr
+}
 // register metricsMiddleware via RegisterHttpMiddlewares
+// (the module refuses a nil middleware at boot: a discarded constructor error
+// would otherwise serve traffic silently uninstrumented)
 
 // expose the registry; e.g. route GET /metrics -> opentelemetry.MetricsHandler(registry)
 ```
 
-`NewMetricsMiddleware` records `http.server.request.count` and `http.server.request.duration` (ms) with `http.request.method`, `http.route`, and `http.response.status_code` attributes.
+`NewMetricsMiddleware` records `http.server.request.count` and `http.server.request.duration` (ms) with `http.request.method`, `http.route`, and `http.response.status_code` attributes. The status attribute is the status the client receives: a status the handler already committed to the writer is recorded over anything it returns afterwards (`101` for a hijacked upgrade); otherwise, in the order the kernel answers it, a handler error decides first (an `HttpException` below `500` at its own status, anything else as `500`), then the response the handler returns, and for a handler that returned neither, what it wrote.
+
+`NewPrometheusMeter` builds a pull-based meter: the underlying meter provider has no background goroutine and no close door is offered — it lives for the process, which is the lifetime a Prometheus registry serves anyway.
 
 Or build the meter, the middleware, and the `/metrics` handler in one call:
 
@@ -50,15 +57,33 @@ tracer := tracerProvider.Tracer("my-service") // your configured *sdktrace.Trace
 tracingMiddleware := opentelemetry.NewTracingMiddleware(tracer, nil) // nil -> W3C TraceContext propagation
 ```
 
-The tracing middleware extracts the incoming trace context from request headers, starts a server span per request (named `<METHOD> <route>`), injects the span context into the runtime passed downstream, records method/route/status attributes, and marks the span as errored on a handler error or a 5xx response.
+The tracing middleware extracts the incoming trace context from request headers, starts a server span per request (named `<METHOD> <route>`), injects the span context into the runtime passed downstream, records method/route/status attributes with the status decided as the metrics decide it — including a status the handler writes directly, as streaming, proxy and upgrade handlers do — and marks the span as errored when the status the client receives is a 5xx; a handler error is recorded on the span as an exception event either way.
+
+### Lifecycle decorator
+
+The middlewares see a request only once the kernel routed it, so a security denial, a response a `kernel.request` listener wrote and the panic-recovery path leave no span and no metric there. [`NewHandlerDecorator`](./handler_decorator.go) builds the outermost seam instead: it wraps the whole `nethttp.Handler` the http kernel produces.
+
+```go
+decorator, decoratorErr := opentelemetry.NewHandlerDecorator(opentelemetry.HandlerDecoratorConfig{
+    Tracer: tracer, // required: a nil tracer is refused with "handler decorator tracer is nil"
+    Meter:  meter,  // optional
+})
+if nil != decoratorErr {
+    return decoratorErr
+}
+
+app.RegisterHttpHandlerDecorator(decorator) // or ModuleConfig.HandlerDecorators
+```
+
+Every request, short-circuited ones included, gets a lifecycle span; the tracing middleware's span becomes its child through the context the decorator injects. `Propagator` defaults to W3C TraceContext. With a `Meter`, the decorator counts and times under `http.server.lifecycle.request.count` and `http.server.lifecycle.request.duration`, names distinct from the middleware's `http.server.request.*`, so a routed request is not counted twice.
 
 ### OTLP export
 
 The `TracerProvider` the tracing middleware needs is not something you have to assemble yourself: the [`otlp`](./otlp) subpackage ships one wired to an OTLP exporter.
 
-[`otlp.NewTracerProvider(ctx, otlp.Config{...})`](./otlp/tracer_provider.go) returns a batching `*sdktrace.TracerProvider`. The caller then owns its lifecycle — `Shutdown` must run on application exit to flush pending spans.
+[`otlp.NewTracerProvider(ctx, otlp.Config{...})`](./otlp/tracer_provider.go) returns a batching `*sdktrace.TracerProvider`. The caller then owns its lifecycle — `Shutdown` must run on application exit to flush pending spans. `Config.SampleRatio` accepts `(0,1)` to keep that fraction and `0` / `>=1` to keep everything; a negative or NaN ratio is refused at construction, because both used to fall through to `AlwaysSample`.
 
-[`otlp.NewModule`](./otlp/module.go) is the plug-and-play alternative and is the recommended path: it registers the provider as the container service `otlp.ServiceTracerProvider` (`"opentelemetry.otlp.tracer_provider"`) wrapped in a `Close()`-able handle, so the container's shutdown flushes for you, and it installs the tracing middleware itself.
+[`otlp.NewModule`](./otlp/module.go) is the plug-and-play alternative and is the recommended path: it registers the provider as the container service `otlp.ServiceTracerProvider` (`"opentelemetry.otlp.tracer_provider"`) wrapped in a closeable handle, so the container's shutdown flushes for you, and it installs the tracing middleware itself. The container reaches that handle through its context-taking close, so the flush runs under the teardown budget the application declares rather than under a figure of this module's own.
 
 ```go
 app.RegisterModule(otlp.NewModule(otlp.ModuleConfig{
@@ -83,7 +108,7 @@ app.RegisterModule(otlp.NewModule(otlp.ModuleConfig{
 | `Insecure`       | skip transport security — for a collector on the local network                                                  | `false`           |
 | `BatchTimeout`   | batch span processor flush interval                                                                             | `5s`              |
 
-`ModuleConfig` additionally takes `TracerName` (default `melody`) and `Propagator` (nil selects W3C TraceContext). The endpoint and its credentials are deployment-owned, so read them from a parameter or `.env` rather than hardcoding them.
+`ModuleConfig` additionally takes `TracerName` (default `melody`) and `Propagator` (nil selects W3C TraceContext). The endpoint and its credentials are deployment-owned, so read them from a parameter or `.env` rather than hardcoding them. `Config` redacts `Headers` in every `fmt` rendering (`String`/`Format`), since that field carries the collector auth token: a config dropped into a log or an error context prints `Headers:[redacted N]` beside its safe fields, never the token.
 
 ### Register as a module
 
@@ -94,6 +119,7 @@ app.RegisterModule(opentelemetry.NewModule(opentelemetry.ModuleConfig{
     Middlewares:    []httpcontract.Middleware{metricsMiddleware, tracingMiddleware},
     MetricsHandler: metricsHandler,
     MetricsPath:    "/metrics",
+    // HandlerDecorators: []applicationcontract.HttpHandlerDecorator{decorator},
 }))
 ```
 
@@ -105,4 +131,5 @@ The metrics route is skipped when no handler or path is configured.
 - The tracing middleware replaces the downstream runtime with one carrying the span context, so handlers and nested spans link correctly.
 - The root package provides HTTP traces and metrics only — it holds no exporter. Export to a collector comes from the [`otlp`](./otlp) subpackage (see [OTLP export](#otlp-export)), or from a `TracerProvider` the application configures itself.
 - The OTLP `TracerProvider` must be shut down to flush pending spans. `otlp.NewModule` delegates that to the container's shutdown; a hand-built `otlp.NewTracerProvider` leaves it to the caller, and skipping it silently drops the last batch.
+- **A teardown budget already spent by the time the provider is reached means the flush does not run at all**, and the handle says so rather than attempting it. Driving the vendor's shutdown under a spent deadline latches its shut flag before it reaches a single span processor and makes every later attempt answer success, which leaves the batch goroutine, the ticker and the exporter connection running with no door left to end them. Refusing keeps the provider closable. With no deadline at all the handle applies its own five-second reserve; a declared budget is honoured whole. Components that close before this one spend from the same budget, so a broker that wedges its own close is what takes the reserve away — the container's failure map names both.
 - Tests run fully in-process (in-memory span recorder + Prometheus registry); no collector is required.

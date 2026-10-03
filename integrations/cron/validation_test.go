@@ -133,7 +133,7 @@ func TestValidateUserField_RefusesEveryUnicodeSpace(t *testing.T) {
     }
 }
 
-/* the divergent verdicts mirror the live measurement on busybox 1.37: DayOfWeek "0-6" beside DayOfMonth "16" ran only on the 16th under busybox while the crontab-dialect matcher answered due every day, and the check is semantic — both models evaluated over every day combination — so the agreeing pairs prove the refusal does not overreach. */
+/* the divergent verdicts follow busybox crond, which runs DayOfWeek "0-6" beside DayOfMonth "16" only on the 16th while the crontab-dialect matcher answers due every day; the check is semantic, both models evaluated over every day combination, so the agreeing pairs prove the refusal does not overreach. */
 func TestBusyboxDayFieldsDiverge_FlagsThePairsBusyboxRunsDifferently(t *testing.T) {
     divergent := map[string][2]string{
         "full-coverage day of week beside a restricted day of month": {"16", "0-6"},

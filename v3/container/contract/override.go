@@ -12,13 +12,13 @@ type OverrideService interface {
 
 /* OverrideOptions carries what an override declares beyond the value itself. */
 type OverrideOptions struct {
-    /* ClosedWithScope hands the installed value to the scope's teardown. An override belongs by default to whoever installed it and outlives the scope — the http kernel installs the request logger and goes on using it to report the scope's own close failure — so a caller that built the value FOR this scope and has nowhere else to close it says so here. */
+    /* ClosedWithScope hands the installed value to the scope's teardown. By default an override belongs to whoever installed it and outlives the scope. */
     ClosedWithScope bool
 }
 
 type OverrideOption func(option *OverrideOptions)
 
-/* OverrideServiceWithOptions is the optional companion of OverrideService. It is a separate interface so the four signatures of OverrideService never move: an installed override is the oldest thing in this package and every framework caller of it predates options. */
+/* OverrideServiceWithOptions is the optional companion of OverrideService, kept apart so its signatures never move. */
 type OverrideServiceWithOptions interface {
     OverrideInstanceWithOptions(serviceName string, value any, options ...OverrideOption) error
 

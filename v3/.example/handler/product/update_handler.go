@@ -1,11 +1,13 @@
 package product
 
 import (
+    "errors"
     nethttp "net/http"
     "strings"
 
     "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/presenter"
+    "github.com/precision-soft/melody/v3/.example/repository"
     "github.com/precision-soft/melody/v3/.example/service"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
@@ -30,20 +32,31 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
 
         updateProduct := melodyhttp.JsonHandler(
             func(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, dto updateRequest) (melodyhttpcontract.Response, error) {
+                dto = dto.trimmed()
+                if refusal := presenter.ApiRefusalOfInvalidBody(runtimeInstance, request, dto); nil != refusal {
+                    return refusal, nil
+                }
+
                 productService := service.MustGetProductService(runtimeInstance.Container())
 
                 product, found, updateErr := productService.Update(
                     runtimeInstance,
                     id,
-                    strings.TrimSpace(dto.Name),
-                    strings.TrimSpace(dto.Description),
-                    strings.TrimSpace(dto.CategoryId),
+                    dto.Name,
+                    dto.Description,
+                    dto.CategoryId,
                     dto.Price,
-                    strings.TrimSpace(dto.CurrencyId),
+                    dto.CurrencyId,
                     dto.Stock,
                 )
+                if true == errors.Is(updateErr, repository.ErrUnknownCategory) || true == errors.Is(updateErr, repository.ErrUnknownCurrency) {
+                    status, message := createRefusalStatus(updateErr)
+
+                    return presenter.ApiError(runtimeInstance, request, status, message), nil
+                }
+
                 if nil != updateErr {
-                    return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to update product"), nil
+                    return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to update product", updateErr), nil
                 }
 
                 if false == found {
@@ -66,4 +79,14 @@ type updateRequest struct {
     Price       float64 `json:"price" validate:"greaterThan=0"`
     CurrencyId  string  `json:"currencyId" validate:"notBlank"`
     Stock       int64   `json:"stock" validate:"greaterThan=-1"`
+}
+
+/* trimmed answers the body as the door stores it, so it is validated in that spelling */
+func (instance updateRequest) trimmed() updateRequest {
+    instance.Name = strings.TrimSpace(instance.Name)
+    instance.Description = strings.TrimSpace(instance.Description)
+    instance.CategoryId = strings.TrimSpace(instance.CategoryId)
+    instance.CurrencyId = strings.TrimSpace(instance.CurrencyId)
+
+    return instance
 }

@@ -28,15 +28,9 @@ type catalogNotificationPayload struct {
 
 /* runCatalogNotificationCheck proves the socket carries the application's own changes to every open page.
 
-The WEBSOCKET FAN-OUT section already proves the handshake and the hub's fan-out, but it does it in process,
-against a hub it built itself and broadcast into itself. What it cannot show is that the RUNNING application
-broadcasts when its nomenclature changes — that the listener which invalidates the cache and writes the journal
-also tells the browsers, and that it does so through the socket a real page connects to.
+   The WEBSOCKET FAN-OUT section already proves the handshake and the hub's fan-out, but it does it in process, against a hub it built itself and broadcast into itself. What it cannot show is that the RUNNING application broadcasts when its nomenclature changes — that the listener which invalidates the cache and writes the journal also tells the browsers, and that it does so through the socket a real page connects to.
 
-So: two live clients connect to the supervised application's /ws, one product is created through the API, and
-both clients must receive the same notification naming that product. Two clients rather than one because a
-broadcast that reached only the connection that happened to be first is not a fan-out, and a page opened in a
-second tab would silently stay stale. */
+   So: two live clients connect to the supervised application's /ws, one product is created through the API, and both clients must receive the same notification naming that product. Two clients rather than one because a broadcast that reached only the connection that happened to be first is not a fan-out, and a page opened in a second tab would silently stay stale. */
 func runCatalogNotificationCheck(baseUrl string, mysqlDsn string, redisAddress string) {
     if "" == mysqlDsn {
         skip(
@@ -69,24 +63,33 @@ func runCatalogNotificationCheck(baseUrl string, mysqlDsn string, redisAddress s
 
     socketUrl := strings.Replace(strings.TrimRight(baseUrl, "/"), "http", "ws", 1) + "/ws"
 
-    first, _, firstDialErr := coderwebsocket.Dial(dialCtx, socketUrl, nil)
-    if nil != firstDialErr {
-        fail("%s: dial the first client on %s: %v", catalogNotificationLabel, socketUrl, firstDialErr)
+    /* the socket bridges the RoleEditor-gated catalog feed, so the anonymous handshake must be refused before any client is admitted: this is the assertion that sees the route's access rule — an ungated /ws served the whole mutation feed to a client that never signed in */
+    if _, _, anonymousDialErr := coderwebsocket.Dial(dialCtx, socketUrl, nil); nil == anonymousDialErr {
+        fail("%s: the anonymous handshake on %s was admitted; the socket serves the RoleEditor-gated catalog feed and must refuse it", catalogNotificationLabel, socketUrl)
     }
-    defer first.Close(coderwebsocket.StatusNormalClosure, "")
 
-    second, _, secondDialErr := coderwebsocket.Dial(dialCtx, socketUrl, nil)
-    if nil != secondDialErr {
-        fail("%s: dial the second client: %v", catalogNotificationLabel, secondDialErr)
-    }
-    defer second.Close(coderwebsocket.StatusNormalClosure, "")
-
-    pass("two clients are connected to the running application's socket")
+    pass("the anonymous handshake is refused")
 
     resetExampleRateLimitCounters(catalogNotificationLabel, redisAddress, catalogNotificationRateLimit)
 
     client := newExampleHttpClient()
     signInExampleHttpEditor(client, baseUrl, "")
+
+    dialOptions := &coderwebsocket.DialOptions{HTTPClient: client}
+
+    first, _, firstDialErr := coderwebsocket.Dial(dialCtx, socketUrl, dialOptions)
+    if nil != firstDialErr {
+        fail("%s: dial the first client on %s: %v", catalogNotificationLabel, socketUrl, firstDialErr)
+    }
+    defer first.Close(coderwebsocket.StatusNormalClosure, "")
+
+    second, _, secondDialErr := coderwebsocket.Dial(dialCtx, socketUrl, dialOptions)
+    if nil != secondDialErr {
+        fail("%s: dial the second client: %v", catalogNotificationLabel, secondDialErr)
+    }
+    defer second.Close(coderwebsocket.StatusNormalClosure, "")
+
+    pass("two signed-in clients are connected to the running application's socket")
 
     productId := createCatalogNotificationProbe(client, baseUrl)
 
@@ -171,8 +174,7 @@ func createCatalogNotificationProbe(client *http.Client, baseUrl string) string 
     return created.Id
 }
 
-/* readCatalogNotification waits for the one frame the write must produce. A client that receives nothing is the
-failure this section exists to catch, so the wait is bounded and the timeout is named for what it means. */
+/* readCatalogNotification waits for the one frame the write must produce. A client that receives nothing is the failure this section exists to catch, so the wait is bounded and the timeout is named for what it means. */
 func readCatalogNotification(connection *coderwebsocket.Conn, name string) catalogNotificationPayload {
     readCtx, readCancel := context.WithTimeout(context.Background(), catalogNotificationReadWindow)
     defer readCancel()

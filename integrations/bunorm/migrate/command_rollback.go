@@ -1,6 +1,7 @@
 package migrate
 
 import (
+    "strconv"
     "time"
 
     clicontract "github.com/precision-soft/melody/cli/contract"
@@ -36,14 +37,18 @@ func (instance *RollbackCommand) Flags() []clicontract.Flag {
 
 func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) (runErr error) {
     option := instance.base.optionFromCommand(commandContext)
-    outputInstance := newCommandOutput(commandContext.Writer, option)
+    outputInstance := newCommandOutput(commandContext.Writer, commandContext.Args().Slice(), option)
 
     startedAt := time.Now()
     defer func() {
-        runErr = outputInstance.finish(instance.Name(), startedAt, runErr)
+        runErr = outputInstance.finishRun(instance.Name(), startedAt, runErr, recover())
     }()
 
-    SetDefaultRunnerOption(runnerOptionForCommand(commandContext.Writer, option))
+    /* the per-query lines print through the command output's writer, so a write the report lost there is remembered by finish too */
+    runnerOption := runnerOptionForCommand(outputInstance.writer, option)
+    ctx := withRunnerOption(runtimeInstance.Context(), runnerOption)
+    /* the parsed posture reaches the migrations through the context the migrator hands them, so this run's writer and colour choice belong to this run alone; the process-wide fallback is installed only for the length of the run, for a migration that drops the context it receives, and put back on the way out */
+    defer restoreDefaultRunnerOption(swapDefaultRunnerOption(runnerOption))
 
     db, managerName, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext)
     if nil != dbErr {
@@ -56,7 +61,7 @@ func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, co
     }
 
     /* take the bun migration lock so two replicas rolling back concurrently cannot both act on the same applied group. */
-    if lockErr := migrator.Lock(runtimeInstance.Context()); nil != lockErr {
+    if lockErr := migrator.Lock(ctx); nil != lockErr {
         /* the same remedy-naming refusal the migrate sibling answers: bun's own error states that a lock exists and nothing else — not which database it belongs to, and not that this command set ships db:unlock to clear a lock a crashed process left behind. The bun error stays the cause, so errors.Is still reaches it. */
         return exception.NewError(
             "migrate: the migration lock is held; another migration is running, or a crashed one left it behind",
@@ -70,14 +75,14 @@ func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, co
     }
     /* the unlock failure becomes the command's verdict only when the rollback itself succeeded: a failed rollback keeps its own error, with the unlock failure printed beside it */
     defer func() {
-        unlockErr := unlockMigrations(runtimeInstance.Context(), migrator, outputInstance)
+        unlockErr := unlockMigrations(ctx, migrator, outputInstance, instance.base.options.CommandPrefix+":unlock")
         if nil == runErr && nil != unlockErr {
             runErr = unlockErr
         }
     }()
 
     if true == outputInstance.wantsDetail() {
-        identity, identityErr := fetchDatabaseIdentity(runtimeInstance.Context(), db)
+        identity, identityErr := fetchDatabaseIdentity(ctx, db)
         if nil != identityErr {
             return identityErr
         }
@@ -87,8 +92,11 @@ func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, co
         }
     }
 
-    group, rollbackErr := migrator.Rollback(runtimeInstance.Context())
+    group, rollbackErr := migrator.Rollback(ctx)
     if nil != rollbackErr {
+        /* bun hands the walked group back whole beside the failure, so which migrations were rolled back cannot be read from it; the group is reported so the operator checks those names in the migrations table */
+        printRollbackGroupOnFailure(outputInstance, managerName, group)
+
         return rollbackErr
     }
 
@@ -131,3 +139,19 @@ func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, co
 }
 
 var _ clicontract.Command = (*RollbackCommand)(nil)
+
+/* printRollbackGroupOnFailure reports the group a failed rollback was walking, in the text block and in the machine document finish assembles beside the error, and is silent for a failure that named no group. */
+func printRollbackGroupOnFailure(outputInstance *commandOutput, managerName string, group *migrate.MigrationGroup) {
+    names := migrationNamesOf(group)
+    if 0 == len(names) {
+        return
+    }
+
+    outputInstance.printDetailsBlock(map[string]string{
+        "manager":    managerName,
+        "group":      strconv.FormatInt(group.ID, 10),
+        "migrations": strconv.Itoa(len(names)),
+    })
+
+    outputInstance.printMigrationsBlock("rollbackGroup", "ROLLBACK GROUP MIGRATIONS", names)
+}

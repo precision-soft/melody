@@ -26,7 +26,7 @@ The `--build` sweep reports its failures on the envelope, so it fails a deployme
 
 **The `debug:*` family is registered on the development environment alone**, `debug:router` excepted — [`bootCli`](../../application/application_cli.go) appends the rest only when `Kernel().Env()` is `EnvDevelopment`. A deployed application therefore does not have `debug:container` at all: the invocation falls to the unknown-command path, which exits `2` with `cli command not found`. A shell gate written as `|| exit 1` still fires there, but for the wrong reason — it is reporting a missing command, not a failing service. A gate that must exercise the container has to run against a process booted in the development environment.
 
-`debug:container` reports why a failing service failed, not only that it did: the causes below the resolution error render as `caused by` lines in the table views, as `errorCauseChain` in the json items, and on the envelope error's cause details. The error context is read through the `ContextProvider` contract, so an `HttpException` or a userland context-bearing error contributes its context too. The rendered context is redacted by key name — keys containing `trace` or `stack` are dropped, case-insensitively, while full verbosity (`-vvv`, verbosity level three and above) keeps the whole context — which is a diagnostic-noise filter, deliberately not a credential filter: an error context has no secret declaration the way parameters do, so keeping credentials out of error contexts is the producer's responsibility. The context json is truncated to the table-cell width only in the table format; the json document always carries it whole.
+`debug:container` reports why a failing service failed, not only that it did: the causes below the resolution error render as `caused by` lines in the table views — at every verbosity: the ladder `-v`/`-vv`/`-vvv` cuts the error message and the context json of a list row, never the causes, and the cut marker ` ...` sits on the last rendered line — as `errorCauseChain` in the json items, and on the envelope error's cause details. The error context is read through the `ContextProvider` contract, so an `HttpException` or a userland context-bearing error contributes its context too, and it is read from the first link of the resolution chain that carries one: a provider without a context answers an empty map, so an `HttpException` wrapping the error that carries the host renders that error's context, while a link above it that has a context of its own wins. The walk is the cause chain's own, nine links deep like the `caused by` list — a context sitting below that bound is not rendered. A provider whose `Context()` panics no longer ends the command: the panic is rendered as a `contextPanicked` entry in its place, and that entry counts as the link's context, so it wins over a real context further down the chain. The rendered context is redacted by key name — keys containing `trace` or `stack` are dropped, case-insensitively, while full verbosity (`-vvv`, verbosity level three and above) keeps the whole context — which is a diagnostic-noise filter, deliberately not a credential filter: an error context has no secret declaration the way parameters do, so keeping credentials out of error contexts is the producer's responsibility. The context json is truncated to the table-cell width only in the table format; the json document always carries it whole.
 
 `debug:events --format=json --verbose` carries the per-listener detail — priority, source, owner and the required / may-skip marks — under `data.listeners`, beside the event list under `data.events`; without `--verbose` the json `data` stays the plain list payload. The **declaration** of the listeners a serving process wires and this one does not is on `data.servingProcessListeners` at every verbosity, beside the listing rather than instead of it, because it exists so that "is access control wired?" is not answered with an absence meaning "not in this process". `--order` reaches both halves of the document: it orders the events, while inside one event the listener rows keep the dispatch order their `order` field reports. The table summary's `SUBSCRIBERS` total counts distinct subscribers across the whole dispatcher, while the per-event column counts them per event.
 
@@ -40,7 +40,7 @@ Shared behaviours — the first, second and last applying to every command on th
 
 - **`--format=json` prints the envelope document and nothing else** — no headers, no banners, no trailing prose, and on a single line — so `app debug:router --format=json | jq '.data'` works directly and a stream of documents can be read line by line. `--format=json-pretty` is the same document indented for reading by hand. Selecting json also **implies `--no-color`**: [`NormalizeOption`](../../cli/output/option_parser.go) forces it, so passing `--no-color=false` alongside does not put ANSI escapes back into the document.
 - **A command whose envelope carries an error exits non-zero.** [`Render`](../../cli/output/renderer.go) writes the envelope and then returns an exit error with code `1` when `Envelope.Error` is set, so `app debug:container app.repository.order || exit 1` fails a deployment gate on a service that does not resolve, instead of passing because the command "ran". The error travels unmarked, so the exit path also writes it to the application log — the rendered envelope is the report a shell sees, the log record the one a deployment keeps.
-- **A route attribute the encoder cannot represent degrades instead of emptying the document.** Route attributes are arbitrary `any` from userland — the `attributes` argument of [`NewRouteOptions`](../../http/route_option.go), handed to the router through `HandleWithOptions` — and one unserializable value used to make the whole `debug:router --format=json` envelope fail to marshal, leaving zero bytes on stdout. A value that marshals keeps its json type; only one that cannot degrades to its `%v` rendering, which names the attribute rather than losing the report.
+- **A route attribute the encoder cannot represent degrades instead of emptying the document.** Route attributes are arbitrary `any` from userland — the `attributes` argument of [`NewRouteOptions`](../../http/route_option.go), handed to the router through `HandleWithOptions` — and one unserializable value used to make the whole `debug:router --format=json` envelope fail to marshal, leaving zero bytes on stdout. A value that marshals keeps its json type; only one that cannot degrades to its `%v` rendering, which names the attribute rather than losing the report — after a cycle-guarded walk has replaced any self-referencing value with a marker, because `fmt` has no cycle detection and a route attribute pointing at itself would otherwise kill the process instead of degrading.
 - **`debug:middleware` items always carry `reason`**, empty where there is nothing to say. `--build` cannot fill `name` and `priority`: the build provider hands back the built chain alone, and correlating it with the described pipeline by position would be a guess, since the description also lists the inactive entries the build never produces. Read the default listing — which describes without building — when the name is what you need.
 - **`--format` and `--order` reject an unrecognised value** at argument-parsing time (`unsupported output format "…", expected "table", "json" or "json-pretty"`; `unsupported sort order "…", expected "asc" or "desc"`) rather than silently falling back to the default.
 
@@ -50,6 +50,9 @@ Shared behaviours — the first, second and last applying to every command on th
 
 - [`ContainerCommand`](../../debug/command_container.go)
 - [`EventCommand`](../../debug/command_event.go)
+    - [`NewEventCommand(deferredListenerProvider DeferredListenerProvider) *EventCommand`](../../debug/command_event.go)
+- [`DeferredListener`](../../debug/command_event.go)
+- [`DeferredListenerProvider`](../../debug/command_event.go)
 - [`RouterCommand`](../../debug/command_router.go)
 - [`ParameterCommand`](../../debug/command_parameter.go)
 - [`VersionCommand`](../../debug/command_version.go)
@@ -57,7 +60,7 @@ Shared behaviours — the first, second and last applying to every command on th
 
 ### Constructors and helpers
 
-- [`NewMiddlewareCommand(descriptionProvider MiddlewareDescriptionProvider, buildProvider MiddlewareBuildProvider) *MiddlewareCommand`](../../debug/command_middleware.go) — panics on a nil provider; return empty results from the providers when there is nothing to list
+- [`NewMiddlewareCommand(descriptionProvider MiddlewareDescriptionProvider, buildProvider MiddlewareBuildProvider) *MiddlewareCommand`](../../debug/command_middleware.go) — panics on a nil provider, and a zero-value command built around the constructor renders its refusal on the envelope (`error.code = "debug.providerNil"`) before failing with the exit-coded error; return empty results from the providers when there is nothing to list
 - [`MiddlewareDescriptionProvider`](../../debug/command_middleware.go)
 - [`MiddlewareBuildProvider`](../../debug/command_middleware.go)
 
@@ -83,6 +86,11 @@ func main() {
     ctx := context.Background()
 
     serviceContainer := container.NewContainer()
+    /* a container built by hand is closed by the hand that built it: there is no exit handler here to close it */
+    defer func() {
+        _ = serviceContainer.Close()
+    }()
+
     scope := serviceContainer.NewScope()
 
     runtimeInstance := runtime.New(
@@ -122,7 +130,7 @@ func main() {
         runtimeInstance,
     )
 
-    /* the registered command's action closes runtimeInstance.Scope() after it runs, and the exit handler closes the container, so there is nothing to shut down here */
+    /* the registered command's action closes runtimeInstance.Scope() after it runs; the container is closed by the deferred Close above */
     runErr := commandContext.Run(
         ctx,
         []string{"example", "debug:version"},

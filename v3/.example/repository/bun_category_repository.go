@@ -11,7 +11,7 @@ import (
     "github.com/uptrace/bun"
 )
 
-/* categoryRow is the nomenclature as the database holds it; the domain entity stays free of storage concerns because it is cached through a gob serializer. */
+/* categoryRow is the nomenclature as the database holds it; the entity stays free of storage concerns because it is cached through a gob serializer. */
 type categoryRow struct {
     bun.BaseModel `bun:"table:melody_example_v3_category,alias:category"`
 
@@ -34,46 +34,32 @@ func newBunCategoryRepository(database *bun.DB) *bunCategoryRepository {
     return &bunCategoryRepository{database: database}
 }
 
+/* categoryIdentifierMintLockName names the advisory lock the creates of melody_example_v3_category mint their identifiers under */
+const categoryIdentifierMintLockName = "melody_example_v3_category.id"
+
 type bunCategoryRepository struct {
     database *bun.DB
 }
 
-/* EnsureSchema creates the table when it is absent and writes the opening nomenclature into it when it is empty. The seeding insert ignores duplicate keys because several example applications may reach an empty table at the same time, and losing that race is not a failure. */
-func (instance *bunCategoryRepository) EnsureSchema(ctx context.Context) error {
-    _, createErr := instance.database.
-        NewCreateTable().
-        Model((*categoryRow)(nil)).
-        IfNotExists().
-        Exec(ctx)
-    if nil != createErr {
-        return createErr
+func (instance *bunCategoryRepository) seedIfEmpty(ctx context.Context) error {
+    identifierList := make([]string, 0)
+    for _, category := range seedCategoryList() {
+        identifierList = append(identifierList, category.Id)
     }
 
-    count, countErr := instance.database.
-        NewSelect().
-        Model((*categoryRow)(nil)).
-        Count(ctx)
-    if nil != countErr {
-        return countErr
+    if raiseErr := raiseSequenceOverSeeds(ctx, instance.database, "cat-", identifierList); nil != raiseErr {
+        return raiseErr
     }
 
-    if 0 < count {
-        return nil
-    }
+    return seedIfEmptyRows(ctx, instance.database, func() []*categoryRow {
+        seedList := seedCategoryList()
+        rowList := make([]*categoryRow, 0, len(seedList))
+        for _, category := range seedList {
+            rowList = append(rowList, newCategoryRow(category))
+        }
 
-    seedList := seedCategoryList()
-    rowList := make([]*categoryRow, 0, len(seedList))
-    for _, category := range seedList {
-        rowList = append(rowList, newCategoryRow(category))
-    }
-
-    _, insertErr := instance.database.
-        NewInsert().
-        Model(&rowList).
-        Ignore().
-        Exec(ctx)
-
-    return insertErr
+        return rowList
+    })
 }
 
 func (instance *bunCategoryRepository) All(ctx context.Context) ([]*entity.Category, error) {
@@ -109,7 +95,7 @@ func (instance *bunCategoryRepository) FindById(ctx context.Context, id string) 
     return row.toEntity(), true, nil
 }
 
-/* findRowById separates a row that is not there from a query that could not run: only sql.ErrNoRows is an answer, and every other failure is reported. */
+/* findRowById separates a row that is not there from a query that could not run: only sql.ErrNoRows is an answer. */
 func (instance *bunCategoryRepository) findRowById(ctx context.Context, id string) (*categoryRow, bool, error) {
     row := &categoryRow{}
 
@@ -136,30 +122,43 @@ func (instance *bunCategoryRepository) Create(ctx context.Context, category *ent
         return validationErr
     }
 
-    if "" == strings.TrimSpace(category.Id) {
-        identifierList, identifierErr := instance.identifierList(ctx)
-        if nil != identifierErr {
-            return identifierErr
+    mintsIdentifier := "" == strings.TrimSpace(category.Id)
+    if false == mintsIdentifier {
+        _, exists, existsErr := instance.findRowById(ctx, category.Id)
+        if nil != existsErr {
+            return existsErr
         }
 
-        category.Id = nextCategoryId(identifierList)
+        if true == exists {
+            return ErrIdAlreadyExists
+        }
     }
 
-    _, exists, existsErr := instance.findRowById(ctx, category.Id)
-    if nil != existsErr {
-        return existsErr
-    }
+    return insertWithMintedIdentifier(
+        ctx,
+        instance.database,
+        categoryIdentifierMintLockName,
+        identifierSequence{prefix: "cat-", identifier: func() string { return category.Id }},
+        mintsIdentifier,
+        func(floor string) error {
+            identifierList, identifierErr := instance.identifierList(ctx)
+            if nil != identifierErr {
+                return identifierErr
+            }
 
-    if true == exists {
-        return fmt.Errorf("id already exists")
-    }
+            category.Id = nextCategoryId(append(identifierList, floor))
 
-    _, insertErr := instance.database.
-        NewInsert().
-        Model(newCategoryRow(category)).
-        Exec(ctx)
+            return nil
+        },
+        func() error {
+            _, insertErr := instance.database.
+                NewInsert().
+                Model(newCategoryRow(category)).
+                Exec(ctx)
 
-    return insertErr
+            return insertErr
+        },
+    )
 }
 
 func (instance *bunCategoryRepository) Update(ctx context.Context, category *entity.Category) (bool, error) {
@@ -191,7 +190,14 @@ func (instance *bunCategoryRepository) Update(ctx context.Context, category *ent
         return false, updateErr
     }
 
-    return affectedAtLeastOneRow(result), nil
+    if true == affectedAtLeastOneRow(result) {
+        return true, nil
+    }
+
+    /* MySQL answers the rows an update changed, not the rows it matched, so an update writing the values the row already holds reports none: the row is read again, and only a row that is gone by now is answered as absent */
+    _, stillFound, refindErr := instance.findRowById(ctx, id)
+
+    return stillFound, refindErr
 }
 
 func (instance *bunCategoryRepository) DeleteById(ctx context.Context, id string) (bool, error) {

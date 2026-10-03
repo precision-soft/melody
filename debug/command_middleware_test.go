@@ -2,6 +2,7 @@ package debug
 
 import (
     "encoding/json"
+    "errors"
     "fmt"
     "strings"
     "testing"
@@ -347,6 +348,33 @@ func TestMiddlewareCommand_ZeroValueProvider_ReturnsANamedError(t *testing.T) {
     }
 }
 
+/* the refusal of the zero-value command is written on the envelope before the command fails, so a machine consumer waiting for a document receives one, and the exit-coded error is the one the envelope's own failure carries */
+func TestMiddlewareCommand_ZeroValueProviderRendersTheEnvelopeBeforeItFails(t *testing.T) {
+    rendered, runErr := runDebugCommand(
+        &MiddlewareCommand{},
+        newTestRuntime(container.NewContainer()),
+        []string{"--format=json"},
+    )
+
+    decoded := struct {
+        Error struct {
+            Code    string `json:"code"`
+            Message string `json:"message"`
+        } `json:"error"`
+    }{}
+    if decodeErr := json.Unmarshal([]byte(rendered), &decoded); nil != decodeErr {
+        t.Fatalf("expected a json document on the stream, got %q (%v)", rendered, decodeErr)
+    }
+    if "debug.providerNil" != decoded.Error.Code || "middleware provider is nil" != decoded.Error.Message {
+        t.Fatalf("expected the named refusal on the envelope, got %+v", decoded.Error)
+    }
+
+    var exitError *exception.ExitError
+    if false == errors.As(runErr, &exitError) || 1 != exitError.ExitCode() {
+        t.Fatalf("expected the envelope's exit-coded error, got %v", runErr)
+    }
+}
+
 /* the default listing is a description: nothing is built, so the command has no side effect in the console process that asks — the build is the explicit flag's to run */
 func TestMiddlewareCommand_DefaultListingRunsNoBuild(t *testing.T) {
     buildRuns := 0
@@ -518,7 +546,7 @@ func TestMiddlewareCommand_SameNameInactiveEntriesKeepTheReasonOrder(t *testing.
     }
 }
 
-/* the reason appeared and disappeared with the row: omitempty dropped it from every active middleware, so a consumer keying on it could not tell an active entry from a malformed document, and the three shapes this one struct serves — described-active, described-inactive, built — differed in their key set as well as their values. */
+/* the reason key is present on every row, empty on an active one, so a consumer keying on it can tell an active entry from a malformed document, and the three shapes this one struct serves — described-active, described-inactive, built — share one key set. */
 func TestMiddlewareCommand_TheReasonKeyIsPresentOnEveryRow(t *testing.T) {
     rendered, runErr := runDebugCommand(
         NewMiddlewareCommand(

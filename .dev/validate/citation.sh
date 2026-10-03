@@ -86,12 +86,13 @@ cd "${REPOSITORY_ROOT_DIRECTORY_STRING}"
 
 BASELINE_PATH_STRING=".dev/validate/citation.baseline"
 
-# the majors this run gates. v3 is measured and printed like the rest and is not gated, for the reason the
-# parity band gives for its own pair list: it is the line still under development, its documents are the
-# next stage's work, and a lane that is red for a known reason teaches a team to ignore the lane.
+# the majors this run gates. All three are gated: v3's documents were brought to the same bar during the
+# stabilization sweep, so a finding there is as actionable as one on the published majors, and the
+# baseline holds the declared collisions for each.
 GATED_MAJOR_STRING_LIST=(
     "v1"
     "v2"
+    "v3"
 )
 
 MAJOR_FILTER_STRING=""
@@ -130,9 +131,14 @@ trap 'rm -rf "${TEMPORARY_DIRECTORY_STRING}"' EXIT
 # every path the tree would carry into a commit: what git tracks, plus what it does not yet track and does
 # not ignore either. `git ls-files` alone answers with the index, and the index belongs to whoever is
 # committing, so a document a session ADDS would be invisible to every dimension below until someone staged
-# it — the shape of blindness the parity band was measured to have and had to be repaired for.
+# it — the shape of blindness the parity band was measured to have and had to be repaired for. The files
+# DELETED in the working tree are subtracted for the mirror-image reason: the index still lists them, and a
+# reader handed a path with no file behind it dies mid-band on the one state every deleting session passes
+# through before its commit.
 list_repository_path() {
-    git ls-files --cached --others --exclude-standard -- "$@" | sort -u
+    comm -23 \
+        <(git ls-files --cached --others --exclude-standard -- "$@" | sort -u) \
+        <(git ls-files --deleted -- "$@" | sort -u)
 }
 
 # ------------------------------------------------------------------------------------------------------
@@ -195,13 +201,20 @@ list_major_source_file() {
 # README and CHANGELOG are the documents a consumer of that integration reads, and no band has ever looked
 # at them. The shared repository documents — CONTRIBUTING, SECURITY, the issue templates — belong to no
 # major and are left out, so that a single copy is not judged three times against three different trees.
+#
+# The example application's own README is read here, and only here among the bands: the example is excluded
+# from parity, documentation, apidiff and compatibility, so nothing else would look at it. It is also the
+# WHOLE of that application's documentation — an example is not a project with a past, so it keeps no
+# changelog — which makes this band the only thing standing between that document and the symbols it names.
+# The source side already includes the example for the mirror reason.
 list_major_document() {
     local MAJOR_STRING="${1:?}"
     local MAJOR_DIRECTORY_STRING
     MAJOR_DIRECTORY_STRING="$(major_directory_for "${MAJOR_STRING}")"
 
     if [[ "." = "${MAJOR_DIRECTORY_STRING}" ]]; then
-        list_repository_path '.documentation/*.md' 'README.md' 'CHANGELOG.md'
+        list_repository_path '.documentation/*.md' 'README.md' 'CHANGELOG.md' \
+            '.example/README.md'
         list_repository_path 'integrations/*.md' \
             | grep -v '^integrations/[^/]*/v[0-9]\+/' \
             | grep -v '^integrations/[^/]*/[^/]*/v[0-9]\+/' \
@@ -211,7 +224,8 @@ list_major_document() {
     fi
 
     list_repository_path "${MAJOR_DIRECTORY_STRING}/.documentation/*.md" \
-        "${MAJOR_DIRECTORY_STRING}/README.md" "${MAJOR_DIRECTORY_STRING}/CHANGELOG.md"
+        "${MAJOR_DIRECTORY_STRING}/README.md" "${MAJOR_DIRECTORY_STRING}/CHANGELOG.md" \
+        "${MAJOR_DIRECTORY_STRING}/.example/README.md"
     list_repository_path 'integrations/*.md' | grep -E "/${MAJOR_STRING}/"
 }
 

@@ -25,6 +25,11 @@ func NewMeta(
         version.Application = getApplicationVersion()
     }
 
+    /* as for the two fields above: the caller's value wins when present, the running binary's otherwise */
+    if "" == version.Go {
+        version.Go = runtime.Version()
+    }
+
     return Meta{
         Command:   command,
         Arguments: copyStringSlice(arguments),
@@ -42,7 +47,7 @@ func NewMeta(
         Version: Version{
             Application: version.Application,
             Melody:      version.Melody,
-            Go:          runtime.Version(),
+            Go:          version.Go,
         },
     }
 }

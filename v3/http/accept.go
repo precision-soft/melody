@@ -1,23 +1,15 @@
 package http
 
 import (
-    "strconv"
     "strings"
 
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal"
 )
 
 func PrefersHtml(request httpcontract.Request) bool {
-    if nil == request {
-        return false
-    }
-
-    httpRequest := request.HttpRequest()
-    if nil == httpRequest {
-        return false
-    }
-
-    acceptHeader := httpRequest.Header.Get("Accept")
+    /* every line of a repeated Accept field is joined through the door the error renderer uses, so both readers of one response see one preference */
+    acceptHeader := joinedAcceptHeader(request)
     if "" == acceptHeader {
         return false
     }
@@ -41,7 +33,7 @@ func PrefersHtml(request httpcontract.Request) bool {
     return htmlPosition < jsonPosition
 }
 
-/* acceptQuality reports the weight the Accept header gives a media type and where it was named. A client ranks alternatives with the q parameter — "text/html;q=0.1, application/json" asks for json, and q=0 refuses a type outright — so reading the header by substring position alone serves a representation the client down-weighted or rejected. A wildcard range (a type wildcard, or the catch-all range) supplies the weight when the exact type is absent. Returns a quality of -1 when nothing matches. */
+/* acceptQuality reports the weight the Accept header gives a media type and where it was named, honouring q and a refusal with q=0; a wildcard range supplies the weight when the exact type is absent. It answers -1 when nothing matches. */
 func acceptQuality(acceptHeader string, mediaType string) (float64, int) {
     quality := -1.0
     position := -1
@@ -50,8 +42,18 @@ func acceptQuality(acceptHeader string, mediaType string) (float64, int) {
     slashIndex := strings.IndexByte(mediaType, '/')
     typeWildcard := mediaType[:slashIndex+1] + "*"
 
-    for entryIndex, entry := range strings.Split(acceptHeader, ",") {
-        parameters := strings.Split(entry, ";")
+    /* members and parameters split outside quoted sections, the serializer reader's grammar, and a header the member cap cut reads as unparsable, since a member past the cap may carry a refusal */
+    entries, cut := internal.SplitOutsideQuotes(acceptHeader, ',')
+    if true == cut {
+        return quality, position
+    }
+
+    for entryIndex, entry := range entries {
+        parameters, cut := internal.SplitOutsideQuotes(entry, ';')
+        if true == cut {
+            return -1.0, -1
+        }
+
         mediaRange := strings.ToLower(strings.TrimSpace(parameters[0]))
 
         entrySpecificity := -1
@@ -65,22 +67,30 @@ func acceptQuality(acceptHeader string, mediaType string) (float64, int) {
             continue
         }
 
+        /* a q outside the RFC 7231 qvalue grammar drops the member, the serializer reader's rule */
         entryQuality := 1.0
+        entryQualityValid := true
         for _, parameter := range parameters[1:] {
             trimmed := strings.TrimSpace(parameter)
             if false == strings.HasPrefix(strings.ToLower(trimmed), "q=") {
                 continue
             }
 
-            parsed, parseErr := strconv.ParseFloat(strings.TrimSpace(trimmed[2:]), 64)
-            if nil != parseErr {
+            parsed, valid := internal.ParseQualityValue(strings.TrimSpace(trimmed[2:]))
+            if false == valid {
+                entryQualityValid = false
+
                 continue
             }
 
             entryQuality = parsed
         }
 
-        /* the most specific matching range supplies the weight: a more specific match replaces a less specific one outright (so a wildcard can never override an exact type's q, including an explicit q=0 refusal), and equal-specificity ties fall to the higher q */
+        if false == entryQualityValid {
+            continue
+        }
+
+        /* the most specific matching range supplies the weight, so a wildcard never overrides an exact type's q; equal specificity takes the higher q */
         if entrySpecificity > specificity || (entrySpecificity == specificity && entryQuality > quality) {
             specificity = entrySpecificity
             quality = entryQuality

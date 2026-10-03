@@ -29,9 +29,14 @@ type acceptedMime struct {
     qualityValue float64
 }
 
-/* a member whose q parameter falls outside the RFC 7231 qvalue grammar is dropped whole rather than rounded to a guess: the previous leniency scored an unparseable q as full acceptance, clamped a negative one into a refusal and let NaN through as a weight that no comparison could select or refuse, so the same malformed header could open, close or silently poison the negotiation depending on the spelling */
-func parseAcceptHeader(acceptHeader string) []acceptedMime {
-    parts := internal.SplitOutsideQuotes(acceptHeader, ',')
+/* parseAcceptHeader drops a member whose q falls outside the RFC 7231 qvalue grammar rather than guessing a weight. */
+func parseAcceptHeader(acceptHeader string) ([]acceptedMime, bool) {
+    /* a header the member cap cut is reported, and the manager refuses it as not acceptable, since a member past the cap may carry a refusal */
+    parts, cut := internal.SplitOutsideQuotes(acceptHeader, ',')
+    if true == cut {
+        return nil, true
+    }
+
     result := make([]acceptedMime, 0, len(parts))
 
     for _, part := range parts {
@@ -50,7 +55,11 @@ func parseAcceptHeader(acceptHeader string) []acceptedMime {
             parametersPart := strings.TrimSpace(part[parameterSeparatorIndex+1:])
 
             if "" != parametersPart {
-                parameters := internal.SplitOutsideQuotes(parametersPart, ';')
+                parameters, cut := internal.SplitOutsideQuotes(parametersPart, ';')
+                if true == cut {
+                    return nil, true
+                }
+
                 for _, parameter := range parameters {
                     parameter = strings.TrimSpace(parameter)
                     if "" == parameter {
@@ -106,7 +115,7 @@ func parseAcceptHeader(acceptHeader string) []acceptedMime {
         return result[i].qualityValue > result[j].qualityValue
     })
 
-    return result
+    return result, false
 }
 
 func isWildcardSubtype(mime string) bool {
@@ -125,7 +134,6 @@ func matchWildcardSubtype(wildcardMime string, candidateMime string) bool {
     return true == strings.HasPrefix(candidateMime, prefix)
 }
 
-/* a q of 0 is a refusal, not an absence: it is kept in the parsed list so a candidate it covers can be excluded rather than falling through to the default */
 func acceptMatchSpecificity(acceptedMimeValue string, candidateMime string) int {
     acceptedMimeValue = normalizeMime(acceptedMimeValue)
     candidateMime = normalizeMime(candidateMime)
@@ -145,6 +153,7 @@ func acceptMatchSpecificity(acceptedMimeValue string, candidateMime string) int 
     return 0
 }
 
+/* acceptQualityFor answers the quality of the most specific accepted range that covers the candidate; among ranges of equal specificity the first in the parsed list wins, which the sort by quality makes the highest. A q of 0 is kept in the parsed list, so a candidate whose winning range carries it answers 0, a refusal, rather than falling through to the default. */
 func acceptQualityFor(acceptedMimes []acceptedMime, candidateMime string) (float64, int, bool) {
     bestSpecificity := 0
     bestQuality := 0.0

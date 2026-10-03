@@ -15,13 +15,25 @@ func Render(
 
     printErr := printer.Print(writer, envelope, option)
     if nil != printErr {
-        return printErr
+        /* the envelope's own failure survives a printing failure, which would otherwise replace the reason the command failed */
+        reportedErr := envelopeExitError(envelope)
+        if nil == reportedErr {
+            return printErr
+        }
+
+        return exception.NewError(
+            "failed to print the command result that reports a failure",
+            map[string]any{
+                "printError": printErr.Error(),
+            },
+            reportedErr,
+        )
     }
 
     return envelopeExitError(envelope)
 }
 
-/* the rendered envelope is the command result, so an envelope reporting a failure has to leave the process with a non-zero status: a deployment gate such as `app debug:container app.repository.order || exit 1` is otherwise passed by a service that does not resolve. The returned error is marked as logged because the rendered envelope already carries the full report. */
+/* the rendered envelope is the command result, so an envelope reporting a failure leaves the process with a non-zero status, which a deployment gate such as `app debug:container app.repository.order || exit 1` relies on. It is returned unmarked so the exit path writes it to the application log. */
 func envelopeExitError(envelope Envelope) error {
     if nil == envelope.Error {
         return nil
@@ -49,8 +61,6 @@ func envelopeExitError(envelope Envelope) error {
         context,
         nil,
     )
-
-    _ = exception.MarkLogged(reportedErr)
 
     return exception.NewExitError(1, reportedErr)
 }

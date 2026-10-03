@@ -231,7 +231,6 @@ func TestBuild_RefusesGatedReferenceExpressedAsAfter(t *testing.T) {
     }
 }
 
-/* Groups gate selection exactly as environments do and fail the same way, so they are compared the same way. */
 /* The group a build is asked for decides what that build carries, and several groups are built in one process, so a reference unsatisfiable in some other group says nothing about this one. The selection has already dropped what this group does not carry; a target missing from it is an ordinary missing reference. */
 func TestBuild_AllowsReferenceAcrossGroupsTheBuildDoesNotAskFor(t *testing.T) {
     audit := NewHttpMiddlewareDefinition("audit", 0, []string{"profiler"}, nil, []string{"http", "admin"}, nil, passthroughFactory(), false, false)
@@ -297,7 +296,7 @@ func TestBuild_LeavesUngatedPipelinesAlone(t *testing.T) {
     }
 }
 
-/* Splitting one middleware across environments is how a configuration that differs per environment is ordinarily written: an `auth` wired for development beside an `auth` wired for production, both registered under the one name the rest of the pipeline orders against. What has to be present wherever the referrer runs is A middleware called `auth`, not one particular registration of it — so the union of the registrations is what answers the reference. Weighing them one at a time refused this in dev AND in prod, for a configuration that boots correctly in both. */
+/* Splitting one middleware across environments is how a configuration that differs per environment is ordinarily written: an `auth` wired for development beside an `auth` wired for production, both registered under the one name the rest of the pipeline orders against. What has to be present wherever the referrer runs is A middleware called `auth`, not one particular registration of it, so the union of the registrations answers the reference. Weighed one at a time, the pair would be refused in dev AND in prod, for a configuration that boots correctly in both. */
 func TestBuild_AcceptsAReferenceCoveredByTheUnionOfSameNamedDefinitions(t *testing.T) {
     developmentAuth := NewHttpMiddlewareDefinition("auth", 0, nil, nil, []string{"http"}, []string{"dev"}, passthroughFactory(), false, true)
     productionAuth := NewHttpMiddlewareDefinition("auth", 0, nil, nil, []string{"http"}, []string{"prod"}, passthroughFactory(), false, true)
@@ -344,7 +343,7 @@ func TestSupportedEnvironments_MatchesTheConfigurationPackage(t *testing.T) {
     }
 }
 
-/* Several groups are built from one builder in one process, each from its own selection. A pair of definitions confined to `api` says nothing about the `web` build, which assembles neither of them — yet the gating pass was handed every definition the builder holds, so `web` refused to build over a reference no request to it could reach. The check still fires for the group that does carry the pair. */
+/* Several groups are built from one builder in one process, each from its own selection. A pair of definitions confined to `api` says nothing about the `web` build, which assembles neither of them, so `web` builds; the check still fires for the group that does carry the pair. */
 func TestBuild_GatingOfAnotherGroupDoesNotRefuseThisOne(t *testing.T) {
     profiler := NewHttpMiddlewareDefinition("profiler", 0, nil, nil, []string{"api"}, []string{"dev"}, passthroughFactory(), false, false)
     audit := NewHttpMiddlewareDefinition("audit", 0, []string{"profiler"}, nil, []string{"api"}, nil, passthroughFactory(), false, false)

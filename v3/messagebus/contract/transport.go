@@ -13,5 +13,6 @@ type Transport interface {
 
     Nack(runtimeInstance runtimecontract.Runtime, envelope Envelope, requeue bool) error
 
-    Close(runtimeInstance runtimecontract.Runtime) error
+    /* Close takes no runtime: the container's ordered teardown calls it through the closer RegisterTransports registers, and the teardown recognizes Close() error alone. */
+    Close() error
 }

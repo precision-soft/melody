@@ -33,7 +33,7 @@ func (instance *Module) Description() string {
 }
 
 func (instance *Module) RegisterCliCommands(kernelInstance kernelcontract.Kernel) []clicontract.Command {
-    /* a configuration with neither Migrations nor Contexts is refused at registration by name: registering the commands is this module's only purpose, so an empty configuration is a wiring mistake with no legal reading — accepted, it produced a module that silently registered nothing and the operator discovered the error as "unknown command" at the first db:migrate. The cron module refuses its own contradictory emptiness the same way. */
+    /* a configuration with neither Migrations nor Contexts is refused by name at registration, since registering the commands is this module's only purpose */
     if nil == instance.config.Migrations && 0 == len(instance.config.Contexts) {
         exception.Panic(
             exception.NewError("bunorm migrate module requires migrations or contexts", nil, nil),

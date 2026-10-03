@@ -8,10 +8,7 @@ import (
     "testing"
 )
 
-/* The envelope builder decides what the multipart assertion is actually asserting: the section compares the byte
-count the handler reported against len(envelope), so an envelope whose Content-Type boundary did not match its body
-would be rejected by the framework as malformed and the section would report a framework defect that does not
-exist. */
+/* The envelope builder decides what the multipart assertion is actually asserting: the section compares the byte count the handler reported against len(envelope), so an envelope whose Content-Type boundary did not match its body would be rejected by the framework as malformed and the section would report a framework defect that does not exist. */
 func TestBuildMultipartEnvelope_BoundaryMatchesTheBody(t *testing.T) {
     envelope, contentType := buildMultipartEnvelope(
         map[string]string{"label": "a field"},
@@ -37,8 +34,7 @@ func TestBuildMultipartEnvelope_BoundaryMatchesTheBody(t *testing.T) {
     }
 }
 
-/* the envelope has to be parseable by a real multipart reader: the property under test is that the FRAMEWORK left
-the body unread, which says nothing at all if the body was never a valid envelope in the first place. */
+/* the envelope has to be parseable by a real multipart reader: the property under test is that the FRAMEWORK left the body unread, which says nothing at all if the body was never a valid envelope in the first place. */
 func TestBuildMultipartEnvelope_ParsesBackIntoItsParts(t *testing.T) {
     fileContent := []byte("the file part's own bytes")
 
@@ -80,8 +76,7 @@ func TestBuildMultipartEnvelope_ParsesBackIntoItsParts(t *testing.T) {
     }
 }
 
-/* the missing-key probe posts a fields-only envelope, so an empty filename must produce a valid envelope with no
-file part rather than an empty part the framework might reject for its own reasons. */
+/* the missing-key probe posts a fields-only envelope, so an empty filename must produce a valid envelope with no file part rather than an empty part the framework might reject for its own reasons. */
 func TestBuildMultipartEnvelope_OmitsTheFilePartWithoutAFilename(t *testing.T) {
     envelope, contentType := buildMultipartEnvelope(map[string]string{"label": "no file here"}, "", "", nil)
 

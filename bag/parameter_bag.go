@@ -50,7 +50,7 @@ func (instance *ParameterBag) Set(name string, value any) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    /* the zero value is constructible outside the constructors and carries a nil map; the first write allocates it instead of panicking on the assignment — the reads already answer the zero value, so the panic surfaced only after the bag looked functional */
+    /* the zero value is constructible outside the constructors and carries a nil map; the first write allocates it rather than panicking on an assignment into a bag that reads as functional */
     if nil == instance.parameters {
         instance.parameters = make(map[string]any)
     }

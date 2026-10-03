@@ -8,7 +8,7 @@ import (
     loggingcontract "github.com/precision-soft/melody/v2/logging/contract"
 )
 
-/* NewLoggingConfiguration copies the labels on the way in, and LevelLabels hands a copy back out: the map is read lock-free on every Log call of the logger built from it, so a reference kept by the caller turns a later write into a fatal concurrent map access no recover reaches. */
+/* NewLoggingConfiguration copies the labels on the way in, and LevelLabels hands a copy back out: the map is read lock-free on every Log call, so a reference the caller keeps would turn a later write into a fatal concurrent map access. */
 func NewLoggingConfiguration(labels loggingcontract.LevelLabels) loggingcontract.LoggingConfiguration {
     return &loggingConfiguration{levelLabels: copyLevelLabels(labels)}
 }
@@ -40,7 +40,7 @@ func LoggingConfigurationFromModules(moduleConfigurations map[string]any) loggin
         return &loggingConfiguration{levelLabels: loggingcontract.DefaultLevelLabels()}
     }
 
-    /* the typed nil is refused above the assertion, which would otherwise accept it: the boot then dies inside the logger provider, naming service.logger instead of the configuration that was registered wrong */
+    /* the typed nil is refused before the assertion, so the boot names the configuration registered wrong rather than service.logger */
     if nil == raw || true == internal.IsNilInterface(raw) {
         actualType := "<nil>"
         if nil != raw {

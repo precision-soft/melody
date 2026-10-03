@@ -1,14 +1,27 @@
 package cron
 
 import (
+    "bytes"
+    "context"
+    "encoding/json"
     "errors"
     "fmt"
     "os"
     "path/filepath"
     "strings"
+    "syscall"
     "testing"
+    "time"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
+    "github.com/precision-soft/melody/v3/cli/output"
+    melodyconfig "github.com/precision-soft/melody/v3/config"
+    configcontract "github.com/precision-soft/melody/v3/config/contract"
+    "github.com/precision-soft/melody/v3/container"
+    containercontract "github.com/precision-soft/melody/v3/container/contract"
+    "github.com/precision-soft/melody/v3/exception"
+    exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
+    "github.com/precision-soft/melody/v3/runtime"
 )
 
 func TestNewGenerateCommandIdentity(t *testing.T) {
@@ -22,9 +35,11 @@ func TestNewGenerateCommandIdentity(t *testing.T) {
         t.Fatalf("Description() should not be empty")
     }
 
+    /* the command carries its 12 own flags plus the standard set every melody command accepts, which the framework's -v/-vv rewrite into --verbosity requires */
     flags := command.Flags()
-    if 11 != len(flags) {
-        t.Fatalf("expected 11 flags, got %d", len(flags))
+    expectedFlagCount := 12 + len(output.StandardFlags())
+    if expectedFlagCount != len(flags) {
+        t.Fatalf("expected %d flags (12 own + the standard set), got %d", expectedFlagCount, len(flags))
     }
 }
 
@@ -1838,7 +1853,7 @@ func TestRunHeartbeatOnlyMessageInStdout(t *testing.T) {
         t.Fatalf("Run returned unexpected error: %v", err)
     }
 
-    if false == strings.Contains(stdout, "heartbeat-only file") {
+    if false == strings.Contains(stdout, "heartbeat-only crontab") {
         t.Fatalf("expected heartbeat-only message in stdout, got: %q", stdout)
     }
 }
@@ -2010,7 +2025,7 @@ func TestRunRendersK8sTemplateWithImageAndNamespaceFlags(t *testing.T) {
 }
 
 func TestRunK8sTemplateRejectsResourceNameCollisionAcrossDestinationFiles(t *testing.T) {
-    /* @info the namespace is one global flag, so two commands that sanitize to the same resource name collide on kubectl apply even when split across distinct destination files; Render only sees one destination, so the CLI must reject the clash across the whole set */
+    /* the namespace is one global flag, so two commands that sanitize to the same resource name collide on kubectl apply even when split across distinct destination files; Render only sees one destination, so the CLI must reject the clash across the whole set */
     tempDir := t.TempDir()
     defaultOutputPath := filepath.Join(tempDir, "cron.yaml")
 
@@ -2079,7 +2094,7 @@ func TestRunK8sTemplateWarnsWhenHeartbeatConfigured(t *testing.T) {
 }
 
 func TestRunK8sTemplateIgnoresUnmatchedHeartbeatDestination(t *testing.T) {
-    /* @info the k8s template declares heartbeat options ignored (it never emits a heartbeat CronJob), so a --heartbeat-destination that matches no written destination must not hard-fail the command the way it does for the crontab template */
+    /* the k8s template declares heartbeat options ignored (it never emits a heartbeat CronJob), so a --heartbeat-destination that matches no written destination must not hard-fail the command the way it does for the crontab template */
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "cron.yaml")
     heartbeatPath := filepath.Join(tempDir, "heartbeat.crontab")
@@ -2120,7 +2135,7 @@ func TestRunK8sTemplateIgnoresUnmatchedHeartbeatDestination(t *testing.T) {
 }
 
 func TestRunK8sTemplateWithHeartbeatAndEmptyConfigurationWritesNothing(t *testing.T) {
-    /* @info heartbeat is crontab-only; with the k8s template an empty Configuration must not synthesize a heartbeat-only destination, so no file is written and the missing image is never demanded */
+    /* heartbeat is crontab-only; with the k8s template an empty Configuration must not synthesize a heartbeat-only destination, so no file is written and the missing image is never demanded */
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "cron.yaml")
     heartbeatPath := filepath.Join(tempDir, "heartbeat.crontab")
@@ -2260,7 +2275,7 @@ func TestRunK8sTemplateSuffixesNamesForMultiInstanceCommand(t *testing.T) {
 }
 
 func TestRunK8sTemplateWithHeartbeatAndNoUserSucceedsAndWarns(t *testing.T) {
-    /* @info the k8s template ignores the heartbeat, so a heartbeat-configured k8s run with no --user must not fail with ErrHeartbeatUserMissing (a crontab-only requirement); it succeeds and warns that the heartbeat is dropped */
+    /* the k8s template ignores the heartbeat, so a heartbeat-configured k8s run with no --user must not fail with ErrHeartbeatUserMissing (a crontab-only requirement); it succeeds and warns that the heartbeat is dropped */
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "cron.yaml")
     heartbeatPath := filepath.Join(tempDir, "heartbeat.crontab")
@@ -2295,7 +2310,7 @@ func TestRunK8sTemplateWithHeartbeatAndNoUserSucceedsAndWarns(t *testing.T) {
 }
 
 func TestRunK8sTemplateSucceedsWithoutLogsDir(t *testing.T) {
-    /* @info the k8s template logs to container stdout and never reads Entry.LogPath, so a k8s run must not inherit the crontab-only logs-dir requirement (ErrNoLogsDir) */
+    /* the k8s template logs to container stdout and never reads Entry.LogPath, so a k8s run must not inherit the crontab-only logs-dir requirement (ErrNoLogsDir) */
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "cron.yaml")
 
@@ -2541,7 +2556,50 @@ func TestAtomicWriteFileRollsBackTemporaryOnRenameFailure(t *testing.T) {
     }
 }
 
-/* @info The crontab-no-user dialect renders no user column at all, so the heartbeat line needs no user to place. Demanding --user turned a valid busybox-crond configuration into a hard error. */
+/* a destination already in place keeps the mode it carries across the atomic rewrite, as the framework's and the migrate module's atomic writers do, so a crontab narrowed to 0600 stays 0600; a destination that does not exist yet is created with the mode the caller chose */
+func TestAtomicWriteFileKeepsTheModeOfAnExistingDestination(t *testing.T) {
+    tempDir := t.TempDir()
+
+    narrowed := filepath.Join(tempDir, "narrowed")
+    if writeErr := os.WriteFile(narrowed, []byte("before"), 0o600); nil != writeErr {
+        t.Fatalf("setup: %v", writeErr)
+    }
+    if chmodErr := os.Chmod(narrowed, 0o600); nil != chmodErr {
+        t.Fatalf("setup: %v", chmodErr)
+    }
+
+    if writeErr := atomicWriteFile(narrowed, []byte("after"), 0o644); nil != writeErr {
+        t.Fatalf("atomicWriteFile: %v", writeErr)
+    }
+
+    info, statErr := os.Stat(narrowed)
+    if nil != statErr {
+        t.Fatalf("stat: %v", statErr)
+    }
+    if os.FileMode(0o600) != info.Mode().Perm() {
+        t.Fatalf("expected the narrowed destination to keep 0600 across the rewrite, got %#o", info.Mode().Perm())
+    }
+
+    content, readErr := os.ReadFile(narrowed)
+    if nil != readErr || "after" != string(content) {
+        t.Fatalf("expected the content rewritten, got %q (%v)", content, readErr)
+    }
+
+    fresh := filepath.Join(tempDir, "fresh")
+    if writeErr := atomicWriteFile(fresh, []byte("new"), 0o644); nil != writeErr {
+        t.Fatalf("atomicWriteFile: %v", writeErr)
+    }
+
+    info, statErr = os.Stat(fresh)
+    if nil != statErr {
+        t.Fatalf("stat: %v", statErr)
+    }
+    if os.FileMode(0o644) != info.Mode().Perm() {
+        t.Fatalf("expected a fresh destination created with the caller's mode, got %#o", info.Mode().Perm())
+    }
+}
+
+/* The crontab-no-user dialect renders no user column, so the heartbeat line needs no user and a valid busybox-crond configuration succeeds without --user. */
 func TestRunCrontabNoUserTemplateWithHeartbeatAndNoUserSucceeds(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")
@@ -2568,5 +2626,1734 @@ func TestRunCrontabNoUserTemplateWithHeartbeatAndNoUserSucceeds(t *testing.T) {
     }
     if nil != runErr {
         t.Fatalf("Run returned unexpected error: %v", runErr)
+    }
+}
+
+func TestRunPruneEmptiesADestinationThisRunNoLongerProduces(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+    retiredPath := filepath.Join(tempDir, "reports.crontab")
+
+    baseArgs := []string{
+        "--out", outputPath,
+        "--logs-dir", filepath.Join(tempDir, "logs"),
+        "--binary", "/usr/local/bin/fakeapp",
+        "--user", "deploy",
+    }
+
+    _, firstErr := runGenerateCommand(
+        t,
+        []clicontract.Command{
+            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+                Schedule:        &Schedule{Minute: "0", Hour: "3"},
+                DestinationFile: "reports.crontab",
+            }),
+        },
+        baseArgs,
+    )
+    if nil != firstErr {
+        t.Fatalf("the first generation failed: %v", firstErr)
+    }
+
+    firstContent, firstReadErr := os.ReadFile(retiredPath)
+    if nil != firstReadErr {
+        t.Fatalf("the first generation wrote no %s: %v", retiredPath, firstReadErr)
+    }
+
+    if false == strings.Contains(string(firstContent), "reports:daily") {
+        t.Fatalf("the first generation did not name the job: %s", firstContent)
+    }
+
+    /* the next version moves the same job to the default destination */
+    stdout, secondErr := runGenerateCommand(
+        t,
+        []clicontract.Command{
+            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+                Schedule: &Schedule{Minute: "0", Hour: "3"},
+            }),
+        },
+        append(append([]string{}, baseArgs...), "--prune"),
+    )
+    if nil != secondErr {
+        t.Fatalf("the second generation failed: %v", secondErr)
+    }
+
+    stale, staleErr := os.ReadFile(retiredPath)
+    if nil != staleErr {
+        t.Fatalf("expected the pruned destination to survive as an empty manifest: %v", staleErr)
+    }
+
+    if true == strings.Contains(string(stale), "reports:daily") {
+        t.Fatalf("expected the retired destination to stop naming the job, got: %s", stale)
+    }
+
+    if false == strings.Contains(string(stale), CrontabOwnershipMarker) {
+        t.Fatalf("expected the pruned destination to keep its ownership marker, got: %s", stale)
+    }
+
+    current, currentErr := os.ReadFile(outputPath)
+    if nil != currentErr {
+        t.Fatalf("the second generation wrote no %s: %v", outputPath, currentErr)
+    }
+
+    if false == strings.Contains(string(current), "reports:daily") {
+        t.Fatalf("expected the job to live at its new destination, got: %s", current)
+    }
+
+    if false == strings.Contains(stdout, "pruned "+retiredPath) {
+        t.Fatalf("expected the sweep to be reported, got: %q", stdout)
+    }
+}
+
+func TestRunPruneIsReportedInTheJsonEnvelope(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+    retiredPath := filepath.Join(tempDir, "reports.crontab")
+
+    baseArgs := []string{
+        "--out", outputPath,
+        "--logs-dir", filepath.Join(tempDir, "logs"),
+        "--binary", "/usr/local/bin/fakeapp",
+        "--user", "deploy",
+    }
+
+    if _, firstErr := runGenerateCommand(
+        t,
+        []clicontract.Command{
+            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+                Schedule:        &Schedule{Minute: "0", Hour: "3"},
+                DestinationFile: "reports.crontab",
+            }),
+        },
+        baseArgs,
+    ); nil != firstErr {
+        t.Fatalf("the first generation failed: %v", firstErr)
+    }
+
+    stdout, secondErr := runGenerateCommand(
+        t,
+        []clicontract.Command{
+            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+                Schedule: &Schedule{Minute: "0", Hour: "3"},
+            }),
+        },
+        append(append([]string{}, baseArgs...), "--prune", "--format=json"),
+    )
+    if nil != secondErr {
+        t.Fatalf("the second generation failed: %v", secondErr)
+    }
+
+    document := map[string]any{}
+    if unmarshalErr := json.Unmarshal([]byte(stdout), &document); nil != unmarshalErr {
+        t.Fatalf("the envelope did not parse: %v, got %q", unmarshalErr, stdout)
+    }
+
+    data, hasData := document["data"].(map[string]any)
+    if false == hasData {
+        t.Fatalf("expected a data object, got %q", stdout)
+    }
+
+    pruned, hasPruned := data["pruned"].([]any)
+    if false == hasPruned {
+        t.Fatalf("expected pruned to be a list on every run, got %q", stdout)
+    }
+
+    if 1 != len(pruned) || retiredPath != pruned[0] {
+        t.Fatalf("expected the swept destination to be named, got %v", pruned)
+    }
+}
+
+func TestRunPruneLeavesAFileItCannotProveItWrote(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+    foreignPath := filepath.Join(tempDir, "operator.crontab")
+
+    foreignContent := "# written by the operator\n*/5 * * * * root /usr/local/bin/backup\n"
+    if writeErr := os.WriteFile(foreignPath, []byte(foreignContent), 0o644); nil != writeErr {
+        t.Fatalf("unexpected write error: %v", writeErr)
+    }
+
+    if _, runErr := runGenerateCommand(
+        t,
+        []clicontract.Command{
+            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+                Schedule: &Schedule{Minute: "0", Hour: "3"},
+            }),
+        },
+        []string{
+            "--out", outputPath,
+            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "deploy",
+            "--prune",
+        },
+    ); nil != runErr {
+        t.Fatalf("the generation failed: %v", runErr)
+    }
+
+    survived, readErr := os.ReadFile(foreignPath)
+    if nil != readErr {
+        t.Fatalf("expected the operator's file to survive: %v", readErr)
+    }
+
+    if foreignContent != string(survived) {
+        t.Fatalf("expected the operator's file untouched, got: %s", survived)
+    }
+}
+
+func TestRunPruneSweepsWhenTheConfigurationBecomesEmpty(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+
+    baseArgs := []string{
+        "--out", outputPath,
+        "--logs-dir", filepath.Join(tempDir, "logs"),
+        "--binary", "/usr/local/bin/fakeapp",
+        "--user", "deploy",
+    }
+
+    if _, firstErr := runGenerateCommand(
+        t,
+        []clicontract.Command{
+            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+                Schedule: &Schedule{Minute: "0", Hour: "3"},
+            }),
+        },
+        baseArgs,
+    ); nil != firstErr {
+        t.Fatalf("the first generation failed: %v", firstErr)
+    }
+
+    stdout, secondErr := runGenerateCommand(
+        t,
+        nil,
+        append(append([]string{}, baseArgs...), "--prune"),
+    )
+    if nil != secondErr {
+        t.Fatalf("an empty configuration must stay a success, got: %v", secondErr)
+    }
+
+    if false == strings.Contains(stdout, "nothing to write") {
+        t.Fatalf("expected the empty run to keep its message, got: %q", stdout)
+    }
+
+    swept, sweptErr := os.ReadFile(outputPath)
+    if nil != sweptErr {
+        t.Fatalf("expected the previously written destination to survive as an empty manifest: %v", sweptErr)
+    }
+
+    if true == strings.Contains(string(swept), "reports:daily") {
+        t.Fatalf("expected the emptied configuration to stop the job, got: %s", swept)
+    }
+}
+
+func TestRunReportsAnEmptyPrunedListWhenNothingIsSwept(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+
+    stdout, runErr := runGenerateCommand(
+        t,
+        []clicontract.Command{
+            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+                Schedule: &Schedule{Minute: "0", Hour: "3"},
+            }),
+        },
+        []string{
+            "--out", outputPath,
+            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "deploy",
+            "--format=json",
+        },
+    )
+    if nil != runErr {
+        t.Fatalf("the generation failed: %v", runErr)
+    }
+
+    document := map[string]any{}
+    if unmarshalErr := json.Unmarshal([]byte(stdout), &document); nil != unmarshalErr {
+        t.Fatalf("the envelope did not parse: %v, got %q", unmarshalErr, stdout)
+    }
+
+    data := document["data"].(map[string]any)
+
+    pruned, hasPruned := data["pruned"].([]any)
+    if false == hasPruned {
+        t.Fatalf("expected pruned to be a list even when nothing was swept, got %q", stdout)
+    }
+
+    if 0 != len(pruned) {
+        t.Fatalf("expected an empty sweep, got %v", pruned)
+    }
+}
+
+func TestRunWithoutPruneLeavesAStaleDestinationUntouched(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+    retiredPath := filepath.Join(tempDir, "reports.crontab")
+
+    baseArgs := []string{
+        "--out", outputPath,
+        "--logs-dir", filepath.Join(tempDir, "logs"),
+        "--binary", "/usr/local/bin/fakeapp",
+        "--user", "deploy",
+    }
+
+    if _, firstErr := runGenerateCommand(
+        t,
+        []clicontract.Command{
+            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+                Schedule:        &Schedule{Minute: "0", Hour: "3"},
+                DestinationFile: "reports.crontab",
+            }),
+        },
+        baseArgs,
+    ); nil != firstErr {
+        t.Fatalf("the first generation failed: %v", firstErr)
+    }
+
+    if _, secondErr := runGenerateCommand(
+        t,
+        []clicontract.Command{
+            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+                Schedule: &Schedule{Minute: "0", Hour: "3"},
+            }),
+        },
+        baseArgs,
+    ); nil != secondErr {
+        t.Fatalf("the second generation failed: %v", secondErr)
+    }
+
+    stale, staleErr := os.ReadFile(retiredPath)
+    if nil != staleErr {
+        t.Fatalf("expected the stale destination to be left alone: %v", staleErr)
+    }
+
+    if false == strings.Contains(string(stale), "reports:daily") {
+        t.Fatalf("expected the stale destination untouched without --prune, got: %s", stale)
+    }
+}
+
+func TestGenerateCommand_TheSweepDoesNotOpenANamedPipe(t *testing.T) {
+    directory := t.TempDir()
+
+    if fifoErr := syscall.Mkfifo(filepath.Join(directory, "a-fifo.crontab"), 0o644); nil != fifoErr {
+        t.Skipf("this platform has no fifo: %v", fifoErr)
+    }
+
+    completed := make(chan error, 1)
+    go func() {
+        _, runErr := runGenerateCommand(
+            t,
+            []clicontract.Command{newFakeCommandWithSchedule("job:probe", &testSchedule{Minute: "0", Hour: "*"})},
+            []string{
+                "--out", filepath.Join(directory, "current.crontab"),
+                "--logs-dir", directory,
+                "--binary", "/usr/bin/app",
+                "--user", "root",
+                "--prune",
+            },
+        )
+        completed <- runErr
+    }()
+
+    select {
+    case runErr := <-completed:
+        if nil != runErr {
+            t.Fatalf("the fifo must be skipped, not fail the run: %v", runErr)
+        }
+    case <-time.After(10 * time.Second):
+        t.Fatal("the generator is wedged opening the fifo")
+    }
+}
+
+func TestGenerateCommand_JsonFormatRendersOneDocument(t *testing.T) {
+    tempDir := t.TempDir()
+
+    stdout, runErr := runGenerateCommand(
+        t,
+        []clicontract.Command{newFakeCommandWithSchedule("report:daily", &testSchedule{Minute: "0"})},
+        []string{
+            "--out", filepath.Join(tempDir, "crontab"),
+            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "deploy",
+            "--format=json",
+        },
+    )
+    if nil != runErr {
+        t.Fatalf("run: %v", runErr)
+    }
+
+    var document map[string]any
+    if unmarshalErr := json.Unmarshal([]byte(stdout), &document); nil != unmarshalErr {
+        t.Fatalf("the output is not one json document: %v; got %q", unmarshalErr, stdout)
+    }
+
+    meta, hasMeta := document["meta"].(map[string]any)
+    if false == hasMeta {
+        t.Fatalf("the document carries no meta, got %q", stdout)
+    }
+
+    if "melody:cron:generate" != meta["command"] {
+        t.Fatalf("meta.command = %v", meta["command"])
+    }
+
+    data, hasData := document["data"].(map[string]any)
+    if false == hasData {
+        t.Fatalf("the document carries no data, got %q", stdout)
+    }
+
+    writes, hasWrites := data["writes"].([]any)
+    if false == hasWrites || 0 == len(writes) {
+        t.Fatalf("expected the write summary inside the document, got %v", data)
+    }
+}
+
+func TestGenerateCommand_JsonNamesTheDestinationsWrittenBeforeTheFailure(t *testing.T) {
+    tempDir := t.TempDir()
+
+    /* the second destination cannot be created: its parent is a file, so MkdirAll fails after the first has been written */
+    blockingFile := filepath.Join(tempDir, "blocked")
+    if writeErr := os.WriteFile(blockingFile, []byte("not a directory"), 0o644); nil != writeErr {
+        t.Fatalf("failed to place the blocking file: %v", writeErr)
+    }
+
+    commands := []clicontract.Command{
+        newFakeCommandWithConfig("a:first", &EntryConfig{
+            Schedule:        &Schedule{Minute: "0"},
+            DestinationFile: filepath.Join(tempDir, "a-crontab"),
+        }),
+        newFakeCommandWithConfig("b:second", &EntryConfig{
+            Schedule:        &Schedule{Minute: "0"},
+            DestinationFile: filepath.Join(blockingFile, "b-crontab"),
+        }),
+    }
+
+    stdout, runErr := runGenerateCommand(
+        t,
+        commands,
+        []string{
+            "--out", filepath.Join(tempDir, "crontab"),
+            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "deploy",
+            "--format=json",
+        },
+    )
+
+    if nil == runErr {
+        t.Fatalf("expected the unwritable destination to fail the run, got %q", stdout)
+    }
+
+    document := struct {
+        Data struct {
+            Writes []struct {
+                Destination string `json:"destination"`
+            } `json:"writes"`
+        } `json:"data"`
+    }{}
+    if decodeErr := json.Unmarshal([]byte(stdout), &document); nil != decodeErr {
+        t.Fatalf("expected one json document on a partial run, got %q: %v", stdout, decodeErr)
+    }
+
+    if 1 != len(document.Data.Writes) {
+        t.Fatalf("expected the destination written before the failure, got %#v in %q", document.Data.Writes, stdout)
+    }
+
+    if filepath.Join(tempDir, "a-crontab") != document.Data.Writes[0].Destination {
+        t.Fatalf("expected the first destination to be named, got %q", document.Data.Writes[0].Destination)
+    }
+}
+
+func TestGenerateCommand_JsonReportsTheFailureAndWhatWasAlreadyWritten(t *testing.T) {
+    tempDir := t.TempDir()
+
+    stdout, runErr := runGenerateCommand(
+        t,
+        []clicontract.Command{
+            newFakeCommandWithSchedule("product:list", &testSchedule{Minute: "0", Hour: "3"}),
+        },
+        []string{
+            "--out", filepath.Join(tempDir, "crontab"),
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "deploy",
+            "--format=json",
+        },
+    )
+
+    if nil == runErr {
+        t.Fatalf("expected the missing logs-dir to fail the run, got %q", stdout)
+    }
+
+    document := struct {
+        Data struct {
+            Writes []map[string]any `json:"writes"`
+        } `json:"data"`
+        Error *struct {
+            Code    string         `json:"code"`
+            Message string         `json:"message"`
+            Details map[string]any `json:"details"`
+            Cause   *struct {
+                Message string              `json:"message"`
+                Details map[string][]string `json:"details"`
+            } `json:"cause"`
+        } `json:"error"`
+    }{}
+    if decodeErr := json.Unmarshal([]byte(stdout), &document); nil != decodeErr {
+        t.Fatalf("expected one json document on a failed run, got %q: %v", stdout, decodeErr)
+    }
+
+    if nil == document.Error {
+        t.Fatalf("expected the failure inside the envelope, got %q", stdout)
+    }
+
+    if "cron.generateFailed" != document.Error.Code {
+        t.Fatalf("expected the generate-failed code, got %q", document.Error.Code)
+    }
+
+    if nil == document.Error.Cause {
+        t.Fatalf("expected the failure to carry its cause, got %q", stdout)
+    }
+
+    if false == strings.Contains(document.Error.Cause.Message, "logs-dir") {
+        t.Fatalf("expected the cause to name the missing logs-dir, got %q", document.Error.Cause.Message)
+    }
+
+    /* the document carries the failure's details and cause.details, the context and chain the journal carries for the same value */
+    if nil == document.Error.Details {
+        t.Fatalf("expected the failure details to be an object, got %q", stdout)
+    }
+
+    if 0 == len(document.Error.Cause.Details["chain"]) {
+        t.Fatalf("expected the cause chain inside the failure, got %q", stdout)
+    }
+
+    if false == strings.Contains(document.Error.Cause.Details["chain"][0], "logs-dir") {
+        t.Fatalf("expected the chain to start at the failure itself, got %v", document.Error.Cause.Details["chain"])
+    }
+
+    /* the writes key stays an array on a failed run: a consumer keying on it must not meet a null */
+    if nil == document.Data.Writes {
+        t.Fatalf("expected an empty writes array on a failed run, got %q", stdout)
+    }
+
+    /* the success path must stay exactly what it was, or the guard above would pass for a command that reports every run as failed */
+    successStdout, successErr := runGenerateCommand(
+        t,
+        []clicontract.Command{
+            newFakeCommandWithSchedule("product:list", &testSchedule{Minute: "0", Hour: "3"}),
+        },
+        []string{
+            "--out", filepath.Join(tempDir, "crontab"),
+            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "deploy",
+            "--format=json",
+        },
+    )
+    if nil != successErr {
+        t.Fatalf("expected the successful run to stay successful, got %v", successErr)
+    }
+
+    successDocument := struct {
+        Error *struct {
+            Code string `json:"code"`
+        } `json:"error"`
+    }{}
+    if decodeErr := json.Unmarshal([]byte(successStdout), &successDocument); nil != decodeErr {
+        t.Fatalf("failed to decode the document: %v, got %q", decodeErr, successStdout)
+    }
+
+    if nil != successDocument.Error {
+        t.Fatalf("expected no error on a successful run, got %q", successStdout)
+    }
+}
+
+func TestGenerateCommand_TheTextBranchNamesWhatItProducedBeforeFailing(t *testing.T) {
+    var stdout bytes.Buffer
+    commandContext := &clicontract.StaticContext{WriterValue: &stdout}
+
+    runErr := NewGenerateCommand(NewConfiguration()).reportWrites(
+        commandContext,
+        output.Option{Format: output.FormatTable},
+        time.Now(),
+        []destinationWrite{{Destination: "/etc/cron.d/app", Entries: 3}},
+        []string{"/etc/cron.d/app-retired", "/etc/cron.d/app-moved"},
+        "",
+        nil,
+        errors.New("the sweep stopped part way through"),
+    )
+
+    if nil == runErr {
+        t.Fatal("the run's own failure must stay the verdict")
+    }
+
+    rendered := stdout.String()
+
+    for _, expected := range []string{
+        "pruned /etc/cron.d/app-retired",
+        "pruned /etc/cron.d/app-moved",
+        "wrote 3 entries to /etc/cron.d/app",
+    } {
+        if false == strings.Contains(rendered, expected) {
+            t.Fatalf("the failed run does not report %q, got: %q", expected, rendered)
+        }
+    }
+}
+
+func TestGenerateCommand_AcceptsTheStandardVerbosityFlag(t *testing.T) {
+    tempDir := t.TempDir()
+
+    _, runErr := runGenerateCommand(
+        t,
+        []clicontract.Command{newFakeCommandWithSchedule("report:daily", &testSchedule{Minute: "0"})},
+        []string{
+            "--out", filepath.Join(tempDir, "crontab"),
+            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "deploy",
+            "--verbosity=1",
+        },
+    )
+    if nil != runErr {
+        t.Fatalf("expected the standard verbosity flag to be accepted, got %v", runErr)
+    }
+}
+
+func TestErrorDetailsOf_CarriesTheFailuresOwnContext(t *testing.T) {
+    runErr := exception.NewError(
+        "the cron manifest could not be renamed into place",
+        exceptioncontract.Context{"destination": "/etc/cron.d/app", "source": "/tmp/app.tmp"},
+        errors.New("permission denied"),
+    )
+
+    details := errorDetailsOf(runErr)
+
+    if "/etc/cron.d/app" != details["destination"] {
+        t.Fatalf("expected the failure's own context in the details, got %#v", details)
+    }
+
+    if "/tmp/app.tmp" != details["source"] {
+        t.Fatalf("expected the failure's own context in the details, got %#v", details)
+    }
+}
+
+func TestErrorDetailsOf_KeepsAnObjectWithoutAContext(t *testing.T) {
+    details := errorDetailsOf(errors.New("bare failure"))
+
+    if nil == details {
+        t.Fatal("expected an empty object rather than nil")
+    }
+
+    if 0 != len(details) {
+        t.Fatalf("expected the details to be empty for a bare failure, got %#v", details)
+    }
+}
+
+func TestErrorCauseOf_StartsAtTheFailureAndCarriesTheChain(t *testing.T) {
+    runErr := exception.NewError(
+        "the cron manifest could not be renamed into place",
+        nil,
+        errors.New("permission denied"),
+    )
+
+    cause := errorCauseOf(runErr)
+    if nil == cause {
+        t.Fatal("expected the failure to carry its cause")
+    }
+
+    if false == strings.Contains(cause.Message, "could not be renamed") {
+        t.Fatalf("expected the cause to be the failure's own sentence, got %q", cause.Message)
+    }
+
+    chain, isChain := cause.Details["chain"].([]string)
+    if false == isChain || 2 > len(chain) {
+        t.Fatalf("expected the whole chain beneath the failure, got %#v", cause.Details)
+    }
+
+    if false == strings.Contains(strings.Join(chain, " | "), "permission denied") {
+        t.Fatalf("expected the chain to reach the bottom, got %#v", chain)
+    }
+}
+
+func TestErrorCauseOf_AnswersNothingForAFailureWithoutACause(t *testing.T) {
+    if nil != errorCauseOf(nil) {
+        t.Fatal("expected no cause for a nil failure")
+    }
+}
+
+func TestRunAnchorsARelativeParameterPathAtTheProjectDirectory(t *testing.T) {
+    projectDirectory := t.TempDir()
+    workingDirectory := t.TempDir()
+
+    t.Chdir(workingDirectory)
+
+    commands := []clicontract.Command{
+        newFakeCommandWithSchedule("backup:run", &testSchedule{Minute: "0", Hour: "2"}),
+    }
+
+    configuration := newStubConfigurationWithProjectDirectory(
+        map[string]string{
+            ParameterUser:            "deploy",
+            ParameterBinary:          "/opt/melody/app",
+            ParameterDestinationFile: filepath.Join("var", "cron", "crontab"),
+            ParameterLogsDir:         filepath.Join("var", "log", "cron"),
+        },
+        projectDirectory,
+    )
+
+    _, runErr := runGenerateCommandWithConfiguration(t, commands, nil, configuration)
+    if nil != runErr {
+        t.Fatalf("Run returned unexpected error: %v", runErr)
+    }
+
+    anchoredDestination := filepath.Join(projectDirectory, "var", "cron", "crontab")
+    if _, statErr := os.Stat(anchoredDestination); nil != statErr {
+        t.Fatalf("expected the relative parameter path under the project directory: %v", statErr)
+    }
+
+    if _, statErr := os.Stat(filepath.Join(workingDirectory, "var", "cron", "crontab")); nil == statErr {
+        t.Fatal("expected nothing written under the working directory")
+    }
+
+    body, _ := os.ReadFile(anchoredDestination)
+    if false == strings.Contains(string(body), filepath.Join(projectDirectory, "var", "log", "cron")) {
+        t.Fatalf("expected the logs directory anchored at the project directory too, got:\n%s", string(body))
+    }
+}
+
+func TestRunKeepsARelativeFlagPathRelativeToTheWorkingDirectory(t *testing.T) {
+    projectDirectory := t.TempDir()
+    workingDirectory := t.TempDir()
+
+    t.Chdir(workingDirectory)
+
+    commands := []clicontract.Command{
+        newFakeCommandWithSchedule("backup:run", &testSchedule{Minute: "0", Hour: "2"}),
+    }
+
+    configuration := newStubConfigurationWithProjectDirectory(
+        map[string]string{
+            ParameterUser:    "deploy",
+            ParameterBinary:  "/opt/melody/app",
+            ParameterLogsDir: filepath.Join(projectDirectory, "var", "log", "cron"),
+        },
+        projectDirectory,
+    )
+
+    _, runErr := runGenerateCommandWithConfiguration(
+        t,
+        commands,
+        []string{"--out", filepath.Join("var", "cron", "crontab")},
+        configuration,
+    )
+    if nil != runErr {
+        t.Fatalf("Run returned unexpected error: %v", runErr)
+    }
+
+    if _, statErr := os.Stat(filepath.Join(workingDirectory, "var", "cron", "crontab")); nil != statErr {
+        t.Fatalf("expected the flag path to follow the working directory: %v", statErr)
+    }
+
+    if _, statErr := os.Stat(filepath.Join(projectDirectory, "var", "cron", "crontab")); nil == statErr {
+        t.Fatal("expected the flag path not to be anchored at the project directory")
+    }
+}
+
+func TestRunCreatesTheLogSubdirectoryTheLogFileNameNames(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+    logsDir := filepath.Join(tempDir, "logs")
+
+    commands := []clicontract.Command{
+        newFakeCommandWithSchedule("nightly:report", &testSchedule{
+            Minute:      "0",
+            LogFileName: "nightly/report.log",
+        }),
+    }
+
+    _, err := runGenerateCommand(
+        t,
+        commands,
+        []string{
+            "--out", outputPath,
+            "--logs-dir", logsDir,
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "deploy",
+        },
+    )
+    if nil != err {
+        t.Fatalf("expected the subdirectory log file name to generate, got: %v", err)
+    }
+
+    subdirectoryInfo, statErr := os.Stat(filepath.Join(logsDir, "nightly"))
+    if nil != statErr {
+        t.Fatalf("expected the log subdirectory to exist after generation: %v", statErr)
+    }
+
+    if false == subdirectoryInfo.IsDir() {
+        t.Fatal("expected the created log path to be a directory")
+    }
+}
+
+func TestRun_RefusesAMalformedHeartbeatOptIn(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+    logsDir := filepath.Join(tempDir, "logs")
+
+    commands := []clicontract.Command{
+        newFakeCommandWithSchedule("backup:run", &testSchedule{Minute: "0", Hour: "2"}),
+    }
+
+    configuration := newStubConfiguration(map[string]string{
+        ParameterHeartbeatAutoEnabled: "ture",
+    })
+
+    _, err := runGenerateCommandWithConfiguration(
+        t,
+        commands,
+        []string{
+            "--out", outputPath,
+            "--logs-dir", logsDir,
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "apache",
+        },
+        configuration,
+    )
+    if nil == err {
+        t.Fatal("a heartbeat opt-in that does not hold a boolean must fail generation, not silently disable the heartbeat")
+    }
+
+    reported, isReported := err.(*exception.Error)
+    if false == isReported {
+        t.Fatalf("expected an exception error, got %T", err)
+    }
+
+    if ParameterHeartbeatAutoEnabled != reported.Context()["parameter"] {
+        t.Fatalf("the refusal must name the parameter, got %v", reported.Context()["parameter"])
+    }
+}
+
+func TestGenerateCommand_ConfigurationResolvesThroughTheRunScope(t *testing.T) {
+    containerConfiguration := newGenerateTestConfiguration(t)
+    scopeConfiguration := newGenerateTestConfiguration(t)
+
+    serviceContainer := container.NewContainer()
+    serviceContainer.MustRegister(
+        melodyconfig.ServiceConfig,
+        func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
+            return containerConfiguration, nil
+        },
+    )
+
+    scope := serviceContainer.NewScope()
+    defer func() {
+        _ = scope.Close()
+    }()
+    scope.MustOverrideProtectedInstance(melodyconfig.ServiceConfig, scopeConfiguration)
+
+    runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
+
+    resolved, resolveErr := configurationFromRuntime(runtimeInstance)
+    if nil != resolveErr {
+        t.Fatalf("resolve: %v", resolveErr)
+    }
+
+    if scopeConfiguration != resolved {
+        t.Fatal("expected the generator to honour the run scope's configuration, not the container's")
+    }
+}
+
+func TestGenerateCommand_EntryArgumentsReachTheGeneratedLine(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+
+    commands := []clicontract.Command{
+        newFakeCommandWithConfig("product:list", &EntryConfig{
+            Schedule:  &Schedule{Minute: "0", Hour: "3"},
+            Arguments: []string{"--format=json", "--quiet"},
+        }),
+    }
+
+    stdout, runErr := runGenerateCommand(
+        t,
+        commands,
+        []string{
+            "--out", outputPath,
+            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "deploy",
+        },
+    )
+    if nil != runErr {
+        t.Fatalf("Run returned unexpected error: %v\nstdout=%s", runErr, stdout)
+    }
+
+    body, readErr := os.ReadFile(outputPath)
+    if nil != readErr {
+        t.Fatalf("failed to read crontab output %s: %v", outputPath, readErr)
+    }
+
+    expectedLine := "0 3 * * * deploy /usr/local/bin/fakeapp product:list --format=json --quiet >> '" + filepath.Join(tempDir, "logs", "product-list.log") + "' 2>&1"
+    if false == strings.Contains(string(body), expectedLine) {
+        t.Fatalf("expected the entry arguments on the generated line %q in:\n%s", expectedLine, string(body))
+    }
+}
+
+func TestExpandEntriesForCommand_EveryEntryCarriesItsOwnSchedule(t *testing.T) {
+    schedule := &Schedule{Minute: "0", Hour: "3"}
+
+    entries, expandErr := expandEntriesForCommand(
+        "reports:daily",
+        &EntryConfig{Schedule: schedule, Instances: 2},
+        "/usr/local/bin/fakeapp",
+        "deploy",
+        t.TempDir(),
+        true,
+    )
+    if nil != expandErr {
+        t.Fatalf("unexpected expand error: %v", expandErr)
+    }
+
+    if 2 != len(entries) {
+        t.Fatalf("expected two entries, got %d", len(entries))
+    }
+
+    if entries[0].Schedule == schedule || entries[1].Schedule == schedule {
+        t.Fatal("expected the entries to carry copies rather than the configured schedule itself")
+    }
+
+    if entries[0].Schedule == entries[1].Schedule {
+        t.Fatal("expected the two instances to carry distinct schedules")
+    }
+
+    entries[0].Schedule.Defaults()
+
+    if "3" != schedule.Hour || "" != schedule.DayOfMonth {
+        t.Fatalf("expected the configured schedule untouched by a template calling Defaults, got %#v", schedule)
+    }
+
+    if "3" != entries[1].Schedule.Hour || "" != entries[1].Schedule.DayOfMonth {
+        t.Fatalf("expected the sibling entry untouched, got %#v", entries[1].Schedule)
+    }
+}
+
+func TestGenerateCommand_ARegisteredNoUserDialectNeedsNoUserForTheHeartbeat(t *testing.T) {
+    directory := t.TempDir()
+
+    _, runErr := runGenerateCommandWithRegistrar(
+        t,
+        []clicontract.Command{newFakeCommandWithSchedule("job:probe", &testSchedule{Minute: "0", Hour: "*"})},
+        []string{
+            "--out", filepath.Join(directory, "crontab"),
+            "--logs-dir", directory,
+            "--binary", "/usr/bin/app",
+            "--template", "kubernetes-probe",
+            "--heartbeat-path", filepath.Join(directory, "heartbeat.crontab"),
+        },
+        func(command *GenerateCommand) {
+            command.RegisterTemplate(&noUserColumnTemplate{})
+        },
+    )
+
+    if nil != runErr {
+        t.Fatalf("a dialect that renders no user column must not demand a user, got: %v", runErr)
+    }
+}
+
+type generateTestEnvironmentSource struct {
+    values map[string]string
+}
+
+func (instance *generateTestEnvironmentSource) Load() (map[string]string, error) {
+    copied := make(map[string]string, len(instance.values))
+    for key, value := range instance.values {
+        copied[key] = value
+    }
+
+    return copied, nil
+}
+
+func newGenerateTestConfiguration(t *testing.T) configcontract.Configuration {
+    t.Helper()
+
+    environment, environmentErr := melodyconfig.NewEnvironment(
+        &generateTestEnvironmentSource{
+            values: map[string]string{
+                melodyconfig.EnvKey: melodyconfig.EnvDevelopment,
+            },
+        },
+    )
+    if nil != environmentErr {
+        t.Fatalf("environment: %v", environmentErr)
+    }
+
+    configuration, configurationErr := melodyconfig.NewConfiguration(environment, t.TempDir())
+    if nil != configurationErr {
+        t.Fatalf("configuration: %v", configurationErr)
+    }
+
+    return configuration
+}
+
+type noUserColumnTemplate struct{}
+
+func (instance *noUserColumnTemplate) Name() string {
+    return "kubernetes-probe"
+}
+
+func (instance *noUserColumnTemplate) Render(entries []Entry, options RenderOptions) (string, error) {
+    lines := []string{instance.OwnershipMarker()}
+    for _, entry := range entries {
+        lines = append(lines, entry.Name+" "+strings.Join(entry.Command, " "))
+    }
+
+    return strings.Join(lines, "\n") + "\n", nil
+}
+
+func (instance *noUserColumnTemplate) OwnershipMarker() string {
+    return "# melody-cron-probe"
+}
+
+func (instance *noUserColumnTemplate) RendersUserColumn() bool {
+    return false
+}
+
+/* the frozen majors have no builtin k8s dialect, so only this major pins it: the k8s template is owned, its manifests open with the marker, and a manifest the configuration does not produce is emptied by the same sweep that reconciles a crontab directory */
+func TestRunPruneSweepsAK8sManifestDirectory(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "cronjobs.yaml")
+    retiredPath := filepath.Join(tempDir, "reports.yaml")
+
+    baseArgs := []string{
+        "--out", outputPath,
+        "--template", "k8s",
+        "--image", "registry.example/app:1",
+    }
+
+    if _, firstErr := runGenerateCommand(
+        t,
+        []clicontract.Command{
+            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+                Schedule:        &Schedule{Minute: "0", Hour: "3"},
+                DestinationFile: "reports.yaml",
+            }),
+        },
+        baseArgs,
+    ); nil != firstErr {
+        t.Fatalf("the first generation failed: %v", firstErr)
+    }
+
+    if _, secondErr := runGenerateCommand(
+        t,
+        []clicontract.Command{
+            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+                Schedule: &Schedule{Minute: "0", Hour: "3"},
+            }),
+        },
+        append(append([]string{}, baseArgs...), "--prune"),
+    ); nil != secondErr {
+        t.Fatalf("the second generation failed: %v", secondErr)
+    }
+
+    stale, staleErr := os.ReadFile(retiredPath)
+    if nil != staleErr {
+        t.Fatalf("expected the pruned manifest to survive as an empty document: %v", staleErr)
+    }
+
+    if true == strings.Contains(string(stale), "reports-daily") {
+        t.Fatalf("expected the retired manifest to stop naming the CronJob, got: %s", stale)
+    }
+
+    if false == strings.Contains(string(stale), CrontabOwnershipMarker) {
+        t.Fatalf("expected the pruned manifest to keep its ownership marker, got: %s", stale)
+    }
+
+    current, currentErr := os.ReadFile(outputPath)
+    if nil != currentErr {
+        t.Fatalf("the second generation wrote no %s: %v", outputPath, currentErr)
+    }
+
+    if false == strings.Contains(string(current), "reports-daily") {
+        t.Fatalf("expected the CronJob to live at its new destination, got: %s", current)
+    }
+}
+
+/* the dropped-heartbeat warning must reach the machine document too: in json mode the cli prints nothing else, so a warning that only ever went to the text branch would leave the pipeline reading a clean document about a setting the run just ignored */
+func TestRunK8sHeartbeatWarningReachesTheJsonEnvelope(t *testing.T) {
+    tempDir := t.TempDir()
+
+    stdout, runErr := runGenerateCommand(
+        t,
+        []clicontract.Command{
+            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+                Schedule: &Schedule{Minute: "0", Hour: "3"},
+            }),
+        },
+        []string{
+            "--out", filepath.Join(tempDir, "cronjobs.yaml"),
+            "--template", "k8s",
+            "--image", "registry.example/app:1",
+            "--heartbeat-path", filepath.Join(tempDir, "heartbeat.crontab"),
+            "--user", "deploy",
+            "--format=json",
+        },
+    )
+    if nil != runErr {
+        t.Fatalf("expected the ignored heartbeat to warn rather than fail, got %v", runErr)
+    }
+
+    document := struct {
+        Warnings []struct {
+            Code string `json:"code"`
+        } `json:"warnings"`
+    }{}
+    if decodeErr := json.Unmarshal([]byte(stdout), &document); nil != decodeErr {
+        t.Fatalf("the envelope did not parse: %v, got %q", decodeErr, stdout)
+    }
+
+    found := false
+    for _, warning := range document.Warnings {
+        if "cron.heartbeatIgnored" == warning.Code {
+            found = true
+        }
+    }
+
+    if false == found {
+        t.Fatalf("expected the cron.heartbeatIgnored warning inside the envelope, got %q", stdout)
+    }
+}
+
+/* the malformed opt-in fails under every template — only the derived path is the k8s template's to skip. A typo hidden by the template choice would resurface as a missing liveness line the day the deployment switches back to crontab, with nothing ever having said the parameter was broken. */
+func TestRun_RefusesAMalformedHeartbeatOptInUnderK8s(t *testing.T) {
+    tempDir := t.TempDir()
+
+    commands := []clicontract.Command{
+        newFakeCommandWithSchedule("backup:run", &testSchedule{Minute: "0", Hour: "2"}),
+    }
+
+    configuration := newStubConfiguration(map[string]string{
+        ParameterHeartbeatAutoEnabled: "ture",
+    })
+
+    _, err := runGenerateCommandWithConfiguration(
+        t,
+        commands,
+        []string{
+            "--out", filepath.Join(tempDir, "cronjobs.yaml"),
+            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--template", "k8s",
+            "--image", "registry.example/app:1",
+        },
+        configuration,
+    )
+    if nil == err {
+        t.Fatal("a malformed heartbeat opt-in must fail generation under the k8s template too")
+    }
+
+    reported, isReported := err.(*exception.Error)
+    if false == isReported {
+        t.Fatalf("expected an exception error, got %T", err)
+    }
+
+    if ParameterHeartbeatAutoEnabled != reported.Context()["parameter"] {
+        t.Fatalf("the refusal must name the parameter, got %v", reported.Context()["parameter"])
+    }
+}
+
+/* the k8s template ignores the heartbeat, so a well-formed opt-in derives no path for it: deriving one would only arm the dropped-heartbeat warning on a setting nobody made for this dialect */
+func TestRunK8sTemplateDoesNotAutoDeriveAHeartbeat(t *testing.T) {
+    tempDir := t.TempDir()
+
+    commands := []clicontract.Command{
+        newFakeCommandWithSchedule("backup:run", &testSchedule{Minute: "0", Hour: "2"}),
+    }
+
+    configuration := newStubConfiguration(map[string]string{
+        ParameterHeartbeatAutoEnabled: "true",
+    })
+
+    stdout, runErr := runGenerateCommandWithConfiguration(
+        t,
+        commands,
+        []string{
+            "--out", filepath.Join(tempDir, "cronjobs.yaml"),
+            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--template", "k8s",
+            "--image", "registry.example/app:1",
+        },
+        configuration,
+    )
+    if nil != runErr {
+        t.Fatalf("Run returned unexpected error: %v", runErr)
+    }
+
+    if true == strings.Contains(stdout, "the k8s template ignores them") {
+        t.Fatalf("expected no heartbeat to be derived for the k8s template, got: %q", stdout)
+    }
+}
+
+/* emptying is irreversible, so ownership is not a substring question: a file that quotes the marker inside a longer line, or past the leading lines, is not one this generator wrote, and a custom dialect that suffixes the builtin marker (the ansible example) declares files of its own that a builtin run must not claim */
+func TestFileCarriesOwnershipMarker_MatchesOnlyAnExactLeadingLine(t *testing.T) {
+    tempDir := t.TempDir()
+
+    owned := filepath.Join(tempDir, "owned")
+    if writeErr := os.WriteFile(owned, []byte("# GENERATED FILE\n# DO NOT EDIT LOCALLY\n"+CrontabOwnershipMarker+"\n0 3 * * * job\n"), 0o644); nil != writeErr {
+        t.Fatalf("write owned: %v", writeErr)
+    }
+
+    quoting := filepath.Join(tempDir, "quoting")
+    if writeErr := os.WriteFile(quoting, []byte("# deployment notes\n# files carrying `"+CrontabOwnershipMarker+"` are managed\n"), 0o644); nil != writeErr {
+        t.Fatalf("write quoting: %v", writeErr)
+    }
+
+    late := filepath.Join(tempDir, "late")
+    lateContent := strings.Repeat("# filler line\n", ownershipMarkerLineLimit) + CrontabOwnershipMarker + "\n"
+    if writeErr := os.WriteFile(late, []byte(lateContent), 0o644); nil != writeErr {
+        t.Fatalf("write late: %v", writeErr)
+    }
+
+    suffixed := filepath.Join(tempDir, "suffixed")
+    if writeErr := os.WriteFile(suffixed, []byte(CrontabOwnershipMarker+" (ansible-cron)\n---\n"), 0o644); nil != writeErr {
+        t.Fatalf("write suffixed: %v", writeErr)
+    }
+
+    if carries, checkErr := fileCarriesOwnershipMarker(owned, CrontabOwnershipMarker); nil != checkErr || false == carries {
+        t.Fatalf("expected the generated header to prove ownership, got carries=%v err=%v", carries, checkErr)
+    }
+
+    if carries, checkErr := fileCarriesOwnershipMarker(quoting, CrontabOwnershipMarker); nil != checkErr || true == carries {
+        t.Fatalf("expected the quoting file to stay the operator's, got carries=%v err=%v", carries, checkErr)
+    }
+
+    if carries, checkErr := fileCarriesOwnershipMarker(late, CrontabOwnershipMarker); nil != checkErr || true == carries {
+        t.Fatalf("expected a marker past the leading lines to prove nothing, got carries=%v err=%v", carries, checkErr)
+    }
+
+    if carries, checkErr := fileCarriesOwnershipMarker(suffixed, CrontabOwnershipMarker); nil != checkErr || true == carries {
+        t.Fatalf("expected the suffixed custom marker to stay the custom dialect's, got carries=%v err=%v", carries, checkErr)
+    }
+
+    if carries, checkErr := fileCarriesOwnershipMarker(suffixed, CrontabOwnershipMarker+" (ansible-cron)"); nil != checkErr || false == carries {
+        t.Fatalf("expected the custom marker to prove its own files, got carries=%v err=%v", carries, checkErr)
+    }
+}
+
+func TestGenerateCommand_PruneLeavesABystanderFileThatQuotesTheMarker(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+
+    bystander := filepath.Join(tempDir, "README")
+    bystanderContent := "# deployment notes\n# files carrying `" + CrontabOwnershipMarker + "` are managed by the generator\n"
+    if writeErr := os.WriteFile(bystander, []byte(bystanderContent), 0o644); nil != writeErr {
+        t.Fatalf("write bystander: %v", writeErr)
+    }
+
+    _, runErr := runGenerateCommand(
+        t,
+        []clicontract.Command{
+            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+                Schedule: &Schedule{Minute: "0", Hour: "3"},
+            }),
+        },
+        []string{
+            "--out", outputPath,
+            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "deploy",
+            "--prune",
+        },
+    )
+    if nil != runErr {
+        t.Fatalf("generation failed: %v", runErr)
+    }
+
+    surviving, readErr := os.ReadFile(bystander)
+    if nil != readErr {
+        t.Fatalf("read bystander: %v", readErr)
+    }
+
+    if bystanderContent != string(surviving) {
+        t.Fatalf("expected the quoting bystander to survive the sweep byte-identical, got: %s", surviving)
+    }
+}
+
+/* the binary is the fourth path-shaped value the generator resolves, and its parameter follows the rule of the other three: relative from the configuration means under the project, relative from the flag means where the shell is. */
+func TestRunAnchorsARelativeBinaryParameterAtTheProjectDirectory(t *testing.T) {
+    projectDirectory := t.TempDir()
+    workingDirectory := t.TempDir()
+
+    t.Chdir(workingDirectory)
+
+    commands := []clicontract.Command{
+        newFakeCommandWithSchedule("backup:run", &testSchedule{Minute: "0", Hour: "2"}),
+    }
+
+    configuration := newStubConfigurationWithProjectDirectory(
+        map[string]string{
+            ParameterUser:            "deploy",
+            ParameterBinary:          filepath.Join("bin", "app"),
+            ParameterDestinationFile: filepath.Join(projectDirectory, "var", "cron", "crontab"),
+            ParameterLogsDir:         filepath.Join(projectDirectory, "var", "log", "cron"),
+        },
+        projectDirectory,
+    )
+
+    _, runErr := runGenerateCommandWithConfiguration(t, commands, nil, configuration)
+    if nil != runErr {
+        t.Fatalf("Run returned unexpected error: %v", runErr)
+    }
+
+    body, _ := os.ReadFile(filepath.Join(projectDirectory, "var", "cron", "crontab"))
+    if false == strings.Contains(string(body), filepath.Join(projectDirectory, "bin", "app")+" backup:run") {
+        t.Fatalf("expected the relative binary parameter anchored at the project directory, got:\n%s", string(body))
+    }
+}
+
+func TestRunKeepsARelativeBinaryFlagRelativeToTheWorkingDirectory(t *testing.T) {
+    projectDirectory := t.TempDir()
+    workingDirectory := t.TempDir()
+
+    t.Chdir(workingDirectory)
+
+    commands := []clicontract.Command{
+        newFakeCommandWithSchedule("backup:run", &testSchedule{Minute: "0", Hour: "2"}),
+    }
+
+    configuration := newStubConfigurationWithProjectDirectory(
+        map[string]string{
+            ParameterUser:            "deploy",
+            ParameterBinary:          "/opt/melody/app",
+            ParameterDestinationFile: filepath.Join(projectDirectory, "var", "cron", "crontab"),
+            ParameterLogsDir:         filepath.Join(projectDirectory, "var", "log", "cron"),
+        },
+        projectDirectory,
+    )
+
+    _, runErr := runGenerateCommandWithConfiguration(t, commands, []string{"--binary", filepath.Join("bin", "app")}, configuration)
+    if nil != runErr {
+        t.Fatalf("Run returned unexpected error: %v", runErr)
+    }
+
+    body, _ := os.ReadFile(filepath.Join(projectDirectory, "var", "cron", "crontab"))
+    if false == strings.Contains(string(body), filepath.Join(workingDirectory, "bin", "app")+" backup:run") {
+        t.Fatalf("expected the relative binary flag resolved against the working directory, got:\n%s", string(body))
+    }
+
+    if true == strings.Contains(string(body), filepath.Join(projectDirectory, "bin", "app")) {
+        t.Fatalf("a flag path must not be anchored at the project directory, got:\n%s", string(body))
+    }
+}
+
+/* ownershipLineDialects lists the builtin dialects whose rendering the ownership-line tests read back, with the arguments each needs to render an entry */
+func ownershipLineDialects() []struct {
+    name  string
+    extra []string
+} {
+    return []struct {
+        name  string
+        extra []string
+    }{
+        {TemplateNameCrontab, nil},
+        {TemplateNameCrontabNoUser, nil},
+        {TemplateNameK8s, []string{"--image", "registry.example/app:1"}},
+    }
+}
+
+/* containsExactLeadingLine answers whether the content carries the line as a whole trimmed line of its own among the leading lines the sweep reads, which is the only reading the reconciliation performs */
+func containsExactLeadingLine(content string, line string) bool {
+    lines := strings.SplitN(content, "\n", ownershipMarkerLineLimit+1)
+    if ownershipMarkerLineLimit < len(lines) {
+        lines = lines[:ownershipMarkerLineLimit]
+    }
+
+    for _, candidate := range lines {
+        if line == strings.TrimSpace(candidate) {
+            return true
+        }
+    }
+
+    return false
+}
+
+func ownershipLineArguments(tempDir string, dialect string, extra []string) []string {
+    return append([]string{
+        "--logs-dir", filepath.Join(tempDir, "logs"),
+        "--binary", "/usr/local/bin/fakeapp",
+        "--user", "deploy",
+        "--template", dialect,
+    }, extra...)
+}
+
+func TestRunWritesTheOwnershipLineWithTheApplicationsName(t *testing.T) {
+    for _, dialect := range ownershipLineDialects() {
+        tempDir := t.TempDir()
+        outputPath := filepath.Join(tempDir, "crontab")
+
+        _, runErr := runGenerateCommandWithConfiguration(
+            t,
+            []clicontract.Command{newFakeCommandWithConfig("reports:daily", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})},
+            append(ownershipLineArguments(tempDir, dialect.name, dialect.extra), "--out", outputPath),
+            newStubConfigurationNamed(nil, "billing"),
+        )
+        if nil != runErr {
+            t.Fatalf("%s: the generation failed: %v", dialect.name, runErr)
+        }
+
+        content, readErr := os.ReadFile(outputPath)
+        if nil != readErr {
+            t.Fatalf("%s: the generation wrote no %s: %v", dialect.name, outputPath, readErr)
+        }
+
+        if false == containsExactLeadingLine(string(content), CrontabOwnershipMarker+" for billing") {
+            t.Fatalf("%s: expected the destination to open with the application's ownership line, got: %s", dialect.name, content)
+        }
+
+        if true == containsExactLeadingLine(string(content), CrontabOwnershipMarker) {
+            t.Fatalf("%s: expected the bare marker not to stand as a line of its own beside the application's, got: %s", dialect.name, content)
+        }
+    }
+}
+
+func TestRunPruneLeavesTheDestinationsOfAnotherApplication(t *testing.T) {
+    for _, dialect := range ownershipLineDialects() {
+        tempDir := t.TempDir()
+        neighbourPath := filepath.Join(tempDir, "neighbour.crontab")
+
+        _, neighbourErr := runGenerateCommandWithConfiguration(
+            t,
+            []clicontract.Command{newFakeCommandWithConfig("neighbour:job", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})},
+            append(ownershipLineArguments(tempDir, dialect.name, dialect.extra), "--out", neighbourPath),
+            newStubConfigurationNamed(nil, "neighbour"),
+        )
+        if nil != neighbourErr {
+            t.Fatalf("%s: the neighbour's generation failed: %v", dialect.name, neighbourErr)
+        }
+
+        before, beforeErr := os.ReadFile(neighbourPath)
+        if nil != beforeErr {
+            t.Fatalf("%s: the neighbour wrote no %s: %v", dialect.name, neighbourPath, beforeErr)
+        }
+
+        stdout, runErr := runGenerateCommandWithConfiguration(
+            t,
+            []clicontract.Command{newFakeCommandWithConfig("billing:job", &EntryConfig{Schedule: &Schedule{Minute: "5", Hour: "4"}})},
+            append(ownershipLineArguments(tempDir, dialect.name, dialect.extra), "--out", filepath.Join(tempDir, "billing.crontab"), "--prune"),
+            newStubConfigurationNamed(nil, "billing"),
+        )
+        if nil != runErr {
+            t.Fatalf("%s: the sweeping generation failed: %v", dialect.name, runErr)
+        }
+
+        after, afterErr := os.ReadFile(neighbourPath)
+        if nil != afterErr {
+            t.Fatalf("%s: the neighbour's destination is gone: %v", dialect.name, afterErr)
+        }
+
+        if string(before) != string(after) {
+            t.Fatalf("%s: expected the neighbour's destination to be left byte for byte, got:\n%s\nwas:\n%s", dialect.name, after, before)
+        }
+
+        if true == strings.Contains(stdout, "pruned ") {
+            t.Fatalf("%s: expected nothing to be swept, got: %q", dialect.name, stdout)
+        }
+    }
+}
+
+func TestRunPruneLeavesADestinationWrittenBeforeTheLineNamedTheApplication(t *testing.T) {
+    tempDir := t.TempDir()
+    legacyPath := filepath.Join(tempDir, "legacy.crontab")
+    legacyContent := "#############################################################################\n#\n# GENERATED FILE\n# DO NOT EDIT LOCALLY\n#\n" + CrontabOwnershipMarker + "\n#############################################################################\n0 3 * * * deploy /usr/local/bin/fakeapp legacy:job\n"
+    if writeErr := os.WriteFile(legacyPath, []byte(legacyContent), 0o644); nil != writeErr {
+        t.Fatalf("write legacy: %v", writeErr)
+    }
+
+    stdout, runErr := runGenerateCommandWithConfiguration(
+        t,
+        []clicontract.Command{newFakeCommandWithConfig("billing:job", &EntryConfig{Schedule: &Schedule{Minute: "5", Hour: "4"}})},
+        append(ownershipLineArguments(tempDir, TemplateNameCrontab, nil), "--out", filepath.Join(tempDir, "billing.crontab"), "--prune"),
+        newStubConfigurationNamed(nil, "billing"),
+    )
+    if nil != runErr {
+        t.Fatalf("the sweeping generation failed: %v", runErr)
+    }
+
+    after, afterErr := os.ReadFile(legacyPath)
+    if nil != afterErr {
+        t.Fatalf("the legacy destination is gone: %v", afterErr)
+    }
+
+    if legacyContent != string(after) {
+        t.Fatalf("expected the destination written under the bare marker to be left byte for byte, got: %s", after)
+    }
+
+    if true == strings.Contains(stdout, "pruned ") {
+        t.Fatalf("expected nothing to be swept, got: %q", stdout)
+    }
+}
+
+func TestRunPruneEmptiesTheApplicationsOwnStaleDestinationDownToItsLine(t *testing.T) {
+    for _, dialect := range ownershipLineDialects() {
+        tempDir := t.TempDir()
+        stalePath := filepath.Join(tempDir, "stale.crontab")
+
+        _, firstErr := runGenerateCommandWithConfiguration(
+            t,
+            []clicontract.Command{newFakeCommandWithConfig("reports:daily", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})},
+            append(ownershipLineArguments(tempDir, dialect.name, dialect.extra), "--out", stalePath),
+            newStubConfigurationNamed(nil, "billing"),
+        )
+        if nil != firstErr {
+            t.Fatalf("%s: the first generation failed: %v", dialect.name, firstErr)
+        }
+
+        stdout, secondErr := runGenerateCommandWithConfiguration(
+            t,
+            []clicontract.Command{newFakeCommandWithConfig("reports:daily", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})},
+            append(ownershipLineArguments(tempDir, dialect.name, dialect.extra), "--out", filepath.Join(tempDir, "current.crontab"), "--prune"),
+            newStubConfigurationNamed(nil, "billing"),
+        )
+        if nil != secondErr {
+            t.Fatalf("%s: the second generation failed: %v", dialect.name, secondErr)
+        }
+
+        stale, staleErr := os.ReadFile(stalePath)
+        if nil != staleErr {
+            t.Fatalf("%s: expected the pruned destination to survive as an empty manifest: %v", dialect.name, staleErr)
+        }
+
+        if true == strings.Contains(string(stale), "reports:daily") {
+            t.Fatalf("%s: expected the retired destination to stop naming the job, got: %s", dialect.name, stale)
+        }
+
+        if false == containsExactLeadingLine(string(stale), CrontabOwnershipMarker+" for billing") {
+            t.Fatalf("%s: expected the emptied destination to keep the application's ownership line, got: %s", dialect.name, stale)
+        }
+
+        if false == strings.Contains(stdout, "pruned "+stalePath) {
+            t.Fatalf("%s: expected the sweep to be reported, got: %q", dialect.name, stdout)
+        }
+    }
+}
+
+func TestRunPruneIsRefusedWhenTheApplicationHasNoName(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+    stalePath := filepath.Join(tempDir, "stale.crontab")
+    staleContent := "#\n" + CrontabOwnershipMarker + "\n0 3 * * * deploy /usr/local/bin/fakeapp stale:job\n"
+    if writeErr := os.WriteFile(stalePath, []byte(staleContent), 0o644); nil != writeErr {
+        t.Fatalf("write stale: %v", writeErr)
+    }
+
+    _, runErr := runGenerateCommandWithConfiguration(
+        t,
+        []clicontract.Command{newFakeCommandWithConfig("reports:daily", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})},
+        append(ownershipLineArguments(tempDir, TemplateNameCrontab, nil), "--out", outputPath, "--prune"),
+        newStubConfigurationNamed(nil, ""),
+    )
+    if nil == runErr || false == strings.Contains(runErr.Error(), "the cli configuration carries none") {
+        t.Fatalf("expected the sweep to be refused for want of an application name, got: %v", runErr)
+    }
+
+    /* the writes precede the sweep, so the run's own destination is on disk under the bare marker — recognisable, and no application's */
+    content, readErr := os.ReadFile(outputPath)
+    if nil != readErr {
+        t.Fatalf("expected the destination to be written before the sweep was refused: %v", readErr)
+    }
+
+    if false == containsExactLeadingLine(string(content), CrontabOwnershipMarker) {
+        t.Fatalf("expected a nameless run to write the bare marker, got: %s", content)
+    }
+
+    after, afterErr := os.ReadFile(stalePath)
+    if nil != afterErr || staleContent != string(after) {
+        t.Fatalf("expected the refused sweep to touch nothing, got err=%v content=%s", afterErr, after)
+    }
+}
+
+func TestRunRefusesAnApplicationNameThatSpansLines(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+
+    _, runErr := runGenerateCommandWithConfiguration(
+        t,
+        []clicontract.Command{newFakeCommandWithConfig("reports:daily", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})},
+        append(ownershipLineArguments(tempDir, TemplateNameCrontab, nil), "--out", outputPath),
+        newStubConfigurationNamed(nil, "billing\n0 * * * * root /bin/sh"),
+    )
+    if nil == runErr || false == strings.Contains(runErr.Error(), "spans lines") {
+        t.Fatalf("expected a name spanning lines to be refused before anything is written, got: %v", runErr)
+    }
+
+    if _, statErr := os.Stat(outputPath); nil == statErr {
+        t.Fatalf("expected nothing to be written under a refused name")
+    }
+}
+
+func TestFileCarriesOwnershipMarker_KeepsOneApplicationsLineApartFromAnothersAndFromTheBarePrefix(t *testing.T) {
+    tempDir := t.TempDir()
+
+    files := map[string]string{
+        "billing":   CrontabOwnershipMarker + " for billing",
+        "neighbour": CrontabOwnershipMarker + " for neighbour",
+        "bare":      CrontabOwnershipMarker,
+    }
+    for name, line := range files {
+        if writeErr := os.WriteFile(filepath.Join(tempDir, name), []byte("# GENERATED FILE\n"+line+"\n0 3 * * * job\n"), 0o644); nil != writeErr {
+            t.Fatalf("write %s: %v", name, writeErr)
+        }
+    }
+
+    for name, expected := range map[string]bool{"billing": true, "neighbour": false, "bare": false} {
+        carries, checkErr := fileCarriesOwnershipMarker(filepath.Join(tempDir, name), CrontabOwnershipMarker+" for billing")
+        if nil != checkErr || expected != carries {
+            t.Fatalf("expected the %s file to answer carries=%v for billing's line, got carries=%v err=%v", name, expected, carries, checkErr)
+        }
+    }
+}
+
+/* decoratingCrontabTemplate embeds the builtin crontab dialect and decorates its rendering: the shape an application writes to override a builtin, registered under the builtin's own name through RegisterTemplate. The embedding promotes the builtin's unexported doors onto it — the per-application copy door included. */
+type decoratingCrontabTemplate struct {
+    *CrontabTemplate
+}
+
+func (instance *decoratingCrontabTemplate) Render(entries []Entry, options RenderOptions) (string, error) {
+    rendered, renderErr := instance.CrontabTemplate.Render(entries, options)
+
+    return "# decorated by the application\n" + rendered, renderErr
+}
+
+/* the wrapper is used as it is, and so is the line it answers: the bare prefix promoted from the builtin it embeds, which another application's wrapper writes as well. A sweep on it would empty those destinations, so the sweep is refused and the destination is written. */
+func TestRunPruneIsRefusedOnADialectWhoseLineDoesNotNameTheApplication(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+    legacyPath := filepath.Join(tempDir, "legacy.crontab")
+    legacyContent := "#\n" + CrontabOwnershipMarker + "\n0 3 * * * deploy /usr/local/bin/old legacy:job\n"
+    if writeErr := os.WriteFile(legacyPath, []byte(legacyContent), 0o644); nil != writeErr {
+        t.Fatalf("write legacy: %v", writeErr)
+    }
+
+    var builtin *CrontabTemplate
+    for _, template := range BuiltinTemplates() {
+        if candidate, isCrontab := template.(*CrontabTemplate); true == isCrontab && "crontab" == candidate.Name() {
+            builtin = candidate
+        }
+    }
+    if nil == builtin {
+        t.Fatalf("expected the builtin crontab dialect among the builtins")
+    }
+
+    generateCommand := NewGenerateCommand(buildConfigurationFromFakeCommands([]clicontract.Command{newFakeCommandWithConfig("reports:daily", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})}))
+    generateCommand.RegisterTemplate(&decoratingCrontabTemplate{CrontabTemplate: builtin})
+
+    _, runErr := dispatchGenerateCommand(
+        generateCommand,
+        newStubConfigurationNamed(nil, "billing"),
+        append(ownershipLineArguments(tempDir, "crontab", nil), "--out", outputPath, "--prune"),
+    )
+    if nil == runErr || false == strings.Contains(runErr.Error(), "the template's line does not") {
+        t.Fatalf("expected the sweep refused on a line that does not name the application, got: %v", runErr)
+    }
+
+    content, readErr := os.ReadFile(outputPath)
+    if nil != readErr || false == strings.Contains(string(content), "# decorated by the application") {
+        t.Fatalf("expected the wrapper's destination written before the sweep was refused, got %q (%v)", content, readErr)
+    }
+
+    after, afterErr := os.ReadFile(legacyPath)
+    if nil != afterErr || legacyContent != string(after) {
+        t.Fatalf("expected the bare-marker neighbour left byte for byte, got %q (%v)", after, afterErr)
+    }
+}
+
+func TestRunLeavesADialectEmbeddingABuiltinAsItIsInsteadOfReplacingItWithTheBareCopy(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+
+    var builtin *CrontabTemplate
+    for _, template := range BuiltinTemplates() {
+        if candidate, isCrontab := template.(*CrontabTemplate); true == isCrontab && "crontab" == candidate.Name() {
+            builtin = candidate
+        }
+    }
+    if nil == builtin {
+        t.Fatalf("expected the builtin crontab dialect among the builtins")
+    }
+
+    generateCommand := NewGenerateCommand(buildConfigurationFromFakeCommands([]clicontract.Command{newFakeCommandWithConfig("reports:daily", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})}))
+    generateCommand.RegisterTemplate(&decoratingCrontabTemplate{CrontabTemplate: builtin})
+
+    _, runErr := dispatchGenerateCommand(
+        generateCommand,
+        newStubConfigurationNamed(nil, "billing"),
+        append(ownershipLineArguments(tempDir, "crontab", nil), "--out", outputPath),
+    )
+    if nil != runErr {
+        t.Fatalf("the generation failed: %v", runErr)
+    }
+
+    content, readErr := os.ReadFile(outputPath)
+    if nil != readErr {
+        t.Fatalf("the generation wrote no %s: %v", outputPath, readErr)
+    }
+
+    if false == strings.Contains(string(content), "# decorated by the application") {
+        t.Fatalf("expected the registered dialect's own rendering, got the bare copy's: %s", content)
+    }
+
+    if false == containsExactLeadingLine(string(content), CrontabOwnershipMarker) {
+        t.Fatalf("expected the wrapper's destination to carry the bare prefix its embedded builtin answers, got: %s", content)
+    }
+
+    if true == containsExactLeadingLine(string(content), CrontabOwnershipMarker+" for billing") {
+        t.Fatalf("expected no application line on a dialect the generator does not own, got: %s", content)
+    }
+}
+
+/* the marker line is read with its surrounding whitespace trimmed, so a destination saved with CRLF line endings still proves itself this generator's; the tenth line is still inside the head and the eleventh is not */
+func TestFileCarriesOwnershipMarker_ReadsTheMarkerLineTrimmedUpToTheTenthLine(t *testing.T) {
+    tempDir := t.TempDir()
+
+    carriageReturn := filepath.Join(tempDir, "crlf")
+    if writeErr := os.WriteFile(carriageReturn, []byte("# GENERATED FILE\r\n"+CrontabOwnershipMarker+"  \r\n0 3 * * * job\r\n"), 0o644); nil != writeErr {
+        t.Fatalf("write crlf: %v", writeErr)
+    }
+
+    if carries, checkErr := fileCarriesOwnershipMarker(carriageReturn, CrontabOwnershipMarker); nil != checkErr || false == carries {
+        t.Fatalf("expected a CRLF destination to carry the marker, got %v, %v", carries, checkErr)
+    }
+
+    tenth := filepath.Join(tempDir, "tenth")
+    if writeErr := os.WriteFile(tenth, []byte(strings.Repeat("# filler line\n", ownershipMarkerLineLimit-1)+CrontabOwnershipMarker), 0o644); nil != writeErr {
+        t.Fatalf("write tenth: %v", writeErr)
+    }
+
+    if carries, checkErr := fileCarriesOwnershipMarker(tenth, CrontabOwnershipMarker); nil != checkErr || false == carries {
+        t.Fatalf("expected the marker on the tenth line, the last without a newline, to count, got %v, %v", carries, checkErr)
+    }
+}
+
+/* a basename of 255 bytes is the longest a path component admits; the temp file beside it must fit the same component */
+func TestAtomicWriteFileReplacesADestinationWhoseBasenameFillsTheFilesystemComponent(t *testing.T) {
+    tempDir := t.TempDir()
+    destination := filepath.Join(tempDir, strings.Repeat("c", 255))
+
+    if writeErr := os.WriteFile(destination, []byte("first"), 0o644); nil != writeErr {
+        t.Fatalf("setup: %v", writeErr)
+    }
+
+    if writeErr := atomicWriteFile(destination, []byte("second"), 0o644); nil != writeErr {
+        t.Fatalf("expected a destination of 255 bytes to be replaced, got %v", writeErr)
+    }
+
+    written, readErr := os.ReadFile(destination)
+    if nil != readErr || "second" != string(written) {
+        t.Fatalf("expected the replaced content, got %q, %v", string(written), readErr)
+    }
+
+    entries, readDirErr := os.ReadDir(tempDir)
+    if nil != readDirErr || 1 != len(entries) {
+        t.Fatalf("expected only the destination in the directory, got %v, %v", entries, readDirErr)
     }
 }

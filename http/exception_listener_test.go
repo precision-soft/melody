@@ -330,7 +330,7 @@ func readResponseBody(t *testing.T, response httpcontract.Response) string {
     return string(data)
 }
 
-/* the errors context key is the public half of an http exception's context: BindJsonAndValidate attaches the per-field validation errors under it, and without this the client of a failed validation received only the flat message */
+/* the errors context key is the public half of an http exception's context: BindJsonAndValidate attaches the per-field validation errors under it, and they reach the client of a failed validation beside the flat message */
 func TestExceptionListener_ErrorsContextReachesTheJsonBody(t *testing.T) {
     clockInstance := clock.NewSystemClock()
     dispatcher := event.NewEventDispatcher(clockInstance)
@@ -371,7 +371,7 @@ func TestExceptionListener_ErrorsContextReachesTheJsonBody(t *testing.T) {
     }
 }
 
-/* an http exception without the errors key keeps today's body: the exposure is opt-in per context key, not a blanket context dump */
+/* an http exception without the errors key keeps the plain body: the exposure is opt-in per context key, not a blanket context dump */
 func TestExceptionListener_ContextWithoutErrorsKeyStaysPrivate(t *testing.T) {
     clockInstance := clock.NewSystemClock()
     dispatcher := event.NewEventDispatcher(clockInstance)
@@ -401,14 +401,17 @@ func TestExceptionListener_ContextWithoutErrorsKeyStaysPrivate(t *testing.T) {
 
     body := readResponseBody(t, response)
 
+    /* the body reader is allowed to be absent, and the helper answers "" for that, so a negative assertion on its own reports success for a response that carries nothing at all. The flat message is what says the envelope was rendered and the refusal below is a real one. */
+    if false == strings.Contains(body, "bad request") {
+        t.Fatalf("expected the flat message to be rendered, got %s", body)
+    }
+
     if true == strings.Contains(body, "must not leak") {
         t.Fatalf("expected non-errors context to stay out of the body, got %s", body)
     }
 }
 
-/* errors.As matches the dynamic type of a typed nil and reports it as found, so reading the status straight
-off the result dereferenced it; the package's own door refuses the typed nil with the plain one, and the
-same call three lines below already used it. */
+/* errors.As matches the dynamic type of a typed nil and reports it as found, so reading the status straight off the result would dereference it; the package's own door refuses the typed nil, as NewKernelExceptionEvent below does with the unassigned exception. */
 func TestExceptionListener_AnswersATypedNilHttpExceptionWithoutDereferencingIt(t *testing.T) {
     clockInstance := clock.NewSystemClock()
     dispatcher := event.NewEventDispatcher(clockInstance)
@@ -513,8 +516,17 @@ func TestExceptionListener_UnmarkedError_LogsOneRecordAndMarksIt(t *testing.T) {
         t.Fatalf("expected exactly one record for an unmarked error, got %d", capture.errorCalls)
     }
 
-    if false == exception.IsAlreadyLogged(err) {
-        t.Fatalf("expected the listener to mark the error it logged")
+    /* the mark is the event's occurrence, never the error value, which another request can share */
+    if false == exception.IsAlreadyLogged(exceptionEvent.Err()) {
+        t.Fatalf("expected the listener to mark the occurrence it logged")
+    }
+
+    if true == exception.IsAlreadyLogged(err) {
+        t.Fatalf("expected the error value itself to stay unmarked")
+    }
+
+    if false == errors.Is(exceptionEvent.Err(), err) {
+        t.Fatalf("expected the marked occurrence to carry the error")
     }
 
     if nil == exceptionEvent.Response() {
@@ -667,7 +679,7 @@ func TestExceptionListener_A5xxKeepsTheErrorLevel(t *testing.T) {
     }
 }
 
-/* a struct tag naming a rule that does not exist is a program failure wearing a 400: it refuses every request that route will ever serve, and no input a client can send produces it. At warning it sat in the dashboard among the users who mistyped their address, with the route permanently broken and nothing saying so. */
+/* a struct tag naming a rule that does not exist is a program failure wearing a 400: it refuses every request that route will ever serve, and no input a client can send produces it. At warning it would sit among the users who mistyped their address, with the route permanently broken and nothing saying so. */
 func TestExceptionListener_AValidationWiringFaultIsRecordedAtErrorRatherThanAsARoutineFourHundred(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
     capture := &exceptionListenerCaptureLogger{}
@@ -695,7 +707,7 @@ func TestExceptionListener_AValidationWiringFaultIsRecordedAtErrorRatherThanAsAR
     }
 }
 
-/* a genuine field refusal keeps the warning level a deliberate 4xx earns: raising every 400 would put the users who mistyped their address back among the incidents, which is the mirror of the defect. */
+/* a genuine field refusal keeps the warning level a deliberate 4xx earns: raising every 400 would put the users who mistyped their address back among the incidents. */
 func TestExceptionListener_AGenuineFieldRefusalStaysAWarning(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
     capture := &exceptionListenerCaptureLogger{}
@@ -786,7 +798,7 @@ func TestExceptionListener_AForeignErrorsPayloadIsHandedBackUntouched(t *testing
     }
 }
 
-/* the debug-mode rendering of the error text runs under the containment its siblings received: a panic value whose own Error() dereferences exactly the nil that produced the panic raised a second panic while the listener was rendering the first, and the dispatcher absorbed it one level up — at the price of the whole debug payload, so the client received the kernel's fallback body instead of the degraded page the listener exists to serve. */
+/* the debug-mode rendering of the error text runs under containment: a panic value whose own Error() dereferences the nil that produced the panic would raise a second panic while the first is rendered, and the dispatcher would absorb it one level up at the price of the whole debug payload, serving the kernel's fallback body instead of the degraded page the listener exists to serve. */
 func TestExceptionListener_DebugModeOn_APanickingErrorTextIsContained(t *testing.T) {
     clockInstance := clock.NewSystemClock()
     dispatcher := event.NewEventDispatcher(clockInstance)
@@ -863,4 +875,33 @@ func (instance *nilMapPanickingError) Error() string {
     instance.values["key"] = "value"
 
     return "unreachable"
+}
+
+/* the kernel marks the exception it dispatches when an application error handler is installed, and the framework listener stands aside for the marked event so the kernel consults that handler; the same error on an unmarked event is answered as before */
+func TestExceptionListener_StandsAsideForAnInstalledErrorHandler(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    dispatcher := event.NewEventDispatcher(clockInstance)
+    runtimeInstance := newTestRuntime()
+
+    RegisterKernelExceptionListener(dispatcher, false)
+
+    for _, errorHandlerInstalled := range []bool{true, false} {
+        melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(httptest.NewRequest("GET", "/missing", nil))
+
+        exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, exception.NewHttpException(404, "no such product"))
+        exceptionEvent.errorHandlerInstalled = errorHandlerInstalled
+
+        _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+        if nil != dispatchErr {
+            t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+        }
+
+        if true == errorHandlerInstalled && nil != exceptionEvent.Response() {
+            t.Fatalf("expected the listener to stand aside for an installed error handler")
+        }
+
+        if false == errorHandlerInstalled && nil == exceptionEvent.Response() {
+            t.Fatalf("expected the listener to answer an event with no error handler installed")
+        }
+    }
 }

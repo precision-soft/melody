@@ -8,14 +8,20 @@ import (
     nethttp "net/http"
     "strconv"
     "strings"
+    "sync"
 
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/* maxConsecutiveEmptyPeekReads bounds how many (0, nil) results the peek loop accepts from a response body before it declares the reader stuck. The value matches the identical bound in bufio, so a reader that already works under bufio.Reader keeps working here. */
+/* maxConsecutiveEmptyPeekReads bounds the (0, nil) reads the peek loop accepts before declaring the reader stuck, the bound bufio uses. */
 const maxConsecutiveEmptyPeekReads = 100
+
+/* peekChunkSize is the peek buffer's starting length; the buffer doubles toward MinSize as bytes arrive. */
+const peekChunkSize = 32 * 1024
 
 type CompressionConfig struct {
     level                int
@@ -107,11 +113,18 @@ func DefaultCompressionConfig() *CompressionConfig {
 }
 
 func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
+    /* nil reads as the default configuration, and a non-nil one is copied before normalization, so the caller's object is not rewritten */
+    if nil == config {
+        config = DefaultCompressionConfig()
+    } else {
+        config = NewCompressionConfig(config.level, config.minSize, config.excludedContentTypes, config.excludedPaths)
+    }
+
     if gzip.HuffmanOnly > config.Level() || gzip.BestCompression < config.Level() {
         config.SetLevel(gzip.DefaultCompression)
     }
 
-    /* a negative minimum would reach make([]byte, peekSize) below and panic on every request, so normalize the whole non-positive range, not just zero */
+    /* a non-positive minimum normalizes to the default */
     if 0 >= config.MinSize() {
         config.SetMinSize(1024)
     }
@@ -127,7 +140,7 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
                 response.SetHeaders(make(nethttp.Header))
             }
 
-            /* emitted on every path so a shared cache cannot serve one encoding of the URL to a client that asked for another. The paths that skip compression need it most: a body some other layer already encoded, an excluded path and an excluded content type are all negotiated against Accept-Encoding just the same, and a Cache-Control: public response stored under the URL alone would then be replayed to a client that cannot decode it. */
+            /* emitted on every path, the skipped ones included, so a shared cache cannot serve one encoding to a client that asked for another */
             addVaryAcceptEncoding(response.Headers())
 
             httpRequest := request.HttpRequest()
@@ -135,8 +148,11 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
                 return response, nil
             }
 
+            /* the excluded prefixes are read against the spelling the router matched */
+            requestPath := http.RequestPathAsRouted(internal.RequestPathAsSent(httpRequest.URL))
+
             for _, excludedPath := range config.ExcludedPaths() {
-                if "" != excludedPath && true == strings.HasPrefix(httpRequest.URL.Path, excludedPath) {
+                if "" != excludedPath && true == strings.HasPrefix(requestPath, excludedPath) {
                     return response, nil
                 }
             }
@@ -156,7 +172,8 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
                 }
             }
 
-            if false == acceptsGzip(httpRequest.Header.Get("Accept-Encoding")) {
+            /* every line of a repeated Accept-Encoding field is joined before parsing, as the Accept readers do */
+            if false == acceptsGzip(strings.Join(httpRequest.Header.Values("Accept-Encoding"), ",")) {
                 return response, nil
             }
 
@@ -170,12 +187,28 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
 
             originalReader := response.BodyReader()
 
+            /* the peek buffer grows with the bytes read, since MinSize has no upper bound */
             peekSize := config.MinSize()
-            peekBuffer := make([]byte, peekSize)
+            initialLength := peekSize
+            if peekChunkSize < initialLength {
+                initialLength = peekChunkSize
+            }
+            peekBuffer := make([]byte, initialLength)
             peeked := 0
             emptyReads := 0
             var peekErr error
             for peeked < peekSize {
+                if peeked == len(peekBuffer) {
+                    nextLength := len(peekBuffer) * 2
+                    if peekSize < nextLength {
+                        nextLength = peekSize
+                    }
+
+                    grown := make([]byte, nextLength)
+                    copy(grown, peekBuffer)
+                    peekBuffer = grown
+                }
+
                 readCount, readErr := originalReader.Read(peekBuffer[peeked:])
                 peeked += readCount
                 if nil != readErr {
@@ -184,7 +217,7 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
                 }
 
                 if 0 == readCount {
-                    /* the destination slice is never empty here, so io.Reader permits (0, nil) only as a state the caller must tolerate rather than loop on; an unbounded loop would pin this request's goroutine at full processor for the lifetime of the process. Give up exactly as bufio does and let the request fail instead. */
+                    /* a (0, nil) read on a non-empty slice must be tolerated, not looped on forever, so the loop gives up as bufio does */
                     emptyReads++
                     if maxConsecutiveEmptyPeekReads <= emptyReads {
                         peekErr = io.ErrNoProgress
@@ -213,7 +246,7 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
             pipeReader, pipeWriter := io.Pipe()
             compressionDone := make(chan struct{})
             go streamGzipCompressInto(pipeWriter, source, originalReader, config.Level(), compressionDone)
-            /* if an outer middleware panics after next() returned, the kernel drops this response without closing its body, so the gzip goroutine would block forever in pipe.Write and pin the original reader's descriptor; tie the pipe reader to the request lifecycle so it is closed when the request unwinds */
+            /* the pipe reader is tied to the request lifecycle, so an outer middleware panicking after next() cannot leave the gzip goroutine blocked in pipe.Write */
             go closePipeReaderOnRequestUnwind(httpRequest.Context(), pipeReader, compressionDone)
 
             response.SetBodyReader(pipeReader)
@@ -233,34 +266,56 @@ func acceptsGzip(acceptEncoding string) bool {
     gzipQuality := -1.0
     starQuality := -1.0
 
-    for _, rawEntry := range strings.Split(acceptEncoding, ",") {
+    /* a header the member cap cut reads as unparsable, since a member past the cap may carry the refusal gzip;q=0 */
+    entries, cut := internal.SplitOutsideQuotes(acceptEncoding, ',')
+    if true == cut {
+        return false
+    }
+
+    for _, rawEntry := range entries {
         entry := strings.TrimSpace(rawEntry)
         if "" == entry {
             continue
         }
 
-        parts := strings.Split(entry, ";")
+        parts, cut := internal.SplitOutsideQuotes(entry, ';')
+        if true == cut {
+            return false
+        }
+
         codingName := strings.ToLower(strings.TrimSpace(parts[0]))
         if "" == codingName {
             continue
         }
 
+        /* a q outside the RFC 7231 qvalue grammar drops the entry, as every negotiating reader in this tree does */
         quality := 1.0
+        qualityValid := true
         for _, rawParam := range parts[1:] {
-            param := strings.TrimSpace(rawParam)
+            /* the parameter name is case-insensitive, so a refusal spelled "Q=0" weighs the same as "q=0" */
+            param := strings.ToLower(strings.TrimSpace(rawParam))
             if false == strings.HasPrefix(param, "q=") {
                 continue
             }
 
-            parsedQuality, parseErr := strconv.ParseFloat(strings.TrimSpace(param[2:]), 64)
-            if nil == parseErr {
-                quality = parsedQuality
+            parsedQuality, valid := internal.ParseQualityValue(strings.TrimSpace(param[2:]))
+            if false == valid {
+                qualityValid = false
+
+                continue
             }
+
+            quality = parsedQuality
         }
 
-        if "gzip" == codingName {
+        if false == qualityValid {
+            continue
+        }
+
+        /* a repeated coding resolves to its higher q, the tie rule of every Accept reader in this tree */
+        if "gzip" == codingName && quality > gzipQuality {
             gzipQuality = quality
-        } else if "*" == codingName {
+        } else if "*" == codingName && quality > starQuality {
             starQuality = quality
         }
     }
@@ -297,7 +352,7 @@ func closeBodyReaderQuiet(reader io.Reader) {
     _ = closer.Close()
 }
 
-/* closePipeReaderOnRequestUnwind closes the gzip pipe reader when the request context is cancelled, so a compression goroutine whose response was abandoned by a panicking outer middleware cannot block forever in pipe.Write; it returns without touching the pipe once compression finishes normally, so the successful path does not disturb the served body */
+/* closePipeReaderOnRequestUnwind closes the gzip pipe reader when the request context is cancelled, and returns without touching it once compression finishes normally. */
 func closePipeReaderOnRequestUnwind(requestContext context.Context, pipeReader *io.PipeReader, compressionDone <-chan struct{}) {
     select {
     case <-compressionDone:
@@ -307,11 +362,72 @@ func closePipeReaderOnRequestUnwind(requestContext context.Context, pipeReader *
     }
 }
 
+/* the pools are indexed by compression level, since a writer keeps the level it was built with; an invalid level fails at creation. */
+const lowestGzipLevel = gzip.HuffmanOnly
+const highestGzipLevel = gzip.BestCompression
+
+var gzipWriterPools [highestGzipLevel - lowestGzipLevel + 1]sync.Pool
+
+func gzipWriterPoolFor(level int) *sync.Pool {
+    if lowestGzipLevel > level || highestGzipLevel < level {
+        return nil
+    }
+
+    return &gzipWriterPools[level-lowestGzipLevel]
+}
+
+/* acquireGzipWriter hands out a pooled writer, reset onto this response's pipe, since a fresh one allocates its whole deflate state. */
+func acquireGzipWriter(destination io.Writer, level int) (*gzip.Writer, error) {
+    pool := gzipWriterPoolFor(level)
+    if nil == pool {
+        return gzip.NewWriterLevel(destination, level)
+    }
+
+    pooled, isWriter := pool.Get().(*gzip.Writer)
+    if false == isWriter {
+        return gzip.NewWriterLevel(destination, level)
+    }
+
+    pooled.Reset(destination)
+
+    return pooled, nil
+}
+
+/* releaseGzipWriter is called only once Close has returned; Reset clears a failed Close's error, so the writer stays reusable. */
+func releaseGzipWriter(gzipWriter *gzip.Writer, level int) {
+    pool := gzipWriterPoolFor(level)
+    if nil == pool {
+        return
+    }
+
+    pool.Put(gzipWriter)
+}
+
+/* copyIntoGzipWriterSafely contains a panic of the application's body reader, since the copy runs on a goroutine no recovery stands over. The panic returns as the copy error, which fails this response alone. */
+func copyIntoGzipWriterSafely(gzipWriter *gzip.Writer, source io.Reader) (copyErr error) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            return
+        }
+
+        copyErr = exception.NewError(
+            "the response body reader panicked while the response was being compressed",
+            nil,
+            http.RecoverToError(recoveredValue),
+        )
+    }()
+
+    _, copyErr = io.Copy(gzipWriter, source)
+
+    return copyErr
+}
+
 func streamGzipCompressInto(pipeWriter *io.PipeWriter, source io.Reader, sourceCloser io.Reader, level int, compressionDone chan<- struct{}) {
     defer close(compressionDone)
     defer closeBodyReaderQuiet(sourceCloser)
 
-    gzipWriter, gzipErr := gzip.NewWriterLevel(pipeWriter, level)
+    gzipWriter, gzipErr := acquireGzipWriter(pipeWriter, level)
     if nil != gzipErr {
         _ = pipeWriter.CloseWithError(
             exception.NewError("failed to initialize gzip writer", nil, gzipErr),
@@ -319,7 +435,10 @@ func streamGzipCompressInto(pipeWriter *io.PipeWriter, source io.Reader, sourceC
         return
     }
 
-    _, copyErr := io.Copy(gzipWriter, source)
+    /* reached only after gzipWriter.Close returned, the condition the pool depends on */
+    defer releaseGzipWriter(gzipWriter, level)
+
+    copyErr := copyIntoGzipWriterSafely(gzipWriter, source)
     if nil != copyErr {
         _ = gzipWriter.Close()
         _ = pipeWriter.CloseWithError(copyErr)

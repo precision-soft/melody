@@ -1,6 +1,7 @@
 package bag
 
 import (
+    "net/url"
     "testing"
 )
 
@@ -174,7 +175,6 @@ func TestBagFloat64_ConversionsAndErrors(t *testing.T) {
     }
 }
 
-/* @info a key set to nil is present but carries no value: String used to report it as set while Int, Bool, Float64 and Duration reported it as unset, so Has and the typed accessors contradicted each other on the same state */
 func TestValue_PresentNilReportsUnsetAcrossAllAccessors(t *testing.T) {
     parameterBag := NewParameterBag()
     parameterBag.Set("key", nil)
@@ -203,5 +203,79 @@ func TestValue_PresentNilReportsUnsetAcrossAllAccessors(t *testing.T) {
 
     if value, exists := String(parameterBag, "key"); false == exists || "value" != value {
         t.Fatalf("expected a set value to be reported, got %q exists=%v", value, exists)
+    }
+}
+
+func TestString_ReadsTheFirstValueOfARepeatedKey(t *testing.T) {
+    parameterBag := NewParameterBagFromValues(url.Values{"name": {"a", "b"}})
+
+    value, exists := String(parameterBag, "name")
+    if false == exists || "a" != value {
+        t.Fatalf("expected the first value of the repeated key, got exists=%v value=%q", exists, value)
+    }
+
+    if "a" != StringOrDefault(parameterBag, "name", "anonymous") {
+        t.Fatalf("expected StringOrDefault to deliver the first value, not the fallback")
+    }
+
+    if false == HasNonEmptyString(parameterBag, "name") {
+        t.Fatalf("expected HasNonEmptyString to see the first value")
+    }
+
+    if slice, exists := StringSlice(parameterBag, "name"); false == exists || 2 != len(slice) {
+        t.Fatalf("expected the whole list through StringSlice, got exists=%v slice=%v", exists, slice)
+    }
+}
+
+func TestString_ReportsAnEmptyListAsUnset(t *testing.T) {
+    parameterBag := NewParameterBag()
+    parameterBag.Set("tags", []string{})
+
+    if value, exists := String(parameterBag, "tags"); true == exists || "" != value {
+        t.Fatalf("expected an empty list to read as unset, got exists=%v value=%q", exists, value)
+    }
+
+    if "anonymous" != StringOrDefault(parameterBag, "tags", "anonymous") {
+        t.Fatalf("expected the fallback for an empty list")
+    }
+}
+
+/* a key that appeared once in url.Values is stored as the string it is, and only a genuinely repeated key stays a slice — the separation String and Input depend on. */
+func TestNewParameterBagFromValues_KeepsTheSingleAndTheRepeatedKeyApartByType(t *testing.T) {
+    parameterBag := NewParameterBagFromValues(url.Values{
+        "single":   []string{"one"},
+        "repeated": []string{"one", "two"},
+        "empty":    []string{},
+    })
+
+    if value, exists := String(parameterBag, "single"); false == exists || "one" != value {
+        t.Fatalf("expected the single occurrence as a string, got %q exists=%v", value, exists)
+    }
+
+    values, exists := StringSlice(parameterBag, "repeated")
+    if false == exists || 2 != len(values) {
+        t.Fatalf("expected the repeated key as a slice, got %#v exists=%v", values, exists)
+    }
+
+    if true == parameterBag.Has("empty") {
+        t.Fatalf("expected a key with no values to stay out of the bag")
+    }
+}
+
+func TestBagString_NonStringScalarReportsAbsentAndFallsBackToDefault(t *testing.T) {
+    parameterBag := NewParameterBag()
+    parameterBag.Set("port", 9000)
+
+    _, exists := String(parameterBag, "port")
+    if true == exists {
+        t.Fatalf("expected a non-string scalar to report absent, not present-but-empty")
+    }
+
+    if "8080" != StringOrDefault(parameterBag, "port", "8080") {
+        t.Fatalf("expected StringOrDefault to substitute the default for a non-string value")
+    }
+
+    if true == HasNonEmptyString(parameterBag, "port") {
+        t.Fatalf("expected HasNonEmptyString to report false for a non-string value")
     }
 }

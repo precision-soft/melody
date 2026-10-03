@@ -1,8 +1,4 @@
-/* The shared test material of this package: the doubles every test file of it reaches for, the helpers
-that build them, and — where a contract spans every source rather than any one of them — the test that
-asserts it. It carries no mirror of its own on purpose: it is the ONE test file of a package allowed to
-exist without a matching source, which is what keeps every other one honest. A test provable from a
-single source belongs in that source's own mirror, not here. */
+/* The shared test material of this package: the doubles every test file of it reaches for, the helpers that build them, and — where a contract spans every source rather than any one of them — the test that asserts it. It carries no mirror of its own on purpose: it is the ONE test file of a package allowed to exist without a matching source, which is what keeps every other one honest. A test provable from a single source belongs in that source's own mirror, not here. */
 package http
 
 import (
@@ -11,12 +7,14 @@ import (
     "io"
     "net"
     nethttp "net/http"
+    "sync"
     "time"
 
     "github.com/precision-soft/melody/v2/container"
     containercontract "github.com/precision-soft/melody/v2/container/contract"
     "github.com/precision-soft/melody/v2/exception"
     "github.com/precision-soft/melody/v2/logging"
+    loggingcontract "github.com/precision-soft/melody/v2/logging/contract"
     "github.com/precision-soft/melody/v2/runtime"
     runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
     sessioncontract "github.com/precision-soft/melody/v2/session/contract"
@@ -185,3 +183,60 @@ func (instance *countingSessionStorage) Save(sessionId string, data map[string]a
 
     return instance.Storage.Save(sessionId, data, ttl)
 }
+
+/* capturedRecord is one record a recordsCaptureLogger received */
+type capturedRecord struct {
+    level   loggingcontract.Level
+    message string
+    context loggingcontract.Context
+}
+
+/* recordsCaptureLogger keeps every record, under a lock, so a test served over several requests can count the records each one filed */
+type recordsCaptureLogger struct {
+    mutex   sync.Mutex
+    records []capturedRecord
+}
+
+func (instance *recordsCaptureLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.records = append(instance.records, capturedRecord{level: level, message: message, context: context})
+}
+
+func (instance *recordsCaptureLogger) Debug(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelDebug, message, context)
+}
+
+func (instance *recordsCaptureLogger) Info(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelInfo, message, context)
+}
+
+func (instance *recordsCaptureLogger) Warning(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelWarning, message, context)
+}
+
+func (instance *recordsCaptureLogger) Error(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelError, message, context)
+}
+
+func (instance *recordsCaptureLogger) Emergency(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelEmergency, message, context)
+}
+
+/* failureRecords answers the records at warning, error or emergency, the ones a failure files */
+func (instance *recordsCaptureLogger) failureRecords() []capturedRecord {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    selected := make([]capturedRecord, 0, len(instance.records))
+    for _, record := range instance.records {
+        if loggingcontract.LevelWarning == record.level || loggingcontract.LevelError == record.level || loggingcontract.LevelEmergency == record.level {
+            selected = append(selected, record)
+        }
+    }
+
+    return selected
+}
+
+var _ loggingcontract.Logger = (*recordsCaptureLogger)(nil)

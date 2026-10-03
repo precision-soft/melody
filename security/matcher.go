@@ -4,9 +4,11 @@ import (
     "strings"
 
     httpcontract "github.com/precision-soft/melody/http/contract"
+    "github.com/precision-soft/melody/internal"
     securitycontract "github.com/precision-soft/melody/security/contract"
 )
 
+/* NewPathPrefixMatcher selects a firewall for every request path that begins with prefix, compared as a string prefix: "/api" claims "/api-admin" and "/apiary" as well as "/api/users". The first firewall whose matcher matches wins, so a firewall declared after one whose prefix begins its own is never selected and its access control never runs: declare the narrower firewall first, or end the earlier prefix at a segment boundary ("/api/"). An empty prefix claims every path. The path is written as the router reads it, decoded, with %2F for a separator inside a segment: a percent escape other than %2F claims only a resource whose name holds the percent sign literally. */
 func NewPathPrefixMatcher(prefix string) *PathPrefixMatcher {
     return &PathPrefixMatcher{
         prefix: prefix,
@@ -18,7 +20,8 @@ type PathPrefixMatcher struct {
 }
 
 func (instance *PathPrefixMatcher) Matches(request httpcontract.Request) bool {
-    if nil == request {
+    /* IsNilInterface: the request is an application-implementable contract, and the next line dereferences it */
+    if true == internal.IsNilInterface(request) {
         return false
     }
 
@@ -31,6 +34,11 @@ func (instance *PathPrefixMatcher) Matches(request httpcontract.Request) bool {
     }
 
     path := request.HttpRequest().URL.Path
+
+    /* a request target that does not begin with "/", the empty path of an absolute-form or authority-form target or the asterisk-form "*", is read with the "/" prepended, the way the router and the access-control matcher read it, so the three agree on one spelling and the firewall that owns "/" is selected for it rather than skipped */
+    if false == strings.HasPrefix(path, "/") {
+        path = "/" + path
+    }
 
     if "" == instance.prefix {
         return true

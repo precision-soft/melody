@@ -14,11 +14,6 @@ type adminUserCreateRequest struct {
     Roles    []string `json:"roles"`
 }
 
-type userCurrentResponse struct {
-    UserId string   `json:"userId"`
-    Roles  []string `json:"roles"`
-}
-
 func ListPageHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         return page.Html(runtimeInstance, request, nethttp.StatusOK, page.UsersHtml), nil

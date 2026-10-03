@@ -12,7 +12,7 @@ func RecoverToError(recoveredValue any) error {
         return nil
     }
 
-    /* a typed-nil error is normalized to the generic branch the way the exit handler's resolver normalizes it: passed through as-is it reads as a non-nil error whose Error() dereferences a nil receiver, and the first reader without its own guard — the kernel's debug-mode message, inside the recovery defer — raised a second panic that escaped ServeHttp and reset the connection. */
+    /* a typed-nil error is normalized to the generic branch, as the exit handler's resolver does: passed through, its Error() would dereference a nil receiver in the first reader without a guard, a second panic inside the recovery defer. */
     err, ok := recoveredValue.(error)
     if true == ok && false == internal.IsNilInterface(err) {
         return err
@@ -32,7 +32,7 @@ func RecoverToError(recoveredValue any) error {
     )
 }
 
-/* debugErrorMessage renders an error's text for the debug-mode response body under a recover: a value whose Error() panics — the shape that dereferences exactly the nil field that produced the panic — would otherwise raise a second panic while the first one is being rendered. Inside the kernel's recovery defer that reset the connection; inside the exception listener it was absorbed one level up by the dispatcher, at the price of the whole debug payload the listener exists to build, so the client received the kernel's fallback body instead of the degraded page. The trade is the one exception.LogContext makes for the record's text: a named rendering failure beats losing the report. */
+/* debugErrorMessage renders an error's text for the debug-mode body under a recover: a value whose Error() panics would raise a second panic while the first is rendered, resetting the connection inside the kernel's recovery defer and costing the whole debug payload inside the exception listener. A named rendering failure beats losing the report, the trade exception.LogContext makes. */
 func debugErrorMessage(err error) (message string) {
     defer func() {
         recoveredValue := recover()

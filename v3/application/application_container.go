@@ -2,7 +2,11 @@ package application
 
 import (
     "errors"
+    "io"
     "os"
+    "path/filepath"
+    "syscall"
+    "time"
 
     applicationcontract "github.com/precision-soft/melody/v3/application/contract"
     "github.com/precision-soft/melody/v3/cache"
@@ -21,6 +25,7 @@ import (
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
+    "github.com/precision-soft/melody/v3/messagebus"
     "github.com/precision-soft/melody/v3/security"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
     "github.com/precision-soft/melody/v3/serializer"
@@ -38,7 +43,7 @@ func (instance *Application) RegisterService(
     instance.MustRegister(serviceName, provider, options...)
 }
 
-/* Register makes the application a container registrar, so a module may reach for the container's own registration helpers — container.MustRegisterType and the generated wiring built on it — instead of only the name-based RegisterService. A duplicate is absorbed into the aggregated boot report rather than returned, so a module that registers a service the framework already provides reports it the same way whichever entry point it used. */
+/* Register makes the application a container registrar, so a module may use container.MustRegisterType and the generated wiring as well as RegisterService. A duplicate is absorbed into the aggregated boot report rather than returned. */
 func (instance *Application) Register(
     serviceName string,
     provider any,
@@ -53,7 +58,7 @@ func (instance *Application) Register(
         return nil
     }
 
-    /* duplicates are recorded for the aggregated boot report instead of panicking one at a time (the first registration wins until the guaranteed panic ends the boot); any other registration failure stays fail-fast */
+    /* duplicates are recorded for the aggregated boot report, the first registration winning until the report ends the boot; any other registration failure stays fail-fast */
     if true == errors.Is(registerErr, container.ErrServiceIdAlreadyRegistered) {
         instance.recordBootCollision(bootCollisionKindService, serviceName)
         return nil
@@ -64,7 +69,7 @@ func (instance *Application) Register(
         return nil
     }
 
-    /* the name — or the type — is already claimed at the scoped lifetime. The collision is the same wiring mistake reported from the other side, so it joins the same report rather than ending the boot on its own */
+    /* the name or type is already claimed at the scoped lifetime, the same wiring mistake from the other side, so it joins the same report */
     if true == errors.Is(registerErr, container.ErrScopedServiceIdAlreadyRegistered) {
         instance.recordBootCollision(bootCollisionKindScopedService, serviceName)
         return nil
@@ -89,6 +94,7 @@ func (instance *Application) MustRegister(
     }
 }
 
+/* RegisterScopedService declares a service the application's scopes own: one instance per scope, one http request or one command run, closed with it. It mirrors RegisterService in everything but lifetime; a name claimed at both lifetimes joins the aggregated boot report. In console the run's scope spans the whole command, so a long-running command that processes many units creates a child runtime per unit, as the cron runner does: a scope from Container().NewScope(), a runtime.New over it, and a Close whose error joins the unit's own. */
 func (instance *Application) RegisterScopedService(
     serviceName string,
     provider any,
@@ -97,7 +103,7 @@ func (instance *Application) RegisterScopedService(
     instance.MustRegisterScoped(serviceName, provider, options...)
 }
 
-/* RegisterScoped declares a service the application's scopes own: one instance per request, closed with the request. It mirrors Register in everything but lifetime, collisions included — a name claimed at both lifetimes is absorbed into the aggregated boot report, so a module that scopes a name the framework registers later hears about it beside every other collision instead of one panic per boot attempt. */
+/* RegisterScoped declares a service the application's scopes own: one instance per request, closed with the request. It mirrors Register in everything but lifetime; a name claimed at both lifetimes joins the aggregated boot report. */
 func (instance *Application) RegisterScoped(
     serviceName string,
     provider any,
@@ -150,39 +156,23 @@ func (instance *Application) bootContainer() {
     kernelInstance := instance.kernel
     configuration := instance.configuration
 
-    instance.RegisterService(
-        logging.ServiceLogger,
-        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
-            writer := os.Stdout
+    serviceContainer := kernelInstance.ServiceContainer()
 
-            logPath := configuration.Kernel().LogPath()
-
-            if "" != logPath {
-                file, openFileErr := os.OpenFile(
-                    logPath,
-                    os.O_CREATE|os.O_APPEND|os.O_WRONLY,
-                    0o644,
-                )
-                if nil != openFileErr {
-                    exception.Panic(
-                        exception.NewError(
-                            "failed to open log file",
-                            exceptioncontract.Context{
-                                "path": logPath,
-                            },
-                            openFileErr,
-                        ),
-                    )
-                }
-
-                writer = file
-            }
-
-            loggingConfigurationInstance := logging.LoggingConfigurationFromModules(instance.moduleConfigurations)
-
-            return logging.NewJsonLoggerWithLabels(writer, configuration.Kernel().LogLevel(), loggingConfigurationInstance.LevelLabels()), nil
-        },
-    )
+    /* gated like the cache, session and firewall registrations below, so the application or a module can substitute the logger */
+    if false == serviceContainer.Has(logging.ServiceLogger) {
+        instance.RegisterService(
+            logging.ServiceLogger,
+            func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+                return newContainerLogger(
+                    resolveRuntimePath(configuration.Kernel().ProjectDir(), configuration.Kernel().LogPath()),
+                    configuration.Kernel().LogLevel(),
+                    instance.moduleConfigurations,
+                    kernelInstance.Clock(),
+                    config.ModeHttp == instance.runtimeFlags.Mode(),
+                ), nil
+            },
+        )
+    }
 
     instance.RegisterService(
         config.ServiceConfig,
@@ -205,12 +195,16 @@ func (instance *Application) bootContainer() {
         },
     )
 
-    instance.RegisterService(
-        http.ServiceUrlGenerator,
-        func(resolver containercontract.Resolver) (httpcontract.UrlGenerator, error) {
-            return http.NewUrlGenerator(instance.routeRegistry), nil
-        },
-    )
+    if false == serviceContainer.Has(http.ServiceUrlGenerator) {
+        instance.RegisterService(
+            http.ServiceUrlGenerator,
+            func(resolver containercontract.Resolver) (httpcontract.UrlGenerator, error) {
+                return http.NewUrlGenerator(instance.routeRegistry), nil
+            },
+        )
+    }
+
+    /* the router, the dispatcher, the clock, the config, the route registry and the process role are not gated: the kernel owns them and reads them directly, so a substitute would be ignored. The gates stand where a replacement built outside is a whole answer. */
 
     instance.RegisterService(
         http.ServiceRouter,
@@ -226,24 +220,39 @@ func (instance *Application) bootContainer() {
         },
     )
 
-    instance.RegisterService(
-        serializer.ServiceSerializerManager,
-        func(resolver containercontract.Resolver) (*serializer.SerializerManager, error) {
-            return serializer.NewSerializerManager(
-                map[string]serializercontract.Serializer{
-                    "application/json": serializer.NewJsonSerializer(),
-                    "text/plain":       serializer.NewPlainTextSerializer(),
-                },
-            )
-        },
-    )
+    /* gated so a module can substitute the manager content negotiation reads, to add a media type; NewSerializerManager takes the map, so a replacement built outside is a whole answer */
+    if false == serviceContainer.Has(serializer.ServiceSerializerManager) {
+        instance.RegisterService(
+            serializer.ServiceSerializerManager,
+            func(resolver containercontract.Resolver) (*serializer.SerializerManager, error) {
+                return serializer.NewSerializerManager(
+                    map[string]serializercontract.Serializer{
+                        "application/json": serializer.NewJsonSerializer(),
+                        "text/plain":       serializer.NewPlainTextSerializer(),
+                    },
+                )
+            },
+        )
+    }
 
-    instance.RegisterService(
-        validation.ServiceValidator,
-        func(resolver containercontract.Resolver) (*validation.Validator, error) {
-            return validation.NewValidator(), nil
-        },
-    )
+    /* the default serializer SerializerFromRuntime and SerializerMustFromRuntime answer; content negotiation runs through the manager above, so replacing it changes what those two resolvers answer, not what a request is served */
+    if false == serviceContainer.Has(serializer.ServiceSerializer) {
+        instance.RegisterService(
+            serializer.ServiceSerializer,
+            func(resolver containercontract.Resolver) (serializercontract.Serializer, error) {
+                return serializer.NewJsonSerializer(), nil
+            },
+        )
+    }
+
+    if false == serviceContainer.Has(validation.ServiceValidator) {
+        instance.RegisterService(
+            validation.ServiceValidator,
+            func(resolver containercontract.Resolver) (*validation.Validator, error) {
+                return validation.NewValidator(), nil
+            },
+        )
+    }
 
     instance.RegisterService(
         clock.ServiceClock,
@@ -256,10 +265,86 @@ func (instance *Application) bootContainer() {
 
     instance.registerHttpSession()
 
-    httpSecurityErr := instance.registerHttpSecurity()
-    if nil != httpSecurityErr {
-        exception.Panic(exception.FromError(httpSecurityErr))
+    securityErr := instance.registerSecurity()
+    if nil != securityErr {
+        exception.Panic(exception.FromError(securityErr))
     }
+
+    /* the logger is resolved once, eagerly, whoever registered it, so a failing provider fails the boot step that owns it instead of the first run that resolves it; the container memoizes the built logger, so the log file is opened once */
+    _, loggerProbeErr := logging.LoggerFromContainer(serviceContainer)
+    if nil != loggerProbeErr {
+        exception.Panic(
+            exception.NewError(
+                "the configured logger cannot be built",
+                nil,
+                loggerProbeErr,
+            ),
+        )
+    }
+}
+
+/* newContainerLogger builds the logger the container serves. The module configuration is read before the descriptor is opened, because it panics on a configuration of the wrong type and a file opened before it would have no owner. The file journal is armed for reopening on SIGHUP in the serving process only: the exit-path logger belongs to a dying process, and in a cli process signal.Notify would take SIGHUP's terminating disposition away from a command whose terminal hung up. */
+func newContainerLogger(
+    logPath string,
+    logLevel loggingcontract.Level,
+    moduleConfigurations map[string]any,
+    clockInstance clockcontract.Clock,
+    armRotationReopen bool,
+) loggingcontract.Logger {
+    loggingConfigurationInstance := logging.LoggingConfigurationFromModules(moduleConfigurations)
+
+    var writer io.Writer = os.Stdout
+
+    if "" != logPath {
+        /* the parent directory is created as ensureRuntimeDirectories creates the logs directory, since MELODY_LOG_PATH may point elsewhere */
+        mkdirErr := os.MkdirAll(filepath.Dir(logPath), 0o755)
+        if nil != mkdirErr {
+            exception.Panic(
+                exception.NewError(
+                    "failed to create the log directory",
+                    exceptioncontract.Context{
+                        "path": logPath,
+                    },
+                    mkdirErr,
+                ),
+            )
+        }
+
+        fileWriter, openFileErr := logging.NewReopenableFileWriter(logPath)
+        if nil != openFileErr {
+            exception.Panic(
+                exception.NewError(
+                    "failed to open log file",
+                    exceptioncontract.Context{
+                        "path": logPath,
+                    },
+                    openFileErr,
+                ),
+            )
+        }
+
+        if true == armRotationReopen {
+            armErr := fileWriter.ArmReopenOnSignal(syscall.SIGHUP)
+            if nil != armErr {
+                /* the descriptor is closed before the panic: the container stores only what a provider returns and does not memoize a creation failure, so a file left open here would have no owner and each later resolution would open another */
+                _ = fileWriter.Close()
+
+                exception.Panic(
+                    exception.NewError(
+                        "failed to arm the log rotation signal watcher",
+                        exceptioncontract.Context{
+                            "path": logPath,
+                        },
+                        armErr,
+                    ),
+                )
+            }
+        }
+
+        writer = fileWriter
+    }
+
+    return logging.NewJsonLoggerWithClock(writer, logLevel, loggingConfigurationInstance.LevelLabels(), clockInstance)
 }
 
 func (instance *Application) registerCache() {
@@ -275,7 +360,7 @@ func (instance *Application) registerCache() {
     }
 
     if false == serviceContainer.Has(cache.ServiceCacheBackend) {
-        /* the fallback backend is deliberately left unarmed in both dimensions — an item ceiling melody picked would evict an application's entries behind its back, and an expiry melody picked would drop them early — so what it costs is carried to the http path as a warning instead of being decided here */
+        /* the fallback backend is left without an item ceiling or an expiry, since either would drop the application's entries behind its back; its cost is reported on the http path as a warning */
         instance.unboundedDefaultCacheBackend = true
 
         instance.RegisterService(
@@ -312,13 +397,13 @@ func (instance *Application) registerHttpSession() {
     serviceContainer := instance.kernel.ServiceContainer()
 
     if false == serviceContainer.Has(session.ServiceSessionStorage) {
-        /* the fallback storage keeps its entries in this process and nothing outside it can expire them, so what it costs is carried to the http path as a warning rather than being decided here — the same shape the fallback cache backend uses, and for the same reason: a lifetime melody picked would end sessions the application never agreed to end */
+        /* the fallback storage keeps its entries in this process, where nothing outside it can expire them; its cost is reported on the http path as a warning, since a lifetime chosen here would end sessions the application never agreed to end */
         instance.defaultInMemorySessionStorage = true
 
         instance.RegisterService(
             session.ServiceSessionStorage,
             func(resolver containercontract.Resolver) (sessioncontract.Storage, error) {
-                return session.NewInMemoryStorage(), nil
+                return session.NewInMemoryStorageWithClock(time.Minute, instance.kernel.Clock()), nil
             },
         )
     }
@@ -329,17 +414,20 @@ func (instance *Application) registerHttpSession() {
             func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
                 storage := session.SessionStorageMustFromResolver(resolver)
 
-                return session.NewManager(storage, instance.configuration.Http().SessionTtl()), nil
+                /* the manager reads the kernel's clock, as the storage above does: the tombstone record and the entry expiry are two halves of one lifetime */
+                return session.NewManagerWithClock(
+                    storage,
+                    instance.configuration.Http().SessionTtl(),
+                    instance.configuration.Http().SessionTombstoneRetention(),
+                    instance.kernel.Clock(),
+                ), nil
             },
         )
     }
 }
 
-func (instance *Application) registerHttpSecurity() error {
-    if config.ModeHttp != instance.runtimeFlags.Mode() {
-        return nil
-    }
-
+/* registerSecurity wires what a compiled security configuration means for this process. The firewall manager is registered in every mode, since it is a plain view of the configuration; the two kernel listeners are the enforcement and stay http-only. */
+func (instance *Application) registerSecurity() error {
     if nil == instance.securityConfiguration {
         return nil
     }
@@ -355,6 +443,10 @@ func (instance *Application) registerHttpSecurity() error {
         )
     }
 
+    if config.ModeHttp != instance.runtimeFlags.Mode() {
+        return nil
+    }
+
     registry := security.NewFirewallRegistry(instance.securityConfiguration)
 
     kernelInstance := instance.kernel
@@ -363,6 +455,29 @@ func (instance *Application) registerHttpSecurity() error {
     security.RegisterKernelAccessControlListener(kernelInstance, registry)
 
     return nil
+}
+
+/* buildMessageBusTransportsCloser builds the closer that joins the registered message bus transports to the container's ordered teardown, for every process that never resolves the transports map itself, an http process routing through transport values among them. Built this early, it is closed after every service that could still publish through a transport. A failure is a warning: the transports are optional and the name is the framework's own. */
+func (instance *Application) buildMessageBusTransportsCloser() {
+    serviceContainer := instance.kernel.ServiceContainer()
+
+    if false == serviceContainer.Has(messagebus.ServiceTransportsCloser) {
+        return
+    }
+
+    _, closerErr := container.FromResolver[*messagebus.TransportsCloser](
+        serviceContainer,
+        messagebus.ServiceTransportsCloser,
+    )
+    if nil != closerErr {
+        instance.bootLogger().Warning(
+            "could not build the message bus transports closer; the registered transports will not be closed on shutdown",
+            exceptioncontract.Context{
+                "serviceName": messagebus.ServiceTransportsCloser,
+                "error":       closerErr.Error(),
+            },
+        )
+    }
 }
 
 var _ applicationcontract.ServiceRegistrar = (*Application)(nil)

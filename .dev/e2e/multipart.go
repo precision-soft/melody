@@ -2,17 +2,19 @@ package main
 
 import (
     "bytes"
+    "io"
     "mime/multipart"
     "net/http"
     "net/url"
+    "regexp"
 )
+
+/* presignedSignaturePattern is a SigV4 signature, the hex of an HMAC-SHA256 */
+var presignedSignaturePattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 const multipartLabel = "multipart body"
 
-/* the storage demo is the only route in the example that reports the byte count its handler saw, which is what
-makes it the right probe: PutHandler reads the RAW request body and answers with its length
-(handler/storage/storage_handler.go), so the number in the response is a direct measurement of what the framework
-left for the handler to read. */
+/* the storage demo is the only route in the example that reports the byte count its handler saw, which is what makes it the right probe: PutHandler reads the RAW request body and answers with its length (handler/storage/storage_handler.go), so the number in the response is a direct measurement of what the framework left for the handler to read. */
 const multipartRoute = "/storage/object"
 
 /* multipartPutPayload and multipartGetPayload mirror the two handlers' response payloads. */
@@ -44,14 +46,69 @@ be refused before the bucket is touched, and the object already at the key must 
 objectstorage.go, which drives the awss3 Put directly and can therefore lie about the size — something no http
 client can do, since the framework derives the length from the body it actually read. The two must never grow into
 the same coverage: this one is about what the FRAMEWORK leaves in the body, that one is about what the STORAGE layer
-does with a size it was handed. */
+does with a size it was handed.
+
+The storage doors write into the bucket and read any key back, so they carry the catalogue's write role: the section signs in as the seeded editor, the way every section that drives a route behind a role does, and the anonymous arm below is what proves the doors are not public. */
 func runMultipartCheck(baseUrl string) {
-    client := newLiveExampleClient(baseUrl)
+    assertMultipartAnonymousPutRefused(baseUrl)
+
+    client := newSignedInLiveExampleClient(baseUrl, exampleHttpEditorUsername, exampleHttpEditorPassword)
 
     assertMultipartBodyReachesHandlerIntact(client)
     assertUrlEncodedBodyIsRestoredAfterParsing(client)
     assertMultipartMissingKeyRefused(client)
     assertMultipartUnknownKeyNotFound(client)
+    assertPresignedLinkReadsTheObjectDirectly(client)
+}
+
+/* multipartLinkPayload mirrors the link door's response payload */
+type multipartLinkPayload struct {
+    Key       string `json:"key"`
+    Url       string `json:"url"`
+    ExpiresIn int    `json:"expiresIn"`
+}
+
+/* the link door hands the client a presigned url to the object, read here straight from the object store, the second party, with the bytes the door stored. The development localstack enforces neither the signature nor the expiry (an unsigned url and a zeroed signature both answer 200, and a one-second link still answers after two), so what separates a presigned link from the object's plain url is the url itself: the SigV4 query carrying a 64-hex signature and the ttl the caller asked for as X-Amz-Expires. A ttl past an hour is refused 400 and an absent object 404. */
+func assertPresignedLinkReadsTheObjectDirectly(client *liveExampleClient) {
+    key := liveExampleUnique("e2e-presigned")
+    content := []byte("bytes a presigned link hands out without this application in the path")
+
+    stored := client.call(multipartLabel, liveExampleRequest{method: "POST", path: multipartRoute + "?key=" + url.QueryEscape(key), contentType: "application/octet-stream", body: content})
+    requireLiveExampleStatus(multipartLabel, "the put the link reads", stored, http.StatusOK)
+
+    answered := client.call(multipartLabel, liveExampleRequest{method: "GET", path: multipartRoute + "/link?key=" + url.QueryEscape(key) + "&ttl=60"})
+    requireLiveExampleStatus(multipartLabel, "the presigned link", answered, http.StatusOK)
+
+    link := multipartLinkPayload{}
+    decodeLiveExamplePayload(multipartLabel, answered, &link)
+
+    parsed, parseErr := url.Parse(link.Url)
+    if nil != parseErr || key != link.Key || 60 != link.ExpiresIn {
+        fail("%s: the link door answered %+v (%v), wanted the key, a url and expiresIn 60", multipartLabel, link, parseErr)
+    }
+
+    query := parsed.Query()
+    if "AWS4-HMAC-SHA256" != query.Get("X-Amz-Algorithm") || "60" != query.Get("X-Amz-Expires") || false == presignedSignaturePattern.MatchString(query.Get("X-Amz-Signature")) || "" == query.Get("X-Amz-Credential") {
+        fail("%s: the link %s is not a SigV4 presigned url expiring in 60 seconds", multipartLabel, link.Url)
+    }
+
+    direct, directErr := http.Get(link.Url)
+    if nil != directErr {
+        fail("%s: the presigned link could not be read from the object store: %v", multipartLabel, directErr)
+    }
+    directBody, _ := io.ReadAll(direct.Body)
+    _ = direct.Body.Close()
+    if http.StatusOK != direct.StatusCode || false == bytes.Equal(content, directBody) {
+        fail("%s: the presigned link answered %d %q from the object store, wanted 200 and the bytes the door stored", multipartLabel, direct.StatusCode, directBody)
+    }
+
+    tooLong := client.call(multipartLabel, liveExampleRequest{method: "GET", path: multipartRoute + "/link?key=" + url.QueryEscape(key) + "&ttl=3601"})
+    requireLiveExampleStatus(multipartLabel, "a link asked for past an hour", tooLong, http.StatusBadRequest)
+
+    absent := client.call(multipartLabel, liveExampleRequest{method: "GET", path: multipartRoute + "/link?key=" + url.QueryEscape(key+"-absent")})
+    requireLiveExampleStatus(multipartLabel, "a link to an absent object", absent, http.StatusNotFound)
+
+    pass("%s: the link door hands out a SigV4 url expiring when asked, read from the object store with the stored bytes; past an hour 400, an absent object 404", multipartLabel)
 }
 
 func assertMultipartBodyReachesHandlerIntact(client *liveExampleClient) {
@@ -86,8 +143,7 @@ func assertMultipartBodyReachesHandlerIntact(client *liveExampleClient) {
     }
     pass("the handler read all %d bytes of the multipart envelope (the framework left the body unread)", put.Bytes)
 
-    /* the byte COUNT alone would also be satisfied by a body whose bytes were reordered or re-encoded, so the
-       stored object is read back and compared byte for byte */
+    /* the byte COUNT alone would also be satisfied by a body whose bytes were reordered or re-encoded, so the stored object is read back and compared byte for byte */
     stored := readMultipartStoredObject(client, key)
     if false == bytes.Equal(envelope, stored) {
         fail(
@@ -101,8 +157,7 @@ func assertMultipartBodyReachesHandlerIntact(client *liveExampleClient) {
     pass("the stored object is byte-identical to the multipart envelope that was posted")
 }
 
-/* assertUrlEncodedBodyIsRestoredAfterParsing is the twin half: the same route, the same measurement, a body the
-framework DOES drain. A zero byte count here is the drain-without-restore regression. */
+/* assertUrlEncodedBodyIsRestoredAfterParsing is the twin half: the same route, the same measurement, a body the framework DOES drain. A zero byte count here is the drain-without-restore regression. */
 func assertUrlEncodedBodyIsRestoredAfterParsing(client *liveExampleClient) {
     key := liveExampleUnique("e2e-urlencoded")
 
@@ -198,11 +253,7 @@ func readMultipartStoredObject(client *liveExampleClient, key string) []byte {
     return []byte(payload.Content)
 }
 
-/* buildMultipartEnvelope assembles a REAL mime/multipart envelope and returns it together with the Content-Type
-carrying the boundary the writer chose. Hand-writing the envelope would risk a body the framework rejects as
-malformed for a reason unrelated to the property under test — and the returned Content-Type has to come from the
-writer, because a boundary that does not match the body makes every assertion below meaningless. A file part is
-included only when a filename is given, so the missing-key probe can post a fields-only envelope. */
+/* buildMultipartEnvelope assembles a REAL mime/multipart envelope and returns it together with the Content-Type carrying the boundary the writer chose. Hand-writing the envelope would risk a body the framework rejects as malformed for a reason unrelated to the property under test — and the returned Content-Type has to come from the writer, because a boundary that does not match the body makes every assertion below meaningless. A file part is included only when a filename is given, so the missing-key probe can post a fields-only envelope. */
 func buildMultipartEnvelope(fields map[string]string, fileField string, fileName string, fileContent []byte) ([]byte, string) {
     buffer := &bytes.Buffer{}
     writer := multipart.NewWriter(buffer)
@@ -229,4 +280,29 @@ func buildMultipartEnvelope(fields map[string]string, fileField string, fileName
     }
 
     return buffer.Bytes(), writer.FormDataContentType()
+}
+
+/* assertMultipartAnonymousPutRefused is the arm that keeps the storage doors off the public rule table: anonymous, the put stored the body under any key of the bucket and the get read any object back. The firewall answers before any handler runs, so the body never reaches the store; a 200 here would mean the rule moved back to public. */
+func assertMultipartAnonymousPutRefused(baseUrl string) {
+    client := newLiveExampleClient(baseUrl)
+    key := liveExampleUnique("e2e-multipart-anonymous")
+
+    envelope, contentType := buildMultipartEnvelope(map[string]string{"label": "anonymous"}, "attachment", "payload.bin", []byte("must not land"))
+
+    response := client.call(multipartLabel, liveExampleRequest{
+        method:      "POST",
+        path:        multipartRoute + "?key=" + url.QueryEscape(key),
+        contentType: contentType,
+        body:        envelope,
+    })
+
+    if http.StatusUnauthorized != response.statusCode {
+        fail("%s: an anonymous put on the storage door answered %d, wanted 401 — the door is public again: %s", multipartLabel, response.statusCode, exampleTruncate(response.bodyText()))
+    }
+
+    response = client.get(multipartLabel, multipartRoute+"?key="+url.QueryEscape(key))
+
+    if http.StatusUnauthorized != response.statusCode {
+        fail("%s: an anonymous get on the storage door answered %d, wanted 401 — the door is public again: %s", multipartLabel, response.statusCode, exampleTruncate(response.bodyText()))
+    }
 }

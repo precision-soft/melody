@@ -2,9 +2,11 @@ package cache
 
 import (
     "container/list"
+    "sort"
     "strconv"
     "strings"
     "sync"
+    "sync/atomic"
     "time"
 
     cachecontract "github.com/precision-soft/melody/v3/cache/contract"
@@ -23,8 +25,19 @@ type lruEntry struct {
     key         string
     item        *Item
     listElement *list.Element
+    /* lastPromotedAtNano is when this entry was last moved to the front, not when it was last read, which keeps the read path off the exclusive lock; it is atomic because Get reads it under the read lock */
+    lastPromotedAtNano atomic.Int64
 }
 
+func (instance *lruEntry) isPromotionDue(now time.Time) bool {
+    return recencyPromotionInterval <= time.Duration(now.UnixNano()-instance.lastPromotedAtNano.Load())
+}
+
+func (instance *lruEntry) markPromoted(now time.Time) {
+    instance.lastPromotedAtNano.Store(now.UnixNano())
+}
+
+/* NewInMemoryBackend builds the in-memory cache backend and starts its cleanup goroutine, which only Close stops; there is no finalizer fallback. maxItems bounds the entry count: zero disables the bound and a negative value panics. cleanupInterval is how often the sweep collects lapsed entries, a minute when non-positive. */
 func NewInMemoryBackend(
     maxItems int,
     cleanupInterval time.Duration,
@@ -33,6 +46,18 @@ func NewInMemoryBackend(
     interval := cleanupInterval
     if 0 >= interval {
         interval = time.Minute
+    }
+
+    if 0 > maxItems {
+        exception.Panic(
+            exception.NewError(
+                "cache max items is negative",
+                exceptioncontract.Context{
+                    "maxItems": maxItems,
+                },
+                nil,
+            ),
+        )
     }
 
     if true == internal.IsNilInterface(clockInstance) {
@@ -69,13 +94,104 @@ type InMemoryBackend struct {
     stopCleanup         chan struct{}
     cleanupDone         chan struct{}
     stopCleanupOnce     sync.Once
+    closed              bool
     clock               clockcontract.Clock
+}
+
+/* a closed backend refuses every operation, since its cleanup goroutine is stopped and an entry saved after Close would never be reclaimed */
+func closedBackendError() error {
+    return exception.NewError(
+        "cache backend is closed",
+        nil,
+        nil,
+    )
+}
+
+const inMemoryBackendMaxKeyLength = 1024
+
+/* validateKey enforces the Backend key grammar with the exact refusals the redis backend answers, so the implementations cannot be told apart by which keys they refuse */
+func validateKey(key string) error {
+    if "" == key {
+        return emptyKeyError()
+    }
+
+    if true == strings.Contains(key, " ") {
+        return exception.NewError(
+            "cache key contains spaces",
+            exceptioncontract.Context{
+                "key": key,
+            },
+            nil,
+        )
+    }
+
+    if true == strings.Contains(key, "\n") {
+        return exception.NewError(
+            "cache key contains newlines",
+            exceptioncontract.Context{
+                "key": key,
+            },
+            nil,
+        )
+    }
+
+    if inMemoryBackendMaxKeyLength < len(key) {
+        return exception.NewError(
+            "cache key is too long",
+            exceptioncontract.Context{
+                "key":          key,
+                "maxKeyLength": inMemoryBackendMaxKeyLength,
+                "keyLength":    len(key),
+            },
+            nil,
+        )
+    }
+
+    return nil
+}
+
+func emptyKeyError() error {
+    return exception.NewError(
+        "cache key is empty",
+        nil,
+        nil,
+    )
+}
+
+func negativeTtlError(ttl time.Duration) error {
+    return exception.NewError(
+        "cache ttl is negative",
+        exceptioncontract.Context{
+            "ttl": ttl.String(),
+        },
+        nil,
+    )
+}
+
+func refuseEmptyKeyList(keys []string) error {
+    for _, key := range keys {
+        if keyErr := validateKey(key); nil != keyErr {
+            return keyErr
+        }
+    }
+
+    return nil
 }
 
 func (instance *InMemoryBackend) Get(key string) ([]byte, bool, error) {
     now := instance.clock.Now()
 
     instance.mutex.RLock()
+    if true == instance.closed {
+        instance.mutex.RUnlock()
+        return nil, false, closedBackendError()
+    }
+
+    if keyErr := validateKey(key); nil != keyErr {
+        instance.mutex.RUnlock()
+        return nil, false, keyErr
+    }
+
     entry, exists := instance.entries[key]
     if false == exists || nil == entry || nil == entry.item {
         instance.mutex.RUnlock()
@@ -88,13 +204,23 @@ func (instance *InMemoryBackend) Get(key string) ([]byte, bool, error) {
     }
 
     payload := entry.item.Payload()
+
+    /* the access mark is atomic, so the read path refreshes it without ever leaving the read lock */
+    entry.item.Touch(now)
+    promotionDue := entry.isPromotionDue(now)
+
     instance.mutex.RUnlock()
+
+    /* a key promoted recently answers under the read lock alone; a lapsed entry found here is answered absent and left to the sweep, since deleting it needs the exclusive lock */
+    if false == promotionDue {
+        return payload, true, nil
+    }
 
     instance.mutex.Lock()
     entry, exists = instance.entries[key]
     if true == exists && nil != entry && nil != entry.item {
         if false == instance.isExpiredAt(entry.item, now) {
-            entry.item.Touch(now)
+            entry.markPromoted(now)
             instance.lruList.MoveToFront(entry.listElement)
         } else {
             instance.deleteExpiredLocked(key, now)
@@ -109,6 +235,16 @@ func (instance *InMemoryBackend) Has(key string) (bool, error) {
     now := instance.clock.Now()
 
     instance.mutex.RLock()
+    if true == instance.closed {
+        instance.mutex.RUnlock()
+        return false, closedBackendError()
+    }
+
+    if keyErr := validateKey(key); nil != keyErr {
+        instance.mutex.RUnlock()
+        return false, keyErr
+    }
+
     entry, exists := instance.entries[key]
     if false == exists || nil == entry || nil == entry.item {
         instance.mutex.RUnlock()
@@ -134,6 +270,18 @@ func (instance *InMemoryBackend) Set(
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
+    if true == instance.closed {
+        return closedBackendError()
+    }
+
+    if keyErr := validateKey(key); nil != keyErr {
+        return keyErr
+    }
+
+    if 0 > ttl {
+        return negativeTtlError(ttl)
+    }
+
     instance.saveLocked(
         key,
         payload,
@@ -148,6 +296,14 @@ func (instance *InMemoryBackend) Delete(key string) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
+    if true == instance.closed {
+        return closedBackendError()
+    }
+
+    if keyErr := validateKey(key); nil != keyErr {
+        return keyErr
+    }
+
     instance.deleteLocked(key)
 
     return nil
@@ -156,6 +312,10 @@ func (instance *InMemoryBackend) Delete(key string) error {
 func (instance *InMemoryBackend) Clear() error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
+
+    if true == instance.closed {
+        return closedBackendError()
+    }
 
     instance.entries = make(map[string]*lruEntry)
     instance.lruList = list.New()
@@ -174,6 +334,16 @@ func (instance *InMemoryBackend) Many(keys []string) (map[string][]byte, error) 
     hits := make([]hit, 0, len(keys))
 
     instance.mutex.RLock()
+    if true == instance.closed {
+        instance.mutex.RUnlock()
+        return nil, closedBackendError()
+    }
+
+    if refuseErr := refuseEmptyKeyList(keys); nil != refuseErr {
+        instance.mutex.RUnlock()
+        return nil, refuseErr
+    }
+
     for _, key := range keys {
         entry, exists := instance.entries[key]
         if false == exists || nil == entry || nil == entry.item {
@@ -185,6 +355,13 @@ func (instance *InMemoryBackend) Many(keys []string) (map[string][]byte, error) 
         }
 
         result[key] = entry.item.Payload()
+
+        entry.item.Touch(now)
+
+        if false == entry.isPromotionDue(now) {
+            continue
+        }
+
         hits = append(
             hits,
             hit{
@@ -194,6 +371,7 @@ func (instance *InMemoryBackend) Many(keys []string) (map[string][]byte, error) 
     }
     instance.mutex.RUnlock()
 
+    /* only the keys whose place in the list is stale reach the exclusive lock, so a batch of hot keys costs one read lock */
     if 0 == len(hits) {
         return result, nil
     }
@@ -210,7 +388,7 @@ func (instance *InMemoryBackend) Many(keys []string) (map[string][]byte, error) 
             continue
         }
 
-        entry.item.Touch(now)
+        entry.markPromoted(now)
         instance.lruList.MoveToFront(entry.listElement)
     }
     instance.mutex.Unlock()
@@ -223,6 +401,28 @@ func (instance *InMemoryBackend) SetMultiple(items map[string][]byte, ttl time.D
 
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
+
+    if true == instance.closed {
+        return closedBackendError()
+    }
+
+    /* the ttl is judged before the keys, the order the redis backend judges them in */
+    if 0 > ttl {
+        return negativeTtlError(ttl)
+    }
+
+    /* the keys are validated in sorted order, so the same malformed batch answers the same refusal every time, as the redis backend's batch reporting does */
+    keys := make([]string, 0, len(items))
+    for key := range items {
+        keys = append(keys, key)
+    }
+    sort.Strings(keys)
+
+    for _, key := range keys {
+        if keyErr := validateKey(key); nil != keyErr {
+            return keyErr
+        }
+    }
 
     for key, payload := range items {
         instance.saveLocked(
@@ -240,6 +440,14 @@ func (instance *InMemoryBackend) DeleteMultiple(keys []string) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
+    if true == instance.closed {
+        return closedBackendError()
+    }
+
+    if refuseErr := refuseEmptyKeyList(keys); nil != refuseErr {
+        return refuseErr
+    }
+
     for _, key := range keys {
         instance.deleteLocked(key)
     }
@@ -252,6 +460,11 @@ func (instance *InMemoryBackend) Increment(key string, delta int64) (int64, erro
 }
 
 func (instance *InMemoryBackend) Decrement(key string, delta int64) (int64, error) {
+    /* the magnitude of the delta is judged after the closed backend and the key, the order the shared contract fixes for every implementation */
+    if refusalErr := instance.refuseClosedOrInvalidKey(key); nil != refusalErr {
+        return 0, refusalErr
+    }
+
     if minInt64 == delta {
         return 0, exception.NewError(
             "delta overflows int64 when negated",
@@ -265,7 +478,24 @@ func (instance *InMemoryBackend) Decrement(key string, delta int64) (int64, erro
     return instance.incrementValue(key, -delta)
 }
 
+/* refuseClosedOrInvalidKey answers the two refusals incrementValue makes under its own lock, in the same order. The flag is read under the lock every writer takes, and a Close landing after the read is caught by incrementValue itself. */
+func (instance *InMemoryBackend) refuseClosedOrInvalidKey(key string) error {
+    instance.mutex.RLock()
+    closed := instance.closed
+    instance.mutex.RUnlock()
+
+    if true == closed {
+        return closedBackendError()
+    }
+
+    return validateKey(key)
+}
+
 func (instance *InMemoryBackend) Close() error {
+    instance.mutex.Lock()
+    instance.closed = true
+    instance.mutex.Unlock()
+
     instance.stopCleanupLoop()
 
     <-instance.cleanupDone
@@ -290,29 +520,35 @@ func (instance *InMemoryBackend) incrementValue(
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
+    if true == instance.closed {
+        return 0, closedBackendError()
+    }
+
+    if keyErr := validateKey(key); nil != keyErr {
+        return 0, keyErr
+    }
+
     entry, exists := instance.getEntryLocked(key, now)
 
     var currentValue int64 = 0
 
+    /* an existing payload is parsed against the redis integer grammar, not Go's lenient one, so a payload increments or errors the same way on both backends */
     if true == exists && nil != entry && nil != entry.item {
-        payload := entry.item.Payload()
-        trimmedValue := strings.TrimSpace(string(payload))
+        payloadValue := string(entry.item.Payload())
 
-        if "" != trimmedValue {
-            parsedValue, parseIntErr := strconv.ParseInt(trimmedValue, 10, 64)
-            if nil != parseIntErr {
-                return 0, exception.NewError(
-                    "cache value is not a valid int64",
-                    exceptioncontract.Context{
-                        "key":   key,
-                        "value": trimmedValue,
-                    },
-                    parseIntErr,
-                )
-            }
-
-            currentValue = parsedValue
+        parsedValue, parseIntErr := parseCanonicalCounterPayload(payloadValue)
+        if nil != parseIntErr {
+            return 0, exception.NewError(
+                "cache value is not a valid int64",
+                exceptioncontract.Context{
+                    "key":   key,
+                    "value": payloadValue,
+                },
+                parseIntErr,
+            )
         }
+
+        currentValue = parsedValue
     }
 
     newValue, addInt64WithOverflowCheckErr := instance.addInt64WithOverflowCheck(currentValue, delta)
@@ -363,16 +599,19 @@ const cleanupChunkSize = 1024
 
 const evictionProbeLimit = 8
 
-/* @important the sweep takes the keys once and then expires them in chunks, releasing the lock between chunks: Get takes the same exclusive lock to touch the recency list, so a single whole-map pass under one lock stalls every concurrent request for as long as the map is large. A key deleted meanwhile is simply not found. */
+/* how often one entry may cost the exclusive lock for its place in the recency list: eviction picks an expired victim first and falls back to the least recently promoted one, so the order only has to hold at this coarser grain. The access mark is still refreshed on every read. */
+const recencyPromotionInterval = time.Second
+
+/* the sweep snapshots the keys under the read lock and expires them in chunks, releasing the exclusive lock between chunks, so a large map does not stall every concurrent write and promotion; a key deleted meanwhile is not found */
 func (instance *InMemoryBackend) cleanupExpired() {
     now := instance.clock.Now()
 
-    instance.mutex.Lock()
+    instance.mutex.RLock()
     keys := make([]string, 0, len(instance.entries))
     for key := range instance.entries {
         keys = append(keys, key)
     }
-    instance.mutex.Unlock()
+    instance.mutex.RUnlock()
 
     for start := 0; start < len(keys); start = start + cleanupChunkSize {
         end := start + cleanupChunkSize
@@ -432,6 +671,11 @@ func (instance *InMemoryBackend) saveLocked(
     now time.Time,
     ttl time.Duration,
 ) {
+    /* a nil payload is stored as the empty payload, the contract's rule, since redis has no nil to store */
+    if nil == payload {
+        payload = []byte{}
+    }
+
     var expiresAt *time.Time
     if 0 < ttl {
         expiration := now.Add(ttl)
@@ -462,20 +706,24 @@ func (instance *InMemoryBackend) saveItemLocked(
 
     if true == exists && nil != entry {
         entry.item = item
+        entry.markPromoted(now)
         instance.lruList.MoveToFront(entry.listElement)
         return
     }
 
     element := instance.lruList.PushFront(key)
 
-    instance.entries[key] = &lruEntry{
+    freshEntry := &lruEntry{
         key:         key,
         item:        item,
         listElement: element,
     }
+    freshEntry.markPromoted(now)
+
+    instance.entries[key] = freshEntry
 }
 
-/* @important the walk toward the front is bounded: it looks for an expired victim before falling back to the least recently used one, and an unbounded search would make every insert into a full cache pay a whole-list scan under the exclusive lock. Expired entries are reclaimed anyway, lazily by the readers and periodically by the sweep. */
+/* evictOneLocked walks toward the front a bounded distance for an expired victim before falling back to the least recently promoted one, so an insert into a full cache never scans the whole list under the exclusive lock. */
 func (instance *InMemoryBackend) evictOneLocked(now time.Time) {
     probed := 0
     for element := instance.lruList.Back(); nil != element && evictionProbeLimit > probed; element = element.Prev() {
@@ -553,6 +801,41 @@ func (instance *InMemoryBackend) addInt64WithOverflowCheck(left int64, right int
     }
 
     return left + right, nil
+}
+
+/* parseCanonicalCounterPayload accepts exactly what redis's integer reader (string2ll) accepts: an optional minus and a first digit of 1-9 unless the number is 0, with no whitespace, plus sign, leading zeros or minus zero. */
+func parseCanonicalCounterPayload(payload string) (int64, error) {
+    digits := payload
+    if "" != digits && '-' == digits[0] {
+        digits = digits[1:]
+    }
+
+    canonical := "" != digits
+    if true == canonical && 1 < len(digits) && '0' == digits[0] {
+        canonical = false
+    }
+    if true == canonical && "-0" == payload {
+        canonical = false
+    }
+    if true == canonical {
+        for index := 0; index < len(digits); index++ {
+            if digits[index] < '0' || digits[index] > '9' {
+                canonical = false
+
+                break
+            }
+        }
+    }
+
+    if false == canonical {
+        return 0, exception.NewError(
+            "value is not a canonical integer",
+            nil,
+            nil,
+        )
+    }
+
+    return strconv.ParseInt(payload, 10, 64)
 }
 
 var _ cachecontract.Backend = (*InMemoryBackend)(nil)

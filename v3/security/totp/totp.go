@@ -20,6 +20,7 @@ const (
     defaultDigits        = 6
     defaultSkew          = 1
     maxSkew              = 10
+    maxPeriod            = 24 * 60 * 60
     defaultSecretBytes   = 20
     defaultRecoveryCount = 10
 )
@@ -33,23 +34,24 @@ type Config struct {
     Skew   uint
 }
 
-/* Resolve returns the config the algorithm actually runs with: the zero-value defaults filled in and the skew clamped to the same maxSkew ceiling Verify enforces. A caller that must reason about the exact window Verify accepts (for example to size a replay-guard TTL) resolves the config through this method rather than reading the raw fields, so its view never diverges from what Verify honors. */
+/* Resolve returns the config the algorithm runs with: the zero-value defaults filled in and the skew clamped as Verify clamps it. A caller that sizes anything on the window Verify accepts, a replay-guard TTL above all, resolves through it. */
 func (instance Config) Resolve() Config {
     return instance.withDefaults()
 }
 
 func (instance Config) withDefaults() Config {
     resolved := instance
-    if 0 == resolved.Period {
+    /* the period is clamped: one past the int64 range converts to a non-positive base and freezes the counter, so one code would verify forever */
+    if 0 == resolved.Period || maxPeriod < resolved.Period {
         resolved.Period = defaultPeriod
     }
 
-    /* RFC 6238 defines 6 to 8 digits; clamp anything outside that range (including the zero value and values large enough to overflow the uint32 modulo in hotpCode) back to the default. */
+    /* RFC 6238 defines 6 to 8 digits; anything else, including values that would overflow the uint32 modulo in hotpCode, falls back to the default */
     if 6 > resolved.Digits || 8 < resolved.Digits {
         resolved.Digits = defaultDigits
     }
 
-    /* clamp the skew window: the verify loop runs 2*Skew+1 HMAC-SHA1 computations, so an unbounded (mis)configured skew turns every verification into heavy CPU work — and a skew near the uint maximum would additionally overflow the int64 loop bound in VerifyAt. A window of a few steps already covers realistic clock drift (maxSkew steps is ±5 minutes at the default 30-second period). */
+    /* the skew is clamped: verification runs 2*Skew+1 HMAC computations, and a skew near the uint maximum would overflow the loop bound in VerifyAt */
     if 0 == resolved.Skew {
         resolved.Skew = defaultSkew
     } else if maxSkew < resolved.Skew {
@@ -69,17 +71,17 @@ func GenerateSecret() (string, error) {
     return base32NoPadding.EncodeToString(raw), nil
 }
 
-/* Verify reports whether code is a valid TOTP for secret at the current time, accepting codes within the configured step skew on either side. */
+/* Verify reports whether code is a valid TOTP for secret at the current time, accepting codes within the configured step skew on either side. It reads the system clock; a caller under an injected clock verifies through VerifyAt. */
 func Verify(secret string, code string, config Config) (bool, error) {
     return VerifyAt(secret, code, time.Now(), config)
 }
 
-/* NormalizeCode strips whitespace from a submitted code, the same normalization Verify applies before comparison. A caller that keys anything on an accepted code — a replay guard above all — must key on this form: "123 456" and "123456" verify as the same code, so keying on the raw header value would let a captured code be replayed by re-spacing it. */
+/* NormalizeCode strips whitespace from a submitted code, as Verify does before comparison. A caller that keys anything on an accepted code, a replay guard above all, keys on this form, or a captured code could be replayed by re-spacing it. */
 func NormalizeCode(code string) string {
     return strings.Join(strings.Fields(code), "")
 }
 
-/* VerifyAt is Verify at an explicit time, exposed for deterministic testing and for callers that drive their own clock. Whitespace anywhere in the submitted code is stripped before comparison — authenticator apps display codes as "123 456" and mobile copy/paste keeps the separator (often as a non-breaking space) — mirroring the secret normalization; whitespace can never be part of an all-digit code, so the tolerance is unambiguous and the comparison stays constant-time. */
+/* VerifyAt is Verify at an explicit time. Whitespace anywhere in the submitted code is stripped before the constant-time comparison, since authenticator apps display "123 456" and a digit code never contains whitespace. */
 func VerifyAt(secret string, code string, at time.Time, config Config) (bool, error) {
     resolved := config.withDefaults()
 
@@ -205,7 +207,7 @@ func decodeSecret(secret string) ([]byte, error) {
 }
 
 func newRecoveryCode() (string, error) {
-    /* six random bytes base32-encode (unpadded) to exactly ten characters, so the [:5]+"-"+[5:] split yields the documented xxxxx-xxxxx layout (48 bits of entropy — the tenth base32 character carries only the trailing three bits, the rest is zero padding); five bytes would only produce eight characters (xxxxx-xxx). */
+    /* six random bytes base32-encode, unpadded, to exactly ten characters, which the split lays out as xxxxx-xxxxx */
     raw := make([]byte, 6)
     if _, readErr := rand.Read(raw); nil != readErr {
         return "", exception.NewError("could not generate a recovery code", nil, readErr)

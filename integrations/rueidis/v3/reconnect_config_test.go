@@ -39,7 +39,7 @@ func TestResolveReconnectConfig_OverrideWinsPerField(t *testing.T) {
     }
 }
 
-/* @info a factor below 1 (or NaN) would decay the resubscribe backoff toward zero and turn a redis outage into a reconnect storm, so the resolver keeps the default instead */
+/* a factor below 1 (or NaN) would decay the resubscribe backoff toward zero and turn a redis outage into a reconnect storm, so the resolver keeps the default instead */
 func TestResolveReconnectConfig_SubUnitFactorKeepsTheDefault(t *testing.T) {
     for _, factor := range []float64{0.5, 0, -1, math.NaN()} {
         resolved := resolveReconnectConfig(&ReconnectConfig{BackoffFactor: factor})
@@ -54,7 +54,7 @@ func TestResolveReconnectConfig_SubUnitFactorKeepsTheDefault(t *testing.T) {
     }
 }
 
-/* @info an initial backoff above the cap would make the first resubscribe wait exceed the declared maximum, so the resolver clamps it onto the cap */
+/* an initial backoff above the cap would make the first resubscribe wait exceed the declared maximum, so the resolver clamps it onto the cap */
 func TestResolveReconnectConfig_InitialAboveTheCapClampsOntoTheCap(t *testing.T) {
     resolved := resolveReconnectConfig(&ReconnectConfig{InitialBackoff: 5 * time.Minute, MaxBackoff: 30 * time.Second})
 

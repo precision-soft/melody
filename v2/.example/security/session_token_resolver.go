@@ -1,6 +1,7 @@
 package security
 
 import (
+    "github.com/precision-soft/melody/v2/.example/entity"
     melodyhttp "github.com/precision-soft/melody/v2/http"
     melodyhttpcontract "github.com/precision-soft/melody/v2/http/contract"
     melodysecurity "github.com/precision-soft/melody/v2/security"
@@ -9,11 +10,13 @@ import (
 )
 
 const (
-    SessionKeySecurityUserId = "security.userId"
-    SessionKeySecurityRoles  = "security.roles"
+    SessionKeySecurityUserId            = "security.userId"
+    SessionKeySecurityRoles             = "security.roles"
+    SessionKeySecurityCredentialVersion = "security.credentialVersion"
 )
 
-func SessionTokenResolver() melodysecuritycontract.TokenResolver {
+/* SessionTokenResolver answers the token of the account the session names, with the account's CURRENT roles. A session that carries no credential version, or one the account does not hold, or that names an account which is gone or holds no role, is cleared and answers anonymous; a lookup that fails answers anonymous for this request and leaves the session alone, since the failure says nothing about the account. */
+func SessionTokenResolver(lookupUser SessionUserLookup) melodysecuritycontract.TokenResolver {
     return func(request melodyhttpcontract.Request) melodysecuritycontract.Token {
         sessionInstance := getSession(request)
         if nil == sessionInstance {
@@ -38,11 +41,41 @@ func SessionTokenResolver() melodysecuritycontract.TokenResolver {
             return melodysecurity.NewAnonymousToken()
         }
 
+        credentialVersion, ok := getStringFromSession(sessionInstance, SessionKeySecurityCredentialVersion)
+        if false == ok || "" == credentialVersion {
+            sessionInstance.Clear()
+
+            return melodysecurity.NewAnonymousToken()
+        }
+
+        user, found, lookupErr := lookupUser(request, userId)
+        if nil != lookupErr {
+            return melodysecurity.NewAnonymousToken()
+        }
+
+        if false == sessionAccountIsCurrent(user, found, userId, credentialVersion) {
+            sessionInstance.Clear()
+
+            return melodysecurity.NewAnonymousToken()
+        }
+
         return melodysecurity.NewAuthenticatedToken(
-            userId,
-            roles,
+            user.Id,
+            user.Roles,
         )
     }
+}
+
+func sessionAccountIsCurrent(user *entity.User, found bool, userId string, credentialVersion string) bool {
+    if false == found || nil == user {
+        return false
+    }
+
+    if userId != user.Id || "" == user.Password || 0 == len(user.Roles) {
+        return false
+    }
+
+    return credentialVersion == SessionCredentialVersion(user.Password)
 }
 
 func getSession(request melodyhttpcontract.Request) melodysessioncontract.Session {
@@ -83,7 +116,7 @@ func getStringFromSession(sessionInstance melodysessioncontract.Session, key str
     return typed, true
 }
 
-/* getStringSliceFromSession accepts the two spellings a role list has in a session: the []string the login handler writes, and the []any a file-backed storage answers after a restart — its snapshot round-trips through json, which keeps no element type. The second form is accepted only when EVERY element is a string; anything else stays a refusal. */
+/* getStringSliceFromSession accepts the two spellings a role list has in a session: the []string the login handler writes, and the []any a file-backed storage answers after a restart, since its json snapshot keeps no element type. The second form is accepted only when every element is a string. */
 func getStringSliceFromSession(sessionInstance melodysessioncontract.Session, key string) ([]string, bool) {
     if false == sessionInstance.Has(key) {
         return nil, false

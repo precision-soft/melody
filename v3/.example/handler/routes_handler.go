@@ -2,9 +2,9 @@ package handler
 
 import (
     nethttp "net/http"
-    "strings"
 
     "github.com/precision-soft/melody/v3/.example/presenter"
+    exampleurl "github.com/precision-soft/melody/v3/.example/url"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -16,34 +16,29 @@ type routeListingResponse struct {
     Example string `json:"example"`
 }
 
+/* RoutesHandler lists the routes a client may know about, through the framework's projection every page carries, which applies the RouteAttributeExpose opt-in and the caller's zone; walking the registry directly would list internal and admin routes to an anonymous caller. */
 func RoutesHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        routeRegistry := melodyhttp.RouteRegistryMustFromContainer(runtimeInstance.Container())
         urlGenerator := melodyhttp.UrlGeneratorMustFromContainer(runtimeInstance.Container())
 
-        definitions := routeRegistry.RouteDefinitions()
-        payload := make([]routeListingResponse, 0, len(definitions))
+        manifest, manifestErr := exampleurl.RouteManifestForRuntime(runtimeInstance)
+        if nil != manifestErr {
+            return nil, manifestErr
+        }
 
-        for _, definition := range definitions {
-            if nil == definition {
-                continue
-            }
+        payload := make([]routeListingResponse, 0, len(manifest.Routes))
 
-            name := strings.TrimSpace(definition.Name())
-            if "" == name {
-                continue
-            }
-
+        for _, entry := range manifest.Routes {
             examplePath, _ := urlGenerator.GeneratePath(
-                name,
+                entry.Name,
                 map[string]string{
                     "id": "1",
                 },
             )
 
             payload = append(payload, routeListingResponse{
-                Name:    name,
-                Pattern: definition.Pattern(),
+                Name:    entry.Name,
+                Pattern: entry.Pattern,
                 Example: examplePath,
             })
         }

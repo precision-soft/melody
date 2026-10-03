@@ -1,5 +1,11 @@
 package service
 
+import (
+    "net/url"
+
+    "github.com/precision-soft/melody/v3/.example/repository"
+)
+
 const (
     CacheKeyProductList  = "example-product-list"
     CacheKeyCategoryList = "example-category-list"
@@ -7,28 +13,52 @@ const (
     CacheKeyUserList     = "example-user-list"
 
     cacheKeyProductByIdPrefix    = "example-product-by-id"
+    cacheKeyProductViewsPrefix   = "example-product-views"
     cacheKeyCategoryByIdPrefix   = "example-category-by-id"
     cacheKeyCurrencyByIdPrefix   = "example-currency-by-id"
     cacheKeyUserByIdPrefix       = "example-user-by-id"
     cacheKeyUserByUsernamePrefix = "example-user-by-username"
 )
 
+/* cacheSafeIdentifierMaximumBytes keeps a composed key under the backends' 1024-byte ceiling with room for every prefix and for the escape, which can triple a byte; the widest column an identifier is stored in holds 255 bytes, so a longer one names no row. */
+const cacheSafeIdentifierMaximumBytes = 255
+
+/* CacheSafeIdentifier reports whether a caller-supplied identifier fits a cache key once escaped. An identifier that does not names a row no write door admits, so a lookup answers it as absent instead of asking the cache a question it would refuse. */
+func CacheSafeIdentifier(identifier string) bool {
+    if "" == identifier {
+        return false
+    }
+
+    return cacheSafeIdentifierMaximumBytes >= len(identifier)
+}
+
+/* cacheKeyPart escapes the one part of a key a client chose, since both cache backends refuse a key carrying a space or a newline. Escaping rather than refusing answers a name this application does not have as absent; the escape is reversible, so two values never fold onto one key, and it leaves an ordinary identifier untouched. */
+func cacheKeyPart(value string) string {
+    return url.PathEscape(value)
+}
+
 func CacheKeyProductById(id string) string {
-    return cacheKeyProductByIdPrefix + "-" + id
+    return cacheKeyProductByIdPrefix + "-" + cacheKeyPart(id)
+}
+
+/* CacheKeyProductViews names a product's view counter, written by the backend's own increment as decimal text rather than through the serializer, so no entity is ever cached under it */
+func CacheKeyProductViews(id string) string {
+    return cacheKeyProductViewsPrefix + "-" + cacheKeyPart(id)
 }
 
 func CacheKeyCategoryById(id string) string {
-    return cacheKeyCategoryByIdPrefix + "-" + id
+    return cacheKeyCategoryByIdPrefix + "-" + cacheKeyPart(id)
 }
 
 func CacheKeyCurrencyById(id string) string {
-    return cacheKeyCurrencyByIdPrefix + "-" + id
+    return cacheKeyCurrencyByIdPrefix + "-" + cacheKeyPart(id)
 }
 
 func CacheKeyUserById(id string) string {
-    return cacheKeyUserByIdPrefix + "-" + id
+    return cacheKeyUserByIdPrefix + "-" + cacheKeyPart(id)
 }
 
+/* CacheKeyUserByUsername folds the username itself, so the service that fills the entry and the listeners that drop it always build the same key. */
 func CacheKeyUserByUsername(username string) string {
-    return cacheKeyUserByUsernamePrefix + "-" + username
+    return cacheKeyUserByUsernamePrefix + "-" + cacheKeyPart(repository.NormalizedUsername(username))
 }

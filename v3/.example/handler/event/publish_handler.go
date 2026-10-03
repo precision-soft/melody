@@ -5,6 +5,7 @@ import (
 
     "github.com/precision-soft/melody/v3/.example/message"
     "github.com/precision-soft/melody/v3/.example/presenter"
+    melodybag "github.com/precision-soft/melody/v3/bag"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
     melodymessagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -12,12 +13,12 @@ import (
 
 func PublishHandler(bus melodymessagebuscontract.Bus) melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        topic := queryStringOr(request, "topic", "default")
+        topic := queryStringOr(request, "topic", CatalogTopic)
         text := queryStringOr(request, "text", "hello")
 
         _, dispatchErr := bus.Dispatch(runtimeInstance, message.Notification{Topic: topic, Text: text})
         if nil != dispatchErr {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "could not publish notification"), nil
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not publish notification", dispatchErr), nil
         }
 
         return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusAccepted, map[string]any{
@@ -27,24 +28,13 @@ func PublishHandler(bus melodymessagebuscontract.Bus) melodyhttpcontract.Handler
     }
 }
 
+/* queryStringOr falls back on a present but empty value too, where StringOrDefault answers the empty string. */
 func queryStringOr(request melodyhttpcontract.Request, name string, fallback string) string {
-    value, exists := request.Query().Get(name)
-    if false == exists {
+    value := melodybag.StringOrDefault(request.Query(), name, fallback)
+    if "" == value {
         return fallback
     }
 
-    switch typed := value.(type) {
-    case string:
-        if "" == typed {
-            return fallback
-        }
-        return typed
-    case []string:
-        if 0 == len(typed) || "" == typed[0] {
-            return fallback
-        }
-        return typed[0]
-    default:
-        return fallback
-    }
+    return value
 }
+

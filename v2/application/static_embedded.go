@@ -16,7 +16,7 @@ func newStaticFileServerOptions(
     embeddedPublicFiles fs.FS,
     configuration configcontract.Configuration,
 ) *static.Options {
-    /* the guard reads through the interface the way its environment sibling does: a typed-nil fs.FS passes the plain comparison and dies later as an anonymous nil dereference inside fs.Stat, instead of this refusal that names the argument */
+    /* read through the interface: a typed-nil fs.FS passes the plain comparison and would die later inside fs.Stat instead of in this refusal that names the argument */
     if true == internal.IsNilInterface(embeddedPublicFiles) {
         exception.Panic(
             exception.NewError(

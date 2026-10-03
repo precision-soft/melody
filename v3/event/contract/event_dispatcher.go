@@ -9,7 +9,12 @@ type ListenerRegistration struct {
     ListenerId uint64
 }
 
-/* RequiredListenerRegistrar is an optional interface an EventDispatcher may implement to mark registered listeners as required. When a listener stops event propagation before a required listener behind it (lower priority) has run, Dispatch/DispatchName return an error instead of silently completing, so a caller such as the http kernel fails closed rather than proceeding as if the required listener — for example the security access-control listener — had run. A listener that legitimately short-circuits past required listeners opts out through MarkListenerMaySkipRequiredListeners. Both marks default off, so a dispatcher and its callers behave exactly as before unless a listener is explicitly marked; the first listener error already aborts dispatch regardless. */
+/* SubscriberRegistration identifies one installation of a subscriber, as ListenerRegistration identifies one registration of a listener. The subscriber value cannot identify itself, since every zero-size value shares one address; the id is issued by the dispatcher and unique for its life, so two installations of one subscriber are removed independently. */
+type SubscriberRegistration struct {
+    SubscriberId uint64
+}
+
+/* RequiredListenerRegistrar is an optional interface an EventDispatcher may implement to mark registered listeners as required. When a listener stops propagation or fails before a required listener behind it has run, the dispatch returns an error, so a caller such as the http kernel fails closed; a listener that legitimately short-circuits opts out through MarkListenerMaySkipRequiredListeners. Both marks default off, and a failure travels as the cause of the refusal. */
 type RequiredListenerRegistrar interface {
     MarkListenerRequired(registration ListenerRegistration)
 
@@ -21,9 +26,11 @@ type EventDispatcher interface {
 
     RemoveListener(registration ListenerRegistration) bool
 
-    AddSubscriber(subscriber EventSubscriber)
+    /* AddSubscriber installs every listener the subscriber declares and answers the registration that owns them; hold it to remove them. */
+    AddSubscriber(subscriber EventSubscriber) SubscriberRegistration
 
-    RemoveSubscriber(subscriber EventSubscriber) int
+    /* RemoveSubscriber removes the listeners installed by one AddSubscriber call and answers how many were removed. An unknown registration removes nothing and answers zero. */
+    RemoveSubscriber(registration SubscriberRegistration) int
 
     /* Dispatch runs the listeners registered for the event's name in descending priority order. The first listener error aborts the remaining listeners and is returned alongside the (partially dispatched) event; callers decide the policy for partial dispatch. */
     Dispatch(runtimeInstance runtimecontract.Runtime, event Event) (Event, error)

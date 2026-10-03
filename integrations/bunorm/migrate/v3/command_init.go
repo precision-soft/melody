@@ -1,6 +1,7 @@
 package migrate
 
 import (
+
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/cli/output"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -34,43 +35,33 @@ func (instance *InitCommand) Flags() []clicontract.Flag {
     )
 }
 
-func (instance *InitCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
-    option := instance.base.optionFromCommand(commandContext)
-    outputInstance := newCommandOutput(commandContext.Writer, option)
+func (instance *InitCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+    return instance.base.run(instance.Name(), runtimeInstance, commandContext, instance.runInit)
+}
 
-    db, managerName, dbErr := instance.base.resolveDatabase(runtimeInstance, commandContext)
-    if nil != dbErr {
-        outputInstance.printError(dbErr)
-        return dbErr
+func (instance *InitCommand) runInit(
+    runtimeInstance runtimecontract.Runtime,
+    commandContext clicontract.Context,
+    outputInstance *commandOutput,
+) (runErr error) {
+    db, managerName, migrator, releaseDatabase, resolveErr := instance.base.resolveMigrator(runtimeInstance, commandContext, outputInstance)
+    if nil != resolveErr {
+        return resolveErr
     }
+    defer releaseDatabase()
 
-    migrator, migratorErr := instance.base.newMigrator(db)
-    if nil != migratorErr {
-        outputInstance.printError(migratorErr)
-        return migratorErr
-    }
-
-    if option.Verbose {
-        identity, identityErr := fetchDatabaseIdentity(runtimeInstance.Context(), db)
-        if nil != identityErr {
-            outputInstance.printError(identityErr)
-            return identityErr
-        }
-        if nil != identity {
-            outputInstance.printDatabaseBlock(identity)
-            outputInstance.newline()
-        }
+    if identityErr := instance.base.printDatabaseIdentity(runtimeInstance.Context(), db, outputInstance); nil != identityErr {
+        return identityErr
     }
 
     initErr := migrator.Init(runtimeInstance.Context())
     if nil != initErr {
-        outputInstance.printError(initErr)
         return initErr
     }
 
     outputInstance.printSuccess("migrations tables initialized")
 
-    if option.Verbose {
+    if true == outputInstance.wantsDetail() {
         outputInstance.newline()
         outputInstance.printDetailsBlock(map[string]string{
             "manager": managerName,

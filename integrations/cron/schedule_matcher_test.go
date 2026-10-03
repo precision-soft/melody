@@ -483,8 +483,7 @@ func TestScheduleMatcher_RejectsUngeneratableShapes(t *testing.T) {
     }
 }
 
-/* a step of exactly the field's cardinality is every scheduler's degenerate "just the low value" and stays accepted, admitting only the range's low value. */
-/* a step wider than the field is what crond does with it, not an error: busybox crond accepts `* / 90` (spaced here to keep this comment intact) and its expansion strides past the high bound on the first hop, so only the range's low value ever fires. The matcher clamps rather than rejects — rejecting would refuse a schedule the generator renders and crond runs — and the clamp is also what keeps a step near the integer maximum from overflowing the expansion loop into values the range never allowed. */
+/* a step wider than the field is what crond does with it, not an error: busybox crond accepts `* / 90` (spaced to keep this comment intact) and only the range's low value fires, as with a step of exactly the field's cardinality. The matcher clamps rather than refuses, which also keeps a step near the integer maximum from overflowing the expansion loop. */
 func TestScheduleMatcher_StepWiderThanTheFieldAdmitsOnlyTheLowValue(t *testing.T) {
     cases := []struct {
         name        string
@@ -539,7 +538,7 @@ func TestScheduleMatcher_AcceptedFieldsAreAlwaysGeneratable(t *testing.T) {
     }
 }
 
-/* a step on a single value ("5/15") is the one shape no two target schedulers agree on — measured: vixie crond rejects it as a bad field and refuses the WHOLE crontab (every entry in the file dies), busybox crond accepts it, robfig reads it as the range from that value up — so neither half picks a meaning: the matcher rejects it and the generator rejects it too, naming the rewrite all three read alike. */
+/* a step on a single value ("5/15") is the one shape the target schedulers disagree on: vixie crond refuses the whole crontab, busybox crond accepts it and robfig reads the range from that value up, so both halves refuse it and name the rewrite all three read alike. */
 func TestScheduleMatcher_SteppedSingleValueIsRejectedByBothHalves(t *testing.T) {
     cases := []struct {
         name     string
@@ -597,7 +596,7 @@ func TestScheduleMatcher_TheSuggestedExplicitRangeIsAccepted(t *testing.T) {
     }
 }
 
-/* the whitespace rule is one rule at one width across both halves. Embedded whitespace is the correctness half — measured against vixie crond, an ascii space, a vertical tab and a no-break space inside a field each fail the WHOLE crontab with "bad minute", dropping every entry in the file. Leading and trailing whitespace crond itself tolerates; both halves still refuse it, because the generator always has, and a matcher that repaired it would admit a schedule that cannot be generated. */
+/* the whitespace rule is one rule across both halves: an ascii space, a vertical tab or a no-break space inside a field fails the whole crontab under vixie crond, and leading or trailing whitespace, which crond tolerates, is refused by both halves so the matcher admits nothing the generator cannot render. */
 func TestScheduleMatcher_WhitespaceIsRejectedByBothHalves(t *testing.T) {
     fields := []string{" 5", "5 ", "1, 5", "1,\u00a05", "1\v-5", "1,\f5", "5\t", "1\u20285"}
 

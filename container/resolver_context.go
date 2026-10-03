@@ -5,6 +5,8 @@ import (
     "runtime"
     "sort"
     "strings"
+    "sync"
+    "sync/atomic"
 
     containercontract "github.com/precision-soft/melody/container/contract"
     "github.com/precision-soft/melody/exception"
@@ -38,11 +40,22 @@ func newScopeResolverContext(containerInstance *container, scopeInstance *scope)
 
 /* resolutionStack is the live chain of node keys one resolution is in the middle of building, held apart from the context so a provider's own view of the resolution can carry a different owner while still pushing and popping the one chain the cycle detection reads. */
 type resolutionStack struct {
-    keys []string
+    /* mutex serialises the chain: it belongs to one resolution, but a goroutine a provider starts before it returns can reach it through a retained view (container.Lazy) while the provider still resolves on it. That use is outside the Lazy contract and may read an interleaved chain; the mutex keeps it from being a memory race. */
+    mutex sync.Mutex
+    keys  []string
 }
 
 func newResolutionStack() *resolutionStack {
     return &resolutionStack{keys: make([]string, 0, 8)}
+}
+
+/* chainWithRepeatLocked spells the chain with the key that closes a cycle appended; the caller holds the mutex */
+func (instance *resolutionStack) chainWithRepeatLocked(repeatedKey string) string {
+    parts := make([]string, 0, len(instance.keys)+1)
+    parts = append(parts, instance.keys...)
+    parts = append(parts, repeatedKey)
+
+    return strings.Join(parts, " -> ")
 }
 
 type resolverContext struct {
@@ -51,17 +64,17 @@ type resolverContext struct {
     contextId         uint64
     rootRequestedKey  string
     stack             *resolutionStack
-    /* ownerKey is the node whose provider was handed this view of the resolution, and it is what a resolution performed after that provider returned belongs to. The live stack answers the question while the provider is running and is empty the moment it returns, so a service that holds its resolver and reaches through it later — container.Lazy, the ContainerCarrier pattern, any replay of deferred work — used to record no dependency edge at all, and the teardown then closed its dependencies in name order instead of after it. A handle built over the container itself has no owner and keeps that behaviour, because there is no node the container could be said to belong to. */
+    /* ownerKey is the node whose provider receives this view: a resolution through it after that provider returned is recorded as that node's dependency, so a service that keeps its resolver (container.Lazy, the ContainerCarrier pattern) is still closed before what it resolves. A handle built over the container itself has no owner. */
     ownerKey string
-    /* scopeSuspended is set while a provider registered on the CONTAINER builds its service, and it is what keeps the two apart. The container is request-agnostic: a service it owns is one instance for the whole process, so its construction may read only what the container holds. A request scope layers over the container for the code that runs inside a request, not underneath the container's own wiring, and a factory that reached through it would assemble a process-lifetime singleton out of one request's values.
-
-       Suspension is a refusal, not a substitution. A container provider that asks for something only a scope carries — the request context — is told the service does not exist, which is a wiring mistake reported where it is made; a provider that asks for the logger gets the container's agnostic one, because that is the logger a process-lifetime service should hold. Only the service actually being requested is looked up through the scope, which is the layering a caller means by resolving through a scope at all. */
+    /* scopeSuspended is set while a provider registered on the container builds its service: a process-lifetime singleton may read only what the container holds, never one request's values. Suspension is a refusal, not a substitution: a scope-only service is reported as not existing, the logger resolves to the container's own, and only the service actually requested is looked up through the scope. */
     scopeSuspended bool
+    /* providerReturned is set once the provider that received this view has returned; from then on the live chain belongs to the resolution above it, and a resolution through the view starts a chain of its own */
+    providerReturned atomic.Bool
+    /* late marks the view lateResolution answers: the edge it writes from its owner is weak, since a retained resolver — a Lazy handle — resolves what its owner was built without */
+    late bool
 }
 
-/* childOwnedBy is the view of this resolution handed to the provider of one node: the same container, the same scope, the same resolution id and the same live stack, so cycle detection and the wait graph are unchanged, with the owning node written on it. A provider that keeps it and resolves through it after it has returned is then still recorded as depending on what it resolves.
-
-The suspension rides on the view rather than being set on the shared context and restored afterwards: the caller's own resolution continues above this frame and must keep seeing the scope, and a restore that runs at the wrong moment — after a panic unwound past it, say — would leave the wrong answer behind for everything further up. */
+/* childOwnedBy is the view of this resolution handed to the provider of one node: the same container, scope, resolution id and live stack, with the owning node written on it. The suspension rides on the view rather than on the shared context, so the caller's resolution above this frame keeps seeing the scope, a panic included. */
 func (instance *resolverContext) childOwnedBy(nodeKey string, scopeSuspended bool) *resolverContext {
     return &resolverContext{
         containerInstance: instance.containerInstance,
@@ -74,8 +87,77 @@ func (instance *resolverContext) childOwnedBy(nodeKey string, scopeSuspended boo
     }
 }
 
+/* lateResolution answers the view a resolution through this one starts from once its provider has returned: a chain and a resolution id of its own, with the owner, the scope and the suspension kept, so the owner's dependency edge is still recorded while concurrent resolutions through one retained view — a Lazy built over a provider's resolver — never push onto one chain. The new chain is recorded in the wait graph as awaited by the resolution that handed this view out, so a cycle closed through the retained view while that resolution is still building is refused as circular instead of waiting on a creation its own caller holds; the edge can refuse only a wait on a creation that resolution owns, so it is written only while that resolution owns one, which spares a retained resolver used after the boot the exclusive lock, and the release, deferred by the caller, removes it. A view whose provider is still running answers nil and resolves on the live chain. */
+func (instance *resolverContext) lateResolution() (*resolverContext, func()) {
+    if false == instance.providerReturned.Load() {
+        return nil, nil
+    }
+
+    lateResolver := &resolverContext{
+        containerInstance: instance.containerInstance,
+        scopeInstance:     instance.scopeInstance,
+        contextId:         instance.containerInstance.resolverContextIdCounter.Add(1),
+        rootRequestedKey:  "",
+        stack:             newResolutionStack(),
+        ownerKey:          instance.ownerKey,
+        scopeSuspended:    instance.scopeSuspended,
+        late:              true,
+    }
+
+    containerInstance := instance.containerInstance
+
+    containerInstance.mutex.RLock()
+    ancestorBuilding := containerInstance.ownsCreationInFlightLocked(instance.contextId, instance.scopeInstance)
+    containerInstance.mutex.RUnlock()
+
+    if false == ancestorBuilding {
+        return lateResolver, func() {}
+    }
+
+    containerInstance.mutex.Lock()
+    containerInstance.recordResolverWaitEdgeLocked(instance.contextId, lateResolver.contextId)
+    containerInstance.mutex.Unlock()
+
+    return lateResolver, func() {
+        containerInstance.mutex.Lock()
+        defer containerInstance.mutex.Unlock()
+
+        containerInstance.clearResolverWaitLocked(instance.contextId, lateResolver.contextId)
+    }
+}
+
+/* writesWeakEdgeFrom answers whether the edge from parentKey is weak: one a late view writes from its owner, the resolution a retained resolver makes of what its owner was built without. An edge from a node on the late view's own chain is a provider's, written while it builds. */
+func (instance *resolverContext) writesWeakEdgeFrom(parentKey string) bool {
+    return true == instance.late && "" != parentKey && parentKey == instance.ownerKey
+}
+
+/* registerContainerEdgeLocked writes the edge into the container's graph, weak or strong as writesWeakEdgeFrom reads it. The container mutex is held. */
+func (instance *resolverContext) registerContainerEdgeLocked(parentKey string, nodeKey string) {
+    if true == instance.writesWeakEdgeFrom(parentKey) {
+        instance.containerInstance.registerWeakDependencyLocked(parentKey, nodeKey)
+
+        return
+    }
+
+    instance.containerInstance.registerDependencyLocked(parentKey, nodeKey)
+}
+
+/* registerScopedEdgeLocked writes the edge into the scope's graph, weak or strong as writesWeakEdgeFrom reads it. The container mutex is held. */
+func (instance *resolverContext) registerScopedEdgeLocked(scopeInstance *scope, parentKey string, nodeKey string) {
+    if true == instance.writesWeakEdgeFrom(parentKey) {
+        registerScopedWeakDependencyLocked(scopeInstance, parentKey, nodeKey)
+
+        return
+    }
+
+    registerScopedDependencyLocked(scopeInstance, parentKey, nodeKey)
+}
+
 /* parentNodeKey answers the node a resolution starting here depends on: the node currently being built while a provider is running, and the node that owns this view once it has returned. */
 func (instance *resolverContext) parentNodeKey() string {
+    instance.stack.mutex.Lock()
+    defer instance.stack.mutex.Unlock()
+
     if 0 < len(instance.stack.keys) {
         return instance.stack.keys[len(instance.stack.keys)-1]
     }
@@ -83,12 +165,33 @@ func (instance *resolverContext) parentNodeKey() string {
     return instance.ownerKey
 }
 
+/* claimRootRequestedKey records the key the resolution started from, once, and answers it; it reads and writes under the chain's mutex, since the views sharing one chain can be used from a goroutine the provider started */
+func (instance *resolverContext) claimRootRequestedKey(requestedKey string) string {
+    instance.stack.mutex.Lock()
+    defer instance.stack.mutex.Unlock()
+
+    if "" == instance.rootRequestedKey {
+        instance.rootRequestedKey = requestedKey
+    }
+
+    return instance.rootRequestedKey
+}
+
 /* scopeVisible reports whether this resolution may read the request scope. */
 func (instance *resolverContext) scopeVisible() bool {
     return nil != instance.scopeInstance && false == instance.scopeSuspended
 }
 
-/* containerNameStore keeps a finished service under its name in the container's own maps, and under the canonical type as well when the resolution was type-keyed. It runs under the container mutex. An override that was installed while the provider ran already occupies the name — it answers before anything is built — so the built value is handed back to the guard as the loser, and the name is marked container-built otherwise, which is what tells a later override that the value it evicts is the container's to close. */
+/* Closed reports whether what this resolution reads has stopped answering resolutions, the liveness question a LazyService built over a provider's resolver asks. A resolution that reads the request scope ends with its request; one that reads the container, a container provider's suspended view included, ends only when the teardown has finished. */
+func (instance *resolverContext) Closed() bool {
+    if true == instance.scopeVisible() {
+        return instance.scopeInstance.Closed()
+    }
+
+    return instance.containerInstance.resolutionsRefused()
+}
+
+/* containerNameStore keeps a finished service under its name in the container's maps, and under the canonical type too when the resolution was type-keyed; it runs under the container mutex. An override installed while the provider ran wins and the built value is handed back as the loser; otherwise the name is marked container-built, so a later override knows the value it evicts is the container's to close. */
 func containerNameStore(
     containerInstance *container,
     serviceName string,
@@ -138,11 +241,13 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
         return nil, exception.NewError("service name is required in get", nil, nil)
     }
 
-    if "" == instance.rootRequestedKey {
-        instance.rootRequestedKey = serviceName
+    if lateResolver, release := instance.lateResolution(); nil != lateResolver {
+        defer release()
+
+        return lateResolver.Get(serviceName)
     }
 
-    requestedKey := instance.rootRequestedKey
+    requestedKey := instance.claimRootRequestedKey(serviceName)
 
     /* whether the name belongs to this scope decides the node key, and the key has to be settled before it is pushed: the resolution stack is what tells the scope's own dependency graph which of its services depends on which, and a scoped node wearing the container's key would be indistinguishable from a container one. */
     scopedProvider := providerAny(nil)
@@ -158,16 +263,14 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
 
     parentKey := instance.parentNodeKey()
 
-    /* a resolution that has nothing to write takes the read lock instead of the exclusive one. Every resolution used to take the container's exclusive lock, even one that only reads a singleton built long ago, so dependency injection had a hard ceiling that did not move with the number of cores — the http kernel alone resolves four services per request, and an application cannot route around it without giving up the container.
-
-       Nothing to write means all three at once: no scope layered over this resolution, no node to record an edge for, and the instance already built. The last two are what keep the ordering guarantee intact — a resolution that would record an edge, including one made through a resolver a provider kept, falls through to the exclusive path that writes the graph. */
+    /* a resolution with nothing to write takes the read lock: no scope layered over it, no node to record an edge for, and the instance already built. A resolution that would record an edge, one through a resolver a provider kept included, takes the exclusive path that writes the graph. */
     if false == instance.scopeVisible() && "" == parentKey {
         instance.containerInstance.mutex.RLock()
         memoizedValue, memoized := instance.containerInstance.instances[serviceName]
         teardownFinished := instance.containerInstance.teardownFinished
         instance.containerInstance.mutex.RUnlock()
 
-        /* the fast path answers out of the map, so it is the path that must ask whether the map still means anything: the creation guard below refuses a closed container, but a memoized instance never reaches it, and a resolution performed after the teardown was answered with a closed service and a nil error */
+        /* the fast path answers out of the map, so it asks whether resolutions are still answered: a memoized instance never reaches the creation guard's closed check. */
         if true == teardownFinished {
             return nil, newContainerClosedError(serviceName)
         }
@@ -191,10 +294,10 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
 
         /* an installed override answers before anything is built, which is what keeps overriding a mechanism of its own rather than a competitor of registration */
         if true == exists {
-            /* the edge is recorded even though nothing is built: a scoped dependent resolving a scoped service the scope ALREADY holds depends on it exactly as hard as the resolution that built it, and without the edge the teardown falls back to closing the two in name order — the graph guarantee would hold only for whichever resolution happened to come first. */
+            /* the edge is recorded even though nothing is built: a scoped dependent depends as hard on a scoped service the scope already holds as on one it builds, whichever resolution came first. */
             if "" != parentKey && true == isScopedNodeKey(parentKey) && true == isScopedNodeKey(nodeKey) {
                 instance.containerInstance.mutex.Lock()
-                registerScopedDependencyLocked(instance.scopeInstance, parentKey, nodeKey)
+                instance.registerScopedEdgeLocked(instance.scopeInstance, parentKey, nodeKey)
                 instance.containerInstance.mutex.Unlock()
             }
 
@@ -208,7 +311,7 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
             defer instance.containerInstance.mutex.Unlock()
 
             if "" != parentKey && true == isScopedNodeKey(parentKey) {
-                registerScopedDependencyLocked(scopeInstance, parentKey, nodeKey)
+                instance.registerScopedEdgeLocked(scopeInstance, parentKey, nodeKey)
             }
 
             return instance.scopedServiceByName(scopeInstance, serviceName, scopedProvider, nil)
@@ -220,7 +323,7 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
 
     /* a scoped parent writes no edge into the container's graph: the teardown walks that graph only over container-created representatives, so a scope-keyed dependent is skipped there, while the scope's own teardown reads only the scope's graph — the entry would never be consulted, and the container's graph is never pruned, so a live-scope registration under a request-derived name would leave one permanent entry per name for the life of the process */
     if "" != parentKey && false == isScopedNodeKey(parentKey) && false == isScopedNodeKey(nodeKey) {
-        instance.containerInstance.registerDependencyLocked(
+        instance.registerContainerEdgeLocked(
             parentKey,
             nodeKey,
         )
@@ -313,13 +416,16 @@ func (instance *resolverContext) lookupByType(canonicalTargetType reflect.Type) 
     }
 }
 
-/* MustGet panics with the failure the way FromResolver returns it: a melody error travels out whole with the service name written into its context in place, and only a foreign error is wrapped naming the service — a rebuilt copy would shed the log level, the already-logged mark, the capture stack and every wrapper above it, and the mark shed here made one logged provider failure file a second record at the recovery site. */
+/* MustGet panics with the failure FromResolver would return: a melody error travels out whole with the service name written into its context, so it keeps its log level, its already-logged mark and its capture stack, and only a foreign error is wrapped naming the service. */
 func (instance *resolverContext) MustGet(serviceName string) any {
     value, getErr := instance.Get(serviceName)
     if nil != getErr {
         melodyErr, isMelodyErr := getErr.(*exception.Error)
+        /* the service name is written only where none is named yet, so a nested failure keeps the name of the service that failed */
         if true == isMelodyErr && nil != melodyErr {
-            melodyErr.SetContextValue("serviceName", serviceName)
+            if _, named := melodyErr.Context()["serviceName"]; false == named {
+                melodyErr.SetContextValue("serviceName", serviceName)
+            }
 
             exception.Panic(melodyErr)
         }
@@ -356,11 +462,13 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
         )
     }
 
-    if "" == instance.rootRequestedKey {
-        instance.rootRequestedKey = "type:" + typeIdentityKey(canonicalTargetType)
+    if lateResolver, release := instance.lateResolution(); nil != lateResolver {
+        defer release()
+
+        return lateResolver.GetByType(targetType)
     }
 
-    requestedKey := instance.rootRequestedKey
+    requestedKey := instance.claimRootRequestedKey("type:" + typeIdentityKey(canonicalTargetType))
     typeKey := typeIdentityKey(canonicalTargetType)
 
     /* the scoped registrations are looked up before the node key is settled, for the reason Get settles its own key early: the key is what the scope's dependency graph is built from. */
@@ -398,7 +506,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
             /* mirror Get: an already-held scoped instance is depended on as hard as one built by this resolution */
             if "" != parentKey && true == isScopedNodeKey(parentKey) && true == isScopedNodeKey(nodeKey) {
                 instance.containerInstance.mutex.Lock()
-                registerScopedDependencyLocked(instance.scopeInstance, parentKey, nodeKey)
+                instance.registerScopedEdgeLocked(instance.scopeInstance, parentKey, nodeKey)
                 instance.containerInstance.mutex.Unlock()
             }
 
@@ -440,7 +548,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
             defer instance.containerInstance.mutex.Unlock()
 
             if "" != parentKey && true == isScopedNodeKey(parentKey) {
-                registerScopedDependencyLocked(scopeInstance, parentKey, scopedNameNodeKey(serviceName))
+                instance.registerScopedEdgeLocked(scopeInstance, parentKey, scopedNameNodeKey(serviceName))
             }
 
             /* the type resolves through the name it is registered under, so a scoped service reached by name and by type is one instance rather than two */
@@ -454,7 +562,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
             defer instance.containerInstance.mutex.Unlock()
 
             if "" != parentKey && true == isScopedNodeKey(parentKey) {
-                registerScopedDependencyLocked(scopeInstance, parentKey, nodeKey)
+                instance.registerScopedEdgeLocked(scopeInstance, parentKey, nodeKey)
             }
 
             return instance.scopedServiceByType(scopeInstance, typeKey, canonicalTargetType, scopedTypeProvider)
@@ -466,7 +574,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
 
     /* the same parent filter as the by-name path: a scope-keyed dependent is skipped by the container teardown and the entry is never pruned, so recording it would only grow the graph */
     if "" != parentKey && false == isScopedNodeKey(parentKey) && false == isScopedNodeKey(nodeKey) {
-        instance.containerInstance.registerDependencyLocked(
+        instance.registerContainerEdgeLocked(
             parentKey,
             nodeKey,
         )
@@ -637,7 +745,7 @@ func (instance *resolverContext) MustGetByType(targetType reflect.Type) any {
     return value
 }
 
-/* Has answers under the same suspension Get enforces: a container-owned provider asking about a scope-only name used to hear "yes" from the very entries its Get would refuse, and an existence check that disagrees with the resolution it gates turns into a wiring decision made on one request's substitutes — or a Has-then-MustGet panic. */
+/* Has answers under the same suspension Get enforces, so a container-owned provider asking about a scope-only name hears no, as its Get would. */
 func (instance *resolverContext) Has(serviceName string) bool {
     if true == instance.scopeVisible() {
         return instance.scopeInstance.Has(serviceName)
@@ -663,13 +771,16 @@ func (instance *resolverContext) pushKey(creatingKey string) error {
         )
     }
 
+    instance.stack.mutex.Lock()
+    defer instance.stack.mutex.Unlock()
+
     for _, key := range instance.stack.keys {
         if key == creatingKey {
             return exception.NewError(
                 "circular service dependency detected",
                 exceptioncontract.Context{
                     "creatingKey": creatingKey,
-                    "stack":       instance.stackStringWithRepeat(creatingKey),
+                    "stack":       instance.stack.chainWithRepeatLocked(creatingKey),
                 },
                 nil,
             )
@@ -682,6 +793,9 @@ func (instance *resolverContext) pushKey(creatingKey string) error {
 }
 
 func (instance *resolverContext) popKey() {
+    instance.stack.mutex.Lock()
+    defer instance.stack.mutex.Unlock()
+
     if 0 == len(instance.stack.keys) {
         return
     }
@@ -690,11 +804,10 @@ func (instance *resolverContext) popKey() {
 }
 
 func (instance *resolverContext) stackStringWithRepeat(repeatedKey string) string {
-    parts := make([]string, 0, len(instance.stack.keys)+1)
-    parts = append(parts, instance.stack.keys...)
-    parts = append(parts, repeatedKey)
+    instance.stack.mutex.Lock()
+    defer instance.stack.mutex.Unlock()
 
-    return strings.Join(parts, " -> ")
+    return instance.stack.chainWithRepeatLocked(repeatedKey)
 }
 
 /* Container answers the container behind this resolution, the door a process-lifetime service uses to replay deferred work after this context's own resolution has ended. */

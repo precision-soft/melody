@@ -16,7 +16,7 @@ func Configure(app *melodyapplication.Application) {
         RunnerCommands:       cronRunnerCommands(),
     }))
 
-    /* registered whether or not a database is configured, so the command surface does not change between environments — the same rule catalog:journal follows; without one every db:* command fails at Run with the container refusal naming the registry service. The base family is pinned to the catalog manager by name, because with only the journal armed the registry's default falls back to the journal definition and an unpinned db:migrate would aim the mysql set at postgres; pinned, it refuses naming the absent manager instead. The journal context pins itself: its manager name defaults to the context name. */
+    /* registered whether or not a database is configured, so the command surface does not change between environments; without one every db:* command fails at Run naming the registry service. The base family is pinned to the catalog manager by name, since with only the journal armed an unpinned db:migrate would aim the mysql set at postgres; the journal context pins itself through its default manager name. */
     app.RegisterModule(bunormmigrate.NewModule(bunormmigrate.ModuleConfig{
         Migrations: migration.Migrations,
         Contexts: []bunormmigrate.ContextConfig{

@@ -67,10 +67,9 @@ func (instance *UserService) FindById(id string) (*entity.User, bool, error) {
 
     cacheKey := CacheKeyUserById(id)
 
-    cached, rememberErr := melodycache.Remember(
+    cached, rememberErr := rememberEntityOrAbsence(
         instance.cache,
         cacheKey,
-        0,
         func(ctx context.Context) (any, error) {
             user, found, findErr := instance.userRepository.FindById(ctx, id)
             if nil != findErr {
@@ -83,7 +82,6 @@ func (instance *UserService) FindById(id string) (*entity.User, bool, error) {
 
             return user, nil
         },
-        nil,
     )
     if nil != rememberErr {
         return nil, false, rememberErr
@@ -101,6 +99,15 @@ func (instance *UserService) FindById(id string) (*entity.User, bool, error) {
     return user, true, nil
 }
 
+func (instance *UserService) findByUsernameUncached(ctx context.Context, username string) (*entity.User, bool, error) {
+    normalizedUsername := repository.NormalizedUsername(username)
+    if false == CacheSafeIdentifier(normalizedUsername) {
+        return nil, false, nil
+    }
+
+    return instance.userRepository.FindByUsername(ctx, normalizedUsername)
+}
+
 func (instance *UserService) FindByUsername(username string) (*entity.User, bool, error) {
     /* CacheSafeIdentifier also refuses the empty spelling, so the blank-username answer travels through the same door */
     normalizedUsername := repository.NormalizedUsername(username)
@@ -110,10 +117,9 @@ func (instance *UserService) FindByUsername(username string) (*entity.User, bool
 
     cacheKey := CacheKeyUserByUsername(normalizedUsername)
 
-    cached, rememberErr := melodycache.Remember(
+    cached, rememberErr := rememberEntityOrAbsence(
         instance.cache,
         cacheKey,
-        0,
         func(ctx context.Context) (any, error) {
             user, found, findErr := instance.userRepository.FindByUsername(ctx, normalizedUsername)
             if nil != findErr {
@@ -126,7 +132,6 @@ func (instance *UserService) FindByUsername(username string) (*entity.User, bool
 
             return user, nil
         },
-        nil,
     )
     if nil != rememberErr {
         return nil, false, rememberErr
@@ -171,39 +176,23 @@ func (instance *UserService) Create(
     return user, nil
 }
 
+/* Update writes the change through the repository's locked door: the account is read from the directory, never from the cache, the guard decides on it under the lock, and a field the change leaves out is not written. The event carries the account the door wrote and the name it held before. */
 func (instance *UserService) Update(
     runtimeInstance melodyruntimecontract.Runtime,
     userId string,
-    username string,
-    passwordHash string,
-    roles []string,
+    change repository.UserChange,
+    guard repository.UserGuard,
 ) (*entity.User, bool, error) {
-    ctx := runtimeInstance.Context()
-
-    user, found, findErr := instance.userRepository.FindById(ctx, userId)
-    if nil != findErr {
-        return nil, false, findErr
-    }
-
-    if false == found {
-        return nil, false, nil
-    }
-
-    previousUsername := user.Username
-
-    user.Username = username
-    user.Password = passwordHash
-    user.Roles = roles
-
-    updated, updateErr := instance.userRepository.Update(ctx, user)
+    before, after, updateErr := instance.userRepository.Update(runtimeInstance.Context(), userId, change, guard)
     if nil != updateErr {
         return nil, false, updateErr
     }
-    if false == updated {
+
+    if nil == before {
         return nil, false, nil
     }
 
-    updatedEvent := event.NewUserUpdatedEvent(user, previousUsername)
+    updatedEvent := event.NewUserUpdatedEvent(after, before.Username)
     _, dispatchErr := instance.eventDispatcher.DispatchName(
         runtimeInstance,
         event.UserUpdatedEventName,
@@ -213,33 +202,25 @@ func (instance *UserService) Update(
         return nil, true, dispatchErr
     }
 
-    return user, true, nil
+    return after, true, nil
 }
 
+/* DeleteById removes the account through the repository's locked door, the guard deciding on the account the delete removes. */
 func (instance *UserService) DeleteById(
     runtimeInstance melodyruntimecontract.Runtime,
     userId string,
+    guard repository.UserGuard,
 ) (bool, error) {
-    ctx := runtimeInstance.Context()
-
-    user, found, findErr := instance.userRepository.FindById(ctx, userId)
-    if nil != findErr {
-        return false, findErr
-    }
-
-    if false == found {
-        return false, nil
-    }
-
-    deleted, deleteErr := instance.userRepository.DeleteById(ctx, userId)
+    removed, deleteErr := instance.userRepository.DeleteById(runtimeInstance.Context(), userId, guard)
     if nil != deleteErr {
         return false, deleteErr
     }
-    if false == deleted {
+
+    if nil == removed {
         return false, nil
     }
 
-    deletedEvent := event.NewUserDeletedEvent(userId, user.Username)
+    deletedEvent := event.NewUserDeletedEvent(removed.Id, removed.Username)
     _, dispatchErr := instance.eventDispatcher.DispatchName(
         runtimeInstance,
         event.UserDeletedEventName,
@@ -252,7 +233,9 @@ func (instance *UserService) DeleteById(
     return true, nil
 }
 
+/* AuthenticateByUsernameAndPassword reads the account through the repository rather than the cache, so a password change or a deletion the cache has not dropped yet cannot authenticate the replaced credential. The name is still refused as FindByUsername refuses it before any backend is asked. */
 func (instance *UserService) AuthenticateByUsernameAndPassword(
+    ctx context.Context,
     username string,
     password string,
 ) (*entity.User, bool, error) {
@@ -265,12 +248,12 @@ func (instance *UserService) AuthenticateByUsernameAndPassword(
         return nil, false, nil
     }
 
-    user, found, findErr := instance.FindByUsername(normalizedUsername)
+    user, found, findErr := instance.findByUsernameUncached(ctx, normalizedUsername)
     if nil != findErr {
         return nil, false, findErr
     }
     if false == found {
-        /* spend a bcrypt comparison on an absent username too: the found path below runs one, and returning here without it would answer an unknown username faster than a wrong password, an existence oracle an attacker times to enumerate usernames */
+        /* an absent username spends a bcrypt comparison too, so it is not answered faster than a wrong password: the timing would reveal which usernames exist */
         security.DummyPasswordMatch(password)
 
         return nil, false, nil

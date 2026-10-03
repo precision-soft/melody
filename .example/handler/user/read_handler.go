@@ -141,7 +141,7 @@ func normalizeRoles(roles []string) []string {
     return result
 }
 
-/* roleContainingComma reports the first role carrying a comma: the repository stores the role list comma-joined, so a role with one inside would come back as several roles on the next read — among them, possibly, an administrator nobody granted. */
+/* roleContainingComma reports the first role carrying a comma: the repository stores the list comma-joined, so such a role would come back as several roles, possibly one nobody granted. */
 func roleContainingComma(roles []string) (string, bool) {
     for _, role := range roles {
         if true == strings.Contains(role, ",") {

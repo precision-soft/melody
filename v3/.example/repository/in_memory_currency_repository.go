@@ -10,16 +10,24 @@ import (
 )
 
 func newInMemoryCurrencyRepository() CurrencyRepository {
-    return &inMemoryCurrencyRepository{currencies: seedCurrencyList()}
+    currencies := seedCurrencyList()
+
+    identifierList := make([]string, 0, len(currencies))
+    for _, currency := range currencies {
+        identifierList = append(identifierList, currency.Id)
+    }
+
+    return &inMemoryCurrencyRepository{currencies: currencies, mintFloor: seededFloor(identifierList, "cur-")}
 }
 
 type inMemoryCurrencyRepository struct {
     mutex      sync.RWMutex
     currencies []*entity.Currency
+    /* mintFloor is the highest identifier this repository ever stored, see raisedFloor */
+    mintFloor  string
 }
 
-/* @info the returned slice is a copy, but a shallow one: the entity pointers stay shared with the
-repository, so a caller that mutates an entity in place bypasses the lock */
+/* the slice is a shallow copy: the entity pointers stay shared with the repository, so a caller that mutates an entity in place bypasses the lock */
 func (instance *inMemoryCurrencyRepository) All(ctx context.Context) ([]*entity.Currency, error) {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
@@ -60,15 +68,20 @@ func (instance *inMemoryCurrencyRepository) Create(ctx context.Context, currency
     }
 
     if "" == strings.TrimSpace(currency.Id) {
-        currency.Id = nextCurrencyId(instance.identifierListLocked())
+        currency.Id = nextCurrencyId(append(instance.identifierListLocked(), instance.mintFloor))
     }
 
     _, exists := instance.findByIdLocked(currency.Id)
     if true == exists {
-        return fmt.Errorf("id already exists")
+        return ErrIdAlreadyExists
+    }
+
+    if true == instance.codeTakenByAnotherLocked(currency.Code, currency.Id) {
+        return ErrCurrencyCodeAlreadyExists
     }
 
     instance.currencies = append(instance.currencies, currency)
+    instance.mintFloor = raisedFloor(instance.mintFloor, currency.Id, "cur-")
     return nil
 }
 
@@ -95,7 +108,51 @@ func (instance *inMemoryCurrencyRepository) Update(ctx context.Context, currency
             continue
         }
 
-        instance.currencies[index] = currency
+        if true == instance.codeTakenByAnotherLocked(currency.Code, id) {
+            return false, ErrCurrencyCodeAlreadyExists
+        }
+
+        renamed := *existing
+        renamed.Code = currency.Code
+        renamed.Name = currency.Name
+        instance.currencies[index] = &renamed
+
+        return true, nil
+    }
+
+    return false, nil
+}
+
+func (instance *inMemoryCurrencyRepository) UpdateQuote(ctx context.Context, id string, quote entity.RateQuote) (bool, error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    normalizedId := strings.TrimSpace(id)
+    if "" == normalizedId {
+        return false, fmt.Errorf("id is required")
+    }
+
+    for index, existing := range instance.currencies {
+        if nil == existing || normalizedId != existing.Id {
+            continue
+        }
+
+        /* the judgement and the write are one step under the lock, as the database's conditional statement is one */
+        held := existing.Quote()
+        if true == quote.NamesTheSameReadingAs(held) {
+            return false, nil
+        }
+
+        if false == quote.ProviderAsOf.Equal(held.ProviderAsOf) && true == held.AsOf.After(quote.AsOf) {
+            return false, nil
+        }
+
+        quoted := *existing
+        quoted.Rate = quote.Rate
+        quoted.RateAsOf = quote.AsOf
+        quoted.ProviderRateAsOf = quote.ProviderAsOf
+        instance.currencies[index] = &quoted
+
         return true, nil
     }
 
@@ -125,6 +182,17 @@ func (instance *inMemoryCurrencyRepository) DeleteById(ctx context.Context, id s
     }
 
     return false, nil
+}
+
+/* codeTakenByAnotherLocked compares codes byte for byte, as the table's binary collation does: the service stores a code in its folded spelling, so both configurations hold one row per code */
+func (instance *inMemoryCurrencyRepository) codeTakenByAnotherLocked(code string, excludedId string) bool {
+    for _, existing := range instance.currencies {
+        if nil != existing && excludedId != existing.Id && code == existing.Code {
+            return true
+        }
+    }
+
+    return false
 }
 
 func (instance *inMemoryCurrencyRepository) identifierListLocked() []string {
