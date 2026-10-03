@@ -27,6 +27,7 @@ func NewContainer() containercontract.Container {
         collectionPriorityByName:    make(map[string]int),
         typeIdentityKeyToType:       make(map[string]reflect.Type),
         dependencyGraph:             make(map[string]map[string]struct{}),
+        weakDependencyEdges:         make(map[string]map[string]struct{}),
         builtServiceNames:           make(map[string]struct{}),
         creationOrderByNodeKey:      make(map[string]int),
 
@@ -56,6 +57,8 @@ type container struct {
     /* distinct types can share an identity key, so each key records its type and a second, different type under it is refused at registration */
     typeIdentityKeyToType map[string]reflect.Type
     dependencyGraph       map[string]map[string]struct{}
+    /* the edges of dependencyGraph only a resolution through a retained resolver wrote after its provider returned, a Lazy handle's; they yield in the teardown where they would close a ring */
+    weakDependencyEdges map[string]map[string]struct{}
     /* the name-keyed instances the container built, as opposed to installed overrides; an override replacing one leaves it to the teardown through replacedBuiltInstances */
     builtServiceNames      map[string]struct{}
     replacedBuiltInstances []any
@@ -469,13 +472,58 @@ func (instance *container) registerDependencyLocked(dependentKey string, depende
         return
     }
 
-    dependencies, exists := instance.dependencyGraph[dependentKey]
+    addDependencyEdge(instance.dependencyGraph, dependentKey, dependencyKey)
+
+    /* an edge a provider wrote while it built is strong, whatever wrote it before */
+    removeDependencyEdge(instance.weakDependencyEdges, dependentKey, dependencyKey)
+}
+
+/* registerWeakDependencyLocked records the edge a resolution through a retained resolver writes after its provider returned. It orders the teardown like any edge, but yields where it would close a ring; an edge already written strong stays strong. */
+func (instance *container) registerWeakDependencyLocked(dependentKey string, dependencyKey string) {
+    if "" == dependentKey || "" == dependencyKey {
+        return
+    }
+
+    if true == hasDependencyEdge(instance.dependencyGraph, dependentKey, dependencyKey) && false == hasDependencyEdge(instance.weakDependencyEdges, dependentKey, dependencyKey) {
+        return
+    }
+
+    addDependencyEdge(instance.dependencyGraph, dependentKey, dependencyKey)
+    addDependencyEdge(instance.weakDependencyEdges, dependentKey, dependencyKey)
+}
+
+func addDependencyEdge(graph map[string]map[string]struct{}, dependentKey string, dependencyKey string) {
+    dependencies, exists := graph[dependentKey]
     if false == exists {
         dependencies = make(map[string]struct{})
-        instance.dependencyGraph[dependentKey] = dependencies
+        graph[dependentKey] = dependencies
     }
 
     dependencies[dependencyKey] = struct{}{}
+}
+
+func removeDependencyEdge(graph map[string]map[string]struct{}, dependentKey string, dependencyKey string) {
+    dependencies, exists := graph[dependentKey]
+    if false == exists {
+        return
+    }
+
+    delete(dependencies, dependencyKey)
+
+    if 0 == len(dependencies) {
+        delete(graph, dependentKey)
+    }
+}
+
+func hasDependencyEdge(graph map[string]map[string]struct{}, dependentKey string, dependencyKey string) bool {
+    dependencies, exists := graph[dependentKey]
+    if false == exists {
+        return false
+    }
+
+    _, related := dependencies[dependencyKey]
+
+    return related
 }
 
 func (instance *container) register(

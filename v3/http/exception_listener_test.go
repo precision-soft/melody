@@ -508,8 +508,17 @@ func TestExceptionListener_UnmarkedError_LogsOneRecordAndMarksIt(t *testing.T) {
         t.Fatalf("expected exactly one record for an unmarked error, got %d", capture.errorCalls)
     }
 
-    if false == exception.IsAlreadyLogged(err) {
-        t.Fatalf("expected the listener to mark the error it logged")
+    /* the mark is the event's occurrence, never the error value, which another request can share */
+    if false == exception.IsAlreadyLogged(exceptionEvent.Err()) {
+        t.Fatalf("expected the listener to mark the occurrence it logged")
+    }
+
+    if true == exception.IsAlreadyLogged(err) {
+        t.Fatalf("expected the error value itself to stay unmarked")
+    }
+
+    if false == errors.Is(exceptionEvent.Err(), err) {
+        t.Fatalf("expected the marked occurrence to carry the error")
     }
 
     if nil == exceptionEvent.Response() {

@@ -3,6 +3,7 @@ package http
 import (
     "context"
     "errors"
+    "fmt"
     "io"
     nethttp "net/http"
     "net/http/httptest"
@@ -12,6 +13,8 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/cache"
+    "github.com/precision-soft/melody/clock"
     "github.com/precision-soft/melody/container"
     containercontract "github.com/precision-soft/melody/container/contract"
     "github.com/precision-soft/melody/event"
@@ -2401,14 +2404,22 @@ func TestLogHandlerError_ADeliberate4xxFilesOneWarningAndMarksTheError(t *testin
     capture := &exceptionListenerCaptureLogger{}
     handlerErr := exception.TooManyRequests("rate limit exceeded")
 
-    logHandlerError(capture, "controller handler error", handlerErr, httptest.NewRequest(nethttp.MethodGet, "/limited", nil))
+    reportedErr := logHandlerError(capture, "controller handler error", handlerErr, httptest.NewRequest(nethttp.MethodGet, "/limited", nil))
 
     if 1 != capture.warningCalls || 0 != capture.errorCalls {
         t.Fatalf("expected one warning and no error, got %d warnings %d errors", capture.warningCalls, capture.errorCalls)
     }
 
-    if false == exception.IsAlreadyLogged(handlerErr) {
-        t.Fatal("expected the record to mark the error, so the exception listener does not file it again")
+    if false == exception.IsAlreadyLogged(reportedErr) {
+        t.Fatal("expected the record to mark the reported occurrence, so the exception listener does not file it again")
+    }
+
+    if true == exception.IsAlreadyLogged(handlerErr) {
+        t.Fatal("expected the handler's error value to stay unmarked, so the next request that returns it files its own record")
+    }
+
+    if nethttp.StatusTooManyRequests != exception.AsHttpException(reportedErr).StatusCode() {
+        t.Fatal("expected the occurrence to keep the status of the error it carries")
     }
 }
 
@@ -3137,5 +3148,245 @@ func TestKernel_AnswersANotFoundWithoutAHandlerInTheRepresentationTheClientNegot
 
     if false == strings.HasPrefix(recorder.Body.String(), "404 not found\n") {
         t.Fatalf("expected the status line first, got %q", recorder.Body.String())
+    }
+}
+
+/* loggedMarkSentinelErr and loggedMarkWrappedSentinelErr are the package-level failure values an application returns from more than one request */
+var loggedMarkSentinelErr = exception.NewError("the shared failure", nil, nil)
+
+var loggedMarkWrappedSentinelErr = exception.NewError("the shared wrapped failure", nil, nil)
+
+/* servedLoggedMarkKernel serves one route over a kernel whose logger keeps every record, with the framework's exception listener installed */
+func servedLoggedMarkKernel(handler httpcontract.Handler) (nethttp.Handler, *recordsCaptureLogger) {
+    capture := &recordsCaptureLogger{}
+
+    serviceContainer := newHttpTestContainer()
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, capture)
+
+    RegisterKernelExceptionListener(event.EventDispatcherMustFromContainer(serviceContainer), false)
+
+    router := NewRouter()
+    router.Handle(nethttp.MethodGet, "/fail", handler)
+
+    return NewKernel(router).ServeHttp(serviceContainer), capture
+}
+
+func distinctRequestIdsOf(records []capturedRecord) map[string]bool {
+    requestIds := make(map[string]bool, len(records))
+    for _, record := range records {
+        requestId, _ := record.context["requestId"].(string)
+        requestIds[requestId] = true
+    }
+
+    return requestIds
+}
+
+/* every request that fails files its own record, whether the error value is fresh, a package-level sentinel or a sentinel wrapped by the handler: the logged mark belongs to one occurrence, never to the value. An error a lower layer filed and marked before it returned is not filed again. */
+func TestKernel_EveryRequestFilesItsOwnRecordOfASharedErrorValue(t *testing.T) {
+    cases := []struct {
+        name            string
+        handlerErr      func() error
+        expectedRecords int
+    }{
+        {name: "fresh", handlerErr: func() error { return exception.NewError("a fresh failure", nil, nil) }, expectedRecords: 3},
+        {name: "sentinel", handlerErr: func() error { return loggedMarkSentinelErr }, expectedRecords: 3},
+        {name: "wrapped sentinel", handlerErr: func() error { return fmt.Errorf("while serving: %w", loggedMarkWrappedSentinelErr) }, expectedRecords: 3},
+        {name: "filed by a lower layer", handlerErr: func() error { return exception.Logged(exception.NewError("filed below", nil, nil)) }, expectedRecords: 0},
+    }
+
+    for _, testCase := range cases {
+        t.Run(testCase.name, func(t *testing.T) {
+            handler, capture := servedLoggedMarkKernel(
+                func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                    return nil, testCase.handlerErr()
+                },
+            )
+
+            for requestIndex := 0; requestIndex < 3; requestIndex++ {
+                recorder := httptest.NewRecorder()
+                handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/fail", nil))
+
+                if nethttp.StatusInternalServerError != recorder.Code {
+                    t.Fatalf("expected 500, got %d", recorder.Code)
+                }
+            }
+
+            records := capture.failureRecords()
+            if testCase.expectedRecords != len(records) {
+                t.Fatalf("expected %d records over three requests, got %d", testCase.expectedRecords, len(records))
+            }
+
+            if testCase.expectedRecords != len(distinctRequestIdsOf(records)) {
+                t.Fatalf("expected each record to carry the id of its own request, got %v", distinctRequestIdsOf(records))
+            }
+        })
+    }
+
+    for _, shared := range []*exception.Error{loggedMarkSentinelErr, loggedMarkWrappedSentinelErr} {
+        if true == shared.AlreadyLogged() {
+            t.Fatalf("expected the shared value %q to carry no mark after the requests it failed", shared.Message())
+        }
+
+        if _, written := shared.Context()["requestId"]; true == written {
+            t.Fatalf("expected the shared value %q to carry no request's coordinates, got %v", shared.Message(), shared.Context())
+        }
+    }
+}
+
+/* the waiters of one remember flight are handed one error value: each request still files its own record, under its own request id */
+func TestKernel_TheWaitersOfOneRememberFlightFileOneRecordEach(t *testing.T) {
+    flightErr := exception.NewError("the flight failed", nil, nil)
+
+    cacheManager := cache.NewManager(cache.NewInMemoryBackend(16, time.Minute, clock.NewSystemClock()), cache.NewJsonSerializer())
+
+    var entered sync.WaitGroup
+    entered.Add(2)
+
+    release := make(chan struct{})
+
+    handler, capture := servedLoggedMarkKernel(
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            entered.Done()
+
+            _, rememberErr := cache.Remember(
+                cacheManager,
+                "the-flight",
+                time.Minute,
+                func(ctx context.Context) (any, error) {
+                    <-release
+
+                    return nil, flightErr
+                },
+                nil,
+            )
+
+            return nil, rememberErr
+        },
+    )
+
+    var served sync.WaitGroup
+    for requestIndex := 0; requestIndex < 2; requestIndex++ {
+        served.Add(1)
+
+        go func() {
+            defer served.Done()
+
+            handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/fail", nil))
+        }()
+    }
+
+    entered.Wait()
+    close(release)
+    served.Wait()
+
+    records := capture.failureRecords()
+    if 2 != len(records) {
+        t.Fatalf("expected one record per waiter of the flight, got %d", len(records))
+    }
+
+    if 2 != len(distinctRequestIdsOf(records)) {
+        t.Fatalf("expected each record to carry its own request id, got %v", distinctRequestIdsOf(records))
+    }
+}
+
+/* an application listener on the kernel exception event reads the mark the kernel left, as every reader of the mark does: a failure the kernel filed is not filed a second time by it */
+func TestKernel_AnApplicationListenerReadsTheMarkOfTheOccurrenceTheKernelFiled(t *testing.T) {
+    capture := &recordsCaptureLogger{}
+
+    serviceContainer := newHttpTestContainer()
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, capture)
+
+    eventDispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    eventDispatcher.AddListener(
+        kernelcontract.EventKernelException,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            exceptionEvent, ok := eventValue.Payload().(*KernelExceptionEvent)
+            if false == ok || true == exception.IsAlreadyLogged(exceptionEvent.Err()) {
+                return nil
+            }
+
+            capture.Error("application record", nil)
+
+            return nil
+        },
+        0,
+    )
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/fail",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return nil, loggedMarkSentinelErr
+        },
+    )
+
+    handler := NewKernel(router).ServeHttp(serviceContainer)
+
+    for requestIndex := 0; requestIndex < 2; requestIndex++ {
+        handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/fail", nil))
+    }
+
+    records := capture.failureRecords()
+    if 2 != len(records) {
+        t.Fatalf("expected one record per request and none from the application listener, got %d", len(records))
+    }
+
+    for _, record := range records {
+        if "application record" == record.message {
+            t.Fatalf("expected the application listener to read the occurrence as filed")
+        }
+    }
+}
+
+/* a panic carrying an error value other requests also raise files one record per request: the recovery hands on a marked occurrence, never a mark written into the value */
+func TestKernel_EveryPanicCarryingASharedErrorValueFilesItsOwnRecord(t *testing.T) {
+    sharedPanicErr := exception.NewError("the shared panic", nil, nil)
+
+    handler, capture := servedLoggedMarkKernel(
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            panic(sharedPanicErr)
+        },
+    )
+
+    for requestIndex := 0; requestIndex < 3; requestIndex++ {
+        handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/fail", nil))
+    }
+
+    if 3 != len(capture.failureRecords()) {
+        t.Fatalf("expected one record per request that panicked, got %d", len(capture.failureRecords()))
+    }
+
+    if true == sharedPanicErr.AlreadyLogged() {
+        t.Fatalf("expected the shared panic value to carry no mark")
+    }
+}
+
+/* in debug mode the payload shows the request's coordinates beside the error's own context, read from the occurrence the kernel marked, while the error value keeps none */
+func TestKernel_TheDebugPayloadShowsTheCoordinatesOfTheOccurrence(t *testing.T) {
+    sharedErr := exception.NewError("the shared failure in debug", map[string]any{"detail": "kept"}, nil)
+
+    serviceContainer := newHttpTestContainer()
+    RegisterKernelExceptionListener(event.EventDispatcherMustFromContainer(serviceContainer), true)
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/fail",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return nil, sharedErr
+        },
+    )
+
+    recorder := httptest.NewRecorder()
+    NewKernel(router).ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/fail", nil))
+
+    body := recorder.Body.String()
+    if false == strings.Contains(body, `"path":"/fail"`) || false == strings.Contains(body, `"detail":"kept"`) {
+        t.Fatalf("expected the debug payload to carry the error's context and the request's coordinates, got %s", body)
+    }
+
+    if _, written := sharedErr.Context()["path"]; true == written {
+        t.Fatalf("expected the error value to keep no request's coordinates, got %v", sharedErr.Context())
     }
 }

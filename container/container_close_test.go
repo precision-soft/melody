@@ -1859,3 +1859,116 @@ func TestContainer_Close_TheCycleRemainderClosesLatestFirst(t *testing.T) {
         t.Fatalf("expected the cycle remainder to close latest first, got %v", closeSequence)
     }
 }
+
+/* lazyRingHolder holds its partner through a Lazy handle, the handle that breaks a construction cycle */
+type lazyRingHolder struct {
+    recorder *closeOrderRecorder
+    partner  *LazyService[*lazyRingPartner]
+}
+
+func (instance *lazyRingHolder) Close() error {
+    instance.recorder.record("holder")
+    return nil
+}
+
+/* lazyRingPartner holds the holder directly, resolved while it was built */
+type lazyRingPartner struct {
+    recorder *closeOrderRecorder
+    holder   *lazyRingHolder
+}
+
+func (instance *lazyRingPartner) Close() error {
+    instance.recorder.record("partner")
+    return nil
+}
+
+/* registerLazyRing registers a holder whose Lazy handle names the partner and a partner whose provider resolves the holder; withPartnerDependency false leaves the partner without the holder, so the Lazy edge closes no ring */
+func registerLazyRing(t *testing.T, serviceContainer *container, recorder *closeOrderRecorder, withPartnerDependency bool) {
+    t.Helper()
+
+    if registerErr := serviceContainer.Register(
+        "app.lazy.holder",
+        func(resolver containercontract.Resolver) (*lazyRingHolder, error) {
+            return &lazyRingHolder{recorder: recorder, partner: Lazy[*lazyRingPartner](resolver, "app.lazy.partner")}, nil
+        },
+        WithoutTypeRegistration(),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.lazy.partner",
+        func(resolver containercontract.Resolver) (*lazyRingPartner, error) {
+            partner := &lazyRingPartner{recorder: recorder}
+            if true == withPartnerDependency {
+                holder, getErr := FromResolver[*lazyRingHolder](resolver, "app.lazy.holder")
+                if nil != getErr {
+                    return nil, getErr
+                }
+
+                partner.holder = holder
+            }
+
+            return partner, nil
+        },
+        WithoutTypeRegistration(),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+}
+
+/* a ring closed through a Lazy handle is not the operator's mistake: the handle exists to break the construction cycle, so its edge yields in the teardown and the order follows the edge the partner's provider wrote. Both services close once, in that order, and the teardown reports nothing. */
+func TestContainer_Close_ARingClosedThroughALazyHandleClosesClean(t *testing.T) {
+    serviceContainer := NewContainer().(*container)
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{mutex: &mutex, closeSequence: &closeSequence}
+
+    registerLazyRing(t, serviceContainer, recorder, true)
+
+    holder, getErr := FromResolver[*lazyRingHolder](serviceContainer, "app.lazy.holder")
+    if nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if _, resolveErr := holder.partner.Resolve(); nil != resolveErr {
+        t.Fatalf("unexpected lazy resolution error: %v", resolveErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("expected a clean teardown, got %v", closeErr)
+    }
+
+    if 2 != len(closeSequence) || "partner" != closeSequence[0] || "holder" != closeSequence[1] {
+        t.Fatalf("expected the partner closed before the holder it was built over, got %v", closeSequence)
+    }
+}
+
+/* the edge a Lazy handle writes still orders the teardown where it closes no ring: the holder closes before the partner it resolved later, against the latest-first order the creation stamps alone would give */
+func TestContainer_Close_ALazyEdgeThatClosesNoRingStillOrders(t *testing.T) {
+    serviceContainer := NewContainer().(*container)
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{mutex: &mutex, closeSequence: &closeSequence}
+
+    registerLazyRing(t, serviceContainer, recorder, false)
+
+    holder, getErr := FromResolver[*lazyRingHolder](serviceContainer, "app.lazy.holder")
+    if nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if _, resolveErr := holder.partner.Resolve(); nil != resolveErr {
+        t.Fatalf("unexpected lazy resolution error: %v", resolveErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("expected a clean teardown, got %v", closeErr)
+    }
+
+    if 2 != len(closeSequence) || "holder" != closeSequence[0] || "partner" != closeSequence[1] {
+        t.Fatalf("expected the holder closed before the partner its handle resolved, got %v", closeSequence)
+    }
+}

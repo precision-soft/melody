@@ -65,11 +65,12 @@ func RegisterKernelExceptionListener(eventDispatcher eventcontract.EventDispatch
                         }
                     }
 
-                    /* an error already logged is not filed again: the request coordinates are attached to it instead. Through the kernel every producer logs before it dispatches; this branch journals the dispatches made by hand, such as the rate-limit listener's. */
+                    /* an error already logged is not filed again: the request coordinates are attached to its occurrence instead. Through the kernel every producer logs before it dispatches; this branch journals the dispatches made by hand, such as the rate-limit listener's, and marks the event's own occurrence, never the error value, which another request can share. */
                     if true == exception.IsAlreadyLogged(exceptionEvent.Err()) {
                         attachRequestContextToError(exceptionEvent.Err(), requestId, method, path)
                     } else {
-                        _ = exception.MarkLogged(exceptionEvent.Err())
+                        exceptionEvent.err = newLoggedOccurrence(exceptionEvent.Err())
+                        attachRequestContextToError(exceptionEvent.err, requestId, method, path)
 
                         recordContext := exception.LogContext(
                             exceptionEvent.Err(),
@@ -113,7 +114,7 @@ func RegisterKernelExceptionListener(eventDispatcher eventcontract.EventDispatch
                 var melodyError *exception.Error
                 melodyErrorFound := errors.As(exceptionEvent.Err(), &melodyError)
                 if true == melodyErrorFound && nil != melodyError {
-                    payloadExtras["context"] = melodyError.Context()
+                    payloadExtras["context"] = withOccurrenceCoordinates(melodyError.Context(), exceptionEvent.Err())
 
                     causeErr := melodyError.CauseErr()
                     if nil != causeErr {
@@ -132,8 +133,29 @@ func RegisterKernelExceptionListener(eventDispatcher eventcontract.EventDispatch
     )
 }
 
-/* attachRequestContextToError carries the request coordinates onto an already-logged error. A key the error already holds is kept, and an empty coordinate is not written. */
+/* attachRequestContextToError carries the request coordinates onto an already-logged error: onto the occurrence the kernel marked when the chain holds one, so a value several requests share keeps no request's coordinates, and onto the nearest melody error otherwise, the error a lower layer filed itself. A key already held is kept, and an empty coordinate is not written. */
 func attachRequestContextToError(err error, requestId string, method string, path string) {
+    var occurrence *loggedOccurrence
+    if true == errors.As(err, &occurrence) && nil != occurrence {
+        for key, value := range map[string]string{
+            "requestId": requestId,
+            "method":    method,
+            "path":      path,
+        } {
+            if "" == value {
+                continue
+            }
+
+            if _, exists := occurrence.coordinates[key]; true == exists {
+                continue
+            }
+
+            occurrence.coordinates[key] = value
+        }
+
+        return
+    }
+
     var melodyError *exception.Error
     if false == errors.As(err, &melodyError) || nil == melodyError {
         return
@@ -185,4 +207,27 @@ func clientVisibleValidationErrors(errorsValue any) any {
     }
 
     return validationErrors.WithoutRuleWiringContext()
+}
+
+/* withOccurrenceCoordinates answers the context of the debug payload: the error's own context, with the coordinates of the occurrence the kernel marked under the keys the context does not hold. The error's context is copied, never written. */
+func withOccurrenceCoordinates(context exceptioncontract.Context, err error) exceptioncontract.Context {
+    var occurrence *loggedOccurrence
+    if false == errors.As(err, &occurrence) || nil == occurrence || 0 == len(occurrence.coordinates) {
+        return context
+    }
+
+    merged := make(exceptioncontract.Context, len(context)+len(occurrence.coordinates))
+    for key, value := range context {
+        merged[key] = value
+    }
+
+    for key, value := range occurrence.coordinates {
+        if _, exists := merged[key]; true == exists {
+            continue
+        }
+
+        merged[key] = value
+    }
+
+    return merged
 }

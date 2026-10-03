@@ -2345,3 +2345,54 @@ func TestScope_CloseWithContext_HandsTheCallersContextToTheEvictedAndTheReplacem
         })
     }
 }
+
+/* a ring of scoped services closed through a Lazy handle closes clean at the end of the request, as in the container: the handle's edge yields and the partner closes before the holder it was built over */
+func TestScopeClose_ARingClosedThroughALazyHandleClosesClean(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{mutex: &mutex, closeSequence: &closeSequence}
+
+    if registerErr := serviceContainer.RegisterScoped(
+        "app.scoped.lazy.holder",
+        func(resolver containercontract.Resolver) (*lazyRingHolder, error) {
+            return &lazyRingHolder{recorder: recorder, partner: Lazy[*lazyRingPartner](resolver, "app.scoped.lazy.partner")}, nil
+        },
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.RegisterScoped(
+        "app.scoped.lazy.partner",
+        func(resolver containercontract.Resolver) (*lazyRingPartner, error) {
+            holder, getErr := FromResolver[*lazyRingHolder](resolver, "app.scoped.lazy.holder")
+            if nil != getErr {
+                return nil, getErr
+            }
+
+            return &lazyRingPartner{recorder: recorder, holder: holder}, nil
+        },
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    scopeInstance := serviceContainer.NewScope()
+
+    holder, getErr := FromResolver[*lazyRingHolder](scopeInstance, "app.scoped.lazy.holder")
+    if nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+
+    if _, resolveErr := holder.partner.Resolve(); nil != resolveErr {
+        t.Fatalf("unexpected lazy resolution error: %v", resolveErr)
+    }
+
+    if closeErr := scopeInstance.Close(); nil != closeErr {
+        t.Fatalf("expected a clean scope teardown, got %v", closeErr)
+    }
+
+    if 2 != len(closeSequence) || "partner" != closeSequence[0] || "holder" != closeSequence[1] {
+        t.Fatalf("expected the partner closed before the holder it was built over, got %v", closeSequence)
+    }
+}

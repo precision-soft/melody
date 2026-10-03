@@ -37,6 +37,7 @@ func newScope(containerInstance *container, plan *scopePlan) containercontract.S
         creatingByName:  make(map[string]*creationState),
         creatingByType:  make(map[string]*creationState),
         dependencyGraph: make(map[string]map[string]struct{}),
+        weakDependencyEdges: make(map[string]map[string]struct{}),
 
         creationOrderByNodeKey: make(map[string]int),
     }
@@ -69,6 +70,8 @@ type scope struct {
     creatingByName  map[string]*creationState
     creatingByType  map[string]*creationState
     dependencyGraph map[string]map[string]struct{}
+    /* the scoped edges a retained resolver wrote after its provider returned, guarded like dependencyGraph */
+    weakDependencyEdges map[string]map[string]struct{}
     /* the order this scope's teardown nodes came into being, written under the scope mutex */
     creationOrderByNodeKey map[string]int
     creationOrderCounter   int
@@ -546,6 +549,7 @@ func (instance *scope) Close() error {
 func (instance *scope) CloseWithContext(closeContext context.Context) error {
     /* the dependency graph is guarded by the container mutex, so the snapshot takes the container lock first; an edge a racing creation misses degrades to creation order */
     dependencyGraph := map[string]map[string]struct{}(nil)
+    weakDependencyEdges := map[string]map[string]struct{}(nil)
 
     containerInstance := instance.container.Load()
     if nil != containerInstance {
@@ -558,6 +562,13 @@ func (instance *scope) CloseWithContext(closeContext context.Context) error {
             }
 
             dependencyGraph[dependentKey] = copiedDependencies
+        }
+
+        weakDependencyEdges = make(map[string]map[string]struct{}, len(instance.weakDependencyEdges))
+        for dependentKey, dependencySet := range instance.weakDependencyEdges {
+            for dependencyKey := range dependencySet {
+                addDependencyEdge(weakDependencyEdges, dependentKey, dependencyKey)
+            }
         }
         containerInstance.mutex.RUnlock()
     }
@@ -582,7 +593,7 @@ func (instance *scope) CloseWithContext(closeContext context.Context) error {
     /* the lock is released before anything is closed, with the scope already marked closed, so a Close reaching back reads a closed scope */
     instance.mutex.Unlock()
 
-    return closeCreatedScopeInstances(closeContext, createdInstances, createdTypeInstances, createdAliasNodeKeys, dependencyGraph, evictedCreatedInstances, creationOrderByNodeKey)
+    return closeCreatedScopeInstances(closeContext, createdInstances, createdTypeInstances, createdAliasNodeKeys, dependencyGraph, weakDependencyEdges, evictedCreatedInstances, creationOrderByNodeKey)
 }
 
 /* closeCreatedScopeInstances closes each service the scope built once, through CloseWithContext when the value carries it and Close otherwise, dependents before dependencies, creation order latest first as the tie-break. An instance filed under name and type is collapsed onto its name node first. A failing or panicking Close is recorded and the loop carries on. The evicted instances close after the ordered walk. */
@@ -592,6 +603,7 @@ func closeCreatedScopeInstances(
     createdTypeInstances map[reflect.Type]any,
     createdAliasNodeKeys map[string]string,
     dependencyGraph map[string]map[string]struct{},
+    weakDependencyEdges map[string]map[string]struct{},
     evictedCreatedInstances []any,
     creationOrderByNodeKey map[string]int,
 ) error {
@@ -642,6 +654,8 @@ func closeCreatedScopeInstances(
     }
 
     canonicalEdges := make(map[string]map[string]struct{}, len(canonicalNodeKeys))
+    weakCanonicalEdges := make(map[string]map[string]struct{})
+    strongCanonicalEdges := make(map[string]map[string]struct{}, len(canonicalNodeKeys))
     for dependentKey, dependencySet := range dependencyGraph {
         canonicalDependent, dependentExists := representativeOf[dependentKey]
         if false == dependentExists {
@@ -654,13 +668,13 @@ func closeCreatedScopeInstances(
                 continue
             }
 
-            dependencies, exists := canonicalEdges[canonicalDependent]
-            if false == exists {
-                dependencies = make(map[string]struct{})
-                canonicalEdges[canonicalDependent] = dependencies
-            }
+            addDependencyEdge(canonicalEdges, canonicalDependent, canonicalDependency)
 
-            dependencies[canonicalDependency] = struct{}{}
+            if true == hasDependencyEdge(weakDependencyEdges, dependentKey, dependencyKey) {
+                addDependencyEdge(weakCanonicalEdges, canonicalDependent, canonicalDependency)
+            } else {
+                addDependencyEdge(strongCanonicalEdges, canonicalDependent, canonicalDependency)
+            }
         }
     }
 
@@ -680,7 +694,7 @@ func closeCreatedScopeInstances(
     }
 
     /* a scope closes serially; the waves the shared drain computes are dropped */
-    closeOrder, _, cycleNodeKeys := teardownCloseOrder(canonicalNodeKeys, canonicalEdges, canonicalCreationOrder)
+    closeOrder, _, cycleNodeKeys, _ := teardownCloseOrderYieldingWeakEdges(canonicalNodeKeys, canonicalEdges, weakOnlyEdges(weakCanonicalEdges, strongCanonicalEdges), canonicalCreationOrder)
 
     closedPointers := make(map[pointerIdentity]struct{})
     closedValues := make(map[any]struct{})

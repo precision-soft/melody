@@ -247,6 +247,8 @@ func (instance *container) closeInternal() error {
 
     /* the graph is stated in the container's own node keys, so it is translated into the canonical keys the teardown walks — the ones an alias of the same instance was collapsed onto — before the shared ordering runs over it */
     canonicalEdges := make(map[string]map[string]struct{}, len(canonicalNodeKeys))
+    weakCanonicalEdges := make(map[string]map[string]struct{})
+    strongCanonicalEdges := make(map[string]map[string]struct{}, len(canonicalNodeKeys))
 
     for dependentKey, dependencySet := range instance.dependencyGraph {
         canonicalDependent, dependentCreated := representativeOf[dependentKey]
@@ -260,13 +262,14 @@ func (instance *container) closeInternal() error {
                 continue
             }
 
-            dependencies, exists := canonicalEdges[canonicalDependent]
-            if false == exists {
-                dependencies = make(map[string]struct{})
-                canonicalEdges[canonicalDependent] = dependencies
-            }
+            addDependencyEdge(canonicalEdges, canonicalDependent, canonicalDependency)
 
-            dependencies[canonicalDependency] = struct{}{}
+            /* a canonical edge is weak only while every edge translated onto it is weak */
+            if true == hasDependencyEdge(instance.weakDependencyEdges, dependentKey, dependencyKey) {
+                addDependencyEdge(weakCanonicalEdges, canonicalDependent, canonicalDependency)
+            } else {
+                addDependencyEdge(strongCanonicalEdges, canonicalDependent, canonicalDependency)
+            }
         }
     }
 
@@ -285,7 +288,7 @@ func (instance *container) closeInternal() error {
         }
     }
 
-    closeOrder, remaining := teardownCloseOrder(canonicalNodeKeys, canonicalEdges, canonicalCreationOrder)
+    closeOrder, remaining := teardownCloseOrderYieldingWeakEdges(canonicalNodeKeys, canonicalEdges, weakOnlyEdges(weakCanonicalEdges, strongCanonicalEdges), canonicalCreationOrder)
 
     dependencyCycleDetected := 0 < len(remaining)
 
@@ -531,6 +534,87 @@ func pointerKeyOf(value any) (pointerIdentity, bool) {
     }
 
     return pointerIdentity{}, false
+}
+
+/* teardownCloseOrderYieldingWeakEdges orders the teardown, and where a ring remains lets the weak edges that lie on a ring yield and orders again over the edges they leave: a ring closed through a Lazy handle is ordered by the edges its providers wrote while they built, and only a ring of strong edges stays a cycle. */
+func teardownCloseOrderYieldingWeakEdges(
+    nodeKeys []string,
+    edges map[string]map[string]struct{},
+    weakEdges map[string]map[string]struct{},
+    creationOrderOf map[string]int,
+) ([]string, []string) {
+    closeOrder, cycleNodeKeys := teardownCloseOrder(nodeKeys, edges, creationOrderOf)
+    if 0 == len(cycleNodeKeys) || 0 == len(weakEdges) {
+        return closeOrder, cycleNodeKeys
+    }
+
+    yieldedEdges := make(map[string]map[string]struct{}, len(edges))
+    for dependentKey, dependencySet := range edges {
+        for dependencyKey := range dependencySet {
+            addDependencyEdge(yieldedEdges, dependentKey, dependencyKey)
+        }
+    }
+
+    yielded := false
+    for dependentKey, dependencySet := range weakEdges {
+        for dependencyKey := range dependencySet {
+            /* a weak edge lies on a ring exactly when its dependency reaches its dependent */
+            if false == dependencyReaches(edges, dependencyKey, dependentKey) {
+                continue
+            }
+
+            removeDependencyEdge(yieldedEdges, dependentKey, dependencyKey)
+            yielded = true
+        }
+    }
+
+    if false == yielded {
+        return closeOrder, cycleNodeKeys
+    }
+
+    return teardownCloseOrder(nodeKeys, yieldedEdges, creationOrderOf)
+}
+
+/* weakOnlyEdges answers the weak edges no strong edge shares */
+func weakOnlyEdges(weakEdges map[string]map[string]struct{}, strongEdges map[string]map[string]struct{}) map[string]map[string]struct{} {
+    weakOnly := make(map[string]map[string]struct{}, len(weakEdges))
+    for dependentKey, dependencySet := range weakEdges {
+        for dependencyKey := range dependencySet {
+            if true == hasDependencyEdge(strongEdges, dependentKey, dependencyKey) {
+                continue
+            }
+
+            addDependencyEdge(weakOnly, dependentKey, dependencyKey)
+        }
+    }
+
+    return weakOnly
+}
+
+/* dependencyReaches answers whether target is reachable from start along the edges */
+func dependencyReaches(edges map[string]map[string]struct{}, start string, target string) bool {
+    visited := map[string]struct{}{start: {}}
+    pending := []string{start}
+
+    for 0 < len(pending) {
+        current := pending[len(pending)-1]
+        pending = pending[:len(pending)-1]
+
+        if current == target {
+            return true
+        }
+
+        for next := range edges[current] {
+            if _, seen := visited[next]; true == seen {
+                continue
+            }
+
+            visited[next] = struct{}{}
+            pending = append(pending, next)
+        }
+    }
+
+    return false
 }
 
 /* teardownCloseOrder orders a set of created services for closing: a dependent before everything it depends on, ties broken by creation order, latest first (see closesBefore). An edge naming a node that was not created is dropped, a self-edge is ignored, and what a cycle leaves is returned separately so the caller can close it and report it. The container and the request scope share this walk, so their two teardowns cannot order differently. */

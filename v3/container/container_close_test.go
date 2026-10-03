@@ -4221,3 +4221,67 @@ func TestContainer_Close_APanicValueWhoseRenderingPanicsIsRecordedInsteadOfEscap
         t.Fatalf("expected the panic recorded against its service, got %+v", typedError.Context())
     }
 }
+
+/* a ring closed through a Lazy handle is not the operator's mistake: the handle exists to break the construction cycle, so its edge yields in the teardown and the order follows the edge the partner's provider wrote. Both services close once, in that order, and the teardown reports nothing. */
+func TestContainer_Close_ARingClosedThroughALazyHandleClosesClean(t *testing.T) {
+    serviceContainer := NewContainer().(*container)
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{mutex: &mutex, closeSequence: &closeSequence}
+
+    registerLazyRing(t, serviceContainer, recorder, true)
+
+    holder, getErr := FromResolver[*lazyRingHolder](serviceContainer, "app.lazy.holder")
+    if nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if _, resolveErr := holder.partner.Resolve(); nil != resolveErr {
+        t.Fatalf("unexpected lazy resolution error: %v", resolveErr)
+    }
+
+    serviceContainer.mutex.Lock()
+    cycleNodeKeys := serviceContainer.teardownPlanLocked().cycleNodeKeys
+    serviceContainer.mutex.Unlock()
+
+    if 0 != len(cycleNodeKeys) {
+        t.Fatalf("expected the plan to hold no cycle for a ring closed through a Lazy handle, got %v", cycleNodeKeys)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("expected a clean teardown, got %v", closeErr)
+    }
+
+    if 2 != len(closeSequence) || "partner" != closeSequence[0] || "holder" != closeSequence[1] {
+        t.Fatalf("expected the partner closed before the holder it was built over, got %v", closeSequence)
+    }
+}
+
+/* the edge a Lazy handle writes still orders the teardown where it closes no ring: the holder closes before the partner it resolved later, against the latest-first order the creation stamps alone would give */
+func TestContainer_Close_ALazyEdgeThatClosesNoRingStillOrders(t *testing.T) {
+    serviceContainer := NewContainer().(*container)
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{mutex: &mutex, closeSequence: &closeSequence}
+
+    registerLazyRing(t, serviceContainer, recorder, false)
+
+    holder, getErr := FromResolver[*lazyRingHolder](serviceContainer, "app.lazy.holder")
+    if nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if _, resolveErr := holder.partner.Resolve(); nil != resolveErr {
+        t.Fatalf("unexpected lazy resolution error: %v", resolveErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("expected a clean teardown, got %v", closeErr)
+    }
+
+    if 2 != len(closeSequence) || "holder" != closeSequence[0] || "partner" != closeSequence[1] {
+        t.Fatalf("expected the holder closed before the partner its handle resolved, got %v", closeSequence)
+    }
+}

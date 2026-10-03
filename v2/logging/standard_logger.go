@@ -12,12 +12,15 @@ func NewStandardErrorLogger(logger loggingcontract.Logger, message string) *log.
     return log.New(&standardLogWriter{logger: logger, message: message}, "", 0)
 }
 
+/* netHttpPanicLinePrefix opens the line net/http's server writes for a panic it recovered while serving a connection */
+const netHttpPanicLinePrefix = "http: panic serving "
+
 type standardLogWriter struct {
     logger  loggingcontract.Logger
     message string
 }
 
-/* Write files one record per line the standard logger emits, at warning. The line travels in the context, so the message stays one groupable string. */
+/* Write files one record per line the standard logger emits: at error for a handler panic net/http recovered, a defect that closed the connection, and at warning for every other line, a failure of the connection the kernel never saw. The line travels in the context, so the message stays one groupable string. */
 func (instance *standardLogWriter) Write(data []byte) (int, error) {
     written := len(data)
 
@@ -30,12 +33,17 @@ func (instance *standardLogWriter) Write(data []byte) (int, error) {
         return written, nil
     }
 
-    instance.logger.Warning(
-        instance.message,
-        loggingcontract.Context{
-            "line": line,
-        },
-    )
+    context := loggingcontract.Context{
+        "line": line,
+    }
+
+    if true == strings.HasPrefix(line, netHttpPanicLinePrefix) {
+        instance.logger.Error(instance.message, context)
+
+        return written, nil
+    }
+
+    instance.logger.Warning(instance.message, context)
 
     return written, nil
 }

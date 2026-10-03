@@ -148,13 +148,22 @@ func registerScopedDependencyLocked(scopeInstance *scope, dependentKey string, d
         return
     }
 
-    dependencies, exists := scopeInstance.dependencyGraph[dependentKey]
-    if false == exists {
-        dependencies = make(map[string]struct{})
-        scopeInstance.dependencyGraph[dependentKey] = dependencies
+    addDependencyEdge(scopeInstance.dependencyGraph, dependentKey, dependencyKey)
+    removeDependencyEdge(scopeInstance.weakDependencyEdges, dependentKey, dependencyKey)
+}
+
+/* registerScopedWeakDependencyLocked records the scoped edge a retained resolver writes after its provider returned, as registerWeakDependencyLocked does for the container. */
+func registerScopedWeakDependencyLocked(scopeInstance *scope, dependentKey string, dependencyKey string) {
+    if "" == dependentKey || "" == dependencyKey {
+        return
     }
 
-    dependencies[dependencyKey] = struct{}{}
+    if true == hasDependencyEdge(scopeInstance.dependencyGraph, dependentKey, dependencyKey) && false == hasDependencyEdge(scopeInstance.weakDependencyEdges, dependentKey, dependencyKey) {
+        return
+    }
+
+    addDependencyEdge(scopeInstance.dependencyGraph, dependentKey, dependencyKey)
+    addDependencyEdge(scopeInstance.weakDependencyEdges, dependentKey, dependencyKey)
 }
 
 func isScopedNodeKey(nodeKey string) bool {

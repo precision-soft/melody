@@ -186,8 +186,6 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                         },
                     ),
                 )
-
-                _ = exception.Logged(recoveredErr)
             }
 
             if true == writer.HeadersWritten() {
@@ -426,7 +424,8 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                     ),
                 )
 
-                reportedErr = exception.Logged(recoveredErr)
+                /* the report hands on a marked carrier of this occurrence, never a mark written into the recovered value, which other requests can share */
+                reportedErr = newLoggedOccurrence(recoveredErr)
             }
 
             exceptionEvent := instance.newKernelExceptionEvent(runtimeInstance, melodyRequest, reportedErr)
@@ -964,7 +963,7 @@ func normalizeBodyLimitError(handlerErr error) error {
     return handlerErr
 }
 
-/* logHandlerError files the one record for a handler-returned failure: an error already logged is not filed again, a deliberate 4xx is a warning, the request context's own cancellation is named as the client's, and everything else is an error, a 4xx whose validation errors blame the declaration included. The returned error is the one the caller puts on the exception event, wrapped in a marked carrier when the original has nowhere for the mark to live, so the exception listener attaches its request coordinates instead of filing a second record. */
+/* logHandlerError files the one record for a handler-returned failure: an error already logged is not filed again, a deliberate 4xx is a warning, the request context's own cancellation is named as the client's, and everything else is an error, a 4xx whose validation errors blame the declaration included. The returned error is the one the caller puts on the exception event: a marked carrier of this occurrence, so the exception listener attaches its request coordinates instead of filing a second record, and the value the handler returned is never marked, so the next request that returns it files its own record. */
 func logHandlerError(requestLogger loggingcontract.Logger, message string, handlerErr error, httpRequest *nethttp.Request) error {
     if true == exception.IsAlreadyLogged(handlerErr) {
         return handlerErr
@@ -1001,8 +1000,39 @@ func logHandlerError(requestLogger loggingcontract.Logger, message string, handl
         requestLogger.Error(message, logContext)
     }
 
-    return exception.Logged(handlerErr)
+    return newLoggedOccurrence(handlerErr)
 }
+
+/* loggedOccurrence is the mark of one request's failure, carried beside the error instead of written into it. An application returns one error value from many requests — a package-level sentinel, a remember flight's answer to every waiter — so a mark or a coordinate written into the value would silence the records of the requests that follow and label them with the first one's coordinates. It reports itself logged at the outermost link, is read through by errors.Is and errors.As, holds the coordinates of its request for the debug payload, and is not a context provider, so the context of the error it carries is read as before. */
+type loggedOccurrence struct {
+    err         error
+    coordinates map[string]string
+}
+
+func newLoggedOccurrence(err error) error {
+    if true == internal.IsNilInterface(err) {
+        return err
+    }
+
+    return &loggedOccurrence{err: err, coordinates: make(map[string]string)}
+}
+
+func (instance *loggedOccurrence) Error() string {
+    return instance.err.Error()
+}
+
+func (instance *loggedOccurrence) Unwrap() error {
+    return instance.err
+}
+
+func (instance *loggedOccurrence) AlreadyLogged() bool {
+    return true
+}
+
+/* MarkAsLogged leaves nothing to do: the carrier exists only as the mark */
+func (instance *loggedOccurrence) MarkAsLogged() {}
+
+var _ exceptioncontract.AlreadyLogged = (*loggedOccurrence)(nil)
 
 func (instance *Kernel) logEventDispatchError(
     logger loggingcontract.Logger,

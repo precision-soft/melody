@@ -357,3 +357,60 @@ func localCollisionProviderSecond() any {
         return &Local{}, nil
     }
 }
+
+/* lazyRingHolder holds its partner through a Lazy handle, the handle that breaks a construction cycle */
+type lazyRingHolder struct {
+    recorder *closeOrderRecorder
+    partner  *LazyService[*lazyRingPartner]
+}
+
+func (instance *lazyRingHolder) Close() error {
+    instance.recorder.record("holder")
+    return nil
+}
+
+/* lazyRingPartner holds the holder directly, resolved while it was built */
+type lazyRingPartner struct {
+    recorder *closeOrderRecorder
+    holder   *lazyRingHolder
+}
+
+func (instance *lazyRingPartner) Close() error {
+    instance.recorder.record("partner")
+    return nil
+}
+
+/* registerLazyRing registers a holder whose Lazy handle names the partner and a partner whose provider resolves the holder; withPartnerDependency false leaves the partner without the holder, so the Lazy edge closes no ring */
+func registerLazyRing(t *testing.T, serviceContainer *container, recorder *closeOrderRecorder, withPartnerDependency bool) {
+    t.Helper()
+
+    if registerErr := serviceContainer.Register(
+        "app.lazy.holder",
+        func(resolver containercontract.Resolver) (*lazyRingHolder, error) {
+            return &lazyRingHolder{recorder: recorder, partner: Lazy[*lazyRingPartner](resolver, "app.lazy.partner")}, nil
+        },
+        WithoutTypeRegistration(),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.lazy.partner",
+        func(resolver containercontract.Resolver) (*lazyRingPartner, error) {
+            partner := &lazyRingPartner{recorder: recorder}
+            if true == withPartnerDependency {
+                holder, getErr := FromResolver[*lazyRingHolder](resolver, "app.lazy.holder")
+                if nil != getErr {
+                    return nil, getErr
+                }
+
+                partner.holder = holder
+            }
+
+            return partner, nil
+        },
+        WithoutTypeRegistration(),
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+}

@@ -905,3 +905,46 @@ func TestResolverContext_ACycleClosedThroughALazyAmongScopedServicesIsRefusedAsC
         t.Fatalf("the resolution did not answer within 5s")
     }
 }
+
+/* MustGet keeps the service name a failure already carries, as FromResolver does */
+func TestResolverContext_MustGet_KeepsTheServiceNameANestedFailureCarries(t *testing.T) {
+    nestedErr := exception.NewError(
+        "service is not registered",
+        map[string]any{"serviceName": "app.nested"},
+        nil,
+    )
+
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "app.failing",
+        func(resolver containercontract.Resolver) (*resolverContextMustProbe, error) {
+            return nil, nestedErr
+        },
+        WithoutTypeRegistration(),
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    registerErr = serviceContainer.Register(
+        "app.outer",
+        func(resolver containercontract.Resolver) (*resolverContextMustDependent, error) {
+            _ = resolver.MustGet("app.failing")
+
+            return &resolverContextMustDependent{}, nil
+        },
+        WithoutTypeRegistration(),
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get("app.outer"); nil == getErr {
+        t.Fatalf("expected the nested failure to fail the resolution")
+    }
+
+    if "app.nested" != nestedErr.Context()["serviceName"] {
+        t.Fatalf("expected the nested failure to keep the name of the service that failed, got %v", nestedErr.Context()["serviceName"])
+    }
+}

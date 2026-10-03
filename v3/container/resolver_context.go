@@ -74,6 +74,8 @@ type resolverContext struct {
     scopeSuspended bool
     /* providerReturned is set once the provider that received this view has returned; from then on the live chain belongs to the resolution above it, and a resolution through the view starts a chain of its own */
     providerReturned atomic.Bool
+    /* late marks the view lateResolution answers: the edge it writes from its owner is weak, since a retained resolver — a Lazy handle — resolves what its owner was built without */
+    late bool
 }
 
 /* childOwnedBy is the view handed to one node's provider: the same container, scope, resolution id and live stack, with the owning node written on it. The suspension rides on the view, so the caller above keeps seeing the scope. */
@@ -103,6 +105,7 @@ func (instance *resolverContext) lateResolution() (*resolverContext, func()) {
         stack:             newResolutionStack(),
         ownerKey:          instance.ownerKey,
         scopeSuspended:    instance.scopeSuspended,
+        late:              true,
     }
 
     containerInstance := instance.containerInstance
@@ -125,6 +128,33 @@ func (instance *resolverContext) lateResolution() (*resolverContext, func()) {
 
         containerInstance.clearResolverWaitLocked(instance.contextId, lateResolver.contextId)
     }
+}
+
+/* writesWeakEdgeFrom answers whether the edge from parentKey is weak: one a late view writes from its owner, the resolution a retained resolver makes of what its owner was built without. An edge from a node on the late view's own chain is a provider's, written while it builds. */
+func (instance *resolverContext) writesWeakEdgeFrom(parentKey string) bool {
+    return true == instance.late && "" != parentKey && parentKey == instance.ownerKey
+}
+
+/* registerContainerEdgeLocked writes the edge into the container's graph, weak or strong as writesWeakEdgeFrom reads it. The container mutex is held. */
+func (instance *resolverContext) registerContainerEdgeLocked(parentKey string, nodeKey string) {
+    if true == instance.writesWeakEdgeFrom(parentKey) {
+        instance.containerInstance.registerWeakDependencyLocked(parentKey, nodeKey)
+
+        return
+    }
+
+    instance.containerInstance.registerDependencyLocked(parentKey, nodeKey)
+}
+
+/* registerScopedEdgeLocked writes the edge into the scope's graph, weak or strong as writesWeakEdgeFrom reads it. The container mutex is held. */
+func (instance *resolverContext) registerScopedEdgeLocked(scopeInstance *scope, parentKey string, nodeKey string) {
+    if true == instance.writesWeakEdgeFrom(parentKey) {
+        registerScopedWeakDependencyLocked(scopeInstance, parentKey, nodeKey)
+
+        return
+    }
+
+    registerScopedDependencyLocked(scopeInstance, parentKey, nodeKey)
 }
 
 /* parentNodeKey answers the node a resolution starting here depends on: the node being built, or the owner once its provider returned. */
@@ -282,7 +312,7 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
             /* the edge is recorded even when the scope already holds the service */
             if "" != parentKey && true == isScopedNodeKey(parentKey) && true == isScopedNodeKey(nodeKey) {
                 instance.containerInstance.mutex.Lock()
-                registerScopedDependencyLocked(instance.scopeInstance, parentKey, nodeKey)
+                instance.registerScopedEdgeLocked(instance.scopeInstance, parentKey, nodeKey)
                 instance.containerInstance.mutex.Unlock()
             }
 
@@ -296,7 +326,7 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
             defer instance.containerInstance.mutex.Unlock()
 
             if "" != parentKey && true == isScopedNodeKey(parentKey) {
-                registerScopedDependencyLocked(scopeInstance, parentKey, nodeKey)
+                instance.registerScopedEdgeLocked(scopeInstance, parentKey, nodeKey)
             }
 
             return instance.scopedServiceByName(scopeInstance, serviceName, scopedProvider, nil)
@@ -308,7 +338,7 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
 
     /* a scoped parent writes no edge into the container's graph, which never reads it and is never pruned */
     if "" != parentKey && false == isScopedNodeKey(parentKey) && false == isScopedNodeKey(nodeKey) {
-        instance.containerInstance.registerDependencyLocked(
+        instance.registerContainerEdgeLocked(
             parentKey,
             nodeKey,
         )
@@ -405,8 +435,11 @@ func (instance *resolverContext) MustGet(serviceName string) any {
     value, getErr := instance.Get(serviceName)
     if nil != getErr {
         melodyErr, isMelodyErr := getErr.(*exception.Error)
+        /* the service name is written only where none is named yet, so a nested failure keeps the name of the service that failed */
         if true == isMelodyErr && nil != melodyErr {
-            melodyErr.SetContextValue("serviceName", serviceName)
+            if _, named := melodyErr.Context()["serviceName"]; false == named {
+                melodyErr.SetContextValue("serviceName", serviceName)
+            }
 
             exception.Panic(melodyErr)
         }
@@ -487,7 +520,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
             /* an already-held scoped instance is depended on, as in Get */
             if "" != parentKey && true == isScopedNodeKey(parentKey) && true == isScopedNodeKey(nodeKey) {
                 instance.containerInstance.mutex.Lock()
-                registerScopedDependencyLocked(instance.scopeInstance, parentKey, nodeKey)
+                instance.registerScopedEdgeLocked(instance.scopeInstance, parentKey, nodeKey)
                 instance.containerInstance.mutex.Unlock()
             }
 
@@ -529,7 +562,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
             defer instance.containerInstance.mutex.Unlock()
 
             if "" != parentKey && true == isScopedNodeKey(parentKey) {
-                registerScopedDependencyLocked(scopeInstance, parentKey, scopedNameNodeKey(serviceName))
+                instance.registerScopedEdgeLocked(scopeInstance, parentKey, scopedNameNodeKey(serviceName))
             }
 
             /* the type resolves through its registered name, so name and type reach one instance */
@@ -543,7 +576,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
             defer instance.containerInstance.mutex.Unlock()
 
             if "" != parentKey && true == isScopedNodeKey(parentKey) {
-                registerScopedDependencyLocked(scopeInstance, parentKey, nodeKey)
+                instance.registerScopedEdgeLocked(scopeInstance, parentKey, nodeKey)
             }
 
             return instance.scopedServiceByType(scopeInstance, typeKey, canonicalTargetType, scopedTypeProvider)
@@ -555,7 +588,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
 
     /* a scope-keyed dependent writes no edge into the container's graph, as in Get */
     if "" != parentKey && false == isScopedNodeKey(parentKey) && false == isScopedNodeKey(nodeKey) {
-        instance.containerInstance.registerDependencyLocked(
+        instance.registerContainerEdgeLocked(
             parentKey,
             nodeKey,
         )

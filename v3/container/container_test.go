@@ -1412,3 +1412,30 @@ func TestContainer_DeclaredTypeEdgeBindsOnlyToTheTypeItDeclares(t *testing.T) {
         t.Fatalf("expected the armed path to refuse the declaration, got %v", armErr)
     }
 }
+
+/* an edge a provider wrote while it built stays strong when a retained resolver writes it again later, and a late edge a provider then writes becomes strong: only an edge no provider wrote yields in the teardown */
+func TestContainer_AStrongWriteOfAnEdgeWinsOverAWeakOne(t *testing.T) {
+    serviceContainer := NewContainer().(*container)
+
+    serviceContainer.mutex.Lock()
+    defer serviceContainer.mutex.Unlock()
+
+    serviceContainer.registerDependencyLocked("service:app.first", "service:app.second")
+    serviceContainer.registerWeakDependencyLocked("service:app.first", "service:app.second")
+
+    if true == hasDependencyEdge(serviceContainer.weakDependencyEdges, "service:app.first", "service:app.second") {
+        t.Fatalf("expected a late write of an edge a provider wrote to leave it strong")
+    }
+
+    serviceContainer.registerWeakDependencyLocked("service:app.third", "service:app.fourth")
+
+    if false == hasDependencyEdge(serviceContainer.weakDependencyEdges, "service:app.third", "service:app.fourth") || false == hasDependencyEdge(serviceContainer.dependencyGraph, "service:app.third", "service:app.fourth") {
+        t.Fatalf("expected a late edge to be written into the graph as weak")
+    }
+
+    serviceContainer.registerDependencyLocked("service:app.third", "service:app.fourth")
+
+    if true == hasDependencyEdge(serviceContainer.weakDependencyEdges, "service:app.third", "service:app.fourth") {
+        t.Fatalf("expected a provider's write of a late edge to make it strong")
+    }
+}

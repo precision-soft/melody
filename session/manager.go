@@ -146,7 +146,7 @@ func (instance *Manager) NewSession() sessioncontract.Session {
     }
 }
 
-/* RegenerateSession rotates a session id, the defence against session fixation: the returned session carries the values over under a fresh id and the previous entry is removed. The result is marked modified, so publishing it on the request under http.RequestAttributeSession makes the response path store it and emit its cookie, which http.RegenerateRequestSession does. The session passed in is latched cleared, so a caller that forgets to publish the rotated one has the response path expire the cookie and hand out a fresh session instead of leaving the client presenting an id the store does not hold. */
+/* RegenerateSession rotates a session id, the defence against session fixation: the returned session carries the values over under a fresh id and the previous entry is removed. The result is marked modified, so publishing it on the request under http.RequestAttributeSession makes the response path store it and emit its cookie, which http.RegenerateRequestSession does. The session passed in is latched cleared, so a caller that forgets to publish the rotated one has the response path expire the cookie and hand out a fresh session instead of leaving the client presenting an id the store does not hold. An id a logout or an earlier rotation buried is refused with ErrSessionDeleted, the error SaveSession answers for it, before anything is stored, so a copy loaded before either cannot carry its identity onto a fresh id. */
 func (instance *Manager) RegenerateSession(sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
     if true == internal.IsNilInterface(sessionInstance) {
         return nil, exception.NewError("session is nil in regenerate session", nil, nil)
@@ -166,8 +166,8 @@ func (instance *Manager) RegenerateSession(sessionInstance sessioncontract.Sessi
     /* the fresh id is minted before the previous entry is removed, so a storage outage while probing for it leaves the session that is still in use intact */
     rotatedId := instance.uniqueSessionId()
 
-    /* the rotated-away id is buried for the same reason a deleted one is, and in the same critical section as its removal: a request that loaded the session under the previous id while this rotation ran would otherwise write it back, re-creating the very id the rotation exists to retire */
-    deleteErr := instance.DeleteSession(previousId)
+    /* the rotated-away id is checked, removed and buried in one critical section, for the same reason a deleted one is: a request that loaded the session under the previous id while this rotation ran would otherwise write it back, or rotate it again into a second live session, re-creating the very identity the rotation exists to retire */
+    deleteErr := instance.deleteSession(previousId, true)
     if nil != deleteErr {
         return nil, deleteErr
     }
@@ -217,20 +217,18 @@ func (instance *Manager) SaveSession(sessionInstance sessioncontract.Session) er
     sessionMutex.Lock()
     defer sessionMutex.Unlock()
 
-    if true == instance.isTombstoned(sessionId) {
-        return exception.NewError(
-            "session was deleted and cannot be saved again",
-            map[string]any{
-                "sessionRef": sessionIdLogReference(sessionId),
-            },
-            ErrSessionDeleted,
-        )
+    if refusalErr := instance.buriedIdRefusal(sessionId, "saved again"); nil != refusalErr {
+        return refusalErr
     }
 
     return instance.storage.Save(sessionId, values, instance.ttl)
 }
 
 func (instance *Manager) DeleteSession(sessionId string) error {
+    return instance.deleteSession(sessionId, false)
+}
+
+func (instance *Manager) deleteSession(sessionId string, rotation bool) error {
     if false == isValidSessionId(sessionId) {
         return exception.NewError(
             "session id is invalid in delete session",
@@ -244,13 +242,46 @@ func (instance *Manager) DeleteSession(sessionId string) error {
     sessionMutex.Lock()
     defer sessionMutex.Unlock()
 
-    /* only a removal that actually happened earns a tombstone. Nothing lifts a burial before its retention window lapses, so one laid over a storage refusal refuses every later save of an id whose entry is still there: the caller is handed a transient error, its next SaveSession answers ErrSessionDeleted, and the response path reads that refusal as a deliberate logout and expires the browser cookie — a storage blip logs the user out of a session that was never removed. The burial stays inside this section and follows the removal, so a save waiting on this lock still finds the tombstone whenever the entry did go. */
+    /* a rotation asks the tombstone the save path asks, so a copy loaded before a logout or a rotation cannot mint a fresh id carrying the identity the burial ended */
+    if true == rotation {
+        if refusalErr := instance.buriedIdRefusal(sessionId, "rotated"); nil != refusalErr {
+            return refusalErr
+        }
+    }
+
+    /* an id the storage certainly does not hold earns no tombstone, so a logout presenting an unknown id leaves no record behind; a read that fails is taken as holding it */
+    _, held, heldErr := instance.storage.Load(sessionId)
+    certainlyAbsent := nil == heldErr && false == held
+
+    /* only a removal that actually happened earns a tombstone. Nothing lifts a burial before its retention window lapses, so one laid over an entry that is still there refuses every later save of it: the caller is handed a transient error, its next SaveSession answers ErrSessionDeleted, and the response path reads that refusal as a deliberate logout and expires the browser cookie — a storage blip logs the user out of a session that was never removed. A delete that failed is therefore buried only when a fresh read says the entry went, which is the storage that removed and then failed to flush. The burial stays inside this section and follows the removal, so a save waiting on this lock still finds the tombstone whenever the entry did go. */
     deleteErr := instance.storage.Delete(sessionId)
-    if nil == deleteErr {
+
+    removed := nil == deleteErr
+    if nil != deleteErr {
+        _, stillHeld, readErr := instance.storage.Load(sessionId)
+        removed = nil == readErr && false == stillHeld
+    }
+
+    if false == certainlyAbsent && true == removed {
         instance.buryTombstone(sessionId)
     }
 
     return deleteErr
+}
+
+/* buriedIdRefusal answers the refusal of a write to a buried id, carrying ErrSessionDeleted, and nil for an id that is not buried. The session lock is held. */
+func (instance *Manager) buriedIdRefusal(sessionId string, attempt string) error {
+    if false == instance.isTombstoned(sessionId) {
+        return nil
+    }
+
+    return exception.NewError(
+        "session was deleted and cannot be "+attempt,
+        map[string]any{
+            "sessionRef": sessionIdLogReference(sessionId),
+        },
+        ErrSessionDeleted,
+    )
 }
 
 /* sessionIdLogReference answers a short one-way reference to a session id for an error context that may be logged: a truncated SHA-256, enough to correlate records without carrying the id itself, so a log reader cannot present it as a cookie. The http response path folds a live id the same way; this one covers the ids the manager itself names in refusals. */

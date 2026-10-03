@@ -338,6 +338,73 @@ func TestApplicationRegisterHttpSession_HandsTheConfiguredTtlToTheManager(t *tes
     }
 }
 
+/* the configured window and the kernel's clock must both travel into the manager: on a frozen clock a deleted session is still refused a write-back 30 minutes later under a one-hour window and accepted 61 minutes later, where the five-minute default would accept the first and the wall clock would refuse the second. */
+func TestApplicationRegisterHttpSession_HandsTheConfiguredTombstoneRetentionAndTheKernelClockToTheManager(t *testing.T) {
+    environment, environmentErr := config.NewEnvironment(
+        &mapEnvironmentSource{
+            values: map[string]string{
+                config.HttpSessionTombstoneRetentionKey: "1h",
+            },
+        },
+    )
+    if nil != environmentErr {
+        t.Fatalf("unexpected environment error: %v", environmentErr)
+    }
+
+    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+    if nil != configurationErr {
+        t.Fatalf("unexpected configuration error: %v", configurationErr)
+    }
+
+    frozenClock := clock.NewFrozenClock(time.Date(2026, time.October, 3, 12, 0, 0, 0, time.UTC))
+
+    kernelInstance := newTestKernel()
+    kernelInstance.clock = frozenClock
+
+    applicationInstance := &Application{
+        ctx:                  context.Background(),
+        configuration:        configuration,
+        runtimeFlags:         NewRuntimeFlags(config.ModeHttp),
+        kernel:               kernelInstance,
+        moduleConfigurations: make(map[string]any),
+    }
+
+    applicationInstance.registerHttpSession()
+
+    manager := session.SessionMustFromContainer(applicationInstance.kernel.ServiceContainer())
+
+    sessionInstance := manager.NewSession()
+    sessionInstance.Set("identity", "alice")
+    if saveErr := manager.SaveSession(sessionInstance); nil != saveErr {
+        t.Fatalf("unexpected save error: %v", saveErr)
+    }
+
+    inFlightView := manager.Session(sessionInstance.Id())
+    if nil == inFlightView {
+        t.Fatalf("expected the session to load")
+    }
+
+    if deleteErr := manager.DeleteSession(sessionInstance.Id()); nil != deleteErr {
+        t.Fatalf("unexpected delete error: %v", deleteErr)
+    }
+
+    frozenClock.Advance(30 * time.Minute)
+
+    inFlightView.Set("lastSeen", "half an hour later")
+
+    if saveErr := manager.SaveSession(inFlightView); false == errors.Is(saveErr, session.ErrSessionDeleted) {
+        t.Fatalf("expected the write-back inside the configured one-hour window to be refused, got %v", saveErr)
+    }
+
+    frozenClock.Advance(31 * time.Minute)
+
+    inFlightView.Set("lastSeen", "an hour and a minute later")
+
+    if saveErr := manager.SaveSession(inFlightView); nil != saveErr {
+        t.Fatalf("expected the configured window to have lapsed on the kernel's clock, got %v", saveErr)
+    }
+}
+
 func TestApplicationRegisterHttpSession_KeepsAnUnconfiguredTtlUnbounded(t *testing.T) {
     applicationInstance := newSessionTtlTestApplication(t, "0")
 
