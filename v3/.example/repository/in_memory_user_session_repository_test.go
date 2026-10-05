@@ -9,10 +9,11 @@ import (
     "time"
 )
 
+/* admitWithoutRelease admits a session before the grace, so the next admission asks the storage whether it still holds it */
 func admitWithoutRelease(t *testing.T, repositoryInstance UserSessionRepository, userId string, previousSessionId string, sessionId string) {
     t.Helper()
 
-    if admitErr := repositoryInstance.Admit(context.Background(), userId, previousSessionId, sessionId, time.Now(), everySessionLive, func(sessionId string) error { return nil }); nil != admitErr {
+    if admitErr := repositoryInstance.Admit(context.Background(), userId, previousSessionId, sessionId, time.Now().Add(-2*UserSessionAdmissionGrace), everySessionLive, func(sessionId string) error { return nil }); nil != admitErr {
         t.Fatalf("admit %s: %v", sessionId, admitErr)
     }
 }
@@ -191,3 +192,68 @@ func TestInMemoryUserSessionRepositoryAdmit_AFailedLivenessReadRefusesTheAdmissi
     }
 }
 
+
+/* noSessionStored answers every session as absent from the storage, as it reads while the kernel has not yet saved the sessions the sign-ins rotated to */
+func noSessionStored(sessionId string) (bool, error) {
+    return false, nil
+}
+
+/* concurrent sign-ins whose sessions the kernel has not stored yet keep their places: a row within the grace counts as live whatever the storage answers, so the cap releases the oldest instead of dropping the newer rows unreleased */
+func TestInMemoryUserSessionRepositoryAdmit_ARowWithinTheGraceCountsWhateverTheStorageAnswers(t *testing.T) {
+    repositoryInstance := newInMemoryUserSessionRepository()
+    now := time.Now()
+
+    var releasedList []string
+    release := func(sessionId string) error {
+        releasedList = append(releasedList, sessionId)
+
+        return nil
+    }
+
+    for index := range UserSessionCap + 2 {
+        if admitErr := repositoryInstance.Admit(context.Background(), "user-1", "", fmt.Sprintf("s%d", index+1), now, noSessionStored, release); nil != admitErr {
+            t.Fatalf("admit s%d: %v", index+1, admitErr)
+        }
+    }
+
+    if "[s1 s2]" != fmt.Sprint(releasedList) {
+        t.Fatalf("expected the two oldest released past the cap, got %v", releasedList)
+    }
+
+    if held := repositoryInstance.(*inMemoryUserSessionRepository).sessionsByUser["user-1"]; "[s3 s4 s5 s6 s7]" != fmt.Sprint(held) {
+        t.Fatalf("expected the newest %d held, got %v", UserSessionCap, held)
+    }
+}
+
+/* a row admitted the grace ago or earlier is read from the storage again: an absent session's row is dropped without a release */
+func TestInMemoryUserSessionRepositoryAdmit_ARowAtTheGraceIsReadFromTheStorage(t *testing.T) {
+    repositoryInstance := newInMemoryUserSessionRepository()
+    now := time.Now()
+
+    if admitErr := repositoryInstance.Admit(context.Background(), "user-1", "", "s1", now.Add(-UserSessionAdmissionGrace), everySessionLive, func(sessionId string) error { return nil }); nil != admitErr {
+        t.Fatalf("admit s1: %v", admitErr)
+    }
+
+    if admitErr := repositoryInstance.Admit(context.Background(), "user-1", "", "s2", now.Add(-UserSessionAdmissionGrace+time.Millisecond), everySessionLive, func(sessionId string) error { return nil }); nil != admitErr {
+        t.Fatalf("admit s2: %v", admitErr)
+    }
+
+    var askedList []string
+    sessionLive := func(sessionId string) (bool, error) {
+        askedList = append(askedList, sessionId)
+
+        return false, nil
+    }
+
+    if admitErr := repositoryInstance.Admit(context.Background(), "user-1", "", "s3", now, sessionLive, func(sessionId string) error { return nil }); nil != admitErr {
+        t.Fatalf("admit s3: %v", admitErr)
+    }
+
+    if "[s1]" != fmt.Sprint(askedList) {
+        t.Fatalf("expected the storage asked about the row at the grace alone, got %v", askedList)
+    }
+
+    if held := repositoryInstance.(*inMemoryUserSessionRepository).sessionsByUser["user-1"]; "[s2 s3]" != fmt.Sprint(held) {
+        t.Fatalf("expected the row at the grace dropped and the one within it kept, got %v", held)
+    }
+}

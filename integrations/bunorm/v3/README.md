@@ -162,6 +162,17 @@ reader, _ := splitter.Reader()  // a replica (or the primary if none configured)
 
 `Reader` round-robins the replicas and falls back to the primary only when a replica is **unreachable** — an open failure its provider classified as transient and could not get past, answered by `ErrDatabaseUnreachable`: the outage where reading from the primary is the availability trade the splitter exists to make. Every other failure is refused instead of absorbed — a replica name the registry does not know, an empty name, a closed registry, a provider that answered neither a database nor an error, and every refusal the provider or the server gave by name (a parameter left empty, a password the server refused, a database that does not exist): each is a wiring error, permanent by nature, and folding it into the fallback routed every read to the primary forever with no signal. The `pgsql` and `mysql` providers file an outage under the class through `DatabaseUnreachable`; a provider of your own that files nothing has every failure read as a refusal, the direction that surfaces a misconfiguration. When the primary then fails too, the error carries the primary failure as its cause and names the replica failure beside it. An empty replica name is refused at construction.
 
+An unreachable replica is remembered for a retry interval, five seconds by default: inside it the replica's share of the reads goes to the primary without dialling it again, so a dead replica no longer costs every read a connect timeout, and the first read after it dials the replica again. The move is journaled once each way through the registry's logger, a warning naming the replica, the primary and the interval when reads move to the primary, and an info when the replica takes them back. The interval is set through the options constructor:
+
+```go
+splitter := melodybunorm.NewReadWriteSplitterWithOptions(
+    registry,
+    ManagerPrimaryName,
+    []string{"replica-1", "replica-2"},
+    melodybunorm.WithReplicaRetryInterval(30*time.Second),
+)
+```
+
 ## Dialect providers
 
 * MySQL provider: [`../mysql/v3/`](../mysql/v3/)

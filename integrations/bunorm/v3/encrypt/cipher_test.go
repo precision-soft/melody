@@ -885,3 +885,119 @@ func BenchmarkDeterministicNonceFrom(b *testing.B) {
         deterministicNonceFrom(nonceKey, "a value of the size a column holds", minNonceSize)
     }
 }
+
+/* a column type over a wrapped cipher cannot seal a marker-shaped value as data, since the wrapper's Encrypt is the package's own and passes a seal through; the column refuses it, so another row's seal is never stored bare and read back as that row's plaintext */
+func TestEncryptedString_ASealWrittenAsDataThroughAWrappedCipherIsRefused(t *testing.T) {
+    packageCipher := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(7)}))
+    UseCipher(wrappedCipher{Cipher: packageCipher})
+    t.Cleanup(func() { UseCipher(nil) })
+
+    otherRowsSeal, sealErr := packageCipher.Encrypt("another account's iban")
+    if nil != sealErr {
+        t.Fatalf("seal: %v", sealErr)
+    }
+
+    stored, valueErr := EncryptedString(otherRowsSeal).Value()
+    if nil == valueErr {
+        t.Fatalf("expected the marker-shaped value refused through a wrapped cipher, stored %q", stored)
+    }
+
+    if true == strings.Contains(valueErr.Error(), "another account") || false == strings.Contains(valueErr.Error(), "encryption marker") {
+        t.Fatalf("expected the foreign-cipher refusal without the value, got: %v", valueErr)
+    }
+}
+
+/* the deterministic column refuses it as well, where the wrapper's EncryptDeterministic would re-seal the victim's plaintext */
+func TestEncryptedDeterministicString_ASealWrittenAsDataThroughAWrappedCipherIsRefused(t *testing.T) {
+    packageCipher := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(7)}))
+    UseCipher(wrappedCipher{Cipher: packageCipher})
+    t.Cleanup(func() { UseCipher(nil) })
+
+    otherRowsSeal, sealErr := packageCipher.EncryptDeterministic("another account's iban")
+    if nil != sealErr {
+        t.Fatalf("seal: %v", sealErr)
+    }
+
+    if stored, valueErr := EncryptedDeterministicString(otherRowsSeal).Value(); nil == valueErr {
+        t.Fatalf("expected the marker-shaped value refused through a wrapped cipher, stored %q", stored)
+    }
+}
+
+/* a column bound to a named compartment over a wrapped cipher refuses it the same way */
+func TestEncryptedStringFor_ASealWrittenAsDataThroughAWrappedNamedCipherIsRefused(t *testing.T) {
+    packageCipher := NewCipher(NewStaticKeyProvider("crm-v1", map[string][]byte{"crm-v1": newKey(11)}))
+    UseCipherNamed(crmCipherRef{}.CipherName(), wrappedCipher{Cipher: packageCipher})
+    t.Cleanup(func() { storeCipher(crmCipherRef{}.CipherName(), nil) })
+
+    otherRowsSeal, sealErr := packageCipher.Encrypt("another customer's iban")
+    if nil != sealErr {
+        t.Fatalf("seal: %v", sealErr)
+    }
+
+    if stored, valueErr := EncryptedStringFor[crmCipherRef](otherRowsSeal).Value(); nil == valueErr {
+        t.Fatalf("expected the marker-shaped value refused through a wrapped named cipher, stored %q", stored)
+    }
+
+    if stored, valueErr := EncryptedDeterministicStringFor[crmCipherRef](otherRowsSeal).Value(); nil == valueErr {
+        t.Fatalf("expected the marker-shaped value refused through a wrapped named cipher, stored %q", stored)
+    }
+}
+
+/* an ordinary value keeps the wrapper's own doors: it is sealed through them and reads back */
+func TestEncryptedString_APlaintextThroughAWrappedCipherIsSealed(t *testing.T) {
+    UseCipher(wrappedCipher{Cipher: NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(7)}))})
+    t.Cleanup(func() { UseCipher(nil) })
+
+    stored, valueErr := EncryptedString("an ordinary iban").Value()
+    if nil != valueErr {
+        t.Fatalf("value: %v", valueErr)
+    }
+
+    var loaded EncryptedString
+    if scanErr := loaded.Scan(stored); nil != scanErr {
+        t.Fatalf("scan: %v", scanErr)
+    }
+
+    if "an ordinary iban" != string(loaded) || "an ordinary iban" == string(stored.([]byte)) {
+        t.Fatalf("expected the value sealed and read back, stored %q, read %q", stored, string(loaded))
+    }
+}
+
+/* countingKeyProvider answers one key and counts every lookup */
+type countingKeyProvider struct {
+    KeyProvider
+    calls int
+}
+
+func (instance *countingKeyProvider) Key(keyId string) ([]byte, error) {
+    instance.calls++
+
+    return instance.KeyProvider.Key(keyId)
+}
+
+/* the read side holds a stored key id to the grammar the write side seals under: an id no seal can carry is malformed, never handed to the KeyProvider and never carried whole into the error */
+func TestCipher_DecryptRefusesAKeyIdOutsideTheGrammarWithoutAskingTheProvider(t *testing.T) {
+    provider := &countingKeyProvider{KeyProvider: NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})}
+    cipherInstance := NewCipher(provider)
+
+    for _, keyId := range []string{strings.Repeat("k", 4000), "key id", ""} {
+        _, decryptErr := cipherInstance.Decrypt(markerPrefix + keyId + ":c2VhbGVkLXBheWxvYWQtb2YtZW5vdWdoLWxlbmd0aA")
+        if nil == decryptErr || false == strings.Contains(decryptErr.Error(), "malformed") {
+            t.Fatalf("expected the id of %d bytes refused as malformed, got: %v", len(keyId), decryptErr)
+        }
+
+        if 200 < len(decryptErr.Error()) {
+            t.Fatalf("expected the refusal not to carry the id, got %d bytes", len(decryptErr.Error()))
+        }
+    }
+
+    if 0 != provider.calls {
+        t.Fatalf("expected the provider never asked, got %d lookups", provider.calls)
+    }
+
+    inGrammar := strings.Repeat("k", 32)
+    _, _ = cipherInstance.Decrypt(markerPrefix + inGrammar + ":c2VhbGVkLXBheWxvYWQtb2YtZW5vdWdoLWxlbmd0aA")
+    if 1 != provider.calls {
+        t.Fatalf("expected an id in the grammar handed to the provider once, got %d lookups", provider.calls)
+    }
+}

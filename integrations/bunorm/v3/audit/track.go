@@ -2,6 +2,7 @@ package audit
 
 import (
     "context"
+    "errors"
     "fmt"
     "reflect"
     "strings"
@@ -60,8 +61,8 @@ func (instance *Tracker) runInTx(ctx context.Context, entity string, operation s
         return nil
     }
 
-    /* the closure's own failure is already named and travels unchanged; only an error the closure did not produce is one of the two margins */
-    if txErr == unitErr {
+    /* the closure's own failure is already named and travels unchanged; only an error the closure did not produce is one of the two margins. errors.Is, not ==: a storage error of a non-comparable type, a struct carrying a slice, makes == panic */
+    if nil != unitErr && true == errors.Is(txErr, unitErr) {
         return txErr
     }
 
@@ -163,13 +164,19 @@ func entityIdFromModel(database *bun.DB, model any) string {
             return ""
         }
 
-        parts = append(parts, escapeEntityIdPart(fmt.Sprintf("%v", fieldValue.Interface())))
+        part := fmt.Sprintf("%v", fieldValue.Interface())
+        /* a single part cannot make the join ambiguous, so a single-column key is never escaped and a key carrying ":" or "\" keeps joining the trail recorded before the escaping */
+        if 1 < len(table.PKs) {
+            part = escapeEntityIdPart(part)
+        }
+
+        parts = append(parts, part)
     }
 
     return strings.Join(parts, ":")
 }
 
-/* escapeEntityIdPart keeps the ":" join unambiguous, so ("a:b","c") and ("a","b:c") derive distinct entity ids; a key carrying neither ":" nor "\" renders unchanged, so existing trails keep joining. */
+/* escapeEntityIdPart keeps the ":" join of a composite key unambiguous, so ("a:b","c") and ("a","b:c") derive distinct entity ids; a part carrying neither ":" nor "\" renders unchanged, so existing trails keep joining, and a single-column key is never escaped. */
 func escapeEntityIdPart(part string) string {
     part = strings.ReplaceAll(part, `\`, `\\`)
 

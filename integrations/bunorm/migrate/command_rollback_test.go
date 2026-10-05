@@ -3,6 +3,7 @@ package migrate
 import (
     "bytes"
     "context"
+    "database/sql/driver"
     "errors"
     "io"
     "strings"
@@ -146,6 +147,7 @@ func TestRollbackCommand_FailedUnlockFailsTheCommand(t *testing.T) {
 /* the same remedy-naming refusal the migrate sibling proves: bun's bare lock error names neither the database nor db:unlock */
 func TestRollbackCommand_LockFailureNamesTheRemedy(t *testing.T) {
     database, recorder := newFakeBunDatabase()
+    recorder.queryHook = lockCountHook(1)
     recorder.execHook = func(query string) error {
         if true == isLockInsert(query) {
             return context.DeadlineExceeded
@@ -251,5 +253,34 @@ func TestRollbackCommand_HandsItsPostureToTheMigrationsThroughTheContext(t *test
 
     if &elsewhere != resolveDefaultRunnerOption().Writer {
         t.Fatalf("expected the command to put the fallback back on the way out, got %v", resolveDefaultRunnerOption().Writer)
+    }
+}
+
+/* the rollback asks the locks table the same question: a missing table is not answered with the unlock command */
+func TestRollbackCommand_ALockRefusedByAMissingLocksTableDoesNotNameTheUnlockCommand(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    missingTable := errors.New("Error 1146 (42S02): Table 'melody.bun_migration_locks' doesn't exist")
+    recorder.queryHook = func(query string) ([]string, [][]driver.Value, error) {
+        if true == strings.Contains(query, "bun_migration_locks") {
+            return nil, nil, missingTable
+        }
+
+        return []string{}, nil, nil
+    }
+    recorder.execHook = func(query string) error {
+        if true == isLockInsert(query) {
+            return missingTable
+        }
+
+        return nil
+    }
+
+    _, runErr := runMigrationCommand(t, newRuntimeWithDatabase(t, database), NewRollbackCommand(newSingleMigrationSet("20240101000000", "create_users", nil, new(int)), DefaultOptions()), "--no-color")
+    if nil == runErr || false == strings.Contains(runErr.Error(), "missing or unreachable") {
+        t.Fatalf("expected the missing-table refusal, got %v", runErr)
+    }
+
+    if _, namesUnlock := lockRefusalContextOf(t, runErr)["unlockCommand"]; true == namesUnlock {
+        t.Fatal("expected no unlock command named for a missing locks table")
     }
 }

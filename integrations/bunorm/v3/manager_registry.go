@@ -8,6 +8,7 @@ import (
     "runtime/debug"
     "sort"
     "sync"
+    "unicode/utf8"
 
     "github.com/uptrace/bun"
 
@@ -24,6 +25,8 @@ type ManagerRegistry struct {
     openCancel  context.CancelFunc
 
     providerDefinitionByName      map[string]ProviderDefinition
+    /* the definition names sorted once, since the definitions never change after the constructor: an unknown-name refusal then reads them under the lock without sorting or allocating */
+    sortedProviderDefinitionNames []string
     defaultProviderDefinitionName string
 
     lock              sync.Mutex
@@ -33,6 +36,8 @@ type ManagerRegistry struct {
     pendingMigrationOpens map[chan struct{}]struct{}
     /* the migration databases live beside the request pools, never inside them: a migration connection lifts the driver deadlines, and handing it to request traffic would trade one failure mode for another */
     migrationDatabases map[string]*bun.DB
+    /* how many callers hold each dedicated migration connection: every MigrationDatabase answering it takes a hold, and CloseMigrationDatabase closes it when the last hold is released */
+    migrationHolders map[string]int
     closed             bool
 }
 
@@ -48,7 +53,7 @@ func NewManagerRegistry(logger loggingcontract.Logger, providerDefinitions ...Pr
     return NewManagerRegistryWithContext(context.Background(), logger, providerDefinitions...)
 }
 
-/* NewManagerRegistryWithContext additionally binds the registry to the given context: a provider that implements ContextOpener has its lazy opens run under it, so a shutdown that cancels the context refuses an open not yet started, reaches the attempt's cancellable steps — the configuration hook, the boot ping, a retry sleep — in flight, and pays at most the dialect handshake bun bounds by the connect timeout. A nil context reads as context.Background(), the exact behaviour of NewManagerRegistry. */
+/* NewManagerRegistryWithContext additionally binds the registry to the given context: a provider that implements ContextOpener has its lazy opens run under it, so a shutdown that cancels the context refuses an open not yet started, reaches the attempt's cancellable steps — the configuration hook, the boot ping, a retry sleep — in flight, its dial and handshake bounded by the connect timeout under the context. A nil context reads as context.Background(), the exact behaviour of NewManagerRegistry. */
 func NewManagerRegistryWithContext(ctx context.Context, logger loggingcontract.Logger, providerDefinitions ...ProviderDefinition) (*ManagerRegistry, error) {
     if true == isNilInterface(logger) {
         return nil, ErrLoggerIsRequired
@@ -102,11 +107,13 @@ func NewManagerRegistryWithContext(ctx context.Context, logger loggingcontract.L
         openContext:                   openContext,
         openCancel:                    openCancel,
         providerDefinitionByName:      providerDefinitionByName,
+        sortedProviderDefinitionNames: sortedProviderDefinitionNamesOf(providerDefinitionByName),
         defaultProviderDefinitionName: defaultProviderDefinitionName,
         managers:                      make(map[string]*Manager),
         pendingOpenByName:             make(map[string]*managerOpen),
         pendingMigrationOpens:         make(map[chan struct{}]struct{}),
         migrationDatabases:            make(map[string]*bun.DB),
+        migrationHolders:              make(map[string]int),
     }, nil
 }
 
@@ -126,7 +133,7 @@ func isNilInterface(value any) bool {
     }
 }
 
-/* MigrationDatabase answers the connection the migration commands run on: a dedicated one with the driver deadlines lifted when the provider implements MigrationProvider, reported through the second return, and the pooled connection otherwise, since a DDL statement cut by a request deadline is not rolled back. The dedicated database is opened once per name and ended by CloseMigrationDatabase, with the registry's Close as the net for whatever was not; an empty name selects the default definition. */
+/* MigrationDatabase answers the connection the migration commands run on: a dedicated one with the driver deadlines lifted when the provider implements MigrationProvider, reported through the second return, and the pooled connection otherwise, since a DDL statement cut by a request deadline is not rolled back. The dedicated database is opened once per name and shared: every call answering it takes a hold, CloseMigrationDatabase releases one and closes the connection with the last, and the registry's Close is the net for whatever was not released; an empty name selects the default definition. */
 func (instance *ManagerRegistry) MigrationDatabase(name string) (*bun.DB, bool, error) {
     if "" == name {
         name = instance.defaultProviderDefinitionName
@@ -141,6 +148,7 @@ func (instance *ManagerRegistry) MigrationDatabase(name string) (*bun.DB, bool, 
     }
 
     if database, exists := instance.migrationDatabases[name]; true == exists {
+        instance.migrationHolders[name]++
         instance.lock.Unlock()
 
         return database, true, nil
@@ -207,16 +215,18 @@ func (instance *ManagerRegistry) MigrationDatabase(name string) (*bun.DB, bool, 
 
     if existingDatabase, exists := instance.migrationDatabases[name]; true == exists {
         _ = database.Close()
+        instance.migrationHolders[name]++
 
         return existingDatabase, true, nil
     }
 
     instance.migrationDatabases[name] = database
+    instance.migrationHolders[name] = 1
 
     return database, true, nil
 }
 
-/* CloseMigrationDatabase ends the dedicated migration connection opened for one definition and forgets it, so the next MigrationDatabase opens a fresh one; an empty name selects the default. That connection lifts the driver deadlines and recycles nothing, so it must not outlive the migration run. A name with no migration connection closes nothing, and a closed registry refuses the call. */
+/* CloseMigrationDatabase releases one hold on the dedicated migration connection opened for one definition, and with the last hold ends it and forgets it, so the next MigrationDatabase opens a fresh one; an empty name selects the default. That connection lifts the driver deadlines and recycles nothing, so it must not outlive the migration run. A name with no migration connection closes nothing, and a closed registry refuses the call. */
 func (instance *ManagerRegistry) CloseMigrationDatabase(name string) error {
     if "" == name {
         name = instance.defaultProviderDefinitionName
@@ -237,7 +247,16 @@ func (instance *ManagerRegistry) CloseMigrationDatabase(name string) error {
         return nil
     }
 
+    /* another caller still holds the connection: two migration commands in one process share it, and the first to release must not close it under the second */
+    instance.migrationHolders[name]--
+    if 0 < instance.migrationHolders[name] {
+        instance.lock.Unlock()
+
+        return nil
+    }
+
     delete(instance.migrationDatabases, name)
+    delete(instance.migrationHolders, name)
 
     instance.lock.Unlock()
 
@@ -300,22 +319,49 @@ func (instance *ManagerRegistry) HasProviderDefinition(name string) bool {
 
 /* providerDefinitionNotFoundErrorLocked names the definition asked for and the ones registered; it is called with the registry lock held. The sentinel stays the cause, so errors.Is(err, ErrProviderDefinitionNotFound) keeps its answer. */
 func (instance *ManagerRegistry) providerDefinitionNotFoundErrorLocked(name string) error {
-    registered := make([]string, 0, len(instance.providerDefinitionByName))
-    for definitionName := range instance.providerDefinitionByName {
-        registered = append(registered, definitionName)
+    errorContext := map[string]any{
+        "requested":  name,
+        "registered": instance.sortedProviderDefinitionNames,
     }
 
-    /* sorted so one misspelling always prints one list: the map walk is random, and an operator comparing two runs would otherwise read two different answers to the same question */
-    sort.Strings(registered)
+    /* a requested name past the bound is cut on a rune boundary, its full length kept beside it, so a caller-supplied name cannot carry a megabyte into the error and the journal */
+    if maxRequestedNameLength < len(name) {
+        errorContext["requested"] = name[:runeBoundaryAtOrBefore(name, maxRequestedNameLength)] + truncatedNameMarker
+        errorContext["requestedLength"] = len(name)
+    }
 
     return exception.NewError(
         "provider definition not found",
-        map[string]any{
-            "requested":  name,
-            "registered": registered,
-        },
+        errorContext,
         ErrProviderDefinitionNotFound,
     )
+}
+
+/* maxRequestedNameLength bounds, in bytes, the requested name an unknown-name refusal carries */
+const maxRequestedNameLength = 128
+
+const truncatedNameMarker = "...(truncated)"
+
+/* sortedProviderDefinitionNamesOf answers the definition names sorted, so one misspelling always prints one list: the map walk is random, and an operator comparing two runs would otherwise read two different answers to the same question */
+func sortedProviderDefinitionNamesOf(providerDefinitionByName map[string]ProviderDefinition) []string {
+    names := make([]string, 0, len(providerDefinitionByName))
+    for definitionName := range providerDefinitionByName {
+        names = append(names, definitionName)
+    }
+
+    sort.Strings(names)
+
+    return names
+}
+
+/* runeBoundaryAtOrBefore answers the largest index at or before limit that starts a rune, so a cut never splits a multi-byte character */
+func runeBoundaryAtOrBefore(value string, limit int) int {
+    boundary := limit
+    for 0 < boundary && false == utf8.RuneStart(value[boundary]) {
+        boundary--
+    }
+
+    return boundary
 }
 
 func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
@@ -426,11 +472,11 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
 
             /* an open the registry ended through openContext reaches its waiter as the registry's refusal with the cancellation under it; a refusal that does not carry the cancellation is the provider's own and travels unchanged. A provider that refuses with a cancellation of its own after the close is still read as ended by the registry, since nothing on the error says whose it is */
             if true == instance.closed && nil != instance.openContext.Err() && true == errors.Is(openErr, context.Canceled) {
-                pendingOpen.openError = exception.NewError(
+                pendingOpen.openError = keepLoggedMark(exception.NewError(
                     fmt.Sprintf("bunorm manager %s open ended by the registry closing while it was in flight", name),
                     map[string]any{"manager": name},
                     &openEndedByClose{openErr: openErr},
-                )
+                ), openErr)
 
                 return
             }
@@ -675,4 +721,13 @@ func (instance *ManagerRegistry) CloseWithContext(closeContext context.Context) 
     }
 
     return closeErr
+}
+
+/* keepLoggedMark marks a wrapper logged when the cause it wraps was: the mark is read at the outermost link, so a wrapper over a failure the provider already journaled would otherwise be filed a second time by the kernel or the console */
+func keepLoggedMark(wrapper error, cause error) error {
+    if true == exception.IsAlreadyLogged(cause) {
+        return exception.MarkLogged(wrapper)
+    }
+
+    return wrapper
 }

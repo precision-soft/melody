@@ -33,6 +33,23 @@ func DefaultRunnerOption() RunnerOption {
 /* runnerOptionContextKey is the key under which a migrate command hands its parsed posture to the migrations it runs. A generated migration's signature is fixed by bun as (ctx, db) and cannot receive the parsed flags any other way, and bun passes the command's context into every migration unchanged, so the context is the one channel that reaches the migration and belongs to that run alone. */
 type runnerOptionContextKey struct{}
 
+/* emptyMigrationWarnerContextKey is the key under which a migrate command hands RunQueries the door an empty migration's warning goes through when the command's writer is discarded, under --format=json, so the machine document still carries it. It rides the context beside the option rather than inside it, since a function field would make RunnerOption incomparable. */
+type emptyMigrationWarnerContextKey struct{}
+
+func withEmptyMigrationWarner(ctx context.Context, warn func(message string)) context.Context {
+    return context.WithValue(ctx, emptyMigrationWarnerContextKey{}, warn)
+}
+
+func emptyMigrationWarnerFromContext(ctx context.Context) func(message string) {
+    if nil == ctx {
+        return nil
+    }
+
+    warn, _ := ctx.Value(emptyMigrationWarnerContextKey{}).(func(message string))
+
+    return warn
+}
+
 /* withRunnerOption returns a context carrying the option RunQueries reads first; the migrate commands derive it from their parsed flags and run the migrator under it. */
 func withRunnerOption(ctx context.Context, option RunnerOption) context.Context {
     return context.WithValue(ctx, runnerOptionContextKey{}, option)
@@ -167,7 +184,7 @@ func RunQueriesWithOption(ctx context.Context, db *bun.DB, direction string, mig
     }
 
     total := len(queries)
-    printer := &migrationPrinter{writer: writer, noColor: option.NoColor}
+    printer := &migrationPrinter{writer: writer, noColor: option.NoColor, warn: emptyMigrationWarnerFromContext(ctx)}
 
     /* an empty set is almost always a builder that produced nothing rather than a migration with nothing to do, and the migrator marks the migration applied on success — burying it, since an applied migration never runs again. The run still succeeds, so the caller decides; what it must not do is read like the queries ran. */
     if 0 == total {
@@ -218,6 +235,8 @@ func DownWithOption(ctx context.Context, db *bun.DB, migrationName string, queri
 type migrationPrinter struct {
     writer  io.Writer
     noColor bool
+    /* warn receives the empty migration's warning in place of the writer, set by a command whose writer is discarded under --format=json */
+    warn func(message string)
 }
 
 func (instance *migrationPrinter) printExecuting(prefix string, queryName string) {
@@ -271,6 +290,12 @@ func (instance *migrationPrinter) printFailed(prefix string, queryName string, e
 
 func (instance *migrationPrinter) printEmpty(direction string, migrationName string) {
     message := fmt.Sprintf("[migration:%s] %s: WARNING no queries to execute; the migration is marked applied without running anything", escapeControlCharacters(direction, false), escapeControlCharacters(migrationName, false))
+
+    if nil != instance.warn {
+        instance.warn(message)
+
+        return
+    }
 
     if instance.noColor {
         _, _ = fmt.Fprintf(instance.writer, "%s\n", message)

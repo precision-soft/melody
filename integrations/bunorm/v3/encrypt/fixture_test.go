@@ -193,6 +193,18 @@ var scriptedSqlSequence atomic.Uint64
 func newScriptedMigrator(t *testing.T, responses []scriptedSqlResponse) (*Migrator, *scriptedSqlDriver) {
     t.Helper()
 
+    /* every run reads the table's charsets first; a script that does not answer it reads every column as utf8mb4, the shape of the tables these pins describe */
+    answersCharsets := false
+    for _, response := range responses {
+        if true == strings.Contains(response.fragment, "CHARACTER_SET_NAME") {
+            answersCharsets = true
+        }
+    }
+
+    if false == answersCharsets {
+        responses = append([]scriptedSqlResponse{{fragment: "CHARACTER_SET_NAME", columns: []string{"COLUMN_NAME", "CHARACTER_SET_NAME"}}}, responses...)
+    }
+
     stub := &scriptedSqlDriver{responses: responses}
     driverName := fmt.Sprintf("scripted-migrate-%d", scriptedSqlSequence.Add(1))
     sql.Register(driverName, stub)
@@ -251,4 +263,9 @@ func (instance *capturingCommand) Run(
     instance.capturedErr = instance.Command.Run(instance.runtimeInstance, commandContext)
 
     return nil
+}
+
+/* wrappedCipher forwards every door to the package cipher it embeds, the shape of an application's metrics or tracing wrapper: it carries none of the package's unexported doors */
+type wrappedCipher struct {
+    Cipher
 }

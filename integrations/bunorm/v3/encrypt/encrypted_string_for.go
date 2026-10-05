@@ -98,10 +98,10 @@ func (instance *EncryptedStringFor[R]) Scan(source any) error {
 func refCipher[R CipherRef]() (Cipher, error) {
     var ref R
 
-    /* a pointer-form marker's zero value is nil, so its CipherName call would panic inside database/sql; it is answered as an error naming the marker */
-    if reflected := reflect.ValueOf(any(ref)); reflect.Pointer == reflected.Kind() && true == reflected.IsNil() {
+    /* a pointer-form marker's zero value is nil, and an interface marker, CipherRef itself included, has no zero value to call, so either CipherName call would panic inside database/sql; both are answered as an error naming the marker */
+    if reflected := reflect.ValueOf(any(ref)); false == reflected.IsValid() || (reflect.Pointer == reflected.Kind() && true == reflected.IsNil()) {
         return nil, exception.NewError(
-            "cipher reference is a pointer type; a CipherRef must be a zero-size value type",
+            "cipher reference is a pointer or interface type; a CipherRef must be a zero-size value type",
             map[string]any{"cipherRef": fmt.Sprintf("%T", ref)},
             nil,
         )

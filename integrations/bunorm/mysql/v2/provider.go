@@ -143,7 +143,7 @@ func (instance *Provider) Open(params bunorm.ConnectionParameters, logger loggin
     return instance.OpenContext(context.Background(), params, logger)
 }
 
-/* OpenContext opens under the caller's context: an already-cancelled context is refused before the attempt, the retry sleeps watch it beside the clock, and the configuration hook and the boot ping derive their budgets from it; the dialect handshake bun runs at construction is bounded by the connect timeout alone, so a mid-attempt cancellation is honoured at the next cancellable step. A nil context reads as context.Background(), which is exactly Open. A nil logger reads as the emergency logger, since the terminal branches mark the returned error as logged and the diagnostics routing consumes a process-lifetime once, so both need a sink that writes. */
+/* OpenContext opens under the caller's context: an already-cancelled context is refused before the attempt, the retry sleeps watch it beside the clock, and the configuration hook and the boot ping derive their budgets from it; the dial and the handshake are bounded by the connect timeout under the caller's context, and the dialect query bun runs at construction goes over the connection the ping established, so a mid-attempt cancellation is honoured at the next cancellable step. A nil context reads as context.Background(), which is exactly Open. A nil logger reads as the emergency logger, since the terminal branches mark the returned error as logged and the diagnostics routing consumes a process-lifetime once, so both need a sink that writes. */
 func (instance *Provider) OpenContext(ctx context.Context, params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     if nil == ctx {
         ctx = context.Background()
@@ -326,13 +326,13 @@ func (instance *Provider) connectionTlsConfig(host string) *tls.Config {
     }
 
     return &tls.Config{
-        ServerName: host,
+        ServerName: tlsServerNameOf(host),
         MinVersion: tls.VersionTLS12,
     }
 }
 
 func (instance *Provider) open(ctx context.Context, params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    /* an already-cancelled context is refused before the attempt: the dialect handshake bun performs at construction queries the server outside any caller context, bounded by the connect timeout alone, so without this refusal a shutdown-cancelled lazy open would pay one full dial against a database nothing waits for. */
+    /* an already-cancelled context is refused before the attempt: so a shutdown-cancelled lazy open pays no dial against a database nothing waits for. */
     if ctxErr := ctx.Err(); nil != ctxErr {
         return nil, exception.NewError(
             "database open cancelled before the attempt",
@@ -404,8 +404,6 @@ func (instance *Provider) open(ctx context.Context, params bunorm.ConnectionPara
     sqlDatabase.SetConnMaxLifetime(poolConfig.ConnectionMaxLifetime)
     sqlDatabase.SetConnMaxIdleTime(poolConfig.ConnectionMaxIdleTime)
 
-    database := bun.NewDB(sqlDatabase, mysqldialect.New())
-
     pingContext := ctx
     pingCancel := func() {}
     if 0 < timeoutConfig.ConnectTimeout {
@@ -413,9 +411,10 @@ func (instance *Provider) open(ctx context.Context, params bunorm.ConnectionPara
     }
     defer pingCancel()
 
-    pingErr := database.PingContext(pingContext)
+    /* the connection is established before bun is handed the pool: bun's mysql dialect queries the server version at construction with no context, so a peer that accepts the connection and never sends the greeting would hold that first dial for as long as the read deadline allows, which the migration pool lifts. The ping dials and completes the handshake under the connect timeout and the caller's context, and the dialect query then runs over the connection it left idle. */
+    pingErr := sqlDatabase.PingContext(pingContext)
     if nil != pingErr {
-        _ = database.Close()
+        _ = sqlDatabase.Close()
 
         return nil, exception.NewError(
             "database connection failed",
@@ -423,6 +422,8 @@ func (instance *Provider) open(ctx context.Context, params bunorm.ConnectionPara
             pingErr,
         )
     }
+
+    database := bun.NewDB(sqlDatabase, mysqldialect.New())
 
     return database, nil
 }
@@ -613,4 +614,14 @@ func dialAddressOf(host string, port string) string {
     }
 
     return host + ":" + port
+}
+
+/* tlsServerNameOf answers the name a certificate is verified against for the configured host: a bracketed IPv6 literal loses its brackets and a scoped one its zone, since no certificate carries either and a name keeping them can never verify, while a host name or a plain address is answered as it is */
+func tlsServerNameOf(host string) string {
+    name := strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+    if zone := strings.IndexByte(name, '%'); -1 != zone {
+        name = name[:zone]
+    }
+
+    return name
 }

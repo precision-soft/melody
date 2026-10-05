@@ -113,7 +113,7 @@ func (instance *EncryptDatabaseCommand) Flags() []clicontract.Flag {
         &clicontract.StringFlag{Name: "mode", Value: migrateModeEncrypt, Usage: "encrypt | reencrypt | decrypt"},
         &clicontract.StringFlag{Name: "target-key", Usage: "key id to re-encrypt under (mode=reencrypt)"},
         &clicontract.IntFlag{Name: "batch", Value: defaultMigrateBatchSize, Usage: "rows per batch"},
-        &clicontract.BoolFlag{Name: "deterministic", Usage: "use deterministic (searchable) encryption for the columns"},
+        &clicontract.BoolFlag{Name: "deterministic", Usage: "seal the columns deterministically (searchable); without it a rotation keeps each stored value's mode, and a run onto the current key converts a deterministic column to random"},
     }
 }
 

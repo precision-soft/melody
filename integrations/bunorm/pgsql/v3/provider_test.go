@@ -1437,3 +1437,19 @@ func TestOpenWithRetry_AZeroAttemptBudgetTakesTheDefaultBudget(t *testing.T) {
 
     t.Fatalf("expected the terminal record of a spent budget, got %v", logger.entries)
 }
+
+/* the default verifying TLS config is checked against the host without the brackets of an IPv6 literal and without the zone of a scoped one, since no certificate carries either; a host name or a plain address is checked as configured */
+func TestTlsServerNameOf_DropsTheBracketsAndTheZoneOfAnIpv6Literal(t *testing.T) {
+    for host, expected := range map[string]string{
+        "fe80::1%eth0":         "fe80::1",
+        "[::1]":                "::1",
+        "[fe80::1%25eth0]":     "fe80::1",
+        "db.example.com":       "db.example.com",
+        "10.0.0.7":             "10.0.0.7",
+        "2001:db8::7":          "2001:db8::7",
+    } {
+        if serverName := tlsServerNameOf(host); expected != serverName {
+            t.Fatalf("host %q: expected the name %q verified, got %q", host, expected, serverName)
+        }
+    }
+}

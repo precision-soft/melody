@@ -6,8 +6,6 @@ import (
 
     clicontract "github.com/precision-soft/melody/cli/contract"
     "github.com/precision-soft/melody/cli/output"
-    "github.com/precision-soft/melody/exception"
-    exceptioncontract "github.com/precision-soft/melody/exception/contract"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
     "github.com/uptrace/bun/migrate"
 )
@@ -47,6 +45,10 @@ func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, co
     /* the per-query lines print through the command output's writer, so a write the report lost there is remembered by finish too */
     runnerOption := runnerOptionForCommand(outputInstance.writer, option)
     ctx := withRunnerOption(runtimeInstance.Context(), runnerOption)
+    /* under --format=json the per-query lines are discarded, so an empty migration's warning goes to the document's warnings instead */
+    if true == outputInstance.isJson() {
+        ctx = withEmptyMigrationWarner(ctx, outputInstance.printWarning)
+    }
     /* the parsed posture reaches the migrations through the context the migrator hands them, so this run's writer and colour choice belong to this run alone; the process-wide fallback is installed only for the length of the run, for a migration that drops the context it receives, and put back on the way out */
     defer restoreDefaultRunnerOption(swapDefaultRunnerOption(runnerOption))
 
@@ -62,16 +64,7 @@ func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, co
 
     /* take the bun migration lock so two replicas rolling back concurrently cannot both act on the same applied group. */
     if lockErr := migrator.Lock(ctx); nil != lockErr {
-        /* the same remedy-naming refusal the migrate sibling answers: bun's own error states that a lock exists and nothing else — not which database it belongs to, and not that this command set ships db:unlock to clear a lock a crashed process left behind. The bun error stays the cause, so errors.Is still reaches it. */
-        return exception.NewError(
-            "migrate: the migration lock is held; another migration is running, or a crashed one left it behind",
-            exceptioncontract.Context{
-                "manager":       managerName,
-                "locksTable":    migrationLocksTable,
-                "unlockCommand": instance.base.options.CommandPrefix + ":unlock",
-            },
-            lockErr,
-        )
+        return lockRefusal(ctx, db, lockErr, managerName, instance.base.options.CommandPrefix+":unlock")
     }
     /* the unlock failure becomes the command's verdict only when the rollback itself succeeded: a failed rollback keeps its own error, with the unlock failure printed beside it */
     defer func() {
@@ -115,10 +108,7 @@ func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, co
     if true == outputInstance.wantsDetail() {
         outputInstance.newline()
 
-        groupString := "<none>"
-        if nil != group {
-            groupString = group.String()
-        }
+        groupString := groupLabel(group)
 
         outputInstance.printDetailsBlock(map[string]string{
             "manager": managerName,
@@ -149,7 +139,7 @@ func printRollbackGroupOnFailure(outputInstance *commandOutput, managerName stri
 
     outputInstance.printDetailsBlock(map[string]string{
         "manager":    managerName,
-        "group":      strconv.FormatInt(group.ID, 10),
+        "group":      groupLabel(group),
         "migrations": strconv.Itoa(len(names)),
     })
 

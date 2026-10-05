@@ -15,6 +15,7 @@ import (
     "github.com/precision-soft/melody/v3/exception"
     melodylogging "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
+    "github.com/uptrace/bun"
 )
 
 type recordingStorage struct {
@@ -445,11 +446,21 @@ func TestAsyncStorage_CloseCancelsAWedgedSaveAfterTheGrace(t *testing.T) {
     }
 }
 
+/* ridingRecordingStorage records like recordingStorage and answers whether it rides a bound transaction, as BunStorage does */
+type ridingRecordingStorage struct {
+    *recordingStorage
+    rides bool
+}
+
+func (instance *ridingRecordingStorage) ridesTransactionOf(origin *bun.DB) bool {
+    return instance.rides
+}
+
 /* the worker is deliberately wedged on an unbound entry first: a queued bound entry would sit behind it, so the second delegate call arriving before Save returns can only be the synchronous path — the probe is constructed rather than raced */
 func TestAsyncStorage_SaveWithABoundDatabaseGoesThroughTheDelegateSynchronously(t *testing.T) {
     installDefaultAsyncStorageLogger(t)
 
-    delegate := newRecordingStorage()
+    delegate := &ridingRecordingStorage{recordingStorage: newRecordingStorage(), rides: true}
     storage := NewAsyncStorage(delegate, 4)
 
     if saveErr := storage.Save(context.Background(), "melody_audit", Entry{Entity: "wedges-the-worker"}); nil != saveErr {
@@ -1628,4 +1639,92 @@ func TestAsyncStorage_ADeadLetterLoggerOnAFullQueueCanCloseAndDrain(t *testing.T
     case <-time.After(2 * time.Second):
         t.Fatalf("expected the dead-letter logger to close and drain the storage, the save did not return")
     }
+}
+
+/* a wedged save under a caller's deadline is reported abandoned, every time: the cancellation stretch ends a margin before the deadline, so its timer does not race the deadline for the verdict */
+func TestAsyncStorage_AWedgedSaveUnderADeadlineIsReportedAbandonedNotCancelled(t *testing.T) {
+    installDefaultAsyncStorageLogger(t)
+
+    for round := range 40 {
+        delegate := newContextIgnoringStorage()
+        storage := NewAsyncStorage(delegate, 2)
+
+        if saveErr := storage.Save(context.Background(), "melody_audit", Entry{Entity: "wedged"}); nil != saveErr {
+            t.Fatalf("round %d: save: %v", round, saveErr)
+        }
+
+        <-delegate.entered
+
+        closeContext, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+        closeErr := storage.CloseWithContext(closeContext)
+        cancel()
+        close(delegate.release)
+
+        if nil == closeErr || false == strings.Contains(closeErr.Error(), "abandoned") {
+            t.Fatalf("round %d: expected the wedged save reported abandoned, got: %v", round, closeErr)
+        }
+    }
+}
+
+/* a caller that cancels during the stretches is still answered as the caller who withdrew the budget */
+func TestAsyncStorage_ACallerCancellingDuringTheCloseIsReportedAsCancelling(t *testing.T) {
+    installDefaultAsyncStorageLogger(t)
+
+    delegate := newContextIgnoringStorage()
+    defer close(delegate.release)
+    storage := NewAsyncStorage(delegate, 2)
+
+    if saveErr := storage.Save(context.Background(), "melody_audit", Entry{Entity: "wedged"}); nil != saveErr {
+        t.Fatalf("save: %v", saveErr)
+    }
+
+    <-delegate.entered
+
+    closeContext, cancel := context.WithTimeout(context.Background(), time.Second)
+    time.AfterFunc(20*time.Millisecond, cancel)
+    defer cancel()
+
+    closeErr := storage.CloseWithContext(closeContext)
+    if nil == closeErr || false == strings.Contains(closeErr.Error(), "cancelled by its caller") || false == errors.Is(closeErr, context.Canceled) {
+        t.Fatalf("expected the caller's cancellation reported, got: %v", closeErr)
+    }
+}
+
+/* a bound save over a delegate that cannot ride the transaction gains no atomicity from the inline write, so it is queued behind the wedged worker instead of reaching the delegate before Save returns */
+func TestAsyncStorage_ABoundSaveOverADelegateThatCannotRideItIsQueued(t *testing.T) {
+    installDefaultAsyncStorageLogger(t)
+
+    for _, delegate := range []Storage{newRecordingStorage(), &ridingRecordingStorage{recordingStorage: newRecordingStorage(), rides: false}} {
+        recording := recordingStorageOf(delegate)
+        storage := NewAsyncStorage(delegate, 4)
+
+        if saveErr := storage.Save(context.Background(), "melody_audit", Entry{Entity: "wedges-the-worker"}); nil != saveErr {
+            t.Fatalf("unbound save: %v", saveErr)
+        }
+
+        <-recording.entered
+
+        if saveErr := storage.Save(WithDatabase(context.Background(), newTestDatabase()), "melody_audit", Entry{Entity: "bound"}); nil != saveErr {
+            t.Fatalf("bound save: %v", saveErr)
+        }
+
+        if 0 != recording.count() {
+            t.Fatalf("expected the bound save queued behind the wedged worker, %d reached the delegate first", recording.count())
+        }
+
+        close(recording.release)
+
+        if closeErr := storage.Close(); nil != closeErr {
+            t.Fatalf("close: %v", closeErr)
+        }
+    }
+}
+
+/* recordingStorageOf answers the recording storage under a delegate of either shape */
+func recordingStorageOf(delegate Storage) *recordingStorage {
+    if riding, isRiding := delegate.(*ridingRecordingStorage); true == isRiding {
+        return riding.recordingStorage
+    }
+
+    return delegate.(*recordingStorage)
 }

@@ -7,6 +7,7 @@ import (
     "runtime/debug"
     "sort"
     "sync"
+    "unicode/utf8"
 
     "github.com/uptrace/bun"
 
@@ -21,6 +22,8 @@ type ManagerRegistry struct {
     openContext context.Context
 
     providerDefinitionByName      map[string]ProviderDefinition
+    /* the definition names sorted once, since the definitions never change after the constructor: an unknown-name refusal then reads them under the lock without sorting or allocating */
+    sortedProviderDefinitionNames []string
     defaultProviderDefinitionName string
 
     lock              sync.Mutex
@@ -43,7 +46,7 @@ func NewManagerRegistry(logger loggingcontract.Logger, providerDefinitions ...Pr
     return NewManagerRegistryWithContext(context.Background(), logger, providerDefinitions...)
 }
 
-/* NewManagerRegistryWithContext additionally binds the registry to the given context: a provider that implements ContextOpener has its lazy opens run under it, so a shutdown that cancels the context refuses an open not yet started, reaches the attempt's cancellable steps — the configuration hook, the boot ping, a retry sleep — in flight, and pays at most the dialect handshake bun bounds by the connect timeout. A nil context reads as context.Background(), the exact behaviour of NewManagerRegistry. */
+/* NewManagerRegistryWithContext additionally binds the registry to the given context: a provider that implements ContextOpener has its lazy opens run under it, so a shutdown that cancels the context refuses an open not yet started, reaches the attempt's cancellable steps — the configuration hook, the boot ping, a retry sleep — in flight, its dial and handshake bounded by the connect timeout under the context. A nil context reads as context.Background(), the exact behaviour of NewManagerRegistry. */
 func NewManagerRegistryWithContext(ctx context.Context, logger loggingcontract.Logger, providerDefinitions ...ProviderDefinition) (*ManagerRegistry, error) {
     if true == isNilInterface(logger) {
         return nil, ErrLoggerIsRequired
@@ -94,6 +97,7 @@ func NewManagerRegistryWithContext(ctx context.Context, logger loggingcontract.L
         logger:                        logger,
         openContext:                   ctx,
         providerDefinitionByName:      providerDefinitionByName,
+        sortedProviderDefinitionNames: sortedProviderDefinitionNamesOf(providerDefinitionByName),
         defaultProviderDefinitionName: defaultProviderDefinitionName,
         managers:                      make(map[string]*Manager),
         pendingOpenByName:             make(map[string]*managerOpen),
@@ -279,22 +283,49 @@ func providerDefinitionRefusal(sentinel error, position int, name string) error 
 
 /* providerDefinitionNotFoundErrorLocked names the definition asked for and the ones registered, as the framework's container names an unregistered service id. It is called with the registry lock held, and the sentinel stays the cause, so errors.Is(err, ErrProviderDefinitionNotFound) keeps its answer. */
 func (instance *ManagerRegistry) providerDefinitionNotFoundErrorLocked(name string) error {
-    registered := make([]string, 0, len(instance.providerDefinitionByName))
-    for definitionName := range instance.providerDefinitionByName {
-        registered = append(registered, definitionName)
+    errorContext := map[string]any{
+        "requested":  name,
+        "registered": instance.sortedProviderDefinitionNames,
     }
 
-    /* sorted so one misspelling always prints one list */
-    sort.Strings(registered)
+    /* a requested name past the bound is cut on a rune boundary, its full length kept beside it, so a caller-supplied name cannot carry a megabyte into the error and the journal */
+    if maxRequestedNameLength < len(name) {
+        errorContext["requested"] = name[:runeBoundaryAtOrBefore(name, maxRequestedNameLength)] + truncatedNameMarker
+        errorContext["requestedLength"] = len(name)
+    }
 
     return exception.NewError(
         "provider definition not found",
-        map[string]any{
-            "requested":  name,
-            "registered": registered,
-        },
+        errorContext,
         ErrProviderDefinitionNotFound,
     )
+}
+
+/* maxRequestedNameLength bounds, in bytes, the requested name an unknown-name refusal carries */
+const maxRequestedNameLength = 128
+
+const truncatedNameMarker = "...(truncated)"
+
+/* sortedProviderDefinitionNamesOf answers the definition names sorted, so one misspelling always prints one list: the map walk is random, and an operator comparing two runs would otherwise read two different answers to the same question */
+func sortedProviderDefinitionNamesOf(providerDefinitionByName map[string]ProviderDefinition) []string {
+    names := make([]string, 0, len(providerDefinitionByName))
+    for definitionName := range providerDefinitionByName {
+        names = append(names, definitionName)
+    }
+
+    sort.Strings(names)
+
+    return names
+}
+
+/* runeBoundaryAtOrBefore answers the largest index at or before limit that starts a rune, so a cut never splits a multi-byte character */
+func runeBoundaryAtOrBefore(value string, limit int) int {
+    boundary := limit
+    for 0 < boundary && false == utf8.RuneStart(value[boundary]) {
+        boundary--
+    }
+
+    return boundary
 }
 
 func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {

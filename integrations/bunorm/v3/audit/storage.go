@@ -54,6 +54,16 @@ func databaseFromContext(ctx context.Context, fallback bun.IDB) bun.IDB {
     return bound.handle
 }
 
+/* transactionRider is the question AsyncStorage asks its delegate about a bound transaction: whether the delegate's save would write through it. A delegate that does not answer is taken as one that cannot. */
+type transactionRider interface {
+    ridesTransactionOf(origin *bun.DB) bool
+}
+
+/* ridesTransactionOf answers what databaseFromContext decides: a caller-made binding, which carries no origin, is honoured unconditionally, and a tracker-made one only over the database this storage writes to */
+func (instance *BunStorage) ridesTransactionOf(origin *bun.DB) bool {
+    return nil == origin || origin == instance.database
+}
+
 func NewBunStorage(database *bun.DB) *BunStorage {
     if nil == database {
         exception.Panic(exception.NewError("audit storage database is nil", nil, nil))

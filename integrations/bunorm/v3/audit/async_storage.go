@@ -111,9 +111,11 @@ func (instance *AsyncStorage) WithLogger(logger loggingcontract.Logger) *AsyncSt
 
 /* Save queues the entries for the worker and returns without waiting for the delegate. An entry the queue cannot take is dead-lettered and reported as ErrAsyncStorageQueueFull or ErrAsyncStorageClosed; every entry is attempted, and the first refusal names each dropped entry under "refused" with its position in the call, and the logger it was dead-lettered through, so a caller retries those alone and a Recorder journals the loss unless that logger is its own. */
 func (instance *AsyncStorage) Save(ctx context.Context, table string, entries ...Entry) error {
-    /* a context carrying a database binding asks for the audit rows to ride that transaction, so the save goes through the delegate synchronously on the caller's context; queued, it could be written after a rollback */
+    /* a context carrying a database binding asks for the audit rows to ride that transaction, so where the delegate can ride it the save goes through the delegate synchronously on the caller's context; queued, it could be written after a rollback. A delegate that cannot ride it, a file or a database other than the transaction's, gains no atomicity from the inline write and would only put its latency and its failures on the business write, so its entries are queued like any other */
     if bound, isBound := ctx.Value(databaseContextKey{}).(*boundDatabase); true == isBound && nil != bound && nil != bound.handle {
-        return instance.delegate.Save(ctx, table, entries...)
+        if rider, isRider := instance.delegate.(transactionRider); true == isRider && true == rider.ridesTransactionOf(bound.origin) {
+            return instance.delegate.Save(ctx, table, entries...)
+        }
     }
 
     instance.mutex.RLock()
@@ -186,7 +188,7 @@ func (instance *AsyncStorage) Close() error {
     return instance.CloseWithContext(context.Background())
 }
 
-/* closeGracesWithin splits what the caller's deadline leaves, read once at entry, into the drain and the cancellation stretch: each is half the remainder and neither exceeds the package grace, since a declared budget bounds the whole teardown. Between one and two floors the drain keeps its half and the cancellation gives its half up, since no reaction can be observed in it; below the floor, or on a cancelled context, both are zero, and no deadline gives both the package grace. */
+/* closeGracesWithin splits what the caller's deadline leaves, read once at entry, into the drain and the cancellation stretch: each is half the remainder less a margin kept back so the cooperative stretch ends before the deadline, and neither exceeds the package grace, since a declared budget bounds the whole teardown. Between one and two floors the drain keeps its half and the cancellation gives its half up, since no reaction can be observed in it; below the floor, or on a cancelled context, both are zero, and no deadline gives both the package grace. */
 func (instance *AsyncStorage) closeGracesWithin(closeContext context.Context) (drainGrace time.Duration, cancellationGrace time.Duration) {
     if nil != closeContext.Err() {
         return 0, 0
@@ -203,7 +205,9 @@ func (instance *AsyncStorage) closeGracesWithin(closeContext context.Context) (d
         return 0, 0
     }
 
-    grace := min(remaining/2, asyncStorageCloseGrace)
+    /* a margin is kept back before the halves, so the cancellation stretch ends strictly before the caller's deadline even when the drain stretch overran its timer: with the halves summing to the deadline exactly, the stretch's timer and the deadline fired in one instant and the verdict was a coin toss between "abandoned" and "cancelled by its caller" */
+    margin := max(asyncStorageCloseGraceFloor, remaining/asyncStorageCloseMarginDivisor)
+    grace := min((remaining-margin)/2, asyncStorageCloseGrace)
 
     if asyncStorageCloseGraceFloor > grace {
         return grace, 0
@@ -214,6 +218,9 @@ func (instance *AsyncStorage) closeGracesWithin(closeContext context.Context) (d
 
 /* asyncStorageCloseGraceFloor is the shortest stretch that is a measurement of a delegate's reaction, and the shortest remainder of a deadline that is given any grace at all: below it both stretches are read as none, and the close answers what it can say without waiting. */
 const asyncStorageCloseGraceFloor = time.Millisecond
+
+/* asyncStorageCloseMarginDivisor sizes the margin a deadline-bound close keeps back before it splits the remainder into its two stretches: an eighth of it, and never less than the floor */
+const asyncStorageCloseMarginDivisor = 8
 
 /* CloseWithContext is Close under a deadline its caller declares, spent on the same two stretches. A storage with nothing outstanding answers nil whatever the deadline. A deadline already passed leaves both stretches at zero: the queue is closed, the worker cancelled, and the answer counts what was still outstanding — the save in hand included — without claiming the save ignored a cancellation it was given no grace to react to, which is the whole of what the operator can still be told once the budget is gone. */
 func (instance *AsyncStorage) CloseWithContext(closeContext context.Context) error {

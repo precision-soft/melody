@@ -221,7 +221,7 @@ func TestEncryptedStringFor_RefusesAPointerFormMarker(t *testing.T) {
         t.Fatalf("expected the pointer-form marker to be refused")
     }
 
-    if false == strings.Contains(valueErr.Error(), "pointer type") {
+    if false == strings.Contains(valueErr.Error(), "pointer or interface type") {
         t.Fatalf("expected the refusal to name the pointer form, got: %v", valueErr)
     }
 }
@@ -307,5 +307,23 @@ func TestEncryptedStringFor_ASealWrittenAsDataIsSealedAndReadBackAsTheSeal(t *te
 
     if otherRowsSeal != string(loaded) {
         t.Fatalf("expected the column to read back the seal it was given, got %q", string(loaded))
+    }
+}
+
+/* an interface marker, CipherRef itself, has no zero value to call CipherName on; both doors answer an error instead of panicking inside database/sql */
+func TestEncryptedStringFor_AnInterfaceMarkerIsRefusedWithoutAPanic(t *testing.T) {
+    defer func() {
+        if recovered := recover(); nil != recovered {
+            t.Fatalf("expected an error, the marker panicked: %v", recovered)
+        }
+    }()
+
+    if _, valueErr := EncryptedStringFor[CipherRef]("plaintext").Value(); nil == valueErr || false == strings.Contains(valueErr.Error(), "pointer or interface type") {
+        t.Fatalf("expected the interface marker refused at Value, got: %v", valueErr)
+    }
+
+    var loaded EncryptedStringFor[CipherRef]
+    if scanErr := loaded.Scan(markerPrefix + "v1:c2VhbGVk"); nil == scanErr {
+        t.Fatal("expected the interface marker refused at Scan")
     }
 }

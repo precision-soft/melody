@@ -54,18 +54,23 @@ func (instance *bunUserSessionRepository) Admit(
             }
         }
 
-        var heldOldestFirst []string
+        var heldRows []userSessionRow
         selectErr := tx.NewSelect().
-            Model((*userSessionRow)(nil)).
-            Column("session_id").
+            Model(&heldRows).
+            Column("session_id", "created_at").
             Where("user_identifier = ?", userId).
             OrderExpr("created_at ASC, session_id ASC").
-            Scan(ctx, &heldOldestFirst)
+            Scan(ctx)
         if nil != selectErr {
             return selectErr
         }
 
-        live, ended, liveErr := liveSessionsOldestFirst(heldOldestFirst, sessionLive)
+        heldOldestFirst := make([]heldSession, 0, len(heldRows))
+        for _, heldRow := range heldRows {
+            heldOldestFirst = append(heldOldestFirst, heldSession{sessionId: heldRow.SessionId, admittedAt: heldRow.CreatedAt})
+        }
+
+        live, ended, liveErr := liveSessionsOldestFirst(heldOldestFirst, createdAt, sessionLive)
         if nil != liveErr {
             return liveErr
         }

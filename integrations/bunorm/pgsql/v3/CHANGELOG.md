@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
-- `Unlimited` lifts the bound of a `PoolConfig` or `TimeoutConfig` field: no deadline for a timeout, no cap on the open or idle connections, no recycling for a lifetime or an idle time. Every negative value reads the same, so a duration read from configuration as `-1s` lifts it too, while a zero field is unset and takes the default.
+- `Unlimited` lifts the bound of a `PoolConfig` or `TimeoutConfig` field: no deadline for a timeout, no cap on the open connections and none on the idle ones, no recycling for a lifetime or an idle time. Every negative value reads the same, so a duration read from configuration as `-1s` lifts it too, while a zero field is unset and takes the default, so "keep no idle connection" is not expressed through `PoolConfig`: call `SetMaxIdleConns(0)` on the `*bun.DB` the provider returns.
 - `ConnectionConfig` and `NewConnectionConfig` hold the connection details the provider dials, and `SafeContext` answers them without the password, for a log line or an error context.
 - `RegisterLockerService(registrar, database)` and `NewModule(ModuleConfig{Database, AsLocker})` — the plug-and-play pair the mysql sibling has carried since the registration helpers landed, and which this module went without even though it has shipped the advisory-lock `Locker` since v3.2.0. The helper publishes the locker under the framework's own `lock.ServiceLocker` name, so an application resolves "the locker" and receives whichever backend it wired; the module is the same registration behind one `RegisterModule` call, opt-in through `AsLocker` and skipped when no database was handed to it. Until now the module's own README recorded the absence — "register the locker under the core service name yourself" — so every consumer repeated the registration and named the service itself
 
@@ -29,6 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- the default verifying TLS config checked the server certificate against the configured host as written, so a bracketed IPv6 literal such as `[::1]` or a scoped one such as `fe80::1%eth0`, which the dialer reaches, could never be verified, no certificate carrying brackets or a zone; the name verified is now the host without either.
 - documentation: the README says how the host is joined with the port: an IPv6 literal may be bare or in brackets, a bare one is bracketed, a bracketed one is kept, and a scoped literal keeps its zone.
 - documentation: the unreleased entries spell the behavioural-change marker in full and name `ConnectionConfig`.
 - documentation: the README says that the package ships a registration helper and an application module for its advisory-lock `Locker`, as the mysql provider does.

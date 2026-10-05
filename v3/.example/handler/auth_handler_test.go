@@ -1056,12 +1056,38 @@ func TestLoginHandler_ASessionThatEndedElsewhereGivesItsPlaceBack(t *testing.T) 
         t.Fatalf("unexpected error lapsing the session: %v", deleteErr)
     }
 
+    login.clock.Advance(repository.UserSessionAdmissionGrace)
+
     login.signInAndStore(t, "user", nil)
 
     for _, sessionId := range []string{sessionIdList[0], sessionIdList[1], sessionIdList[3], sessionIdList[4]} {
         if nil == login.sessionManager.Session(sessionId) {
             t.Fatalf("expected no live session ended while an ended one held a place, %q is gone", sessionId)
         }
+    }
+}
+
+/* concurrent sign-ins of one account whose sessions the kernel has not stored yet still meet the cap: each row counts as live within the grace, so the sign-ins past the cap end the oldest and no more than repository.UserSessionCap of them can be stored */
+func TestLoginHandler_SignInsNotYetStoredStillMeetTheCap(t *testing.T) {
+    login := newSecondFactorLogin(t)
+
+    pendingList := make([]melodysessioncontract.Session, 0, repository.UserSessionCap+2)
+    for range repository.UserSessionCap + 2 {
+        response, sessionInstance := login.post(t, "user", "user", nil)
+        requireLoginAnswer(t, response, nethttp.StatusOK)
+
+        pendingList = append(pendingList, sessionInstance)
+    }
+
+    storedCount := 0
+    for _, sessionInstance := range pendingList {
+        if saveErr := login.sessionManager.SaveSession(sessionInstance); nil == saveErr {
+            storedCount++
+        }
+    }
+
+    if repository.UserSessionCap != storedCount {
+        t.Fatalf("expected %d of the account's sessions stored, got %d", repository.UserSessionCap, storedCount)
     }
 }
 

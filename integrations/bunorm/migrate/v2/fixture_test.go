@@ -143,6 +143,17 @@ func appliedMigrationRowsHook(appliedNames ...string) func(query string) ([]stri
     }
 }
 
+/* lockCountHook answers the count of the migration locks table, the probe a refused lock asks, with heldLocks rows */
+func lockCountHook(heldLocks int64) func(query string) ([]string, [][]driver.Value, error) {
+    return func(query string) ([]string, [][]driver.Value, error) {
+        if true == strings.HasPrefix(query, "SELECT count(*)") && true == strings.Contains(query, "bun_migration_locks") {
+            return []string{"count"}, [][]driver.Value{{heldLocks}}, nil
+        }
+
+        return []string{}, nil, nil
+    }
+}
+
 func isLockInsert(query string) bool {
     return strings.HasPrefix(query, "INSERT") && strings.Contains(query, "bun_migration_locks")
 }

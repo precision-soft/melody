@@ -4,13 +4,19 @@ import (
     "context"
     "database/sql/driver"
     "errors"
+    "fmt"
     "strings"
     "testing"
     "time"
 )
 
-/* heldSessionRows answers the account's locked row when the account exists, and its held sessions, oldest first, to the index read */
+/* heldSessionRows answers the account's locked row when the account exists, and its held sessions, oldest first and admitted long before the grace, to the index read */
 func heldSessionRows(accountExists bool, heldOldestFirst ...string) func(query string) ([]string, [][]driver.Value, error) {
+    return heldSessionRowsAdmittedAt(accountExists, time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC), heldOldestFirst...)
+}
+
+/* heldSessionRowsAdmittedAt answers the held sessions as admitted at admittedAt */
+func heldSessionRowsAdmittedAt(accountExists bool, admittedAt time.Time, heldOldestFirst ...string) func(query string) ([]string, [][]driver.Value, error) {
     return func(query string) ([]string, [][]driver.Value, error) {
         if true == strings.Contains(query, "FOR UPDATE") {
             if false == accountExists {
@@ -23,10 +29,10 @@ func heldSessionRows(accountExists bool, heldOldestFirst ...string) func(query s
         if true == strings.Contains(query, "melody_example_v3_user_session") && true == strings.HasPrefix(query, "SELECT") {
             rows := make([][]driver.Value, 0, len(heldOldestFirst))
             for _, sessionId := range heldOldestFirst {
-                rows = append(rows, []driver.Value{sessionId})
+                rows = append(rows, []driver.Value{sessionId, admittedAt})
             }
 
-            return []string{"session_id"}, rows, nil
+            return []string{"session_id", "created_at"}, rows, nil
         }
 
         return []string{}, nil, nil
@@ -183,3 +189,29 @@ func TestBunUserSessionRepositoryAdmit_AFailedLivenessReadRecordsNothing(t *test
     }
 }
 
+
+/* a held row admitted within the grace counts as live without the storage read, so a concurrent sign-in whose session is not stored yet keeps its place and the cap releases the oldest */
+func TestBunUserSessionRepositoryAdmit_ARowWithinTheGraceCountsWhateverTheStorageAnswers(t *testing.T) {
+    now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = heldSessionRowsAdmittedAt(true, now.Add(-time.Second), "s1", "s2", "s3", "s4", "s5")
+    repositoryInstance := newBunUserSessionRepository(database)
+
+    var releasedList []string
+    admitErr := repositoryInstance.Admit(context.Background(), "user-1", "", "s6", now, func(sessionId string) (bool, error) { return false, nil }, func(sessionId string) error {
+        releasedList = append(releasedList, sessionId)
+
+        return nil
+    })
+    if nil != admitErr {
+        t.Fatalf("the admission failed: %v", admitErr)
+    }
+
+    if "[s1]" != fmt.Sprint(releasedList) {
+        t.Fatalf("expected the oldest released past the cap, got %v", releasedList)
+    }
+
+    if 0 != recorder.countMatching(func(query string) bool { return true == strings.HasPrefix(query, "DELETE") && false == strings.Contains(query, "'s1'") }) {
+        t.Fatalf("expected no row within the grace dropped as ended: %q", recorder.recordedQueries())
+    }
+}

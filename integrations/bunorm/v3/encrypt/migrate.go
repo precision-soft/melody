@@ -148,7 +148,7 @@ func (instance *Migrator) encryptTransform(spec TableSpec) func(string) (string,
     }
 }
 
-/* reencryptTransform decides on the STORED value alone and seals the value it decrypted as data under the target key, so a seal an application stored as data is rotated as data and never turned back into a bare seal. */
+/* reencryptTransform decides on the STORED value alone and seals the value it decrypted as data under the target key, so a seal an application stored as data is rotated as data and never turned back into a bare seal. On a key change the stored seal's mode is kept, deterministic or random; spec.Deterministic converts to deterministic, and a run onto the key a seal already carries without the flag converts it to random, the two explicit conversions. */
 func (instance *Migrator) reencryptTransform(spec TableSpec, targetKeyId string) func(string) (string, error) {
     sealer, isSealer := instance.cipher.(valueSealer)
 
@@ -170,14 +170,17 @@ func (instance *Migrator) reencryptTransform(spec TableSpec, targetKeyId string)
                 return sealer.sealValueWithKeyId(plaintext, targetKeyId, true)
             }
 
+            /* the value decrypted above, so a sealed one authenticates; an unsealed value reads as random and is sealed so */
+            stored, _ := sealer.authenticatedSeal(value)
             if true == sameKey {
-                stored, _ := sealer.authenticatedSeal(value)
                 if false == stored.deterministic {
                     return value, nil
                 }
+
+                return sealer.sealValueWithKeyId(plaintext, targetKeyId, false)
             }
 
-            return sealer.sealValueWithKeyId(plaintext, targetKeyId, false)
+            return sealer.sealValueWithKeyId(plaintext, targetKeyId, stored.deterministic)
         }
 
         if true == hasEncryptionMarker(plaintext) {
@@ -196,6 +199,20 @@ func (instance *Migrator) reencryptTransform(spec TableSpec, targetKeyId string)
 
             if value != deterministic {
                 return value, nil
+            }
+
+            return instance.cipher.EncryptWithKeyId(plaintext, targetKeyId)
+        }
+
+        /* a foreign cipher exposes no mode, so the stored seal's is read by sealing the plaintext deterministically under the key it carries: an equal seal is deterministic */
+        if true == encrypted {
+            storedDeterministic, deterministicErr := instance.cipher.EncryptDeterministicWithKeyId(plaintext, currentKeyId)
+            if nil != deterministicErr {
+                return "", deterministicErr
+            }
+
+            if value == storedDeterministic {
+                return instance.cipher.EncryptDeterministicWithKeyId(plaintext, targetKeyId)
             }
         }
 
@@ -223,8 +240,13 @@ func (instance *Migrator) ensureColumnCapacity(ctx context.Context, spec TableSp
         return exception.NewError("migrate spec needs a table and at least one column", nil, nil)
     }
 
+    charsetByColumn, charsetErr := instance.columnCharsets(ctx, spec.Table)
+    if nil != charsetErr {
+        return charsetErr
+    }
+
     for _, column := range spec.Columns {
-        longest, hasUnsealed, longestErr := instance.longestUnsealedLength(ctx, spec.Table, column)
+        longest, hasUnsealed, longestErr := instance.longestUnsealedLength(ctx, spec.Table, column, charsetByColumn[column])
         if nil != longestErr {
             return longestErr
         }
@@ -241,7 +263,7 @@ func (instance *Migrator) ensureColumnCapacity(ctx context.Context, spec TableSp
         }
 
         if "" != targetKeyId {
-            withoutKeyId, hasSealed, withoutKeyIdErr := instance.longestSealedLengthWithoutKeyId(ctx, spec.Table, column)
+            withoutKeyId, hasSealed, withoutKeyIdErr := instance.longestSealedLengthWithoutKeyId(ctx, spec.Table, column, charsetByColumn[column])
             if nil != withoutKeyIdErr {
                 return withoutKeyIdErr
             }
@@ -287,14 +309,14 @@ func (instance *Migrator) ensureColumnCapacity(ctx context.Context, spec TableSp
     return nil
 }
 
-/* longestUnsealedLength reports, in bytes, the length of the longest value not already sealed and whether one exists; bytes are the unit the seal expands over. */
-func (instance *Migrator) longestUnsealedLength(ctx context.Context, table string, column string) (int, bool, error) {
+/* longestUnsealedLength reports, in bytes, the length of the longest value not already sealed and whether one exists; bytes are the unit the seal expands over, counted in the utf8mb4 the cipher reads whatever the column's charset. */
+func (instance *Migrator) longestUnsealedLength(ctx context.Context, table string, column string, charset string) (int, bool, error) {
     /* the cast keeps a case-insensitive collation from reading a plaintext that merely looks like the marker as already sealed; markerPrefix carries no LIKE metacharacter, so the pattern needs no escaping */
     probeSql := fmt.Sprintf(
         "SELECT MAX(LENGTH(%s)) FROM %s WHERE %s NOT LIKE ?",
-        quoteIdentifier(column),
+        columnBytes(column, charset),
         quoteIdentifier(table),
-        binaryComparison(column),
+        binaryComparison(column, charset),
     )
 
     var longest sql.NullInt64
@@ -316,13 +338,13 @@ func (instance *Migrator) longestUnsealedLength(ctx context.Context, table strin
 }
 
 /* longestSealedLengthWithoutKeyId reports, in bytes, the widest sealed value with its key id taken out, and whether one exists; adding another key id's length gives its width after rotation. The key id ends at the first colon, since neither the key id alphabet nor base64 carries one, and the column is read as bytes so the substring offset matches LENGTH. */
-func (instance *Migrator) longestSealedLengthWithoutKeyId(ctx context.Context, table string, column string) (int, bool, error) {
+func (instance *Migrator) longestSealedLengthWithoutKeyId(ctx context.Context, table string, column string, charset string) (int, bool, error) {
     probeSql := fmt.Sprintf(
         "SELECT MAX(LENGTH(%s) - LENGTH(SUBSTRING_INDEX(SUBSTRING(%s, ?), ':', 1))) FROM %s WHERE %s LIKE ?",
-        quoteIdentifier(column),
-        binaryComparison(column),
+        columnBytes(column, charset),
+        binaryComparison(column, charset),
         quoteIdentifier(table),
-        binaryComparison(column),
+        binaryComparison(column, charset),
     )
 
     var longest sql.NullInt64
@@ -453,6 +475,16 @@ func (instance *Migrator) run(ctx context.Context, spec TableSpec, transform fun
         quoteIdentifier(spec.PrimaryKey),
     )
 
+    charsetByColumn, charsetErr := instance.columnCharsets(ctx, spec.Table)
+    if nil != charsetErr {
+        return 0, charsetErr
+    }
+
+    guardByColumn := make([]string, 0, len(spec.Columns))
+    for _, column := range spec.Columns {
+        guardByColumn = append(guardByColumn, binaryComparison(column, charsetByColumn[column])+" = ?")
+    }
+
     var cursor any
     hasCursor := false
     processed := 0
@@ -487,7 +519,7 @@ func (instance *Migrator) run(ctx context.Context, spec TableSpec, transform fun
             cursor = row.primaryKeyArgument
             hasCursor = true
 
-            applied, updateErr := instance.applyRow(ctx, spec, row, transform)
+            applied, updateErr := instance.applyRow(ctx, spec, guardByColumn, row, transform)
             if nil != updateErr {
                 return processed, instance.classifyRunError(spec, processed, "", updateErr)
             }
@@ -542,7 +574,7 @@ func (instance *Migrator) classifyRunError(spec TableSpec, processed int, messag
     return exception.NewError(message, map[string]any{"table": spec.Table}, cause)
 }
 
-func (instance *Migrator) applyRow(ctx context.Context, spec TableSpec, row migrateRow, transform func(string) (string, error)) (bool, error) {
+func (instance *Migrator) applyRow(ctx context.Context, spec TableSpec, guardByColumn []string, row migrateRow, transform func(string) (string, error)) (bool, error) {
     assignments := make([]string, 0, len(spec.Columns))
     setArguments := make([]any, 0, len(spec.Columns))
     valuePredicates := make([]string, 0, len(spec.Columns))
@@ -565,7 +597,7 @@ func (instance *Migrator) applyRow(ctx context.Context, spec TableSpec, row migr
 
         assignments = append(assignments, quoteIdentifier(column)+" = ?")
         setArguments = append(setArguments, transformed)
-        valuePredicates = append(valuePredicates, binaryComparison(column)+" = ?")
+        valuePredicates = append(valuePredicates, guardByColumn[index])
         valueArguments = append(valueArguments, value.String)
     }
 
@@ -685,9 +717,48 @@ func isIntegerDatabaseType(databaseTypeName string) bool {
     }
 }
 
-/* binaryComparison renders a column so the pre-image guard compares bytes: under a case-insensitive or PAD SPACE collation a concurrent write that only changed casing or trailing whitespace would still match, and be overwritten in silence. The CAST form is used because COLLATE utf8mb4_bin is rejected on a latin1 column and the BINARY operator is deprecated. */
-func binaryComparison(column string) string {
-    return "CAST(" + quoteIdentifier(column) + " AS BINARY)"
+/* binaryComparison renders a column so the pre-image guard compares bytes: under a case-insensitive or PAD SPACE collation a concurrent write that only changed casing or trailing whitespace would still match, and be overwritten in silence. The CAST form is used because COLLATE utf8mb4_bin is rejected on a latin1 column and the BINARY operator is deprecated. The bytes are those of columnBytes, the utf8mb4 the driver hands the run, so the guard matches the value it read on a column of another charset too. */
+func binaryComparison(column string, charset string) string {
+    return "CAST(" + columnBytes(column, charset) + " AS BINARY)"
+}
+
+/* columnBytes renders a column as the utf8mb4 bytes the driver reads it as: a text column of another charset is converted, so its guard and its width are taken on the bytes the cipher seals, while a utf8mb4 or a binary column (no charset) is read as it is stored, a conversion of bytes that are not valid utf8 rewriting them. */
+func columnBytes(column string, charset string) string {
+    if "" == charset || "utf8mb4" == strings.ToLower(charset) || "binary" == strings.ToLower(charset) {
+        return quoteIdentifier(column)
+    }
+
+    return "CONVERT(" + quoteIdentifier(column) + " USING utf8mb4)"
+}
+
+/* columnCharsets answers the charset of each column of the table, read once per run; a column without one, a binary type, answers the empty string. */
+func (instance *Migrator) columnCharsets(ctx context.Context, table string) (map[string]string, error) {
+    rows, queryErr := instance.db.DB.QueryContext(
+        ctx,
+        "SELECT COLUMN_NAME, CHARACTER_SET_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?",
+        table,
+    )
+    if nil != queryErr {
+        return nil, exception.NewError("migrate column charset lookup failed", map[string]any{"table": table}, queryErr)
+    }
+    defer rows.Close()
+
+    charsetByColumn := map[string]string{}
+    for rows.Next() {
+        var column string
+        var charset sql.NullString
+        if scanErr := rows.Scan(&column, &charset); nil != scanErr {
+            return nil, exception.NewError("migrate column charset lookup failed", map[string]any{"table": table}, scanErr)
+        }
+
+        charsetByColumn[column] = charset.String
+    }
+
+    if rowsErr := rows.Err(); nil != rowsErr {
+        return nil, exception.NewError("migrate column charset lookup failed", map[string]any{"table": table}, rowsErr)
+    }
+
+    return charsetByColumn, nil
 }
 
 func quoteIdentifier(identifier string) string {

@@ -123,3 +123,21 @@ func TestFileStorage_RefusesAContextAlreadyDone(t *testing.T) {
         t.Fatalf("expected no file written on a cancelled context, stat: %v", statErr)
     }
 }
+
+/* a BunStorage rides a caller-made binding, which carries no origin, and a tracker-made one over its own database; over another database it writes to its own, so it does not ride that transaction */
+func TestBunStorage_RidesACallersBindingAndATransactionOfItsOwnDatabase(t *testing.T) {
+    ownDatabase := newTestDatabase()
+    storage := NewBunStorage(ownDatabase)
+
+    if false == storage.ridesTransactionOf(nil) {
+        t.Fatal("expected a caller-made binding ridden")
+    }
+
+    if false == storage.ridesTransactionOf(ownDatabase) {
+        t.Fatal("expected a transaction of its own database ridden")
+    }
+
+    if true == storage.ridesTransactionOf(newTestDatabase()) {
+        t.Fatal("expected a transaction of another database not ridden")
+    }
+}

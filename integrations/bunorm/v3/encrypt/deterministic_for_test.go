@@ -142,3 +142,21 @@ func TestEncryptedDeterministicStringFor_ASealWrittenAsDataIsSealedAndReadBackAs
         t.Fatalf("expected the column to read back the seal it was given, got %q", string(loaded))
     }
 }
+
+/* the deterministic column refuses an interface marker the same way */
+func TestEncryptedDeterministicStringFor_AnInterfaceMarkerIsRefusedWithoutAPanic(t *testing.T) {
+    defer func() {
+        if recovered := recover(); nil != recovered {
+            t.Fatalf("expected an error, the marker panicked: %v", recovered)
+        }
+    }()
+
+    if _, valueErr := EncryptedDeterministicStringFor[CipherRef]("plaintext").Value(); nil == valueErr {
+        t.Fatal("expected the interface marker refused at Value")
+    }
+
+    var loaded EncryptedDeterministicStringFor[CipherRef]
+    if scanErr := loaded.Scan(markerPrefix + "v1:c2VhbGVk"); nil == scanErr {
+        t.Fatal("expected the interface marker refused at Scan")
+    }
+}

@@ -243,6 +243,11 @@ func (instance *Manager) SaveSession(sessionInstance sessioncontract.Session) er
     values, sessionModified, sessionCleared := sessionInstance.Snapshot()
 
     if true == sessionCleared {
+        /* a session this manager minted and never stored has no entry to remove and no copy to bury, as its rotation does not, so clearing it leaves no record */
+        if concreteSession, isConcrete := sessionInstance.(*Session); true == isConcrete && true == concreteSession.isMinted() {
+            return nil
+        }
+
         return instance.DeleteSession(sessionInstance.Id())
     }
 

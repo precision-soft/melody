@@ -475,3 +475,51 @@ func TestEntityIdFromModel_EscapesTheCompositeJoin(t *testing.T) {
         t.Fatalf("expected the colon inside a part to be escaped, got %q", ambiguousLeft)
     }
 }
+
+/* a single part cannot make the join ambiguous, so a single-column key carrying ":" or "\" is not escaped and keeps joining the trail recorded before the escaping */
+func TestEntityIdFromModel_ASingleColumnKeyCarryingAColonIsNotEscaped(t *testing.T) {
+    database := newTestDatabase()
+
+    type single struct {
+        bun.BaseModel `bun:"table:single"`
+
+        Id string `bun:"id,pk"`
+    }
+
+    if derived := entityIdFromModel(database, &single{Id: "tenant:42"}); "tenant:42" != derived {
+        t.Fatalf("expected the single-column key unescaped, got %q", derived)
+    }
+
+    if derived := entityIdFromModel(database, &single{Id: `a\b`}); `a\b` != derived {
+        t.Fatalf("expected the single-column key unescaped, got %q", derived)
+    }
+}
+
+/* nonComparableStorageError is an error of a type == cannot compare: comparing two interface values holding it panics */
+type nonComparableStorageError struct {
+    fields []string
+}
+
+func (instance nonComparableStorageError) Error() string {
+    return "storage refused " + strings.Join(instance.fields, ",")
+}
+
+/* a storage answering an error of a non-comparable type has its failure reported, not turned into a panic inside the transaction boundary */
+func TestTracker_AStorageErrorOfANonComparableTypeIsReportedNotPanicked(t *testing.T) {
+    scripted := &scriptedDatabase{}
+    database := bun.NewDB(sql.OpenDB(&scriptedConnector{database: scripted}), mysqldialect.New())
+    tracker := NewTracker(database, NewRecorderWithStorage(&fakeStorage{failWith: nonComparableStorageError{fields: []string{"iban"}}}, nil))
+
+    defer func() {
+        if recovered := recover(); nil != recovered {
+            t.Fatalf("expected the failure reported, it panicked: %v", recovered)
+        }
+    }()
+
+    insertErr := tracker.Insert(context.Background(), "parityAccount", "1", &parityAccount{Id: 1})
+
+    var storageErr nonComparableStorageError
+    if false == errors.As(insertErr, &storageErr) {
+        t.Fatalf("expected the storage's failure reachable, got: %v", insertErr)
+    }
+}

@@ -10,6 +10,7 @@ import (
     "os"
     "reflect"
     "strings"
+    "sync"
     "testing"
     "time"
 
@@ -20,6 +21,7 @@ import (
     "github.com/precision-soft/melody/exception"
     "github.com/precision-soft/melody/logging"
     loggingcontract "github.com/precision-soft/melody/logging/contract"
+    "github.com/uptrace/bun"
     "github.com/uptrace/bun/schema"
 )
 
@@ -1377,5 +1379,139 @@ func TestProviderOpen_RefusesAnEmptyHostBeforeBuildingTheDriverConfig(t *testing
 
     if nil == openErr || false == strings.Contains(openErr.Error(), "the host is empty") {
         t.Fatalf("expected the refusal to name the host, got %v", openErr)
+    }
+}
+
+/* silentPeer listens on loopback, accepts every connection and never writes the server greeting, the peer a handshake read waits on for ever without a deadline */
+func silentPeer(t *testing.T) (string, string) {
+    t.Helper()
+
+    listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+    if nil != listenErr {
+        t.Fatalf("listen: %v", listenErr)
+    }
+
+    var connectionMutex sync.Mutex
+    var connectionList []net.Conn
+    go func() {
+        for {
+            connection, acceptErr := listener.Accept()
+            if nil != acceptErr {
+                return
+            }
+
+            connectionMutex.Lock()
+            connectionList = append(connectionList, connection)
+            connectionMutex.Unlock()
+        }
+    }()
+
+    t.Cleanup(func() {
+        _ = listener.Close()
+
+        connectionMutex.Lock()
+        defer connectionMutex.Unlock()
+        for _, connection := range connectionList {
+            _ = connection.Close()
+        }
+    })
+
+    host, port, splitErr := net.SplitHostPort(listener.Addr().String())
+    if nil != splitErr {
+        t.Fatalf("split the listener address: %v", splitErr)
+    }
+
+    return host, port
+}
+
+/* openAgainstASilentPeer runs the open and answers how long it took, failing the test when it is still blocked well past the bound it must hold */
+func openAgainstASilentPeer(t *testing.T, open func() (*bun.DB, error)) (time.Duration, error) {
+    t.Helper()
+
+    type openOutcome struct {
+        database *bun.DB
+        err      error
+    }
+
+    outcome := make(chan openOutcome, 1)
+    startedAt := time.Now()
+    go func() {
+        database, openErr := open()
+        outcome <- openOutcome{database: database, err: openErr}
+    }()
+
+    select {
+    case result := <-outcome:
+        if nil != result.database {
+            _ = result.database.Close()
+            t.Fatal("expected no database handle against a peer that never greets")
+        }
+
+        return time.Since(startedAt), result.err
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the open to return inside the connect timeout, it is still blocked after 5s")
+    }
+
+    return 0, nil
+}
+
+/* the migration pool lifts the read deadline, so before the ping preceded bun's dialect query a peer that accepted the connection and never greeted held the open for ever; the dial and the handshake are now bounded by the connect timeout */
+func TestProvider_OpenForMigrationReturnsInsideTheConnectTimeoutAgainstAPeerThatAcceptsAndStaysSilent(t *testing.T) {
+    host, port := silentPeer(t)
+    provider := newTestProvider().WithTimeoutConfig(NewTimeoutConfig(500*time.Millisecond, time.Second, time.Second))
+    resolver := newStubResolver(host, port, "melody", "melody", "melody")
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+    open := func() (*bun.DB, error) { return provider.OpenForMigrationContext(ctx, resolver) }
+
+    elapsed, openErr := openAgainstASilentPeer(t, open)
+    if nil == openErr {
+        t.Fatal("expected the open against a silent peer to fail")
+    }
+
+    if 1500*time.Millisecond < elapsed {
+        t.Fatalf("expected the open to return inside the 500ms connect timeout, it took %s", elapsed)
+    }
+}
+
+/* the request pool's open is bounded by the connect timeout as well, not by its read deadline */
+func TestProvider_OpenReturnsInsideTheConnectTimeoutAgainstASilentPeer(t *testing.T) {
+    host, port := silentPeer(t)
+    provider := newTestProvider().WithTimeoutConfig(NewTimeoutConfig(500*time.Millisecond, 30*time.Second, 30*time.Second))
+    resolver := newStubResolver(host, port, "melody", "melody", "melody")
+    open := func() (*bun.DB, error) { return provider.OpenContext(context.Background(), resolver) }
+
+    elapsed, openErr := openAgainstASilentPeer(t, open)
+    if nil == openErr {
+        t.Fatal("expected the open against a silent peer to fail")
+    }
+
+    if 1500*time.Millisecond < elapsed {
+        t.Fatalf("expected the open to return inside the 500ms connect timeout, not the 30s read deadline, it took %s", elapsed)
+    }
+}
+
+/* the default verifying TLS config is checked against the host without the brackets of an IPv6 literal and without the zone of a scoped one, since no certificate carries either; a host name or a plain address is checked as configured */
+func TestTlsServerNameOf_DropsTheBracketsAndTheZoneOfAnIpv6Literal(t *testing.T) {
+    for host, expected := range map[string]string{
+        "fe80::1%eth0":         "fe80::1",
+        "[::1]":                "::1",
+        "[fe80::1%25eth0]":     "fe80::1",
+        "db.example.com":       "db.example.com",
+        "10.0.0.7":             "10.0.0.7",
+        "2001:db8::7":          "2001:db8::7",
+    } {
+        if serverName := tlsServerNameOf(host); expected != serverName {
+            t.Fatalf("host %q: expected the name %q verified, got %q", host, expected, serverName)
+        }
+    }
+}
+
+/* the verifying default is built with the name tlsServerNameOf answers, so a scoped literal the dialer reaches can also be verified */
+func TestConnectionTlsConfig_TheDefaultVerifiesAScopedLiteralWithoutItsZone(t *testing.T) {
+    provider := NewProvider("database.host", "database.port", "database.name", "database.user", "database.password")
+
+    if tlsConfig := provider.connectionTlsConfig("fe80::1%eth0"); nil == tlsConfig || "fe80::1" != tlsConfig.ServerName {
+        t.Fatalf("expected the default config to verify fe80::1, got %+v", tlsConfig)
     }
 }

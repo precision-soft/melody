@@ -459,6 +459,7 @@ type cappedLogin struct {
     sessionManager  melodysessioncontract.Manager
     sessionStorage  melodysessioncontract.Storage
     sessionIndex    repository.UserSessionRepository
+    clock           *melodyclock.FrozenClock
 }
 
 func (instance *cappedLogin) sessionIndexLookup(request melodyhttpcontract.Request) (security.SessionIndex, error) {
@@ -496,8 +497,9 @@ func newCappedLogin(t *testing.T) *cappedLogin {
     melodycontainer.MustRegister(containerInstance, melodyhttp.ServiceUrlGenerator, func(resolver melodycontainercontract.Resolver) (melodyhttpcontract.UrlGenerator, error) {
         return melodyhttp.NewUrlGenerator(melodyhttp.NewRouter().RouteRegistry()), nil
     })
+    clockInstance := melodyclock.NewFrozenClock(time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC))
     melodycontainer.MustRegister(containerInstance, melodyclock.ServiceClock, func(resolver melodycontainercontract.Resolver) (melodyclockcontract.Clock, error) {
-        return melodyclock.NewFrozenClock(time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)), nil
+        return clockInstance, nil
     })
 
     return &cappedLogin{
@@ -505,11 +507,24 @@ func newCappedLogin(t *testing.T) *cappedLogin {
         sessionManager:  sessionManager,
         sessionStorage:  sessionManagerStorage,
         sessionIndex:    repository.NewInMemoryUserSessionRepository(),
+        clock:           clockInstance,
     }
 }
 
 /* signInAndStore signs the account in on a fresh session and stores the session as the response path would */
 func (instance *cappedLogin) signInAndStore(t *testing.T, username string) string {
+    t.Helper()
+
+    sessionInstance := instance.signIn(t, username)
+    if saveErr := instance.sessionManager.SaveSession(sessionInstance); nil != saveErr {
+        t.Fatalf("save session: %v", saveErr)
+    }
+
+    return sessionInstance.Id()
+}
+
+/* signIn signs the account in on a fresh session and answers the session the response path has not stored yet */
+func (instance *cappedLogin) signIn(t *testing.T, username string) melodysessioncontract.Session {
     t.Helper()
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/login", bytes.NewBufferString("username="+username+"&password="+username))
@@ -523,12 +538,7 @@ func (instance *cappedLogin) signInAndStore(t *testing.T, username string) strin
         t.Fatalf("expected the sign-in of %s answered 200, got %v, %v", username, response, handlerErr)
     }
 
-    sessionInstance := getSessionFromRequest(request)
-    if saveErr := instance.sessionManager.SaveSession(sessionInstance); nil != saveErr {
-        t.Fatalf("save session: %v", saveErr)
-    }
-
-    return sessionInstance.Id()
+    return getSessionFromRequest(request)
 }
 
 /* the cap holds at the sign-in door: the sign-in past repository.UserSessionCap ends the account's oldest session in the storage, keeps its newer ones, and leaves the session of another account alone */
@@ -627,12 +637,35 @@ func TestLoginHandler_ASessionThatEndedElsewhereGivesItsPlaceBack(t *testing.T) 
         t.Fatalf("unexpected error lapsing the session: %v", deleteErr)
     }
 
+    login.clock.Advance(repository.UserSessionAdmissionGrace)
+
     login.signInAndStore(t, "user")
 
     for _, sessionId := range []string{sessionIdList[0], sessionIdList[1], sessionIdList[3], sessionIdList[4]} {
         if nil == login.sessionManager.Session(sessionId) {
             t.Fatalf("expected no live session ended while an ended one held a place, %q is gone", sessionId)
         }
+    }
+}
+
+/* concurrent sign-ins of one account whose sessions the kernel has not stored yet still meet the cap: each row counts as live within the grace, so the sign-ins past the cap end the oldest and no more than repository.UserSessionCap of them can be stored */
+func TestLoginHandler_SignInsNotYetStoredStillMeetTheCap(t *testing.T) {
+    login := newCappedLogin(t)
+
+    pendingList := make([]melodysessioncontract.Session, 0, repository.UserSessionCap+2)
+    for range repository.UserSessionCap + 2 {
+        pendingList = append(pendingList, login.signIn(t, "user"))
+    }
+
+    storedCount := 0
+    for _, sessionInstance := range pendingList {
+        if saveErr := login.sessionManager.SaveSession(sessionInstance); nil == saveErr {
+            storedCount++
+        }
+    }
+
+    if repository.UserSessionCap != storedCount {
+        t.Fatalf("expected %d of the account's sessions stored, got %d", repository.UserSessionCap, storedCount)
     }
 }
 

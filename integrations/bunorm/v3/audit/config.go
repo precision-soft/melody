@@ -3,6 +3,7 @@ package audit
 import (
     "context"
     "regexp"
+    "slices"
     "sort"
     "sync"
 
@@ -53,6 +54,9 @@ func (instance *Registry) Register(entity string, options EntityOptions) *Regist
     if "" != options.Table {
         validateAuditTableName(options.Table)
     }
+
+    /* copied rather than aliased, as NewRegistry copies the global list: a caller appending to its own slice after Register would otherwise change what request goroutines read under the read lock */
+    options.IgnoredFields = slices.Clone(options.IgnoredFields)
 
     instance.mutex.Lock()
     instance.optionsByEntity[entity] = options

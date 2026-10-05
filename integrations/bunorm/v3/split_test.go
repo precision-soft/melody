@@ -5,6 +5,7 @@ import (
     "fmt"
     "strings"
     "testing"
+    "time"
 
     "github.com/uptrace/bun"
 
@@ -204,4 +205,153 @@ func TestReadWriteSplitter_ReaderRefusesAReplicaWhoseProviderRefused(t *testing.
     if primary, primaryErr := registry.Database("primary"); nil != primaryErr || nil == primary {
         t.Fatalf("the primary itself stays reachable: %v", primaryErr)
     }
+}
+
+/* journaledUnreachableSplitProvider fails as unreachableSplitProvider does after journaling the failure and marking it logged, as the providers' terminal branches do */
+type journaledUnreachableSplitProvider struct{}
+
+func (instance *journaledUnreachableSplitProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return nil, exception.MarkLogged(exception.NewError("database connection failed", nil, DatabaseUnreachable(errors.New("primary is down"))))
+}
+
+/* the double failure over a primary the provider already journaled stays marked logged, so it is not filed a second time; over an unmarked primary failure it stays unmarked */
+func TestReadWriteSplitter_ADoubleFailureOverAJournaledPrimaryStaysMarkedLogged(t *testing.T) {
+    for _, journaled := range []bool{true, false} {
+        var primaryProvider Provider = &unreachableSplitProvider{}
+        if true == journaled {
+            primaryProvider = &journaledUnreachableSplitProvider{}
+        }
+
+        registry, registryErr := NewManagerRegistry(
+            &fakeLogger{},
+            ProviderDefinition{Name: "primary", Provider: primaryProvider, IsDefault: true},
+            ProviderDefinition{Name: "replica", Provider: &unreachableSplitProvider{}},
+        )
+        if nil != registryErr {
+            t.Fatalf("registry: %v", registryErr)
+        }
+
+        _, readerErr := NewReadWriteSplitter(registry, "primary", "replica").Reader()
+        if nil == readerErr {
+            t.Fatal("expected the double failure refused")
+        }
+
+        if journaled != exception.IsAlreadyLogged(readerErr) {
+            t.Fatalf("expected the refusal marked logged exactly when the primary's failure was (journaled=%v)", journaled)
+        }
+    }
+}
+
+/* switchableSplitProvider fails as unreachable while down is set and opens otherwise, counting every open */
+type switchableSplitProvider struct {
+    down      bool
+    openCount int
+}
+
+func (instance *switchableSplitProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    instance.openCount++
+    if true == instance.down {
+        return nil, exception.NewError("database connection failed", nil, DatabaseUnreachable(errors.New("replica is down")))
+    }
+
+    database, _ := newCloseRaceDatabase()
+
+    return database, nil
+}
+
+/* inside the retry interval an unreachable replica's reads go to the primary without dialling it, so a dead replica does not cost every read a connect timeout; past the interval it is dialled again */
+func TestReadWriteSplitter_AnUnreachableReplicaIsRememberedForTheInterval(t *testing.T) {
+    replica := &switchableSplitProvider{down: true}
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, IsDefault: true},
+        ProviderDefinition{Name: "replica", Provider: replica},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry: %v", registryErr)
+    }
+
+    now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+    splitter := NewReadWriteSplitterWithOptions(registry, "primary", []string{"replica"}, WithReplicaRetryInterval(time.Minute))
+    splitter.now = func() time.Time { return now }
+
+    for range 2 {
+        if _, readerErr := splitter.Reader(); nil != readerErr {
+            t.Fatalf("expected the primary served in place of the replica, got: %v", readerErr)
+        }
+    }
+
+    if 1 != replica.openCount {
+        t.Fatalf("expected one dial inside the interval, got %d", replica.openCount)
+    }
+
+    now = now.Add(time.Minute)
+    if _, readerErr := splitter.Reader(); nil != readerErr {
+        t.Fatalf("expected the primary served in place of the replica, got: %v", readerErr)
+    }
+
+    if 2 != replica.openCount {
+        t.Fatalf("expected the replica dialled again once the interval lapsed, got %d dials", replica.openCount)
+    }
+}
+
+/* the move of the reads to the primary is journaled once, however many failures follow, and the replica taking them back once more */
+func TestReadWriteSplitter_WritesOneWarningPerTransition(t *testing.T) {
+    logger := &capturingDiagnosticLogger{}
+    replica := &switchableSplitProvider{down: true}
+    registry, registryErr := NewManagerRegistry(
+        logger,
+        ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, IsDefault: true},
+        ProviderDefinition{Name: "replica", Provider: replica},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry: %v", registryErr)
+    }
+
+    now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+    splitter := NewReadWriteSplitter(registry, "primary", "replica")
+    splitter.now = func() time.Time { return now }
+
+    for range 3 {
+        _, _ = splitter.Reader()
+        now = now.Add(defaultReplicaRetryInterval)
+    }
+
+    replica.down = false
+    _, _ = splitter.Reader()
+    _, _ = splitter.Reader()
+
+    warnings, infos := 0, 0
+    for _, record := range logger.captured() {
+        switch {
+        case loggingcontract.LevelWarning == record.level && "read replica unreachable, reads served by the primary" == record.message:
+            warnings++
+        case loggingcontract.LevelInfo == record.level && "read replica reachable again, reads served by it" == record.message:
+            infos++
+        }
+    }
+
+    if 3 != replica.openCount-1 || 1 != warnings || 1 != infos {
+        t.Fatalf("expected three failed dials journaled as one warning and the recovery as one info, got %d dials, %d warnings, %d infos", replica.openCount, warnings, infos)
+    }
+}
+
+/* the option refuses a negative interval where it is written, and a zero one keeps the default */
+func TestWithReplicaRetryInterval_RefusesANegativeIntervalAndKeepsTheDefaultForZero(t *testing.T) {
+    registry, registryErr := NewManagerRegistry(&fakeLogger{}, ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, IsDefault: true})
+    if nil != registryErr {
+        t.Fatalf("registry: %v", registryErr)
+    }
+
+    if splitter := NewReadWriteSplitterWithOptions(registry, "primary", nil, WithReplicaRetryInterval(0)); defaultReplicaRetryInterval != splitter.replicaRetryInterval {
+        t.Fatalf("expected a zero interval to keep the default, got %s", splitter.replicaRetryInterval)
+    }
+
+    defer func() {
+        if nil == recover() {
+            t.Fatal("expected a negative interval refused")
+        }
+    }()
+
+    WithReplicaRetryInterval(-time.Second)
 }

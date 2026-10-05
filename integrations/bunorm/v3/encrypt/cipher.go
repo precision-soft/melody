@@ -229,7 +229,7 @@ func (instance *aes256Cipher) Decrypt(encoded string) (string, error) {
     return opened.plaintext, nil
 }
 
-/* valueSealer is the door the column types and the Migrator seal through. A value is always sealed as data, even when it is itself one of this cipher's seals: a column an attacker can write and later read back in the clear would otherwise hand back the plaintext of any seal of the compartment, from any row, column or table. The Migrator classifies the STORED value through authenticatedSeal and seals the value it decrypted through sealValueWithKeyId, so nothing it re-writes is inspected for being a seal. A Cipher implemented outside this package does not carry the door and is sealed through its own Encrypt. */
+/* valueSealer is the door the column types and the Migrator seal through. A value is always sealed as data, even when it is itself one of this cipher's seals: a column an attacker can write and later read back in the clear would otherwise hand back the plaintext of any seal of the compartment, from any row, column or table. The Migrator classifies the STORED value through authenticatedSeal and seals the value it decrypted through sealValueWithKeyId, so nothing it re-writes is inspected for being a seal. A Cipher implemented outside this package does not carry the door, so a column type over it refuses a value carrying the encryption marker instead of risking a bare seal: a wrapper's Encrypt may hand such a value back as it came. */
 type valueSealer interface {
     sealValue(plaintext string, deterministic bool) (string, error)
 
@@ -253,11 +253,24 @@ func sealColumnValue(cipherInstance Cipher, plaintext string, deterministic bool
         return sealer.sealValue(plaintext, deterministic)
     }
 
+    if true == hasEncryptionMarker(plaintext) {
+        return "", errSealWrittenAsDataThroughForeignCipher()
+    }
+
     if true == deterministic {
         return cipherInstance.EncryptDeterministic(plaintext)
     }
 
     return cipherInstance.Encrypt(plaintext)
+}
+
+/* errSealWrittenAsDataThroughForeignCipher refuses a marker-shaped value a column type would write through a cipher implemented outside this package; the context carries no key id, since the value is application data and the id it spells is untrusted */
+func errSealWrittenAsDataThroughForeignCipher() error {
+    return exception.NewError(
+        "a column type over a cipher implemented outside this package refuses a value that carries the encryption marker; install the package cipher directly where applications may store such values",
+        nil,
+        nil,
+    )
 }
 
 /* the write side is deliberately lenient: a marker-shaped value passes through only when it authenticates under a key still in the set, so a retired key's seal is not encrypted twice, and anything else is application data and is sealed under the current key */
@@ -363,6 +376,11 @@ func decodeEncrypted(value string) (string, []byte, error) {
     }
 
     keyId := body[:separator]
+
+    /* the read side holds the key id to the grammar the write side seals under, so an id no seal can carry is malformed and never reaches the KeyProvider or an error context */
+    if false == keyIdPattern.MatchString(keyId) {
+        return "", nil, exception.NewError("encrypted value is malformed", nil, nil)
+    }
 
     /* Strict refuses a non-canonical final base64 quantum: CiphertextCandidates emits only the canonical spelling, so a lenient decode would authenticate a value the equality lookup can never find */
     payload, decodeErr := base64.RawStdEncoding.Strict().DecodeString(body[separator+1:])

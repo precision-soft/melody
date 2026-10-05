@@ -89,3 +89,24 @@ func TestRegistry_EnsureSchemaNamesTheTableItCouldNotCreate(t *testing.T) {
         t.Fatalf("expected the failure to name the table, got context: %v", logContext)
     }
 }
+
+/* Register copies the ignored fields, so a caller appending to its own slice afterwards does not change what the registry reads */
+func TestRegistry_RegisterCopiesTheIgnoredFields(t *testing.T) {
+    ignoredFields := make([]string, 1, 4)
+    ignoredFields[0] = "password"
+
+    registry := NewRegistry("audit_log")
+    registry.Register("account", EntityOptions{IgnoredFields: ignoredFields})
+
+    ignoredFields[0] = "email"
+    _ = append(ignoredFields, "token")
+
+    ignored := registry.ignoredFieldsFor("account")
+    if _, isIgnored := ignored["password"]; false == isIgnored {
+        t.Fatalf("expected the registered field kept, got %v", ignored)
+    }
+
+    if _, isIgnored := ignored["email"]; true == isIgnored {
+        t.Fatalf("expected the caller's later write not to reach the registry, got %v", ignored)
+    }
+}

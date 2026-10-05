@@ -11,6 +11,7 @@ import (
     "strings"
     "sync"
     "testing"
+    "unicode/utf8"
     "time"
 
     "github.com/uptrace/bun"
@@ -2942,5 +2943,151 @@ func TestManagerRegistry_CloseLeavesTheChannelAnotherRegistryOfAnEqualValueLogge
 
     if nil == routedBySecond || routedBySecond != bunDiagnosticsTarget.Load() {
         t.Fatal("expected the first registry's close to leave the channel the second routed")
+    }
+}
+
+/* a requested name past the bound is carried cut on a rune boundary with its full length beside it, so a caller-supplied name cannot carry a megabyte into the error; a short name stays whole */
+func TestManagerRegistry_AnUnknownNameIsRefusedWithTheSortedListAndACutName(t *testing.T) {
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{Name: "reports", Provider: &fakeProvider{}, IsDefault: true},
+        ProviderDefinition{Name: "analytics", Provider: &fakeProvider{}},
+    )
+    if nil != registryErr {
+        t.Fatalf("NewManagerRegistry returned an error: %v", registryErr)
+    }
+
+    requested := strings.Repeat("é", 512*1024)
+    _, managerErr := registry.Manager(requested)
+
+    var melodyErr *exception.Error
+    if false == errors.As(managerErr, &melodyErr) {
+        t.Fatalf("expected a melody error carrying the names, got %T", managerErr)
+    }
+
+    errorContext := melodyErr.Context()
+    carried, isString := errorContext["requested"].(string)
+    if false == isString || maxRequestedNameLength+len(truncatedNameMarker) < len(carried) || false == utf8.ValidString(carried) || false == strings.HasSuffix(carried, truncatedNameMarker) {
+        t.Fatalf("expected the requested name cut on a rune boundary, got %d bytes", len(carried))
+    }
+
+    if len(requested) != errorContext["requestedLength"] {
+        t.Fatalf("expected the full length beside the cut name, got %v", errorContext["requestedLength"])
+    }
+
+    if registered, _ := errorContext["registered"].([]string); 2 != len(registered) || "analytics" != registered[0] || "reports" != registered[1] {
+        t.Fatalf("expected the registered names sorted, got %v", errorContext["registered"])
+    }
+
+    _, managerErr = registry.Manager("repots")
+    if false == errors.As(managerErr, &melodyErr) || "repots" != melodyErr.Context()["requested"] {
+        t.Fatalf("expected a short name carried whole, got %v", managerErr)
+    }
+
+    if _, hasLength := melodyErr.Context()["requestedLength"]; true == hasLength {
+        t.Fatal("expected no length beside a name carried whole")
+    }
+}
+
+/* journalingContextWatchingProvider ends like contextWatchingProvider, but journals its refusal and marks it logged first, as the providers' terminal branches do */
+type journalingContextWatchingProvider struct {
+    contextWatchingProvider
+}
+
+func (instance *journalingContextWatchingProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.OpenContext(context.Background(), params, logger)
+}
+
+func (instance *journalingContextWatchingProvider) OpenContext(ctx context.Context, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    _, openErr := instance.contextWatchingProvider.OpenContext(ctx, params, logger)
+
+    return nil, exception.MarkLogged(exception.NewError("database open cancelled", nil, openErr))
+}
+
+/* the registry's refusal over an open the provider already journaled stays marked logged, so the kernel or the console does not file it a second time; over an unmarked failure the refusal stays unmarked */
+func TestManagerRegistry_ARefusalOverAJournaledOpenFailureStaysMarkedLogged(t *testing.T) {
+    for _, journaled := range []bool{true, false} {
+        var provider Provider
+        var entered chan struct{}
+        if true == journaled {
+            journaling := &journalingContextWatchingProvider{contextWatchingProvider: contextWatchingProvider{entered: make(chan struct{})}}
+            provider, entered = journaling, journaling.entered
+        } else {
+            watching := &contextWatchingProvider{entered: make(chan struct{})}
+            provider, entered = watching, watching.entered
+        }
+
+        registry, registryErr := NewManagerRegistry(&fakeLogger{}, ProviderDefinition{Name: "x", Provider: provider, IsDefault: true})
+        if nil != registryErr {
+            t.Fatalf("unexpected error: %v", registryErr)
+        }
+
+        opened := make(chan error, 1)
+        go func() {
+            _, openErr := registry.Database("x")
+            opened <- openErr
+        }()
+
+        select {
+        case <-entered:
+        case <-time.After(2 * time.Second):
+            t.Fatal("the provider was never reached")
+        }
+
+        closeContext, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+        _ = registry.CloseWithContext(closeContext)
+        cancel()
+
+        openErr := <-opened
+        if false == errors.Is(openErr, ErrManagerRegistryClosed) {
+            t.Fatalf("expected the registry's refusal, got: %v", openErr)
+        }
+
+        if journaled != exception.IsAlreadyLogged(openErr) {
+            t.Fatalf("expected the refusal marked logged exactly when the provider journaled (journaled=%v), got %v", journaled, exception.IsAlreadyLogged(openErr))
+        }
+    }
+}
+
+/* two migration commands in one process share the dedicated connection: the first to release leaves it open under the second, and the last release closes it */
+func TestManagerRegistry_CloseMigrationDatabaseClosesOnlyWhenTheLastHolderReleases(t *testing.T) {
+    migrationDatabase, migrationDatabaseClosed := newCloseRaceDatabase()
+
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{Name: "main", Provider: &configurableMigrationProvider{migrationDatabase: migrationDatabase}, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    for range 2 {
+        if _, _, migrationErr := registry.MigrationDatabase("main"); nil != migrationErr {
+            t.Fatalf("unexpected migration database error: %v", migrationErr)
+        }
+    }
+
+    if closeErr := registry.CloseMigrationDatabase("main"); nil != closeErr {
+        t.Fatalf("unexpected error: %v", closeErr)
+    }
+
+    select {
+    case <-migrationDatabaseClosed:
+        t.Fatal("the first release closed the connection the second holder still uses")
+    case <-time.After(50 * time.Millisecond):
+    }
+
+    if 1 != len(registry.migrationDatabases) {
+        t.Fatalf("expected the connection still memoized for its second holder, got %d", len(registry.migrationDatabases))
+    }
+
+    if closeErr := registry.CloseMigrationDatabase("main"); nil != closeErr {
+        t.Fatalf("unexpected error: %v", closeErr)
+    }
+
+    select {
+    case <-migrationDatabaseClosed:
+    case <-time.After(2 * time.Second):
+        t.Fatal("the last release did not close the connection")
     }
 }

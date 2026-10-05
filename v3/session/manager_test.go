@@ -1538,6 +1538,49 @@ func TestManager_ARotationOfAMintedSessionLeavesNoRecord(t *testing.T) {
     }
 }
 
+/* a cleared session the manager minted and never stored, the original a rotation latched cleared or one the application cleared, is saved with no removal and no record, while a stored one cleared still is */
+func TestManager_ASaveOfAClearedMintedSessionLeavesNoRecord(t *testing.T) {
+    storage := &deleteCountingStorage{inner: NewInMemoryStorage()}
+    manager := NewManager(storage, time.Minute)
+
+    original := manager.NewSession()
+    original.Set("userId", "u-1")
+
+    if _, rotateErr := manager.RegenerateSession(original); nil != rotateErr {
+        t.Fatalf("unexpected error rotating a fresh session: %v", rotateErr)
+    }
+
+    if saveErr := manager.SaveSession(original); nil != saveErr {
+        t.Fatalf("unexpected error saving the rotated-away original: %v", saveErr)
+    }
+
+    cleared := manager.NewSession()
+    cleared.Clear()
+
+    if saveErr := manager.SaveSession(cleared); nil != saveErr {
+        t.Fatalf("unexpected error saving a cleared fresh session: %v", saveErr)
+    }
+
+    if 0 != storage.deletes || 0 != tombstoneCountOf(manager) {
+        t.Fatalf("expected no removal and no record for a cleared minted id, got %d removals and %d records", storage.deletes, tombstoneCountOf(manager))
+    }
+
+    stored := manager.NewSession()
+    stored.Set("userId", "u-2")
+    if saveErr := manager.SaveSession(stored); nil != saveErr {
+        t.Fatalf("unexpected error saving: %v", saveErr)
+    }
+
+    stored.Clear()
+    if saveErr := manager.SaveSession(stored); nil != saveErr {
+        t.Fatalf("unexpected error saving the cleared stored session: %v", saveErr)
+    }
+
+    if 1 != storage.deletes || 1 != tombstoneCountOf(manager) {
+        t.Fatalf("expected the stored id removed and buried, got %d removals and %d records", storage.deletes, tombstoneCountOf(manager))
+    }
+}
+
 /* once a fresh session was saved its id is stored, so its rotation removes and buries the retired id as a loaded one's does */
 func TestManager_ARotationOfASavedSessionBuriesTheRetiredId(t *testing.T) {
     storage := &deleteCountingStorage{inner: NewInMemoryStorage()}

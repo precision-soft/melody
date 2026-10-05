@@ -202,6 +202,82 @@ func TestReencryptTransform_RandomizedSameKeyRewritesDeterministicValue(t *testi
     }
 }
 
+/* a rotation onto another key keeps a deterministic seal deterministic without the flag, so the column stays searchable under the new key */
+func TestReencryptTransform_AKeyChangeKeepsADeterministicSealDeterministic(t *testing.T) {
+    cipher := NewCipher(NewStaticKeyProvider("v2", map[string][]byte{"v1": newKey(1), "v2": newKey(2)}))
+    migrator := &Migrator{cipher: cipher}
+
+    deterministicUnderV1, _ := cipher.EncryptDeterministicWithKeyId("alice@example.com", "v1")
+
+    rotated, rotateErr := migrator.reencryptTransform(TableSpec{Deterministic: false}, "v2")(deterministicUnderV1)
+    if nil != rotateErr {
+        t.Fatalf("reencrypt transform: %v", rotateErr)
+    }
+
+    if keyId, _, _ := keyIdOf(rotated); "v2" != keyId {
+        t.Fatalf("expected the value rotated onto v2, got %q", keyId)
+    }
+
+    if false == deterministicCandidateMatches(t, cipher, "alice@example.com", rotated) {
+        t.Fatal("expected the rotated value still searchable via CiphertextCandidates")
+    }
+}
+
+/* a rotation onto another key keeps a random seal random */
+func TestReencryptTransform_AKeyChangeKeepsARandomSealRandom(t *testing.T) {
+    cipher := NewCipher(NewStaticKeyProvider("v2", map[string][]byte{"v1": newKey(1), "v2": newKey(2)}))
+    migrator := &Migrator{cipher: cipher}
+
+    randomUnderV1, _ := cipher.EncryptWithKeyId("alice@example.com", "v1")
+
+    rotated, rotateErr := migrator.reencryptTransform(TableSpec{Deterministic: false}, "v2")(randomUnderV1)
+    if nil != rotateErr {
+        t.Fatalf("reencrypt transform: %v", rotateErr)
+    }
+
+    if keyId, _, _ := keyIdOf(rotated); "v2" != keyId {
+        t.Fatalf("expected the value rotated onto v2, got %q", keyId)
+    }
+
+    if true == deterministicCandidateMatches(t, cipher, "alice@example.com", rotated) {
+        t.Fatal("expected the rotated value to stay random")
+    }
+
+    if plaintext, _ := cipher.Decrypt(rotated); "alice@example.com" != plaintext {
+        t.Fatalf("expected the rotated value to decrypt to the original plaintext, got %q", plaintext)
+    }
+}
+
+/* a cipher implemented outside this package exposes no mode, and the rotation reads it from the stored seal the same way: each mode is kept across the key change */
+func TestReencryptTransform_AKeyChangeThroughAForeignCipherKeepsTheMode(t *testing.T) {
+    packageCipher := NewCipher(NewStaticKeyProvider("v2", map[string][]byte{"v1": newKey(1), "v2": newKey(2)}))
+    migrator := &Migrator{cipher: wrappedCipher{Cipher: packageCipher}}
+
+    deterministicUnderV1, _ := packageCipher.EncryptDeterministicWithKeyId("alice@example.com", "v1")
+    randomUnderV1, _ := packageCipher.EncryptWithKeyId("alice@example.com", "v1")
+
+    for _, testCase := range []struct {
+        stored        string
+        deterministic bool
+    }{
+        {stored: deterministicUnderV1, deterministic: true},
+        {stored: randomUnderV1, deterministic: false},
+    } {
+        rotated, rotateErr := migrator.reencryptTransform(TableSpec{Deterministic: false}, "v2")(testCase.stored)
+        if nil != rotateErr {
+            t.Fatalf("reencrypt transform (deterministic=%v): %v", testCase.deterministic, rotateErr)
+        }
+
+        if keyId, _, _ := keyIdOf(rotated); "v2" != keyId {
+            t.Fatalf("expected the value rotated onto v2 (deterministic=%v), got %q", testCase.deterministic, keyId)
+        }
+
+        if testCase.deterministic != deterministicCandidateMatches(t, packageCipher, "alice@example.com", rotated) {
+            t.Fatalf("expected the rotated value's mode kept (deterministic=%v)", testCase.deterministic)
+        }
+    }
+}
+
 type stubMigrateDriver struct {
     rowsAffected int64
     served       bool
@@ -494,7 +570,7 @@ func TestSealedProbeLength_MeasuresUnderTheKeyIdTheRunWillSealWith(t *testing.T)
 func TestLongestUnsealedLength_ExcludesValuesThatAreAlreadySealed(t *testing.T) {
     migrator, stub := newRecordingStubMigrator(t, "zzMigrateUnsealedProbeStub", 1)
 
-    _, hasUnsealed, probeErr := migrator.longestUnsealedLength(context.Background(), "user", "secret")
+    _, hasUnsealed, probeErr := migrator.longestUnsealedLength(context.Background(), "user", "secret", "")
     if nil != probeErr {
         t.Fatalf("unexpected error: %v", probeErr)
     }
@@ -1399,6 +1475,7 @@ func TestMigrateReencrypt_RotatesASealStoredAsDataEndToEnd(t *testing.T) {
     }
 
     stub.responses = []scriptedSqlResponse{
+        {fragment: "CHARACTER_SET_NAME", columns: []string{"COLUMN_NAME", "CHARACTER_SET_NAME"}},
         {fragment: "NOT LIKE", columns: []string{"longest"}, rows: [][]driver.Value{{nil}}},
         {fragment: "SUBSTRING_INDEX", columns: []string{"longest"}, rows: [][]driver.Value{{int64(100)}}},
         {
@@ -1449,6 +1526,7 @@ func TestMigrateDecrypt_StopsOnARowWhoseDecryptedValueIsASeal(t *testing.T) {
     cases := sealStoredAsDataCases(t, cipherInstance)
 
     stub.responses = []scriptedSqlResponse{
+        {fragment: "CHARACTER_SET_NAME", columns: []string{"COLUMN_NAME", "CHARACTER_SET_NAME"}},
         {
             fragment: "ORDER BY",
             columns:  []string{"id", "notes"},
@@ -1492,5 +1570,98 @@ func TestMigrateDecrypt_StopsOnARowWhoseDecryptedValueIsASeal(t *testing.T) {
 
     if 1 != len(written) || "my notes" != written[0] {
         t.Fatalf("expected only the ordinary row decrypted and the refused row left sealed, wrote %q", written)
+    }
+}
+
+/* a text column of another charset is sized and guarded on the utf8mb4 bytes the driver reads, while a utf8mb4 column keeps the bare comparison, so the guard matches the value read and a binary column's bytes are never rewritten by a conversion */
+func TestMigrateEncrypt_ConvertsOnlyAColumnOfAnotherCharsetInItsWidthAndGuard(t *testing.T) {
+    migrator, stub := newScriptedMigrator(t, []scriptedSqlResponse{
+        {fragment: "CHARACTER_SET_NAME", columns: []string{"COLUMN_NAME", "CHARACTER_SET_NAME"}, rows: [][]driver.Value{{"notes", "latin1"}, {"code", "utf8mb4"}, {"digest", nil}}},
+        {fragment: "NOT LIKE", columns: []string{"longest"}, rows: [][]driver.Value{{nil}}},
+        {fragment: "ORDER BY", columns: []string{"id", "notes", "code", "digest"}, rows: [][]driver.Value{{"1", "café", "c", "d"}}},
+    })
+
+    if _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes", "code", "digest"}}); nil != runErr {
+        t.Fatalf("run: %v", runErr)
+    }
+
+    var widthProbes []string
+    var update string
+    for _, query := range stub.recorded() {
+        if true == strings.Contains(query, "NOT LIKE") {
+            widthProbes = append(widthProbes, query)
+        }
+
+        if true == strings.HasPrefix(query, "UPDATE") {
+            update = query
+        }
+    }
+
+    if 3 != len(widthProbes) || false == strings.Contains(widthProbes[0], "LENGTH(CONVERT(`notes` USING utf8mb4))") || true == strings.Contains(widthProbes[1], "CONVERT") || true == strings.Contains(widthProbes[2], "CONVERT") {
+        t.Fatalf("expected the width of the latin1 column alone measured converted: %q", widthProbes)
+    }
+
+    if false == strings.Contains(update, "CAST(CONVERT(`notes` USING utf8mb4) AS BINARY) = ?") || false == strings.Contains(update, "CAST(`code` AS BINARY) = ?") || false == strings.Contains(update, "CAST(`digest` AS BINARY) = ?") {
+        t.Fatalf("expected the latin1 column alone guarded converted: %q", update)
+    }
+}
+
+/* on a live latin1 column the guard reads the bytes the run read, so the row is sealed rather than reported as changed under the run, and its width is the five utf8mb4 bytes of "café", not its four latin1 ones; a utf8mb4 column is the control */
+func TestEncryptMigrate_SealsALatin1ColumnAndMeasuresItInConnectionBytes(t *testing.T) {
+    dsn := os.Getenv("MYSQL_DSN")
+    if "" == dsn {
+        t.Skip("MYSQL_DSN not set; skipping bunorm encrypt migrate integration test")
+    }
+
+    ctx := context.Background()
+
+    sqlDb, openErr := sql.Open("mysql", dsn)
+    if nil != openErr {
+        t.Fatalf("open: %v", openErr)
+    }
+    defer sqlDb.Close()
+
+    database := bun.NewDB(sqlDb, mysqldialect.New())
+    cipher := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newRampKey()}))
+    migrator := NewMigrator(database, cipher)
+
+    for _, charset := range []string{"latin1", "utf8mb4"} {
+        table := "migrate_charset_" + charset
+
+        database.ExecContext(ctx, "DROP TABLE IF EXISTS "+table)
+        defer database.ExecContext(ctx, "DROP TABLE IF EXISTS "+table)
+
+        createSql := "CREATE TABLE " + table + " (id BIGINT NOT NULL PRIMARY KEY, secret VARCHAR(255) CHARACTER SET " + charset + " NOT NULL)"
+        if _, createErr := database.ExecContext(ctx, createSql); nil != createErr {
+            t.Fatalf("create %s: %v", table, createErr)
+        }
+
+        if _, insertErr := database.ExecContext(ctx, "INSERT INTO "+table+" (id, secret) VALUES (1, ?)", "café"); nil != insertErr {
+            t.Fatalf("insert %s: %v", table, insertErr)
+        }
+
+        charsetByColumn, charsetErr := migrator.columnCharsets(ctx, table)
+        if nil != charsetErr {
+            t.Fatalf("charsets %s: %v", table, charsetErr)
+        }
+
+        longest, _, longestErr := migrator.longestUnsealedLength(ctx, table, "secret", charsetByColumn["secret"])
+        if nil != longestErr || 5 != longest {
+            t.Fatalf("%s: expected the five utf8mb4 bytes of the value measured, got %d (%v)", charset, longest, longestErr)
+        }
+
+        sealed, runErr := migrator.MigrateEncrypt(ctx, TableSpec{Table: table, PrimaryKey: "id", Columns: []string{"secret"}})
+        if nil != runErr || 1 != sealed {
+            t.Fatalf("%s: expected the row sealed, got %d (%v)", charset, sealed, runErr)
+        }
+
+        var stored string
+        if scanErr := sqlDb.QueryRowContext(ctx, "SELECT secret FROM "+table+" WHERE id = 1").Scan(&stored); nil != scanErr {
+            t.Fatalf("%s: read back: %v", charset, scanErr)
+        }
+
+        if plaintext, decryptErr := cipher.Decrypt(stored); nil != decryptErr || "café" != plaintext {
+            t.Fatalf("%s: expected the stored seal to decrypt to the value, got %q (%v)", charset, plaintext, decryptErr)
+        }
     }
 }

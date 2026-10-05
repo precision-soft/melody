@@ -12,6 +12,7 @@ import (
     "strings"
     "sync"
     "testing"
+    "unicode/utf8"
     "time"
 
     "github.com/uptrace/bun"
@@ -2268,5 +2269,48 @@ func TestManagerRegistry_APanicInThePublishIsNotBlamedOnTheProvider(t *testing.T
 
     if false == strings.Contains(pendingOpen.openError.Error(), "registry panicked while publishing") {
         t.Fatalf("expected the record to name the stage that actually unwound, got %v", pendingOpen.openError)
+    }
+}
+
+/* a requested name past the bound is carried cut on a rune boundary with its full length beside it, so a caller-supplied name cannot carry a megabyte into the error; a short name stays whole */
+func TestManagerRegistry_AnUnknownNameIsRefusedWithTheSortedListAndACutName(t *testing.T) {
+    registry, registryErr := NewManagerRegistry(
+        &fakeResolver{},
+        ProviderDefinition{Name: "reports", Provider: &fakeProvider{}, IsDefault: true},
+        ProviderDefinition{Name: "analytics", Provider: &fakeProvider{}},
+    )
+    if nil != registryErr {
+        t.Fatalf("NewManagerRegistry returned an error: %v", registryErr)
+    }
+
+    requested := strings.Repeat("é", 512*1024)
+    _, managerErr := registry.Manager(requested)
+
+    var melodyErr *exception.Error
+    if false == errors.As(managerErr, &melodyErr) {
+        t.Fatalf("expected a melody error carrying the names, got %T", managerErr)
+    }
+
+    errorContext := melodyErr.Context()
+    carried, isString := errorContext["requested"].(string)
+    if false == isString || maxRequestedNameLength+len(truncatedNameMarker) < len(carried) || false == utf8.ValidString(carried) || false == strings.HasSuffix(carried, truncatedNameMarker) {
+        t.Fatalf("expected the requested name cut on a rune boundary, got %d bytes", len(carried))
+    }
+
+    if len(requested) != errorContext["requestedLength"] {
+        t.Fatalf("expected the full length beside the cut name, got %v", errorContext["requestedLength"])
+    }
+
+    if registered, _ := errorContext["registered"].([]string); 2 != len(registered) || "analytics" != registered[0] || "reports" != registered[1] {
+        t.Fatalf("expected the registered names sorted, got %v", errorContext["registered"])
+    }
+
+    _, managerErr = registry.Manager("repots")
+    if false == errors.As(managerErr, &melodyErr) || "repots" != melodyErr.Context()["requested"] {
+        t.Fatalf("expected a short name carried whole, got %v", managerErr)
+    }
+
+    if _, hasLength := melodyErr.Context()["requestedLength"]; true == hasLength {
+        t.Fatal("expected no length beside a name carried whole")
     }
 }

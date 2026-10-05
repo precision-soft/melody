@@ -7,14 +7,15 @@ import (
 )
 
 func newInMemoryUserSessionRepository() UserSessionRepository {
-    return &inMemoryUserSessionRepository{sessionsByUser: map[string][]string{}, userBySession: map[string]string{}}
+    return &inMemoryUserSessionRepository{sessionsByUser: map[string][]string{}, userBySession: map[string]string{}, admittedAtBySession: map[string]time.Time{}}
 }
 
 /* inMemoryUserSessionRepository keeps each account's sessions in the order they were admitted, oldest first; the mutex is the lock Admit holds on the account. */
 type inMemoryUserSessionRepository struct {
     mutex          sync.Mutex
-    sessionsByUser map[string][]string
-    userBySession  map[string]string
+    sessionsByUser      map[string][]string
+    userBySession       map[string]string
+    admittedAtBySession map[string]time.Time
 }
 
 func (instance *inMemoryUserSessionRepository) Admit(
@@ -36,7 +37,12 @@ func (instance *inMemoryUserSessionRepository) Admit(
 
     instance.removeLocked(previousSessionId)
 
-    live, ended, liveErr := liveSessionsOldestFirst(instance.sessionsByUser[userId], sessionLive)
+    heldOldestFirst := make([]heldSession, 0, len(instance.sessionsByUser[userId]))
+    for _, heldSessionId := range instance.sessionsByUser[userId] {
+        heldOldestFirst = append(heldOldestFirst, heldSession{sessionId: heldSessionId, admittedAt: instance.admittedAtBySession[heldSessionId]})
+    }
+
+    live, ended, liveErr := liveSessionsOldestFirst(heldOldestFirst, createdAt, sessionLive)
     if nil != liveErr {
         return liveErr
     }
@@ -55,6 +61,7 @@ func (instance *inMemoryUserSessionRepository) Admit(
 
     instance.sessionsByUser[userId] = append(append([]string{}, instance.sessionsByUser[userId]...), sessionId)
     instance.userBySession[sessionId] = userId
+    instance.admittedAtBySession[sessionId] = createdAt
 
     return nil
 }
@@ -75,6 +82,7 @@ func (instance *inMemoryUserSessionRepository) removeLocked(sessionId string) {
     }
 
     delete(instance.userBySession, sessionId)
+    delete(instance.admittedAtBySession, sessionId)
 
     remaining := make([]string, 0, len(instance.sessionsByUser[userId]))
     for _, heldSessionId := range instance.sessionsByUser[userId] {

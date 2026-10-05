@@ -341,7 +341,7 @@ func (instance *Provider) open(ctx context.Context, params bunorm.ConnectionPara
     } else {
         /* do NOT hand this case to pgdriver.WithInsecure(false): despite the name, pgdriver implements it as tls.Config{InsecureSkipVerify: true} — TLS is negotiated but the server certificate is never checked, so the default connection is trivially machine-in-the-middled. Build a verifying config instead: the system roots, and the configured host as the name to verify against. Callers that genuinely want an unverified session pass WithTlsConfig or WithInsecure(true) explicitly. */
         connectorOptions = append(connectorOptions, pgdriver.WithTLSConfig(&tls.Config{
-            ServerName: params.Host,
+            ServerName: tlsServerNameOf(params.Host),
             MinVersion: tls.VersionTLS12,
         }))
     }
@@ -614,4 +614,14 @@ func dialAddressOf(host string, port string) string {
     }
 
     return host + ":" + port
+}
+
+/* tlsServerNameOf answers the name a certificate is verified against for the configured host: a bracketed IPv6 literal loses its brackets and a scoped one its zone, since no certificate carries either and a name keeping them can never verify, while a host name or a plain address is answered as it is */
+func tlsServerNameOf(host string) string {
+    name := strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+    if zone := strings.IndexByte(name, '%'); -1 != zone {
+        name = name[:zone]
+    }
+
+    return name
 }
