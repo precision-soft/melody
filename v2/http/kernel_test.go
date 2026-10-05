@@ -3390,3 +3390,169 @@ func TestKernel_TheDebugPayloadShowsTheCoordinatesOfTheOccurrence(t *testing.T) 
         t.Fatalf("expected the error value to keep no request's coordinates, got %v", sharedErr.Context())
     }
 }
+
+func TestKernel_AnErrorTheApplicationErrorHandlerDeclinesKeepsItsOwnStatus(t *testing.T) {
+    for _, testCase := range []struct {
+        name     string
+        err      error
+        expected int
+    }{
+        {name: "http exception", err: exception.NotFound("gone"), expected: nethttp.StatusNotFound},
+        {name: "wrapped http exception", err: exception.NewError("lookup failed", nil, exception.Conflict("taken")), expected: nethttp.StatusConflict},
+        {name: "plain error", err: exception.NewError("handler failed", nil, nil), expected: nethttp.StatusInternalServerError},
+    } {
+        handlerErr := testCase.err
+
+        router := NewRouter()
+        router.Handle(
+            nethttp.MethodGet,
+            "/declined",
+            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                return nil, handlerErr
+            },
+        )
+
+        kernel := NewKernel(router)
+        kernel.SetErrorHandler(
+            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request, err error) httpcontract.Response {
+                return nil
+            },
+        )
+
+        recorder := httptest.NewRecorder()
+        kernel.ServeHttp(newHttpTestContainer()).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/declined", nil))
+
+        if testCase.expected != recorder.Code {
+            t.Fatalf("%s: expected %d, got %d", testCase.name, testCase.expected, recorder.Code)
+        }
+    }
+}
+
+func TestKernel_APanicCarryingAnHttpExceptionTheErrorHandlerDeclinesKeepsItsStatus(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/panics",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            panic(exception.Conflict("taken"))
+        },
+    )
+
+    kernel := NewKernel(router)
+    kernel.SetErrorHandler(
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request, err error) httpcontract.Response {
+            return nil
+        },
+    )
+
+    recorder := httptest.NewRecorder()
+    kernel.ServeHttp(newHttpTestContainer()).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/panics", nil))
+
+    if nethttp.StatusConflict != recorder.Code {
+        t.Fatalf("expected the panic's 409 kept, got %d", recorder.Code)
+    }
+}
+
+func TestKernel_ANotFoundHandlerErrorTheErrorHandlerDeclinesKeepsItsStatus(t *testing.T) {
+    kernel := NewKernel(NewRouter())
+    kernel.SetNotFoundHandler(
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return nil, exception.Forbidden("hidden")
+        },
+    )
+    kernel.SetErrorHandler(
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request, err error) httpcontract.Response {
+            return nil
+        },
+    )
+
+    recorder := httptest.NewRecorder()
+    kernel.ServeHttp(newHttpTestContainer()).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/no-such-route", nil))
+
+    if nethttp.StatusForbidden != recorder.Code {
+        t.Fatalf("expected the not-found handler's 403 kept, got %d", recorder.Code)
+    }
+}
+
+func TestKernel_AnAutomaticOptionsIsNotJournaledAsAMethodNotAllowed(t *testing.T) {
+    for _, testCase := range []struct {
+        method          string
+        expectedStatus  int
+        expectedWarning bool
+    }{
+        {method: nethttp.MethodOptions, expectedStatus: nethttp.StatusNoContent, expectedWarning: false},
+        {method: nethttp.MethodDelete, expectedStatus: nethttp.StatusMethodNotAllowed, expectedWarning: true},
+    } {
+        router := NewRouter()
+        router.Handle(
+            nethttp.MethodGet,
+            "/resource",
+            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                return TextResponse(nethttp.StatusOK, "resource"), nil
+            },
+        )
+
+        recordingLogger := &warningRecordingLogger{}
+
+        serviceContainer := newHttpTestContainer()
+        serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger)
+
+        recorder := httptest.NewRecorder()
+        NewKernel(router).ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(testCase.method, "/resource", nil))
+
+        if testCase.expectedStatus != recorder.Code {
+            t.Fatalf("%s: expected %d, got %d", testCase.method, testCase.expectedStatus, recorder.Code)
+        }
+
+        if testCase.expectedWarning != recordingLogger.hasWarning("method not allowed") {
+            t.Fatalf("%s: expected the method-not-allowed warning %t, got %v", testCase.method, testCase.expectedWarning, recordingLogger.warningMessages)
+        }
+    }
+}
+
+func TestKernel_ARefusedLongPathIsJournaledOnceAndBounded(t *testing.T) {
+    recordingLogger := &warningRecordingLogger{}
+
+    serviceContainer := newHttpTestContainer()
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger)
+
+    recorder := httptest.NewRecorder()
+    NewKernel(NewRouter()).ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/a/../"+strings.Repeat("b", 600*1024), nil))
+
+    if nethttp.StatusBadRequest != recorder.Code {
+        t.Fatalf("expected the non-canonical path refused, got %d", recorder.Code)
+    }
+
+    if 1 != len(recordingLogger.warningMessages) || "request path refused before the handler" != recordingLogger.warningMessages[0] {
+        t.Fatalf("expected the refusal as the only warning, got %v", recordingLogger.warningMessages)
+    }
+
+    path, _ := recordingLogger.warningContexts[0]["path"].(string)
+    if 600 < len(path) {
+        t.Fatalf("expected the refusal's path bounded, got %d bytes", len(path))
+    }
+}
+
+func TestKernel_AnUnroutedLongPathLeavesABoundedNoRouteRecord(t *testing.T) {
+    recordingLogger := &warningRecordingLogger{}
+
+    serviceContainer := newHttpTestContainer()
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger)
+
+    recorder := httptest.NewRecorder()
+    NewKernel(NewRouter()).ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/"+strings.Repeat("b", 600*1024), nil))
+
+    if nethttp.StatusNotFound != recorder.Code {
+        t.Fatalf("expected the unrouted path answered 404, got %d", recorder.Code)
+    }
+
+    warningContext, logged := recordingLogger.warningContextFor("no route matched")
+    if false == logged {
+        t.Fatalf("expected the no-route record, got %v", recordingLogger.warningMessages)
+    }
+
+    path, _ := warningContext["path"].(string)
+    if 600 < len(path) {
+        t.Fatalf("expected the no-route record's path bounded, got %d bytes", len(path))
+    }
+}

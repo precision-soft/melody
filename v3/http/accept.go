@@ -20,17 +20,25 @@ func PrefersHtml(request httpcontract.Request) bool {
         return false
     }
 
-    jsonQuality, jsonPosition := acceptQuality(acceptHeader, "application/json")
-    if 0 >= jsonQuality {
-        return true
+    /* html is ranked against every other representation the error renderer serves: it wins only at a higher weight than each, or at an equal one the client wrote first. A tie inside one range, as under a wildcard, goes to json, the default representation, and to html over text/plain */
+    for _, alternative := range []struct {
+        mediaType     string
+        winsRangeTies bool
+    }{
+        {mediaType: "application/json", winsRangeTies: true},
+        {mediaType: "text/plain", winsRangeTies: false},
+    } {
+        alternativeQuality, alternativePosition := acceptQuality(acceptHeader, alternative.mediaType)
+        if 0 >= alternativeQuality {
+            continue
+        }
+
+        if htmlQuality < alternativeQuality || (htmlQuality == alternativeQuality && (htmlPosition > alternativePosition || (htmlPosition == alternativePosition && true == alternative.winsRangeTies))) {
+            return false
+        }
     }
 
-    if htmlQuality != jsonQuality {
-        return htmlQuality > jsonQuality
-    }
-
-    /* equal weights: the order the client wrote them in is the only preference left to honour */
-    return htmlPosition < jsonPosition
+    return true
 }
 
 /* acceptQuality reports the weight the Accept header gives a media type and where it was named, honouring q and a refusal with q=0; a wildcard range supplies the weight when the exact type is absent. It answers -1 when nothing matches. */

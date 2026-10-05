@@ -346,3 +346,40 @@ func TestRegisterKernelTerminateAccessLogListener_RedactsTheQueryOfTheReferer(t 
         t.Fatalf("expected the referer journaled with its query redacted and its fragment dropped, got %v", loggedContext["referer"])
     }
 }
+
+func TestRegisterKernelTerminateAccessLogListener_BoundsEveryRequestSuppliedField(t *testing.T) {
+    recordingLogger := &accessLogRecordingLogger{}
+    runtimeInstance := newAccessLogRuntime(recordingLogger)
+
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    RegisterKernelTerminateAccessLogListener(dispatcher)
+
+    longText := strings.Repeat("a", 4096)
+
+    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/"+longText+"?"+longText+"=1", nil)
+    httpRequest.Header.Set("User-Agent", longText)
+    httpRequest.Header.Set("Referer", "https://example.com/"+longText)
+
+    terminateEvent := NewKernelTerminateEvent(
+        runtimeInstance,
+        testhelper.NewHttpTestRequestFromHttpRequest(httpRequest),
+        NewResponse(nethttp.StatusOK, []byte("ok")),
+    )
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelTerminate, terminateEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    loggedContext, logged := recordingLogger.accessLogContext()
+    if false == logged {
+        t.Fatalf("expected the access log record to be written")
+    }
+
+    for _, key := range []string{"path", "query", "userAgent", "referer"} {
+        value, _ := loggedContext[key].(string)
+        if 600 < len(value) || false == strings.Contains(value, "...(truncated ") {
+            t.Fatalf("expected %s bounded, got %d bytes", key, len(value))
+        }
+    }
+}

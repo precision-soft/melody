@@ -778,26 +778,35 @@ func TestGenerate_RequiredTailSegmentEmitsASinglePath(t *testing.T) {
     }
 }
 
-func TestGenerate_MirroredPathDoesNotDisplaceARouteRegisteredThere(t *testing.T) {
-    for _, routes := range [][]httpcontract.RouteDefinition{
+func TestGenerate_AMirrorAndARouteOfEqualPriorityAtOnePathGoToTheEarlierRegistration(t *testing.T) {
+    for _, testCase := range []struct {
+        routes   []httpcontract.RouteDefinition
+        expected string
+    }{
         {
-            fakeRoute{name: "page.show", pattern: "/page/:slug?", methods: []string{"GET"}},
-            fakeRoute{name: "page.index", pattern: "/page", methods: []string{"GET"}},
+            routes: []httpcontract.RouteDefinition{
+                fakeRoute{name: "page.show", pattern: "/page/:slug?", methods: []string{"GET"}},
+                fakeRoute{name: "page.index", pattern: "/page", methods: []string{"GET"}},
+            },
+            expected: "page.show.without.slug",
         },
         {
-            fakeRoute{name: "page.index", pattern: "/page", methods: []string{"GET"}},
-            fakeRoute{name: "page.show", pattern: "/page/:slug?", methods: []string{"GET"}},
+            routes: []httpcontract.RouteDefinition{
+                fakeRoute{name: "page.index", pattern: "/page", methods: []string{"GET"}},
+                fakeRoute{name: "page.show", pattern: "/page/:slug?", methods: []string{"GET"}},
+            },
+            expected: "page.index",
         },
     } {
-        document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+        document := Generate(Info{Title: "Example", Version: "1.0.0"}, testCase.routes, nil)
 
         operation := document.Paths["/page"].Get
         if nil == operation {
             t.Fatalf("expected a GET operation on /page")
         }
 
-        if "page.index" != operation.OperationId {
-            t.Fatalf("expected the route registered at /page to own the operation, got %q", operation.OperationId)
+        if testCase.expected != operation.OperationId {
+            t.Fatalf("expected %q to own the operation, got %q", testCase.expected, operation.OperationId)
         }
     }
 }
@@ -988,17 +997,37 @@ func TestGenerate_AnEarlierRouteWithTheHigherPriorityKeepsTheOperation(t *testin
     }
 }
 
-func TestGenerate_AHigherPriorityRouteDisplacesAMirrorAndAnExplicitRouteStillBeatsAMirror(t *testing.T) {
+func TestGenerate_AMirrorOfAHigherPriorityRouteOwnsTheShortenedPathOverALowerRoute(t *testing.T) {
+    for _, routes := range [][]httpcontract.RouteDefinition{
+        {
+            fakeRoute{name: "a.show", pattern: "/a/:x?", methods: []string{"GET"}, priority: 10},
+            fakeRoute{name: "a.index", pattern: "/a", methods: []string{"GET"}},
+        },
+        {
+            fakeRoute{name: "a.index", pattern: "/a", methods: []string{"GET"}},
+            fakeRoute{name: "a.show", pattern: "/a/:x?", methods: []string{"GET"}, priority: 10},
+        },
+    } {
+        document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+
+        operation := document.Paths["/a"].Get
+        if nil == operation || "a.show.without.x" != operation.OperationId {
+            t.Fatalf("expected the mirror of the higher-priority route to own the shortened path, got %+v", operation)
+        }
+    }
+}
+
+func TestGenerate_AHigherPriorityRouteDisplacesAMirrorWrittenFirst(t *testing.T) {
     routes := []httpcontract.RouteDefinition{
-        fakeRoute{name: "a.show", pattern: "/a/:x?", methods: []string{"GET"}, priority: 10},
-        fakeRoute{name: "a.index", pattern: "/a", methods: []string{"GET"}},
+        fakeRoute{name: "a.show", pattern: "/a/:x?", methods: []string{"GET"}},
+        fakeRoute{name: "a.index", pattern: "/a", methods: []string{"GET"}, priority: 10},
     }
 
     document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, nil)
 
     operation := document.Paths["/a"].Get
     if nil == operation || "a.index" != operation.OperationId {
-        t.Fatalf("expected the explicit route to own the shortened path over the mirror, got %+v", operation)
+        t.Fatalf("expected the higher-priority route to own the shortened path, got %+v", operation)
     }
 }
 

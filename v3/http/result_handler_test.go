@@ -224,7 +224,7 @@ func TestNormalizeResultToResponse_TypedNilContractResponseBecomesNilInterface(t
     }
 }
 
-func TestNormalizeResultToResponse_ARefusedResolutionIsRecordedBeforeTheFallback(t *testing.T) {
+func TestNormalizeResultToResponse_AFailedResolutionIsRecordedBeforeTheFallback(t *testing.T) {
     serviceContainer := container.NewContainer()
 
     registerErr := container.Register[*serializer.SerializerManager](
@@ -232,9 +232,7 @@ func TestNormalizeResultToResponse_ARefusedResolutionIsRecordedBeforeTheFallback
         serializer.ServiceSerializerManager,
         func(resolver containercontract.Resolver) (*serializer.SerializerManager, error) {
             return serializer.NewSerializerManager(
-                map[string]serializercontract.Serializer{
-                    serializer.MimeApplicationJson: serializer.NewJsonSerializer(),
-                },
+                map[string]serializercontract.Serializer{},
             )
         },
     )

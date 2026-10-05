@@ -1,6 +1,8 @@
 package security
 
 import (
+    "errors"
+
     "github.com/precision-soft/melody/v3/event"
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
@@ -66,13 +68,13 @@ func (instance *AuthenticatorTokenSource) Resolve(runtimeInstance runtimecontrac
                 NewLoginFailureEvent(request, err),
             )
             if nil != eventSecurityLoginFailureErr {
-                /* the authentication error stays the cause: it carries the status the client should see, which a bare dispatch error would turn into a 500 */
+                /* both errors are the cause, the authentication error first: it carries the status the client should see, which errors.As reads from the first member that holds one, and the dispatch error stays reachable to errors.Is and to the record */
                 return nil, exception.NewError(
                     "security login failure event dispatch failed",
                     exceptioncontract.Context{
                         "dispatchError": eventSecurityLoginFailureErr.Error(),
                     },
-                    err,
+                    errors.Join(err, eventSecurityLoginFailureErr),
                 )
             }
         }
@@ -97,14 +99,23 @@ func (instance *AuthenticatorTokenSource) Resolve(runtimeInstance runtimecontrac
             failureMessage = "security second factor rejected"
         }
 
+        failureErr := exception.NewError(failureMessage, nil, nil)
+
         eventDispatcher := event.EventDispatcherMustFromContainer(runtimeInstance.Container())
         _, eventSecurityLoginFailureErr := eventDispatcher.DispatchName(
             runtimeInstance,
             securitycontract.EventSecurityLoginFailure,
-            NewLoginFailureEvent(request, exception.NewError(failureMessage, nil, nil)),
+            NewLoginFailureEvent(request, failureErr),
         )
         if nil != eventSecurityLoginFailureErr {
-            return nil, eventSecurityLoginFailureErr
+            /* the rejection is kept beside the dispatch error, so the record says which login failed */
+            return nil, exception.NewError(
+                "security login failure event dispatch failed",
+                exceptioncontract.Context{
+                    "dispatchError": eventSecurityLoginFailureErr.Error(),
+                },
+                errors.Join(failureErr, eventSecurityLoginFailureErr),
+            )
         }
 
         return token, nil

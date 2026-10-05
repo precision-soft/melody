@@ -14,6 +14,9 @@ import (
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
+/* netHttpUrlEncodedFormCeiling is the size past which net/http's ParseForm refuses a urlencoded body, its unexported maxFormSize */
+const netHttpUrlEncodedFormCeiling = 10 << 20
+
 const (
     RequestAttributeSession = "_session"
     RequestAttributeScheme  = "_scheme"
@@ -59,6 +62,13 @@ func NewRequest(
         }
 
         /* a body whose read failed is not parsed; the read error is recorded and the kernel refuses the request */
+        /* ParseForm refuses a urlencoded body past net/http's own ceiling whatever the configured limit, so a larger body the configured limit admitted is parsed here and published as the PostForm ParseForm then merges into Form; a body that does not parse is left to ParseForm, whose failure refuses it below */
+        if nil == bodyReadErr && true == bufferedBody && netHttpUrlEncodedFormCeiling < len(rawBody) {
+            if postForm, postFormErr := url.ParseQuery(string(rawBody)); nil == postFormErr {
+                httpRequest.PostForm = postForm
+            }
+        }
+
         if nil == bodyReadErr {
             parseFormErr := httpRequest.ParseForm()
 

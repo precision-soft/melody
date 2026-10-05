@@ -1,6 +1,7 @@
 package security
 
 import (
+    "errors"
     "fmt"
 
     eventcontract "github.com/precision-soft/melody/v3/event/contract"
@@ -276,14 +277,14 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                 }
 
                 if nil != handlerErr {
-                    /* the authorization decision stays the cause, so the exception listener resolves the denial status through the chain; the handler error alone would turn a 403 into a 500 */
+                    /* both errors are the cause, the authorization decision first, so the exception listener resolves the denial status through the chain and the handler's own error stays reachable; the handler error alone would turn a 403 into a 500 */
                     decisionErr = exception.NewError(
                         "access denied handler failed",
                         exceptioncontract.Context{
                             "reason":       "access_denied_handler_failed",
                             "handlerError": handlerErr.Error(),
                         },
-                        decisionErr,
+                        errors.Join(decisionErr, handlerErr),
                     )
                 }
             }

@@ -2267,16 +2267,47 @@ func TestSanitizeUrlParseError_AUrlHoldingAnAtSignRedactsTheSpanItQuotes(t *test
     }
 }
 
-func TestSanitizeUrlParseError_AUrlWithoutAnAtSignKeepsTheSpanItQuotes(t *testing.T) {
-    _, parseErr := url.Parse("http://host:bad/path")
+func TestSanitizeUrlParseError_AnEncodedAtSignInThePasswordIsRedactedToo(t *testing.T) {
+    _, parseErr := url.Parse("https://user:secret%40host/")
     if nil == parseErr {
         t.Fatalf("expected net/url to refuse the probe")
     }
 
     sanitized := sanitizeUrlParseError(parseErr)
 
-    if `invalid port ":bad" after host` != sanitized {
-        t.Fatalf("expected net/url's text kept, got %q", sanitized)
+    if `invalid port "`+redactedValue+`" after host` != sanitized {
+        t.Fatalf("expected the quoted port redacted, got %q", sanitized)
+    }
+}
+
+func TestSanitizeUrlTextually_ASchemeSeparatorInARelativeReferencesQueryOpensNoAuthority(t *testing.T) {
+    for rawUrl, expected := range map[string]string{
+        "/callback%zz?redirect_uri=http://user:secret@evil.example": "/callback%zz?" + redactedValue,
+        "/callback%zz#next=http://user:secret@evil.example":         "/callback%zz",
+    } {
+        if _, parseErr := url.Parse(rawUrl); nil == parseErr {
+            t.Fatalf("expected net/url to refuse %q", rawUrl)
+        }
+
+        if sanitized := sanitizeUrlForDiagnostics(rawUrl); expected != sanitized {
+            t.Fatalf("expected %q for %q, got %q", expected, rawUrl, sanitized)
+        }
+    }
+}
+
+func TestSanitizeUrlForDiagnostics_AParsedUrlWhosePathHoldsAnAtSignBehindAUserinfoKeepsOnlyItsScheme(t *testing.T) {
+    sanitized := sanitizeUrlForDiagnostics("https://user:p@ss/word@host/path")
+
+    if "https://"+redactedValue != sanitized {
+        t.Fatalf("expected only the scheme kept, got %q", sanitized)
+    }
+}
+
+func TestSanitizeUrlForDiagnostics_AParsedUrlWithAUserinfoAndAnAtSignInItsQueryKeepsItsPath(t *testing.T) {
+    sanitized := sanitizeUrlForDiagnostics("https://user:secret@host/path?email=a@b.example")
+
+    if "https://"+redactedValue+":"+redactedValue+"@host/path?email="+redactedValue != sanitized {
+        t.Fatalf("expected the userinfo and the query redacted, got %q", sanitized)
     }
 }
 

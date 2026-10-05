@@ -668,10 +668,10 @@ func markResponsePrivateForSessionCookie(response httpcontract.Response) {
         return
     }
 
-    /* a line that ends inside a quoted string would swallow an appended "private" into the quote, so the whole header is replaced by the one directive that must be read */
+    /* a line that ends inside a quoted string would swallow an appended "private" into the quote and leaves no member of it readable, so the whole header is replaced by the strictest answer: nothing of the response is stored, and no shared cache keeps it */
     for _, existing := range existingLines {
         if true == endsInsideQuotes(existing) {
-            headers.Set("Cache-Control", "private")
+            headers.Set("Cache-Control", "no-store, private")
 
             return
         }

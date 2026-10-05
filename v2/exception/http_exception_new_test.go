@@ -27,8 +27,16 @@ func TestNewHttpException_StatusOutOfRange_Panics(t *testing.T) {
     }
 }
 
+func TestNewHttpException_AnInformationalStatusIsRefused(t *testing.T) {
+    for _, statusCode := range []int{100, 103, 199} {
+        assertPanicsWithEmergency(t, "http status code out of range", func() {
+            NewHttpException(statusCode, "boom")
+        })
+    }
+}
+
 func TestNewHttpException_AcceptsTheRangeBoundaries(t *testing.T) {
-    for _, statusCode := range []int{100, 599} {
+    for _, statusCode := range []int{200, 599} {
         if statusCode != NewHttpException(statusCode, "boom").StatusCode() {
             t.Fatalf("expected status %d accepted", statusCode)
         }

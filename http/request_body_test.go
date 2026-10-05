@@ -372,3 +372,51 @@ func TestRequest_BindJsonAndValidateReturnsTheBindingFailureBeforeValidating(t *
         t.Fatalf("expected no validation violations on a body that never parsed")
     }
 }
+
+func serveBindJsonAndValidateIntoAPointer(t *testing.T, body string) (error, int) {
+    t.Helper()
+
+    var bindErr error
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodPost,
+        "/articles",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            var subject *bindAndValidateSubject
+
+            bindErr = request.(*Request).BindJsonAndValidate(&subject)
+            if nil != bindErr {
+                return nil, bindErr
+            }
+
+            return TextResponse(nethttp.StatusOK, "ok"), nil
+        },
+    )
+
+    recorder := httptest.NewRecorder()
+    NewKernel(router).ServeHttp(newHttpTestContainerWithValidator()).ServeHTTP(
+        recorder,
+        httptest.NewRequest(nethttp.MethodPost, "/articles", strings.NewReader(body)),
+    )
+
+    return bindErr, recorder.Code
+}
+
+func TestRequest_BindJsonAndValidateRefusesANullBodyAsTheTypedHandlerDoes(t *testing.T) {
+    bindErr, statusCode := serveBindJsonAndValidateIntoAPointer(t, `null`)
+
+    httpException := exception.AsHttpException(bindErr)
+    if nil == httpException || "empty request body" != httpException.Message() || nethttp.StatusBadRequest != statusCode {
+        t.Fatalf("expected the null body refused with 400, got %v and %d", bindErr, statusCode)
+    }
+}
+
+func TestRequest_BindJsonAndValidateValidatesAnEmptyObjectBoundThroughAPointer(t *testing.T) {
+    bindErr, statusCode := serveBindJsonAndValidateIntoAPointer(t, `{}`)
+
+    httpException := exception.AsHttpException(bindErr)
+    if nil == httpException || "validation failed" != httpException.Message() {
+        t.Fatalf("expected the empty object refused by validation, got %v and %d", bindErr, statusCode)
+    }
+}

@@ -27,9 +27,9 @@ func NewHttpExceptionWithCause(statusCode int, message string, causeErr error) *
     }
 }
 
-/* refuseStatusCodeOutOfRange refuses at construction a status outside 100–599, the classes an http exception can answer with; net/http's WriteHeader would panic deep in the response path below 100 and above 999. */
+/* refuseStatusCodeOutOfRange refuses at construction a status outside 200–599, the classes an http exception can answer with: net/http's WriteHeader would panic deep in the response path below 100 and above 999, and an informational status is not a final answer, so the writer serves the error body under a 200. */
 func refuseStatusCodeOutOfRange(statusCode int) {
-    if 100 > statusCode || 599 < statusCode {
+    if 200 > statusCode || 599 < statusCode {
         Panic(
             NewEmergency(
                 "http status code out of range",

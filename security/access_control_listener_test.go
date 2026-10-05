@@ -1211,3 +1211,62 @@ func TestAccessControlListener_ARulePathSpelledWithoutASlashGovernsItsPath(t *te
     }
 }
 
+func TestAccessControlListener_AFailedDeniedHandlerKeepsItsErrorBesideTheDecision(t *testing.T) {
+    runtimeInstance, _ := newRefusalCaptureRuntime(t)
+
+    handlerErr := errors.New("denied page renderer down")
+
+    firewall := NewCompiledFirewall(
+        "admin-area",
+        nil,
+        "m",
+        nil,
+        nil,
+        NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN")),
+        NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, NewRoleVoter()),
+        nil,
+        nil,
+        &accessControlListenerTestAccessDeniedHandler{response: nil, err: handlerErr},
+        "",
+        "",
+        nil,
+        nil,
+        SourceFirewall,
+        SourceFirewall,
+        SourceFirewall,
+        SourceNone,
+        SourceFirewall,
+    )
+
+    kernel := newTestKernel()
+
+    var exceptionErr error
+    kernel.EventDispatcher().AddListener(
+        "kernel.exception",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            if exceptionEvent, ok := eventValue.Payload().(*httpPkg.KernelExceptionEvent); true == ok {
+                exceptionErr = exceptionEvent.Err()
+            }
+
+            return nil
+        },
+        100,
+    )
+    httpPkg.RegisterKernelExceptionListener(kernel.EventDispatcher(), false)
+
+    SecurityContextSetOnRuntime(runtimeInstance, NewSecurityContext(firewall, NewAuthenticatedToken("user", []string{"ROLE_USER"})))
+    RegisterKernelAccessControlListener(kernel, NewFirewallRegistry(NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil)))
+
+    requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, newSecurityTestRequest("GET", "/admin", nil, runtimeInstance))
+    if _, dispatchErr := kernel.EventDispatcher().DispatchName(runtimeInstance, "kernel.request", requestEvent); nil != dispatchErr {
+        t.Fatalf("unexpected error: %v", dispatchErr)
+    }
+
+    if false == errors.Is(exceptionErr, handlerErr) {
+        t.Fatalf("expected the handler's own error kept beside the decision, got %v", exceptionErr)
+    }
+
+    if nil == requestEvent.Response() || 403 != requestEvent.Response().StatusCode() {
+        t.Fatalf("expected the denial still answered 403")
+    }
+}

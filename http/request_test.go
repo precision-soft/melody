@@ -4,10 +4,15 @@ import (
     "io"
     nethttp "net/http"
     "net/http/httptest"
+    "strconv"
     "strings"
     "testing"
 
     "github.com/precision-soft/melody/bag"
+    "github.com/precision-soft/melody/config"
+    httpcontract "github.com/precision-soft/melody/http/contract"
+    runtimecontract "github.com/precision-soft/melody/runtime/contract"
+    "github.com/precision-soft/melody/session"
 )
 
 func TestNewRequest_ValidHttpRequest(t *testing.T) {
@@ -529,5 +534,56 @@ func TestNewRequest_AMalformedQueryDoesNotRefuseAValidForm(t *testing.T) {
 
     if "token" != request.Input("csrf") {
         t.Fatalf("expected every parsed form key to reach the handler, got %q", request.Input("csrf"))
+    }
+}
+
+func serveUrlEncodedFormUnderALimit(t *testing.T, bodyLimitBytes int, valueBytes int) (int, int) {
+    t.Helper()
+
+    postedValueBytes := -1
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodPost,
+        "/form",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            postedValueBytes = len(request.HttpRequest().PostForm.Get("value"))
+            if len(request.HttpRequest().FormValue("value")) != postedValueBytes {
+                t.Errorf("expected Form to carry the posted value beside PostForm")
+            }
+
+            return TextResponse(nethttp.StatusOK, "ok"), nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainerWithSessionStorageAndEnvironmentValues(
+        session.NewInMemoryStorage(),
+        map[string]string{
+            config.HttpMaxRequestBodyBytesKey: strconv.Itoa(bodyLimitBytes),
+        },
+    )
+
+    request := httptest.NewRequest(nethttp.MethodPost, "/form?page=1", strings.NewReader("value="+strings.Repeat("a", valueBytes)))
+    request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+    recorder := httptest.NewRecorder()
+
+    NewKernel(router).ServeHttp(serviceContainer).ServeHTTP(recorder, request)
+
+    return recorder.Code, postedValueBytes
+}
+
+func TestRequest_AUrlencodedBodyPastTheNetHttpCeilingIsRefusedNotEmptied(t *testing.T) {
+    statusCode, postedValueBytes := serveUrlEncodedFormUnderALimit(t, 12<<20, 10<<20+1)
+
+    if nethttp.StatusRequestEntityTooLarge != statusCode || -1 != postedValueBytes {
+        t.Fatalf("expected 413 with no handler run, got %d with %d bytes posted", statusCode, postedValueBytes)
+    }
+}
+
+func TestRequest_AUrlencodedBodyUnderTheNetHttpCeilingIsParsed(t *testing.T) {
+    statusCode, postedValueBytes := serveUrlEncodedFormUnderALimit(t, 12<<20, 9<<20)
+
+    if nethttp.StatusOK != statusCode || 9<<20 != postedValueBytes {
+        t.Fatalf("expected the form parsed, got %d with %d bytes posted", statusCode, postedValueBytes)
     }
 }

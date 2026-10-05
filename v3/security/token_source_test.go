@@ -10,6 +10,7 @@ import (
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/event"
     eventcontract "github.com/precision-soft/melody/v3/event/contract"
+    "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/internal/testhelper"
     "github.com/precision-soft/melody/v3/logging"
@@ -558,5 +559,73 @@ func TestAuthenticatorTokenSource_ResolveFailsWhenTheRejectedCredentialsDispatch
     )
     if false == errors.Is(err, listenerErr) {
         t.Fatalf("expected the listener's failure to fail the resolution, got %v", err)
+    }
+}
+
+func TestAuthenticatorTokenSource_AFailedLoginFailureDispatchKeepsBothErrorsAndTheStatus(t *testing.T) {
+    runtimeInstance, dispatcher := newTokenSourceTestRuntime(t)
+
+    listenerErr := exception.NewHttpException(503, "event bus down")
+    dispatcher.AddListener(
+        securitycontract.EventSecurityLoginFailure,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            return listenerErr
+        },
+        0,
+    )
+
+    authenticationErr := exception.NewHttpException(401, "invalid credentials")
+
+    tokenSource := NewAuthenticatorTokenSource(
+        NewAuthenticatorManager(
+            &testAuthenticator{
+                supportsCallback: func(request httpcontract.Request) bool { return true },
+                authenticateCallback: func(request httpcontract.Request) (securitycontract.Token, error) {
+                    return nil, authenticationErr
+                },
+            },
+        ),
+    )
+
+    _, err := tokenSource.Resolve(runtimeInstance, newFirewallTestRequest("/"))
+    if false == errors.Is(err, authenticationErr) || false == errors.Is(err, listenerErr) {
+        t.Fatalf("expected both errors in the chain, got %v", err)
+    }
+
+    httpException := exception.AsHttpException(err)
+    if nil == httpException || 401 != httpException.StatusCode() {
+        t.Fatalf("expected the authentication status kept, got %v", httpException)
+    }
+}
+
+func TestAuthenticatorTokenSource_AFailedRejectedCredentialsDispatchKeepsTheRejection(t *testing.T) {
+    runtimeInstance, dispatcher := newTokenSourceTestRuntime(t)
+
+    var announcedErr error
+    listenerErr := errors.New("event bus down")
+    dispatcher.AddListener(
+        securitycontract.EventSecurityLoginFailure,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            if failureEvent, ok := eventValue.Payload().(*LoginFailureEvent); true == ok {
+                announcedErr = failureEvent.Error()
+            }
+
+            return listenerErr
+        },
+        0,
+    )
+
+    tokenSource := NewAuthenticatorTokenSource(
+        NewAuthenticatorManager(
+            NewApiKeyHeaderAuthenticator("X-Api-Key", "right", "service", []string{"ROLE_SERVICE"}),
+        ),
+    )
+
+    _, err := tokenSource.Resolve(
+        runtimeInstance,
+        newSecurityTestRequest("GET", "/", map[string]string{"X-Api-Key": "wrong"}, runtimeInstance),
+    )
+    if nil == announcedErr || false == errors.Is(err, announcedErr) || false == errors.Is(err, listenerErr) {
+        t.Fatalf("expected the rejection kept beside the dispatch error, got %v", err)
     }
 }

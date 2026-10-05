@@ -99,7 +99,11 @@ func renderNegotiatedErrorPayload(
     }
 
     if true == isPlainTextMediaType(serializerInstance.ContentType()) {
-        return plainTextErrorResponse(statusCode, message, payload, serializerInstance.ContentType())
+        if response, rendered := plainTextErrorResponseSafely(statusCode, message, payload, serializerInstance.ContentType()); true == rendered {
+            return response
+        }
+
+        return jsonErrorResponseFromPayload(statusCode, message, payload)
     }
 
     serializedBytes, serializeErr := serializeErrorPayloadSafely(serializerInstance, payload)
@@ -183,6 +187,11 @@ func isPlainTextMediaType(contentType string) bool {
     return "text/plain" == mediaType
 }
 
+const (
+    maxPlainTextDepth = 8
+    maxPlainTextLines = 1024
+)
+
 /* plainTextErrorResponse writes the error envelope for a text/plain client as lines: the status and the message first, then the request id, the time and every other entry in key order, a map indented beneath its key and a list one item per line. A plain-text serializer has no shape for a map and would print a Go map dump. */
 func plainTextErrorResponse(statusCode int, message string, payload map[string]any, contentType string) httpcontract.Response {
     lines := []string{fmt.Sprintf("%d %s", statusCode, message)}
@@ -213,7 +222,7 @@ func plainTextErrorResponse(statusCode int, message string, payload map[string]a
             continue
         }
 
-        lines = appendPlainTextEntry(lines, "", leadingKey, value)
+        lines = appendPlainTextEntry(lines, "", leadingKey, value, 0)
         delete(remaining, leadingKey)
     }
 
@@ -224,7 +233,11 @@ func plainTextErrorResponse(statusCode int, message string, payload map[string]a
     sort.Strings(keys)
 
     for _, key := range keys {
-        lines = appendPlainTextEntry(lines, "", key, remaining[key])
+        lines = appendPlainTextEntry(lines, "", key, remaining[key], 0)
+    }
+
+    if maxPlainTextLines < len(lines) {
+        lines = append(lines[:maxPlainTextLines], "...(truncated)")
     }
 
     response := NewResponse(statusCode, []byte(strings.Join(lines, "\n")+"\n"))
@@ -236,11 +249,32 @@ func plainTextErrorResponse(statusCode int, message string, payload map[string]a
     return response
 }
 
-func appendPlainTextEntry(lines []string, indent string, key string, value any) []string {
+/* plainTextErrorResponseSafely contains a value whose String or Error panics, since the renderer runs inside the kernel's recovery defer; it answers false and the caller serves the json envelope instead */
+func plainTextErrorResponseSafely(statusCode int, message string, payload map[string]any, contentType string) (response httpcontract.Response, rendered bool) {
+    defer func() {
+        if nil != recover() {
+            response = nil
+            rendered = false
+        }
+    }()
+
+    return plainTextErrorResponse(statusCode, message, payload, contentType), true
+}
+
+/* appendPlainTextEntry writes one entry and the entries nested under it; a map deeper than maxPlainTextDepth, a map that holds itself among them, is written as an ellipsis, and the walk stops adding lines once the body holds more than maxPlainTextLines */
+func appendPlainTextEntry(lines []string, indent string, key string, value any, depth int) []string {
+    if maxPlainTextLines < len(lines) {
+        return lines
+    }
+
     label := indent + plainTextLabel(key) + ":"
 
     if nil == value {
         return append(lines, label)
+    }
+
+    if maxPlainTextDepth <= depth {
+        return append(lines, labelled(label, "..."))
     }
 
     switch typedValue := value.(type) {
@@ -268,7 +302,7 @@ func appendPlainTextEntry(lines []string, indent string, key string, value any) 
         sort.Strings(mapKeys)
 
         for _, mapKey := range mapKeys {
-            lines = appendPlainTextEntry(lines, indent+"  ", mapKey, reflected.MapIndex(reflect.ValueOf(mapKey).Convert(reflected.Type().Key())).Interface())
+            lines = appendPlainTextEntry(lines, indent+"  ", mapKey, reflected.MapIndex(reflect.ValueOf(mapKey).Convert(reflected.Type().Key())).Interface(), depth+1)
         }
 
         return lines
@@ -278,7 +312,7 @@ func appendPlainTextEntry(lines []string, indent string, key string, value any) 
         }
 
         lines = append(lines, label)
-        for index := 0; index < reflected.Len(); index++ {
+        for index := 0; index < reflected.Len() && maxPlainTextLines >= len(lines); index++ {
             lines = append(lines, indent+"  - "+plainTextItem(reflected.Index(index).Interface()))
         }
 

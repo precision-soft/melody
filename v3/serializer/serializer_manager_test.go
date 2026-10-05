@@ -264,13 +264,26 @@ func TestResolveByAcceptHeader_MalformedQualityDropsTheMember(t *testing.T) {
         t.Fatalf("expected the malformed member to be dropped and text/plain served, got %s", resolved.ContentType())
     }
 
-    _, allDroppedErr := manager.ResolveByAcceptHeader("text/plain;q=NaN")
-    if nil == allDroppedErr {
-        t.Fatalf("expected a header whose every member is malformed to be answered with an error")
+}
+
+func TestResolveByAcceptHeader_AHeaderWithNoReadableMemberServesTheDefault(t *testing.T) {
+    manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
+        MimeApplicationJson: NewJsonSerializer(),
+        MimeTextPlain:       NewPlainTextSerializer(),
+    })
+    if nil != managerErr {
+        t.Fatalf("unexpected manager error: %v", managerErr)
     }
 
-    if true == errors.Is(allDroppedErr, ErrNotAcceptable) {
-        t.Fatalf("a malformed q is not a refusal: expected the no-acceptable-mime error, got %v", allDroppedErr)
+    for _, acceptHeader := range []string{",", ",,,", "text/plain;q=NaN", "text/html;q=abc"} {
+        resolved, resolveErr := manager.ResolveByAcceptHeader(acceptHeader)
+        if nil != resolveErr {
+            t.Fatalf("accept %q: expected the default served, got %v", acceptHeader, resolveErr)
+        }
+
+        if false == strings.HasPrefix(resolved.ContentType(), MimeApplicationJson) {
+            t.Fatalf("accept %q: expected the json default, got %s", acceptHeader, resolved.ContentType())
+        }
     }
 }
 

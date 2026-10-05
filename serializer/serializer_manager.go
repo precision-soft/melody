@@ -133,20 +133,13 @@ func (instance *SerializerManager) ResolveByAcceptHeader(acceptHeader string) (s
         return nil, exception.NewError("no default serializer configured", nil, nil)
     }
 
+    /* a header with no member the negotiation can read matches no candidate below, as one naming nothing the manager serves does, and both are answered with the default representation */
     acceptedMimes, cut := parseAcceptHeader(acceptHeader)
     if true == cut {
         return nil, exception.NewError(
             "the accept header holds more members than the negotiation reads and is refused whole",
             exceptioncontract.Context{"accept": acceptHeader},
             ErrNotAcceptable,
-        )
-    }
-
-    if 0 == len(acceptedMimes) {
-        return nil, exception.NewError(
-            "no acceptable mime types in accept header",
-            exceptioncontract.Context{"accept": acceptHeader},
-            nil,
         )
     }
 

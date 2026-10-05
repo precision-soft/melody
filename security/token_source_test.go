@@ -10,6 +10,7 @@ import (
     containercontract "github.com/precision-soft/melody/container/contract"
     "github.com/precision-soft/melody/event"
     eventcontract "github.com/precision-soft/melody/event/contract"
+    "github.com/precision-soft/melody/exception"
     httpcontract "github.com/precision-soft/melody/http/contract"
     "github.com/precision-soft/melody/internal/testhelper"
     "github.com/precision-soft/melody/logging"
@@ -393,5 +394,41 @@ func TestResolverTokenSource_ResolveReadsATypedNilTokenAsAbsent(t *testing.T) {
 
     if _, isAnonymous := token.(*AnonymousToken); false == isAnonymous {
         t.Fatalf("expected the anonymous token, got %T", token)
+    }
+}
+
+func TestAuthenticatorTokenSource_AFailedLoginFailureDispatchKeepsBothErrorsAndTheStatus(t *testing.T) {
+    runtimeInstance, dispatcher := newTokenSourceTestRuntime(t)
+
+    listenerErr := exception.NewHttpException(503, "event bus down")
+    dispatcher.AddListener(
+        securitycontract.EventSecurityLoginFailure,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            return listenerErr
+        },
+        0,
+    )
+
+    authenticationErr := exception.NewHttpException(401, "invalid credentials")
+
+    tokenSource := NewAuthenticatorTokenSource(
+        NewAuthenticatorManager(
+            &testAuthenticator{
+                supportsCallback: func(request httpcontract.Request) bool { return true },
+                authenticateCallback: func(request httpcontract.Request) (securitycontract.Token, error) {
+                    return nil, authenticationErr
+                },
+            },
+        ),
+    )
+
+    _, err := tokenSource.Resolve(runtimeInstance, newFirewallTestRequest("/"))
+    if false == errors.Is(err, authenticationErr) || false == errors.Is(err, listenerErr) {
+        t.Fatalf("expected both errors in the chain, got %v", err)
+    }
+
+    httpException := exception.AsHttpException(err)
+    if nil == httpException || 401 != httpException.StatusCode() {
+        t.Fatalf("expected the authentication status kept, got %v", httpException)
     }
 }

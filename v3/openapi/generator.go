@@ -36,7 +36,7 @@ func Generate(
     components := make(map[string]*Schema)
     componentNames := make(map[reflect.Type]string)
 
-    /* who holds each slot: a route registered at the shortened path displaces the mirror of an optional tail, whichever of the two is reached first, and between two routes the one the router would serve keeps it */
+    /* who holds each slot: the route the router would serve on that path, a mirror of an optional tail competing as the route it mirrors */
     slotOwners := make(map[string]slotOwner)
 
     for _, routeDefinition := range routeDefinitions {
@@ -69,17 +69,11 @@ func Generate(
                     continue
                 }
 
-                /* a mirror always yields a taken slot and a route always displaces a mirror; between two routes converging on one converted path the one the router would serve wins, the higher Priority() first and then the earlier registration */
+                /* where two patterns converge on one converted path the route the router would serve wins, the higher Priority() first and then the earlier registration; a mirror is the shortened path its route serves, so it competes on the same terms */
                 slotKey := path + " " + strings.ToUpper(method)
-                candidate := slotOwner{priority: routeDefinition.Priority(), mirror: expansion.omitsParameter}
-                if nil != operationFor(&pathItem, method) {
-                    if true == candidate.mirror {
-                        continue
-                    }
-
-                    if holder := slotOwners[slotKey]; false == holder.mirror && false == routeOutranks(candidate, holder) {
-                        continue
-                    }
+                candidate := slotOwner{priority: routeDefinition.Priority()}
+                if nil != operationFor(&pathItem, method) && false == routeOutranks(candidate, slotOwners[slotKey]) {
+                    continue
                 }
 
                 operationId := operationIdFor(routeDefinition.Name(), method, len(methods))
@@ -109,7 +103,6 @@ func Generate(
 /* slotOwner is what the generator remembers of the operation holding a slot */
 type slotOwner struct {
     priority int
-    mirror   bool
 }
 
 /* routeOutranks reports whether the router serves the candidate over the holder; registration order is the loop's order, so a later candidate of equal priority never does */

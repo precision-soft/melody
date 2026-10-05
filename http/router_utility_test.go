@@ -2103,14 +2103,16 @@ func TestWriteResponse_ALaxSessionCookieOverPlainHttpIsNotSecureAndNeverWinsOver
     }
 }
 
-func TestMarkResponsePrivateForSessionCookie_AnUnbalancedQuoteInCacheControlIsReplacedByPrivate(t *testing.T) {
-    response := EmptyResponse(nethttp.StatusOK)
-    response.Headers().Set("Cache-Control", `no-cache="set-cookie`)
+func TestMarkResponsePrivateForSessionCookie_AnUnbalancedQuoteInCacheControlIsReplacedByNoStorePrivate(t *testing.T) {
+    for _, cacheControl := range []string{`no-cache="set-cookie`, `no-store, x="open`, `max-age=60, x="open`} {
+        response := EmptyResponse(nethttp.StatusOK)
+        response.Headers().Set("Cache-Control", cacheControl)
 
-    markResponsePrivateForSessionCookie(response)
+        markResponsePrivateForSessionCookie(response)
 
-    if "private" != response.Headers().Get("Cache-Control") {
-        t.Fatalf("expected the header replaced by private, got %q", response.Headers().Get("Cache-Control"))
+        if "no-store, private" != response.Headers().Get("Cache-Control") {
+            t.Fatalf("expected %q replaced by no-store, private, got %q", cacheControl, response.Headers().Get("Cache-Control"))
+        }
     }
 }
 

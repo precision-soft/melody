@@ -232,3 +232,19 @@ func TestPrefersHtml_AHeaderCutAtTheCapIsReadAsUnparsable(t *testing.T) {
         t.Fatalf("expected a list within the cap to negotiate normally")
     }
 }
+
+func TestPrefersHtml_ATextPlainWeightAboveHtmlDeniesThePage(t *testing.T) {
+    for acceptHeader, expected := range map[string]bool{
+        "text/plain, text/html;q=0.5":       false,
+        "text/plain;q=1, text/html;q=0.5":   false,
+        "text/plain;q=0.5, text/html;q=0.5": false,
+        "text/html;q=0.5, text/plain;q=0.5": true,
+        "text/html, application/json;q=0.5": true,
+        "text/html, text/plain;q=0.9":       true,
+    } {
+        request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/", acceptHeader)
+        if expected != PrefersHtml(request) {
+            t.Fatalf("expected %t for %q", expected, acceptHeader)
+        }
+    }
+}

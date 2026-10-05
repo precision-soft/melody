@@ -197,6 +197,11 @@ func sanitizeUrlForDiagnostics(urlString string) string {
     }
 
     if nil != parsed.User {
+        /* a password holding "/" ends the authority inside it, so net/url reads the password's head as the userinfo and its tail as the path: an "@" in the path of a url that carries a userinfo leaves no trustworthy end to the credential, and the url keeps only its scheme */
+        if true == strings.Contains(parsed.Path, "@") {
+            return parsed.Scheme + "://" + redactedValue
+        }
+
         parsed.User = url.UserPassword(redactedValue, redactedValue)
     }
 
@@ -249,21 +254,22 @@ func sanitizeUrlTextually(urlString string) string {
     return redactAuthorityUserinfo(sanitized, authorityStart)
 }
 
-/* authorityStartIndex reports where the region that can hold a userinfo begins: after the "://" of an absolute url, the leading "//" of a scheme-relative reference, or the ":" of an opaque one. A relative path has no authority, and an "@" in it belongs to the path. */
+/* authorityStartIndex reports where the region that can hold a userinfo begins: after the "://" of an absolute url, the leading "//" of a scheme-relative reference, or the ":" of an opaque one. The separator is the one that ends a scheme, so a "://" in a relative reference's query or path opens no authority. A relative path has no authority, and an "@" in it belongs to the path. */
 func authorityStartIndex(value string) (int, bool) {
-    if schemeEnd := strings.Index(value, "://"); 0 <= schemeEnd {
-        return schemeEnd + len("://"), true
-    }
-
     if true == strings.HasPrefix(value, "//") {
         return len("//"), true
     }
 
-    if schemeEnd := schemeSeparatorIndex(value); 0 <= schemeEnd {
-        return schemeEnd + len(":"), true
+    schemeEnd := schemeSeparatorIndex(value)
+    if 0 > schemeEnd {
+        return 0, false
     }
 
-    return 0, false
+    if true == strings.HasPrefix(value[schemeEnd:], "://") {
+        return schemeEnd + len("://"), true
+    }
+
+    return schemeEnd + len(":"), true
 }
 
 /* schemeSeparatorIndex reports the index of the ":" closing a scheme at the head of the value, or -1, under net/url's grammar: a letter, then letters, digits, "+", "-" and ".". */
@@ -776,14 +782,10 @@ func refuseForeignOrigin(baseUrl string, urlString string) error {
     )
 }
 
-/* sanitizeUrlParseError keeps what net/url says about a refused url and drops the url itself, which its message quotes with userinfo and query. The message also quotes the span it refused, a port or an escape, and in a url holding an "@" that span can be the head of a password net/url read as a port, so there every quoted span is redacted. */
+/* sanitizeUrlParseError keeps what net/url says about a refused url and drops the url itself, which its message quotes with userinfo and query. The message also quotes the span it refused, a port or an escape, which can be the head of a password net/url read as a port, an "@" written "%40" included, so every quoted span is redacted. */
 func sanitizeUrlParseError(err error) string {
     if urlErr, ok := err.(*url.Error); true == ok && nil != urlErr.Err {
-        if true == strings.Contains(urlErr.URL, "@") {
-            return redactQuotedSpans(urlErr.Err.Error())
-        }
-
-        return urlErr.Err.Error()
+        return redactQuotedSpans(urlErr.Err.Error())
     }
 
     return err.Error()

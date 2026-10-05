@@ -225,7 +225,7 @@ func TestNormalizeResultToResponse_TypedNilContractResponseBecomesNilInterface(t
 }
 
 /* the fallback that serves the default representation records the resolution failure first: the record is the only diagnostic a client that named an available type and received another will ever produce */
-func TestNormalizeResultToResponse_ARefusedResolutionIsRecordedBeforeTheFallback(t *testing.T) {
+func TestNormalizeResultToResponse_AFailedResolutionIsRecordedBeforeTheFallback(t *testing.T) {
     serviceContainer := container.NewContainer()
 
     registerErr := container.Register[*serializer.SerializerManager](
@@ -233,9 +233,7 @@ func TestNormalizeResultToResponse_ARefusedResolutionIsRecordedBeforeTheFallback
         serializer.ServiceSerializerManager,
         func(resolver containercontract.Resolver) (*serializer.SerializerManager, error) {
             return serializer.NewSerializerManager(
-                map[string]serializercontract.Serializer{
-                    serializer.MimeApplicationJson: serializer.NewJsonSerializer(),
-                },
+                map[string]serializercontract.Serializer{},
             )
         },
     )

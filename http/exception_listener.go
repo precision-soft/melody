@@ -7,6 +7,7 @@ import (
     eventcontract "github.com/precision-soft/melody/event/contract"
     "github.com/precision-soft/melody/exception"
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
+    httpcontract "github.com/precision-soft/melody/http/contract"
     "github.com/precision-soft/melody/internal"
     kernelcontract "github.com/precision-soft/melody/kernel/contract"
     "github.com/precision-soft/melody/logging"
@@ -61,7 +62,7 @@ func RegisterKernelExceptionListener(eventDispatcher eventcontract.EventDispatch
                     if false == internal.IsNilInterface(exceptionEvent.Request()) && nil != exceptionEvent.Request().HttpRequest() {
                         method = exceptionEvent.Request().HttpRequest().Method
                         if nil != exceptionEvent.Request().HttpRequest().URL {
-                            path = exceptionEvent.Request().HttpRequest().URL.Path
+                            path = internal.BoundDiagnosticText(exceptionEvent.Request().HttpRequest().URL.Path)
                         }
                     }
 
@@ -91,46 +92,53 @@ func RegisterKernelExceptionListener(eventDispatcher eventcontract.EventDispatch
                 }
             }
 
-            statusCode := nethttp.StatusInternalServerError
-            message := "internal server error"
-
-            if nil != httpException {
-                statusCode = httpException.StatusCode()
-                message = httpException.Message()
-            } else if true == debugMode {
-                message = debugErrorMessage(exceptionEvent.Err())
-            }
-
-            payloadExtras := map[string]any{}
-
-            /* the errors context key is the public half of an http exception's context: BindJsonAndValidate attaches the per-field validation errors under it, and they reach the client here. Only the public projection is sent: an entry blaming the declaration carries the developer's typo and the constraint's parameters, which belong to the record, and the record is rendered from the exception's full context. */
-            if nil != httpException {
-                if errorsValue, exists := httpException.Context()["errors"]; true == exists {
-                    payloadExtras["errors"] = clientVisibleValidationErrors(errorsValue)
-                }
-            }
-
-            if true == debugMode {
-                var melodyError *exception.Error
-                melodyErrorFound := errors.As(exceptionEvent.Err(), &melodyError)
-                if true == melodyErrorFound && nil != melodyError {
-                    payloadExtras["context"] = withOccurrenceCoordinates(melodyError.Context(), exceptionEvent.Err())
-
-                    causeErr := melodyError.CauseErr()
-                    if nil != causeErr {
-                        payloadExtras["cause"] = debugErrorMessage(causeErr)
-                    }
-                }
-            }
-
             exceptionEvent.SetResponse(
-                renderErrorResponse(runtimeInstance, exceptionEvent.Request(), statusCode, message, payloadExtras),
+                exceptionResponseFor(runtimeInstance, exceptionEvent.Request(), exceptionEvent.Err(), debugMode),
             )
 
             return nil
         },
         KernelExceptionListenerPriority,
     )
+}
+
+/* exceptionResponseFor renders the answer an error earns when no listener and no error handler answered it: the status and message of the http exception its chain carries, its validation errors projected for the client, and in debug mode the context and cause of the nearest melody error; any other error is a 500. The exception listener answers with it, and so does the kernel when an installed error handler declines. */
+func exceptionResponseFor(runtimeInstance runtimecontract.Runtime, request httpcontract.Request, err error, debugMode bool) httpcontract.Response {
+    httpException := exception.AsHttpException(err)
+
+    statusCode := nethttp.StatusInternalServerError
+    message := "internal server error"
+
+    if nil != httpException {
+        statusCode = httpException.StatusCode()
+        message = httpException.Message()
+    } else if true == debugMode {
+        message = debugErrorMessage(err)
+    }
+
+    payloadExtras := map[string]any{}
+
+    /* the errors context key is the public half of an http exception's context: BindJsonAndValidate attaches the per-field validation errors under it, and they reach the client here. Only the public projection is sent: an entry blaming the declaration carries the developer's typo and the constraint's parameters, which belong to the record, and the record is rendered from the exception's full context. */
+    if nil != httpException {
+        if errorsValue, exists := httpException.Context()["errors"]; true == exists {
+            payloadExtras["errors"] = clientVisibleValidationErrors(errorsValue)
+        }
+    }
+
+    if true == debugMode {
+        var melodyError *exception.Error
+        melodyErrorFound := errors.As(err, &melodyError)
+        if true == melodyErrorFound && nil != melodyError {
+            payloadExtras["context"] = withOccurrenceCoordinates(melodyError.Context(), err)
+
+            causeErr := melodyError.CauseErr()
+            if nil != causeErr {
+                payloadExtras["cause"] = debugErrorMessage(causeErr)
+            }
+        }
+    }
+
+    return renderErrorResponse(runtimeInstance, request, statusCode, message, payloadExtras)
 }
 
 /* attachRequestContextToError carries the request coordinates onto an already-logged error in place of a second record: onto the occurrence the kernel marked when the chain holds one, so a value several requests share keeps no request's coordinates, and onto the nearest melody error otherwise, the error a lower layer filed itself. A key already held is kept — the writer closest to the failure said more — and an empty coordinate says nothing, so it is not written. */

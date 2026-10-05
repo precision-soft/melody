@@ -238,7 +238,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                             /* named explicitly: the emergency logger this falls back to does not inject it */
                             "requestId":  requestId,
                             "method":     request.Method,
-                            "path":       request.URL.Path,
+                            "path":       internal.BoundDiagnosticText(request.URL.Path),
                             "panicStack": string(debug.Stack()),
                         },
                     ),
@@ -293,8 +293,11 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         /* the route is matched on the path as the client spelled it, so an encoded separator stays inside its segment; splitRequestPath unescapes each segment after the split, so a parameter binds the decoded value */
         matchPath := internal.RequestPathAsSent(request.URL)
 
-        /* a stale RawPath is not matched and leaves no no-route record: the canonical guard below refuses it, and a route selected on the re-escaped decoded path would be one the client never named, read by every kernel.response and kernel.terminate listener */
+        /* a stale RawPath is not matched: the canonical guard below refuses it, and a route selected on the re-escaped decoded path would be one the client never named, read by every kernel.response and kernel.terminate listener */
         rawPathIsStale := internal.RequestRawPathIsStale(request.URL)
+
+        /* the refusal below is decided here, so a path it refuses leaves its one record and not a no-route record beside it */
+        pathRefused := false == requestPathIsCanonical(RequestPathAsRouted(internal.RequestPathAsSent(request.URL))) || ("" != request.URL.Path && strings.TrimLeftFunc(request.URL.Path, unicode.IsSpace) != request.URL.Path) || true == rawPathIsStale
         var matchResult *httpcontract.MatchResult
         if false == rawPathIsStale {
             matchResult, _ = instance.router.Match(
@@ -368,33 +371,48 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 "route matched",
                 loggingcontract.Context{
                     "method":    request.Method,
-                    "path":      request.URL.Path,
+                    "path":      internal.BoundDiagnosticText(request.URL.Path),
                     "routeName": routeName,
                 },
             )
-        } else if false == rawPathIsStale {
+        } else if false == pathRefused {
             allowedMethodsValue, exists := routeAttributes[RouteAttributeMethods]
             if true == exists {
                 allowedMethods, ok := allowedMethodsValue.([]string)
                 if true == ok && 0 < len(allowedMethods) {
-                    requestLogger.Warning(
-                        "method not allowed",
-                        loggingcontract.Context{
-                            "method":         request.Method,
-                            "path":           request.URL.Path,
-                            "query":          internal.RedactQueryValuesForDiagnostics(request.URL.RawQuery),
-                            "scheme":         scheme,
-                            "host":           request.Host,
-                            "allowedMethods": allowedMethods,
-                        },
-                    )
+                    /* an OPTIONS the method policy answers itself is served 204 with the Allow list below, so it is not a refused method */
+                    if nethttp.MethodOptions == request.Method && true == instance.options.MethodPolicy.AutomaticOptions {
+                        requestLogger.Debug(
+                            "automatic options answered",
+                            loggingcontract.Context{
+                                "method":         request.Method,
+                                "path":           internal.BoundDiagnosticText(request.URL.Path),
+                                "query":          internal.BoundDiagnosticText(internal.RedactQueryValuesForDiagnostics(request.URL.RawQuery)),
+                                "scheme":         scheme,
+                                "host":           request.Host,
+                                "allowedMethods": allowedMethods,
+                            },
+                        )
+                    } else {
+                        requestLogger.Warning(
+                            "method not allowed",
+                            loggingcontract.Context{
+                                "method":         request.Method,
+                                "path":           internal.BoundDiagnosticText(request.URL.Path),
+                                "query":          internal.BoundDiagnosticText(internal.RedactQueryValuesForDiagnostics(request.URL.RawQuery)),
+                                "scheme":         scheme,
+                                "host":           request.Host,
+                                "allowedMethods": allowedMethods,
+                            },
+                        )
+                    }
                 } else {
                     requestLogger.Warning(
                         "no route matched",
                         loggingcontract.Context{
                             "method": request.Method,
-                            "path":   request.URL.Path,
-                            "query":  internal.RedactQueryValuesForDiagnostics(request.URL.RawQuery),
+                            "path":   internal.BoundDiagnosticText(request.URL.Path),
+                            "query":  internal.BoundDiagnosticText(internal.RedactQueryValuesForDiagnostics(request.URL.RawQuery)),
                             "scheme": scheme,
                             "host":   request.Host,
                         },
@@ -405,8 +423,8 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                     "no route matched",
                     loggingcontract.Context{
                         "method": request.Method,
-                        "path":   request.URL.Path,
-                        "query":  internal.RedactQueryValuesForDiagnostics(request.URL.RawQuery),
+                        "path":   internal.BoundDiagnosticText(request.URL.Path),
+                        "query":  internal.BoundDiagnosticText(internal.RedactQueryValuesForDiagnostics(request.URL.RawQuery)),
                         "scheme": scheme,
                         "host":   request.Host,
                     },
@@ -483,7 +501,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                         recoveredErr,
                         exceptioncontract.Context{
                             "method":     melodyRequest.HttpRequest().Method,
-                            "path":       melodyRequest.HttpRequest().URL.Path,
+                            "path":       internal.BoundDiagnosticText(melodyRequest.HttpRequest().URL.Path),
                             "routeName":  routeName,
                             "durationMs": durationMs,
                             "panicStack": string(debug.Stack()),
@@ -507,14 +525,10 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 }
             }
 
+            /* the application's error handler declined: the error is answered as the exception listener answers it, an http exception with its own status */
             if nil == exceptionEvent.Response() {
-                message := "internal server error"
-                if true == debugMode {
-                    message = debugErrorMessage(recoveredErr)
-                }
-
                 exceptionEvent.SetResponse(
-                    renderErrorResponse(runtimeInstance, melodyRequest, nethttp.StatusInternalServerError, message, nil),
+                    exceptionResponseFor(runtimeInstance, melodyRequest, exceptionEvent.Err(), debugMode),
                 )
             }
 
@@ -545,13 +559,13 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         melodyRequest.Attributes().Set(RequestAttributeSession, sessionInstance)
 
         /* a path that folds to a different spelling is refused after the route is matched and before it is authorized or handled, so the router, the firewall matchers and the access control never disagree about the resource; it is asked of RequestPathAsRouted, the spelling the access-control matcher reads too, and requestPathIsCanonical states the boundary. The leading form of the padded path is asked of the decoded path as well, since " /public" routes as "%20/public". A stale RawPath, left by a handler in front that rewrote Path alone, does not carry the spelling the client sent, so an encoded separator would be read as a separator: it is refused, as the first and second majors refuse on the raw path. */
-        if false == requestPathIsCanonical(RequestPathAsRouted(internal.RequestPathAsSent(request.URL))) || ("" != request.URL.Path && strings.TrimLeftFunc(request.URL.Path, unicode.IsSpace) != request.URL.Path) || true == rawPathIsStale {
+        if true == pathRefused {
             requestLogger.Warning(
                 "request path refused before the handler",
                 loggingcontract.Context{
                     "method":  request.Method,
-                    "path":    request.URL.Path,
-                    "rawPath": request.URL.RawPath,
+                    "path":    internal.BoundDiagnosticText(request.URL.Path),
+                    "rawPath": internal.BoundDiagnosticText(request.URL.RawPath),
                 },
             )
 
@@ -570,7 +584,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                     melodyRequest.bodyReadErr,
                     exceptioncontract.Context{
                         "method": request.Method,
-                        "path":   request.URL.Path,
+                        "path":   internal.BoundDiagnosticText(request.URL.Path),
                     },
                 ),
             )
@@ -704,14 +718,10 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                             }
                         }
 
+                        /* the application's error handler declined: the error is answered as the exception listener answers it, an http exception with its own status */
                         if nil == kernelExceptionEvent.Response() {
-                            message := "internal server error"
-                            if true == debugMode {
-                                message = debugErrorMessage(err)
-                            }
-
                             kernelExceptionEvent.SetResponse(
-                                renderErrorResponse(runtimeInstance, request, nethttp.StatusInternalServerError, message, nil),
+                                exceptionResponseFor(runtimeInstance, request, kernelExceptionEvent.Err(), debugMode),
                             )
                         }
 
@@ -789,14 +799,10 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 }
             }
 
+            /* the application's error handler declined: the error is answered as the exception listener answers it, an http exception with its own status */
             if nil == kernelExceptionEvent.Response() {
-                message := "internal server error"
-                if true == debugMode {
-                    message = debugErrorMessage(finalHandlerErr)
-                }
-
                 kernelExceptionEvent.SetResponse(
-                    renderErrorResponse(runtimeInstance, melodyRequest, nethttp.StatusInternalServerError, message, nil),
+                    exceptionResponseFor(runtimeInstance, melodyRequest, kernelExceptionEvent.Err(), debugMode),
                 )
             }
 
@@ -982,7 +988,7 @@ func logHandlerError(requestLogger loggingcontract.Logger, message string, handl
         handlerErr,
         exceptioncontract.Context{
             "method": method,
-            "path":   path,
+            "path":   internal.BoundDiagnosticText(path),
         },
     )
 

@@ -14,6 +14,9 @@ import (
     runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
 )
 
+/* netHttpUrlEncodedFormCeiling is the size past which net/http's ParseForm refuses a urlencoded body, its unexported maxFormSize */
+const netHttpUrlEncodedFormCeiling = 10 << 20
+
 const (
     RequestAttributeSession = "_session"
     RequestAttributeScheme  = "_scheme"
@@ -78,6 +81,18 @@ func NewRequest(
                         "path":   httpRequest.URL.Path,
                     },
                     bodyParseErr,
+                )
+            } else if true == bufferedBody && netHttpUrlEncodedFormCeiling < len(rawBody) {
+                /* the body parses, but net/http refused it at its own ceiling, which the configured limit does not raise: refused as a body past the limit, so the handler never reads it as an empty form */
+                bodyReadErr = exception.NewError(
+                    "the urlencoded body exceeds the 10 MiB net/http parses, which the configured body limit does not raise",
+                    map[string]any{
+                        "method":       httpRequest.Method,
+                        "path":         httpRequest.URL.Path,
+                        "bodyBytes":    len(rawBody),
+                        "ceilingBytes": netHttpUrlEncodedFormCeiling,
+                    },
+                    &nethttp.MaxBytesError{Limit: netHttpUrlEncodedFormCeiling},
                 )
             } else {
                 /* the body parsed and only the query did not: net/http drops the malformed query pairs, which Request reads for itself through URL.Query(), so the submission is served rather than refused for a query written with a legacy semicolon separator. */

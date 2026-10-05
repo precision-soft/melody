@@ -6,6 +6,7 @@ import (
     "io"
     "math"
     nethttp "net/http"
+    "reflect"
 
     "github.com/precision-soft/melody/v3/config"
     "github.com/precision-soft/melody/v3/exception"
@@ -71,6 +72,11 @@ func (instance *Request) BindJsonAndValidate(target any) error {
         return bindJsonErr
     }
 
+    /* a literal null leaves a nilable target's value nil, which the validator passes, so it is refused here as the typed json handler refuses it */
+    if true == boundTargetIsNil(target) {
+        return exception.NewHttpException(nethttp.StatusBadRequest, "empty request body")
+    }
+
     return validateBoundBody(instance.runtimeInstance, target)
 }
 
@@ -109,4 +115,14 @@ func maxRequestBodyBytes(request httpcontract.Request) int {
     configuration := config.ConfigMustFromContainer(request.RuntimeInstance().Container())
 
     return configuration.Http().MaxRequestBodyBytes()
+}
+
+/* boundTargetIsNil reports whether the value a json binding wrote through the target pointer is nil, every kind a json null can leave nil */
+func boundTargetIsNil(target any) bool {
+    targetValue := reflect.ValueOf(target)
+    if reflect.Ptr != targetValue.Kind() || true == targetValue.IsNil() {
+        return false
+    }
+
+    return boundBodyIsNil(targetValue.Elem().Interface())
 }

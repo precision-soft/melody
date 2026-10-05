@@ -103,18 +103,19 @@ func RegisterKernelTerminateAccessLogListener(eventDispatcher eventcontract.Even
                 referer = internal.RedactRefererForDiagnostics(terminateEvent.Request().HttpRequest().Referer())
             }
 
+            /* every request-supplied field is bounded after its redaction, so a request line of any length costs the access log a bounded line */
             loggerInstance.Info(
                 "request completed",
                 loggingcontract.Context{
                     "requestId":    requestId,
                     "method":       method,
-                    "path":         path,
-                    "query":        queryString,
+                    "path":         internal.BoundDiagnosticText(path),
+                    "query":        internal.BoundDiagnosticText(queryString),
                     "scheme":       scheme,
                     "host":         host,
                     "remoteAddr":   remoteAddr,
-                    "userAgent":    userAgent,
-                    "referer":      referer,
+                    "userAgent":    internal.BoundDiagnosticText(userAgent),
+                    "referer":      internal.BoundDiagnosticText(referer),
                     "routeName":    routeName,
                     "routePattern": routePattern,
                     "statusCode":   statusCode,

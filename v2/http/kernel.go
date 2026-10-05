@@ -181,7 +181,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                             /* named explicitly: the emergency logger this falls back to when the request logger is what failed does not inject it */
                             "requestId":  requestId,
                             "method":     request.Method,
-                            "path":       request.URL.Path,
+                            "path":       internal.BoundDiagnosticText(request.URL.Path),
                             "panicStack": string(debug.Stack()),
                         },
                     ),
@@ -230,6 +230,9 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         }
 
         scheme := detectSchemeWithForwardedHeadersPolicy(request, instance.options.ForwardedHeadersPolicy)
+
+        /* the refusal below is decided here, so a path it refuses leaves its one record and not a no-route record beside it */
+        pathRefused := false == requestPathIsCanonical(request.URL.Path) || true == requestPathCarriesEncodedSeparator(request.URL.RawPath)
 
         matchResult, _ := instance.router.Match(
             request.Method,
@@ -301,33 +304,48 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 "route matched",
                 loggingcontract.Context{
                     "method":    request.Method,
-                    "path":      request.URL.Path,
+                    "path":      internal.BoundDiagnosticText(request.URL.Path),
                     "routeName": routeName,
                 },
             )
-        } else {
+        } else if false == pathRefused {
             allowedMethodsValue, exists := routeAttributes[RouteAttributeMethods]
             if true == exists {
                 allowedMethods, ok := allowedMethodsValue.([]string)
                 if true == ok && 0 < len(allowedMethods) {
-                    requestLogger.Warning(
-                        "method not allowed",
-                        loggingcontract.Context{
-                            "method":         request.Method,
-                            "path":           request.URL.Path,
-                            "query":          internal.RedactQueryValuesForDiagnostics(request.URL.RawQuery),
-                            "scheme":         scheme,
-                            "host":           request.Host,
-                            "allowedMethods": allowedMethods,
-                        },
-                    )
+                    /* an OPTIONS the method policy answers itself is served 204 with the Allow list below, so it is not a refused method */
+                    if nethttp.MethodOptions == request.Method && true == instance.options.MethodPolicy.AutomaticOptions {
+                        requestLogger.Debug(
+                            "automatic options answered",
+                            loggingcontract.Context{
+                                "method":         request.Method,
+                                "path":           internal.BoundDiagnosticText(request.URL.Path),
+                                "query":          internal.BoundDiagnosticText(internal.RedactQueryValuesForDiagnostics(request.URL.RawQuery)),
+                                "scheme":         scheme,
+                                "host":           request.Host,
+                                "allowedMethods": allowedMethods,
+                            },
+                        )
+                    } else {
+                        requestLogger.Warning(
+                            "method not allowed",
+                            loggingcontract.Context{
+                                "method":         request.Method,
+                                "path":           internal.BoundDiagnosticText(request.URL.Path),
+                                "query":          internal.BoundDiagnosticText(internal.RedactQueryValuesForDiagnostics(request.URL.RawQuery)),
+                                "scheme":         scheme,
+                                "host":           request.Host,
+                                "allowedMethods": allowedMethods,
+                            },
+                        )
+                    }
                 } else {
                     requestLogger.Warning(
                         "no route matched",
                         loggingcontract.Context{
                             "method": request.Method,
-                            "path":   request.URL.Path,
-                            "query":  internal.RedactQueryValuesForDiagnostics(request.URL.RawQuery),
+                            "path":   internal.BoundDiagnosticText(request.URL.Path),
+                            "query":  internal.BoundDiagnosticText(internal.RedactQueryValuesForDiagnostics(request.URL.RawQuery)),
                             "scheme": scheme,
                             "host":   request.Host,
                         },
@@ -338,8 +356,8 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                     "no route matched",
                     loggingcontract.Context{
                         "method": request.Method,
-                        "path":   request.URL.Path,
-                        "query":  internal.RedactQueryValuesForDiagnostics(request.URL.RawQuery),
+                        "path":   internal.BoundDiagnosticText(request.URL.Path),
+                        "query":  internal.BoundDiagnosticText(internal.RedactQueryValuesForDiagnostics(request.URL.RawQuery)),
                         "scheme": scheme,
                         "host":   request.Host,
                     },
@@ -416,7 +434,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                         recoveredErr,
                         exceptioncontract.Context{
                             "method":     melodyRequest.HttpRequest().Method,
-                            "path":       melodyRequest.HttpRequest().URL.Path,
+                            "path":       internal.BoundDiagnosticText(melodyRequest.HttpRequest().URL.Path),
                             "routeName":  routeName,
                             "durationMs": durationMs,
                             "panicStack": string(debug.Stack()),
@@ -441,14 +459,10 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 }
             }
 
+            /* the application's error handler declined: the error is answered as the exception listener answers it, an http exception with its own status */
             if nil == exceptionEvent.Response() {
-                message := "internal server error"
-                if true == debugMode {
-                    message = debugErrorMessage(recoveredErr)
-                }
-
                 exceptionEvent.SetResponse(
-                    renderErrorResponse(runtimeInstance, melodyRequest, nethttp.StatusInternalServerError, message, nil),
+                    exceptionResponseFor(runtimeInstance, melodyRequest, exceptionEvent.Err(), debugMode),
                 )
             }
 
@@ -505,13 +519,13 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         melodyRequest.Attributes().Set(RequestAttributeSession, sessionInstance)
 
         /* a request path that folds to a different spelling is refused after the route is matched and before the security dispatch and the handler: the router matches the path as sent while the access-control matcher folds it, so the two could disagree about which resource this is. A trailing slash is not a fold (requestPathIsCanonical states the boundary), and a separator the client encoded is refused too (requestPathCarriesEncodedSeparator). */
-        if false == requestPathIsCanonical(request.URL.Path) || true == requestPathCarriesEncodedSeparator(request.URL.RawPath) {
+        if true == pathRefused {
             requestLogger.Warning(
                 "request path refused before the handler",
                 loggingcontract.Context{
                     "method":  request.Method,
-                    "path":    request.URL.Path,
-                    "rawPath": request.URL.RawPath,
+                    "path":    internal.BoundDiagnosticText(request.URL.Path),
+                    "rawPath": internal.BoundDiagnosticText(request.URL.RawPath),
                 },
             )
 
@@ -549,7 +563,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                     melodyRequest.bodyReadErr,
                     exceptioncontract.Context{
                         "method": request.Method,
-                        "path":   request.URL.Path,
+                        "path":   internal.BoundDiagnosticText(request.URL.Path),
                     },
                 ),
             )
@@ -721,14 +735,10 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                             }
                         }
 
+                        /* the application's error handler declined: the error is answered as the exception listener answers it, an http exception with its own status */
                         if nil == kernelExceptionEvent.Response() {
-                            message := "internal server error"
-                            if true == debugMode {
-                                message = debugErrorMessage(err)
-                            }
-
                             kernelExceptionEvent.SetResponse(
-                                renderErrorResponse(runtimeInstance, request, nethttp.StatusInternalServerError, message, nil),
+                                exceptionResponseFor(runtimeInstance, request, kernelExceptionEvent.Err(), debugMode),
                             )
                         }
 
@@ -825,14 +835,10 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 }
             }
 
+            /* the application's error handler declined: the error is answered as the exception listener answers it, an http exception with its own status */
             if nil == kernelExceptionEvent.Response() {
-                message := "internal server error"
-                if true == debugMode {
-                    message = debugErrorMessage(finalHandlerErr)
-                }
-
                 kernelExceptionEvent.SetResponse(
-                    renderErrorResponse(runtimeInstance, melodyRequest, nethttp.StatusInternalServerError, message, nil),
+                    exceptionResponseFor(runtimeInstance, melodyRequest, kernelExceptionEvent.Err(), debugMode),
                 )
             }
 
@@ -983,7 +989,7 @@ func logHandlerError(requestLogger loggingcontract.Logger, message string, handl
         handlerErr,
         exceptioncontract.Context{
             "method": method,
-            "path":   path,
+            "path":   internal.BoundDiagnosticText(path),
         },
     )
 

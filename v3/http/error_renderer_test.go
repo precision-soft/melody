@@ -7,6 +7,7 @@ import (
     nethttp "net/http"
     "strings"
     "testing"
+    "time"
 
     "github.com/precision-soft/melody/v3/container"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
@@ -350,5 +351,58 @@ func TestPlainTextLabel_SpellsACamelCasedKeyAsWords(t *testing.T) {
         if expected != plainTextLabel(key) {
             t.Fatalf("expected %q for %q, got %q", expected, key, plainTextLabel(key))
         }
+    }
+}
+
+type errorRendererPanickingStringer struct{}
+
+func (instance errorRendererPanickingStringer) String() string {
+    panic("stringer exploded")
+}
+
+func TestRenderErrorResponse_ASelfReferencingMapIsCutAtTheDepthBound(t *testing.T) {
+    selfReferencing := map[string]any{"name": "loop"}
+    selfReferencing["self"] = selfReferencing
+
+    request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/fail", "text/plain")
+
+    rendered := make(chan string, 1)
+    go func() {
+        response := renderErrorResponse(newErrorRendererTextAndJsonRuntime(), request, nethttp.StatusBadRequest, "bad request", map[string]any{"context": selfReferencing})
+        rendered <- readResponseBody(t, response)
+    }()
+
+    select {
+    case body := <-rendered:
+        if false == strings.Contains(body, "self: ...") || 40 < strings.Count(body, "\n") {
+            t.Fatalf("expected the walk cut at the depth bound, got %q", body)
+        }
+    case <-time.After(5 * time.Second):
+        t.Fatalf("expected the self-referencing map rendered within the bound")
+    }
+}
+
+func TestRenderErrorResponse_ALongListIsCutAtTheLineBound(t *testing.T) {
+    items := make([]string, 5000)
+    for index := range items {
+        items[index] = "item"
+    }
+
+    request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/fail", "text/plain")
+
+    body := readResponseBody(t, renderErrorResponse(newErrorRendererTextAndJsonRuntime(), request, nethttp.StatusBadRequest, "bad request", map[string]any{"items": items}))
+
+    if 1100 < strings.Count(body, "\n") || false == strings.HasSuffix(body, "...(truncated)\n") {
+        t.Fatalf("expected the body cut at the line bound, got %d lines", strings.Count(body, "\n"))
+    }
+}
+
+func TestRenderErrorResponse_APanickingStringerFallsBackToTheJsonEnvelope(t *testing.T) {
+    request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/fail", "text/plain")
+
+    response := renderErrorResponse(newErrorRendererTextAndJsonRuntime(), request, nethttp.StatusBadRequest, "bad request", map[string]any{"cause": errorRendererPanickingStringer{}})
+
+    if nethttp.StatusBadRequest != response.StatusCode() || false == strings.HasPrefix(response.Headers().Get("Content-Type"), "application/json") {
+        t.Fatalf("expected the json envelope under the error status, got %d %q", response.StatusCode(), response.Headers().Get("Content-Type"))
     }
 }
