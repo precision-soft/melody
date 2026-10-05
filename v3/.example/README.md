@@ -183,7 +183,7 @@ The application also answers `GET /health` without a session, which is the route
 
 The serving settings the [`.env`](./.env) carries:
 
-- a signed-in session is kept in `var/session/session.json` (`APP_SESSION_FILE`), so a browser stays signed in across the restart the development supervisor does on every saved change, and it expires a day after its last request (`MELODY_HTTP_SESSION_TTL=24h`). One account holds at most five sessions: the sign-in past them ends the account's oldest, through the session index the schema holds, since the file storage rewrites every live session on each save and the number it pays for would otherwise grow with every sign-in an address can make; a sign-out frees its place;
+- a signed-in session is kept in `var/session/session.json` (`APP_SESSION_FILE`), so a browser stays signed in across the restart the development supervisor does on every saved change, and it expires a day after the last request that wrote to it, a sign-in or a change of what it holds, since a request that only reads it does not extend it (`MELODY_HTTP_SESSION_TTL=24h`). One account holds at most five live sessions: a session that ended elsewhere — expired, or cleared because the account changed — has its row dropped by the next sign-in before it counts, and without a database the index is kept in memory and counts again from zero at each restart, while the sessions the file keeps stay valid; the sign-in past them ends the account's oldest, through the session index the schema holds, since the file storage rewrites every live session on each save and the number it pays for would otherwise grow with every sign-in an address can make; a sign-out frees its place;
 - a request body past 64 KiB is refused with 413 before a door reads it (`MELODY_HTTP_MAX_REQUEST_BODY_BYTES`), the object storage upload included;
 - the bundle's assets are cached for an hour and revalidated by ETag and Last-Modified (`MELODY_STATIC_ENABLE_CACHE`, `MELODY_STATIC_CACHE_MAX_AGE`); a developer who wants every save fetched afresh turns the cache off in `.env.dev.local`, which wins over `.env`;
 - the prefixes of the application's own doors, one per first segment of the route table and one per locale of the localized greeting, are never served from `public/` (`MELODY_STATIC_EXCLUDED_PATHS`): the file server answers ahead of routing and the router takes a door with or without its trailing slash, so a file dropped there would otherwise be served to a signed-in caller in place of the door; a door added under a new first segment needs its entry, and the stack checks hold the list against `debug:router`;
@@ -365,7 +365,8 @@ of it was proven by compilation.
   `PUT /currencies/api/update/:id/` renames the code and the name and never writes the rate, which only the
   refresh quotes, and answers the same `409` for a code another currency holds; `DELETE
   /currencies/api/delete/:id/` removes the row, and answers `409` while a product is priced in it — the product
-  table's foreign key holds that on the database, so the conversion of a product never loses its currency to a
+  table's foreign key holds that on the database, and without one a catalogue lock holds the check and the delete
+  together against a concurrent product write, so the conversion of a product never loses its currency to a
   delete. A missing currency is a `404` on both. A product write naming a category or a currency that does not
   exist is the caller's `400`. The currencies are not audited. The write doors validate the body in the
   spelling they store, trimmed: a name of one character padded with a space is refused, not stored.

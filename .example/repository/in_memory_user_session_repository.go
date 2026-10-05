@@ -23,9 +23,10 @@ func (instance *inMemoryUserSessionRepository) Admit(
     previousSessionId string,
     sessionId string,
     createdAt time.Time,
+    sessionLive func(sessionId string) (bool, error),
     release func(sessionId string) error,
 ) error {
-    validationErr := validateSessionAdmission(userId, sessionId, release)
+    validationErr := validateSessionAdmission(userId, sessionId, release, sessionLive)
     if nil != validationErr {
         return validationErr
     }
@@ -35,8 +36,16 @@ func (instance *inMemoryUserSessionRepository) Admit(
 
     instance.removeLocked(previousSessionId)
 
-    held := instance.sessionsByUser[userId]
-    for _, pastCap := range sessionsPastCap(held) {
+    live, ended, liveErr := liveSessionsOldestFirst(instance.sessionsByUser[userId], sessionLive)
+    if nil != liveErr {
+        return liveErr
+    }
+
+    for _, endedSessionId := range ended {
+        instance.removeLocked(endedSessionId)
+    }
+
+    for _, pastCap := range sessionsPastCap(live) {
         if releaseErr := release(pastCap); nil != releaseErr {
             return releaseErr
         }

@@ -8,7 +8,7 @@ import (
     securitycontract "github.com/precision-soft/melody/v2/security/contract"
 )
 
-/* NewPathPrefixMatcher selects a firewall for every request path that begins with prefix, compared as a string prefix: "/api" claims "/api-admin" and "/apiary" as well as "/api/users". The first firewall whose matcher matches wins, so a firewall declared after one whose prefix begins its own is never selected and its access control never runs: declare the narrower firewall first, or end the earlier prefix at a segment boundary ("/api/"). An empty prefix claims every path. The path is written as the router reads it, decoded, with %2F for a separator inside a segment: a percent escape other than %2F claims only a resource whose name holds the percent sign literally. */
+/* NewPathPrefixMatcher selects a firewall for every request path that begins with prefix, compared as a string prefix: "/api" claims "/api-admin" and "/apiary" as well as "/api/users". The first firewall whose matcher matches wins, so a firewall declared after one whose prefix begins its own is never selected and its access control never runs: declare the narrower firewall first, or end the earlier prefix at a segment boundary ("/api/"). An empty prefix claims every path. The path is written as the router reads it, decoded. A request carrying an encoded separator (%2F) is refused by the kernel before any firewall, so a declared path never holds one; a percent escape written in a declaration claims only a resource whose name holds the percent sign literally. */
 func NewPathPrefixMatcher(prefix string) *PathPrefixMatcher {
     return &PathPrefixMatcher{
         prefix: prefix,

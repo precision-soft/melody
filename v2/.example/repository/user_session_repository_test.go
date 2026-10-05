@@ -28,15 +28,17 @@ func TestUserSessionRepositoryAdmit_RefusesAnAdmissionWithoutAccountOrSession(t 
     release := func(sessionId string) error { return nil }
 
     for _, admission := range []struct {
-        userId    string
-        sessionId string
-        release   func(sessionId string) error
+        userId      string
+        sessionId   string
+        sessionLive func(sessionId string) (bool, error)
+        release     func(sessionId string) error
     }{
-        {userId: " ", sessionId: "s1", release: release},
-        {userId: "user-1", sessionId: "", release: release},
-        {userId: "user-1", sessionId: "s1", release: nil},
+        {userId: " ", sessionId: "s1", sessionLive: everySessionLive, release: release},
+        {userId: "user-1", sessionId: "", sessionLive: everySessionLive, release: release},
+        {userId: "user-1", sessionId: "s1", sessionLive: everySessionLive, release: nil},
+        {userId: "user-1", sessionId: "s1", sessionLive: nil, release: release},
     } {
-        if nil == repositoryInstance.Admit(context.Background(), admission.userId, "", admission.sessionId, time.Now(), admission.release) {
+        if nil == repositoryInstance.Admit(context.Background(), admission.userId, "", admission.sessionId, time.Now(), admission.sessionLive, admission.release) {
             t.Fatalf("expected %+v refused", admission)
         }
     }

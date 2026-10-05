@@ -23,16 +23,17 @@ type bunUserSessionRepository struct {
     database *bun.DB
 }
 
-/* Admit locks the account's row FOR UPDATE, the lock the admin doors and GrantRole take, so the sign-ins of one account admit one at a time; the rows are read, released past the cap, and written inside that one transaction. An account deleted before the lock answers ErrSessionAccountAbsent, and one deleted after it waits for the commit, whose rows its cascade then removes. */
+/* Admit locks the account's row FOR UPDATE, the lock the admin doors and GrantRole take, so the sign-ins of one account admit one at a time; the rows are read, released past the cap, and written inside that one transaction. An account deleted before the lock answers ErrSessionAccountAbsent, and one deleted after it waits for the commit, whose rows its cascade then removes. A failure after a release rolls back the row deletes while the released sessions stay ended; those rows are dropped as ended at the next admission. */
 func (instance *bunUserSessionRepository) Admit(
     ctx context.Context,
     userId string,
     previousSessionId string,
     sessionId string,
     createdAt time.Time,
+    sessionLive func(sessionId string) (bool, error),
     release func(sessionId string) error,
 ) error {
-    validationErr := validateSessionAdmission(userId, sessionId, release)
+    validationErr := validateSessionAdmission(userId, sessionId, release, sessionLive)
     if nil != validationErr {
         return validationErr
     }
@@ -64,7 +65,18 @@ func (instance *bunUserSessionRepository) Admit(
             return selectErr
         }
 
-        for _, pastCap := range sessionsPastCap(heldOldestFirst) {
+        live, ended, liveErr := liveSessionsOldestFirst(heldOldestFirst, sessionLive)
+        if nil != liveErr {
+            return liveErr
+        }
+
+        for _, endedSessionId := range ended {
+            if _, deleteErr := tx.NewDelete().Model((*userSessionRow)(nil)).Where("session_id = ?", endedSessionId).Exec(ctx); nil != deleteErr {
+                return deleteErr
+            }
+        }
+
+        for _, pastCap := range sessionsPastCap(live) {
             if releaseErr := release(pastCap); nil != releaseErr {
                 return releaseErr
             }

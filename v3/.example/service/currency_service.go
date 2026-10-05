@@ -421,16 +421,24 @@ func (instance *CurrencyService) DeleteById(
     currencyId string,
 ) (bool, error) {
     /* the product table's foreign key refuses the delete on the database; the read answers the same refusal on the configuration without one, and names it before the delete is tried */
-    pricedIn, pricedInErr := instance.productRepository.PricedIn(runtimeInstance.Context(), currencyId)
-    if nil != pricedInErr {
-        return false, pricedInErr
-    }
+    deleted := false
 
-    if true == pricedIn {
-        return false, repository.ErrCurrencyInUse
-    }
+    /* the read and the delete are one step against a concurrent product write naming the currency */
+    deleteErr := instance.productRepository.HoldingReferences(func() error {
+        pricedIn, pricedInErr := instance.productRepository.PricedIn(runtimeInstance.Context(), currencyId)
+        if nil != pricedInErr {
+            return pricedInErr
+        }
 
-    deleted, deleteErr := instance.currencyRepository.DeleteById(runtimeInstance.Context(), currencyId)
+        if true == pricedIn {
+            return repository.ErrCurrencyInUse
+        }
+
+        var removeErr error
+        deleted, removeErr = instance.currencyRepository.DeleteById(runtimeInstance.Context(), currencyId)
+
+        return removeErr
+    })
     if nil != deleteErr {
         return false, deleteErr
     }

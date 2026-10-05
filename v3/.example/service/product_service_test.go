@@ -3,10 +3,12 @@ package service
 import (
     "context"
     "errors"
+    "strings"
     "testing"
     "time"
 
     examplecache "github.com/precision-soft/melody/v3/.example/cache"
+    "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/persistence"
     "github.com/precision-soft/melody/v3/.example/repository"
     melodycache "github.com/precision-soft/melody/v3/cache"
@@ -52,7 +54,7 @@ func TestProductService_RefusesAReferenceThatNamesNothing(t *testing.T) {
     }
 
     productRepository := newInMemoryProductRepositoryForTest(t)
-    productService := NewProductService(productRepository, NewCategoryService(categoryRepository, newTtlRecordingCache(), nil), currencyService, newTtlRecordingCache(), nil, &frozenClock{instant: currencyQuoteInstant})
+    productService := NewProductService(productRepository, NewCategoryService(categoryRepository, productRepository, newTtlRecordingCache(), nil), currencyService, newTtlRecordingCache(), nil, &frozenClock{instant: currencyQuoteInstant})
 
     if _, createErr := productService.Create(runtimeInstance, "prod-probe", "Probe", "d", "cat-absent", 1, "cur-eur", 1); false == errors.Is(createErr, repository.ErrUnknownCategory) {
         t.Fatalf("a create naming no category answered %v", createErr)
@@ -77,4 +79,24 @@ func TestCurrencyService_RefusesToDeleteACurrencyAProductIsPricedIn(t *testing.T
     if deleted, deleteErr := currencyService.DeleteById(runtimeInstance, "cur-ron"); true == deleted || false == errors.Is(deleteErr, repository.ErrCurrencyInUse) {
         t.Fatalf("the delete of a priced currency answered deleted=%v err=%v", deleted, deleteErr)
     }
+}
+
+/* paddingProductRepository answers a lookup the way MySQL's PAD SPACE collation does: trailing spaces of the identifier asked are ignored */
+type paddingProductRepository struct {
+    repository.ProductRepository
+}
+
+func (instance *paddingProductRepository) FindById(ctx context.Context, id string) (*entity.Product, bool, error) {
+    return instance.ProductRepository.FindById(ctx, strings.TrimRight(id, " "))
+}
+
+func TestProductService_FindByIdAnswersAPaddedIdentifierAsAbsentAndCachesNothingUnderIt(t *testing.T) {
+    cacheInstance := newTtlRecordingCache()
+    productService := NewProductService(&paddingProductRepository{ProductRepository: newInMemoryProductRepositoryForTest(t)}, nil, nil, cacheInstance, nil, &frozenClock{instant: currencyQuoteInstant})
+
+    assertPaddedIdentifierAnsweredAbsent(t, cacheInstance, CacheKeyProductById, func(id string) (bool, error) {
+        _, found, findErr := productService.FindById(id)
+
+        return found, findErr
+    }, "prod-1")
 }

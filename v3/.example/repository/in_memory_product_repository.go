@@ -22,7 +22,9 @@ func newInMemoryProductRepository() ProductRepository {
 }
 
 type inMemoryProductRepository struct {
-    mutex     sync.RWMutex
+    /* references is the catalogue lock HoldingReferences takes, outside every repository's own mutex */
+    references sync.Mutex
+    mutex      sync.RWMutex
     products  []*entity.Product
     /* mintFloor is the highest identifier this repository ever stored, see raisedFloor */
     mintFloor string
@@ -151,6 +153,26 @@ func (instance *inMemoryProductRepository) DeleteById(ctx context.Context, id st
     }
 
     return false, nil
+}
+
+func (instance *inMemoryProductRepository) CategorizedIn(ctx context.Context, categoryId string) (bool, error) {
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
+
+    for _, product := range instance.products {
+        if nil != product && categoryId == product.CategoryId {
+            return true, nil
+        }
+    }
+
+    return false, nil
+}
+
+func (instance *inMemoryProductRepository) HoldingReferences(action func() error) error {
+    instance.references.Lock()
+    defer instance.references.Unlock()
+
+    return action()
 }
 
 func (instance *inMemoryProductRepository) PricedIn(ctx context.Context, currencyId string) (bool, error) {

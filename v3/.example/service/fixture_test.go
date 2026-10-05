@@ -295,3 +295,30 @@ func newInMemoryProductRepositoryForTest(t *testing.T) repository.ProductReposit
 
     return productRepository
 }
+
+/* assertPaddedIdentifierAnsweredAbsent asks a lookup for the identifier with a trailing space, which a PAD SPACE collation reads as the row's own: it must answer absent and leave nothing under the padded key, while the identifier itself is found and cached */
+func assertPaddedIdentifierAnsweredAbsent(t *testing.T, cacheInstance *ttlRecordingCache, cacheKey func(id string) string, find func(id string) (bool, error), id string) {
+    t.Helper()
+
+    if found, findErr := find(id + " "); nil != findErr || true == found {
+        t.Fatalf("expected the padded identifier answered absent, got found=%v err=%v", found, findErr)
+    }
+
+    for _, write := range cacheInstance.writesFor(cacheKey(id + " ")) {
+        if entityCacheTtl == write.ttl {
+            t.Fatalf("the row was cached under the padded identifier: %+v", write)
+        }
+    }
+
+    if cached, exists, _ := cacheInstance.Get(cacheKey(id + " ")); true == exists && nil != cached {
+        t.Fatalf("the padded identifier holds a row in the cache: %+v", cached)
+    }
+
+    if found, findErr := find(id); nil != findErr || false == found {
+        t.Fatalf("expected the identifier itself found, got found=%v err=%v", found, findErr)
+    }
+
+    if 0 == len(cacheInstance.writesFor(cacheKey(id))) {
+        t.Fatalf("the identifier itself was not cached")
+    }
+}

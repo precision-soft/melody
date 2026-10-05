@@ -6,6 +6,7 @@ import (
     "errors"
     "math"
     "reflect"
+    "strings"
     "testing"
     "time"
 
@@ -478,5 +479,106 @@ func TestCurrencyServiceUpdate_AFailedReadBackAfterTheWriteStillDispatchesTheEve
 
     if 1 != len(dispatcher.names()) || event.CurrencyUpdatedEventName != dispatcher.names()[0] {
         t.Fatalf("expected the update event dispatched once despite the failed read-back, got %v", dispatcher.names())
+    }
+}
+
+/* paddingCurrencyRepository answers a lookup the way MySQL's PAD SPACE collation does: trailing spaces of the identifier asked are ignored */
+type paddingCurrencyRepository struct {
+    repository.CurrencyRepository
+}
+
+func (instance *paddingCurrencyRepository) FindById(ctx context.Context, id string) (*entity.Currency, bool, error) {
+    return instance.CurrencyRepository.FindById(ctx, strings.TrimRight(id, " "))
+}
+
+func TestCurrencyService_FindByIdAnswersAPaddedIdentifierAsAbsentAndCachesNothingUnderIt(t *testing.T) {
+    currencyRepository, currencyErr := repository.NewCurrencyRepository(persistence.NewCatalogStorage(nil))
+    if nil != currencyErr {
+        t.Fatalf("build the currency repository: %v", currencyErr)
+    }
+
+    cacheInstance := newTtlRecordingCache()
+    currencyService := NewCurrencyService(&paddingCurrencyRepository{CurrencyRepository: currencyRepository}, nil, cacheInstance, nil, &frozenClock{instant: currencyQuoteInstant})
+
+    assertPaddedIdentifierAnsweredAbsent(t, cacheInstance, CacheKeyCurrencyById, func(id string) (bool, error) {
+        _, found, findErr := currencyService.FindById(id)
+
+        return found, findErr
+    }, "cur-eur")
+}
+
+/* gatedCurrencyRepository holds a delete open between its entry and the removal, the window a product write would slip its check through */
+type gatedCurrencyRepository struct {
+    repository.CurrencyRepository
+    entered chan struct{}
+    release chan struct{}
+}
+
+func (instance *gatedCurrencyRepository) DeleteById(ctx context.Context, id string) (bool, error) {
+    close(instance.entered)
+    <-instance.release
+
+    return instance.CurrencyRepository.DeleteById(ctx, id)
+}
+
+/* a product write naming a currency whose delete is under way waits for the delete and is then refused, so no product is left priced in a currency the catalogue lost; the outcome is the same however long the delete is held */
+func TestCurrencyService_AProductWriteCannotPassItsCheckWhileTheCurrencyIsDeleted(t *testing.T) {
+    _, dispatcher, runtimeInstance := currencyServiceUnderTest(t)
+
+    storage := persistence.NewCatalogStorage(nil)
+
+    currencyRepository, currencyErr := repository.NewCurrencyRepository(storage)
+    if nil != currencyErr {
+        t.Fatalf("build the currency repository: %v", currencyErr)
+    }
+
+    if createErr := currencyRepository.Create(context.Background(), entity.NewCurrency("cur-gbp", "GBP", "Pound Sterling", 0.85, currencyQuoteInstant)); nil != createErr {
+        t.Fatalf("create the unused currency: %v", createErr)
+    }
+
+    categoryRepository, categoryErr := repository.NewCategoryRepository(storage)
+    if nil != categoryErr {
+        t.Fatalf("build the category repository: %v", categoryErr)
+    }
+
+    clockInstance := &frozenClock{instant: currencyQuoteInstant}
+    productRepository := newInMemoryProductRepositoryForTest(t)
+    gated := &gatedCurrencyRepository{CurrencyRepository: currencyRepository, entered: make(chan struct{}), release: make(chan struct{})}
+    currencyService := NewCurrencyService(gated, productRepository, newTtlRecordingCache(), dispatcher.dispatcher, clockInstance)
+    productService := NewProductService(productRepository, NewCategoryService(categoryRepository, productRepository, newTtlRecordingCache(), dispatcher.dispatcher), currencyService, newTtlRecordingCache(), dispatcher.dispatcher, clockInstance)
+
+    deleteDone := make(chan error, 1)
+    go func() {
+        _, deleteErr := currencyService.DeleteById(runtimeInstance, "cur-gbp")
+        deleteDone <- deleteErr
+    }()
+
+    <-gated.entered
+
+    createDone := make(chan error, 1)
+    go func() {
+        _, createErr := productService.Create(runtimeInstance, "prod-race", "Race", "d", "cat-1", 1, "cur-gbp", 1)
+        createDone <- createErr
+    }()
+
+    /* the delete is held open while the write is given time to run; with the catalogue lock it cannot pass its check before the delete ends */
+    select {
+    case <-createDone:
+        t.Fatalf("the product write completed while the currency's delete held its check open")
+    case <-time.After(200 * time.Millisecond):
+    }
+
+    close(gated.release)
+
+    if deleteErr := <-deleteDone; nil != deleteErr {
+        t.Fatalf("the delete failed: %v", deleteErr)
+    }
+
+    if createErr := <-createDone; false == errors.Is(createErr, repository.ErrUnknownCurrency) {
+        t.Fatalf("expected the write refused for the deleted currency, got %v", createErr)
+    }
+
+    if _, found, _ := productRepository.FindById(context.Background(), "prod-race"); true == found {
+        t.Fatalf("a product was stored priced in the deleted currency")
     }
 }

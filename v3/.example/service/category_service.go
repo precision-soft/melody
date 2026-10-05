@@ -22,11 +22,13 @@ const (
 //melody:service ServiceCategoryService
 func NewCategoryService(
     categoryRepository repository.CategoryRepository,
+    productRepository repository.ProductRepository,
     cacheInstance melodycachecontract.Cache,
     eventDispatcher melodyeventcontract.EventDispatcher,
 ) *CategoryService {
     return &CategoryService{
         categoryRepository: categoryRepository,
+        productRepository:  productRepository,
         cache:              cacheInstance,
         eventDispatcher:    eventDispatcher,
     }
@@ -34,6 +36,7 @@ func NewCategoryService(
 
 type CategoryService struct {
     categoryRepository repository.CategoryRepository
+    productRepository  repository.ProductRepository
     cache              melodycachecontract.Cache
     eventDispatcher    melodyeventcontract.EventDispatcher
 }
@@ -171,7 +174,24 @@ func (instance *CategoryService) DeleteById(
     runtimeInstance melodyruntimecontract.Runtime,
     categoryId string,
 ) (bool, error) {
-    deleted, deleteErr := instance.categoryRepository.DeleteById(runtimeInstance.Context(), categoryId)
+    deleted := false
+
+    /* the product table's foreign key refuses the delete on the database; the read answers the same refusal on the configuration without one, held with the delete against a concurrent product write naming the category */
+    deleteErr := instance.productRepository.HoldingReferences(func() error {
+        categorizedIn, categorizedInErr := instance.productRepository.CategorizedIn(runtimeInstance.Context(), categoryId)
+        if nil != categorizedInErr {
+            return categorizedInErr
+        }
+
+        if true == categorizedIn {
+            return repository.ErrCategoryInUse
+        }
+
+        var removeErr error
+        deleted, removeErr = instance.categoryRepository.DeleteById(runtimeInstance.Context(), categoryId)
+
+        return removeErr
+    })
     if nil != deleteErr {
         return false, deleteErr
     }

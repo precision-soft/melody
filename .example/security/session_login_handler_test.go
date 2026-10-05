@@ -23,9 +23,13 @@ import (
 
 /* the session a client held before authenticating is the one an attacker could have planted, so the identity must land on a session under a fresh id and never on the one the request arrived with */
 func TestSessionLoginHandlerWritesTheIdentityUnderARotatedId(t *testing.T) {
-    manager := melodysession.NewManager(melodysession.NewInMemoryStorage(), time.Hour)
+    managerStorage := melodysession.NewInMemoryStorage()
+    manager := melodysession.NewManager(managerStorage, time.Hour)
 
     containerInstance := melodycontainer.NewContainer()
+    melodycontainer.MustRegister[melodysessioncontract.Storage](containerInstance, melodysession.ServiceSessionStorage, func(resolver melodycontainercontract.Resolver) (melodysessioncontract.Storage, error) {
+        return managerStorage, nil
+    })
 
     registerErr := melodycontainer.Register[melodysessioncontract.Manager](
         containerInstance,
@@ -102,9 +106,13 @@ func TestSessionLoginHandlerAnswersAServerErrorWithoutASession(t *testing.T) {
 func loginRequest(t *testing.T) (melodyruntimecontract.Runtime, melodyhttpcontract.Request) {
     t.Helper()
 
-    manager := melodysession.NewManager(melodysession.NewInMemoryStorage(), time.Hour)
+    managerStorage := melodysession.NewInMemoryStorage()
+    manager := melodysession.NewManager(managerStorage, time.Hour)
 
     containerInstance := melodycontainer.NewContainer()
+    melodycontainer.MustRegister[melodysessioncontract.Storage](containerInstance, melodysession.ServiceSessionStorage, func(resolver melodycontainercontract.Resolver) (melodysessioncontract.Storage, error) {
+        return managerStorage, nil
+    })
 
     registerErr := melodycontainer.Register[melodysessioncontract.Manager](
         containerInstance,

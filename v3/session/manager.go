@@ -187,6 +187,7 @@ func (instance *Manager) NewSession() sessioncontract.Session {
         values:   make(map[string]any),
         modified: false,
         cleared:  false,
+        minted:   true,
     }
 }
 
@@ -210,10 +211,14 @@ func (instance *Manager) RegenerateSession(sessionInstance sessioncontract.Sessi
     /* the fresh id is minted before the previous entry is removed, so a storage outage while probing leaves the session in use intact */
     rotatedId := instance.uniqueSessionId()
 
-    /* the rotated-away id is checked, removed and buried in one critical section, so a request that loaded it can neither write it back nor rotate it again */
-    deleteErr := instance.deleteSessionRecordingCause(previousId, true)
-    if nil != deleteErr {
-        return nil, deleteErr
+    /* a session this manager minted and never stored has no entry to remove and no copy to bury, so its rotation, the sign-in on a fresh session, leaves no record */
+    concreteSession, isConcrete := sessionInstance.(*Session)
+    if false == isConcrete || false == concreteSession.isMinted() {
+        /* the rotated-away id is checked, removed and buried in one critical section, so a request that loaded it can neither write it back nor rotate it again */
+        deleteErr := instance.deleteSessionRecordingCause(previousId, true)
+        if nil != deleteErr {
+            return nil, deleteErr
+        }
     }
 
     /* the rotated-away session is latched cleared, so a caller writing to the original object cannot save the deleted id back; applied only once the entry is gone, so a failed delete leaves a usable session. A foreign Session implementation is cleared through its own Clear. */
@@ -224,6 +229,7 @@ func (instance *Manager) RegenerateSession(sessionInstance sessioncontract.Sessi
         values:   values,
         modified: true,
         cleared:  false,
+        minted:   true,
     }, nil
 }
 
@@ -265,7 +271,14 @@ func (instance *Manager) SaveSession(sessionInstance sessioncontract.Session) er
         return refusalErr
     }
 
-    return instance.storage.Save(sessionId, values, instance.ttl)
+    saveErr := instance.storage.Save(sessionId, values, instance.ttl)
+
+    /* once a save was attempted the id may be stored, so a later rotation removes and buries it */
+    if concreteSession, isConcrete := sessionInstance.(*Session); true == isConcrete {
+        concreteSession.markStored()
+    }
+
+    return saveErr
 }
 
 func (instance *Manager) DeleteSession(sessionId string) error {
@@ -293,10 +306,6 @@ func (instance *Manager) deleteSessionRecordingCause(sessionId string, rotated b
         }
     }
 
-    /* an id the storage certainly does not hold earns no tombstone, so a logout presenting an unknown id leaves no record; a read that fails is taken as holding it */
-    _, held, heldErr := instance.storage.Load(sessionId)
-    certainlyAbsent := nil == heldErr && false == held
-
     deleteErr := instance.storage.Delete(sessionId)
 
     /* a burial over an entry that is still there would read as a logout on the next save, so a failed removal is buried only when a fresh read says the entry went */
@@ -306,7 +315,8 @@ func (instance *Manager) deleteSessionRecordingCause(sessionId string, rotated b
         removed = nil == readErr && false == stillHeld
     }
 
-    if false == certainlyAbsent && true == removed {
+    /* every id that is gone after the removal is buried, the one whose entry lapsed or was evicted while a request held a copy of it as well, so that copy cannot write the ended session back. The kernel deletes only a session the request's cookie named, so an unknown cookie leaves no record; a direct call buries what it is handed, one record per call for the retention window. */
+    if true == removed {
         if true == rotated {
             instance.buryRotationTombstone(sessionId)
         } else {

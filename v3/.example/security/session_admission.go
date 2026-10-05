@@ -15,7 +15,7 @@ import (
 
 /* SessionIndex is the index of the sessions each account holds (repository.UserSessionRepository), named here by what the sign-in and sign-out doors call. */
 type SessionIndex interface {
-    Admit(ctx context.Context, userId string, previousSessionId string, sessionId string, createdAt time.Time, release func(sessionId string) error) error
+    Admit(ctx context.Context, userId string, previousSessionId string, sessionId string, createdAt time.Time, sessionLive func(sessionId string) (bool, error), release func(sessionId string) error) error
 
     Release(ctx context.Context, sessionId string) error
 }
@@ -73,12 +73,25 @@ func admitSession(
         return clockErr
     }
 
+    sessionStorage, sessionStorageErr := melodycontainer.FromResolver[melodysessioncontract.Storage](
+        runtimeInstance.Container(),
+        melodysession.ServiceSessionStorage,
+    )
+    if nil != sessionStorageErr {
+        return sessionStorageErr
+    }
+
     return index.Admit(
         runtimeInstance.Context(),
         userId,
         previousSessionId,
         rotatedSession.Id(),
         clockInstance.Now(),
+        func(sessionId string) (bool, error) {
+            _, exists, loadErr := sessionStorage.Load(sessionId)
+
+            return exists, loadErr
+        },
         sessionManager.DeleteSession,
     )
 }

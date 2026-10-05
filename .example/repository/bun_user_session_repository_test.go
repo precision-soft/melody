@@ -46,7 +46,7 @@ func TestBunUserSessionRepositoryAdmit_ReleasesTheOldestPastTheCapUnderTheAccoun
     repositoryInstance := NewBunUserSessionRepository(database)
 
     var releasedList []string
-    admitErr := repositoryInstance.Admit(context.Background(), "user-1", "s0", "s6", time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC), func(sessionId string) error {
+    admitErr := repositoryInstance.Admit(context.Background(), "user-1", "s0", "s6", time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC), everySessionLive, func(sessionId string) error {
         releasedList = append(releasedList, sessionId)
 
         return nil
@@ -94,7 +94,7 @@ func TestBunUserSessionRepositoryAdmit_AReleaseFailureRecordsNothing(t *testing.
     repositoryInstance := NewBunUserSessionRepository(database)
 
     releaseErr := errors.New("the session storage is down")
-    admitErr := repositoryInstance.Admit(context.Background(), "user-1", "", "s6", time.Now(), func(sessionId string) error {
+    admitErr := repositoryInstance.Admit(context.Background(), "user-1", "", "s6", time.Now(), everySessionLive, func(sessionId string) error {
         return releaseErr
     })
     if false == errors.Is(admitErr, releaseErr) {
@@ -116,7 +116,7 @@ func TestBunUserSessionRepositoryAdmit_RefusesAnAbsentAccount(t *testing.T) {
     recorder.queryHook = heldSessionRows(false)
     repositoryInstance := NewBunUserSessionRepository(database)
 
-    admitErr := repositoryInstance.Admit(context.Background(), "user-1", "", "s1", time.Now(), func(sessionId string) error { return nil })
+    admitErr := repositoryInstance.Admit(context.Background(), "user-1", "", "s1", time.Now(), everySessionLive, func(sessionId string) error { return nil })
     if false == errors.Is(admitErr, ErrSessionAccountAbsent) {
         t.Fatalf("expected ErrSessionAccountAbsent, got %v", admitErr)
     }
@@ -139,3 +139,47 @@ func TestBunUserSessionRepositoryRelease_DropsTheSessionsRow(t *testing.T) {
         t.Fatalf("expected the row of s1 dropped: %q", recorder.recordedQueries())
     }
 }
+
+/* the rows of sessions that ended elsewhere are dropped inside the transaction before the cap is counted, so no live session is released for them */
+func TestBunUserSessionRepositoryAdmit_DropsTheRowsOfEndedSessionsBeforeTheCap(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = heldSessionRows(true, "s1", "s2", "s3", "s4", "s5")
+    repositoryInstance := NewBunUserSessionRepository(database)
+
+    var releasedList []string
+    endedElsewhere := func(sessionId string) (bool, error) { return "s3" != sessionId, nil }
+    admitErr := repositoryInstance.Admit(context.Background(), "user-1", "", "s6", time.Now(), endedElsewhere, func(sessionId string) error {
+        releasedList = append(releasedList, sessionId)
+
+        return nil
+    })
+    if nil != admitErr {
+        t.Fatalf("the admission failed: %v", admitErr)
+    }
+
+    if 0 != len(releasedList) {
+        t.Fatalf("expected no live session released, got %v", releasedList)
+    }
+
+    if 1 != recorder.countMatching(isSessionStatement("DELETE", "s3")) || 0 != recorder.countMatching(isSessionStatement("DELETE", "s1")) || 1 != recorder.countMatching(isSessionStatement("INSERT", "s6")) {
+        t.Fatalf("expected the ended row dropped, the oldest live one kept and the admitted one written: %q", recorder.recordedQueries())
+    }
+}
+
+/* a liveness read that fails rolls the admission back */
+func TestBunUserSessionRepositoryAdmit_AFailedLivenessReadRecordsNothing(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = heldSessionRows(true, "s1")
+    repositoryInstance := NewBunUserSessionRepository(database)
+
+    readErr := errors.New("the session storage is down")
+    admitErr := repositoryInstance.Admit(context.Background(), "user-1", "", "s2", time.Now(), func(sessionId string) (bool, error) { return false, readErr }, func(sessionId string) error { return nil })
+    if false == errors.Is(admitErr, readErr) {
+        t.Fatalf("expected the read's failure, got %v", admitErr)
+    }
+
+    if 0 != recorder.countMatching(isSessionStatement("INSERT", "s2")) || 1 != recorder.countMatching(func(query string) bool { return "ROLLBACK" == query }) {
+        t.Fatalf("expected nothing written and the transaction rolled back: %q", recorder.recordedQueries())
+    }
+}
+

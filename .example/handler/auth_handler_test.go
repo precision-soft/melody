@@ -457,6 +457,7 @@ func (instance *directoryAuthenticationRepository) FindByUsername(ctx context.Co
 type cappedLogin struct {
     runtimeInstance melodyruntimecontract.Runtime
     sessionManager  melodysessioncontract.Manager
+    sessionStorage  melodysessioncontract.Storage
     sessionIndex    repository.UserSessionRepository
 }
 
@@ -480,7 +481,11 @@ func newCappedLogin(t *testing.T) *cappedLogin {
         userList = append(userList, &entity.User{Id: fmt.Sprintf("user-%d", index+1), Username: username, Password: passwordHash, Roles: []string{"ROLE_USER"}})
     }
 
-    sessionManager := melodysession.NewManager(melodysession.NewInMemoryStorage(), time.Hour)
+    sessionManagerStorage := melodysession.NewInMemoryStorage()
+    sessionManager := melodysession.NewManager(sessionManagerStorage, time.Hour)
+    melodycontainer.MustRegister[melodysessioncontract.Storage](containerInstance, melodysession.ServiceSessionStorage, func(resolver melodycontainercontract.Resolver) (melodysessioncontract.Storage, error) {
+        return sessionManagerStorage, nil
+    })
 
     melodycontainer.MustRegister(containerInstance, service.ServiceUserService, func(resolver melodycontainercontract.Resolver) (*service.UserService, error) {
         return service.NewUserService(&directoryAuthenticationRepository{userList: userList}, &passThroughCache{}, nil), nil
@@ -498,6 +503,7 @@ func newCappedLogin(t *testing.T) *cappedLogin {
     return &cappedLogin{
         runtimeInstance: melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance),
         sessionManager:  sessionManager,
+        sessionStorage:  sessionManagerStorage,
         sessionIndex:    repository.NewInMemoryUserSessionRepository(),
     }
 }
@@ -607,3 +613,26 @@ func TestLoginHandler_SigningInAgainRetiresThePlaceOfTheRotatedSession(t *testin
         t.Fatal("expected the account's other session kept: the sign-ins on one browser hold one place")
     }
 }
+
+/* a session that ended elsewhere, its entry lapsed from the storage, gives its place back at the next sign-in: the account's oldest live session is not ended for it */
+func TestLoginHandler_ASessionThatEndedElsewhereGivesItsPlaceBack(t *testing.T) {
+    login := newCappedLogin(t)
+
+    sessionIdList := make([]string, 0, repository.UserSessionCap)
+    for range repository.UserSessionCap {
+        sessionIdList = append(sessionIdList, login.signInAndStore(t, "user"))
+    }
+
+    if deleteErr := login.sessionStorage.Delete(sessionIdList[2]); nil != deleteErr {
+        t.Fatalf("unexpected error lapsing the session: %v", deleteErr)
+    }
+
+    login.signInAndStore(t, "user")
+
+    for _, sessionId := range []string{sessionIdList[0], sessionIdList[1], sessionIdList[3], sessionIdList[4]} {
+        if nil == login.sessionManager.Session(sessionId) {
+            t.Fatalf("expected no live session ended while an ended one held a place, %q is gone", sessionId)
+        }
+    }
+}
+

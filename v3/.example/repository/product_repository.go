@@ -30,6 +30,12 @@ type ProductRepository interface {
 
     /* PricedIn answers whether any product is priced in the currency, the question a currency delete asks before the foreign key would refuse it */
     PricedIn(ctx context.Context, currencyId string) (bool, error)
+
+    /* CategorizedIn answers whether any product sits in the category, the question a category delete asks before the foreign key would refuse it */
+    CategorizedIn(ctx context.Context, categoryId string) (bool, error)
+
+    /* HoldingReferences runs a reference check and the write it guards as one step against every other: a product write naming a category and a currency, and the delete of a category or a currency. On the database the product table's foreign keys hold the references and the action runs as given; in memory one catalogue lock serializes the actions, so a check cannot pass on a reference a concurrent delete is removing. */
+    HoldingReferences(action func() error) error
 }
 
 func MustGetProductRepository(resolver melodycontainercontract.Resolver) ProductRepository {

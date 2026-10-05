@@ -143,6 +143,7 @@ func (instance *Manager) NewSession() sessioncontract.Session {
         values:   make(map[string]any),
         modified: false,
         cleared:  false,
+        minted:   true,
     }
 }
 
@@ -167,9 +168,13 @@ func (instance *Manager) RegenerateSession(sessionInstance sessioncontract.Sessi
     rotatedId := instance.uniqueSessionId()
 
     /* the rotated-away id is checked, removed and buried in one critical section, for the same reason a deleted one is: a request that loaded the session under the previous id while this rotation ran would otherwise write it back, or rotate it again into a second live session, re-creating the very identity the rotation exists to retire */
-    deleteErr := instance.deleteSession(previousId, true)
-    if nil != deleteErr {
-        return nil, deleteErr
+    /* a session this manager minted and never stored has no entry to remove and no copy to bury, so its rotation, the sign-in on a fresh session, leaves no record */
+    concreteSession, isConcrete := sessionInstance.(*Session)
+    if false == isConcrete || false == concreteSession.isMinted() {
+        deleteErr := instance.deleteSession(previousId, true)
+        if nil != deleteErr {
+            return nil, deleteErr
+        }
     }
 
     /* the rotated-away session is cleared, and Clear latches: a caller that keeps writing to the original object cannot make it look live again, so the response path cannot save the deleted id back and re-issue it with the authenticated identity. The latch is also the fail-safe for a caller that forgets to publish the rotated session, which is logged out cleanly. It is applied only once the entry is gone, so a failed delete leaves a usable session; a foreign Session is cleared through its own Clear, which may or may not latch. */
@@ -180,6 +185,7 @@ func (instance *Manager) RegenerateSession(sessionInstance sessioncontract.Sessi
         values:   values,
         modified: true,
         cleared:  false,
+        minted:   true,
     }, nil
 }
 
@@ -221,7 +227,14 @@ func (instance *Manager) SaveSession(sessionInstance sessioncontract.Session) er
         return refusalErr
     }
 
-    return instance.storage.Save(sessionId, values, instance.ttl)
+    saveErr := instance.storage.Save(sessionId, values, instance.ttl)
+
+    /* once a save was attempted the id may be stored, so a later rotation removes and buries it */
+    if concreteSession, isConcrete := sessionInstance.(*Session); true == isConcrete {
+        concreteSession.markStored()
+    }
+
+    return saveErr
 }
 
 func (instance *Manager) DeleteSession(sessionId string) error {
@@ -249,10 +262,6 @@ func (instance *Manager) deleteSession(sessionId string, rotation bool) error {
         }
     }
 
-    /* an id the storage certainly does not hold earns no tombstone, so a logout presenting an unknown id leaves no record behind; a read that fails is taken as holding it */
-    _, held, heldErr := instance.storage.Load(sessionId)
-    certainlyAbsent := nil == heldErr && false == held
-
     /* only a removal that actually happened earns a tombstone. Nothing lifts a burial before its retention window lapses, so one laid over an entry that is still there refuses every later save of it: the caller is handed a transient error, its next SaveSession answers ErrSessionDeleted, and the response path reads that refusal as a deliberate logout and expires the browser cookie — a storage blip logs the user out of a session that was never removed. A delete that failed is therefore buried only when a fresh read says the entry went, which is the storage that removed and then failed to flush. The burial stays inside this section and follows the removal, so a save waiting on this lock still finds the tombstone whenever the entry did go. */
     deleteErr := instance.storage.Delete(sessionId)
 
@@ -262,7 +271,8 @@ func (instance *Manager) deleteSession(sessionId string, rotation bool) error {
         removed = nil == readErr && false == stillHeld
     }
 
-    if false == certainlyAbsent && true == removed {
+    /* every id that is gone after the removal is buried, the one whose entry lapsed or was evicted while a request held a copy of it as well, so that copy cannot write the ended session back. The kernel deletes only a session the request's cookie named, so an unknown cookie leaves no record; a direct call buries what it is handed, one record per call for the retention window. */
+    if true == removed {
         instance.buryTombstone(sessionId)
     }
 

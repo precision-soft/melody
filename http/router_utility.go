@@ -328,11 +328,14 @@ func writeResponse(
         _, sessionModified, sessionCleared := sessionInstance.Snapshot()
 
         if true == sessionCleared {
-            if err := sessionManager.DeleteSession(sessionInstance.Id()); nil != err {
-                /* a session-backend outage on logout must degrade to a logged error but STILL expire the browser cookie: clearing the cookie is independent of and strictly safer than the backend delete (it can only end a session, never resurrect an unpersisted one), so a failed DeleteSession must not leave the client holding a live session cookie while it is told it was logged out. Mark the persistence failed so MarkSessionPersisted is skipped, but emit the clearing cookie below regardless. (This differs from the save path, where a failed SaveSession MUST suppress the cookie so the browser is not pointed at a never-persisted session id.) */
-                sessionPersistFailed = true
+            /* only a session the request's cookie named can be stored: one the kernel minted for an unknown or absent cookie, or a rotated one never saved, has no entry to remove and no copy to bury */
+            if true == requestNamesSession(request, sessionInstance.Id()) {
+                if err := sessionManager.DeleteSession(sessionInstance.Id()); nil != err {
+                    /* a session-backend outage on logout must degrade to a logged error but STILL expire the browser cookie: clearing the cookie is independent of and strictly safer than the backend delete (it can only end a session, never resurrect an unpersisted one), so a failed DeleteSession must not leave the client holding a live session cookie while it is told it was logged out. Mark the persistence failed so MarkSessionPersisted is skipped, but emit the clearing cookie below regardless. (This differs from the save path, where a failed SaveSession MUST suppress the cookie so the browser is not pointed at a never-persisted session id.) */
+                    sessionPersistFailed = true
 
-                logSessionPersistenceEvent(runtimeInstance, loggingcontract.LevelError, "failed to delete session", err, sessionInstance.Id(), request)
+                    logSessionPersistenceEvent(runtimeInstance, loggingcontract.LevelError, "failed to delete session", err, sessionInstance.Id(), request)
+                }
             }
 
             cookie := &nethttp.Cookie{

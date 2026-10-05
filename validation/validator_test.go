@@ -5,6 +5,7 @@ import (
     "fmt"
     "reflect"
     "runtime"
+    "strconv"
     "strings"
     "sync"
     "sync/atomic"
@@ -2735,8 +2736,9 @@ func TestValidator_ADeepListOfTruncatedListsAnswersOneDepthCutUnderTheListsPathW
         t.Fatalf("expected at most %d bytes allocated for a %d-byte body, got %d", hugeMapKeyAllocationCeiling*len(body), len(body), allocated)
     }
 
-    if 1 != len(errors) || ErrorNestingDepthExceeded != errors[0].Code() || listPath != errors[0].Field() {
-        t.Fatalf("expected one depth-cut entry under the list's path, got %d entries, the first of code %q under a %d-byte field", len(errors), errors[0].Code(), len(errors[0].Field()))
+    expectedField := truncatedPathMarker + listPath[len(listPath)-maxRenderedPathLength:]
+    if 1 != len(errors) || ErrorNestingDepthExceeded != errors[0].Code() || expectedField != errors[0].Field() {
+        t.Fatalf("expected one depth-cut entry under the list's path cut at its head, got %d entries, the first of code %q under a %d-byte field", len(errors), errors[0].Code(), len(errors[0].Field()))
     }
 }
 
@@ -2851,12 +2853,6 @@ func TestValidator_OneErrorPastTheBudgetClosesTheAnswerWithTheLimitEntry(t *test
     }
 }
 
-func TestValidator_AnExceededBudgetStillRefusesTheValue(t *testing.T) {
-    if nil == NewValidator().Validate(budgetPayload{Items: make([]budgetElement, 2*maxValidationErrors)}) {
-        t.Fatalf("expected an exceeded budget to answer an error")
-    }
-}
-
 type alwaysFailingCountingConstraint struct {
     calls int
 }
@@ -2938,3 +2934,201 @@ func TestValidator_TheBudgetCountsTheErrorsOfEveryDoor(t *testing.T) {
         t.Fatalf("expected the closing entry last, got %q", errors[maxValidationErrors].Code())
     }
 }
+
+func TestBoundedPath_KeepsAPathWithinTheBoundWholeAndCutsALongerOneAtItsHead(t *testing.T) {
+    atTheBound := strings.Repeat("a", maxRenderedPathLength-5) + ".name"
+    if atTheBound != boundedPath(atTheBound, maxRenderedPathLength) {
+        t.Fatalf("expected a path of exactly the bound spelled whole")
+    }
+
+    pastTheBound := "x" + atTheBound
+    if truncatedPathMarker+atTheBound != boundedPath(pastTheBound, maxRenderedPathLength) {
+        t.Fatalf("expected a path one byte past the bound cut at its head, got %q", boundedPath(pastTheBound, maxRenderedPathLength))
+    }
+
+    /* one byte past the bound lands the cut inside the first two-byte rune, which is dropped whole */
+    multiByte := strings.Repeat("é", maxRenderedPathLength/2) + "x"
+    cut := boundedPath(multiByte, maxRenderedPathLength)
+    if false == utf8.ValidString(cut) || truncatedPathMarker+strings.Repeat("é", maxRenderedPathLength/2-1)+"x" != cut {
+        t.Fatalf("expected the cut on a rune boundary, got %q", cut)
+    }
+}
+
+type deepPathLeaf struct {
+    Name string `json:"name" validate:"notBlank"`
+}
+
+type deepPathPayload struct {
+    Groups map[string]map[string]map[string]*deepPathLeaf `json:"groups"`
+}
+
+/* three map keys of the full rendered width put the leaf's path past the bound: the answer spells its tail, the member nearest the error, after the marker; the same leaf reached twice through the memo is cut the same way */
+func TestValidator_APathLongerThanTheBoundIsCutAtItsHeadAndKeepsItsTail(t *testing.T) {
+    sharedLeaf := &deepPathLeaf{}
+    key := strings.Repeat("k", maxRenderedMapKeyLength)
+
+    payload := deepPathPayload{
+        Groups: map[string]map[string]map[string]*deepPathLeaf{
+            key: {key: {key: sharedLeaf, key[:maxRenderedMapKeyLength-1] + "j": sharedLeaf}},
+        },
+    }
+
+    errors := requireValidationErrors(t, NewValidator().Validate(payload))
+    if 2 != len(errors) {
+        t.Fatalf("expected one entry per path to the shared leaf, got %d", len(errors))
+    }
+
+    for _, validationError := range errors {
+        field := validationError.Field()
+
+        if maxRenderedPathLength+len(truncatedPathMarker) != len(field) || false == strings.HasPrefix(field, truncatedPathMarker) || false == strings.HasSuffix(field, "].name") {
+            t.Fatalf("expected the path cut at its head to %d bytes after the marker, got %d bytes: %q", maxRenderedPathLength, len(field), field)
+        }
+    }
+}
+
+type longMessageConstraint struct{}
+
+func (instance *longMessageConstraint) Validate(value any, field string) validationcontract.ValidationError {
+    return NewValidationError(field, strings.Repeat("m", 2048), "longMessage", nil)
+}
+
+/* an application's constraint whose message is long fills the answer's byte budget before its count: the answer closes with the size entry, the walk stopped there */
+func TestValidator_AnAnswerPastTheByteBudgetClosesWithTheSizeEntry(t *testing.T) {
+    type element struct {
+        Name string `json:"name" validate:"longMessage"`
+    }
+
+    type payload struct {
+        Items []element `json:"items"`
+    }
+
+    validatorInstance := NewValidator()
+    validatorInstance.RegisterConstraint("longMessage", &longMessageConstraint{})
+
+    errors := requireValidationErrors(t, validatorInstance.Validate(payload{Items: make([]element, maxValidationErrors)}))
+
+    spelled := 0
+    for _, validationError := range errors[:len(errors)-1] {
+        spelled = spelled + len(validationError.Field()) + len(validationError.Message())
+    }
+
+    closing := errors[len(errors)-1]
+    if errorLimitExceededCode != closing.Code() || "validation stopped after the maximum size of the answer" != closing.Message() || maxValidationAnswerBytes != closing.Context()["maxAnswerBytes"] {
+        t.Fatalf("expected the size entry closing the answer, got %q %q %v", closing.Code(), closing.Message(), closing.Context())
+    }
+
+    if maxValidationAnswerBytes < spelled || maxValidationErrors <= len(errors) {
+        t.Fatalf("expected the answer under %d bytes and short of the count, got %d bytes in %d entries", maxValidationAnswerBytes, spelled, len(errors))
+    }
+}
+
+type depthCutNode struct {
+    Next *depthCutNode `json:"next"`
+    Leaf string        `json:"leaf" validate:"notBlank"`
+}
+
+func depthCutChain(links int) *depthCutNode {
+    head := &depthCutNode{Leaf: "x"}
+    current := head
+
+    for link := 1; link < links; link++ {
+        current.Next = &depthCutNode{Leaf: "x"}
+        current = current.Next
+    }
+
+    current.Next = &depthCutNode{}
+
+    return head
+}
+
+/* a client-sized list whose elements each reach the depth cut through a struct field spends the budget as a rule's errors do */
+func TestValidator_ADepthCutReachedThroughAStructFieldSpendsTheBudget(t *testing.T) {
+    type payload struct {
+        Items []*depthCutNode `json:"items"`
+    }
+
+    items := make([]*depthCutNode, maxValidationErrors+1)
+    for index := range items {
+        items[index] = depthCutChain(maxNestedValidationDepth)
+    }
+
+    errors := requireValidationErrors(t, NewValidator().Validate(payload{Items: items}))
+
+    if maxValidationErrors+1 != len(errors) || errorLimitExceededCode != errors[maxValidationErrors].Code() {
+        t.Fatalf("expected the budget filled and closed, got %d entries ending in %q", len(errors), errors[len(errors)-1].Code())
+    }
+
+    if ErrorNestingDepthExceeded != errors[0].Code() {
+        t.Fatalf("expected the budget spent by the depth cut, got %q", errors[0].Code())
+    }
+}
+
+/* a malformed tag on every element of a client-sized list spends the budget */
+func TestValidator_AMalformedTagOnEveryElementSpendsTheBudget(t *testing.T) {
+    type element struct {
+        Name string `json:"name" validate:"notBlank("`
+    }
+
+    type payload struct {
+        Items []element `json:"items"`
+    }
+
+    errors := requireValidationErrors(t, NewValidator().Validate(payload{Items: make([]element, maxValidationErrors+1)}))
+
+    if maxValidationErrors+1 != len(errors) || errorLimitExceededCode != errors[maxValidationErrors].Code() || ErrorInvalidRuleSyntax != errors[0].Code() {
+        t.Fatalf("expected the budget filled by the malformed tag and closed, got %d entries, the first %q", len(errors), errors[0].Code())
+    }
+}
+
+/* one leaf shared by every element is answered from the memo after its first walk, and the recalled answers spend the budget */
+func TestValidator_AnAnswerRecalledFromTheMemoSpendsTheBudget(t *testing.T) {
+    type payload struct {
+        Items []*deepPathLeaf `json:"items"`
+    }
+
+    sharedLeaf := &deepPathLeaf{}
+    items := make([]*deepPathLeaf, maxValidationErrors+1)
+    for index := range items {
+        items[index] = sharedLeaf
+    }
+
+    errors := requireValidationErrors(t, NewValidator().Validate(payload{Items: items}))
+
+    if maxValidationErrors+1 != len(errors) || errorLimitExceededCode != errors[maxValidationErrors].Code() {
+        t.Fatalf("expected the budget filled by recalled answers and closed, got %d entries", len(errors))
+    }
+}
+
+/* 1,000 entries under paths past the bound are counted as the answer spells them, cut: the answer closes at the count, under the byte budget, where counted whole they would have filled it first */
+func TestValidator_AClientSizedAnswerOfDeepPathsStaysUnderTheByteCeiling(t *testing.T) {
+    type payload struct {
+        Groups map[string]map[string]map[string]map[string]map[string]*deepPathLeaf `json:"groups"`
+    }
+
+    key := strings.Repeat("k", maxRenderedMapKeyLength)
+    leaves := make(map[string]*deepPathLeaf, maxValidationErrors+1)
+    for index := 0; index <= maxValidationErrors; index++ {
+        leaves[strconv.Itoa(10000+index)+key] = &deepPathLeaf{}
+    }
+
+    body := payload{Groups: map[string]map[string]map[string]map[string]map[string]*deepPathLeaf{key: {key: {key: {key: leaves}}}}}
+
+    errors := requireValidationErrors(t, NewValidator().Validate(body))
+
+    spelled := 0
+    for _, validationError := range errors {
+        spelled = spelled + len(validationError.Field()) + len(validationError.Message())
+    }
+
+    t.Logf("%d entries spelling %d bytes", len(errors), spelled)
+
+    if maxValidationErrors+1 != len(errors) || "validation stopped after the maximum number of errors" != errors[maxValidationErrors].Message() {
+        t.Fatalf("expected the answer closed at the count, got %d entries ending in %q", len(errors), errors[len(errors)-1].Message())
+    }
+
+    if maxValidationErrors*(maxRenderedPathLength+len(truncatedPathMarker)+len(errors[0].Message()))+len(errors[maxValidationErrors].Message()) < spelled {
+        t.Fatalf("expected at most %d bytes of path per entry, got %d bytes in all", maxRenderedPathLength+len(truncatedPathMarker), spelled)
+    }
+}
+

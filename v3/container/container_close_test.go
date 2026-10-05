@@ -4230,7 +4230,7 @@ func TestContainer_Close_ARingClosedThroughALazyHandleClosesClean(t *testing.T) 
     closeSequence := make([]string, 0, 2)
     recorder := &closeOrderRecorder{mutex: &mutex, closeSequence: &closeSequence}
 
-    registerLazyRing(t, serviceContainer, recorder, true)
+    registerLazyRing(t, serviceContainer, recorder, true, false)
 
     holder, getErr := FromResolver[*lazyRingHolder](serviceContainer, "app.lazy.holder")
     if nil != getErr {
@@ -4258,6 +4258,49 @@ func TestContainer_Close_ARingClosedThroughALazyHandleClosesClean(t *testing.T) 
     }
 }
 
+/* a declaration names an order the application requires, so it stays strong over the pair a Lazy handle also wrote: a ring it closes is reported, by type as by name */
+func TestContainer_Close_ARingDeclaredByTypeOverALazyHandleIsStillReported(t *testing.T) {
+    for _, declaration := range []struct {
+        name   string
+        option containercontract.RegisterOption
+    }{
+        {name: "byType", option: WithTeardownDependencyOfType[*lazyRingPartner]()},
+        {name: "byName", option: WithTeardownDependency("app.lazy.partner")},
+    } {
+        t.Run(declaration.name, func(t *testing.T) {
+            serviceContainer := NewContainer().(*container)
+
+            var mutex sync.Mutex
+            closeSequence := make([]string, 0, 2)
+            recorder := &closeOrderRecorder{mutex: &mutex, closeSequence: &closeSequence}
+
+            registerLazyRing(t, serviceContainer, recorder, true, true, declaration.option)
+
+            holder, getErr := FromResolver[*lazyRingHolder](serviceContainer, "app.lazy.holder")
+            if nil != getErr {
+                t.Fatalf("unexpected get error: %v", getErr)
+            }
+
+            if _, resolveErr := holder.partner.Resolve(); nil != resolveErr {
+                t.Fatalf("unexpected lazy resolution error: %v", resolveErr)
+            }
+
+            serviceContainer.mutex.Lock()
+            cycleNodeKeys := serviceContainer.teardownPlanLocked().cycleNodeKeys
+            serviceContainer.mutex.Unlock()
+
+            if 2 != len(cycleNodeKeys) {
+                t.Fatalf("expected the declared ring reported over both services, got %v", cycleNodeKeys)
+            }
+
+            closeErr := serviceContainer.Close()
+            if nil == closeErr || false == strings.Contains(closeErr.Error(), "cycle") {
+                t.Fatalf("expected the teardown to report the declared ring, got %v", closeErr)
+            }
+        })
+    }
+}
+
 /* the edge a Lazy handle writes still orders the teardown where it closes no ring: the holder closes before the partner it resolved later, against the latest-first order the creation stamps alone would give */
 func TestContainer_Close_ALazyEdgeThatClosesNoRingStillOrders(t *testing.T) {
     serviceContainer := NewContainer().(*container)
@@ -4266,7 +4309,7 @@ func TestContainer_Close_ALazyEdgeThatClosesNoRingStillOrders(t *testing.T) {
     closeSequence := make([]string, 0, 2)
     recorder := &closeOrderRecorder{mutex: &mutex, closeSequence: &closeSequence}
 
-    registerLazyRing(t, serviceContainer, recorder, false)
+    registerLazyRing(t, serviceContainer, recorder, false, false)
 
     holder, getErr := FromResolver[*lazyRingHolder](serviceContainer, "app.lazy.holder")
     if nil != getErr {

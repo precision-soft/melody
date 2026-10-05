@@ -353,11 +353,14 @@ func writeResponse(
         _, sessionModified, sessionCleared := sessionInstance.Snapshot()
 
         if true == sessionCleared {
-            if err := sessionManager.DeleteSession(sessionInstance.Id()); nil != err {
-                /* a failed delete on logout is logged and still expires the cookie, which can only end a session; a failed save, by contrast, suppresses the cookie */
-                sessionPersistFailed = true
+            /* only a session the request's cookie named can be stored: one the kernel minted for an unknown or absent cookie, or a rotated one never saved, has no entry to remove and no copy to bury */
+            if true == requestNamesSession(request, sessionInstance.Id()) {
+                if err := sessionManager.DeleteSession(sessionInstance.Id()); nil != err {
+                    /* a failed delete on logout is logged and still expires the cookie, which can only end a session; a failed save, by contrast, suppresses the cookie */
+                    sessionPersistFailed = true
 
-                logSessionPersistenceEvent(runtimeInstance, loggingcontract.LevelError, "failed to delete session", err, sessionInstance.Id(), request)
+                    logSessionPersistenceEvent(runtimeInstance, loggingcontract.LevelError, "failed to delete session", err, sessionInstance.Id(), request)
+                }
             }
 
             setSessionCookie(response, expiringSessionCookie(request, forwardedHeadersPolicy, sessionCookiePolicy))

@@ -167,6 +167,11 @@ func RegisterGeneratedServices(registrar containercontract.Registrar) {
                 return nil, categoryRepositoryErr
             }
 
+            productRepository, productRepositoryErr := melodycontainer.FromResolverByType[repository.ProductRepository](resolver)
+            if nil != productRepositoryErr {
+                return nil, productRepositoryErr
+            }
+
             cacheInstance, cacheInstanceErr := melodycontainer.FromResolverByType[contract2.Cache](resolver)
             if nil != cacheInstanceErr {
                 return nil, cacheInstanceErr
@@ -179,6 +184,7 @@ func RegisterGeneratedServices(registrar containercontract.Registrar) {
 
             return service.NewCategoryService(
                 categoryRepository,
+                productRepository,
                 cacheInstance,
                 eventDispatcher,
             ), nil

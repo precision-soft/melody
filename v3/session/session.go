@@ -16,6 +16,21 @@ type Session struct {
     values   map[string]any
     modified bool
     cleared  bool
+    /* minted marks an id nothing is stored under yet: minted by the manager and never saved, so a rotation of it has no entry to remove and no copy to bury */
+    minted bool
+}
+
+func (instance *Session) isMinted() bool {
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
+
+    return instance.minted
+}
+
+func (instance *Session) markStored() {
+    instance.mutex.Lock()
+    instance.minted = false
+    instance.mutex.Unlock()
 }
 
 func (instance *Session) Id() string {

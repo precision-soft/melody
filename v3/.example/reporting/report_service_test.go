@@ -300,6 +300,14 @@ func (instance *emptyProductRepository) DeleteById(ctx context.Context, id strin
     return false, nil
 }
 
+func (instance *emptyProductRepository) CategorizedIn(ctx context.Context, categoryId string) (bool, error) {
+    return false, nil
+}
+
+func (instance *emptyProductRepository) HoldingReferences(action func() error) error {
+    return action()
+}
+
 func (instance *emptyProductRepository) PricedIn(ctx context.Context, currencyId string) (bool, error) {
     return false, nil
 }

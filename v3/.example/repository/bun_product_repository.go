@@ -279,6 +279,19 @@ func (instance *bunProductRepository) PricedIn(ctx context.Context, currencyId s
         Exists(ctx)
 }
 
+func (instance *bunProductRepository) CategorizedIn(ctx context.Context, categoryId string) (bool, error) {
+    return instance.database.
+        NewSelect().
+        Model((*productRow)(nil)).
+        Where("category_id = ?", categoryId).
+        Exists(ctx)
+}
+
+/* HoldingReferences runs the action as given: the product table's foreign keys hold the references against a concurrent write */
+func (instance *bunProductRepository) HoldingReferences(action func() error) error {
+    return action()
+}
+
 func (instance *bunProductRepository) identifierList(ctx context.Context) ([]string, error) {
     identifierList := make([]string, 0)
 

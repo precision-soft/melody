@@ -416,6 +416,9 @@ v3 ~ compatible ~ ./validation.IsRuleWiringErrorCode ~ added ~ keep ~ a compatib
 v3 ~ compatible ~ ./validation.ValidationErrors.HasRuleWiringError ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./validation.ValidationErrors.MarshalJSON ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./validation.ValidationErrors.WithoutRuleWiringContext ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
+v3 ~ compatible ~ ./validation.DefaultValidatorLimits ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
+v3 ~ compatible ~ ./validation.NewValidatorWithLimits ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
+v3 ~ compatible ~ ./validation.ValidatorLimits ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./wiring.Constructor.IsScoped ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./wiring.GenerateReport.BindTargetsUnchecked ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./wiring.GenerateReport.ExcludedFiles ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features

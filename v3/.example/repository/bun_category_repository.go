@@ -212,7 +212,7 @@ func (instance *bunCategoryRepository) DeleteById(ctx context.Context, id string
         Where("id = ?", normalizedId).
         Exec(ctx)
     if nil != deleteErr {
-        return false, deleteErr
+        return false, asCategoryInUse(deleteErr)
     }
 
     return affectedAtLeastOneRow(result), nil

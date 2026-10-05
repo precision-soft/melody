@@ -27,11 +27,20 @@ const maxRenderedMapKeyLength = 128
 /* maxValidationErrors bounds the errors one Validate call collects. A client chooses how many elements a body holds, so the walk stops at the first error past the bound and the answer closes with one entry of the code errorLimitExceededCode instead. */
 const maxValidationErrors = 1000
 
-/* errorLimitExceededCode is the code of the entry that closes an answer cut at maxValidationErrors. */
+/* maxRenderedPathLength bounds the bytes of the path one entry spells. A client chooses how deep a body nests and how long its keys are, so a longer path is cut at its head and closed there by truncatedPathMarker: the tail keeps the member nearest the error, the useful end. 256 bytes keeps whole every path an application ordinarily validates, two keys of maxRenderedMapKeyLength included. */
+const maxRenderedPathLength = 256
+
+/* maxValidationAnswerBytes bounds the bytes one answer spells in its paths and messages, so an answer and its log record keep a fixed ceiling whatever the document and whatever a constraint of the application answers; an ordinary answer, even one cut at maxValidationErrors, stays under it. */
+const maxValidationAnswerBytes = 512 << 10
+
+/* errorLimitExceededCode is the code of the entry that closes an answer cut at maxValidationErrors or at maxValidationAnswerBytes. */
 const errorLimitExceededCode = "errorLimitExceeded"
 
 /* truncatedMapKeyMarker closes a map key cut at maxRenderedMapKeyLength, so the field name shows that the key is cut. */
 const truncatedMapKeyMarker = "...(truncated)"
+
+/* truncatedPathMarker opens a path cut at its head, so the field name shows that the path is cut. */
+const truncatedPathMarker = "...(truncated)"
 
 /* validationPath is one segment of the path the walk stands at, linked to its parent, so a descent costs only its own segment and the whole path is spelled only when a rule or an error needs it. The nil path is the root, spelled "". */
 type validationPath struct {
@@ -105,6 +114,20 @@ func renderedMapKey(key reflect.Value) string {
     return text[:cut] + truncatedMapKeyMarker
 }
 
+/* boundedPath keeps the tail of a path longer than the limit, cut on a rune boundary and opened by truncatedPathMarker. */
+func boundedPath(path string, limit int) string {
+    if limit >= len(path) {
+        return path
+    }
+
+    cut := len(path) - limit
+    for cut < len(path) && false == utf8.RuneStart(path[cut]) {
+        cut = cut + 1
+    }
+
+    return truncatedPathMarker + path[cut:]
+}
+
 /* cyclicReference identifies a pointer on the current descent path, so a reference cycle is validated once and then short-circuited. The set is path-scoped, since only an ancestor on the path closes a cycle; a shared non-cyclic pointer is validated under every path, which the memo of validationWalk keeps affordable. */
 type cyclicReference struct {
     pointer uintptr
@@ -127,34 +150,73 @@ type memoizedValidationError struct {
     context       map[string]any
 }
 
-/* validationWalk is the state of one Validate call: the path-scoped set that closes reference cycles, the whole-call memo that answers a pointer already walked at the same depth with its first walk's errors, re-spelled under the new path, and the count of the errors the answer holds, which stops the walk at the first error past maxValidationErrors. A walk cut short by an ancestor memoizes only what it saw; the ancestor's errors are reported under its own path. */
-type validationWalk struct {
-    onPath     map[cyclicReference]bool
-    memo       map[validationMemoKey][]memoizedValidationError
-    errorCount int
-    exceeded   bool
+/* validationLimits are the bounds of one answer: the errors it holds, the bytes of the path one entry spells, and the bytes its paths and messages spell together. */
+type validationLimits struct {
+    maxErrors             int
+    maxRenderedPathLength int
+    maxAnswerBytes        int
 }
 
-func newValidationWalk() *validationWalk {
+func defaultValidationLimits() validationLimits {
+    return validationLimits{
+        maxErrors:             maxValidationErrors,
+        maxRenderedPathLength: maxRenderedPathLength,
+        maxAnswerBytes:        maxValidationAnswerBytes,
+    }
+}
+
+/* validationWalk is the state of one Validate call: the path-scoped set that closes reference cycles, the whole-call memo that answers a pointer already walked at the same depth with its first walk's errors, re-spelled under the new path, and the count of the errors and of the bytes the answer holds, which stops the walk at the first error past either bound. A walk cut short by an ancestor memoizes only what it saw; the ancestor's errors are reported under its own path. The paths stay whole during the walk, which the memo re-spells; they are cut once the answer is complete. */
+type validationWalk struct {
+    limits        validationLimits
+    onPath        map[cyclicReference]bool
+    memo          map[validationMemoKey][]memoizedValidationError
+    errorCount    int
+    answerBytes   int
+    exceeded      bool
+    exceededBytes bool
+}
+
+func newValidationWalk(limits validationLimits) *validationWalk {
     return &validationWalk{
+        limits: limits,
         onPath: make(map[cyclicReference]bool),
         memo:   make(map[validationMemoKey][]memoizedValidationError),
     }
 }
 
-/* admit counts the errors a rule, the depth cut or the memo produced into the answer, keeping those within maxValidationErrors; the first one past it marks the walk exceeded, after which nothing further is walked. */
+/* admit counts the errors a rule, the depth cut or the memo produced into the answer, keeping those within the bounds; the first one past either marks the walk exceeded, after which nothing further is walked. */
 func (instance *validationWalk) admit(errors ValidationErrors) ValidationErrors {
-    for index := range errors {
-        if maxValidationErrors <= instance.errorCount {
+    for index, validationError := range errors {
+        if instance.limits.maxErrors <= instance.errorCount {
             instance.exceeded = true
 
             return errors[:index]
         }
 
+        entryBytes := instance.entryBytes(validationError)
+        if instance.limits.maxAnswerBytes < instance.answerBytes+entryBytes {
+            instance.exceeded = true
+            instance.exceededBytes = true
+
+            return errors[:index]
+        }
+
         instance.errorCount = instance.errorCount + 1
+        instance.answerBytes = instance.answerBytes + entryBytes
     }
 
     return errors
+}
+
+/* entryBytes is what one entry spells in the answer: its path as the answer will cut it and its message. A constraint's own error type keeps its path whole, so it is counted whole. */
+func (instance *validationWalk) entryBytes(validationError validationcontract.ValidationError) int {
+    fieldBytes := len(validationError.Field())
+
+    if _, ownType := validationError.(*ValidationError); true == ownType && instance.limits.maxRenderedPathLength < fieldBytes {
+        fieldBytes = instance.limits.maxRenderedPathLength + len(truncatedPathMarker)
+    }
+
+    return fieldBytes + len(validationError.Message())
 }
 
 /* remember files the errors of a finished walk under the key, each relative to the walked path. A walk that produced an error of a constraint's own type is not filed, since re-spelling would change that type, so such a node is walked again per path. */
@@ -228,9 +290,64 @@ func (instance *validationWalk) recall(key validationMemoKey, walkedPath *valida
     return errors, true
 }
 
+/* ValidatorLimits bounds one Validate answer, which a client shapes through the body it sends: MaxErrors the entries it holds, MaxRenderedPathLength the bytes of the path one entry spells, cut at its head past it, and MaxAnswerBytes the bytes its paths and messages spell together. The answer past either count closes with one entry of the code errorLimitExceeded. A zero field takes the default of DefaultValidatorLimits; a negative one is refused. */
+type ValidatorLimits struct {
+    MaxErrors             int
+    MaxRenderedPathLength int
+    MaxAnswerBytes        int
+}
+
+/* DefaultValidatorLimits answers the limits NewValidator applies: 1000 entries, a path of 256 bytes and an answer of 512 KiB. */
+func DefaultValidatorLimits() ValidatorLimits {
+    return ValidatorLimits{
+        MaxErrors:             maxValidationErrors,
+        MaxRenderedPathLength: maxRenderedPathLength,
+        MaxAnswerBytes:        maxValidationAnswerBytes,
+    }
+}
+
 func NewValidator() *Validator {
+    return NewValidatorWithLimits(DefaultValidatorLimits())
+}
+
+/* NewValidatorWithLimits is NewValidator under limits of the application's choosing, for a validator registered over the framework's. */
+func NewValidatorWithLimits(limits ValidatorLimits) *Validator {
+    if 0 > limits.MaxErrors || 0 > limits.MaxRenderedPathLength || 0 > limits.MaxAnswerBytes {
+        exception.Panic(
+            exception.NewError(
+                "validator limits must not be negative",
+                exceptioncontract.Context{
+                    "maxErrors":             limits.MaxErrors,
+                    "maxRenderedPathLength": limits.MaxRenderedPathLength,
+                    "maxAnswerBytes":        limits.MaxAnswerBytes,
+                },
+                nil,
+            ),
+        )
+    }
+
+    defaults := defaultValidationLimits()
+    resolved := validationLimits{
+        maxErrors:             limits.MaxErrors,
+        maxRenderedPathLength: limits.MaxRenderedPathLength,
+        maxAnswerBytes:        limits.MaxAnswerBytes,
+    }
+
+    if 0 == resolved.maxErrors {
+        resolved.maxErrors = defaults.maxErrors
+    }
+
+    if 0 == resolved.maxRenderedPathLength {
+        resolved.maxRenderedPathLength = defaults.maxRenderedPathLength
+    }
+
+    if 0 == resolved.maxAnswerBytes {
+        resolved.maxAnswerBytes = defaults.maxAnswerBytes
+    }
+
     validator := &Validator{
         constraints: make(map[string]validationcontract.Constraint),
+        limits:      resolved,
     }
 
     validator.RegisterConstraint(ConstraintNotBlank, &NotBlank{})
@@ -255,6 +372,8 @@ type Validator struct {
 
     /* the constraint a parameterized rule resolves to, keyed by rule name and parameters, so a regex is not recompiled per value; a registered name never changes constraint, so an entry never goes stale */
     constructedConstraints sync.Map
+
+    limits validationLimits
 }
 
 type constructedConstraint struct {
@@ -315,6 +434,15 @@ func (instance *Validator) RegisterConstraint(name string, constraint validation
     instance.mutex.Unlock()
 }
 
+/* validationLimits answers the limits the validator was built with; a Validator built as a zero value takes the defaults. */
+func (instance *Validator) validationLimits() validationLimits {
+    if 0 == instance.limits.maxErrors {
+        return defaultValidationLimits()
+    }
+
+    return instance.limits
+}
+
 func (instance *Validator) Validate(data any) error {
     errors := instance.validateInternal(data)
 
@@ -330,18 +458,33 @@ func (instance *Validator) validateInternal(data any) ValidationErrors {
         return nil
     }
 
-    walk := newValidationWalk()
+    walk := newValidationWalk(instance.validationLimits())
 
     errors := instance.validateReflected(reflect.ValueOf(data), nil, 0, walk)
 
-    /* the closing entry keeps an exceeded answer non-empty, so a caller asking only whether the value is valid still refuses it */
+    for index, validationError := range errors {
+        ownError, ownType := validationError.(*ValidationError)
+        if false == ownType || len(ownError.field) <= walk.limits.maxRenderedPathLength {
+            continue
+        }
+
+        errors[index] = NewValidationError(boundedPath(ownError.field, walk.limits.maxRenderedPathLength), ownError.message, ownError.code, ownError.context)
+    }
+
+    /* the closing entry tells the client the answer is cut, which the count alone cannot: an answer of exactly the maximum number of entries is complete */
     if true == walk.exceeded {
+        message := "validation stopped after the maximum number of errors"
+        if true == walk.exceededBytes {
+            message = "validation stopped after the maximum size of the answer"
+        }
+
         errors = append(errors, NewValidationError(
             "",
-            "validation stopped after the maximum number of errors",
+            message,
             errorLimitExceededCode,
             map[string]any{
-                "maxErrors": maxValidationErrors,
+                "maxErrors":      walk.limits.maxErrors,
+                "maxAnswerBytes": walk.limits.maxAnswerBytes,
             },
         ))
     }

@@ -119,7 +119,7 @@ type recordingSessionIndex struct {
     releasedList []string
 }
 
-func (instance *recordingSessionIndex) Admit(ctx context.Context, userId string, previousSessionId string, sessionId string, createdAt time.Time, release func(sessionId string) error) error {
+func (instance *recordingSessionIndex) Admit(ctx context.Context, userId string, previousSessionId string, sessionId string, createdAt time.Time, sessionLive func(sessionId string) (bool, error), release func(sessionId string) error) error {
     if nil != instance.admitErr {
         return instance.admitErr
     }

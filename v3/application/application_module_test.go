@@ -7,9 +7,12 @@ import (
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/container"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
+    httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
+    "github.com/precision-soft/melody/v3/security"
     securityconfig "github.com/precision-soft/melody/v3/security/config"
+    securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
 type fakeModule struct {
@@ -515,3 +518,48 @@ func TestRegisterModule_AValueModuleCarryingAHashableFieldKeepsItsIdentity(t *te
 
     assertModuleNames(t, instance.modules, []string{"carrier"})
 }
+
+/* shadowedFirewallModule declares a firewall an earlier one claims whole, a configuration the security builder names in its boot warnings */
+type shadowedFirewallModule struct {
+    fakeModule
+}
+
+func (instance *shadowedFirewallModule) RegisterSecurity(builder *securityconfig.Builder) {
+    anonymous := security.NewResolverTokenSource(func(request httpcontract.Request) securitycontract.Token {
+        return security.NewAnonymousToken()
+    })
+
+    builder.AddStatelessFirewall("api", security.NewPathPrefixMatcher("/api"), nil, anonymous, securityconfig.NewFirewallOverrideConfiguration())
+    builder.AddStatelessFirewall("apiAdmin", security.NewPathPrefixMatcher("/api-admin"), nil, anonymous, securityconfig.NewFirewallOverrideConfiguration())
+}
+
+/* the boot collects what the security builder named, for the http boot to write; a declaration that names nothing leaves the collection empty */
+func TestBootModulesPostConfigurationResolve_CollectsTheSecurityBuildersBootWarnings(t *testing.T) {
+    applicationInstance := newCollisionTestApplication(t)
+    applicationInstance.RegisterModule(&shadowedFirewallModule{fakeModule: fakeModule{name: "shadowed"}})
+
+    applicationInstance.bootModulesPostConfigurationResolve()
+
+    shadowed := 0
+    for _, bootWarning := range applicationInstance.bootWarnings {
+        if "security.firewallShadowed" == bootWarning.Name && "apiAdmin" == bootWarning.Context["firewall"] {
+            shadowed++
+        }
+    }
+
+    if 1 != shadowed {
+        t.Fatalf("expected the shadowed firewall collected once, got %v", applicationInstance.bootWarnings)
+    }
+
+    quietApplication := newCollisionTestApplication(t)
+    quietApplication.RegisterModule(&hookRecordingModule{fakeModule: fakeModule{name: "quiet"}})
+
+    quietApplication.bootModulesPostConfigurationResolve()
+
+    for _, bootWarning := range quietApplication.bootWarnings {
+        if "security.firewallShadowed" == bootWarning.Name {
+            t.Fatalf("expected no shadowed firewall for a declaration without one, got %v", quietApplication.bootWarnings)
+        }
+    }
+}
+

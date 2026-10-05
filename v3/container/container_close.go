@@ -488,7 +488,8 @@ func (instance *container) teardownPlanLocked() teardownPlan {
         addDependencyEdge(strongCanonicalEdges, canonicalDependent, canonicalDependency)
     }
 
-    addCanonicalEdge := func(dependentKey string, dependencyKey string) {
+    /* only an edge the graph holds can be weak: a declaration is strong whatever the graph holds on the same pair */
+    addCanonicalEdge := func(dependentKey string, dependencyKey string, weak bool) {
         canonicalDependent, dependentCreated := representativeOf[dependentKey]
         canonicalDependency, dependencyCreated := representativeOf[dependencyKey]
 
@@ -496,7 +497,7 @@ func (instance *container) teardownPlanLocked() teardownPlan {
             return
         }
 
-        if true == hasDependencyEdge(instance.weakDependencyEdges, dependentKey, dependencyKey) {
+        if true == weak {
             addDependencyEdge(canonicalEdges, canonicalDependent, canonicalDependency)
             addDependencyEdge(weakCanonicalEdges, canonicalDependent, canonicalDependency)
 
@@ -508,12 +509,12 @@ func (instance *container) teardownPlanLocked() teardownPlan {
 
     for dependentKey, dependencySet := range instance.dependencyGraph {
         for dependencyKey := range dependencySet {
-            addCanonicalEdge(dependentKey, dependencyKey)
+            addCanonicalEdge(dependentKey, dependencyKey, hasDependencyEdge(instance.weakDependencyEdges, dependentKey, dependencyKey))
         }
     }
 
     for _, expandedEdge := range instance.expandedDeclaredTypeEdgesLocked() {
-        addCanonicalEdge(expandedEdge[0], expandedEdge[1])
+        addCanonicalEdge(expandedEdge[0], expandedEdge[1], false)
     }
 
     /* the edges inferred from what providers held join the canonical graph after the walk, and the pairs it could not order are grouped so a wave closes each group one service at a time */

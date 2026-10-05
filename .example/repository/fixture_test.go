@@ -287,3 +287,8 @@ var (
     _ driver.Connector      = (*fakeConnector)(nil)
     _ schema.Dialect        = (*fakeDialect)(nil)
 )
+
+/* everySessionLive answers every held session as still stored, the admission's liveness read for a test about the cap alone */
+func everySessionLive(sessionId string) (bool, error) {
+    return true, nil
+}

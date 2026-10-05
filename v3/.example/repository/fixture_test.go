@@ -79,6 +79,8 @@ type queryRecorder struct {
     queryHook func(query string) ([]string, [][]driver.Value, error)
     /* rowsAffected answers the changed-row count of a statement; without it every statement changed one row */
     rowsAffected func(query string) int64
+    /* execErr answers the failure of a statement, nil for one that succeeds */
+    execErr func(query string) error
 }
 
 func (instance *queryRecorder) record(query string) {
@@ -167,6 +169,12 @@ func (instance *fakeTransaction) Rollback() error {
 
 func (instance *fakeConnection) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
     instance.recorder.record(query)
+
+    if nil != instance.recorder.execErr {
+        if statementErr := instance.recorder.execErr(query); nil != statementErr {
+            return nil, statementErr
+        }
+    }
 
     affected := int64(1)
     if nil != instance.recorder.rowsAffected {
@@ -259,3 +267,8 @@ var (
 
 /* concurrentRounds is shared by the four in-memory suites in this package. */
 const concurrentRounds = 500
+
+/* everySessionLive answers every held session as still stored, the admission's liveness read for a test about the cap alone */
+func everySessionLive(sessionId string) (bool, error) {
+    return true, nil
+}

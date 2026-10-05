@@ -11,6 +11,7 @@ import (
     "strings"
     "syscall"
     "testing"
+    "time"
 
     "github.com/precision-soft/melody/container"
     containercontract "github.com/precision-soft/melody/container/contract"
@@ -283,6 +284,7 @@ func TestWriteResponse_SetsSessionCookieWithSecureAndSameSite(t *testing.T) {
 func TestWriteResponse_ClearsSessionCookieWithMaxAgeNegative(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
+    netRequest.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: "session-123"})
 
     melodyRequest := NewRequest(netRequest, nil, nil, nil)
 
@@ -517,6 +519,7 @@ func TestWriteResponse_StillStoresASessionTheClientAlreadyHoldsOnADiscardedRespo
 func TestWriteResponse_StillDeletesAClearedSessionOnADiscardedResponse(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodPost, "http://example.com/logout", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
+    netRequest.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: "0123456789abcdef0123456789abcdef"})
 
     melodyRequest := NewRequest(netRequest, nil, nil, nil)
 
@@ -1038,6 +1041,7 @@ func TestDetectSchemeWithForwardedHeadersPolicy_UsesTheClientFacingProtoOfAChain
 func TestWriteResponse_NilResponsePersistsSessionAndWritesNoContent(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodPost, "http://example.com/logout", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
+    netRequest.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: "session-123"})
 
     melodyRequest := NewRequest(netRequest, nil, nil, nil)
 
@@ -1342,6 +1346,7 @@ func (instance *snapshotDivergentSession) Snapshot() (map[string]any, bool, bool
 func TestWriteResponse_TheBranchDecisionFollowsTheSnapshotNotTheAccessors(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
+    netRequest.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: "1234567890abcdef1234567890abcdef"})
 
     melodyRequest := NewRequest(netRequest, nil, nil, nil)
 
@@ -1578,6 +1583,7 @@ func writeResponseWithSessionOutcome(
 
     netRequest := httptest.NewRequest(nethttp.MethodPost, "http://example.com/account/settings", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
+    netRequest.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: sessionInstance.Id()})
 
     writeResponse(
         runtimeInstance,
@@ -1936,5 +1942,120 @@ func TestWriteResponse_AnEarlyHintLeavesTheReturnedResponseToBeWritten(t *testin
 
     if nethttp.StatusCreated != response.StatusCode {
         t.Fatalf("expected the returned 201 after the early hint, got %d", response.StatusCode)
+    }
+}
+
+/* a cleared session the request's cookie does not name was never stored: the kernel minted it for an unknown or absent cookie, so nothing is deleted and the cookie is still expired */
+func TestWriteResponse_AClearedSessionTheRequestDoesNotNameIsNotDeleted(t *testing.T) {
+    netRequest := httptest.NewRequest(nethttp.MethodPost, "http://example.com/logout", nil)
+    netRequest.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: "fedcba9876543210fedcba9876543210"})
+
+    sessionManager := &stubSessionManager{}
+    writer := httptest.NewRecorder()
+
+    writeResponse(
+        nil,
+        NewRequest(netRequest, nil, nil, nil),
+        writer,
+        EmptyResponse(nethttp.StatusOK),
+        sessionManager,
+        &stubSession{id: "0123456789abcdef0123456789abcdef", isCleared: true},
+        httpcontract.ForwardedHeadersPolicy{},
+        httpcontract.SessionCookiePolicy{Path: "/"},
+    )
+
+    if 0 != sessionManager.deleteCalled {
+        t.Fatalf("expected no delete for a session the request does not name, got %d", sessionManager.deleteCalled)
+    }
+
+    cookies := writer.Result().Cookies()
+    if 1 != len(cookies) || -1 != cookies[0].MaxAge {
+        t.Fatalf("expected the session cookie expired all the same, got %v", cookies)
+    }
+}
+
+/* deleteCountingSessionStorage counts the removals the session manager asks of the storage */
+type deleteCountingSessionStorage struct {
+    inner   *session.InMemoryStorage
+    deletes int
+}
+
+func (instance *deleteCountingSessionStorage) Load(sessionId string) (map[string]any, bool, error) {
+    return instance.inner.Load(sessionId)
+}
+
+func (instance *deleteCountingSessionStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
+    return instance.inner.Save(sessionId, data, ttl)
+}
+
+func (instance *deleteCountingSessionStorage) Delete(sessionId string) error {
+    instance.deletes++
+
+    return instance.inner.Delete(sessionId)
+}
+
+func (instance *deleteCountingSessionStorage) Close() error {
+    return instance.inner.Close()
+}
+
+func serveALogout(t *testing.T, storage *deleteCountingSessionStorage, cookieValue string) *httptest.ResponseRecorder {
+    t.Helper()
+
+    serviceContainer := newHttpTestContainerWithSessionStorage(storage)
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodPost,
+        "/logout",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            sessionValue, _ := request.Attributes().Get(RequestAttributeSession)
+            sessionValue.(contract.Session).Clear()
+
+            return EmptyResponse(nethttp.StatusNoContent), nil
+        },
+    )
+
+    request := httptest.NewRequest(nethttp.MethodPost, "/logout", nil)
+    request.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: cookieValue})
+
+    recorder := httptest.NewRecorder()
+    NewKernel(router).ServeHttp(serviceContainer).ServeHTTP(recorder, request)
+
+    return recorder
+}
+
+/* a logout presenting a cookie no stored session answers to reaches no storage removal and leaves no record: the kernel minted a fresh session for it */
+func TestKernel_ALogoutWhoseCookieNamesNoStoredSessionDeletesNothing(t *testing.T) {
+    storage := &deleteCountingSessionStorage{inner: session.NewInMemoryStorage()}
+
+    recorder := serveALogout(t, storage, "0123456789abcdef0123456789abcdef")
+
+    if 0 != storage.deletes {
+        t.Fatalf("expected no removal for an invented cookie, got %d", storage.deletes)
+    }
+
+    cookies := recorder.Result().Cookies()
+    if 1 != len(cookies) || -1 != cookies[0].MaxAge {
+        t.Fatalf("expected the cookie expired, got %v", cookies)
+    }
+}
+
+/* the control: a logout presenting the cookie of a stored session removes it */
+func TestKernel_ALogoutWhoseCookieNamesAStoredSessionDeletesIt(t *testing.T) {
+    storage := &deleteCountingSessionStorage{inner: session.NewInMemoryStorage()}
+
+    storedId := "0123456789abcdef0123456789abcdef"
+    if saveErr := storage.inner.Save(storedId, map[string]any{"userId": "u-1"}, time.Minute); nil != saveErr {
+        t.Fatalf("unexpected error seeding the session: %v", saveErr)
+    }
+
+    serveALogout(t, storage, storedId)
+
+    if 1 != storage.deletes {
+        t.Fatalf("expected the stored session removed once, got %d", storage.deletes)
+    }
+
+    if _, held, _ := storage.inner.Load(storedId); true == held {
+        t.Fatalf("expected the stored session gone")
     }
 }
