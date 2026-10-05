@@ -2,6 +2,7 @@ package http
 
 import (
     "context"
+    "errors"
     "strings"
     "sync"
     "sync/atomic"
@@ -815,5 +816,74 @@ func TestServerSentEventHub_CloseWithContextClosesTheBackplaneInPlaceUnderACance
 
     if 1 != backplane.closeCalls.Load() {
         t.Fatalf("the backplane was closed %d times, wanted exactly one close and in place", backplane.closeCalls.Load())
+    }
+}
+
+func TestServerSentEventHub_ClearBackplaneWithContextEndsWithTheDeadlineWhileAPublishIsInside(t *testing.T) {
+    hub := NewServerSentEventHub()
+    backplane := newGatedBackplane()
+    hub.SetBackplane(backplane)
+    defer close(backplane.release)
+
+    go hub.Broadcast("topic", ServerSentEvent{Data: "payload"})
+
+    <-backplane.entered
+
+    clearContext, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+    defer cancel()
+
+    answered := make(chan error, 1)
+    go func() { answered <- hub.ClearBackplaneWithContext(clearContext) }()
+
+    select {
+    case clearErr := <-answered:
+        if false == errors.Is(clearErr, context.DeadlineExceeded) {
+            t.Fatalf("expected the clear to answer the deadline it stopped at, got %v", clearErr)
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatal("the clear did not end with its deadline; it waits for the publish without a bound")
+    }
+}
+
+func TestServerSentEventHub_ClearBackplaneWithContextAnswersAtOnceWithNothingInFlight(t *testing.T) {
+    hub := NewServerSentEventHub()
+    hub.SetBackplane(newGatedBackplane())
+
+    spentContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if clearErr := hub.ClearBackplaneWithContext(spentContext); nil != clearErr {
+        t.Fatalf("expected a clear with nothing in flight to succeed even under a spent context, got %v", clearErr)
+    }
+}
+
+func TestServerSentEventHub_SetBackplaneNilReturnsAtItsTimeoutAndWarnsWhileAPublishIsInside(t *testing.T) {
+    logger := &hubRecordingLogger{}
+    hub := NewServerSentEventHub()
+    hub.SetLogger(logger)
+    hub.backplaneClearTimeout = 100 * time.Millisecond
+
+    backplane := newGatedBackplane()
+    hub.SetBackplane(backplane)
+    defer close(backplane.release)
+
+    go hub.Broadcast("topic", ServerSentEvent{Data: "payload"})
+
+    <-backplane.entered
+
+    cleared := make(chan struct{})
+    go func() {
+        hub.SetBackplane(nil)
+        close(cleared)
+    }()
+
+    select {
+    case <-cleared:
+    case <-time.After(2 * time.Second):
+        t.Fatal("the clear did not return at its timeout; it waits for the publish without a bound")
+    }
+
+    if 1 != logger.warningCount() {
+        t.Fatalf("expected one warning naming the publishes still inside, got %d", logger.warningCount())
     }
 }

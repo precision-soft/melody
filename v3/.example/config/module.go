@@ -151,7 +151,7 @@ const (
     environmentKeyS3Endpoint  = "S3_ENDPOINT"
     environmentKeyS3AccessKey = "S3_ACCESS_KEY"
     environmentKeyS3SecretKey = "S3_SECRET_KEY"
-    environmentKeyS3Secure    = "S3_SECURE"
+    environmentKeyS3Insecure  = "S3_INSECURE"
     environmentKeyS3Region    = "S3_REGION"
     environmentKeyS3Bucket    = "S3_BUCKET"
 

@@ -45,6 +45,7 @@ type Config struct {
     Endpoint  string
     AccessKey string
     SecretKey string
+    /* Secure selects https. The zero value is PLAINTEXT http: credentials and objects cross the network in clear, and every presigned url is http. Set it for any endpoint that is not localhost or a loopback address; a storage over a plaintext endpoint off this machine names it once, at WARNING, at its first use. A field that defaults to TLS is planned for the next major. */
     Secure    bool
     Region    string
 }

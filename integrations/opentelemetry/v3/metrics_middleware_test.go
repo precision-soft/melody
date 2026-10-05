@@ -2,6 +2,7 @@ package opentelemetry
 
 import (
     "errors"
+    "fmt"
     "io"
     nethttp "net/http"
     "net/http/httptest"
@@ -267,12 +268,15 @@ func TestMetricsMiddleware_RecordsTheClientStatusOfAnHttpExceptionError(t *testi
     }
 }
 
-func TestStatusCodeForError_MapsSubFiveHundredHttpExceptionsAndDefaultsToFiveHundred(t *testing.T) {
+func TestStatusCodeForError_MapsHttpExceptionsAtTheirOwnStatusABodyLimitTo413AndDefaultsToFiveHundred(t *testing.T) {
     if 404 != statusCodeForError(exception.NewHttpException(nethttp.StatusNotFound, "not found")) {
         t.Fatalf("expected a 404 http exception to map to 404")
     }
-    if nethttp.StatusInternalServerError != statusCodeForError(exception.NewHttpException(nethttp.StatusBadGateway, "upstream")) {
-        t.Fatalf("expected a 5xx http exception to stay a server error")
+    if nethttp.StatusBadGateway != statusCodeForError(exception.NewHttpException(nethttp.StatusBadGateway, "upstream")) {
+        t.Fatalf("expected a 502 http exception graphed at the 502 the kernel sends")
+    }
+    if nethttp.StatusRequestEntityTooLarge != statusCodeForError(fmt.Errorf("read body: %w", &nethttp.MaxBytesError{Limit: 16})) {
+        t.Fatalf("expected a body past its limit graphed at the 413 the kernel sends")
     }
     if nethttp.StatusInternalServerError != statusCodeForError(errors.New("plain")) {
         t.Fatalf("expected a non-http error to be a server error")

@@ -8,6 +8,7 @@ import (
     "sync"
     "sync/atomic"
     "time"
+    "unicode/utf8"
 
     cachecontract "github.com/precision-soft/melody/v3/cache/contract"
     clockcontract "github.com/precision-soft/melody/v3/clock/contract"
@@ -119,7 +120,7 @@ func validateKey(key string) error {
         return exception.NewError(
             "cache key contains spaces",
             exceptioncontract.Context{
-                "key": key,
+                "key": renderedCacheKey(key),
             },
             nil,
         )
@@ -129,7 +130,7 @@ func validateKey(key string) error {
         return exception.NewError(
             "cache key contains newlines",
             exceptioncontract.Context{
-                "key": key,
+                "key": renderedCacheKey(key),
             },
             nil,
         )
@@ -139,7 +140,7 @@ func validateKey(key string) error {
         return exception.NewError(
             "cache key is too long",
             exceptioncontract.Context{
-                "key":          key,
+                "key":          renderedCacheKey(key),
                 "maxKeyLength": inMemoryBackendMaxKeyLength,
                 "keyLength":    len(key),
             },
@@ -839,3 +840,19 @@ func parseCanonicalCounterPayload(payload string) (int64, error) {
 }
 
 var _ cachecontract.Backend = (*InMemoryBackend)(nil)
+
+/* renderedCacheKey bounds a key a refusal carries in its context to its first 128 bytes, cut on a rune boundary and closed by a marker, so a key of a megabyte does not put a megabyte into the record; the refusal of a key past the length limit carries its whole length beside it */
+func renderedCacheKey(key string) string {
+    const renderedCacheKeyLimit = 128
+
+    if renderedCacheKeyLimit >= len(key) {
+        return key
+    }
+
+    cut := renderedCacheKeyLimit
+    for 0 < cut && false == utf8.RuneStart(key[cut]) {
+        cut = cut - 1
+    }
+
+    return key[:cut] + "...(truncated)"
+}

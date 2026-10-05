@@ -54,13 +54,13 @@ func databaseFromContext(ctx context.Context, fallback bun.IDB) bun.IDB {
     return bound.handle
 }
 
-/* transactionRider is the question AsyncStorage asks its delegate about a bound transaction: whether the delegate's save would write through it. A delegate that does not answer is taken as one that cannot. */
-type transactionRider interface {
-    ridesTransactionOf(origin *bun.DB) bool
+/* TransactionRider is the question AsyncStorage asks its delegate about a bound transaction: whether the delegate's save would write through it. A delegate that does not answer is taken as one that cannot, and its entries are queued. A Storage that decorates another one, for metrics, tracing or retries, answers by forwarding the question to the storage it wraps, so a decorated BunStorage still rides the transaction. */
+type TransactionRider interface {
+    RidesTransactionOf(origin *bun.DB) bool
 }
 
-/* ridesTransactionOf answers what databaseFromContext decides: a caller-made binding, which carries no origin, is honoured unconditionally, and a tracker-made one only over the database this storage writes to */
-func (instance *BunStorage) ridesTransactionOf(origin *bun.DB) bool {
+/* RidesTransactionOf answers what databaseFromContext decides: a caller-made binding, which carries no origin, is honoured unconditionally, and a tracker-made one only over the database this storage writes to */
+func (instance *BunStorage) RidesTransactionOf(origin *bun.DB) bool {
     return nil == origin || origin == instance.database
 }
 
@@ -155,4 +155,5 @@ func (instance *FileStorage) Save(ctx context.Context, table string, entries ...
 }
 
 var _ Storage = (*BunStorage)(nil)
+var _ TransactionRider = (*BunStorage)(nil)
 var _ Storage = (*FileStorage)(nil)

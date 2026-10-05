@@ -1,6 +1,7 @@
 package opentelemetry
 
 import (
+    "errors"
     nethttp "net/http"
     "reflect"
     "strconv"
@@ -91,11 +92,16 @@ func completedStatusCode(handlerErr error, response httpcontract.Response, recor
     return recorder.observedStatusCode()
 }
 
-/* statusCodeForError maps a handler error to the status the client receives, as the kernel's exception listener does: a deliberate sub-500 an HttpException carries is graphed at its own status rather than as a 5xx, and anything else is a server error. */
+/* statusCodeForError maps a handler error to the status the client receives, as the kernel does: an HttpException is sent at its own status, a 502 as a 502, a body past its limit as 413, and anything else is a server error. */
 func statusCodeForError(handlerErr error) int {
     httpException := exception.AsHttpException(handlerErr)
-    if nil != httpException && nethttp.StatusInternalServerError > httpException.StatusCode() {
+    if nil != httpException && 100 <= httpException.StatusCode() && 599 >= httpException.StatusCode() {
         return httpException.StatusCode()
+    }
+
+    var maxBytesError *nethttp.MaxBytesError
+    if true == errors.As(handlerErr, &maxBytesError) {
+        return nethttp.StatusRequestEntityTooLarge
     }
 
     return nethttp.StatusInternalServerError

@@ -3,10 +3,12 @@ package rueidis
 import (
     "context"
     "fmt"
+    "strings"
     "testing"
     "time"
 
     "github.com/precision-soft/melody/v3/container"
+    "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/runtime"
 )
 
@@ -173,5 +175,28 @@ func TestWithNonceGuardKeyPrefix_EmptyKeepsTheDefault(t *testing.T) {
 
     if defaultNonceGuardPrefix != guard.keyPrefix {
         t.Fatalf("expected an empty prefix to read as the default, got %q", guard.keyPrefix)
+    }
+}
+
+func TestNonceGuard_AStoreFailureNamesNeitherTheNonceNorItsKey(t *testing.T) {
+    guard, _ := newWedgedNonceGuard(t)
+
+    const nonce = "2fa:alice:739204"
+
+    for _, ttl := range []time.Duration{5 * time.Second, 0} {
+        _, rememberErr := guard.Remember(newTokenStoreRuntime(), nonce, ttl)
+        if nil == rememberErr {
+            t.Fatalf("expected the wedged store to fail the call at ttl %s", ttl)
+        }
+
+        if true == strings.Contains(rememberErr.Error(), "739204") {
+            t.Fatalf("the nonce leaked through the error at ttl %s: %q", ttl, rememberErr.Error())
+        }
+
+        for key, value := range exception.LogContext(rememberErr) {
+            if true == strings.Contains(fmt.Sprintf("%v", value), "739204") {
+                t.Fatalf("the nonce leaked through log field %q at ttl %s: %v", key, ttl, value)
+            }
+        }
     }
 }

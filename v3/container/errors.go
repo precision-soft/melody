@@ -28,6 +28,12 @@ var ErrTeardownDependencyTypeIsAmbiguous = errors.New("a declared teardown depen
 /* ErrTeardownDependencyIsSelf is the cause of a Register refusal for a service declaring a teardown dependency on itself. */
 var ErrTeardownDependencyIsSelf = errors.New("a service cannot declare a teardown dependency on itself")
 
+/* ErrScopedCloserUnsupported is the cause of a scoped registration's refusal for a WithCloser: a scope closes what it built through the doors the values carry. */
+var ErrScopedCloserUnsupported = errors.New("a scoped registration cannot declare a closer")
+
+/* ErrCloserTypeMismatch is the cause of a registration's refusal for a WithCloser whose closer takes a type the provider's declared type is not assignable to. */
+var ErrCloserTypeMismatch = errors.New("the closer does not take the service's type")
+
 /* ErrScopedTeardownDependencyUnsupported is the cause of a RegisterScoped refusal for a WithTeardownDependency: a scope keeps its own teardown graph. */
 var ErrScopedTeardownDependencyUnsupported = errors.New("a scoped registration cannot declare a teardown dependency")
 

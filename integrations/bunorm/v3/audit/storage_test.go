@@ -129,15 +129,15 @@ func TestBunStorage_RidesACallersBindingAndATransactionOfItsOwnDatabase(t *testi
     ownDatabase := newTestDatabase()
     storage := NewBunStorage(ownDatabase)
 
-    if false == storage.ridesTransactionOf(nil) {
+    if false == storage.RidesTransactionOf(nil) {
         t.Fatal("expected a caller-made binding ridden")
     }
 
-    if false == storage.ridesTransactionOf(ownDatabase) {
+    if false == storage.RidesTransactionOf(ownDatabase) {
         t.Fatal("expected a transaction of its own database ridden")
     }
 
-    if true == storage.ridesTransactionOf(newTestDatabase()) {
+    if true == storage.RidesTransactionOf(newTestDatabase()) {
         t.Fatal("expected a transaction of another database not ridden")
     }
 }

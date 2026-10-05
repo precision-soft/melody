@@ -7,6 +7,7 @@ import (
     "math"
     "reflect"
     "strconv"
+    "strings"
     "sync"
     "time"
 
@@ -708,7 +709,7 @@ func (instance *Transport) publishOnce(
 
         acked, waitErr := confirmation.WaitContext(confirmationContext)
         if nil != waitErr {
-            /* an outcome this transport's own budget cut short is ambiguous, the message being on the wire and possibly accepted, so it is not retried, which would publish it twice; a wait the channel's death ended is a channel fault */
+            /* an outcome this transport's own budget cut short is ambiguous, the message being on the wire and possibly accepted, so it is not retried, which would publish it twice; the client answers only the context's error here, a wait the channel's death ended answering (false, nil), read through IsClosed below */
             confirmationRetryable := true
             if nil == ctx.Err() && true == errors.Is(waitErr, context.DeadlineExceeded) {
                 confirmationRetryable = false
@@ -737,7 +738,7 @@ func (instance *Transport) publishOnce(
         }
 
         if false == acked {
-            outcome <- publishOutcome{err: exception.NewError("amqp publish was nacked by the broker", map[string]any{"queue": instance.queue}, nil)}
+            outcome <- unackedPublishOutcome(true == channel.IsClosed(), instance.queue)
 
             return
         }
@@ -745,7 +746,7 @@ func (instance *Transport) publishOnce(
         outcome <- publishOutcome{}
     })
 
-    if true == attempt.awaitTurn() {
+    if true == attempt.awaitTurn(ctx) {
         /* the socket was never touched by this publish, so nothing is marked wedged, faulted or torn down: what ran out was the wait for its turn, and a further attempt is worth making, since the queue it waited behind can be gone by then */
         return channel, publishDisposition{furtherAttemptMayRecover: true}, exception.NewError(
             "amqp publish did not reach the socket within the publish timeout while earlier publishes on this transport still held it",
@@ -765,6 +766,18 @@ func (instance *Transport) publishOnce(
     return channel, disposition, expiredErr
 }
 
+/* unackedPublishOutcome tells a nack from a confirmation the channel's death ended, which the client answers alike, with false and no error: a nack is the broker's verdict and is never retried, while a channel that closed before the confirmation leaves the message's fate unknown — the broker may hold it — so it is not retried in line, which could publish it twice, but a further attempt may recover. */
+func unackedPublishOutcome(channelClosed bool, queue string) publishOutcome {
+    if true == channelClosed {
+        return publishOutcome{
+            disposition: publishDisposition{furtherAttemptMayRecover: true},
+            err:         exception.NewError("amqp publish channel closed before the confirmation; the broker may hold the message, not retried in line", map[string]any{"queue": queue}, nil),
+        }
+    }
+
+    return publishOutcome{err: exception.NewError("amqp publish was nacked by the broker", map[string]any{"queue": queue}, nil)}
+}
+
 /* resolveExpiredWrite is the branch the write budget expiring leads to; it first asks whether the write already returned, as writeReturned explains, and is a door so its test can hand it a write that has already returned. */
 func (instance *Transport) resolveExpiredWrite(
     exchange string,
@@ -781,7 +794,7 @@ func (instance *Transport) resolveExpiredWrite(
     return instance.abandonWedgedPublish(exchange, routingKey, written)
 }
 
-/* abandonWedgedPublish is the timed-out branch of publishOnce, mapping the verdict of the shared abandon onto this transport's dispositions: a cut owned connection is redialed through connect on the one retry, so that fault is retryable exactly like any other channel fault; a caller-owned connection marked wedged refuses every send until the write returns, and that fault is not retryable, since the retry would meet the same refusal. */
+/* abandonWedgedPublish is the timed-out branch of publishOnce, mapping the verdict of the shared abandon onto this transport's dispositions: a cut owned connection is redialed through connect on the one retry, so that fault is retryable exactly like any other channel fault; a cut whose write did not return leaves the channel alone and refuses every send until the write returns; a caller-owned connection marked wedged refuses every send until the write returns, and that fault is not retryable, since the retry would meet the same refusal. */
 func (instance *Transport) abandonWedgedPublish(exchange string, routingKey string, written <-chan struct{}) (publishDisposition, error) {
     verdict := instance.abandonWedgedWrite(&instance.mutex, func() publishOwnerState {
         return publishOwnerState{closing: instance.closing, ownsConnection: instance.ownsConnection, connection: instance.connection}
@@ -804,6 +817,13 @@ func (instance *Transport) abandonWedgedPublish(exchange string, routingKey stri
     case wedgedWriteCut:
         return publishDisposition{channelFaulted: true, furtherAttemptMayRecover: true}, exception.NewError(
             "amqp publish did not return within the publish timeout; the owned connection was closed and is redialed on retry",
+            errorContext,
+            errPublishTimedOut,
+        )
+    case wedgedWriteCutUnfreed:
+        /* not a channel fault: a reset would close the channel the write still holds, parking on its mutex; the channel ends with the cut connection, and sends are refused until the write returns */
+        return publishDisposition{furtherAttemptMayRecover: true}, exception.NewError(
+            "amqp publish did not return within the publish timeout; the owned connection was cut but the write has not returned, the channel is left to end with it",
             errorContext,
             errPublishTimedOut,
         )
@@ -844,8 +864,8 @@ func (instance *Transport) resetPublishChannel(failed *amqp091.Channel) {
     instance.publishReturns = nil
     instance.mutex.Unlock()
 
-    /* the close is an RPC over the socket and runs with the mutex released: a peer that stopped reading would otherwise park isClosing, the publish path and teardown behind that write */
-    detached.Close()
+    /* the close is an RPC over the socket and runs with the mutex released and under the join bound: a peer that stopped reading would otherwise park isClosing, the publish path and teardown behind that write, and the client's close itself parks on the channel mutex a wedged write holds */
+    _ = closeChannelsWithin(instance.resolvedJoinBound(), detached)
 }
 
 /* resetConsumeChannel closes the cached consume channel only when it is still the one the caller lost, as resetPublishChannel does: otherwise two Receive loops on one transport could tear down each other's reopened subscriptions, each teardown bumping the generation and voiding the acks of deliveries already handed to workers. A nil failed channel is a no-op. */
@@ -862,7 +882,7 @@ func (instance *Transport) resetConsumeChannel(failed *amqp091.Channel) {
     instance.consumeChannel = nil
     instance.mutex.Unlock()
 
-    detached.Close()
+    _ = closeChannelsWithin(instance.resolvedJoinBound(), detached)
 }
 
 /* subscribe returns the channel even when Consume refuses, so the retry path can reset exactly the channel it failed on rather than whatever is cached by then. The generation travels beside the channel all the way to the consume loop, so the deliveries of a subscription are always stamped with the generation of the channel that carried them. */
@@ -1419,7 +1439,7 @@ func deadLetterAttemptCountFromHeader(headers amqp091.Table) int {
     return intFromHeader(headers, headerDeadLetterAttemptCount)
 }
 
-/* intFromHeader clamps into [0, math.MaxInt] rather than converting blindly: a foreign producer or a management-UI republish can put any number in these headers, and an out-of-range uint64 or float would wrap negative and read as count zero, resetting the retry accounting. Clamping high keeps the fail-closed direction, so an absurd count dead-letters. */
+/* intFromHeader clamps into [0, math.MaxInt] rather than converting blindly: a foreign producer or a management-UI republish can put any number in these headers, and an out-of-range uint64 or float would wrap negative and read as count zero, resetting the retry accounting. Clamping high keeps the fail-closed direction, so an absurd count dead-letters. A count written as text, as bytes or as an amqp decimal is read as the integer it spells, and a value that spells no integer, or of a type that carries no count, reads math.MaxInt for the same reason: read as zero it would re-arm the budget on every redelivery. */
 func intFromHeader(headers amqp091.Table, key string) int {
     raw, exists := headers[key]
     if false == exists {
@@ -1451,9 +1471,32 @@ func intFromHeader(headers amqp091.Table, key string) int {
         return clampHeaderFloat(float64(typed))
     case float64:
         return clampHeaderFloat(typed)
-    default:
+    case string:
+        return countFromHeaderText(typed)
+    case []byte:
+        return countFromHeaderText(string(typed))
+    case amqp091.Decimal:
+        value := int64(typed.Value)
+        for scale := uint8(0); scale < typed.Scale; scale = scale + 1 {
+            value = value / 10
+        }
+
+        return clampHeaderCount(value)
+    case nil:
         return 0
+    default:
+        return math.MaxInt
     }
+}
+
+/* countFromHeaderText reads a count written as decimal text, math.MaxInt when the text spells no integer */
+func countFromHeaderText(text string) int {
+    parsed, parseErr := strconv.ParseInt(strings.TrimSpace(text), 10, 64)
+    if nil != parseErr {
+        return math.MaxInt
+    }
+
+    return clampHeaderCount(parsed)
 }
 
 func clampHeaderCount(value int64) int {
@@ -1503,7 +1546,7 @@ func (instance *Transport) ensurePublishChannel() (*amqp091.Channel, <-chan amqp
 
     if true == wedged {
         return nil, nil, exception.NewError(
-            "amqp publish is refused: an earlier write is still blocked on the caller-owned connection",
+            "amqp publish is refused: an earlier write is still blocked on this connection",
             map[string]any{"queue": instance.queue},
             errPublishTimedOut,
         )

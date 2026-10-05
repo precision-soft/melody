@@ -96,7 +96,7 @@ func (instance *NonceGuard) Remember(
 
         seen, existsErr := existsResult.AsInt64()
         if nil != existsErr {
-            return false, exception.NewError("redis nonce guard failed", map[string]any{"nonce": nonce}, existsErr)
+            return false, exception.NewError("redis nonce guard failed", map[string]any{"nonceLength": len(nonce), "keyPrefix": instance.keyPrefix}, existsErr)
         }
 
         return 1 == seen, nil
@@ -113,12 +113,13 @@ func (instance *NonceGuard) Remember(
 
     seen, resultErr := result.AsInt64()
     if nil != resultErr {
-        return false, exception.NewError("redis nonce guard failed", map[string]any{"nonce": nonce}, resultErr)
+        return false, exception.NewError("redis nonce guard failed", map[string]any{"nonceLength": len(nonce), "keyPrefix": instance.keyPrefix}, resultErr)
     }
 
     return 1 == seen, nil
 }
 
+/* key is the record of a nonce; the nonce is a credential to the guard's callers, a second factor's code among them, and is never journaled, so a refusal names its length and the key prefix instead */
 func (instance *NonceGuard) key(nonce string) string {
     return instance.keyPrefix + ":" + nonce
 }

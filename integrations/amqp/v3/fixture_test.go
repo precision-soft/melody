@@ -427,8 +427,16 @@ type fakeBrokerWedge struct {
     written    chan struct{}
 }
 
-/* wedgeAPublishOnAFakeBroker dials the fake broker, opens a channel and wedges one publish on its socket write, which the client makes holding the channel mutex. The cleanup closes the client socket, which is the one thing that ends the write whatever the client's own state, and waits for the publish to return, so no goroutine of this test outlives it. */
-func wedgeAPublishOnAFakeBroker(t *testing.T) *fakeBrokerWedge {
+/* fakeBrokerConnection is one connection to a broker faked on a loopback listener, with one channel open: the client socket is a gatedConn and the broker side of the socket is kept, so a test can drop it. After the handshake the broker answers nothing, so a close waits for a close-ok that never comes. */
+type fakeBrokerConnection struct {
+    connection *amqp091.Connection
+    channel    *amqp091.Channel
+    gated      *gatedConn
+    brokerSide net.Conn
+}
+
+/* dialFakeBroker dials the fake broker and opens a channel; the cleanup closes both sides of the socket. */
+func dialFakeBroker(t *testing.T) *fakeBrokerConnection {
     t.Helper()
 
     listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
@@ -478,6 +486,21 @@ func wedgeAPublishOnAFakeBroker(t *testing.T) *fakeBrokerWedge {
     if handshakeErr := <-handshakeErrs; nil != handshakeErr {
         t.Fatalf("the fake broker handshake failed: %v", handshakeErr)
     }
+
+    t.Cleanup(func() { _ = gated.Close() })
+
+    return &fakeBrokerConnection{connection: connection, channel: channel, gated: gated, brokerSide: brokerSide}
+}
+
+/* wedgeAPublishOnAFakeBroker dials the fake broker, opens a channel and wedges one publish on its socket write, which the client makes holding the channel mutex. The cleanup closes the client socket, which is the one thing that ends the write whatever the client's own state, and waits for the publish to return, so no goroutine of this test outlives it. */
+func wedgeAPublishOnAFakeBroker(t *testing.T) *fakeBrokerWedge {
+    t.Helper()
+
+    fake := dialFakeBroker(t)
+    connection := fake.connection
+    channel := fake.channel
+    gated := fake.gated
+    brokerSide := fake.brokerSide
 
     gated.Wedge()
 

@@ -1,7 +1,11 @@
 package container
 
 import (
+    "context"
+    "errors"
+    "sync/atomic"
     "testing"
+    "time"
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
 )
@@ -103,5 +107,142 @@ func TestApplyRegisterServiceOptions_FoldsInOrderAndSkipsANilOption(t *testing.T
 
     if true == reversed.AlsoRegisterType {
         t.Fatalf("expected the reversed order to end with the type registration opted out of")
+    }
+}
+
+/* foreignClosingService stands for a value of a type the application does not own, whose own Close the teardown must not reach */
+type foreignClosingService struct {
+    ownCloses atomic.Int32
+}
+
+func (instance *foreignClosingService) Close() error {
+    instance.ownCloses.Add(1)
+
+    return nil
+}
+
+func TestWithCloser_TheTeardownClosesTheValueThroughTheCloserUnderItsDeadlineAndNotThroughItsOwnClose(t *testing.T) {
+    serviceContainer := NewContainer()
+    built := &foreignClosingService{}
+
+    var closedValue *foreignClosingService
+    var closerHadDeadline bool
+
+    serviceContainer.MustRegister(
+        "app.foreign",
+        func(resolver containercontract.Resolver) (*foreignClosingService, error) {
+            return built, nil
+        },
+        WithCloser(func(closeContext context.Context, value *foreignClosingService) error {
+            closedValue = value
+            _, closerHadDeadline = closeContext.Deadline()
+
+            return nil
+        }),
+    )
+
+    _ = MustFromResolver[*foreignClosingService](serviceContainer, "app.foreign")
+
+    closeContext, cancel := context.WithTimeout(context.Background(), time.Second)
+    defer cancel()
+
+    if closeErr := serviceContainer.(containercontract.ContextCloser).CloseWithContext(closeContext); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    if built != closedValue || false == closerHadDeadline {
+        t.Fatalf("expected the closer handed the built value and the teardown's deadline, got %v deadline %v", closedValue, closerHadDeadline)
+    }
+
+    if 0 != built.ownCloses.Load() {
+        t.Fatalf("expected the value's own Close never called, it was called %d times", built.ownCloses.Load())
+    }
+}
+
+func TestWithCloser_AServiceWithoutTheOptionIsClosedThroughItsOwnClose(t *testing.T) {
+    serviceContainer := NewContainer()
+    built := &foreignClosingService{}
+
+    serviceContainer.MustRegister("app.foreign", func(resolver containercontract.Resolver) (*foreignClosingService, error) {
+        return built, nil
+    })
+
+    _ = MustFromResolver[*foreignClosingService](serviceContainer, "app.foreign")
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    if 1 != built.ownCloses.Load() {
+        t.Fatalf("expected the value's own Close called once, got %d", built.ownCloses.Load())
+    }
+}
+
+func TestWithCloser_AnInstanceAnOverrideEvictedIsClosedThroughTheCloser(t *testing.T) {
+    serviceContainer := NewContainer()
+    built := &foreignClosingService{}
+    closerCalls := atomic.Int32{}
+
+    serviceContainer.MustRegister(
+        "app.foreign",
+        func(resolver containercontract.Resolver) (*foreignClosingService, error) {
+            return built, nil
+        },
+        WithCloser(func(closeContext context.Context, value *foreignClosingService) error {
+            if built == value {
+                closerCalls.Add(1)
+            }
+
+            return nil
+        }),
+    )
+
+    _ = MustFromResolver[*foreignClosingService](serviceContainer, "app.foreign")
+
+    if overrideErr := serviceContainer.OverrideInstance("app.foreign", &foreignClosingService{}); nil != overrideErr {
+        t.Fatalf("override: %v", overrideErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    if 1 != closerCalls.Load() || 0 != built.ownCloses.Load() {
+        t.Fatalf("expected the evicted instance closed once through the closer, got closer %d own %d", closerCalls.Load(), built.ownCloses.Load())
+    }
+}
+
+func TestWithCloser_ACloserThatDoesNotTakeTheServicesTypeIsRefusedAtRegistration(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := serviceContainer.Register(
+        "app.foreign",
+        func(resolver containercontract.Resolver) (*foreignClosingService, error) {
+            return &foreignClosingService{}, nil
+        },
+        WithCloser(func(closeContext context.Context, value string) error { return nil }),
+    )
+
+    if false == errors.Is(registerErr, ErrCloserTypeMismatch) {
+        t.Fatalf("expected the registration refused with ErrCloserTypeMismatch, got %v", registerErr)
+    }
+}
+
+func TestWithCloser_TheScopedRegistrationsRefuseTheOption(t *testing.T) {
+    serviceContainer := NewContainer()
+    closer := WithCloser(func(closeContext context.Context, value *foreignClosingService) error { return nil })
+    provider := func(resolver containercontract.Resolver) (*foreignClosingService, error) {
+        return &foreignClosingService{}, nil
+    }
+
+    if registerErr := serviceContainer.RegisterScoped("app.scoped", provider, closer); false == errors.Is(registerErr, ErrScopedCloserUnsupported) {
+        t.Fatalf("expected the container's scoped registration refused, got %v", registerErr)
+    }
+
+    scopeInstance := serviceContainer.NewScope()
+    defer func() { _ = scopeInstance.Close() }()
+
+    if registerErr := scopeInstance.(*scope).RegisterScoped("app.scoped.own", provider, closer); false == errors.Is(registerErr, ErrScopedCloserUnsupported) {
+        t.Fatalf("expected the scope's own registration refused, got %v", registerErr)
     }
 }

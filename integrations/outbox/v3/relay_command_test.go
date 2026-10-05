@@ -320,3 +320,18 @@ func (instance *capturingCommand) Run(
 
     return nil
 }
+
+func TestRelayCommand_ADeadlineExplainedErrorStillExitsClean(t *testing.T) {
+    parentContext, cancelParent := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+    defer cancelParent()
+
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(parentContext, serviceContainer.NewScope(), serviceContainer)
+
+    repository := &cancellationEchoRepository{}
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{}, Codec: &stringCodec{}})
+
+    if runErr := runRelayCommand(t, runtimeInstance, relay, []string{"--limit", "1"}); nil != runErr {
+        t.Fatalf("expected the deadline-explained failure to exit clean, got %v", runErr)
+    }
+}

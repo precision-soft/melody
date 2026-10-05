@@ -725,11 +725,17 @@ func argumentsOrEmpty(arguments []string) []string {
     return arguments
 }
 
-/* errorTextOrEmpty keeps the document's error field a string on every row, so it keeps its json type. */
-func errorTextOrEmpty(err error) string {
+/* errorTextOrEmpty keeps the document's error field a string on every row, so it keeps its json type. An error whose Error panics is rendered by naming the panic, so the command's own error stays the run's failure instead of the runner filing a panic of its own over it. */
+func errorTextOrEmpty(err error) (text string) {
     if true == isNilInterface(err) {
         return ""
     }
+
+    defer func() {
+        if recovered := recover(); nil != recovered {
+            text = fmt.Sprintf("<error text panicked: %v>", recovered)
+        }
+    }()
 
     return err.Error()
 }

@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- documentation: the GoDoc of the size-checked upload reader said that neither a stalled body nor a departed client could pin an upload; the context is read between reads only, so a source whose `Read` blocks is ended by its own closer, and the GoDoc now says to hand a body a timeout bounds.
 - documentation: the refusal of an empty credential carries the behavioural-change marker.
 - a bucket creation conflict whose existence re-check could not complete was reported as the conflict alone, a name taken by another account; the refusal says the re-check failed and carries both causes.
 - `provider.go` — `Config` redacts its `AccessKey` and `SecretKey` on every `fmt` verb through new `String` and `Format` methods. Both are exported, so a plain `%v` of the config — dropped into a log or an error context — printed the object-storage credentials in the clear; the config now renders its safe fields with each secret shown only as set-or-not, mirroring the `encrypt` key provider
@@ -23,6 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Security
 
+- `plaintext_endpoint.go`, `storage.go`, `provider.go` — a storage over a plain http endpoint other than `localhost` or a loopback address is named once in the configured journal at the first use of a door (`bootWarning=awss3.plaintextEndpoint`, the endpoint's host, never a credential), since `Config.Secure`'s zero value sends credentials and objects in clear and presigns `http://` urls; the GoDoc of `Config.Secure` says so.
 - `storage.go` — **Behavioural change**: every door (`Put`, `Get`, `Delete`, `Exists`, `PresignedUrl`) refuses a key that carries a `..` segment, the backslash read as a separator, and names the segment in the error, before the bucket is asked; `LocalStorage` refuses it the same way. The key was folded instead, so `tenant-b/../tenant-a/secret.txt` addressed `tenant-a/secret.txt`, and an application that isolates its callers by key prefix was crossed by it. A key relying on the fold to address `a/../b` as `b` is now refused: address it as `b`.
 
 ## [v3.0.3] - 2026-07-06 - Standalone Module Resolution Fix

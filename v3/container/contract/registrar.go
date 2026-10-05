@@ -1,6 +1,7 @@
 package contract
 
 import (
+    "context"
     "reflect"
 )
 
@@ -17,6 +18,9 @@ type RegisterOptions struct {
     TeardownDependencyTypes []reflect.Type
     /* SkipsTeardownReflection keeps the armed teardown's walk out of this service's memory: its value is not walked, and a walk that reaches it records the edge and does not enter it. */
     SkipsTeardownReflection bool
+    /* Closer closes the service in place of the Close and CloseWithContext doors its value carries, handed the teardown's remaining budget: the door for a value of a type the application does not own, whose own close cannot be bounded. CloserValueType is the type the closer takes, which the provider's declared type must be assignable to. Set by WithCloser; RegisterScoped refuses it. */
+    Closer          func(closeContext context.Context, value any) error
+    CloserValueType reflect.Type
 }
 
 type RegisterOption func(option *RegisterOptions)

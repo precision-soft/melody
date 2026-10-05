@@ -1,9 +1,12 @@
 package rueidis
 
 import (
+    "reflect"
+
     "github.com/redis/rueidis"
 
     applicationcontract "github.com/precision-soft/melody/v3/application/contract"
+    "github.com/precision-soft/melody/v3/exception"
 )
 
 type ModuleConfig struct {
@@ -45,6 +48,8 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
         return
     }
 
+    refuseAClientAConnectionDoesNotOwn(instance.config)
+
     if nil != instance.config.Connection {
         RegisterConnectionService(registrar, instance.config.Connection)
     }
@@ -64,3 +69,23 @@ var (
     _ applicationcontract.Module        = (*Module)(nil)
     _ applicationcontract.ServiceModule = (*Module)(nil)
 )
+
+/* refuseAClientAConnectionDoesNotOwn refuses a configuration whose Client and Connection name different clients: the services run on Client while the teardown closes the Connection's, so the client in use would never be closed and the closed one never used. Two clients are compared only where both dynamic types are comparable; a client of a type that is not is admitted, the check unable to tell. */
+func refuseAClientAConnectionDoesNotOwn(config ModuleConfig) {
+    if nil == config.Client || nil == config.Connection || nil == config.Connection.Client() {
+        return
+    }
+
+    owned := config.Connection.Client()
+    if false == reflect.TypeOf(config.Client).Comparable() || false == reflect.TypeOf(owned).Comparable() {
+        return
+    }
+
+    if config.Client != owned {
+        exception.Panic(exception.NewError(
+            "rueidis module: Client and Connection name different clients",
+            map[string]any{"hint": "hand the Connection alone, or the client the Connection wraps as Client"},
+            nil,
+        ))
+    }
+}

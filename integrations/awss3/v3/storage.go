@@ -46,14 +46,17 @@ func NewStorage(client *minio.Client, bucket string) *Storage {
     }
 
     return &Storage{
-        client: client,
-        bucket: bucket,
+        client:                   client,
+        bucket:                   bucket,
+        plaintextEndpointWarning: plaintextEndpointWarningOf(client),
     }
 }
 
 type Storage struct {
     client *minio.Client
     bucket string
+    /* plaintextEndpointWarning is written once at the first use of a door, nil over an https or a loopback endpoint */
+    plaintextEndpointWarning *plaintextEndpointWarning
 }
 
 func (instance *Storage) Put(
@@ -63,6 +66,8 @@ func (instance *Storage) Put(
     size int64,
     options storagecontract.PutOptions,
 ) error {
+    instance.plaintextEndpointWarning.write(runtimeInstance)
+
     normalizedKey, keyErr := normalizeObjectKey(key)
     if nil != keyErr {
         return keyErr
@@ -174,7 +179,7 @@ func newSizeCheckedReader(ctx context.Context, key string, source io.Reader, siz
     }
 }
 
-/* sizeCheckedReader yields exactly the declared number of bytes and stops one byte short the moment the body holds more, so the upload is short of its announced length and the bucket commits nothing at the key. Every read is bounded and honours the context, so neither a stalled body nor a departed client can pin an upload. */
+/* sizeCheckedReader yields exactly the declared number of bytes and stops one byte short the moment the body holds more, so the upload is short of its announced length and the bucket commits nothing at the key. Every read is bounded in size, and the context is honoured between reads; a source whose Read blocks is ended only by its own closer, so hand it a body a timeout bounds, as the server's read timeout bounds an http.Request.Body — closing an arbitrary io.Reader is not the storage's to do. */
 type sizeCheckedReader struct {
     key        string
     size       int64
@@ -317,6 +322,8 @@ func (instance *Storage) Get(
     runtimeInstance runtimecontract.Runtime,
     key string,
 ) (io.ReadCloser, error) {
+    instance.plaintextEndpointWarning.write(runtimeInstance)
+
     normalizedKey, keyErr := normalizeObjectKey(key)
     if nil != keyErr {
         return nil, keyErr
@@ -344,6 +351,8 @@ func (instance *Storage) Delete(
     runtimeInstance runtimecontract.Runtime,
     key string,
 ) error {
+    instance.plaintextEndpointWarning.write(runtimeInstance)
+
     normalizedKey, keyErr := normalizeObjectKey(key)
     if nil != keyErr {
         return keyErr
@@ -361,6 +370,8 @@ func (instance *Storage) Exists(
     runtimeInstance runtimecontract.Runtime,
     key string,
 ) (bool, error) {
+    instance.plaintextEndpointWarning.write(runtimeInstance)
+
     normalizedKey, keyErr := normalizeObjectKey(key)
     if nil != keyErr {
         return false, keyErr
@@ -383,6 +394,8 @@ func (instance *Storage) PresignedUrl(
     key string,
     expiry time.Duration,
 ) (string, error) {
+    instance.plaintextEndpointWarning.write(runtimeInstance)
+
     normalizedKey, keyErr := normalizeObjectKey(key)
     if nil != keyErr {
         return "", keyErr

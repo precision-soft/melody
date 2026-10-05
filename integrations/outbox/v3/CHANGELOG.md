@@ -14,6 +14,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- `relay.go` — the record of a panic the relay contained carried the panic and not the stack it was raised on; it now carries `panicStack`, which stays out of `last_error`.
+- `relay.go` — the resolution writes, sent, rescheduled and dead, ran on the run's context, so a SIGTERM landing between a send and its mark failed the mark and the row the transport already published came back after the visibility timeout and published again; each now runs on a context the run's cancellation does not reach, bounded by five seconds.
+- `relay.go` — a row dead-lettered left no record in the process log, `last_error` its only trace; one WARNING per dead-lettered row now names it, its type, its attempts and the stored error.
 - documentation: the entry for a codec or transport panic no longer carries the behavioural-change marker, a crash not being a behaviour an application relied on.
 - documentation: the README says that `--idle-backoff` defaults to the poll interval.
 - `store.go` — `Store.ClaimDueMessages` refuses a non-positive limit by name, with the limit in the error's context, and cuts a limit above the relay's own cap (100000) to it. Bun writes no `LIMIT` clause for a non-positive value and narrows the value to int32 first, so on this public door zero, a negative and a value past the int32 range — where the narrowing wraps to zero or below — claimed the whole table in one transaction and flipped every due row to in-flight, while the allocation hint beside the query was the only thing capped

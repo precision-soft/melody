@@ -6,6 +6,7 @@ import (
     "math"
     "strconv"
     "time"
+    "unicode/utf8"
 
     melodyclock "github.com/precision-soft/melody/v3/clock"
     clockcontract "github.com/precision-soft/melody/v3/clock/contract"
@@ -305,6 +306,7 @@ func (instance *RedisTokenStore) runtimeCallContext(runtimeInstance runtimecontr
     return context.WithTimeout(runtimeInstance.Context(), instance.callTimeout)
 }
 
+/* Put stores the token with no expiry. The user identifier must be valid UTF-8. */
 func (instance *RedisTokenStore) Put(tokenString string, claims securitycontract.Claims) {
     instance.put(tokenString, claims, 0)
 }
@@ -339,6 +341,8 @@ func (instance *RedisTokenStore) Delete(tokenString string) {
 
 /* DeleteByUser reclaims what a revocation made unusable; it is not the revocation itself. SSCAN may miss a member added while the walk runs, so a token issued during the call survives it — RevokeBefore is what ends a user's sessions. */
 func (instance *RedisTokenStore) DeleteByUser(userIdentifier string) int {
+    refuseNonUtf8UserIdentifier(userIdentifier)
+
     indexKey := instance.userKey(userIdentifier)
 
     removed := 0
@@ -520,6 +524,8 @@ func (instance *RedisTokenStore) RevokeBefore(userIdentifier string, deviceIdent
         exception.Panic(exception.NewError("redis token store revocation needs a user identifier", nil, nil))
     }
 
+    refuseNonUtf8UserIdentifier(userIdentifier)
+
     if true == instant.IsZero() || true == instant.Before(revocationEpochLowerBound) || true == instant.After(revocationEpochUpperBound) {
         exception.Panic(exception.NewError(
             "redis token store revocation instant is not representable",
@@ -658,7 +664,20 @@ func (instance *RedisTokenStore) tokenIsRevoked(issuedAt time.Time, epochValues 
     return false == issuedAt.After(time.Unix(0, latest).Add(instance.maximumClockSkew)), nil
 }
 
+/* refuseNonUtf8UserIdentifier refuses a user identifier that is not valid UTF-8 at every door that writes or matches it: the stored claims are json, which writes an invalid byte as the replacement character, so the scripts that compare the stored user with the raw identifier would never match it and RevokeBefore and DeleteByUser would leave the user's tokens standing. The refusal names the length, never the bytes. */
+func refuseNonUtf8UserIdentifier(userIdentifier string) {
+    if false == utf8.ValidString(userIdentifier) {
+        exception.Panic(exception.NewError(
+            "redis token store user identifier must be valid UTF-8",
+            map[string]any{"userLength": len(userIdentifier)},
+            nil,
+        ))
+    }
+}
+
 func (instance *RedisTokenStore) put(tokenString string, claims securitycontract.Claims, ttl time.Duration) {
+    refuseNonUtf8UserIdentifier(claims.UserIdentifier)
+
     /* the IssuedAt stamp is read client-side, one round trip before the script lands, by design: the stamps come from the injected clock (WithTokenStoreClock), which a server-side stamp would replace with redis's. The window a RevokeBefore can slip into is one marshal plus one round trip and fails closed, the fresh token reading as pre-boundary; WithTokenStoreMaximumClockSkew absorbs the same interleaving between instances. */
     claims.IssuedAt = instance.clock.Now()
 

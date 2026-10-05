@@ -20,6 +20,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- `metrics_middleware.go` — a 5xx `HttpException` a handler returned was graphed as a 500, although the kernel sends it at its own status, a 502 as a 502, and a body past its limit was graphed as a 500 where the kernel sends 413; the status recorded is now the one the client receives.
+- documentation: the GoDoc of `otlp.Config.SampleRatio` and the README say the sampler is parent-based, so at an untrusted edge an inbound `traceparent` chooses the sampling.
 - `tracing_middleware.go` — a handler that writes the response itself carries its status onto the span. The middleware read only the returned response and error, so the streaming, proxy and upgrade shapes, which return neither, produced a span with no `http.response.status_code` and a streamed `503` left the span unmarked. The writer goes through the package's recording writer, which keeps flushing, hijacking, `ReadFrom` and the response controller reachable; a hijacked upgrade is recorded as `101`.
 - the recording writer of the handler decorator and of the metrics middleware recorded an informational header as the final status: a handler that sent `103 Early Hints` and then `503` was traced and counted as `103`. An informational status other than `101` is forwarded without being recorded, so the final status is the one the handler writes next, or the implicit `200` of its first write.
 - documentation: the two grpc requirement entries are one, at v1.83.1, naming both advisories it fixes.

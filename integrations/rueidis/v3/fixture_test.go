@@ -19,6 +19,11 @@ import (
     redisclient "github.com/redis/rueidis"
 )
 
+/* stubClient is a client no door may reach: it satisfies the interface and panics on any command, so a pin on a refusal that fires before a round trip runs without a backend */
+type stubClient struct {
+    redisclient.Client
+}
+
 func newTokenStoreRuntime() runtimecontract.Runtime {
     serviceContainer := container.NewContainer()
     return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)

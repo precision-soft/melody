@@ -1592,7 +1592,8 @@ func TestRedeliveryCountFromHeader(t *testing.T) {
         {name: "float32", headers: amqp091.Table{headerRedeliveryCount: float32(6)}, expected: 6},
         {name: "uint", headers: amqp091.Table{headerRedeliveryCount: uint(8)}, expected: 8},
         {name: "uint32", headers: amqp091.Table{headerRedeliveryCount: uint32(9)}, expected: 9},
-        {name: "wrong type", headers: amqp091.Table{headerRedeliveryCount: "7"}, expected: 0},
+        {name: "text", headers: amqp091.Table{headerRedeliveryCount: "7"}, expected: 7},
+        {name: "wrong type", headers: amqp091.Table{headerRedeliveryCount: true}, expected: math.MaxInt},
     }
 
     for _, testCase := range cases {
@@ -2390,7 +2391,7 @@ func TestTransport_ASecondSendOnAWedgedCallerOwnedConnectionIsRefusedAtOnce(t *t
     go func() { outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 3, Name: "while-wedged"})) }()
 
     secondErr := awaitOutcome(t, "send while wedged", outcome, 2*time.Second)
-    if nil == secondErr || false == strings.Contains(secondErr.Error(), "an earlier write is still blocked on the caller-owned connection") {
+    if nil == secondErr || false == strings.Contains(secondErr.Error(), "an earlier write is still blocked on this connection") {
         t.Fatalf("expected the second send to be refused for the earlier blocked write, got: %v", secondErr)
     }
 
@@ -3257,5 +3258,96 @@ func TestTransport_CloseWithContextReturnsWithinTheDeadlineWhileTheClientShutdow
         }
     case <-time.After(bound + 2*time.Second):
         t.Fatalf("the close did not return within the deadline %s plus two seconds; it is held behind the client's stalled shutdown", bound)
+    }
+}
+
+func TestTransport_AResetOfAChannelWhoseWriteIsWedgedReturnsWithinItsBoundWhileTheClientShutdownIsStalled(t *testing.T) {
+    wedge := wedgeAPublishOnAFakeBroker(t)
+    wedge.beginClientShutdown(t)
+
+    bound := 300 * time.Millisecond
+    instance := &Transport{queue: "orders", publishChannel: wedge.channel}
+    instance.joinBound = bound
+
+    reset := make(chan struct{})
+    go func() {
+        instance.resetPublishChannel(wedge.channel)
+        close(reset)
+    }()
+
+    select {
+    case <-reset:
+    case <-time.After(bound + 2*time.Second):
+        t.Fatalf("the reset did not return within its bound %s plus two seconds; the channel close is parked on the mutex the wedged write holds", bound)
+    }
+
+    if true == writeReturned(wedge.written) {
+        t.Fatal("the wedged write returned, so the client's shutdown was not stalled behind it and nothing was measured")
+    }
+}
+
+func TestTransport_ACutThatDidNotFreeTheWriteIsNoChannelFaultAndASecondSendIsRefusedAtOnce(t *testing.T) {
+    wedge := wedgeAPublishOnAFakeBroker(t)
+    wedge.beginClientShutdown(t)
+
+    instance := &Transport{queue: "orders", ownsConnection: true, connection: wedge.connection, publishChannel: wedge.channel}
+    instance.joinBound = 300 * time.Millisecond
+
+    disposition, abandonErr := instance.abandonWedgedPublish("", "orders", wedge.written)
+    if true == disposition.channelFaulted || false == disposition.furtherAttemptMayRecover || false == errors.Is(abandonErr, errPublishTimedOut) {
+        t.Fatalf("expected a timed-out publish that is no channel fault, got %+v %v", disposition, abandonErr)
+    }
+
+    started := time.Now()
+    _, _, channelErr := instance.ensurePublishChannel()
+    elapsed := time.Since(started)
+
+    if false == errors.Is(channelErr, errPublishTimedOut) || false == strings.Contains(channelErr.Error(), "still blocked on this connection") {
+        t.Fatalf("expected the second send refused over the blocked write, got %v", channelErr)
+    }
+
+    if elapsed > 50*time.Millisecond {
+        t.Fatalf("expected the refusal at once, it took %s", elapsed)
+    }
+}
+
+func TestIntFromHeader_ReadsTheTextBytesAndDecimalFormsAndAnUnreadableValueDeadLetters(t *testing.T) {
+    headers := amqp091.Table{
+        "text":            "7",
+        "padded-text":     " 7 ",
+        "bytes":           []byte("7"),
+        "decimal":         amqp091.Decimal{Scale: 0, Value: 7},
+        "scaled-decimal":  amqp091.Decimal{Scale: 1, Value: 75},
+        "unreadable-text": "x",
+        "unreadable-type": true,
+        "void":            nil,
+    }
+
+    for _, key := range []string{"text", "padded-text", "bytes", "decimal", "scaled-decimal"} {
+        if count := intFromHeader(headers, key); 7 != count {
+            t.Fatalf("expected %q read as 7, got %d", key, count)
+        }
+    }
+
+    for _, key := range []string{"unreadable-text", "unreadable-type"} {
+        if count := intFromHeader(headers, key); math.MaxInt != count {
+            t.Fatalf("expected %q read as math.MaxInt so the message dead-letters, got %d", key, count)
+        }
+    }
+
+    if count := intFromHeader(headers, "void"); 0 != count {
+        t.Fatalf("expected a void header read as absence, got %d", count)
+    }
+}
+
+func TestUnackedPublishOutcome_AChannelThatClosedBeforeTheConfirmationIsNotReportedAsANack(t *testing.T) {
+    closed := unackedPublishOutcome(true, "orders")
+    if true == closed.disposition.channelFaulted || false == closed.disposition.furtherAttemptMayRecover || false == strings.Contains(closed.err.Error(), "closed before the confirmation") {
+        t.Fatalf("expected a closed channel reported as an unknown fate a further attempt may recover, got %+v %v", closed.disposition, closed.err)
+    }
+
+    nacked := unackedPublishOutcome(false, "orders")
+    if true == nacked.disposition.channelFaulted || true == nacked.disposition.furtherAttemptMayRecover || false == strings.Contains(nacked.err.Error(), "nacked by the broker") {
+        t.Fatalf("expected a nack reported as the broker's verdict, never retried, got %+v %v", nacked.disposition, nacked.err)
     }
 }

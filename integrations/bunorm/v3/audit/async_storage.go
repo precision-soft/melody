@@ -113,7 +113,7 @@ func (instance *AsyncStorage) WithLogger(logger loggingcontract.Logger) *AsyncSt
 func (instance *AsyncStorage) Save(ctx context.Context, table string, entries ...Entry) error {
     /* a context carrying a database binding asks for the audit rows to ride that transaction, so where the delegate can ride it the save goes through the delegate synchronously on the caller's context; queued, it could be written after a rollback. A delegate that cannot ride it, a file or a database other than the transaction's, gains no atomicity from the inline write and would only put its latency and its failures on the business write, so its entries are queued like any other */
     if bound, isBound := ctx.Value(databaseContextKey{}).(*boundDatabase); true == isBound && nil != bound && nil != bound.handle {
-        if rider, isRider := instance.delegate.(transactionRider); true == isRider && true == rider.ridesTransactionOf(bound.origin) {
+        if rider, isRider := instance.delegate.(TransactionRider); true == isRider && true == rider.RidesTransactionOf(bound.origin) {
             return instance.delegate.Save(ctx, table, entries...)
         }
     }

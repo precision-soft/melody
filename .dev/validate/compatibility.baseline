@@ -43,7 +43,7 @@
 # nothing that worked breaks, because the door was dead, but a third-party Transport implementation stops
 # compiling. The decision has been taken: it ships on v3.14.0, and the changelog and the upgrade guide both carry it. The row stays until that release raises the pin, which is what makes it disappear.
 
-integrations/amqp/v3 ~ contract ~ messagebus/contract.Transport.Close ~ the transport close signature dropped its Runtime parameter so the container's ordered teardown can reach it; measured at the pinned tag as having zero production callers, so nothing that worked breaks, but a third-party Transport implementation stops compiling; adjudicated to ship on v3.14.0 as a documented break, which v3/CHANGELOG.md and v3/.documentation/UPGRADE.md already carry
+integrations/amqp/v3 ~ contract ~ container.WithCloser, http.ServerSentEventHub.ClearBackplaneWithContext, messagebus/contract.Transport.Close ~ the transport close signature dropped its Runtime parameter so the container's ordered teardown can reach it; measured at the pinned tag as having zero production callers, so nothing that worked breaks, but a third-party Transport implementation stops compiling; adjudicated to ship on v3.14.0 as a documented break, which v3/CHANGELOG.md and v3/.documentation/UPGRADE.md already carry; beside it the connection service registers with container.WithCloser and the backplane clears itself through http.ServerSentEventHub.ClearBackplaneWithContext, both added by the branch, which the release train answers by raising the pin
 
 # ------------------------------------------------------------------------------------------------------
 # source ahead of the pinned tag

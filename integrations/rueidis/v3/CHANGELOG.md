@@ -39,6 +39,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- `token_store.go` — a user identifier that is not valid UTF-8 was stored through json, which writes an invalid byte as the replacement character, so the scripts of `RevokeBefore` and `DeleteByUser`, comparing the stored user with the raw identifier, never matched it and left the user's tokens standing; `Put`, `PutWithTtl`, `RevokeBefore` and `DeleteByUser` now refuse it, naming its length and never its bytes.
+- `module.go` — a `ModuleConfig` whose `Client` and `Connection` named different clients registered the services on the one and closed the other at the teardown; the registration now refuses it, where both clients are of a comparable type.
+- `cache/backend.go` — a malformed key's refusal carried the whole key, a megabyte for a key of a megabyte, in its context and its record; it now carries the first 128 bytes, cut on a rune boundary and closed by a marker, the length beside it.
+- documentation: the README said a token stored with `Put` expires with the token; it is stored with no expiry. It now says so, and says the cache backend's command timeout is opt-in where every sibling door is bounded by default.
 - documentation: the empty-prefix refusal carries the behavioural-change marker instead of the breaking one, the backplane's one-second default carries it, and the refusal of a negative value for two options added in this release no longer does.
 - documentation: the README says that a non-positive `ConnectTimeout` or `CommandTimeout` reads as the default, the one exception to a configuration taken whole.
 - documentation: the GoDoc of `Locker`, `RedisTokenStore` and `cache.BackendService` says that each holds a client and settings fixed at construction and keeps its state in redis, so one value serves concurrent callers without a lock; `cache.BackendService` also names the one state it changes, the backend's atomic closed flag, which `Close` sets and every handle `WithContext` minted reads.
@@ -66,6 +70,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - the per-user token index carries an expiry that outlives the longest-lived token it lists, so revoking by user no longer walks a set that grows without bound. The index was created without one and never pruned, while the tokens it named expired underneath it
 - `DeleteByUser` revokes in bounded batches rather than reading the whole index in one script. A single script over a large index blocks every other client of that Redis for as long as it runs — measured at 2.86 seconds for a million tokens; the longest batch is now 7.7 milliseconds for the same set
 - `provider.go` — transient-error detection recognises a connection abort through explicit markers for both spellings its platforms give it (`software caused connection abort` and `established connection was aborted`), aligning with the bunorm providers
+
+### Security
+
+- `nonce_guard.go` — a refusal of the nonce guard carried the nonce in its context, so a store failure journaled, at error, a second factor's code that was accepted and never burned; the refusal now names the nonce's length and the key prefix, never the nonce.
 
 ## [v3.5.1] - 2026-07-24 - Reconnect Backoff Clamps
 

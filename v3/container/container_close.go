@@ -648,6 +648,8 @@ func (instance *container) closeInternal(closeContext context.Context) error {
         nodeKey   string
         value     any
         waveIndex int
+        /* closer is the one the registration declared WithCloser, nil where none */
+        closer func(closeContext context.Context, value any) error
     }
 
     /* the clock starts before the lock: the plan computed under it spends the same budget */
@@ -682,6 +684,7 @@ func (instance *container) closeInternal(closeContext context.Context) error {
                 nodeKey:   nodeKey,
                 value:     value,
                 waveIndex: closeWaveIndexOf[nodeKey],
+                closer:    instance.closerByNodeKey[nodeKey],
             },
         )
     }
@@ -704,6 +707,7 @@ func (instance *container) closeInternal(closeContext context.Context) error {
                 nodeKey:   fmt.Sprintf("container.replacedInstance[%d]", replacedIndex),
                 value:     replacedValue,
                 waveIndex: replacedWaveIndex + replacedIndex,
+                closer:    instance.replacedBuiltClosers[replacedIndex],
             },
         )
     }
@@ -752,7 +756,7 @@ func (instance *container) closeInternal(closeContext context.Context) error {
             closedValues[candidate.value] = struct{}{}
         }
 
-        closeable, contextCloseable, carriesADoor := closeDoorsOf(candidate.value)
+        closeable, contextCloseable, carriesADoor := closeDoorsOfWithCloser(candidate.value, candidate.closer)
         if false == carriesADoor {
             return nil, nil, false
         }
@@ -1007,6 +1011,25 @@ func closeDoorsOf(value any) (closeable interface{ Close() error }, contextClose
     contextCloseable, _ = value.(containercontract.ContextCloser)
 
     return closeable, contextCloseable, nil != closeable || nil != contextCloseable
+}
+
+/* closeDoorsOfWithCloser is closeDoorsOf for a value whose registration may have declared a closer: the closer is its only door, taking the teardown's budget, and the doors the value carries are not used. */
+func closeDoorsOfWithCloser(value any, closer func(closeContext context.Context, value any) error) (closeable interface{ Close() error }, contextCloseable containercontract.ContextCloser, carriesADoor bool) {
+    if nil != closer {
+        return nil, registeredCloser{value: value, closer: closer}, true
+    }
+
+    return closeDoorsOf(value)
+}
+
+/* registeredCloser carries a value to the closer its registration declared, through the context door the teardown already takes. */
+type registeredCloser struct {
+    value  any
+    closer func(closeContext context.Context, value any) error
+}
+
+func (instance registeredCloser) CloseWithContext(closeContext context.Context) error {
+    return instance.closer(closeContext, instance.value)
 }
 
 /* closeServiceValueWithin closes a service under the teardown's deadline when its value carries the context door, and through Close otherwise. The context door is preferred even past the deadline, so the service can still report what it did not release. */

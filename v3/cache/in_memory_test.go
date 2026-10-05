@@ -1,12 +1,14 @@
 package cache
 
 import (
+    "errors"
     "fmt"
     "math"
     "strings"
     "sync"
     "testing"
     "time"
+    "unicode/utf8"
 
     clockcontract "github.com/precision-soft/melody/v3/clock/contract"
     "github.com/precision-soft/melody/v3/exception"
@@ -1320,5 +1322,61 @@ func TestInMemoryBackend_DecrementRefusesTheMalformedKeyBeforeTheDeltaMagnitude(
 
     if true == strings.Contains(decrementErr.Error(), "delta overflows") {
         t.Fatalf("expected the key refusal ahead of the magnitude one, got: %v", decrementErr)
+    }
+}
+
+func TestValidateKey_ARefusalNamesAnOversizedKeyByABoundedPrefix(t *testing.T) {
+    marker := "...(truncated)"
+
+    for name, key := range map[string]string{
+        "too long":         strings.Repeat("k", 1<<20),
+        "with a space":     strings.Repeat("k", 1<<20) + " ",
+        "with a newline":   strings.Repeat("k", 1<<20) + "\n",
+        "cut inside a rune": strings.Repeat("k", 127) + "é" + strings.Repeat("k", 2000),
+    } {
+        refusal := validateKey(key)
+
+        var refusalException *exception.Error
+        if false == errors.As(refusal, &refusalException) {
+            t.Fatalf("%s: expected an exception, got %v", name, refusal)
+        }
+
+        rendered, _ := refusalException.Context()["key"].(string)
+        if len(rendered) > 128+len(marker) || false == strings.HasSuffix(rendered, marker) || false == utf8.ValidString(rendered) {
+            t.Fatalf("%s: expected the key cut to 128 bytes on a rune boundary with the marker, got %d bytes", name, len(rendered))
+        }
+    }
+
+    if refusal := validateKey(strings.Repeat("k", 2000)); len(strings.Repeat("k", 2000)) != refusal.(*exception.Error).Context()["keyLength"] {
+        t.Fatalf("expected the whole length beside the cut key, got %v", refusal.(*exception.Error).Context())
+    }
+}
+
+func TestInMemoryBackend_CloseRefusesEveryLaterDoor(t *testing.T) {
+    backend := NewInMemoryBackend(10, time.Hour, &cacheTestClock{now: time.Unix(10, 0)})
+    sibling := NewInMemoryBackend(10, time.Hour, &cacheTestClock{now: time.Unix(10, 0)})
+    defer sibling.Close()
+
+    _ = backend.Close()
+
+    for door, call := range map[string]func() error{
+        "Get":            func() error { _, _, err := backend.Get("key"); return err },
+        "Has":            func() error { _, err := backend.Has("key"); return err },
+        "Set":            func() error { return backend.Set("key", []byte("value"), time.Minute) },
+        "Delete":         func() error { return backend.Delete("key") },
+        "Clear":          func() error { return backend.Clear() },
+        "Many":           func() error { _, err := backend.Many([]string{"key"}); return err },
+        "SetMultiple":    func() error { return backend.SetMultiple(map[string][]byte{"key": []byte("value")}, time.Minute) },
+        "DeleteMultiple": func() error { return backend.DeleteMultiple([]string{"key"}) },
+        "Increment":      func() error { _, err := backend.Increment("counter", 1); return err },
+        "Decrement":      func() error { _, err := backend.Decrement("counter", 1); return err },
+    } {
+        if closedErr := call(); nil == closedErr || false == strings.Contains(closedErr.Error(), "cache backend is closed") {
+            t.Fatalf("expected %s refused after Close, got %v", door, closedErr)
+        }
+    }
+
+    if setErr := sibling.Set("key", []byte("value"), time.Minute); nil != setErr {
+        t.Fatalf("expected a sibling backend untouched by the close, got %v", setErr)
     }
 }

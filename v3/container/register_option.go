@@ -1,9 +1,12 @@
 package container
 
 import (
+    "context"
+    "fmt"
     "reflect"
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
+    "github.com/precision-soft/melody/v3/exception"
 )
 
 func WithoutTypeRegistration() containercontract.RegisterOption {
@@ -60,6 +63,32 @@ func WithoutTeardownReflection() containercontract.RegisterOption {
 func WithReplacesContainerService() containercontract.RegisterOption {
     return func(option *containercontract.RegisterOptions) {
         option.ReplacesContainerService = true
+    }
+}
+
+/* WithCloser closes the service through closer in place of the Close and CloseWithContext doors its value carries, handing it the teardown's remaining budget, the way a CloseWithContext door is handed it. It is the door for a value of a type the application does not own, whose own Close cannot be bounded: the closer bounds it, and the service keeps its type for every resolver. The closer replaces the value's doors at the container's teardown, for an instance an override evicted and for a value built after the container closed. A registration whose provider declares a type the closer does not take is refused with ErrCloserTypeMismatch, the scoped registrations refuse the option with ErrScopedCloserUnsupported, and a nil closer panics. */
+func WithCloser[T any](closer func(closeContext context.Context, value T) error) containercontract.RegisterOption {
+    if nil == closer {
+        exception.Panic(exception.NewError("a closer is required", nil, nil))
+    }
+
+    return func(option *containercontract.RegisterOptions) {
+        option.CloserValueType = reflect.TypeFor[T]()
+        option.Closer = func(closeContext context.Context, value any) error {
+            typedValue, takesValue := value.(T)
+            if false == takesValue {
+                return exception.NewError(
+                    "the closer does not take the value it was handed",
+                    map[string]any{
+                        "closerValueType": reflect.TypeFor[T]().String(),
+                        "valueType":       fmt.Sprintf("%T", value),
+                    },
+                    ErrCloserTypeMismatch,
+                )
+            }
+
+            return closer(closeContext, typedValue)
+        }
     }
 }
 

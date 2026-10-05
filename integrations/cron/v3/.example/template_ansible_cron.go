@@ -239,9 +239,9 @@ func refuseInvalidUtf8(entryName string, values []string) error {
     return nil
 }
 
-/* yamlScalar emits value as a double-quoted YAML scalar through Go's %q, whose escapes a YAML double-quoted scalar reads with the same meaning; every printable rune passes through verbatim. */
+/* yamlScalar emits value as a double-quoted YAML scalar through Go's %q, whose escapes a YAML double-quoted scalar reads with the same meaning; every printable rune passes through verbatim. The scalar is tagged !unsafe, Ansible's switch that disables templating, so a value carrying {{ or {% is written as the text it is instead of being evaluated on the managed host. */
 func yamlScalar(value string) string {
-    return fmt.Sprintf("%q", value)
+    return "!unsafe " + fmt.Sprintf("%q", value)
 }
 
 /* fieldOrEveryValue mirrors the wildcard defaulting the builtin dialects apply: an empty schedule field means every value. */

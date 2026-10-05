@@ -7,6 +7,7 @@ import (
     "strings"
     "sync/atomic"
     "time"
+    "unicode/utf8"
 
     cachecontract "github.com/precision-soft/melody/v3/cache/contract"
     "github.com/precision-soft/melody/v3/exception"
@@ -641,7 +642,7 @@ func (instance *Backend) normalizeKey(key string) (string, error) {
         return "", exception.NewError(
             "cache key is empty",
             exceptioncontract.Context{
-                "key": key,
+                "key": renderedCacheKey(key),
             },
             nil,
         )
@@ -651,7 +652,7 @@ func (instance *Backend) normalizeKey(key string) (string, error) {
         return "", exception.NewError(
             "cache key contains spaces",
             exceptioncontract.Context{
-                "key": key,
+                "key": renderedCacheKey(key),
             },
             nil,
         )
@@ -661,7 +662,7 @@ func (instance *Backend) normalizeKey(key string) (string, error) {
         return "", exception.NewError(
             "cache key contains newlines",
             exceptioncontract.Context{
-                "key": key,
+                "key": renderedCacheKey(key),
             },
             nil,
         )
@@ -671,7 +672,7 @@ func (instance *Backend) normalizeKey(key string) (string, error) {
         return "", exception.NewError(
             "cache key is too long",
             exceptioncontract.Context{
-                "key":          key,
+                "key":          renderedCacheKey(key),
                 "maxKeyLength": instance.maxKeyLength,
                 "keyLength":    len(key),
             },
@@ -839,3 +840,19 @@ func (instance *Backend) firstDeleteFailure(deleteErrors map[string]error) error
 }
 
 var _ cachecontract.Backend = (*Backend)(nil)
+
+/* renderedCacheKey bounds a key a refusal carries in its context to its first 128 bytes, cut on a rune boundary and closed by a marker, so a key of a megabyte does not put a megabyte into the record; the refusal of a key past the length limit carries its whole length beside it */
+func renderedCacheKey(key string) string {
+    const renderedCacheKeyLimit = 128
+
+    if renderedCacheKeyLimit >= len(key) {
+        return key
+    }
+
+    cut := renderedCacheKeyLimit
+    for 0 < cut && false == utf8.RuneStart(key[cut]) {
+        cut = cut - 1
+    }
+
+    return key[:cut] + "...(truncated)"
+}

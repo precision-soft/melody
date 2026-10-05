@@ -1,6 +1,8 @@
 package rueidis
 
 import (
+    "fmt"
+    "strings"
     "testing"
     "time"
 
@@ -129,5 +131,27 @@ func TestModule_RegisterServicesForwardsTheLockerOptions(t *testing.T) {
     locker := melodylock.LockerMustFromContainer(serviceContainer).(*Locker)
     if 750*time.Millisecond != locker.callTimeout {
         t.Fatalf("expected the module to hand its locker options to the registered locker, got %v", locker.callTimeout)
+    }
+}
+
+func TestModule_AClientAndAConnectionOverDifferentClientsAreRefusedAtRegistration(t *testing.T) {
+    defer func() {
+        recovered := recover()
+        if nil == recovered || false == strings.Contains(fmt.Sprintf("%v", recovered), "Client and Connection name different clients") {
+            t.Fatalf("expected the mismatched pair refused by name, got %v", recovered)
+        }
+    }()
+
+    NewModule(ModuleConfig{Client: &stubClient{}, Connection: NewConnection(&stubClient{})}).RegisterServices(&spyServiceRegistrar{})
+}
+
+func TestModule_AClientAndTheConnectionThatWrapsItAreAdmitted(t *testing.T) {
+    client := &stubClient{}
+    registrar := &spyServiceRegistrar{}
+
+    NewModule(ModuleConfig{Client: client, Connection: NewConnection(client)}).RegisterServices(registrar)
+
+    if false == containsName(registrar.names, ServiceConnection) || false == containsName(registrar.names, ServiceClient) {
+        t.Fatalf("expected the pair registered, got %v", registrar.names)
     }
 }

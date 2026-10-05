@@ -2,6 +2,7 @@ package rueidis
 
 import (
     "context"
+    "fmt"
     "strconv"
     "strings"
     "testing"
@@ -964,7 +965,7 @@ func TestRedisTokenStore_ClockSkewBoundWidensTheBoundaryItself(t *testing.T) {
 }
 
 func TestRedisTokenStore_PutWithTtlRefusesANonPositiveTtl(t *testing.T) {
-    client := newTokenStoreClient(t)
+    client := &stubClient{}
     store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:nonpositivettl"))
 
     for name, ttl := range map[string]time.Duration{
@@ -973,8 +974,8 @@ func TestRedisTokenStore_PutWithTtlRefusesANonPositiveTtl(t *testing.T) {
     } {
         func() {
             defer func() {
-                if nil == recover() {
-                    t.Fatalf("a %s ttl fell through to the store-forever spelling — the exact inversion of what an elapsed remaining lifetime asked for", name)
+                if recovered := recover(); nil == recovered || false == strings.Contains(fmt.Sprintf("%v", recovered), "ttl must be positive") {
+                    t.Fatalf("a %s ttl fell through to the store-forever spelling — the exact inversion of what an elapsed remaining lifetime asked for, got %v", name, recovered)
                 }
             }()
 
@@ -984,11 +985,11 @@ func TestRedisTokenStore_PutWithTtlRefusesANonPositiveTtl(t *testing.T) {
 }
 
 func TestRedisTokenStore_NegativeMaximumClockSkewIsRefusedNotIgnored(t *testing.T) {
-    client := newTokenStoreClient(t)
+    client := &stubClient{}
 
     defer func() {
-        if nil == recover() {
-            t.Fatal("a negative skew was silently ignored: the operator believes a tighter policy is in force while the default runs")
+        if recovered := recover(); nil == recovered || false == strings.Contains(fmt.Sprintf("%v", recovered), "clock skew may not be negative") {
+            t.Fatalf("a negative skew was silently ignored: the operator believes a tighter policy is in force while the default runs, got %v", recovered)
         }
     }()
 
@@ -996,11 +997,11 @@ func TestRedisTokenStore_NegativeMaximumClockSkewIsRefusedNotIgnored(t *testing.
 }
 
 func TestRedisTokenStore_NegativeEpochRetentionIsRefusedNotIgnored(t *testing.T) {
-    client := newTokenStoreClient(t)
+    client := &stubClient{}
 
     defer func() {
-        if nil == recover() {
-            t.Fatal("a negative retention was silently swapped for the default: a boundary expiring earlier than configured is a revocation bypass")
+        if recovered := recover(); nil == recovered || false == strings.Contains(fmt.Sprintf("%v", recovered), "retention may not be negative") {
+            t.Fatalf("a negative retention was silently swapped for the default: a boundary expiring earlier than configured is a revocation bypass, got %v", recovered)
         }
     }()
 
@@ -1229,4 +1230,37 @@ func TestRedisTokenStore_PurgeExpiredMemberScanIsBoundedByTheCallTimeout(t *test
 
         return nil
     }))
+}
+
+func TestWithRevocationEpochRetention_ZeroKeepsTheDefaultAndAPositiveValueReplacesIt(t *testing.T) {
+    if retention := NewTokenStore(&stubClient{}, WithRevocationEpochRetention(0)).epochRetentionMilliseconds; defaultRevocationEpochRetentionMilliseconds != retention {
+        t.Fatalf("expected a zero retention to keep the default %d, got %d", defaultRevocationEpochRetentionMilliseconds, retention)
+    }
+
+    if retention := NewTokenStore(&stubClient{}, WithRevocationEpochRetention(time.Hour)).epochRetentionMilliseconds; 3600000 != retention {
+        t.Fatalf("expected an hour's retention in milliseconds, got %d", retention)
+    }
+}
+
+func TestRedisTokenStore_ANonUtf8UserIdentifierIsRefusedAtEveryWriteDoor(t *testing.T) {
+    store := NewTokenStore(&stubClient{})
+    invalid := "alice\xff"
+
+    for door, call := range map[string]func(){
+        "Put":          func() { store.Put("token", securitycontract.Claims{UserIdentifier: invalid}) },
+        "PutWithTtl":   func() { store.PutWithTtl("token", securitycontract.Claims{UserIdentifier: invalid}, time.Minute) },
+        "RevokeBefore": func() { store.RevokeBefore(invalid, "", time.Now()) },
+        "DeleteByUser": func() { store.DeleteByUser(invalid) },
+    } {
+        func() {
+            defer func() {
+                recovered := recover()
+                if nil == recovered || false == strings.Contains(fmt.Sprintf("%v", recovered), "must be valid UTF-8") {
+                    t.Fatalf("expected %s to refuse the identifier by name before any round trip, got %v", door, recovered)
+                }
+            }()
+
+            call()
+        }()
+    }
 }

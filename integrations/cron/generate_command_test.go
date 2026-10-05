@@ -7,6 +7,7 @@ import (
     "errors"
     "fmt"
     "os"
+    "os/user"
     "path/filepath"
     "strings"
     "syscall"
@@ -2640,6 +2641,7 @@ func TestExpandEntriesForCommand_EveryEntryCarriesItsOwnSchedule(t *testing.T) {
         "/usr/local/bin/fakeapp",
         "deploy",
         t.TempDir(),
+        &logDirectoryOwnership{},
     )
     if nil != expandErr {
         t.Fatalf("unexpected expand error: %v", expandErr)
@@ -3208,6 +3210,7 @@ func TestGenerateCommand_TheTextBranchNamesWhatItProducedBeforeFailing(t *testin
         []destinationWrite{{Destination: "/etc/cron.d/app", Entries: 3}},
         []string{"/etc/cron.d/app-retired", "/etc/cron.d/app-moved"},
         "",
+        nil,
         errors.New("the sweep stopped part way through"),
     )
 
@@ -3797,5 +3800,178 @@ func TestAtomicWriteFileReplacesADestinationWhoseBasenameFillsTheFilesystemCompo
     entries, readDirErr := os.ReadDir(tempDir)
     if nil != readDirErr || 1 != len(entries) {
         t.Fatalf("expected only the destination in the directory, got %v, %v", entries, readDirErr)
+    }
+}
+
+func TestResolveEntryLogPath_AMultiInstanceNameInADottedSubdirectoryKeepsTheDirectory(t *testing.T) {
+    logsDir := t.TempDir()
+
+    resolved, _, resolveErr := resolveEntryLogPath("reports:daily", &EntryConfig{LogFileName: "cron.d/app.log"}, logsDir, 2, 1, "")
+    if nil != resolveErr {
+        t.Fatalf("resolve: %v", resolveErr)
+    }
+
+    if filepath.Join(logsDir, "cron.d", "app-1.log") != resolved {
+        t.Fatalf("expected the instance suffix on the file's own name, got %q", resolved)
+    }
+}
+
+/* withLogDirectoryOwnership replaces the process and system doors the chown reads, so the pin runs as any user */
+func withLogDirectoryOwnership(t *testing.T, effectiveUserId int, lookup func(string) (*user.User, error)) *[]string {
+    t.Helper()
+
+    chowned := make([]string, 0)
+
+    previousEffectiveUserId, previousLookup, previousChown := logDirectoryEffectiveUserId, logDirectoryLookupUser, logDirectoryChown
+    t.Cleanup(func() {
+        logDirectoryEffectiveUserId, logDirectoryLookupUser, logDirectoryChown = previousEffectiveUserId, previousLookup, previousChown
+    })
+
+    logDirectoryEffectiveUserId = func() int { return effectiveUserId }
+    logDirectoryLookupUser = lookup
+    logDirectoryChown = func(name string, userId int, groupId int) error {
+        chowned = append(chowned, fmt.Sprintf("%s %d:%d", name, userId, groupId))
+
+        return nil
+    }
+
+    return &chowned
+}
+
+func TestResolveEntryLogPath_TheSubdirectoriesCreatedForAnEntryAreHandedToItsUserWhenRunningAsRoot(t *testing.T) {
+    logsDir := t.TempDir()
+    chowned := withLogDirectoryOwnership(t, 0, func(name string) (*user.User, error) {
+        return &user.User{Username: name, Uid: "1234", Gid: "5678"}, nil
+    })
+
+    if _, _, resolveErr := resolveEntryLogPath("reports:daily", &EntryConfig{LogFileName: "a/b/app.log"}, logsDir, 1, 1, "deploy"); nil != resolveErr {
+        t.Fatalf("resolve: %v", resolveErr)
+    }
+
+    expected := []string{filepath.Join(logsDir, "a") + " 1234:5678", filepath.Join(logsDir, "a", "b") + " 1234:5678"}
+    if fmt.Sprint(expected) != fmt.Sprint(*chowned) {
+        t.Fatalf("expected the created directories handed to the entry's user, got %v", *chowned)
+    }
+}
+
+func TestResolveEntryLogPath_AnEntryUserTheHostDoesNotKnowLeavesTheDirectoryRootsAndAnswersIt(t *testing.T) {
+    logsDir := t.TempDir()
+    chowned := withLogDirectoryOwnership(t, 0, func(name string) (*user.User, error) {
+        return nil, user.UnknownUserError(name)
+    })
+
+    resolved, unownedDirectory, resolveErr := resolveEntryLogPath("reports:daily", &EntryConfig{LogFileName: "a/b/app.log"}, logsDir, 1, 1, "ghost")
+    if nil != resolveErr {
+        t.Fatalf("expected the generation to continue over a user the host does not know, got %v", resolveErr)
+    }
+
+    if filepath.Join(logsDir, "a", "b", "app.log") != resolved || filepath.Join(logsDir, "a") != unownedDirectory || 0 != len(*chowned) {
+        t.Fatalf("expected the shallowest created directory answered and nothing handed away, got %q %q %v", resolved, unownedDirectory, *chowned)
+    }
+}
+
+func TestResolveEntryLogPath_NothingIsHandedAwayWhenNotRootOrWithoutAUserOrWhenNothingWasCreated(t *testing.T) {
+    logsDir := t.TempDir()
+    chowned := withLogDirectoryOwnership(t, 1000, func(name string) (*user.User, error) {
+        return &user.User{Username: name, Uid: "1234", Gid: "5678"}, nil
+    })
+
+    if _, _, resolveErr := resolveEntryLogPath("reports:daily", &EntryConfig{LogFileName: "a/app.log"}, logsDir, 1, 1, "deploy"); nil != resolveErr {
+        t.Fatalf("resolve: %v", resolveErr)
+    }
+
+    logDirectoryEffectiveUserId = func() int { return 0 }
+
+    if _, _, resolveErr := resolveEntryLogPath("reports:daily", &EntryConfig{LogFileName: "b/app.log"}, logsDir, 1, 1, ""); nil != resolveErr {
+        t.Fatalf("resolve: %v", resolveErr)
+    }
+
+    if _, _, resolveErr := resolveEntryLogPath("reports:daily", &EntryConfig{LogFileName: "a/app.log"}, logsDir, 1, 1, "deploy"); nil != resolveErr {
+        t.Fatalf("resolve: %v", resolveErr)
+    }
+
+    if 0 != len(*chowned) {
+        t.Fatalf("expected nothing handed away, got %v", *chowned)
+    }
+}
+
+func TestRunPruneLeavesAYoungTemporaryFileAloneAndEmptiesAnAgedOne(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+
+    args := []string{
+        "--out", outputPath,
+        "--logs-dir", filepath.Join(tempDir, "logs"),
+        "--binary", "/usr/local/bin/fakeapp",
+        "--user", "deploy",
+    }
+
+    commands := []clicontract.Command{
+        newFakeCommandWithConfig("reports:daily", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}}),
+    }
+
+    if _, firstErr := runGenerateCommand(t, commands, args); nil != firstErr {
+        t.Fatalf("the first generation failed: %v", firstErr)
+    }
+
+    generated, readErr := os.ReadFile(outputPath)
+    if nil != readErr {
+        t.Fatalf("read: %v", readErr)
+    }
+
+    youngPath := filepath.Join(tempDir, ".melody-cron-young.tmp")
+    agedPath := filepath.Join(tempDir, ".melody-cron-aged.tmp")
+
+    for _, path := range []string{youngPath, agedPath} {
+        if writeErr := os.WriteFile(path, generated, 0o644); nil != writeErr {
+            t.Fatalf("write %s: %v", path, writeErr)
+        }
+    }
+
+    aged := time.Now().Add(-10 * time.Minute)
+    if chtimesErr := os.Chtimes(agedPath, aged, aged); nil != chtimesErr {
+        t.Fatalf("chtimes: %v", chtimesErr)
+    }
+
+    if _, secondErr := runGenerateCommand(t, commands, append(append([]string{}, args...), "--prune")); nil != secondErr {
+        t.Fatalf("the pruning generation failed: %v", secondErr)
+    }
+
+    young, _ := os.ReadFile(youngPath)
+    if false == strings.Contains(string(young), "reports:daily") {
+        t.Fatalf("expected a young temporary file, which a run in flight may own, left untouched, got: %s", young)
+    }
+
+    agedContent, _ := os.ReadFile(agedPath)
+    if true == strings.Contains(string(agedContent), "reports:daily") {
+        t.Fatalf("expected an aged temporary file emptied as a leftover, got: %s", agedContent)
+    }
+}
+
+func TestRunWarnsOfALogDirectoryLeftRootsForAUserTheHostDoesNotKnow(t *testing.T) {
+    withLogDirectoryOwnership(t, 0, func(name string) (*user.User, error) {
+        return nil, user.UnknownUserError(name)
+    })
+
+    tempDir := t.TempDir()
+
+    stdout, runErr := runGenerateCommand(
+        t,
+        []clicontract.Command{
+            newFakeCommandWithConfig("reports:daily", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}, LogFileName: "reports/daily.log"}),
+        },
+        []string{
+            "--out", filepath.Join(tempDir, "crontab"),
+            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--binary", "/usr/local/bin/fakeapp",
+            "--user", "ghost",
+        },
+    )
+    if nil != runErr {
+        t.Fatalf("expected the generation to continue, got %v", runErr)
+    }
+
+    if false == strings.Contains(stdout, "stays owned by root") || false == strings.Contains(stdout, filepath.Join(tempDir, "logs", "reports")) {
+        t.Fatalf("expected the warning naming the directory, got %q", stdout)
     }
 }

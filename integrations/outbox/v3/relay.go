@@ -5,6 +5,7 @@ import (
     "errors"
     "fmt"
     "math"
+    "runtime/debug"
     "strconv"
     "strings"
     "time"
@@ -14,6 +15,7 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     lockcontract "github.com/precision-soft/melody/v3/lock/contract"
     "github.com/precision-soft/melody/v3/logging"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     "github.com/precision-soft/melody/v3/messagebus"
     messagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
     "github.com/precision-soft/melody/v3/runtime"
@@ -208,11 +210,20 @@ func (instance *Relay) batchFailureOutcome(deliverErr error, refreshErr error) e
 
 /* runContained runs one step of a delivery, the codec's decode, the transport's send or the logger's record of a contained panic, and hands back the panic it raised as an error, so the row is charged for what its collaborator did instead of the relay dying on it at every claim. A panic value that is not an error is rendered into the message, which last_error and the log record carry. */
 func runContained(step func()) (recoveredErr error) {
+    recoveredErr, _ = runContainedWithStack(step)
+
+    return recoveredErr
+}
+
+/* runContainedWithStack is runContained answering, beside the panic, the stack it was raised on, taken inside the recover where the panicking frames are still on it */
+func runContainedWithStack(step func()) (recoveredErr error, panicStack string) {
     defer func() {
         recovered := recover()
         if nil == recovered {
             return
         }
+
+        panicStack = string(debug.Stack())
 
         recoveredErr = exception.PanicCause(recovered)
         if nil == recoveredErr {
@@ -222,11 +233,11 @@ func runContained(step func()) (recoveredErr error) {
 
     step()
 
-    return nil
+    return nil, ""
 }
 
-/* reportContainedPanic writes a contained panic to the runtime's logger, under the same containment, since the logger is one of the collaborators that can panic. The row's last_error carries the same cause, and RunOnce reports nothing for a row it resolved, so this record is the panic's only trace in the process log. */
-func (instance *Relay) reportContainedPanic(runtimeInstance runtimecontract.Runtime, id int64, phase string, panicErr error) {
+/* reportContainedPanic writes a contained panic to the runtime's logger with the stack it was raised on, which stays out of last_error, under the same containment, since the logger is one of the collaborators that can panic. The row's last_error carries the same cause, and RunOnce reports nothing for a row it resolved, so this record is the panic's only trace in the process log. */
+func (instance *Relay) reportContainedPanic(runtimeInstance runtimecontract.Runtime, id int64, phase string, panicErr error, panicStack string) {
     logger := logging.LoggerFromRuntime(runtimeInstance)
     if nil == logger {
         return
@@ -238,8 +249,9 @@ func (instance *Relay) reportContainedPanic(runtimeInstance runtimecontract.Runt
             exception.LogContext(
                 panicErr,
                 exceptioncontract.Context{
-                    "id":    id,
-                    "phase": phase,
+                    "id":         id,
+                    "phase":      phase,
+                    "panicStack": panicStack,
                 },
             ),
         )
@@ -263,21 +275,21 @@ func (instance *Relay) deliver(runtimeInstance runtimecontract.Runtime, pending 
 
     if deliveryAttempts > instance.config.MaxDeliveryAttempts {
         /* the row has been delivered more times than the delivery cap without ever resolving. A row that merely fails to send is dead-lettered by the send-failure path at MaxAttempts, so exceeding the (larger) delivery cap means it keeps crashing or hanging the relay between the recorded attempt and resolve — its send-failure attempts never advance. Dead-letter it as poison so it cannot re-surface forever. */
-        return false, instance.config.Repository.MarkDead(ctx, pending.Id, pending.Attempts, "exceeded max delivery attempts (poison crashing the relay between claim and resolve)", pending.ClaimToken)
+        return false, instance.markDead(runtimeInstance, pending, pending.Attempts, "exceeded max delivery attempts (poison crashing the relay between claim and resolve)")
     }
 
     var message any
     var decodeErr error
-    decodePanic := runContained(func() {
+    decodePanic, decodePanicStack := runContainedWithStack(func() {
         message, decodeErr = instance.config.Codec.Decode(pending.TypeName, pending.Payload)
     })
     if nil != decodePanic {
-        instance.reportContainedPanic(runtimeInstance, pending.Id, "decode", decodePanic)
+        instance.reportContainedPanic(runtimeInstance, pending.Id, "decode", decodePanic, decodePanicStack)
 
         storedError := storedLastError("panic: decode: ", decodePanic)
 
         return false, resolutionWriteOutcome(
-            instance.config.Repository.MarkDead(ctx, pending.Id, pending.Attempts, storedError, pending.ClaimToken),
+            instance.markDead(runtimeInstance, pending, pending.Attempts, storedError),
             storedError,
         )
     }
@@ -287,7 +299,7 @@ func (instance *Relay) deliver(runtimeInstance runtimecontract.Runtime, pending 
         storedError := storedLastError("decode: ", decodeErr)
 
         return false, resolutionWriteOutcome(
-            instance.config.Repository.MarkDead(ctx, pending.Id, pending.Attempts, storedError, pending.ClaimToken),
+            instance.markDead(runtimeInstance, pending, pending.Attempts, storedError),
             storedError,
         )
     }
@@ -296,20 +308,22 @@ func (instance *Relay) deliver(runtimeInstance runtimecontract.Runtime, pending 
     envelope := messagebus.NewEnvelope(message, messagebus.MessageIdStamp{MessageId: outboxMessageId(pending.Id)})
 
     var sendErr error
-    sendPanic := runContained(func() {
+    sendPanic, sendPanicStack := runContainedWithStack(func() {
         sendErr = instance.config.Transport.Send(runtimeInstance, envelope)
     })
 
     storedErrorPrefix := ""
     if nil != sendPanic {
-        instance.reportContainedPanic(runtimeInstance, pending.Id, "send", sendPanic)
+        instance.reportContainedPanic(runtimeInstance, pending.Id, "send", sendPanic, sendPanicStack)
 
         sendErr = sendPanic
         storedErrorPrefix = "panic: "
     }
 
     if nil == sendErr {
-        return true, instance.config.Repository.MarkSent(ctx, pending.Id, pending.ClaimToken)
+        return true, instance.resolve(ctx, func(resolutionContext context.Context) error {
+            return instance.config.Repository.MarkSent(resolutionContext, pending.Id, pending.ClaimToken)
+        })
     }
 
     storedError := storedLastError(storedErrorPrefix, sendErr)
@@ -317,7 +331,7 @@ func (instance *Relay) deliver(runtimeInstance runtimecontract.Runtime, pending 
     attempts := pending.Attempts + 1
     if attempts >= instance.config.MaxAttempts {
         return false, resolutionWriteOutcome(
-            instance.config.Repository.MarkDead(ctx, pending.Id, attempts, storedError, pending.ClaimToken),
+            instance.markDead(runtimeInstance, pending, attempts, storedError),
             storedError,
         )
     }
@@ -325,9 +339,51 @@ func (instance *Relay) deliver(runtimeInstance runtimecontract.Runtime, pending 
     availableAt := time.Now().Add(instance.nextBackoff(attempts))
 
     return false, resolutionWriteOutcome(
-        instance.config.Repository.Reschedule(ctx, pending.Id, attempts, availableAt, storedError, pending.ClaimToken),
+        instance.resolve(ctx, func(resolutionContext context.Context) error {
+            return instance.config.Repository.Reschedule(resolutionContext, pending.Id, attempts, availableAt, storedError, pending.ClaimToken)
+        }),
         storedError,
     )
+}
+
+/* resolutionTimeout bounds one resolution write, which runs on a context of its own */
+const resolutionTimeout = 5 * time.Second
+
+/* resolve runs a resolution write — sent, rescheduled or dead — on a context the run's cancellation does not reach, bounded by resolutionTimeout: a SIGTERM landing between a send and its mark would otherwise fail the mark, and the row the transport already published would come back after the visibility timeout and publish again. */
+func (instance *Relay) resolve(ctx context.Context, write func(resolutionContext context.Context) error) error {
+    resolutionContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), resolutionTimeout)
+    defer cancel()
+
+    return write(resolutionContext)
+}
+
+/* markDead dead-letters a row through resolve and, once it is marked, writes one WARNING naming it with the stored error: the row left the at-least-once path, and last_error is otherwise its only trace. The record runs contained, since the logger is the application's collaborator. */
+func (instance *Relay) markDead(runtimeInstance runtimecontract.Runtime, pending Pending, attempts int, storedError string) error {
+    markErr := instance.resolve(runtimeInstance.Context(), func(resolutionContext context.Context) error {
+        return instance.config.Repository.MarkDead(resolutionContext, pending.Id, attempts, storedError, pending.ClaimToken)
+    })
+    if nil != markErr {
+        return markErr
+    }
+
+    logger := logging.LoggerFromRuntime(runtimeInstance)
+    if nil == logger {
+        return nil
+    }
+
+    _ = runContained(func() {
+        logger.Warning(
+            "outbox message dead-lettered",
+            loggingcontract.Context{
+                "id":        pending.Id,
+                "type":      pending.TypeName,
+                "attempts":  attempts,
+                "lastError": storedError,
+            },
+        )
+    })
+
+    return nil
 }
 
 /* maximumStoredErrorLength bounds what goes into the row's last_error column. The narrowest schema the store's own EnsureSchema can produce maps the field to a VARCHAR whose default length is 255, and a resolution write refused for an over-long diagnostic would lose the resolution itself — the row would silently re-surface after the visibility timeout with nothing recorded. */

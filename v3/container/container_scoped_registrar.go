@@ -103,6 +103,17 @@ func (instance *container) registerScoped(
         )
     }
 
+    /* a scope closes what it built through the doors the values carry, so a closer is refused */
+    if nil != registerOption.Closer {
+        return exception.NewError(
+            "a scoped registration cannot declare a closer",
+            map[string]any{
+                "serviceName": serviceName,
+            },
+            ErrScopedCloserUnsupported,
+        )
+    }
+
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 

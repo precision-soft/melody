@@ -5,6 +5,7 @@ import (
     "reflect"
     "sync"
     "sync/atomic"
+    "time"
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
@@ -35,6 +36,8 @@ type ServerSentEventHub struct {
 
     /* publishes past the closed check and not yet returned; Shutdown and the clear path of SetBackplane wait on it before the backplane is closed. Incremented under the read lock, so neither can start between the check and the increment. */
     publishesInFlight sync.WaitGroup
+    /* backplaneClearTimeout bounds the wait of a SetBackplane(nil) for the publishes holding the backplane it clears; zero is defaultServerSentEventBackplaneClearTimeout */
+    backplaneClearTimeout time.Duration
 
     /* the same count in a form that can be read without scheduling a waiter, raised and lowered where the group is; once the closed flag is set it can only fall */
     publishesOutstanding atomic.Int64
@@ -122,6 +125,9 @@ func (instance *ServerSentEventHub) Subscribe(topic string, bufferSize int) *Ser
 
 const defaultServerSentEventBufferSize = 16
 
+/* defaultServerSentEventBackplaneClearTimeout bounds the wait of a SetBackplane(nil) for the publishes holding the backplane it clears */
+const defaultServerSentEventBackplaneClearTimeout = 30 * time.Second
+
 func (instance *ServerSentEventHub) Unsubscribe(subscriber *ServerSentEventSubscriber) {
     if nil == subscriber {
         return
@@ -147,15 +153,25 @@ func (instance *ServerSentEventHub) Unsubscribe(subscriber *ServerSentEventSubsc
     }
 }
 
-/* SetBackplane installs the cross-node fan-out, or clears it when handed nil or a typed nil. Installing over a live backplane, or into a hub that has shut down, is refused: clear first, close what was taken out, then install. Clearing is always allowed, since a shipped backplane's Close clears itself from the hub, and it waits for the publishes holding the backplane, so the caller closes it with nothing inside. Clearing from inside the backplane's own Publish waits on itself. */
+/* SetBackplane installs the cross-node fan-out, or clears it when handed nil or a typed nil. Installing over a live backplane, or into a hub that has shut down, is refused: clear first, close what was taken out, then install. Clearing is always allowed, since a shipped backplane's Close clears itself from the hub, and it waits for the publishes holding the backplane, so the caller closes it with nothing inside; the wait is bounded by the hub's clear timeout, thirty seconds, past which a warning names the publishes still inside and the clear returns, the backplane's own Publish being what holds them. ClearBackplaneWithContext is the clear under a deadline of the caller's. Clearing from inside the backplane's own Publish waits on itself until that bound. */
 func (instance *ServerSentEventHub) SetBackplane(backplane ServerSentEventBackplane) {
     if true == internal.IsNilInterface(backplane) {
-        instance.mutex.Lock()
-        instance.backplane = nil
-        instance.mutex.Unlock()
+        clearContext, cancel := context.WithTimeout(context.Background(), positiveDurationOrDefault(instance.backplaneClearTimeout, defaultServerSentEventBackplaneClearTimeout))
+        defer cancel()
 
-        /* the clear waits, outside the lock, for the publishes that read the reference before it, so nothing is inside the backplane the caller is about to close */
-        instance.publishesInFlight.Wait()
+        if clearErr := instance.ClearBackplaneWithContext(clearContext); nil != clearErr {
+            instance.mutex.RLock()
+            logger := instance.logger
+            instance.mutex.RUnlock()
+
+            logServerSentEventHubWarning(
+                logger,
+                "server sent event hub cleared its backplane while publishes were still inside it; the clear stopped waiting for them at its timeout",
+                loggingcontract.Context{
+                    "reason": "backplane clear",
+                },
+            )
+        }
 
         return
     }
@@ -180,6 +196,39 @@ func (instance *ServerSentEventHub) SetBackplane(backplane ServerSentEventBackpl
     }
 
     instance.backplane = backplane
+}
+
+/* ClearBackplaneWithContext clears the backplane and waits, under the caller's deadline, for the publishes that read it before the clear, so the caller closes it with nothing inside. A wait the deadline ended answers an error carrying the context's: publishes are still inside the backplane, which takes no context, and closing it under them is the caller's decision. */
+func (instance *ServerSentEventHub) ClearBackplaneWithContext(clearContext context.Context) error {
+    instance.mutex.Lock()
+    instance.backplane = nil
+    instance.mutex.Unlock()
+
+    /* with no publish past the closed check nothing is waited for, since a spent deadline would otherwise win the select against a waiter not yet scheduled */
+    if 0 == instance.publishesOutstanding.Load() {
+        return nil
+    }
+
+    if true == awaitPublishesInFlight(clearContext, &instance.publishesInFlight) {
+        return nil
+    }
+
+    return exception.NewError(
+        "server sent event hub stopped waiting for the publishes holding the backplane it cleared when the deadline passed",
+        exceptioncontract.Context{
+            "reason": "backplane clear",
+        },
+        clearContext.Err(),
+    )
+}
+
+/* positiveDurationOrDefault reads a non-positive duration as the default. */
+func positiveDurationOrDefault(value time.Duration, fallback time.Duration) time.Duration {
+    if 0 >= value {
+        return fallback
+    }
+
+    return value
 }
 
 /* sameBackplane compares identity only of values that carry one, since == panics on an incomparable dynamic type; a value with no identity is never the same, so re-installing it is refused. */

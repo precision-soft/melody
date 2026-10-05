@@ -975,3 +975,142 @@ func TestRelay_ANonErrorPanicValueIsRecordedInLastError(t *testing.T) {
         t.Fatalf("expected the panic value in last_error, got %q", repository.calls[0].lastError)
     }
 }
+
+func TestRelay_AContainedPanicRecordCarriesTheStack(t *testing.T) {
+    logger := &recordingLogger{}
+    repository := &fakeRepository{due: []Pending{{Id: 1, TypeName: "string", Payload: []byte("a")}}}
+
+    relay := NewRelay(RelayConfig{
+        Repository: repository,
+        Transport:  &fakeTransport{},
+        Codec:      &panickingCodec{payload: "a", value: errors.New("decode boom")},
+    })
+
+    if _, runErr := runOnceContained(t, relay, relayTestRuntimeWithLogger(logger)); nil != runErr {
+        t.Fatalf("run once: %v", runErr)
+    }
+
+    records := logger.errorRecords()
+    if 1 != len(records) {
+        t.Fatalf("expected one record of the contained panic, got %v", records)
+    }
+
+    panicStack, _ := records[0].logContext["panicStack"].(string)
+    if false == strings.Contains(panicStack, "panickingCodec") {
+        t.Fatalf("expected the record to carry the stack the panic was raised on, got %q", panicStack)
+    }
+
+    if true == strings.Contains(repository.calls[0].lastError, "goroutine") {
+        t.Fatalf("expected the stack kept out of last_error, got %q", repository.calls[0].lastError)
+    }
+}
+
+/* contextRecordingRepository records whether the context a resolution write runs on is done when it runs */
+type contextRecordingRepository struct {
+    fakeRepository
+    markSentContextErr error
+}
+
+func (instance *contextRecordingRepository) MarkSent(ctx context.Context, id int64, claimToken string) error {
+    instance.markSentContextErr = ctx.Err()
+
+    return instance.fakeRepository.MarkSent(ctx, id, claimToken)
+}
+
+/* cancellingTransport cancels the run context as it sends, a SIGTERM landing between the send and its mark */
+type cancellingTransport struct {
+    fakeTransport
+    cancel context.CancelFunc
+}
+
+func (instance *cancellingTransport) Send(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope) error {
+    instance.cancel()
+
+    return instance.fakeTransport.Send(runtimeInstance, envelope)
+}
+
+func TestRelay_ASuccessfulSendIsMarkedSentThoughTheRunContextWasCancelled(t *testing.T) {
+    runContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(runContext, serviceContainer.NewScope(), serviceContainer)
+
+    repository := &contextRecordingRepository{fakeRepository: fakeRepository{due: []Pending{{Id: 1, TypeName: "string", Payload: []byte("a")}}}}
+
+    relay := NewRelay(RelayConfig{
+        Repository: repository,
+        Transport:  &cancellingTransport{cancel: cancel},
+        Codec:      &stringCodec{},
+    })
+
+    _, _ = relay.RunOnce(runtimeInstance)
+
+    if 1 != len(repository.calls) || "sent" != repository.calls[0].kind {
+        t.Fatalf("expected the row marked sent, got %v", repository.calls)
+    }
+
+    if nil != repository.markSentContextErr {
+        t.Fatalf("expected the mark written on a context the run's cancellation does not reach, got %v", repository.markSentContextErr)
+    }
+}
+
+func TestRelay_ADeadLetterIsJournaledOnceWithItsStoredError(t *testing.T) {
+    logger := &recordingLogger{}
+    repository := &fakeRepository{due: []Pending{{Id: 7, TypeName: "string", Payload: []byte("a"), Attempts: 3}}}
+
+    relay := NewRelay(RelayConfig{
+        Repository: repository,
+        Transport:  &fakeTransport{},
+        Codec:      &stringCodec{failDecode: true},
+    })
+
+    if _, runErr := relay.RunOnce(relayTestRuntimeWithLogger(logger)); nil != runErr {
+        t.Fatalf("run once: %v", runErr)
+    }
+
+    warnings := make([]logRecord, 0)
+    for _, record := range logger.records {
+        if loggingcontract.LevelWarning == record.level {
+            warnings = append(warnings, record)
+        }
+    }
+
+    if 1 != len(warnings) || "outbox message dead-lettered" != warnings[0].message {
+        t.Fatalf("expected one dead-letter warning, got %v", warnings)
+    }
+
+    if int64(7) != warnings[0].logContext["id"] || "string" != warnings[0].logContext["type"] || 3 != warnings[0].logContext["attempts"] || false == strings.Contains(fmt.Sprintf("%v", warnings[0].logContext["lastError"]), "undecodable") {
+        t.Fatalf("expected the warning to name the row and its stored error, got %v", warnings[0].logContext)
+    }
+}
+
+/* panickingErrorLogger panics on every error record, as an application's logger can */
+type panickingErrorLogger struct {
+    recordingLogger
+}
+
+func (instance *panickingErrorLogger) Error(message string, logContext loggingcontract.Context) {
+    panic("the logger panicked")
+}
+
+func TestRelay_AContainedPanicWhoseLoggerPanicsIsStillDeadLetteredAndTheBatchContinues(t *testing.T) {
+    repository := &fakeRepository{due: []Pending{
+        {Id: 1, TypeName: "string", Payload: []byte("a")},
+        {Id: 2, TypeName: "string", Payload: []byte("b")},
+    }}
+
+    relay := NewRelay(RelayConfig{
+        Repository: repository,
+        Transport:  &fakeTransport{},
+        Codec:      &panickingCodec{payload: "a", value: errors.New("decode boom")},
+    })
+
+    if _, runErr := runOnceContained(t, relay, relayTestRuntimeWithLogger(&panickingErrorLogger{})); nil != runErr {
+        t.Fatalf("run once: %v", runErr)
+    }
+
+    if 2 != len(repository.calls) || "dead" != repository.calls[0].kind || "sent" != repository.calls[1].kind {
+        t.Fatalf("expected the panicking row dead-lettered and the batch to go on, got %v", repository.calls)
+    }
+}

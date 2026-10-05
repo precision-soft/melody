@@ -5,6 +5,7 @@ import (
     "database/sql"
     "math"
     "os"
+    "strings"
     "testing"
     "time"
 
@@ -327,4 +328,35 @@ func TestStore_ClaimDueMessagesRefusesANonPositiveLimitBeforeAnyQuery(t *testing
     if 0 != exception.LogContext(claimErr)["limit"] {
         t.Fatalf("expected the refused limit in the context, got %v", exception.LogContext(claimErr))
     }
+}
+
+/* claimQueryHook keeps the text of every query the store composes */
+type claimQueryHook struct {
+    queries []string
+}
+
+func (instance *claimQueryHook) BeforeQuery(ctx context.Context, event *bun.QueryEvent) context.Context {
+    return ctx
+}
+
+func (instance *claimQueryHook) AfterQuery(ctx context.Context, event *bun.QueryEvent) {
+    instance.queries = append(instance.queries, event.Query)
+}
+
+func TestStore_AnOversizedClaimLimitIsCappedInTheComposedQuery(t *testing.T) {
+    store := outboxTestStore(t)
+    hook := &claimQueryHook{}
+    store.database.AddQueryHook(hook)
+
+    if _, claimErr := store.ClaimDueMessages(context.Background(), math.MaxInt32, time.Minute); nil != claimErr {
+        t.Fatalf("claim: %v", claimErr)
+    }
+
+    for _, query := range hook.queries {
+        if true == strings.Contains(query, "LIMIT 100000") {
+            return
+        }
+    }
+
+    t.Fatalf("expected the composed claim capped at LIMIT 100000, got %v", hook.queries)
 }

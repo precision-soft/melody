@@ -1,6 +1,7 @@
 package amqp
 
 import (
+    "context"
     "errors"
     "fmt"
     neturl "net/url"
@@ -172,6 +173,74 @@ func TestRedactDsn_KeepsWellFormedDsnWithoutThePassword(t *testing.T) {
     }
 }
 
+func TestRedactDsn_APasswordHoldingAReservedCharacterYieldsThePlaceholder(t *testing.T) {
+    for dsn, expected := range map[string]string{
+        "amqp://app:pa/ss@broker:5672/vh":     redactedDsnPlaceholder,
+        "amqp://app:pa?ss@broker:5672/vh":     redactedDsnPlaceholder,
+        "amqp://app:pa#ss@broker:5672/vh":     redactedDsnPlaceholder,
+        "amqp://localhost:1/Pass@broker/":     redactedDsnPlaceholder,
+        "amqp://localhost:#secret@broker/":    redactedDsnPlaceholder,
+        "amqp://app:pa%2Fss@broker:5672/vh":   "amqp://app@broker:5672/vh",
+    } {
+        if redacted := redactDsn(dsn); expected != redacted {
+            t.Fatalf("expected %q to redact to %q, got %q", dsn, expected, redacted)
+        }
+    }
+}
+
+func TestRedactDialError_AParseCauseNeverCarriesTheInput(t *testing.T) {
+    for _, dsn := range []string{
+        "amqp://app:pa/ss@broker:5672/vh",
+        "amqp://app:pa?ss@broker:5672/vh",
+        "amqp://app:pa#ss@broker:5672/vh",
+    } {
+        _, rawErr := amqp091.DialConfig(dsn, amqp091.Config{})
+        if nil == rawErr || false == strings.Contains(rawErr.Error(), ":pa") {
+            t.Fatalf("precondition: expected the raw dial error of %q to quote the password head, got %v", dsn, rawErr)
+        }
+
+        redacted := redactDialError(rawErr)
+
+        var urlErr *neturl.Error
+        if false == errors.As(redacted, &urlErr) || "invalid dsn" != urlErr.Err.Error() {
+            t.Fatalf("expected the cause of %q replaced by invalid dsn, got %v", dsn, redacted)
+        }
+
+        if true == strings.Contains(redacted.Error(), ":pa") {
+            t.Fatalf("the password head of %q leaked: %q", dsn, redacted.Error())
+        }
+    }
+}
+
+func TestProvider_OpenRecordsNeitherTheDsnNorItsHeadOnAMisparsedPassword(t *testing.T) {
+    provider := NewProvider()
+
+    for dsn, secret := range map[string]string{
+        "amqp://localhost:1/Pass@broker/":  "Pass",
+        "amqp://localhost:#secret@broker/": "secret",
+    } {
+        _, openErr := provider.Open(dsn)
+        if nil == openErr {
+            t.Fatalf("expected Open of %q to fail", dsn)
+        }
+
+        var openException *exception.Error
+        if false == errors.As(openErr, &openException) || redactedDsnPlaceholder != openException.Context()["dsn"] {
+            t.Fatalf("expected the dsn of %q recorded as the placeholder, got %v", dsn, openErr)
+        }
+
+        if true == strings.Contains(openErr.Error(), secret) {
+            t.Fatalf("the password of %q leaked through the error: %q", dsn, openErr.Error())
+        }
+
+        for key, value := range exception.LogContext(openErr) {
+            if true == strings.Contains(fmt.Sprintf("%v", value), secret) {
+                t.Fatalf("the password of %q leaked through log field %q: %v", dsn, key, value)
+            }
+        }
+    }
+}
+
 /* the close is asserted on the deadline it arms on the socket, not on its return: the return is bounded by closeJoinTimeout, thirty seconds, while a plain close arms nothing and never returns over a wedged socket */
 func TestProvider_CloseArmsADeadlineOnAWedgedConnection(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
@@ -182,4 +251,39 @@ func TestProvider_CloseArmsADeadlineOnAWedgedConnection(t *testing.T) {
     go func() { _ = NewProvider().Close(connection) }()
 
     awaitArmedDeadline(t, gated)
+}
+
+func TestProvider_CloseWithContextReturnsWithinTheCallersDeadlineWhileTheClientShutdownIsStalled(t *testing.T) {
+    wedge := wedgeAPublishOnAFakeBroker(t)
+    wedge.beginClientShutdown(t)
+
+    deadline := 300 * time.Millisecond
+    closeContext, cancel := context.WithTimeout(context.Background(), deadline)
+    defer cancel()
+
+    closed := make(chan error, 1)
+    go func() {
+        closed <- NewProvider().CloseWithContext(closeContext, wedge.connection)
+    }()
+
+    select {
+    case closeErr := <-closed:
+        if nil == closeErr || false == strings.Contains(closeErr.Error(), "did not return within the bound") {
+            t.Fatalf("expected the close that did not return reported as such, got %v", closeErr)
+        }
+    case <-time.After(deadline + 2*time.Second):
+        t.Fatalf("the close did not return within the deadline %s plus two seconds; it is held behind the client's stalled shutdown", deadline)
+    }
+}
+
+func TestProvider_CloseWithContextAnswersTheClientsOwnTimeoutWhenNoShutdownIsInProgress(t *testing.T) {
+    fake := dialFakeBroker(t)
+
+    closeContext, cancel := context.WithTimeout(context.Background(), time.Second)
+    defer cancel()
+
+    closeErr := NewProvider().CloseWithContext(closeContext, fake.connection)
+    if nil == closeErr || true == strings.Contains(closeErr.Error(), "did not return within the bound") {
+        t.Fatalf("expected the client's own answer to an unanswered close, got %v", closeErr)
+    }
 }

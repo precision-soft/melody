@@ -15,6 +15,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- `handler.go` — a connection refused before the upgrade answered a 500 and an error record whatever the cause; a hub shutting down now answers 503 and an empty resolved topic 400, both as the deliberate refusals they are.
+- `handler.go` — the record of a panicking `OnMessage` carried the panic and not the stack it was raised on; it now carries `panicStack`.
+- `handler.go` — a callback that outlived the close grace and then panicked resolved its logger against the request scope the kernel had closed, and the record was lost; the connection's logger is now resolved at the upgrade, while the scope is alive, and an error record with no logger at all goes to the emergency logger.
 - documentation: the refusal of a zero `IdleTimeout` carries the behavioural-change marker instead of the breaking one, since no compile notices it.
 - `handler.go` — `NewStreamHandler` refuses a nil hub at construction: it passed boot and panicked on the first connection attempt, deep inside the request path, where every sibling constructor of a required dependency reports the wiring error at boot
 - `handler.go` — a negative `ReadLimit` is passed through as coder/websocket's documented "no limit" instead of being silently discarded by the positive-only guard, which left the library's 32 KiB default armed for exactly the payloads the option was set to allow — the first oversized frame closed the connection with `1009` and no explanation

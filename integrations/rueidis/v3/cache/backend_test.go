@@ -1120,3 +1120,50 @@ func TestNewBackend_MaxKeyLengthOverrideRejectsLongKey(t *testing.T) {
         t.Fatalf("expected a key at the configured maximum to be accepted, got %v", normalizeErr)
     }
 }
+
+func TestNormalizeKey_ARefusalNamesAnOversizedKeyByABoundedPrefix(t *testing.T) {
+    marker := "...(truncated)"
+    backend := &Backend{maxKeyLength: rueidisBackendDefaultMaxKeyLength}
+
+    for name, key := range map[string]string{
+        "too long":       strings.Repeat("k", 1<<20),
+        "with a space":   strings.Repeat("k", 1<<20) + " ",
+        "with a newline": strings.Repeat("k", 1<<20) + "\n",
+    } {
+        _, refusal := backend.normalizeKey(key)
+
+        var refusalException *exception.Error
+        if false == errors.As(refusal, &refusalException) {
+            t.Fatalf("%s: expected an exception, got %v", name, refusal)
+        }
+
+        rendered, _ := refusalException.Context()["key"].(string)
+        if len(rendered) > 128+len(marker) || false == strings.HasSuffix(rendered, marker) {
+            t.Fatalf("%s: expected the key cut to 128 bytes with the marker, got %d bytes", name, len(rendered))
+        }
+    }
+}
+
+func TestBackend_CloseRefusesEveryLaterDoor(t *testing.T) {
+    backend := &Backend{}
+    backend.closed.Store(true)
+    ctx := context.Background()
+
+    for door, call := range map[string]func() error{
+        "GetCtx":            func() error { _, _, err := backend.GetCtx(ctx, "key"); return err },
+        "SetCtx":            func() error { return backend.SetCtx(ctx, "key", []byte("value"), time.Minute) },
+        "DeleteCtx":         func() error { return backend.DeleteCtx(ctx, "key") },
+        "HasCtx":            func() error { _, err := backend.HasCtx(ctx, "key"); return err },
+        "ClearCtx":          func() error { return backend.ClearCtx(ctx) },
+        "ClearByPrefixCtx":  func() error { return backend.ClearByPrefixCtx(ctx, "prefix") },
+        "ManyCtx":           func() error { _, err := backend.ManyCtx(ctx, []string{"key"}); return err },
+        "SetMultipleCtx":    func() error { return backend.SetMultipleCtx(ctx, map[string][]byte{"key": []byte("value")}, time.Minute) },
+        "DeleteMultipleCtx": func() error { return backend.DeleteMultipleCtx(ctx, []string{"key"}) },
+        "IncrementCtx":      func() error { _, err := backend.IncrementCtx(ctx, "counter", 1); return err },
+        "DecrementCtx":      func() error { _, err := backend.DecrementCtx(ctx, "counter", 1); return err },
+    } {
+        if closedErr := call(); nil == closedErr || false == strings.Contains(closedErr.Error(), "cache backend is closed") {
+            t.Fatalf("expected %s refused after Close, got %v", door, closedErr)
+        }
+    }
+}

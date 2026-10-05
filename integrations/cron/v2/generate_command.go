@@ -5,8 +5,10 @@ import (
     "fmt"
     "io"
     "os"
+    "os/user"
     "path/filepath"
     "sort"
+    "strconv"
     "strings"
     "time"
 
@@ -150,6 +152,8 @@ func (instance *GenerateCommand) resolveTemplate(name string) (Template, error) 
 }
 
 type runOptions struct {
+    /* logDirectoryOwnership collects, for the run, the log directories created for an entry whose user the generating host does not know */
+    logDirectoryOwnership *logDirectoryOwnership
     template           Template
     outputPath         string
     logsDir            string
@@ -173,10 +177,11 @@ func (instance *GenerateCommand) runWithConfiguration(
     writes := ([]destinationWrite)(nil)
     pruned := ([]string)(nil)
     emptyMessage := ""
+    ownershipWarnings := ([]string)(nil)
 
     /* the report is a defer so that no failure path leaves the run without a document: the cli silences the command's own error line under --format=json, so an early return would hand a consumer an empty stream */
     defer func() {
-        runErr = instance.reportWrites(commandContext, option, startedAt, writes, pruned, emptyMessage, runErr)
+        runErr = instance.reportWrites(commandContext, option, startedAt, writes, pruned, emptyMessage, ownershipWarnings, runErr)
     }()
 
     options, resolveErr := instance.resolveRunOptions(commandContext, configuration)
@@ -187,6 +192,10 @@ func (instance *GenerateCommand) runWithConfiguration(
     entries, collectErr := instance.collectScheduledEntries(options)
     if nil != collectErr {
         return collectErr
+    }
+
+    for _, unowned := range options.logDirectoryOwnership.unowned {
+        ownershipWarnings = append(ownershipWarnings, unowned.warningMessage())
     }
 
     writeErr := (error)(nil)
@@ -318,6 +327,8 @@ func (instance *GenerateCommand) resolveRunOptions(
 }
 
 func (instance *GenerateCommand) collectScheduledEntries(options *runOptions) ([]Entry, error) {
+    options.logDirectoryOwnership = &logDirectoryOwnership{rendersUserColumn: templateRendersUserColumn(options.template)}
+
     scheduledCommands := instance.configuration.Entries()
     if 0 == len(scheduledCommands) {
         return []Entry{}, nil
@@ -350,7 +361,7 @@ func (instance *GenerateCommand) collectScheduledEntries(options *runOptions) ([
             config = &EntryConfig{}
         }
 
-        expanded, expandErr := expandEntriesForCommand(scheduled.CommandName, config, binary, options.defaultUserName, options.logsDir)
+        expanded, expandErr := expandEntriesForCommand(scheduled.CommandName, config, binary, options.defaultUserName, options.logsDir, options.logDirectoryOwnership)
         if nil != expandErr {
             return nil, expandErr
         }
@@ -523,6 +534,14 @@ func pruneStaleDestinations(options *runOptions, writes []destinationWrite) ([]s
             continue
         }
 
+        /* a temporary file a generator writes beside its destination carries the marker too; a young one may belong to a run still in flight, which would rename the emptied file over its live destination */
+        if true == isGeneratorTemporaryFile(directoryEntry.Name()) {
+            info, infoErr := directoryEntry.Info()
+            if nil != infoErr || time.Since(info.ModTime()) < pruneTemporaryFileGrace {
+                continue
+            }
+        }
+
         owned, ownershipErr := fileCarriesOwnershipMarker(candidate, marker)
         if nil != ownershipErr {
             return pruned, ownershipErr
@@ -540,6 +559,14 @@ func pruneStaleDestinations(options *runOptions, writes []destinationWrite) ([]s
     }
 
     return pruned, nil
+}
+
+/* pruneTemporaryFileGrace is how old a generator's temporary file must be before a prune treats it as a leftover: a run writes and renames within seconds, so one younger than this may still be in flight */
+const pruneTemporaryFileGrace = 5 * time.Minute
+
+/* isGeneratorTemporaryFile answers whether a name is one atomicWriteFile creates beside a destination */
+func isGeneratorTemporaryFile(name string) bool {
+    return true == strings.HasPrefix(name, ".melody-cron-") && true == strings.HasSuffix(name, ".tmp")
 }
 
 /* ownershipMarkerReadLimit bounds what is read to decide ownership: the marker rides in the header block every rendered destination opens with, and a file large enough to push it past this is not one this generator wrote. */
@@ -593,6 +620,7 @@ func (instance *GenerateCommand) reportWrites(
     writes []destinationWrite,
     pruned []string,
     emptyMessage string,
+    ownershipWarnings []string,
     runErr error,
 ) error {
     if true == output.IsJsonFormat(option.Format) {
@@ -614,6 +642,10 @@ func (instance *GenerateCommand) reportWrites(
             envelope.Warnings = append(envelope.Warnings, output.NewWarning("cron.nothingToWrite", emptyMessage, nil))
         }
 
+        for _, ownershipWarning := range ownershipWarnings {
+            envelope.Warnings = append(envelope.Warnings, output.NewWarning("cron.logDirectoryOwnerUnknown", ownershipWarning, nil))
+        }
+
         if nil != runErr {
             /* the envelope carries the failure's details and cause, and details stays an object when the failure carries no context, so the field keeps its json type on every failure */
             envelope.SetError(
@@ -630,6 +662,10 @@ func (instance *GenerateCommand) reportWrites(
         }
 
         return renderErr
+    }
+
+    for _, ownershipWarning := range ownershipWarnings {
+        _, _ = fmt.Fprintln(commandContext.Writer, ownershipWarning)
     }
 
     /* a run that fails part way still prints what it wrote and pruned, since emptying is irreversible and the operator needs to know which manifests were blanked */
@@ -948,6 +984,7 @@ func expandEntriesForCommand(
     binary string,
     defaultUserName string,
     logsDir string,
+    ownership *logDirectoryOwnership,
 ) ([]Entry, error) {
     user := config.User
     if "" == user {
@@ -959,11 +996,21 @@ func expandEntriesForCommand(
         instances = 1
     }
 
+    /* a user column runs the entry as that user, so the log directories created for it are that user's */
+    logDirectoryOwner := ""
+    if nil != ownership && true == ownership.rendersUserColumn {
+        logDirectoryOwner = user
+    }
+
     entries := make([]Entry, 0, instances)
     for index := 1; index <= instances; index++ {
-        logPath, logPathErr := resolveEntryLogPath(commandName, config, logsDir, instances, index)
+        logPath, unownedDirectory, logPathErr := resolveEntryLogPath(commandName, config, logsDir, instances, index, logDirectoryOwner)
         if nil != logPathErr {
             return nil, logPathErr
+        }
+
+        if "" != unownedDirectory && nil != ownership {
+            ownership.unowned = append(ownership.unowned, unownedLogDirectory{command: commandName, directory: unownedDirectory, user: logDirectoryOwner})
         }
 
         /* every entry carries its own schedule copy: Render is userland and Schedule.Defaults mutates in place, so a template calling it would otherwise rewrite the schedule of every sibling entry */
@@ -1004,13 +1051,14 @@ func resolveEntryLogPath(
     logsDir string,
     instances int,
     index int,
-) (string, error) {
+    logDirectoryOwner string,
+) (logPath string, unownedDirectory string, err error) {
     if true == config.LogDisabled {
-        return "", nil
+        return "", "", nil
     }
 
     if "" == logsDir {
-        return "", exception.NewError(
+        return "", "", exception.NewError(
             "cron: command wants log redirection but no logs-dir is configured; set --logs-dir, register the melody.cron.logs_dir parameter, or set EntryConfig.LogDisabled=true",
             exceptioncontract.Context{
                 "command":   commandName,
@@ -1031,15 +1079,16 @@ func resolveEntryLogPath(
     }
 
     if 1 < instances {
-        base, extension := splitLogFileExtension(logFileName)
-        logFileName = fmt.Sprintf("%s-%d%s", base, index, extension)
+        /* the extension is cut from the file's own name, so a dotted subdirectory is kept whole and the instances share it */
+        base, extension := splitLogFileExtension(filepath.Base(logFileName))
+        logFileName = filepath.Join(filepath.Dir(logFileName), fmt.Sprintf("%s-%d%s", base, index, extension))
     }
 
     joined := filepath.Join(logsDir, logFileName)
     cleanedLogsDir := filepath.Clean(logsDir)
 
     if false == isWithinDir(joined, cleanedLogsDir) {
-        return "", exception.NewError(
+        return "", "", exception.NewError(
             "cron: EntryConfig.LogFileName resolves to a path that escapes the logs directory; use a file name that stays within the logs dir",
             exceptioncontract.Context{
                 "command":      commandName,
@@ -1052,8 +1101,10 @@ func resolveEntryLogPath(
     }
 
     /* a LogFileName carrying a subdirectory stays within the logs dir but nothing else creates that subdirectory, and under system cron the shell aborts the command when the >> redirection cannot create its file */
+    missingDirectories := missingDirectoriesBelow(filepath.Dir(joined), cleanedLogsDir)
+
     if mkdirErr := os.MkdirAll(filepath.Dir(joined), 0o755); nil != mkdirErr {
-        return "", exception.NewError(
+        return "", "", exception.NewError(
             "cron: could not create the log file directory",
             exceptioncontract.Context{
                 "command":   commandName,
@@ -1063,7 +1114,93 @@ func resolveEntryLogPath(
         )
     }
 
-    return joined, nil
+    unownedDirectory, chownErr := chownCreatedLogDirectories(commandName, missingDirectories, logDirectoryOwner)
+    if nil != chownErr {
+        return "", "", chownErr
+    }
+
+    return joined, unownedDirectory, nil
+}
+
+/* logDirectoryOwnership is what a run knows of the owners of the log directories it creates: whether its template runs every entry as a user, and the directories it left root's for a user the host does not know */
+type logDirectoryOwnership struct {
+    rendersUserColumn bool
+    unowned           []unownedLogDirectory
+}
+
+type unownedLogDirectory struct {
+    command   string
+    directory string
+    user      string
+}
+
+/* warningMessage says what the run left behind and what follows from it */
+func (instance unownedLogDirectory) warningMessage() string {
+    return fmt.Sprintf("cron: the log directory %s created for %q stays owned by root: its user %q is not known on this host, so under system cron the entry may not be able to create its log file there; create the directory for that user on the host that runs it", instance.directory, instance.command, instance.user)
+}
+
+/* missingDirectoriesBelow answers the directories from directory up to, not including, root that do not exist yet, the shallowest first */
+func missingDirectoriesBelow(directory string, root string) []string {
+    missing := make([]string, 0)
+
+    for current := filepath.Clean(directory); current != root && true == isWithinDir(current, root); current = filepath.Dir(current) {
+        if _, statErr := os.Stat(current); nil == statErr {
+            break
+        }
+
+        missing = append([]string{current}, missing...)
+    }
+
+    return missing
+}
+
+/* the doors chownCreatedLogDirectories reads the process and the system through, so a pin drives it without running as root */
+var (
+    logDirectoryEffectiveUserId = os.Geteuid
+    logDirectoryLookupUser      = user.Lookup
+    logDirectoryChown           = os.Chown
+)
+
+/* chownCreatedLogDirectories hands the log directories a run created for an entry to the user the entry runs as: a generator running as root creates them as root, and the entry's shell, running as its user, could not create its log file in them, which under system cron aborts the command. Nothing is done when the generator is not root, which cannot give a directory away, or when the entry renders no user. A user the generating host does not know, the ordinary case of a build host generating for the hosts that run the entries, leaves the directories root's and answers the shallowest of them, which the run reports as a warning; a chown that fails is refused. */
+func chownCreatedLogDirectories(commandName string, directories []string, owner string) (unownedDirectory string, err error) {
+    if 0 == len(directories) || "" == owner || 0 != logDirectoryEffectiveUserId() {
+        return "", nil
+    }
+
+    ownerAccount, lookupErr := logDirectoryLookupUser(owner)
+    if nil != lookupErr {
+        return directories[0], nil
+    }
+
+    userId, userIdErr := strconv.Atoi(ownerAccount.Uid)
+    groupId, groupIdErr := strconv.Atoi(ownerAccount.Gid)
+    if nil != userIdErr || nil != groupIdErr {
+        return "", exception.NewError(
+            "cron: the log directory created for the entry cannot be handed to its user, whose ids are not numeric",
+            exceptioncontract.Context{
+                "command":   commandName,
+                "directory": directories[0],
+                "user":      owner,
+            },
+            errors.Join(userIdErr, groupIdErr),
+        )
+    }
+
+    for _, directory := range directories {
+        if chownErr := logDirectoryChown(directory, userId, groupId); nil != chownErr {
+            return "", exception.NewError(
+                "cron: could not hand the log directory created for the entry to its user",
+                exceptioncontract.Context{
+                    "command":   commandName,
+                    "directory": directory,
+                    "user":      owner,
+                },
+                chownErr,
+            )
+        }
+    }
+
+    return "", nil
 }
 
 /* configurationFromRuntime resolves through the run's scope with the container as the fallback, so a scope-level substitution of the configuration is honoured. */

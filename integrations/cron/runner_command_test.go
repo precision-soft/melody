@@ -3948,13 +3948,36 @@ func TestDispatchDue_APanicInTheLoggerIsFiledAsThatRunsFailure(t *testing.T) {
     assertRunnerPanicFiled(t, report, runErr, healthy, "job:one", "logger panicked")
 }
 
-func TestDispatchDue_AFailureWhoseTextPanicsDoesNotHoldTheMinute(t *testing.T) {
+func TestDispatchDue_AFailureWhoseTextPanicsKeepsTheCommandsErrorAndDoesNotHoldTheMinute(t *testing.T) {
     failing := newRecordingCommand("job:one")
     failing.runErr = errorWithPanickingText{}
 
     report, runErr, healthy := dispatchOnePanicProbe(t, newRunnerTestRuntime(context.Background()), failing)
 
-    assertRunnerPanicFiled(t, report, runErr, healthy, "job:one", "rendering itself")
+    if false == errors.Is(runErr, errorWithPanickingText{}) {
+        t.Fatal("expected the command's own error to stay the run's failure beneath the minute's aggregate")
+    }
+
+    found := false
+    for _, run := range report.Ran {
+        if "job:one" != run.Command {
+            continue
+        }
+
+        found = true
+
+        if false == run.Failed || false == strings.Contains(run.Error, "error text panicked") || false == strings.Contains(run.Error, "rendering itself") || true == strings.Contains(run.Error, "runner panicked") {
+            t.Fatalf("expected the row to name the error's panic and not a runner panic, got failed=%v %q", run.Failed, run.Error)
+        }
+    }
+
+    if false == found {
+        t.Fatalf("expected the failing command in the document, got %v", report.Ran)
+    }
+
+    if 1 != healthy.runCount {
+        t.Fatalf("expected the healthy command to still run, ran %d", healthy.runCount)
+    }
 }
 
 /* an application that registers its logger under the concrete type of its provider refuses the runner's per-run logger override, as the cli entry point does, and the run fails rather than the process. */
@@ -4056,5 +4079,48 @@ func TestDueRunSortsBefore_OrdersOneCommandsRunsByScheduleThenArguments(t *testi
 
     if false == dueRunSortsBefore(dueRun{Command: "alpha", Schedule: "9"}, dueRun{Command: "beta", Schedule: "0"}) {
         t.Fatalf("expected the command to order first")
+    }
+}
+
+/* concurrentRunCommand is a command two entries of one minute may run at once, so its own state is the name alone */
+type concurrentRunCommand struct {
+    commandName string
+}
+
+func (instance *concurrentRunCommand) Name() string {
+    return instance.commandName
+}
+
+func (instance *concurrentRunCommand) Description() string {
+    return "concurrent run command"
+}
+
+func (instance *concurrentRunCommand) Flags() []clicontract.Flag {
+    return nil
+}
+
+func (instance *concurrentRunCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+    return nil
+}
+
+func TestDispatchDue_TwoEntriesOfOneCommandUnderTwoSchedulesRenderInOneOrder(t *testing.T) {
+    for run := 0; run < 20; run = run + 1 {
+        job := &concurrentRunCommand{commandName: "job:report"}
+
+        configuration := NewConfiguration().
+            Schedule("job:report", &EntryConfig{Schedule: &Schedule{Minute: "0"}}).
+            Schedule("job:report", &EntryConfig{Schedule: &Schedule{Minute: "*"}})
+
+        runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+
+        at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
+        report, runErr := runner.dispatchDue(newRunnerTestRuntime(context.Background()), at, true, true)()
+        if nil != runErr {
+            t.Fatalf("unexpected error: %v", runErr)
+        }
+
+        if 2 != len(report.Ran) || false == strings.HasPrefix(report.Ran[0].Schedule, "*") || false == strings.HasPrefix(report.Ran[1].Schedule, "0") {
+            t.Fatalf("run %d: expected the two runs of one command ordered by their schedule, got %+v", run, report.Ran)
+        }
     }
 }

@@ -5,15 +5,18 @@ import (
     "errors"
     "fmt"
     nethttp "net/http"
+    "runtime/debug"
     "sync/atomic"
     "time"
 
     coderwebsocket "github.com/coder/websocket"
 
     "github.com/precision-soft/melody/v3/exception"
+    exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/logging"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
@@ -54,12 +57,11 @@ func NewStreamHandler(hub *melodyhttp.ServerSentEventHub, options Options) httpc
 
 func newStreamHandler(hub *melodyhttp.ServerSentEventHub, options Options) httpcontract.Handler {
     return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-        /* a hub that has shut down serves no stream: Subscribe on it hands back a closed channel, which the event loop would read as an ordinary end of stream after a 101, indistinguishable from a peer that went away. The request is refused before the upgrade, as an empty resolved topic is, so a client connecting during the shutdown drain gets a plain error. */
+        /* a hub that has shut down serves no stream: Subscribe on it hands back a closed channel, which the event loop would read as an ordinary end of stream after a 101, indistinguishable from a peer that went away. The request is refused before the upgrade with 503, as an empty resolved topic is with 400, so a client connecting during the shutdown drain is told to come back rather than handed a server error. */
         if true == hub.IsClosed() {
-            return nil, exception.NewError(
+            return nil, exception.NewHttpException(
+                nethttp.StatusServiceUnavailable,
                 "websocket stream handler hub is shut down: refusing the connection rather than upgrading it to an instantly-closed stream",
-                map[string]any{"path": request.HttpRequest().URL.Path},
-                nil,
             )
         }
 
@@ -68,19 +70,21 @@ func newStreamHandler(hub *melodyhttp.ServerSentEventHub, options Options) httpc
         if nil != options.TopicResolver {
             topic = options.TopicResolver(request)
             if "" == topic {
-                return nil, exception.NewError(
+                return nil, exception.NewHttpException(
+                    nethttp.StatusBadRequest,
                     "websocket topic resolver returned an empty topic: refusing the connection rather than subscribing it to a shared degenerate topic",
-                    map[string]any{"path": request.HttpRequest().URL.Path},
-                    nil,
                 )
             }
         }
+
+        /* the logger is resolved here, while the request scope is alive: the read loop runs past the handler's return when a callback outlives the close grace, and a resolution against a scope the kernel closed answers nothing */
+        logger := newConnectionLogger(runtimeInstance)
 
         connection, acceptErr := coderwebsocket.Accept(writer, request.HttpRequest(), &coderwebsocket.AcceptOptions{
             OriginPatterns: options.OriginPatterns,
         })
         if nil != acceptErr {
-            logError(runtimeInstance, "websocket upgrade failed", acceptErr)
+            logger.error("websocket upgrade failed", acceptErr, nil)
             return nil, nil
         }
         defer connection.CloseNow()
@@ -95,7 +99,7 @@ func newStreamHandler(hub *melodyhttp.ServerSentEventHub, options Options) httpc
 
         /* the hub can shut down between the check above and this Subscribe, handing back a closed channel; it is named at debug so a stream that never delivered is not silent in the journal, and the deferred CloseNow tears the socket down before any read or ping goroutine starts */
         if true == hub.IsClosed() {
-            logDebug(runtimeInstance, "websocket hub shut down during connect, closing the stream", nil)
+            logger.debug("websocket hub shut down during connect, closing the stream", nil)
 
             return nil, nil
         }
@@ -112,7 +116,7 @@ func newStreamHandler(hub *melodyhttp.ServerSentEventHub, options Options) httpc
         go func() {
             defer close(readLoopDone)
 
-            readLoop(connectionContext, cancel, connection, runtimeInstance, options, liveness)
+            readLoop(connectionContext, cancel, connection, runtimeInstance, options, liveness, logger)
         }()
 
         /* unconditional: a positive IdleTimeout is established at construction, so every connection is reaped by the ping loop or by nothing at all */
@@ -135,7 +139,7 @@ func newStreamHandler(hub *melodyhttp.ServerSentEventHub, options Options) httpc
                 liveness.leaveWrite()
                 writeCancel()
                 if nil != writeErr {
-                    logDebug(runtimeInstance, "websocket write failed, closing connection", writeErr)
+                    logger.debug("websocket write failed, closing connection", writeErr)
                     closeConnection(connection, liveness, readLoopDone)
                     return nil, nil
                 }
@@ -151,12 +155,13 @@ func readLoop(
     runtimeInstance runtimecontract.Runtime,
     options Options,
     liveness *connectionLiveness,
+    logger connectionLogger,
 ) {
     for {
         messageType, payload, readErr := connection.Read(ctx)
         if nil != readErr {
             /* debug, not error: most read failures are ordinary disconnects, but a peer killed for exceeding the read limit or for a protocol violation still leaves a record */
-            logDebug(runtimeInstance, "websocket read loop ended", readErr)
+            logger.debug("websocket read loop ended", readErr)
             cancel()
             return
         }
@@ -166,7 +171,7 @@ func readLoop(
         if nil != options.OnMessage {
             /* the reader cannot answer a pong for as long as the callback runs, so tell the ping loop not to read its timeouts as a death */
             liveness.enterCallback()
-            panicked := dispatchOnMessage(runtimeInstance, options, messageType, payload)
+            panicked := dispatchOnMessage(runtimeInstance, options, messageType, payload, logger)
             liveness.leaveCallback()
 
             if true == panicked {
@@ -303,15 +308,16 @@ func dispatchOnMessage(
     options Options,
     messageType coderwebsocket.MessageType,
     payload []byte,
+    logger connectionLogger,
 ) (panicked bool) {
     defer func() {
         recovered := recover()
         if nil != recovered {
-            /* PanicCause keeps an error panic value whole, cause chain and context included; a non-error value renders through the message */
-            logError(
-                runtimeInstance,
+            /* PanicCause keeps an error panic value whole, cause chain and context included; a non-error value renders through the message; the stack is taken here, where the panicking frames are still on it */
+            logger.error(
                 "websocket OnMessage panicked",
                 exception.NewError(fmt.Sprintf("websocket OnMessage panicked: %v", recovered), nil, exception.PanicCause(recovered)),
+                exceptioncontract.Context{"panicStack": string(debug.Stack())},
             )
             panicked = true
         }
@@ -373,20 +379,28 @@ func pingWriteGrace(options Options) time.Duration {
     return writeTimeout(options) + options.IdleTimeout
 }
 
-func logError(runtimeInstance runtimecontract.Runtime, message string, err error) {
-    logger := logging.LoggerFromRuntime(runtimeInstance)
-    if nil == logger {
-        return
-    }
-
-    logger.Error(message, exception.LogContext(err))
+/* connectionLogger is the logger of one connection, resolved while the request scope is alive. An error record whose logger is gone — none registered, or the scope closed before it was resolved — goes to the emergency logger rather than vanishing; a debug record is dropped. */
+type connectionLogger struct {
+    logger loggingcontract.Logger
 }
 
-func logDebug(runtimeInstance runtimecontract.Runtime, message string, err error) {
-    logger := logging.LoggerFromRuntime(runtimeInstance)
+func newConnectionLogger(runtimeInstance runtimecontract.Runtime) connectionLogger {
+    return connectionLogger{logger: logging.LoggerFromRuntime(runtimeInstance)}
+}
+
+func (instance connectionLogger) error(message string, err error, context exceptioncontract.Context) {
+    logger := instance.logger
     if nil == logger {
+        logger = logging.EmergencyLogger()
+    }
+
+    logger.Error(message, exception.LogContext(err, context))
+}
+
+func (instance connectionLogger) debug(message string, err error) {
+    if nil == instance.logger {
         return
     }
 
-    logger.Debug(message, exception.LogContext(err))
+    instance.logger.Debug(message, exception.LogContext(err))
 }

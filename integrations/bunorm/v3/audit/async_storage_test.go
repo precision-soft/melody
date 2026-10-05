@@ -452,7 +452,7 @@ type ridingRecordingStorage struct {
     rides bool
 }
 
-func (instance *ridingRecordingStorage) ridesTransactionOf(origin *bun.DB) bool {
+func (instance *ridingRecordingStorage) RidesTransactionOf(origin *bun.DB) bool {
     return instance.rides
 }
 
@@ -1717,6 +1717,48 @@ func TestAsyncStorage_ABoundSaveOverADelegateThatCannotRideItIsQueued(t *testing
         if closeErr := storage.Close(); nil != closeErr {
             t.Fatalf("close: %v", closeErr)
         }
+    }
+}
+
+/* forwardingStorage is an application's decorator around another storage: it saves through it and forwards the rider question to it */
+type forwardingStorage struct {
+    inner Storage
+}
+
+func (instance *forwardingStorage) Save(ctx context.Context, table string, entries ...Entry) error {
+    return instance.inner.Save(ctx, table, entries...)
+}
+
+func (instance *forwardingStorage) RidesTransactionOf(origin *bun.DB) bool {
+    rider, isRider := instance.inner.(TransactionRider)
+
+    return true == isRider && true == rider.RidesTransactionOf(origin)
+}
+
+func TestAsyncStorage_ABoundSaveOverADecoratorThatForwardsTheRiderQuestionRidesTheTransaction(t *testing.T) {
+    installDefaultAsyncStorageLogger(t)
+
+    inner := &ridingRecordingStorage{recordingStorage: newRecordingStorage(), rides: true}
+    storage := NewAsyncStorage(&forwardingStorage{inner: inner}, 4)
+
+    if saveErr := storage.Save(context.Background(), "melody_audit", Entry{Entity: "wedges-the-worker"}); nil != saveErr {
+        t.Fatalf("unbound save: %v", saveErr)
+    }
+
+    <-inner.entered
+
+    if saveErr := storage.Save(WithDatabase(context.Background(), newTestDatabase()), "melody_audit", Entry{Entity: "bound"}); nil != saveErr {
+        t.Fatalf("bound save: %v", saveErr)
+    }
+
+    if 1 != inner.count() {
+        t.Fatalf("expected the bound save through the decorator to reach the delegate before Save returned, got %d", inner.count())
+    }
+
+    close(inner.release)
+
+    if closeErr := storage.Close(); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
     }
 }
 

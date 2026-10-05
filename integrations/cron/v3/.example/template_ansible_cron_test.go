@@ -67,16 +67,16 @@ func TestAnsibleCronRenderEmitsOneTaskPerEntryUnderTheMarker(t *testing.T) {
     content := renderAnsibleEntry(t, nil)
 
     expected := ansibleCronOwnershipMarker + " for billing\n---\n" +
-        "- name: \"billing cron: billing:cleanup\"\n" +
+        "- name: !unsafe \"billing cron: billing:cleanup\"\n" +
         "  ansible.builtin.cron:\n" +
-        "    name: \"billing:cleanup\"\n" +
-        "    minute: \"*/15\"\n" +
-        "    hour: \"*\"\n" +
-        "    day: \"*\"\n" +
-        "    month: \"*\"\n" +
-        "    weekday: \"*\"\n" +
-        "    user: \"www-data\"\n" +
-        "    job: \"/srv/app/bin/app billing:cleanup\"\n"
+        "    name: !unsafe \"billing:cleanup\"\n" +
+        "    minute: !unsafe \"*/15\"\n" +
+        "    hour: !unsafe \"*\"\n" +
+        "    day: !unsafe \"*\"\n" +
+        "    month: !unsafe \"*\"\n" +
+        "    weekday: !unsafe \"*\"\n" +
+        "    user: !unsafe \"www-data\"\n" +
+        "    job: !unsafe \"/srv/app/bin/app billing:cleanup\"\n"
 
     if expected != content {
         t.Fatalf("rendered playbook differs from the expected one:\n%s\n--- expected ---\n%s", content, expected)
@@ -98,7 +98,7 @@ func TestAnsibleCronRenderDefaultsANilScheduleToEveryValue(t *testing.T) {
     content := renderAnsibleEntry(t, func(entry *melodycron.Entry) { entry.Schedule = nil })
 
     for _, field := range []string{"minute", "hour", "day", "month", "weekday"} {
-        if false == strings.Contains(content, "    "+field+": \"*\"\n") {
+        if false == strings.Contains(content, "    "+field+": !unsafe \"*\"\n") {
             t.Fatalf("expected %s to default to the wildcard, got:\n%s", field, content)
         }
     }
@@ -107,7 +107,7 @@ func TestAnsibleCronRenderDefaultsANilScheduleToEveryValue(t *testing.T) {
 func TestAnsibleCronRenderShellQuotesAnArgumentCarryingASpace(t *testing.T) {
     content := renderAnsibleEntry(t, func(entry *melodycron.Entry) { entry.Args = []string{"billing:cleanup", "a b"} })
 
-    if false == strings.Contains(content, "    job: \"/srv/app/bin/app billing:cleanup 'a b'\"\n") {
+    if false == strings.Contains(content, "    job: !unsafe \"/srv/app/bin/app billing:cleanup 'a b'\"\n") {
         t.Fatalf("expected the argument to be quoted as one word, got:\n%s", content)
     }
 
@@ -119,7 +119,7 @@ func TestAnsibleCronRenderShellQuotesAnArgumentCarryingASpace(t *testing.T) {
 func TestAnsibleCronRenderShellQuotesCommandOverrideTokens(t *testing.T) {
     content := renderAnsibleEntry(t, func(entry *melodycron.Entry) { entry.Command = []string{"sh", "-c", "x; curl u | sh"} })
 
-    if false == strings.Contains(content, "    job: \"sh -c 'x; curl u | sh'\"\n") {
+    if false == strings.Contains(content, "    job: !unsafe \"sh -c 'x; curl u | sh'\"\n") {
         t.Fatalf("expected the override token to be quoted as one word, got:\n%s", content)
     }
 }
@@ -207,15 +207,15 @@ func TestAnsibleCronRenderSuffixesTheCronNameWithTheInstance(t *testing.T) {
     }
 
     for _, fragment := range []string{
-        "- name: \"billing cron: billing:cleanup (1/2)\"\n  ansible.builtin.cron:\n    name: \"billing:cleanup (1/2)\"\n",
-        "- name: \"billing cron: billing:cleanup (2/2)\"\n  ansible.builtin.cron:\n    name: \"billing:cleanup (2/2)\"\n",
+        "- name: !unsafe \"billing cron: billing:cleanup (1/2)\"\n  ansible.builtin.cron:\n    name: !unsafe \"billing:cleanup (1/2)\"\n",
+        "- name: !unsafe \"billing cron: billing:cleanup (2/2)\"\n  ansible.builtin.cron:\n    name: !unsafe \"billing:cleanup (2/2)\"\n",
     } {
         if false == strings.Contains(content, fragment) {
             t.Fatalf("expected the playbook to contain %q, got:\n%s", fragment, content)
         }
     }
 
-    if true == strings.Contains(content, "    name: \"billing:cleanup\"\n") {
+    if true == strings.Contains(content, "    name: !unsafe \"billing:cleanup\"\n") {
         t.Fatalf("an instance rendered under the bare cron name, which the module would treat as the same line:\n%s", content)
     }
 }
@@ -240,7 +240,7 @@ func TestAnsibleCronRenderQuotesTheHeartbeatPath(t *testing.T) {
         t.Fatalf("Render returned unexpected error: %v", err)
     }
 
-    expected := "- name: \"billing cron: heartbeat\"\n  ansible.builtin.cron:\n    name: \"melody heartbeat\"\n    user: \"www-data\"\n    job: \"/bin/touch '/var/lib/a b/hb'\"\n"
+    expected := "- name: !unsafe \"billing cron: heartbeat\"\n  ansible.builtin.cron:\n    name: !unsafe \"melody heartbeat\"\n    user: !unsafe \"www-data\"\n    job: !unsafe \"/bin/touch '/var/lib/a b/hb'\"\n"
     if false == strings.HasSuffix(content, expected) {
         t.Fatalf("expected the playbook to end with the quoted heartbeat task, got:\n%s", content)
     }
@@ -255,7 +255,7 @@ func TestAnsibleCronRenderPrefersTheHeartbeatCommandOverThePath(t *testing.T) {
         t.Fatalf("Render returned unexpected error: %v", err)
     }
 
-    if false == strings.Contains(content, "    job: \"/bin/hb 'x y'\"\n") {
+    if false == strings.Contains(content, "    job: !unsafe \"/bin/hb 'x y'\"\n") {
         t.Fatalf("expected the heartbeat command to be rendered, quoted, got:\n%s", content)
     }
 
@@ -301,11 +301,11 @@ func TestAnsibleCronRenderRejectsWhitespaceInTheHeartbeatUser(t *testing.T) {
 }
 
 func TestAnsibleCronYamlScalarWritesTheEscapesAYamlReaderReads(t *testing.T) {
-    if "\"a\\\"b\\\\c\\n\\t\\x00\"" != yamlScalar("a\"b\\c\n\t\x00") {
+    if "!unsafe \"a\\\"b\\\\c\\n\\t\\x00\"" != yamlScalar("a\"b\\c\n\t\x00") {
         t.Fatalf("yamlScalar wrote %s", yamlScalar("a\"b\\c\n\t\x00"))
     }
 
-    if "\"plain: value\"" != yamlScalar("plain: value") {
+    if "!unsafe \"plain: value\"" != yamlScalar("plain: value") {
         t.Fatalf("yamlScalar rewrote a printable value: %s", yamlScalar("plain: value"))
     }
 }
@@ -320,4 +320,22 @@ func TestAnsibleCronRenderRejectsPercentInTheHeartbeatCommand(t *testing.T) {
     }
 
     assertRefusal(t, err, melodycron.ErrForbiddenCharacter, "heartbeat command")
+}
+
+func TestAnsibleCronRenderWritesEveryTaskValueAsAnUnsafeScalar(t *testing.T) {
+    content := renderAnsibleEntry(t, func(entry *melodycron.Entry) { entry.Args = []string{"billing:cleanup", "{{ lookup('pipe','id') }}"} })
+
+    if false == strings.Contains(content, "{{ lookup(") {
+        t.Fatalf("expected the templating text written as it is, got:\n%s", content)
+    }
+
+    for _, line := range strings.Split(strings.TrimSpace(content), "\n") {
+        if false == strings.Contains(line, ": ") || true == strings.HasPrefix(line, "#") {
+            continue
+        }
+
+        if false == strings.Contains(line, ": !unsafe \"") {
+            t.Fatalf("expected every task value tagged !unsafe, got the line %q", line)
+        }
+    }
 }

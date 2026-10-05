@@ -22,7 +22,7 @@ func (instance *Module) buildStorage() {
         Endpoint:  endpoint,
         AccessKey: instance.environmentValue(environmentKeyS3AccessKey),
         SecretKey: instance.environmentValue(environmentKeyS3SecretKey),
-        Secure:    "true" == instance.environmentValue(environmentKeyS3Secure),
+        Secure:    objectStorageIsSecure(instance.environmentValue(environmentKeyS3Insecure)),
         Region:    instance.environmentValue(environmentKeyS3Region),
     })
     if nil != clientErr {
@@ -36,4 +36,9 @@ func (instance *Module) buildStorage() {
     instance.storageClient = client
     instance.storageBucket = bucket
     instance.storage = melodyawss3.NewStorage(client, bucket)
+}
+
+/* objectStorageIsSecure dials https unless S3_INSECURE is exactly "true", the opt-out the sql providers read too: an omitted key never downgrades the transport */
+func objectStorageIsSecure(insecureValue string) bool {
+    return "true" != insecureValue
 }

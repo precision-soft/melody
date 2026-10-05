@@ -44,6 +44,10 @@ putErr := store.Put(runtimeInstance, "labels/awb-123.pdf", reader, size, storage
 url, _ := store.PresignedUrl(runtimeInstance, "labels/awb-123.pdf", 15*time.Minute)
 ```
 
+### Transport security
+
+`Config.Secure` selects https, and its zero value is **plain http**: credentials and objects cross the network in clear, and every presigned url is `http://`. Set `Secure: true` for any endpoint that is not `localhost` or a loopback address. A storage over a plain http endpoint anywhere else — a private address and a single-label host such as a compose service name included — names it once, at WARNING, at the first use of one of its doors, with `bootWarning=awss3.plaintextEndpoint` and the endpoint's host in the record, never a credential. The endpoint is read from the client itself, so a client built without `NewClient` is judged too. A field that defaults to TLS is planned for the next major.
+
 ### Plug-and-play registration
 
 Register the S3 backend under the core `storage.ServiceStorage` service name in one call, so handlers resolve it from the container with `storage.StorageMustFromResolver`:

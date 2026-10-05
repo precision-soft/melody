@@ -21,7 +21,7 @@ func TestPublishHalf_ATurnThatNeverComesIsLostInTheQueueAndTheWriteIsNeverMade(t
 
     /* the wait is driven on a goroutine under a timer of its own, so a form that waited for a turn that never comes fails here in two seconds instead of parking the suite */
     lost := make(chan bool, 1)
-    go func() { lost <- attempt.awaitTurn() }()
+    go func() { lost <- attempt.awaitTurn(context.Background()) }()
 
     select {
     case lostInTheQueue := <-lost:
@@ -59,7 +59,7 @@ func TestPublishHalf_TheWriteIsCountedInFlightAndAfterRunsOnceItReturned(t *test
         afterRan <- half.writesInFlight.Load()
     })
 
-    if true == attempt.awaitTurn() {
+    if true == attempt.awaitTurn(context.Background()) {
         t.Fatal("expected the turn taken at once on a free mutex")
     }
 
@@ -93,7 +93,7 @@ func TestPublishHalf_AwaitWriteAnswersAWriteThatReturnedInsideTheBudget(t *testi
 
     attempt.run(func() {}, func() {})
 
-    if true == attempt.awaitTurn() || false == attempt.awaitWrite() {
+    if true == attempt.awaitTurn(context.Background()) || false == attempt.awaitWrite() {
         t.Fatal("expected a write that returns at once answered as returned")
     }
 }
@@ -205,8 +205,8 @@ func TestPublishHalf_AFreePublishHalfIsJoinedUnderASpentBudget(t *testing.T) {
     half.publishMutex.Unlock()
 }
 
-/* the cut of a wedged write on an owned connection returns within its bound even when the client's own shutdown already began: that shutdown holds the connection mutex the client's close takes first, and waits for the write, so a cut made in line would hold the publish until the write returns, which here is never inside the test */
-func TestPublishHalf_AbandonOnAnOwnedConnectionReturnsWithinTheBoundWhileTheClientShutdownIsStalled(t *testing.T) {
+/* the cut of a wedged write on an owned connection returns within its bound even when the client's own shutdown already began: that shutdown holds the connection mutex the client's close takes first, and waits for the write, so a cut made in line would hold the publish until the write returns, which here is never inside the test. The write the cut did not free is told apart, and the owner marked wedged until it returns */
+func TestPublishHalf_AbandonOnAnOwnedConnectionWhoseCutDidNotFreeTheWriteReturnsWithinTheBoundAndMarksItWedged(t *testing.T) {
     wedge := wedgeAPublishOnAFakeBroker(t)
     wedge.beginClientShutdown(t)
 
@@ -224,11 +224,19 @@ func TestPublishHalf_AbandonOnAnOwnedConnectionReturnsWithinTheBoundWhileTheClie
 
     select {
     case verdict := <-verdicts:
-        if wedgedWriteCut != verdict {
-            t.Fatalf("expected the cut verdict, got %d", verdict)
+        if wedgedWriteCutUnfreed != verdict {
+            t.Fatalf("expected the verdict of a cut that did not free the write, got %d", verdict)
         }
     case <-time.After(bound + 2*time.Second):
         t.Fatalf("the abandon did not return within its bound %s plus two seconds; the cut is held behind the client's stalled shutdown", bound)
+    }
+
+    stateMutex.Lock()
+    wedged := half.wedged
+    stateMutex.Unlock()
+
+    if false == wedged {
+        t.Fatal("expected the owner marked wedged while the write the cut did not free is still blocked")
     }
 
     elapsed := time.Since(started)
@@ -257,6 +265,13 @@ func TestPublishHalf_AbandonOnAnOwnedConnectionUnblocksTheWriteWhenNoShutdownIsI
 
     if false == writeReturned(wedge.written) {
         t.Fatalf("the cut did not unblock the wedged write within the bound (%s elapsed)", time.Since(started))
+    }
+
+    stateMutex.Lock()
+    defer stateMutex.Unlock()
+
+    if true == half.wedged {
+        t.Fatal("a cut that freed the write marks nothing wedged")
     }
 
     t.Logf("the cut unblocked the write after %s", time.Since(started))
@@ -317,5 +332,61 @@ func TestPublishHalf_CloseOwnedConnectionCutsTheWriteWhenNoShutdownIsInProgress(
     case <-wedge.written:
     case <-time.After(2 * time.Second):
         t.Fatal("the cut did not unblock the wedged write")
+    }
+}
+
+func TestPublishHalf_AwaitTurnEndsWhenTheCallersContextIsCancelled(t *testing.T) {
+    half := &publishHalf{}
+    release := holdPublishMutex(t, &half.publishMutex)
+    defer release()
+
+    attempt := half.beginPublish(5 * time.Second)
+
+    wrote := make(chan struct{}, 1)
+    attempt.run(func() { wrote <- struct{}{} }, func() {})
+
+    ctx, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    started := time.Now()
+    if false == attempt.awaitTurn(ctx) {
+        t.Fatal("expected the publish lost in the queue once the caller's context was cancelled")
+    }
+
+    if elapsed := time.Since(started); elapsed > 50*time.Millisecond {
+        t.Fatalf("expected the turn to end at the cancellation, it took %s", elapsed)
+    }
+
+    release()
+
+    select {
+    case <-wrote:
+        t.Fatal("the publish abandoned in the queue was written")
+    case <-time.After(100 * time.Millisecond):
+    }
+}
+
+func TestCloseConnectionWithin_ReportsTheClientsOwnTimeoutAgainstASilentBroker(t *testing.T) {
+    for run := 0; run < 20; run = run + 1 {
+        fake := dialFakeBroker(t)
+
+        closeErr, returned := closeConnectionWithin(context.Background(), 100*time.Millisecond, fake.connection)
+
+        if false == returned || nil == closeErr || true == strings.Contains(closeErr.Error(), "did not return within the bound") {
+            t.Fatalf("run %d: expected the client's own timeout received, got returned %v error %v", run, returned, closeErr)
+        }
+    }
+}
+
+func TestCloseConnectionWithin_UnderADeadlineWithNoRoomArmsTheDeadlineEarlier(t *testing.T) {
+    fake := dialFakeBroker(t)
+
+    closeContext, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+    defer cancel()
+
+    closeErr, returned := closeConnectionWithin(closeContext, teardownStretchWithin(closeContext, time.Second), fake.connection)
+
+    if false == returned || nil == closeErr || true == strings.Contains(closeErr.Error(), "did not return within the bound") {
+        t.Fatalf("expected the client's own timeout inside the caller's deadline, got returned %v error %v", returned, closeErr)
     }
 }

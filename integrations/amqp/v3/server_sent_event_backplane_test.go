@@ -512,7 +512,7 @@ func TestServerSentEventBackplane_ASecondPublishOnAWedgedCallerOwnedConnectionIs
     go func() { outcome <- backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "while-wedged"}) }()
 
     secondErr := awaitOutcome(t, "publish while wedged", outcome, 2*time.Second)
-    if false == errorChainContains(secondErr, "an earlier write is still blocked on the caller-owned connection") {
+    if false == errorChainContains(secondErr, "an earlier write is still blocked on this connection") {
         t.Fatalf("expected the second publish to be refused for the earlier blocked write, got: %v", secondErr)
     }
 
@@ -1156,5 +1156,53 @@ func TestServerSentEventBackplane_CloseWithContextReturnsWithinTheDeadlineWhileT
         }
     case <-time.After(bound + 2*time.Second):
         t.Fatalf("the close did not return within the deadline %s plus two seconds; it is held behind the client's stalled shutdown", bound)
+    }
+}
+
+func TestServerSentEventBackplane_ARedialOverAWedgedPublishChannelDoesNotHoldTheMutex(t *testing.T) {
+    wedge := wedgeAPublishOnAFakeBroker(t)
+    wedge.beginClientShutdown(t)
+
+    fresh := dialFakeBroker(t)
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    instance := &ServerSentEventBackplane{
+        connection:     wedge.connection,
+        ownsConnection: true,
+        publishChannel: wedge.channel,
+        dialer:         func() (*amqp091.Connection, error) { return fresh.connection, nil },
+        reconnect:      resolveReconnectConfig(nil, nil),
+        ctx:            ctx,
+        cancel:         cancel,
+    }
+    instance.joinBound = 5 * time.Second
+
+    redialed := make(chan error, 1)
+    started := time.Now()
+    go func() {
+        _, redialErr := instance.liveConnection()
+        redialed <- redialErr
+    }()
+
+    select {
+    case redialErr := <-redialed:
+        if nil != redialErr {
+            t.Fatalf("expected the redial to succeed, got %v", redialErr)
+        }
+    case <-time.After(time.Second):
+        t.Fatal("the redial did not return within a second; it waits on the close of the wedged channel")
+    }
+
+    t.Logf("the redial returned after %s", time.Since(started))
+
+    answered := make(chan bool, 1)
+    go func() { answered <- instance.isClosing() }()
+
+    select {
+    case <-answered:
+    case <-time.After(100 * time.Millisecond):
+        t.Fatal("isClosing did not answer while the old channel's close is pending; the mutex is held")
     }
 }

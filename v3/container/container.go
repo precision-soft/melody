@@ -1,6 +1,7 @@
 package container
 
 import (
+    "context"
     "fmt"
     "reflect"
     "sort"
@@ -62,6 +63,10 @@ type container struct {
     /* the name-keyed instances the container built, as opposed to installed overrides; an override replacing one leaves it to the teardown through replacedBuiltInstances */
     builtServiceNames      map[string]struct{}
     replacedBuiltInstances []any
+    /* replacedBuiltClosers holds, at the index of each replaced instance, the closer its registration declared, nil where none */
+    replacedBuiltClosers []func(closeContext context.Context, value any) error
+    /* closerByNodeKey holds the closer a registration declared WithCloser, under its name node and its type node */
+    closerByNodeKey map[string]func(closeContext context.Context, value any) error
     /* the order the teardown nodes came into being, written wherever a value enters the instance maps and read by the teardown alone */
     creationOrderByNodeKey map[string]int
     creationOrderCounter   int
@@ -322,6 +327,7 @@ func (instance *container) OverrideProtectedInstance(serviceName string, value a
     if replacedValue, replacedExists := instance.instances[serviceName]; true == replacedExists {
         if _, wasBuilt := instance.builtServiceNames[serviceName]; true == wasBuilt {
             instance.replacedBuiltInstances = append(instance.replacedBuiltInstances, replacedValue)
+            instance.replacedBuiltClosers = append(instance.replacedBuiltClosers, instance.closerByNodeKey[containerNameNodeKey(serviceName)])
         }
 
         /* the walk's memo of the evicted value goes with it, so its collaborators can be collected */
@@ -580,6 +586,19 @@ func (instance *container) register(
         )
     }
 
+    /* a closer that does not take the provider's declared type is refused before anything is written; a provider declaring any defers the question to the close */
+    if nil != registerOption.Closer && nil != serviceType && false == isAnyType(serviceType) && false == serviceType.AssignableTo(registerOption.CloserValueType) {
+        return exception.NewError(
+            "the closer does not take the service's type",
+            map[string]any{
+                "serviceName":     serviceName,
+                "serviceType":     serviceType.String(),
+                "closerValueType": registerOption.CloserValueType.String(),
+            },
+            ErrCloserTypeMismatch,
+        )
+    }
+
     /* the declared teardown edges are validated before anything is written */
     for _, dependencyName := range registerOption.TeardownDependencyNames {
         if "" == dependencyName {
@@ -662,6 +681,17 @@ func (instance *container) register(
             delete(instance.providerServiceTypeByName, serviceName)
             delete(instance.collectionPriorityByName, serviceName)
             return registerTypeErr
+        }
+    }
+
+    if nil != registerOption.Closer {
+        if nil == instance.closerByNodeKey {
+            instance.closerByNodeKey = make(map[string]func(closeContext context.Context, value any) error)
+        }
+
+        instance.closerByNodeKey[containerNameNodeKey(serviceName)] = registerOption.Closer
+        if true == registerOption.AlsoRegisterType && nil != serviceType {
+            instance.closerByNodeKey[containerTypeNodeKey(serviceType)] = registerOption.Closer
         }
     }
 

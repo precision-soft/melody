@@ -291,10 +291,13 @@ func (instance *container) serviceWithCreationGuardLocked(
         )
     }
 
+    /* the closer the registration declared, read under the lock for the best-effort closes below */
+    createdCloser := instance.closerByNodeKey[creation.ownerNodeKey]
+
     /* a value created while Close ran would never be closed, so it is closed best-effort and the resolution fails */
     if nil == err && true == instance.isClosed {
         instance.mutex.Unlock()
-        closeValueAfterContainerClose(createdValue)
+        closeValueAfterContainerClose(createdValue, createdCloser)
         instance.mutex.Lock()
 
         err = newContainerClosedError(creatingKey)
@@ -306,13 +309,13 @@ func (instance *container) serviceWithCreationGuardLocked(
         if nil != keepErr {
             /* the scope this value was built for closed while the provider ran, so it is closed best-effort and the resolution fails */
             instance.mutex.Unlock()
-            closeValueAfterContainerClose(createdValue)
+            closeValueAfterContainerClose(createdValue, createdCloser)
             instance.mutex.Lock()
 
             err = keepErr
         } else if true == overrideWins {
             instance.mutex.Unlock()
-            closeValueAfterContainerClose(createdValue)
+            closeValueAfterContainerClose(createdValue, createdCloser)
             instance.mutex.Lock()
 
             createdValue = keptValue
@@ -346,9 +349,9 @@ func newContainerClosedError(creatingKey string) error {
     )
 }
 
-/* closeValueAfterContainerClose closes a value no holder will ever close through the door the teardown would have used, the context-taking one included, under the background context a plain Close hands the teardown. */
-func closeValueAfterContainerClose(value any) {
-    closeable, contextCloseable, carriesADoor := closeDoorsOf(value)
+/* closeValueAfterContainerClose closes a value no holder will ever close through the door the teardown would have used, the context-taking one and a registration's closer included, under the background context a plain Close hands the teardown. */
+func closeValueAfterContainerClose(value any, closer func(closeContext context.Context, value any) error) {
+    closeable, contextCloseable, carriesADoor := closeDoorsOfWithCloser(value, closer)
     if false == carriesADoor {
         return
     }

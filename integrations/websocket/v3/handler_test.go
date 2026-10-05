@@ -10,6 +10,7 @@ import (
     "net/http/httptest"
     goruntime "runtime"
     "strings"
+    "sync"
     "testing"
     "time"
 
@@ -227,7 +228,7 @@ func TestPingLoop_ReceivedPongRefreshesTheActivityMark(t *testing.T) {
     serviceContainer := container.NewContainer()
     serverRuntime := runtime.New(loopContext, serviceContainer.NewScope(), serviceContainer)
 
-    go readLoop(loopContext, loopCancel, serverConnection, serverRuntime, Options{}, liveness)
+    go readLoop(loopContext, loopCancel, serverConnection, serverRuntime, Options{}, liveness, newConnectionLogger(serverRuntime))
     go pingLoop(loopContext, loopCancel, serverConnection, interval, time.Second, liveness)
 
     /* the accept-time mark is younger than one interval, so only a pong observed at or after the first tick can push it past that */
@@ -433,7 +434,7 @@ func TestDispatchOnMessage_RecoversPanicFromCallback(t *testing.T) {
         },
     }
 
-    panicked := dispatchOnMessage(runtimeInstance, options, coderwebsocket.MessageText, []byte("payload"))
+    panicked := dispatchOnMessage(runtimeInstance, options, coderwebsocket.MessageText, []byte("payload"), newConnectionLogger(runtimeInstance))
 
     if false == panicked {
         t.Fatalf("expected dispatchOnMessage to recover the callback panic and report it, so the read goroutine does not crash the process")
@@ -961,7 +962,7 @@ func TestDispatchOnMessage_PreservesThePanickedErrorsCauseChain(t *testing.T) {
         },
     }
 
-    panicked := dispatchOnMessage(runtimeInstance, options, coderwebsocket.MessageText, []byte("payload"))
+    panicked := dispatchOnMessage(runtimeInstance, options, coderwebsocket.MessageText, []byte("payload"), newConnectionLogger(runtimeInstance))
 
     if false == panicked {
         t.Fatal("expected the panic to be recovered and reported")
@@ -1005,7 +1006,7 @@ func TestDispatchOnMessage_SurvivesAPanicWhoseUnwrapPanics(t *testing.T) {
         },
     }
 
-    if false == dispatchOnMessage(runtimeInstance, options, coderwebsocket.MessageText, []byte("payload")) {
+    if false == dispatchOnMessage(runtimeInstance, options, coderwebsocket.MessageText, []byte("payload"), newConnectionLogger(runtimeInstance)) {
         t.Fatal("expected the panic to be recovered and reported")
     }
 
@@ -1153,4 +1154,221 @@ func TestStreamHandler_BinaryWritesDeliverTheBroadcastAsABinaryFrame(t *testing.
     }
 
     connection.Close(coderwebsocket.StatusNormalClosure, "")
+}
+
+/* messageCapturingLogger keeps the message and context of every record under a lock, for the records a served handler writes on its own goroutines */
+type messageCapturingLogger struct {
+    mutex    sync.Mutex
+    messages []string
+    contexts []loggingcontract.Context
+}
+
+func (instance *messageCapturingLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.messages = append(instance.messages, message)
+    instance.contexts = append(instance.contexts, context)
+}
+func (instance *messageCapturingLogger) Debug(message string, context loggingcontract.Context) {
+    instance.Log("", message, context)
+}
+func (instance *messageCapturingLogger) Info(message string, context loggingcontract.Context) {
+    instance.Log("", message, context)
+}
+func (instance *messageCapturingLogger) Warning(message string, context loggingcontract.Context) {
+    instance.Log("", message, context)
+}
+func (instance *messageCapturingLogger) Error(message string, context loggingcontract.Context) {
+    instance.Log("", message, context)
+}
+func (instance *messageCapturingLogger) Emergency(message string, context loggingcontract.Context) {
+    instance.Log("", message, context)
+}
+
+func (instance *messageCapturingLogger) hasMessage(message string) bool {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    for _, recorded := range instance.messages {
+        if message == recorded {
+            return true
+        }
+    }
+
+    return false
+}
+
+func runtimeWithLogger(ctx context.Context, logger loggingcontract.Logger) runtimecontract.Runtime {
+    serviceContainer := container.NewContainer()
+    serviceContainer.MustRegister(logging.ServiceLogger, func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+        return logger, nil
+    })
+
+    return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+}
+
+func TestDispatchOnMessage_APanicRecordCarriesTheStack(t *testing.T) {
+    logger := &messageCapturingLogger{}
+    runtimeInstance := runtimeWithLogger(context.Background(), logger)
+
+    options := Options{
+        OnMessage: func(_ runtimecontract.Runtime, _ coderwebsocket.MessageType, _ []byte) {
+            panic("callback boom")
+        },
+    }
+
+    if false == dispatchOnMessage(runtimeInstance, options, coderwebsocket.MessageText, []byte("payload"), newConnectionLogger(runtimeInstance)) {
+        t.Fatal("expected the panic recovered")
+    }
+
+    panicStack, _ := logger.contexts[len(logger.contexts)-1]["panicStack"].(string)
+    if false == strings.Contains(panicStack, "TestDispatchOnMessage_APanicRecordCarriesTheStack") {
+        t.Fatalf("expected the record to carry the stack the callback panicked on, got %q", panicStack)
+    }
+}
+
+func TestDispatchOnMessage_APanicAfterTheScopeClosedStillLeavesARecordThroughTheLoggerCapturedAtUpgrade(t *testing.T) {
+    logger := &messageCapturingLogger{}
+
+    serviceContainer := container.NewContainer()
+    serviceContainer.MustRegister(logging.ServiceLogger, func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+        return logger, nil
+    })
+    scope := serviceContainer.NewScope()
+    runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
+
+    captured := newConnectionLogger(runtimeInstance)
+
+    if closeErr := scope.Close(); nil != closeErr {
+        t.Fatalf("close the scope: %v", closeErr)
+    }
+
+    options := Options{
+        OnMessage: func(_ runtimecontract.Runtime, _ coderwebsocket.MessageType, _ []byte) {
+            panic("callback boom after the scope closed")
+        },
+    }
+
+    if false == dispatchOnMessage(runtimeInstance, options, coderwebsocket.MessageText, []byte("payload"), captured) {
+        t.Fatal("expected the panic recovered")
+    }
+
+    if false == logger.hasMessage("websocket OnMessage panicked") {
+        t.Fatal("expected the panic recorded through the logger captured while the scope was alive")
+    }
+}
+
+func TestStreamHandler_ADrainingHubAnswers503AndAnEmptyTopic400(t *testing.T) {
+    for name, setUp := range map[string]struct {
+        hub      func() *melodyhttp.ServerSentEventHub
+        resolver func(request httpcontract.Request) string
+        status   int
+    }{
+        "draining hub": {
+            hub: func() *melodyhttp.ServerSentEventHub {
+                hub := melodyhttp.NewServerSentEventHub()
+                hub.Shutdown()
+
+                return hub
+            },
+            resolver: func(request httpcontract.Request) string { return "demo" },
+            status:   nethttp.StatusServiceUnavailable,
+        },
+        "empty topic": {
+            hub:      melodyhttp.NewServerSentEventHub,
+            resolver: func(request httpcontract.Request) string { return "" },
+            status:   nethttp.StatusBadRequest,
+        },
+    } {
+        handler := NewStreamHandler(setUp.hub(), Options{IdleTimeout: time.Second, TopicResolver: setUp.resolver})
+
+        serviceContainer := container.NewContainer()
+        runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+        request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/stream", nil), nil, runtimeInstance, nil)
+
+        _, handlerErr := handler(runtimeInstance, httptest.NewRecorder(), request)
+
+        httpException := exception.AsHttpException(handlerErr)
+        if nil == httpException || setUp.status != httpException.StatusCode() {
+            t.Fatalf("%s: expected an http exception at %d, got %v", name, setUp.status, handlerErr)
+        }
+    }
+}
+
+func serveStreamHandlerWithLogger(t *testing.T, hub *melodyhttp.ServerSentEventHub, options Options, logger loggingcontract.Logger) string {
+    t.Helper()
+
+    handler := NewStreamHandler(hub, options)
+
+    server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+        runtimeInstance := runtimeWithLogger(request.Context(), logger)
+        handler(runtimeInstance, writer, melodyhttp.NewRequest(request, nil, runtimeInstance, nil))
+    }))
+    t.Cleanup(server.Close)
+
+    return "ws" + strings.TrimPrefix(server.URL, "http")
+}
+
+func awaitLoggedMessage(t *testing.T, logger *messageCapturingLogger, message string) {
+    t.Helper()
+
+    deadline := time.Now().Add(3 * time.Second)
+    for false == logger.hasMessage(message) {
+        if true == time.Now().After(deadline) {
+            t.Fatalf("expected the record %q, got %v", message, logger.messages)
+        }
+
+        time.Sleep(5 * time.Millisecond)
+    }
+}
+
+func TestStreamHandler_AnOversizedFrameLeavesAReadLoopEndedRecord(t *testing.T) {
+    logger := &messageCapturingLogger{}
+    hub := melodyhttp.NewServerSentEventHub()
+
+    wsUrl := serveStreamHandlerWithLogger(t, hub, Options{
+        TopicResolver:  func(request httpcontract.Request) string { return "demo" },
+        OriginPatterns: []string{"*"},
+        IdleTimeout:    30 * time.Second,
+        ReadLimit:      16,
+    }, logger)
+
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+
+    connection, _, dialErr := coderwebsocket.Dial(ctx, wsUrl, nil)
+    if nil != dialErr {
+        t.Fatalf("dial: %v", dialErr)
+    }
+    defer connection.CloseNow()
+
+    _ = connection.Write(ctx, coderwebsocket.MessageText, []byte(strings.Repeat("x", 64)))
+
+    awaitLoggedMessage(t, logger, "websocket read loop ended")
+}
+
+func TestStreamHandler_AHubClosedBetweenTheCheckAndTheSubscribeLeavesARecord(t *testing.T) {
+    logger := &messageCapturingLogger{}
+    hub := melodyhttp.NewServerSentEventHub()
+
+    wsUrl := serveStreamHandlerWithLogger(t, hub, Options{
+        TopicResolver: func(request httpcontract.Request) string {
+            hub.Shutdown()
+
+            return "demo"
+        },
+        OriginPatterns: []string{"*"},
+        IdleTimeout:    30 * time.Second,
+    }, logger)
+
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+
+    connection, _, dialErr := coderwebsocket.Dial(ctx, wsUrl, nil)
+    if nil == dialErr {
+        defer connection.CloseNow()
+    }
+
+    awaitLoggedMessage(t, logger, "websocket hub shut down during connect, closing the stream")
 }

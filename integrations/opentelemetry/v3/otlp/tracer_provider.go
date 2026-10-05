@@ -24,7 +24,7 @@ const (
     defaultBatchTimeout = 5 * time.Second
 )
 
-/* Config describes how to export spans to an OTLP collector. Endpoint is host:port without a scheme, for example "otel-collector:4317", filled by the deployment from a parameter or .env. SampleRatio in (0,1) keeps that fraction of traces and 0 or >=1 samples everything; a negative or NaN ratio is refused at construction. */
+/* Config describes how to export spans to an OTLP collector. Endpoint is host:port without a scheme, for example "otel-collector:4317", filled by the deployment from a parameter or .env. SampleRatio in (0,1) keeps that fraction of traces and 0 or >=1 samples everything; a negative or NaN ratio is refused at construction. The sampler is parent-based: an inbound traceparent's sampled flag decides for the whole trace, so at an untrusted edge the ratio is the client's to choose; strip or ignore the inbound header there. An option that distrusts a remote parent is planned for the next major. */
 type Config struct {
     Endpoint       string
     Protocol       string
