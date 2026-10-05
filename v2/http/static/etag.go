@@ -54,7 +54,7 @@ func EtagMatchesIfNoneMatch(ifNoneMatch string, etag string) bool {
     return false
 }
 
-/* entityTag is the tag the server sends. A file that carries a modification time is tagged by GenerateEtag. One that carries none, every file of an embedded filesystem, is tagged by its size and a digest of its bytes: the build version GenerateEtag falls back to is melody's own, and it does not move when an application ships a changed asset of the same size, so a revalidating client would be answered 304 over stale bytes. The digest is kept per path, since embedded bytes are fixed for the life of the process; a file that cannot be read keeps GenerateEtag's tag. */
+/* entityTag is the tag the server sends. A file that carries a modification time is tagged by GenerateEtag. One that carries none, every file of an embedded filesystem, is tagged by its size and a digest of its bytes: the build version GenerateEtag falls back to is melody's own, and it does not move when an application ships a changed asset of the same size, so a revalidating client would be answered 304 over stale bytes. The digest is kept per path and size, since embedded bytes are fixed for the life of the process; a filesystem without modification times whose bytes change while it serves keeps the first tag, so it must report modification times. A file that cannot be read keeps GenerateEtag's tag. */
 func (instance *FileServer) entityTag(relativePath string, fileInfo fs.FileInfo) string {
     if nil == fileInfo || false == fileInfo.ModTime().IsZero() {
         return GenerateEtag(fileInfo, instance.config.weakEtag)

@@ -242,7 +242,7 @@ func (instance *publishHalf) closeOwnedConnectionWithin(closeContext context.Con
     return closeErr, reported, returned
 }
 
-/* closeConnectionWithin runs the client's CloseDeadline on a goroutine of its own and waits for it under a bound, answering the client's answer and returned true, or an error naming the bound and returned false. A positive stretch arms the deadline that far ahead and the wait outlives it by closeGrace, so the client's own timeout is what is reported; under a caller's deadline that leaves no room past the stretch, the deadline is armed earlier instead, keeping the grace inside it. A zero stretch is a cut, whose deadline is already behind it, waited for under the join timeout within what is left of the caller's deadline. The client's close first takes the connection mutex, and a shutdown the client already began holds it while it waits for the channel mutex a wedged write holds across the socket call, so a close made in line would block until that write returns; the goroutine ends when the client's shutdown completes. */
+/* closeConnectionWithin runs the client's CloseDeadline on a goroutine of its own and waits for it under a bound, answering the client's answer and returned true, or an error naming the bound and returned false. A positive stretch arms the deadline that far ahead and the wait outlives it by closeGrace, so the client's own timeout is what is reported; under a caller's deadline that leaves no room past the stretch, the deadline is armed earlier instead, keeping the grace inside it, and a deadline that leaves less than two graces is split in half, so the close frame is still written and the handshake still tried. A zero stretch is a cut, whose deadline is already behind it, waited for under the join timeout within what is left of the caller's deadline. The client's close first takes the connection mutex, and a shutdown the client already began holds it while it waits for the channel mutex a wedged write holds across the socket call, so a close made in line would block until that write returns; the goroutine ends when the client's shutdown completes. */
 func closeConnectionWithin(closeContext context.Context, stretch time.Duration, connection *amqp091.Connection) (closeErr error, returned bool) {
     armedStretch := stretch
     closeWait := teardownStretchWithin(closeContext, closeJoinTimeout)
@@ -250,7 +250,7 @@ func closeConnectionWithin(closeContext context.Context, stretch time.Duration, 
     if 0 < stretch {
         closeWait = teardownStretchWithin(closeContext, stretch+closeGrace)
         if closeWait-armedStretch < closeGrace {
-            armedStretch = max(closeWait-closeGrace, 0)
+            armedStretch = max(closeWait-closeGrace, closeWait/2)
         }
     }
 

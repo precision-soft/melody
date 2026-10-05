@@ -212,6 +212,87 @@ func TestWithCloser_AnInstanceAnOverrideEvictedIsClosedThroughTheCloser(t *testi
     }
 }
 
+/* otherClosingService is an override of another type than the closer takes, installed under a name registered without its type */
+type otherClosingService struct {
+    ownCloses atomic.Int32
+}
+
+func (instance *otherClosingService) Close() error {
+    instance.ownCloses.Add(1)
+
+    return nil
+}
+
+func TestWithCloser_AnOverrideOfATypeTheCloserDoesNotTakeIsClosedThroughItsOwnClose(t *testing.T) {
+    serviceContainer := NewContainer()
+    built := &foreignClosingService{}
+    closerCalls := atomic.Int32{}
+
+    serviceContainer.MustRegister(
+        "app.foreign",
+        func(resolver containercontract.Resolver) (*foreignClosingService, error) {
+            return built, nil
+        },
+        WithCloser(func(closeContext context.Context, value *foreignClosingService) error {
+            closerCalls.Add(1)
+
+            return nil
+        }),
+        WithoutTypeRegistration(),
+    )
+
+    _ = MustFromResolver[*foreignClosingService](serviceContainer, "app.foreign")
+
+    override := &otherClosingService{}
+    if overrideErr := serviceContainer.OverrideProtectedInstance("app.foreign", override); nil != overrideErr {
+        t.Fatalf("override: %v", overrideErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    if 1 != override.ownCloses.Load() {
+        t.Fatalf("expected the override closed once through its own Close, got %d", override.ownCloses.Load())
+    }
+
+    if 1 != closerCalls.Load() || 0 != built.ownCloses.Load() {
+        t.Fatalf("expected the evicted instance closed once through the closer, got closer %d own %d", closerCalls.Load(), built.ownCloses.Load())
+    }
+}
+
+func TestWithCloser_AnOverrideOfTheTypeTheCloserTakesIsClosedThroughTheCloser(t *testing.T) {
+    serviceContainer := NewContainer()
+    override := &foreignClosingService{}
+    var closedOverride atomic.Bool
+
+    serviceContainer.MustRegister(
+        "app.foreign",
+        func(resolver containercontract.Resolver) (*foreignClosingService, error) {
+            return &foreignClosingService{}, nil
+        },
+        WithCloser(func(closeContext context.Context, value *foreignClosingService) error {
+            if override == value {
+                closedOverride.Store(true)
+            }
+
+            return nil
+        }),
+    )
+
+    if overrideErr := serviceContainer.OverrideInstance("app.foreign", override); nil != overrideErr {
+        t.Fatalf("override: %v", overrideErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    if false == closedOverride.Load() || 0 != override.ownCloses.Load() {
+        t.Fatalf("expected the override closed through the closer only, got closer %v own %d", closedOverride.Load(), override.ownCloses.Load())
+    }
+}
+
 func TestWithCloser_ACloserThatDoesNotTakeTheServicesTypeIsRefusedAtRegistration(t *testing.T) {
     serviceContainer := NewContainer()
 

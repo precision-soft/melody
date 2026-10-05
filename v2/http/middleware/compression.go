@@ -30,6 +30,7 @@ type CompressionConfig struct {
     excludedPaths        []string
 }
 
+/* NewCompressionConfig builds the middleware's configuration. A level of 0, or one outside gzip's range, reads as the default level: 0 would label an uncompressed body gzip and grow it. A minimum size of 0 or below reads as 1024 bytes, and a nil exclusion list excludes nothing. */
 func NewCompressionConfig(
     level int,
     minSize int,
@@ -120,7 +121,8 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
         config = NewCompressionConfig(config.level, config.minSize, config.excludedContentTypes, config.excludedPaths)
     }
 
-    if gzip.HuffmanOnly > config.Level() || gzip.BestCompression < config.Level() {
+    /* level 0 is gzip's NoCompression, which would label a stored body gzip and grow it by the framing */
+    if gzip.NoCompression == config.Level() || gzip.HuffmanOnly > config.Level() || gzip.BestCompression < config.Level() {
         config.SetLevel(gzip.DefaultCompression)
     }
 
@@ -242,9 +244,11 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
 
             pipeReader, pipeWriter := io.Pipe()
             compressionDone := make(chan struct{})
-            go streamGzipCompressInto(pipeWriter, source, originalReader, config.Level(), compressionDone)
+            /* closed once, by whichever of the two goroutines gets there first: a client that leaves stops the source being read, since gzip consumes megabytes of a compressible body before it writes a byte the closed pipe could refuse */
+            sourceCloser := &onceClosingReader{reader: originalReader}
+            go streamGzipCompressInto(pipeWriter, source, sourceCloser, config.Level(), compressionDone)
             /* if an outer middleware panics after next() returned, the kernel drops this response without closing its body, so the gzip goroutine would block forever in pipe.Write and pin the original reader's descriptor; tie the pipe reader to the request lifecycle so it is closed when the request unwinds */
-            go closePipeReaderOnRequestUnwind(httpRequest.Context(), pipeReader, compressionDone)
+            go closePipeReaderOnRequestUnwind(httpRequest.Context(), pipeReader, compressionDone, sourceCloser)
 
             response.SetBodyReader(pipeReader)
             response.Headers().Set("Content-Encoding", "gzip")
@@ -349,14 +353,33 @@ func closeBodyReaderQuiet(reader io.Reader) {
     _ = closer.Close()
 }
 
-/* closePipeReaderOnRequestUnwind closes the gzip pipe reader when the request context is cancelled, so a compression goroutine whose response was abandoned by a panicking outer middleware cannot block forever in pipe.Write; it returns without touching the pipe once compression finishes normally, so the successful path does not disturb the served body */
-func closePipeReaderOnRequestUnwind(requestContext context.Context, pipeReader *io.PipeReader, compressionDone <-chan struct{}) {
+/* closePipeReaderOnRequestUnwind closes the gzip pipe reader and the source when the request context is cancelled, so a compression goroutine whose response was abandoned by a panicking outer middleware cannot block forever in pipe.Write; it returns without touching the pipe once compression finishes normally, so the successful path does not disturb the served body */
+func closePipeReaderOnRequestUnwind(requestContext context.Context, pipeReader *io.PipeReader, compressionDone <-chan struct{}, sourceCloser io.Closer) {
     select {
     case <-compressionDone:
         return
     case <-requestContext.Done():
         _ = pipeReader.CloseWithError(requestContext.Err())
+        _ = sourceCloser.Close()
     }
+}
+
+/* onceClosingReader closes the reader it carries once, whoever asks first; a reader that is not an io.Closer is left alone */
+type onceClosingReader struct {
+    reader io.Reader
+    once   sync.Once
+}
+
+func (instance *onceClosingReader) Read(buffer []byte) (int, error) {
+    return instance.reader.Read(buffer)
+}
+
+func (instance *onceClosingReader) Close() error {
+    instance.once.Do(func() {
+        closeBodyReaderQuiet(instance.reader)
+    })
+
+    return nil
 }
 
 /* the pools are indexed by compression level, because a writer carries the level it was built with and resetting it does not change it. gzip accepts HuffmanOnly through BestCompression and refuses anything else, so a level outside that range never reaches a pool: it fails at creation, which is where an invalid configuration should be reported. */

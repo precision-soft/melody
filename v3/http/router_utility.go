@@ -603,6 +603,11 @@ func resolveSessionCookieSecure(
         return false
     }
 
+    /* every current browser drops a SameSite=None cookie that is not Secure, so under FromScheme it is Secure whatever the scheme; an explicit Never above is honoured as written */
+    if nethttp.SameSiteNoneMode == resolveSessionCookieSameSite(sessionCookiePolicy) {
+        return true
+    }
+
     if true == internal.IsNilInterface(request) {
         return false
     }
@@ -663,6 +668,15 @@ func markResponsePrivateForSessionCookie(response httpcontract.Response) {
         return
     }
 
+    /* a line that ends inside a quoted string would swallow an appended "private" into the quote, so the whole header is replaced by the one directive that must be read */
+    for _, existing := range existingLines {
+        if true == endsInsideQuotes(existing) {
+            headers.Set("Cache-Control", "private")
+
+            return
+        }
+    }
+
     rebuilt := make([]string, 0)
     hasPrivate := false
     hasNoStore := false
@@ -696,6 +710,34 @@ func markResponsePrivateForSessionCookie(response httpcontract.Response) {
     }
 
     headers.Set("Cache-Control", strings.Join(rebuilt, ", "))
+}
+
+/* endsInsideQuotes reports whether a header value leaves a quoted string open, under the grammar SplitOutsideQuotes reads: a backslash inside quotes escapes the next byte */
+func endsInsideQuotes(value string) bool {
+    insideQuotes := false
+    escaped := false
+
+    for index := 0; index < len(value); index++ {
+        character := value[index]
+
+        if true == escaped {
+            escaped = false
+
+            continue
+        }
+
+        if true == insideQuotes && '\\' == character {
+            escaped = true
+
+            continue
+        }
+
+        if '"' == character {
+            insideQuotes = false == insideQuotes
+        }
+    }
+
+    return insideQuotes
 }
 
 /* sessionIdLogReference answers a truncated SHA-256 of a session id: enough to correlate one session's records, not enough to present as a cookie. */

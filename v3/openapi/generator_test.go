@@ -1,6 +1,7 @@
 package openapi
 
 import (
+    "encoding/json"
     "reflect"
     "strings"
     "testing"
@@ -9,9 +10,10 @@ import (
 )
 
 type fakeRoute struct {
-    name    string
-    pattern string
-    methods []string
+    name     string
+    pattern  string
+    methods  []string
+    priority int
 }
 
 func (instance fakeRoute) Name() string                    { return instance.name }
@@ -22,7 +24,7 @@ func (instance fakeRoute) Schemes() []string               { return nil }
 func (instance fakeRoute) Requirements() map[string]string { return nil }
 func (instance fakeRoute) Defaults() map[string]string     { return nil }
 func (instance fakeRoute) Locales() []string               { return nil }
-func (instance fakeRoute) Priority() int                   { return 0 }
+func (instance fakeRoute) Priority() int                   { return instance.priority }
 func (instance fakeRoute) Attributes() map[string]any      { return nil }
 
 func keysOf(paths map[string]PathItem) []string {
@@ -898,7 +900,7 @@ func TestGenerate_ACatchAllPatternDropsTheSegmentsTheRouterDrops(t *testing.T) {
     }
 }
 
-/* two routes whose patterns converge on one converted path — a placeholder against a brace literal — must not silently replace each other's operations: the earlier registration wins, exactly as it does in the router's match order. */
+/* two routes whose patterns converge on one converted path — a placeholder against a brace literal — must not silently replace each other's operations: at equal priority the earlier registration wins, exactly as it does in the router's match order. */
 func TestGenerate_ALaterRouteDoesNotDisplaceAnEarlierRoutesOperation(t *testing.T) {
     routes := []httpcontract.RouteDefinition{
         fakeRoute{name: "users.read", pattern: "/users/:id", methods: []string{"GET"}},
@@ -955,5 +957,108 @@ func TestGenerate_TheDocumentDoesNotAliasTheRegistryTags(t *testing.T) {
 
     if "products" != second.Paths["/products/"].Get.Tags[0] {
         t.Fatalf("expected the registry tags untouched by a document write, got %q", second.Paths["/products/"].Get.Tags[0])
+    }
+}
+
+func TestGenerate_AConvergingRouteWithTheHigherPriorityOwnsTheOperation(t *testing.T) {
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "users.read", pattern: "/users/:id", methods: []string{"GET"}},
+        fakeRoute{name: "users.read.override", pattern: "/users/{id}", methods: []string{"GET"}, priority: 10},
+    }
+
+    document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+
+    operation := document.Paths["/users/{id}"].Get
+    if nil == operation || "users.read.override" != operation.OperationId {
+        t.Fatalf("expected the route the router serves to own the slot, got %+v", operation)
+    }
+}
+
+func TestGenerate_AnEarlierRouteWithTheHigherPriorityKeepsTheOperation(t *testing.T) {
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "users.read", pattern: "/users/:id", methods: []string{"GET"}, priority: 10},
+        fakeRoute{name: "users.read.literal", pattern: "/users/{id}", methods: []string{"GET"}},
+    }
+
+    document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+
+    operation := document.Paths["/users/{id}"].Get
+    if nil == operation || "users.read" != operation.OperationId {
+        t.Fatalf("expected the earlier route of the higher priority to keep the slot, got %+v", operation)
+    }
+}
+
+func TestGenerate_AHigherPriorityRouteDisplacesAMirrorAndAnExplicitRouteStillBeatsAMirror(t *testing.T) {
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "a.show", pattern: "/a/:x?", methods: []string{"GET"}, priority: 10},
+        fakeRoute{name: "a.index", pattern: "/a", methods: []string{"GET"}},
+    }
+
+    document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+
+    operation := document.Paths["/a"].Get
+    if nil == operation || "a.index" != operation.OperationId {
+        t.Fatalf("expected the explicit route to own the shortened path over the mirror, got %+v", operation)
+    }
+}
+
+func TestGenerate_ARunOfTrailingOptionalSegmentsIsMirroredAtEveryPrefix(t *testing.T) {
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "a.show", pattern: "/a/:x?/:y?", methods: []string{"GET"}},
+    }
+
+    document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+
+    for path, operationId := range map[string]string{
+        "/a":         "a.show.without.x.y",
+        "/a/{x}":     "a.show.without.y",
+        "/a/{x}/{y}": "a.show",
+    } {
+        operation := document.Paths[path].Get
+        if nil == operation || operationId != operation.OperationId {
+            t.Fatalf("expected %s under %s, got %+v (paths %v)", operationId, path, operation, keysOf(document.Paths))
+        }
+    }
+
+    if 3 != len(document.Paths) {
+        t.Fatalf("expected three paths, got %v", keysOf(document.Paths))
+    }
+}
+
+func TestGenerate_AnOptionalBeforeARequiredSegmentIsNotExpanded(t *testing.T) {
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "a.show", pattern: "/a/:x?/:y", methods: []string{"GET"}},
+    }
+
+    document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+
+    if 1 != len(document.Paths) {
+        t.Fatalf("expected the pattern described once, got %v", keysOf(document.Paths))
+    }
+}
+
+func TestGenerate_UnnamedRoutesCarryNoOperationId(t *testing.T) {
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "", pattern: "/x", methods: []string{"GET", "POST"}},
+        fakeRoute{name: "", pattern: "/y/:id?", methods: []string{"GET"}},
+    }
+
+    document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+
+    for path, pathItem := range document.Paths {
+        for _, operation := range []*Operation{pathItem.Get, pathItem.Post} {
+            if nil != operation && "" != operation.OperationId {
+                t.Fatalf("expected no operationId under %s, got %q", path, operation.OperationId)
+            }
+        }
+    }
+
+    encoded, encodeErr := json.Marshal(document)
+    if nil != encodeErr {
+        t.Fatalf("encode: %v", encodeErr)
+    }
+
+    if true == strings.Contains(string(encoded), "operationId") {
+        t.Fatalf("expected no operationId in the serialized document, got %s", encoded)
     }
 }

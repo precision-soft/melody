@@ -649,7 +649,7 @@ func (instance *container) closeInternal(closeContext context.Context) error {
         value     any
         waveIndex int
         /* closer is the one the registration declared WithCloser, nil where none */
-        closer func(closeContext context.Context, value any) error
+        closer *declaredCloser
     }
 
     /* the clock starts before the lock: the plan computed under it spends the same budget */
@@ -1013,13 +1013,31 @@ func closeDoorsOf(value any) (closeable interface{ Close() error }, contextClose
     return closeable, contextCloseable, nil != closeable || nil != contextCloseable
 }
 
-/* closeDoorsOfWithCloser is closeDoorsOf for a value whose registration may have declared a closer: the closer is its only door, taking the teardown's budget, and the doors the value carries are not used. */
-func closeDoorsOfWithCloser(value any, closer func(closeContext context.Context, value any) error) (closeable interface{ Close() error }, contextCloseable containercontract.ContextCloser, carriesADoor bool) {
-    if nil != closer {
-        return nil, registeredCloser{value: value, closer: closer}, true
+/* closeDoorsOfWithCloser is closeDoorsOf for a value whose registration may have declared a closer: a value the closer takes has it as its only door, taking the teardown's budget, and the doors it carries are not used; a value it does not take, an override of another type installed under the name, closes through its own doors. */
+func closeDoorsOfWithCloser(value any, closer *declaredCloser) (closeable interface{ Close() error }, contextCloseable containercontract.ContextCloser, carriesADoor bool) {
+    if nil != closer && true == closer.takes(value) {
+        return nil, registeredCloser{value: value, closer: closer.close}, true
     }
 
     return closeDoorsOf(value)
+}
+
+/* declaredCloser is a registration's WithCloser closer with the type it takes, nil where the registration named none */
+type declaredCloser struct {
+    valueType reflect.Type
+    close     func(closeContext context.Context, value any) error
+}
+
+func (instance *declaredCloser) takes(value any) bool {
+    if nil == instance.valueType {
+        return true
+    }
+
+    if nil == value {
+        return false
+    }
+
+    return reflect.TypeOf(value).AssignableTo(instance.valueType)
 }
 
 /* registeredCloser carries a value to the closer its registration declared, through the context door the teardown already takes. */

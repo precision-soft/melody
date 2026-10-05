@@ -222,15 +222,26 @@ func sanitizeUrlForDiagnostics(urlString string) string {
 
 const redactedValue = "xxxxx"
 
-/* sanitizeUrlTextually removes the userinfo and the whole query from a url net/url refused to parse. The userinfo is cut wherever the reference can carry one, since "//user:secret@host:notaport/path" reaches here with no "://". */
+/* sanitizeUrlTextually removes the userinfo, the whole query and the fragment from a url net/url refused to parse. The userinfo is cut wherever the reference can carry one, since "//user:secret@host:notaport/path" reaches here with no "://". An "@" past the first "/", "?" or "#" of the authority leaves no trustworthy end to it, a password holding one of the three being the usual cause, so such a url keeps only what precedes its authority. */
 func sanitizeUrlTextually(urlString string) string {
-    sanitized := urlString
-
-    if queryStart := strings.Index(sanitized, "?"); 0 <= queryStart {
-        sanitized = sanitized[:queryStart] + "?" + redactedValue
+    authorityStart, hasAuthority := authorityStartIndex(urlString)
+    if true == hasAuthority {
+        authorityEnd := strings.IndexAny(urlString[authorityStart:], "/?#")
+        if 0 <= authorityEnd && true == strings.Contains(urlString[authorityStart+authorityEnd:], "@") {
+            return urlString[:authorityStart] + redactedValue
+        }
     }
 
-    authorityStart, hasAuthority := authorityStartIndex(sanitized)
+    sanitized := urlString
+
+    if referenceEnd := strings.IndexAny(sanitized, "?#"); 0 <= referenceEnd {
+        if '?' == sanitized[referenceEnd] {
+            sanitized = sanitized[:referenceEnd] + "?" + redactedValue
+        } else {
+            sanitized = sanitized[:referenceEnd]
+        }
+    }
+
     if false == hasAuthority {
         return sanitized
     }
@@ -765,13 +776,43 @@ func refuseForeignOrigin(baseUrl string, urlString string) error {
     )
 }
 
-/* sanitizeUrlParseError keeps what net/url says about a refused url and drops the url itself, which its message quotes with userinfo and query. */
+/* sanitizeUrlParseError keeps what net/url says about a refused url and drops the url itself, which its message quotes with userinfo and query. The message also quotes the span it refused, a port or an escape, and in a url holding an "@" that span can be the head of a password net/url read as a port, so there every quoted span is redacted. */
 func sanitizeUrlParseError(err error) string {
     if urlErr, ok := err.(*url.Error); true == ok && nil != urlErr.Err {
+        if true == strings.Contains(urlErr.URL, "@") {
+            return redactQuotedSpans(urlErr.Err.Error())
+        }
+
         return urlErr.Err.Error()
     }
 
     return err.Error()
+}
+
+/* redactQuotedSpans replaces the text between each pair of double quotes, and an unclosed quote's tail, with the redaction */
+func redactQuotedSpans(text string) string {
+    var redacted strings.Builder
+
+    for {
+        quoteStart := strings.Index(text, "\"")
+        if 0 > quoteStart {
+            redacted.WriteString(text)
+
+            return redacted.String()
+        }
+
+        redacted.WriteString(text[:quoteStart+1])
+        redacted.WriteString(redactedValue)
+
+        rest := text[quoteStart+1:]
+        quoteEnd := strings.Index(rest, "\"")
+        if 0 > quoteEnd {
+            return redacted.String()
+        }
+
+        redacted.WriteString("\"")
+        text = rest[quoteEnd+1:]
+    }
 }
 
 /* streamClientForRequest drops the whole-request Timeout for the streaming path, since it would force-close a long-lived body mid-read. The header phase stays bounded by the transport, the body belongs to the caller or its context, and an explicit per-request timeout is still honored. */

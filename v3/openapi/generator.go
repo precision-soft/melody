@@ -36,8 +36,8 @@ func Generate(
     components := make(map[string]*Schema)
     componentNames := make(map[reflect.Type]string)
 
-    /* the slots the mirror of an optional tail wrote: a route registered at the shortened path displaces the mirror, whichever of the two is reached first */
-    mirrorOwnedSlots := make(map[string]bool)
+    /* who holds each slot: a route registered at the shortened path displaces the mirror of an optional tail, whichever of the two is reached first, and between two routes the one the router would serve keeps it */
+    slotOwners := make(map[string]slotOwner)
 
     for _, routeDefinition := range routeDefinitions {
         descriptor := Descriptor{}
@@ -69,16 +69,21 @@ func Generate(
                     continue
                 }
 
-                /* a mirror always yields a taken slot, a route yields only to another route, and between two routes converging on one converted path the earlier registration wins, as in the router's match order */
+                /* a mirror always yields a taken slot and a route always displaces a mirror; between two routes converging on one converted path the one the router would serve wins, the higher Priority() first and then the earlier registration */
                 slotKey := path + " " + strings.ToUpper(method)
+                candidate := slotOwner{priority: routeDefinition.Priority(), mirror: expansion.omitsParameter}
                 if nil != operationFor(&pathItem, method) {
-                    if true == expansion.omitsParameter || false == mirrorOwnedSlots[slotKey] {
+                    if true == candidate.mirror {
+                        continue
+                    }
+
+                    if holder := slotOwners[slotKey]; false == holder.mirror && false == routeOutranks(candidate, holder) {
                         continue
                     }
                 }
 
                 operationId := operationIdFor(routeDefinition.Name(), method, len(methods))
-                if true == expansion.omitsParameter {
+                if true == expansion.omitsParameter && "" != operationId {
                     operationId = operationId + ".without"
                     if "" != expansion.omittedParameter {
                         operationId = operationId + "." + expansion.omittedParameter
@@ -87,7 +92,7 @@ func Generate(
 
                 operation := buildOperation(operationId, method, pathParameters, descriptor, hasDescriptor, components, componentNames)
                 assignOperation(&pathItem, method, operation)
-                mirrorOwnedSlots[slotKey] = expansion.omitsParameter
+                slotOwners[slotKey] = candidate
             }
 
             document.Paths[path] = pathItem
@@ -101,7 +106,23 @@ func Generate(
     return document
 }
 
+/* slotOwner is what the generator remembers of the operation holding a slot */
+type slotOwner struct {
+    priority int
+    mirror   bool
+}
+
+/* routeOutranks reports whether the router serves the candidate over the holder; registration order is the loop's order, so a later candidate of equal priority never does */
+func routeOutranks(candidate slotOwner, holder slotOwner) bool {
+    return candidate.priority > holder.priority
+}
+
+/* operationIdFor names an operation after its route; an unnamed route carries no operationId, the field being optional and two unnamed routes otherwise sharing one */
 func operationIdFor(routeName string, method string, methodCount int) string {
+    if "" == routeName {
+        return ""
+    }
+
     if methodCount <= 1 {
         return routeName
     }
@@ -205,30 +226,37 @@ type patternExpansion struct {
     omittedParameter string
 }
 
-/* the router serves a trailing optional parameter both ways and "in: path" forbids "required: false", so the pattern is described once without its last segment and once with it */
+/* the router ends a route wherever only optional segments remain and "in: path" forbids "required: false", so the pattern is described once per prefix from which only optional segments remain, then whole */
 func expandOptionalTailSegment(pattern string) []patternExpansion {
     segments := strings.Split(pattern, "/")
 
-    parameterName, optional := optionalTailParameterName(segments[len(segments)-1])
-    if false == optional {
-        return []patternExpansion{{pattern: pattern}}
+    runStart := len(segments)
+    parameterNames := make([]string, len(segments))
+    for 0 < runStart {
+        parameterName, optional := optionalTailParameterName(segments[runStart-1])
+        if false == optional {
+            break
+        }
+
+        runStart = runStart - 1
+        parameterNames[runStart] = parameterName
     }
 
-    shortened := strings.Join(segments[:len(segments)-1], "/")
-    if "" == shortened {
-        shortened = "/"
-    }
+    expansions := make([]patternExpansion, 0, len(segments)-runStart+1)
+    for prefixLength := runStart; prefixLength < len(segments); prefixLength = prefixLength + 1 {
+        shortened := strings.Join(segments[:prefixLength], "/")
+        if "" == shortened {
+            shortened = "/"
+        }
 
-    return []patternExpansion{
-        {
+        expansions = append(expansions, patternExpansion{
             pattern:          shortened,
             omitsParameter:   true,
-            omittedParameter: parameterName,
-        },
-        {
-            pattern: pattern,
-        },
+            omittedParameter: strings.Join(parameterNames[prefixLength:], "."),
+        })
     }
+
+    return append(expansions, patternExpansion{pattern: pattern})
 }
 
 /* only the ":name?" spelling is expanded: the router matches a brace segment literally, so expanding one would describe a path no route answers */

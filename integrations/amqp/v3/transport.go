@@ -373,7 +373,7 @@ func closeChannels(channels ...*amqp091.Channel) []error {
     return closeErrs
 }
 
-/* closeChannelsWithin is closeChannels bounded: a channel close is an RPC over the socket that observes no context, so on a caller-owned connection teardown cannot cut, a broker that stops reading mid-close would otherwise hold teardown. Past the bound the closes are left to end with the socket, and the bound is reported. */
+/* closeChannelsWithin is closeChannels bounded: a channel close is an RPC over the socket that observes no context, so a broker that stops reading mid-close would otherwise hold its caller, the teardown of a caller-owned connection it cannot cut or the reset and redial of an owned one. Past the bound the closes are left to end with the socket, and the bound is reported. */
 func closeChannelsWithin(bound time.Duration, channels ...*amqp091.Channel) []error {
     /* a close with nothing to close cannot fail to return, and is counted here rather than in the goroutine below: a spent budget makes the bound zero, and a zero bound arms a timer that is ready before that goroutine is scheduled */
     openChannels := 0
@@ -414,7 +414,7 @@ func closeChannelsWithin(bound time.Duration, channels ...*amqp091.Channel) []er
         }
 
         return []error{exception.NewError(
-            "amqp channel close did not return within the bound on a caller-owned connection; the channels end with that connection",
+            "amqp channel close did not return within the bound; the channels end with their connection",
             map[string]any{"bound": bound.String()},
             nil,
         )}
@@ -1439,7 +1439,7 @@ func deadLetterAttemptCountFromHeader(headers amqp091.Table) int {
     return intFromHeader(headers, headerDeadLetterAttemptCount)
 }
 
-/* intFromHeader clamps into [0, math.MaxInt] rather than converting blindly: a foreign producer or a management-UI republish can put any number in these headers, and an out-of-range uint64 or float would wrap negative and read as count zero, resetting the retry accounting. Clamping high keeps the fail-closed direction, so an absurd count dead-letters. A count written as text, as bytes or as an amqp decimal is read as the integer it spells, and a value that spells no integer, or of a type that carries no count, reads math.MaxInt for the same reason: read as zero it would re-arm the budget on every redelivery. */
+/* intFromHeader clamps into [0, math.MaxInt] rather than converting blindly: a foreign producer or a management-UI republish can put any number in these headers, and an out-of-range uint64 or float would wrap negative and read as count zero, resetting the retry accounting. Clamping high keeps the fail-closed direction, so an absurd count dead-letters. A count written as text, as bytes or as an amqp decimal is read as the integer it spells, and a value that spells no integer, or of a type that carries no count, reads math.MaxInt for the same reason: read as zero it would re-arm the budget on every redelivery. A void value reads as the absent header it stands for, zero, since a producer that omits the header gets the same answer. */
 func intFromHeader(headers amqp091.Table, key string) int {
     raw, exists := headers[key]
     if false == exists {

@@ -143,3 +143,57 @@ func TestDeleteCookie_HonoursThePrefixContractsSoTheDeletionCanLand(t *testing.T
         t.Fatalf("expected the unprefixed deletion to stay as it was, got %q", plainHeader)
     }
 }
+
+func TestSetCookie_PanicsWhenTheNameIsInvalidAndWritesNoHeader(t *testing.T) {
+    response := EmptyResponse(200)
+
+    testhelper.AssertPanicsWithError(t, func() {
+        SetCookie(response, &nethttp.Cookie{Name: "a b", Value: "v"})
+    }, "the cookie name is invalid and can not be set")
+
+    if 0 != len(response.Headers().Values("Set-Cookie")) {
+        t.Fatalf("expected no Set-Cookie header, got %v", response.Headers().Values("Set-Cookie"))
+    }
+}
+
+func TestSetCookie_AValueWithASpaceIsWritten(t *testing.T) {
+    response := EmptyResponse(200)
+
+    SetCookie(response, &nethttp.Cookie{Name: "a", Value: "b c"})
+
+    if "" == response.Headers().Get("Set-Cookie") {
+        t.Fatalf("expected the cookie written with its value quoted")
+    }
+}
+
+func TestDeleteCookieWithDomain_WritesTheDomainOnTheExpiringCookie(t *testing.T) {
+    response := EmptyResponse(200)
+
+    DeleteCookieWithDomain(response, "sid", "/", "example.com")
+
+    value := response.Headers().Get("Set-Cookie")
+    if false == strings.Contains(value, "Domain=example.com") || false == strings.Contains(value, "Max-Age=0") {
+        t.Fatalf("expected the expiring cookie on the domain, got %q", value)
+    }
+}
+
+func TestDeleteCookieWithDomain_AHostPrefixedNameDropsTheDomain(t *testing.T) {
+    response := EmptyResponse(200)
+
+    DeleteCookieWithDomain(response, "__Host-sid", "/admin", "example.com")
+
+    value := response.Headers().Get("Set-Cookie")
+    if true == strings.Contains(value, "Domain=") || false == strings.Contains(value, "Path=/;") && false == strings.HasSuffix(value, "Path=/") {
+        t.Fatalf("expected no domain and the root path, got %q", value)
+    }
+}
+
+func TestDeleteCookie_WritesNoDomain(t *testing.T) {
+    response := EmptyResponse(200)
+
+    DeleteCookie(response, "sid", "/")
+
+    if true == strings.Contains(response.Headers().Get("Set-Cookie"), "Domain=") {
+        t.Fatalf("expected a host-only deletion, got %q", response.Headers().Get("Set-Cookie"))
+    }
+}

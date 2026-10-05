@@ -3464,6 +3464,7 @@ var lockstepTags = []string{
     ",",
     "min(5)",
     "notEmpty(foo)",
+    "nosuchrule",
 }
 
 func lockstepStructType(fieldType reflect.Type, tag string) reflect.Type {
@@ -3716,8 +3717,12 @@ func schemaAccepts(schema *Schema, components map[string]*Schema, value reflect.
     return true
 }
 
-/* declaredDivergence enumerates the known places the document advertises a value the validator refuses, each one declared in schema.go with its reason. Exactly one exists: notBlank's whitespace-only rejection on a genuine string cannot be expressed by minLength, so a non-empty blank string is advertised at length >= 1 and refused by the constraint's TrimSpace. Anything else that trips the invariant is a real divergence of the mirror. */
+/* declaredDivergence enumerates the known places the document advertises a value the validator refuses, each one declared in schema.go with its reason. Two exist: notBlank's whitespace-only rejection on a genuine string cannot be expressed by minLength, so a non-empty blank string is advertised at length >= 1 and refused by the constraint's TrimSpace; and a rule name the mirror does not know, which the stock validator refuses for every value and an application's registered constraint judges as it likes, is named in the field's description instead of modelled. Anything else that trips the invariant is a real divergence of the mirror. */
 func declaredDivergence(tag string, fieldType reflect.Type, value reflect.Value) bool {
+    if true == lockstepTagNamesAnUnmodeledRule(tag) {
+        return true
+    }
+
     hasNotBlank := false
     for _, rule := range splitRules(tag) {
         name, _ := splitRule(rule)
@@ -3740,6 +3745,17 @@ func declaredDivergence(tag string, fieldType reflect.Type, value reflect.Value)
     text := resolved.String()
 
     return "" != text && "" == strings.TrimSpace(text)
+}
+
+func lockstepTagNamesAnUnmodeledRule(tag string) bool {
+    for _, rule := range splitRules(tag) {
+        name, _ := splitRule(rule)
+        if "nosuchrule" == name {
+            return true
+        }
+    }
+
+    return false
 }
 
 func lockstepRequired(schema *Schema) bool {
@@ -3768,7 +3784,7 @@ func TestLockstepMirrorNeverAdvertisesWhatTheValidatorRefuses(t *testing.T) {
                 t.Fatalf("tag %q on %v: the generated schema carries no property for the field", tag, fieldType)
             }
 
-            if false == lockstepRequired(schema) {
+            if false == lockstepRequired(schema) && false == lockstepTagNamesAnUnmodeledRule(tag) {
                 zeroStruct := reflect.New(structType).Elem()
                 if validateErr := validatorInstance.Validate(zeroStruct.Interface()); nil != validateErr {
                     t.Errorf(
@@ -3949,5 +3965,23 @@ func TestApplyValidation_AnswersTheSameFacetsOnTheMemoizedParse(t *testing.T) {
         if firstRejects != secondRejects || false == reflect.DeepEqual(firstSchema, secondSchema) {
             t.Fatalf("expected the same facets for %q on both readings, got %+v / %+v", tag, firstSchema, secondSchema)
         }
+    }
+}
+
+func TestBuildSchema_AnUnknownRuleNameIsNamedInTheDescription(t *testing.T) {
+    schema := schemaFromType(lockstepStructType(reflect.TypeOf(""), "notBlank,nosuchrule"), map[string]*Schema{}, map[reflect.Type]string{})
+
+    property := schema.Properties["value"]
+    if nil == property || false == strings.Contains(property.Description, "`nosuchrule`") {
+        t.Fatalf("expected the unknown rule named in the description, got %+v", property)
+    }
+}
+
+func TestBuildSchema_AKnownRuleLeavesTheDescriptionUntouched(t *testing.T) {
+    schema := schemaFromType(lockstepStructType(reflect.TypeOf(""), "notBlank,min=2,max=40"), map[string]*Schema{}, map[reflect.Type]string{})
+
+    property := schema.Properties["value"]
+    if nil == property || "" != property.Description {
+        t.Fatalf("expected no description for known rules, got %+v", property)
     }
 }

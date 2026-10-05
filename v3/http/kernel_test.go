@@ -3913,3 +3913,53 @@ func TestKernel_TheDebugPayloadShowsTheCoordinatesOfTheOccurrence(t *testing.T) 
         t.Fatalf("expected the error value to keep no request's coordinates, got %v", sharedErr.Context())
     }
 }
+
+func servedSessionCookiePolicyKernel(policy httpcontract.SessionCookiePolicy) (nethttp.Handler, *recordsCaptureLogger) {
+    capture := &recordsCaptureLogger{}
+
+    serviceContainer := newHttpTestContainer()
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, capture)
+
+    router := NewRouter()
+    router.Handle(nethttp.MethodGet, "/ok", func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return EmptyResponse(nethttp.StatusNoContent), nil
+    })
+
+    kernel := NewKernel(router)
+    kernel.SetSessionCookiePolicy(policy)
+
+    return kernel.ServeHttp(serviceContainer), capture
+}
+
+func sessionCookieBootWarningRecords(capture *recordsCaptureLogger) int {
+    count := 0
+    for _, record := range capture.failureRecords() {
+        if "http.sessionCookie.sameSiteNoneNeverSecure" == record.context["bootWarning"] {
+            count = count + 1
+        }
+    }
+
+    return count
+}
+
+func TestKernel_ASameSiteNoneNeverSecurePolicyIsNamedOnceAtTheHttpBoot(t *testing.T) {
+    handler, capture := servedSessionCookiePolicyKernel(httpcontract.SessionCookiePolicy{Path: "/", SameSite: nethttp.SameSiteNoneMode, Secure: httpcontract.SessionCookieSecureNever})
+
+    for request := 0; request < 2; request = request + 1 {
+        handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/ok", nil))
+    }
+
+    if 1 != sessionCookieBootWarningRecords(capture) {
+        t.Fatalf("expected the policy named once, got %d records", sessionCookieBootWarningRecords(capture))
+    }
+}
+
+func TestKernel_ASameSiteNoneAlwaysSecurePolicyIsNotNamed(t *testing.T) {
+    handler, capture := servedSessionCookiePolicyKernel(httpcontract.SessionCookiePolicy{Path: "/", SameSite: nethttp.SameSiteNoneMode, Secure: httpcontract.SessionCookieSecureAlways})
+
+    handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/ok", nil))
+
+    if 0 != sessionCookieBootWarningRecords(capture) {
+        t.Fatalf("expected no warning, got %d records", sessionCookieBootWarningRecords(capture))
+    }
+}

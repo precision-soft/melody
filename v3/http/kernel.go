@@ -77,6 +77,21 @@ type Kernel struct {
     serving atomic.Bool
 }
 
+/* sessionCookieBootWarnings names a session cookie policy every current browser defeats: SameSite=None with Secure never is written as asked and dropped by the browser, so no session sticks */
+func sessionCookieBootWarnings(policy httpcontract.SessionCookiePolicy) []internal.BootWarning {
+    if nethttp.SameSiteNoneMode != resolveSessionCookieSameSite(policy) || httpcontract.SessionCookieSecureNever != policy.Secure {
+        return nil
+    }
+
+    return []internal.BootWarning{
+        {
+            Name:    "http.sessionCookie.sameSiteNoneNeverSecure",
+            Message: "the session cookie policy sets SameSite=None with Secure never: every current browser drops such a cookie, so no session sticks",
+            Context: loggingcontract.Context{"configurationKey": "SessionCookiePolicy"},
+        },
+    }
+}
+
 /* OpenRequestScopes reports how many request scopes are open, one per request being served, hijacked connections included. A shutdown reads it to tell a drained server from one that still has work inside it. */
 func (instance *Kernel) OpenRequestScopes() int64 {
     return instance.openRequestScopes.Load()
@@ -161,6 +176,9 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
     instance.serving.Store(true)
     freezeRouterForServing(instance.router)
 
+    /* the kernel owns the session cookie policy and knows it serves only here; the warnings reach the configured journal through the first request's logger */
+    bootWarnings := internal.NewBootWarningsOnce(sessionCookieBootWarnings(instance.options.SessionCookiePolicy))
+
     return nethttp.HandlerFunc(func(rawWriter nethttp.ResponseWriter, request *nethttp.Request) {
         writer := newRecordingResponseWriter(rawWriter)
 
@@ -241,6 +259,8 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 exception.NewError("failed to create request logger", nil, requestIdLoggerErr),
             )
         }
+
+        bootWarnings.Write(requestLogger)
 
         requestContext := NewRequestContext(requestId, time.Now())
         serviceRequestContextErr := scope.OverrideProtectedInstance(ServiceRequestContext, requestContext)

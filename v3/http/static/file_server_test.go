@@ -3623,3 +3623,53 @@ func TestFileServer_Embedded_ServesANewTagForAChangedAssetOfTheSameSize(t *testi
         t.Fatalf("expected ServeReader to tag a changed asset of the same size anew, got %q and %q", streamedTag(before), streamedTag(after))
     }
 }
+
+func TestLogOpenFailure_AnOperatingSystemRefusalIsWordedAsOne(t *testing.T) {
+    logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
+
+    logOpenFailure(logger, "app.css", &fs.PathError{Op: "open", Path: "app.css", Err: fs.ErrPermission})
+
+    if 1 != len(logger.warningMessages) || false == strings.Contains(logger.warningMessages[0], "the operating system refused") {
+        t.Fatalf("expected the operating system's refusal named, got warnings=%v", logger.warningMessages)
+    }
+}
+
+func TestLogOpenFailure_AContainmentRefusalAndAMissKeepTheirWording(t *testing.T) {
+    logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
+
+    logOpenFailure(logger, "app.css", fs.ErrPermission)
+    logOpenFailure(logger, "app.css", fs.ErrNotExist)
+
+    if 1 != len(logger.warningMessages) || false == strings.Contains(logger.warningMessages[0], "outside the served directory") || 1 != len(logger.debugMessages) {
+        t.Fatalf("unexpected records: warnings=%v debug=%v", logger.warningMessages, logger.debugMessages)
+    }
+}
+
+func TestFileServer_AFifoInThePublicDirectoryIsRefusedAndNamedByItsMode(t *testing.T) {
+    directory := t.TempDir()
+
+    if mkfifoErr := syscall.Mkfifo(directory+"/pipe.html", 0o644); nil != mkfifoErr {
+        t.Skipf("mkfifo: %v", mkfifoErr)
+    }
+
+    server := NewFileServer(NewOptions(NewFileServerConfig(ModeFilesystem, directory, "index.html", "", false, 0, false), "", nil))
+
+    logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
+
+    _, _, _, served := server.Serve(testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/pipe.html"), logger)
+    if true == served {
+        t.Fatalf("expected the fifo not to be served")
+    }
+
+    if 1 != len(logger.warningMessages) || false == strings.Contains(logger.warningMessages[0], "not a regular file") {
+        t.Fatalf("expected the fifo named as not a regular file, got warnings=%v", logger.warningMessages)
+    }
+}
+
+func TestNotRegularFileError_ReadsAsAPermissionRefusalAndCarriesTheMode(t *testing.T) {
+    refusal := error(&notRegularFileError{mode: fs.ModeNamedPipe | 0o644})
+
+    if false == errors.Is(refusal, fs.ErrPermission) || false == strings.HasSuffix(refusal.Error(), "prw-r--r--") {
+        t.Fatalf("expected a permission refusal carrying the fifo mode, got %v", refusal)
+    }
+}

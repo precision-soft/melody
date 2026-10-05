@@ -311,6 +311,8 @@ The kernel loads a session from the incoming cookie, publishes it on the request
 
 A policy that leaves `SameSite` at its zero value gets `SameSiteLaxMode`. `net/http` has no name for the zero `SameSite` and emits **no attribute** for it, which is what an operator who set only `Path` or `Domain` would otherwise silently get; treating it as unset and applying the framework default keeps the partial policy safe. Use `nethttp.SameSiteDefaultMode` to omit the attribute deliberately. See [`resolveSessionCookieSameSite`](../../http/router_utility.go).
 
+`SameSite=None` is written `Secure` under `SessionCookieSecureFromScheme` whatever the scheme, since every current browser drops a `None` cookie without it. `SessionCookieSecureNever` with `None` is honoured as written, and no session sticks.
+
 ### Rotating the session id
 
 The response path saves and advertises the session published on [`RequestAttributeSession`](../../http/request.go) at the moment the response is written, not the one the kernel loaded before routing, so a handler can replace it. [`RegenerateRequestSession`](../../http/session.go) is that operation done whole: it rotates the id of the session the request carries — the defence against **session fixation** — and republishes the rotated session on the request, so one call is all a login handler needs.
@@ -488,8 +490,8 @@ Where the list itself comes from is the application's business — a constant as
     * [`RedirectMovedPermanently`](../../http/response.go)
 
 * Cookies:
-    * [`SetCookie(response httpcontract.Response, cookie *nethttp.Cookie)`](../../http/cookie.go) — appends one `Set-Cookie`, refusing an empty name with a panic and creating the header map when the response carries none
-    * [`DeleteCookie(response httpcontract.Response, name string, path string) `](../../http/cookie.go) — the expiring counterpart; an empty path is read as `/`
+    * [`SetCookie(response httpcontract.Response, cookie *nethttp.Cookie)`](../../http/cookie.go) — appends one `Set-Cookie`, refusing an empty name, and a name that is not a valid token, which the standard library would serialize as an empty header, with a panic and creating the header map when the response carries none
+    * [`DeleteCookie(response httpcontract.Response, name string, path string) `](../../http/cookie.go) — the expiring counterpart of a host-only cookie; an empty path is read as `/`. A cookie set with a `Domain` is not reached by it: write its expiring counterpart, with the same `Domain`, through `SetCookie`
 
 * Session:
     * [`RegenerateRequestSession(request httpcontract.Request) (sessioncontract.Session, error)`](../../http/session.go)

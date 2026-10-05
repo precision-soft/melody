@@ -597,7 +597,7 @@ var fallbackContentTypeByExtension = map[string]string{
     ".woff2": "font/woff2",
 }
 
-/* logOpenFailure records an ordinary miss at debug, since the static server is consulted for every unrouted request, and a permission error at warning: here it comes from the containment guards of dirFileSystem.Open. */
+/* logOpenFailure records an ordinary miss at debug, since the static server is consulted for every unrouted request, and a refusal at warning, worded by its cause: a containment guard of dirFileSystem.Open, the operating system, or a path that is not a regular file. */
 func logOpenFailure(logger loggingcontract.Logger, relativePath string, openErr error) {
     logContext := exception.LogContext(
         openErr,
@@ -605,6 +605,22 @@ func logOpenFailure(logger loggingcontract.Logger, relativePath string, openErr 
             "relativePath": relativePath,
         },
     )
+
+    var notRegularFile *notRegularFileError
+    if true == errors.As(openErr, &notRegularFile) {
+        logContext["mode"] = notRegularFile.mode.String()
+        logger.Warning("static serve refused a path that is not a regular file", logContext)
+
+        return
+    }
+
+    /* the containment guards answer the bare fs.ErrPermission, the operating system a *fs.PathError carrying it */
+    var pathErr *fs.PathError
+    if true == errors.As(openErr, &pathErr) && true == errors.Is(openErr, fs.ErrPermission) {
+        logger.Warning("static serve could not open a path the operating system refused", logContext)
+
+        return
+    }
 
     if true == errors.Is(openErr, fs.ErrPermission) {
         logger.Warning("static serve refused a path that resolves outside the served directory", logContext)

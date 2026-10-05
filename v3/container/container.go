@@ -1,7 +1,6 @@
 package container
 
 import (
-    "context"
     "fmt"
     "reflect"
     "sort"
@@ -64,9 +63,9 @@ type container struct {
     builtServiceNames      map[string]struct{}
     replacedBuiltInstances []any
     /* replacedBuiltClosers holds, at the index of each replaced instance, the closer its registration declared, nil where none */
-    replacedBuiltClosers []func(closeContext context.Context, value any) error
+    replacedBuiltClosers []*declaredCloser
     /* closerByNodeKey holds the closer a registration declared WithCloser, under its name node and its type node */
-    closerByNodeKey map[string]func(closeContext context.Context, value any) error
+    closerByNodeKey map[string]*declaredCloser
     /* the order the teardown nodes came into being, written wherever a value enters the instance maps and read by the teardown alone */
     creationOrderByNodeKey map[string]int
     creationOrderCounter   int
@@ -686,12 +685,13 @@ func (instance *container) register(
 
     if nil != registerOption.Closer {
         if nil == instance.closerByNodeKey {
-            instance.closerByNodeKey = make(map[string]func(closeContext context.Context, value any) error)
+            instance.closerByNodeKey = make(map[string]*declaredCloser)
         }
 
-        instance.closerByNodeKey[containerNameNodeKey(serviceName)] = registerOption.Closer
+        closer := &declaredCloser{valueType: registerOption.CloserValueType, close: registerOption.Closer}
+        instance.closerByNodeKey[containerNameNodeKey(serviceName)] = closer
         if true == registerOption.AlsoRegisterType && nil != serviceType {
-            instance.closerByNodeKey[containerTypeNodeKey(serviceType)] = registerOption.Closer
+            instance.closerByNodeKey[containerTypeNodeKey(serviceType)] = closer
         }
     }
 

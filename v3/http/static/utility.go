@@ -74,11 +74,24 @@ func (instance *dirFileSystem) Open(name string) (fs.File, error) {
     }
 
     if false == pathInfo.Mode().IsRegular() && false == pathInfo.IsDir() {
-        return nil, fs.ErrPermission
+        return nil, &notRegularFileError{mode: pathInfo.Mode()}
     }
 
     /* the validated path is the one opened, which narrows a symlink swap to the window between EvalSymlinks and this open; closing it entirely needs openat2/RESOLVE_BENEATH, which is Linux-only */
     return os.Open(realPath)
+}
+
+/* notRegularFileError refuses a path that is neither a regular file nor a directory, a fifo, a socket or a device, carrying its mode; it reads as fs.ErrPermission to every caller that asks, the answer to the client included */
+type notRegularFileError struct {
+    mode fs.FileMode
+}
+
+func (instance *notRegularFileError) Error() string {
+    return "the path is not a regular file: " + instance.mode.String()
+}
+
+func (instance *notRegularFileError) Unwrap() error {
+    return fs.ErrPermission
 }
 
 /* isRetrievalMethod admits only GET and HEAD: any other method belongs to the route the application registered for the path, an OPTIONS preflight included. */

@@ -56,6 +56,7 @@ type Options struct {
     fileSystem       fs.FS
 }
 
+/* NewOptions carries the file server configuration with the root or the filesystem it serves. The content tag of a file with no modification time, every file of an embedded filesystem, is kept per path and size for the life of the server: the bytes of a filesystem without modification times must not change while it serves, or a same-length change is answered 304 over stale bytes; a mutable filesystem must report modification times. */
 func NewOptions(
     fileServerConfig *FileServerConfig,
     root string,

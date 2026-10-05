@@ -3425,3 +3425,24 @@ func TestFileServer_Embedded_ServesANewTagForAChangedAssetOfTheSameSize(t *testi
         t.Fatalf("expected ServeReader to tag a changed asset of the same size anew, got %q and %q", streamedTag(before), streamedTag(after))
     }
 }
+
+func TestLogOpenFailure_AnOperatingSystemRefusalIsWordedAsOne(t *testing.T) {
+    logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
+
+    logOpenFailure(logger, "app.css", &fs.PathError{Op: "open", Path: "app.css", Err: fs.ErrPermission})
+
+    if 1 != len(logger.warningMessages) || false == strings.Contains(logger.warningMessages[0], "the operating system refused") {
+        t.Fatalf("expected the operating system's refusal named, got warnings=%v", logger.warningMessages)
+    }
+}
+
+func TestLogOpenFailure_AContainmentRefusalAndAMissKeepTheirWording(t *testing.T) {
+    logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
+
+    logOpenFailure(logger, "app.css", fs.ErrPermission)
+    logOpenFailure(logger, "app.css", fs.ErrNotExist)
+
+    if 1 != len(logger.warningMessages) || false == strings.Contains(logger.warningMessages[0], "outside the served directory") || 1 != len(logger.debugMessages) {
+        t.Fatalf("unexpected records: warnings=%v debug=%v", logger.warningMessages, logger.debugMessages)
+    }
+}

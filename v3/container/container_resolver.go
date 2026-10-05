@@ -350,7 +350,7 @@ func newContainerClosedError(creatingKey string) error {
 }
 
 /* closeValueAfterContainerClose closes a value no holder will ever close through the door the teardown would have used, the context-taking one and a registration's closer included, under the background context a plain Close hands the teardown. */
-func closeValueAfterContainerClose(value any, closer func(closeContext context.Context, value any) error) {
+func closeValueAfterContainerClose(value any, closer *declaredCloser) {
     closeable, contextCloseable, carriesADoor := closeDoorsOfWithCloser(value, closer)
     if false == carriesADoor {
         return

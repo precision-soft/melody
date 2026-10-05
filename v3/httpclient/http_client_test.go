@@ -2465,3 +2465,76 @@ func TestHttpClient_SetHeaderRotatesTheCredentialUnderItsCanonicalSpelling(t *te
         t.Fatalf("expected one canonical entry holding the rotated-in credential, got %#v", client.headers)
     }
 }
+
+func TestSanitizeUrlTextually_AnAtSignPastTheAuthorityKeepsOnlyWhatPrecedesIt(t *testing.T) {
+    for _, value := range []string{
+        "http://app:pa/ss@host:8080/vh",
+        "http://app:pa?ss@host:8080/vh",
+        "http://app:pa#ss@host:8080/vh",
+    } {
+        if _, err := url.Parse(value); nil == err {
+            t.Fatalf("the probe no longer reaches the textual fallback: net/url parsed %q", value)
+        }
+
+        sanitized := sanitizeUrlTextually(value)
+
+        if "http://"+internal.RedactedQueryValue != sanitized {
+            t.Fatalf("expected only the scheme kept for %q, got %q", value, sanitized)
+        }
+    }
+}
+
+func TestSanitizeUrlTextually_ARefusedUrlWithoutUserinfoIsCutAtItsFragment(t *testing.T) {
+    sanitized := sanitizeUrlTextually("http://host:bad/path#token=abc")
+
+    if "http://host:bad/path" != sanitized {
+        t.Fatalf("expected the fragment cut, got %q", sanitized)
+    }
+}
+
+func TestSanitizeUrlParseError_AUrlHoldingAnAtSignRedactsTheSpanItQuotes(t *testing.T) {
+    _, parseErr := url.Parse("http://app:pa/ss@host:8080/vh")
+    if nil == parseErr {
+        t.Fatalf("expected net/url to refuse the probe")
+    }
+
+    sanitized := sanitizeUrlParseError(parseErr)
+
+    if `invalid port "`+internal.RedactedQueryValue+`" after host` != sanitized {
+        t.Fatalf("expected the quoted port redacted, got %q", sanitized)
+    }
+}
+
+func TestSanitizeUrlParseError_AUrlWithoutAnAtSignKeepsTheSpanItQuotes(t *testing.T) {
+    _, parseErr := url.Parse("http://host:bad/path")
+    if nil == parseErr {
+        t.Fatalf("expected net/url to refuse the probe")
+    }
+
+    sanitized := sanitizeUrlParseError(parseErr)
+
+    if `invalid port ":bad" after host` != sanitized {
+        t.Fatalf("expected net/url's text kept, got %q", sanitized)
+    }
+}
+
+func TestRedactQuotedSpans_AnUnclosedQuoteLosesItsTail(t *testing.T) {
+    if `a "`+internal.RedactedQueryValue+`" b "`+internal.RedactedQueryValue != redactQuotedSpans(`a "x" b "tail`) {
+        t.Fatalf("unexpected redaction: %q", redactQuotedSpans(`a "x" b "tail`))
+    }
+}
+
+func TestHttpClient_AGetOfAMisparsedUrlJournalsNeitherThePasswordNorItsHead(t *testing.T) {
+    client := NewDefaultHttpClient()
+    defer client.Close()
+
+    _, requestErr := client.Get("http://app:pa/ss@host:8080/vh")
+    if nil == requestErr {
+        t.Fatalf("expected the misparsed url to be refused")
+    }
+
+    rendered := renderErrorForLog(t, requestErr)
+    if true == strings.Contains(rendered, "pa/ss") || true == strings.Contains(rendered, ":pa") {
+        t.Fatalf("the password reached the report: %s", rendered)
+    }
+}

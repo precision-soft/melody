@@ -386,6 +386,7 @@ func DefaultClientIp(request httpcontract.Request) string {
     return host
 }
 
+/* RateLimitConfig is read by the middleware on every request, not copied when the middleware is built: a setter called afterwards changes the middleware in flight, as SetClientIpResolver is meant to, and a second middleware with another key extractor needs a config of its own. */
 type RateLimitConfig struct {
     limiter          httpcontract.RateLimiter
     keyExtractor     KeyExtractor
@@ -407,6 +408,7 @@ func (instance *RateLimitConfig) KeyExtractor() KeyExtractor {
     return instance.keyExtractor
 }
 
+/* SetKeyExtractor changes the key of every middleware built over this config, from its next request on */
 func (instance *RateLimitConfig) SetKeyExtractor(keyExtractor KeyExtractor) {
     instance.keyExtractor = keyExtractor
 }

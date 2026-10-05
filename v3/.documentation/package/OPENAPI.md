@@ -32,27 +32,27 @@ OpenAPI generation is opt-in. The generator reads route metadata from the [`http
 [`Generate`](../../openapi/generator.go) walks the router's `RouteDefinition` list. For each route it:
 
 - converts the Melody pattern to an OpenAPI path — `:id` and `{id}` segments become `{id}` path parameters; a catch-all (`*rest...`, or a trailing `*rest`) becomes `{rest}` and **ends the documented path**, because the router's registration discards every segment written after a catch-all and never matches it — a mid-pattern `*name` without the dots is a single-segment wildcard and keeps its tail;
-- maps each HTTP method to an `Operation` keyed by the route name as `operationId`. A route registered with **no** method list answers every verb, so it is documented on all eight path item verbs, each with its own operationId; a verb the format cannot model (the router registers any string) is named in the path item's `description` instead of being dropped without a trace;
+- maps each HTTP method to an `Operation` keyed by the route name as `operationId`; a route registered without a name carries no operationId, the field being optional and two unnamed routes otherwise sharing one. A route registered with **no** method list answers every verb, so it is documented on all eight path item verbs, each with its own operationId; a verb the format cannot model (the router registers any string) is named in the path item's `description` instead of being dropped without a trace;
 - enriches the operation from the [`Registry`](../../openapi/registry.go) when a [`Descriptor`](../../openapi/registry.go) is registered for the route name (summary, tags, request body, responses). The responses are visited in status order, so component naming — and with it the whole document — is byte-stable across runs;
-- never overwrites an operation another route already wrote: where two patterns converge on one converted path, the earlier registration wins, exactly as it does in the router's match order.
+- never overwrites an operation another route already wrote unless the router would serve it instead: where two patterns converge on one converted path, the route the router would serve wins, the higher `Priority()` first and then the earlier registration, exactly as in the router's match order.
 
-### A trailing optional parameter becomes two path items
+### A trailing run of optional parameters becomes one path item per prefix
 
-The router serves a trailing optional parameter both ways, so one path key would describe only half of what answers. OpenAPI 3.0 forbids `required: false` on `in: path`, which leaves no way to say "optional" inside a single path item — so [`expandOptionalTailSegment`](../../openapi/generator.go) emits **both** shapes as separate path items:
+The router ends a route wherever only optional segments remain, so one path key would describe only part of what answers. OpenAPI 3.0 forbids `required: false` on `in: path`, which leaves no way to say "optional" inside a single path item — so [`expandOptionalTailSegment`](../../openapi/generator.go) emits every shape as a separate path item, one per prefix from which only optional segments remain, then the whole pattern:
 
-| Melody pattern | Emitted paths              |
-|----------------|----------------------------|
-| `/users/:id?`  | `/users` and `/users/{id}` |
-| `/users/{id?}` | `/users` and `/users/{id}` |
+| Melody pattern   | Emitted paths                             |
+|------------------|-------------------------------------------|
+| `/users/:id?`    | `/users` and `/users/{id}`                |
+| `/a/:x?/:y?`     | `/a`, `/a/{x}` and `/a/{x}/{y}`           |
 
-Only the final segment may carry the `?` marker, so the shortened form is always the pattern minus its last segment (a pattern that shortens to nothing becomes `/`).
+Only the `:name?` spelling is expanded: the router matches a brace segment such as `{id?}` literally, so it is described as written. An optional segment followed by a required one is not expanded, and a pattern that shortens to nothing becomes `/`.
 
 The two operations share the descriptor's summary, description, tags, request body and responses. They differ in two ways:
 
 - the shortened form declares **no path parameter**, since the segment it would describe is not there;
-- it gets a distinct operation id, `<id>.without.<parameter>` — `users.show.without.id` beside `users.show` — because operation ids must be unique across the document.
+- it gets a distinct operation id, `<id>.without.<parameters>` — `users.show.without.id` beside `users.show`, `a.show.without.x.y` and `a.show.without.y` beside `a.show` — because operation ids must be unique across the document; the mirror of an unnamed route carries none.
 
-A route **explicitly registered** at the shortened path describes it better than this mirror does, so its own operation always wins, regardless of the order the two routes were registered in: the mirror is skipped when an operation for that method already exists, and an explicit route overwrites a mirror that was written first.
+A route **explicitly registered** at the shortened path describes it better than this mirror does, so its own operation always wins, regardless of the order the two routes were registered in and of their priorities: the mirror is skipped when an operation for that method already exists, and an explicit route overwrites a mirror that was written first. A mirror therefore describes the shortened path only where no route is registered there.
 
 Schemas come from reflection over the DTO types in the descriptor. Struct fields use their `json` tag for the property name (skipping `-` and unexported fields), and `validate` tags shape the schema. The mapping mirrors what the runtime validator actually enforces, and the rule that governs every branch is **fail-closed**: the document may refuse more than the server (each over-approximation is declared in [`schema.go`](../../openapi/schema.go) with its reason), but it never advertises a value the validator refuses:
 
@@ -68,7 +68,7 @@ Slices map to arrays (a `[]byte` to `string` / `format: byte`); maps to objects 
 
 ### The validator lockstep
 
-[`schema.go`](../../openapi/schema.go) is a hand-written mirror of the [`validation`](VALIDATION.md) package's semantics: the production code deliberately does **not** import `validation`, so the generator keeps a dependency-free surface. What holds the two in step is not the prose — it is [`schema_test.go`](../../openapi/schema_test.go), the only file in the tree where `openapi` reaches `validation` (a test-only import). Its oracle is semantic, over values: every tag class crossed with every field shape is built into a real struct type, the document's verdict on a value is read from the generated facets alone, the validator's verdict comes from `validation.NewValidator().Validate` on the same value, and the document is never allowed to advertise a value — or an absence — the validator refuses. The declared divergences (today exactly one: `minLength` cannot express `notBlank`'s whitespace-only rejection) are enumerated in the test with their reasons.
+[`schema.go`](../../openapi/schema.go) is a hand-written mirror of the [`validation`](VALIDATION.md) package's semantics: the production code deliberately does **not** import `validation`, so the generator keeps a dependency-free surface. What holds the two in step is not the prose — it is [`schema_test.go`](../../openapi/schema_test.go), the only file in the tree where `openapi` reaches `validation` (a test-only import). Its oracle is semantic, over values: every tag class crossed with every field shape is built into a real struct type, the document's verdict on a value is read from the generated facets alone, the validator's verdict comes from `validation.NewValidator().Validate` on the same value, and the document is never allowed to advertise a value — or an absence — the validator refuses. The declared divergences are enumerated in the test with their reasons. Today there are two: `minLength` cannot express `notBlank`'s whitespace-only rejection; and a rule name the mirror does not know, a typo or a constraint the application registered through `RegisterConstraint`, which the stock validator refuses for every value and which the document names in the field's `description` instead of modelling.
 
 When the validator's semantics change, this mirror must change in the same session — and the lockstep suite is what turns a forgotten half into a red test instead of a silently wrong published contract. Do not replace it with assertions on the mirror's own predicates: an oracle written on predicates pins the branches of the current repair and goes blind at the next divergence.
 

@@ -2299,3 +2299,68 @@ func TestKernel_ALogoutWhoseCookieNamesAStoredSessionDeletesIt(t *testing.T) {
         t.Fatalf("expected the stored session gone")
     }
 }
+
+func sessionCookieWrittenOverPlainHttp(t *testing.T, sameSite nethttp.SameSite, secure httpcontract.SessionCookieSecurePolicy) *nethttp.Cookie {
+    t.Helper()
+
+    netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
+    netRequest.RemoteAddr = "127.0.0.1:1234"
+
+    writer := httptest.NewRecorder()
+
+    writeResponse(
+        newTestRuntime(),
+        NewRequest(netRequest, nil, nil, nil),
+        writer,
+        EmptyResponse(nethttp.StatusOK),
+        &stubSessionManager{},
+        &stubSession{id: "0123456789abcdef0123456789abcdef", isModified: true},
+        httpcontract.ForwardedHeadersPolicy{TrustedProxyList: []string{}},
+        httpcontract.SessionCookiePolicy{Path: "/", SameSite: sameSite, Secure: secure},
+    )
+
+    cookies := writer.Result().Cookies()
+    if 1 != len(cookies) {
+        t.Fatalf("expected one set-cookie, got %d", len(cookies))
+    }
+
+    return cookies[0]
+}
+
+func TestWriteResponse_ASameSiteNoneSessionCookieIsSecureOverPlainHttpUnderFromScheme(t *testing.T) {
+    if cookie := sessionCookieWrittenOverPlainHttp(t, nethttp.SameSiteNoneMode, httpcontract.SessionCookieSecureFromScheme); false == cookie.Secure {
+        t.Fatalf("expected a SameSite=None session cookie written Secure, got %+v", cookie)
+    }
+}
+
+func TestWriteResponse_ALaxSessionCookieOverPlainHttpIsNotSecureAndNeverWinsOverNone(t *testing.T) {
+    if cookie := sessionCookieWrittenOverPlainHttp(t, nethttp.SameSiteLaxMode, httpcontract.SessionCookieSecureFromScheme); true == cookie.Secure {
+        t.Fatalf("expected a Lax session cookie over plain http not Secure, got %+v", cookie)
+    }
+
+    if cookie := sessionCookieWrittenOverPlainHttp(t, nethttp.SameSiteNoneMode, httpcontract.SessionCookieSecureNever); true == cookie.Secure {
+        t.Fatalf("expected an explicit Never honoured over None, got %+v", cookie)
+    }
+}
+
+func TestMarkResponsePrivateForSessionCookie_AnUnbalancedQuoteInCacheControlIsReplacedByPrivate(t *testing.T) {
+    response := EmptyResponse(nethttp.StatusOK)
+    response.Headers().Set("Cache-Control", `no-cache="set-cookie`)
+
+    markResponsePrivateForSessionCookie(response)
+
+    if "private" != response.Headers().Get("Cache-Control") {
+        t.Fatalf("expected the header replaced by private, got %q", response.Headers().Get("Cache-Control"))
+    }
+}
+
+func TestMarkResponsePrivateForSessionCookie_ABalancedQuoteKeepsItsMembers(t *testing.T) {
+    response := EmptyResponse(nethttp.StatusOK)
+    response.Headers().Set("Cache-Control", `no-cache="set-cookie, a\"b", max-age=0`)
+
+    markResponsePrivateForSessionCookie(response)
+
+    if `no-cache="set-cookie, a\"b", max-age=0, private` != response.Headers().Get("Cache-Control") {
+        t.Fatalf("expected the members kept and private appended, got %q", response.Headers().Get("Cache-Control"))
+    }
+}

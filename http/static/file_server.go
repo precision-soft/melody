@@ -778,7 +778,7 @@ var fallbackContentTypeByExtension = map[string]string{
 
 /* logOpenFailure separates a refusal from a miss, which the level is the only thing that can say. The static server is consulted for every request a route did not answer, so a path that simply names no file is the ordinary case and is recorded at debug along with the successful resolutions; anything louder files one record per request that is not a static asset, and an operator learns to filter the whole message out.
 
-   A permission error is not that case. What produces one here are the two containment guards of dirFileSystem.Open — the dot-dot prefix refusal and the check that a path's symlinks resolve inside the base directory — and in the embedded mode neither can fire. Recorded at debug it is byte-identical to a typo in a stylesheet href, which is exactly the indistinguishability the logging on this path exists to end. */
+   A permission error is not that case. What produces one here are the two containment guards of dirFileSystem.Open — the dot-dot prefix refusal and the check that a path's symlinks resolve inside the base directory — which answer the bare fs.ErrPermission, and the operating system refusing the open, which answers a *fs.PathError carrying it; in the embedded mode none of them can fire. Recorded at debug it is byte-identical to a typo in a stylesheet href, which is exactly the indistinguishability the logging on this path exists to end. */
 func logOpenFailure(logger loggingcontract.Logger, relativePath string, openErr error) {
     logContext := exception.LogContext(
         openErr,
@@ -786,6 +786,14 @@ func logOpenFailure(logger loggingcontract.Logger, relativePath string, openErr 
             "relativePath": relativePath,
         },
     )
+
+    /* the containment guards answer the bare fs.ErrPermission, the operating system a *fs.PathError carrying it */
+    var pathErr *fs.PathError
+    if true == errors.As(openErr, &pathErr) && true == errors.Is(openErr, fs.ErrPermission) {
+        logger.Warning("static serve could not open a path the operating system refused", logContext)
+
+        return
+    }
 
     if true == errors.Is(openErr, fs.ErrPermission) {
         logger.Warning("static serve refused a path that resolves outside the served directory", logContext)

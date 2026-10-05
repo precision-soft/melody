@@ -410,6 +410,7 @@ A configuration the framework admits but that is very likely a mistake is named 
 | `security.jwtSecretShort` | a `JwtConfig.Secret` under 32 bytes, at the validator's first token |
 | `security.hmacSecretShort` | an `HmacKey.Secret` under 32 bytes, by key id, at the first envelope a token source resolves |
 | `cors.credentialedOriginWithoutScheme` | an allowed origin without a scheme in a credentialed cors service, at its first request |
+| `http.sessionCookie.sameSiteNoneNeverSecure` | a session cookie policy of `SameSite=None` with `SessionCookieSecureNever`, which every current browser drops, at the kernel's first request |
 
 ## Footguns & caveats
 

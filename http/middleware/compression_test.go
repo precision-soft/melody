@@ -11,6 +11,7 @@ import (
     "runtime"
     "strconv"
     "strings"
+    "sync/atomic"
     "sync"
     "testing"
     "testing/iotest"
@@ -1410,5 +1411,115 @@ func TestAcceptsGzip_AHeaderCutAtTheCapIsReadAsUnparsable(t *testing.T) {
 
     if false == acceptsGzip(listWithTailPast("*;q=1", 62, "gzip;q=1")) {
         t.Fatalf("expected a list within the cap to negotiate normally")
+    }
+}
+
+func TestCompressionMiddleware_LevelZeroFallsBackToDefaultWithoutMutatingTheCallersConfig(t *testing.T) {
+    config := NewCompressionConfig(gzip.NoCompression, 10, nil, nil)
+
+    resultResponse := serveCompressibleBodyThrough(t, config)
+
+    if gzip.NoCompression != config.Level() {
+        t.Fatalf("expected the caller's config to keep its own level, got %d", config.Level())
+    }
+
+    body, readErr := io.ReadAll(resultResponse.BodyReader())
+    if nil != readErr {
+        t.Fatalf("read: %v", readErr)
+    }
+
+    if "gzip" != resultResponse.Headers().Get("Content-Encoding") || len(body) >= len(strings.Repeat("hello world ", 200)) {
+        t.Fatalf("expected a compressed body shorter than its input, got %d bytes encoded %q", len(body), resultResponse.Headers().Get("Content-Encoding"))
+    }
+}
+
+/* stallingSourceReader serves a head and then blocks, as an upstream body that stopped sending does, until it is closed */
+type stallingSourceReader struct {
+    head        []byte
+    offset      atomic.Int64
+    stalledFlag chan struct{}
+    stallOnce   sync.Once
+    closedFlag  chan struct{}
+    closeOnce   sync.Once
+}
+
+func newStallingSourceReader(head string) *stallingSourceReader {
+    return &stallingSourceReader{head: []byte(head), stalledFlag: make(chan struct{}), closedFlag: make(chan struct{})}
+}
+
+func (instance *stallingSourceReader) Read(buffer []byte) (int, error) {
+    offset := instance.offset.Load()
+    if offset < int64(len(instance.head)) {
+        count := copy(buffer, instance.head[offset:])
+        instance.offset.Add(int64(count))
+
+        return count, nil
+    }
+
+    instance.stallOnce.Do(func() { close(instance.stalledFlag) })
+    <-instance.closedFlag
+
+    return 0, io.ErrClosedPipe
+}
+
+func (instance *stallingSourceReader) Close() error {
+    instance.closeOnce.Do(func() { close(instance.closedFlag) })
+
+    return nil
+}
+
+func TestCompressionMiddleware_ClosesAStalledSourceOnceTheClientLeaves(t *testing.T) {
+    middleware := CompressionMiddleware(NewCompressionConfig(6, 16, nil, nil))
+
+    source := newStallingSourceReader(strings.Repeat("a", 4096))
+
+    handler := middleware(
+        func(
+            runtimeInstance runtimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request httpcontract.Request,
+        ) (httpcontract.Response, error) {
+            response := &http.Response{}
+            response.SetStatusCode(200)
+            responseHeaders := make(nethttp.Header)
+            responseHeaders.Set("Content-Type", "text/plain")
+            response.SetHeaders(responseHeaders)
+            response.SetBodyReader(source)
+
+            return response, nil
+        },
+    )
+
+    requestContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/test", nil).WithContext(requestContext)
+    request.Header.Set("Accept-Encoding", "gzip")
+
+    resultResponse, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
+    if nil != err {
+        t.Fatalf("expected nil error, got: %v", err)
+    }
+    if "gzip" != resultResponse.Headers().Get("Content-Encoding") {
+        t.Fatalf("expected the response to be compressed, got encoding %q", resultResponse.Headers().Get("Content-Encoding"))
+    }
+
+    /* the client drains what gzip writes, so the goroutine reaches the source's stall instead of parking on the pipe */
+    go func() {
+        _, _ = io.Copy(io.Discard, resultResponse.BodyReader())
+    }()
+
+    select {
+    case <-source.stalledFlag:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("the gzip goroutine never reached the stalled source")
+    }
+
+    cancel()
+
+    select {
+    case <-source.closedFlag:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("the stalled source was never closed after the client left; the gzip goroutine stays blocked reading it")
     }
 }

@@ -390,3 +390,16 @@ func TestCloseConnectionWithin_UnderADeadlineWithNoRoomArmsTheDeadlineEarlier(t 
         t.Fatalf("expected the client's own timeout inside the caller's deadline, got returned %v error %v", returned, closeErr)
     }
 }
+
+func TestCloseConnectionWithin_UnderADeadlineShorterThanTheGraceStillWritesTheCloseFrame(t *testing.T) {
+    fake := dialFakeBroker(t)
+
+    closeContext, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+    defer cancel()
+
+    closeErr, returned := closeConnectionWithin(closeContext, teardownStretchWithin(closeContext, time.Second), fake.connection)
+
+    if false == returned || nil == closeErr || true == strings.Contains(closeErr.Error(), "write") {
+        t.Fatalf("expected the close frame written and the client's read timeout received, got returned %v error %v", returned, closeErr)
+    }
+}

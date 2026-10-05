@@ -1065,10 +1065,17 @@ func applyValidation(schema *Schema, validateTag string, components map[string]*
         rejectsAll = true
     }
 
+    unmodeledRules := []string{}
+
     for _, rule := range parsedTagRules(validateTag) {
         name, params := rule.name, rule.params
 
         switch name {
+        default:
+            /* a rule the mirror does not know, a typo or a constraint the application registered, can refuse values no facet expresses, so the document names it instead of advertising its absence */
+            if "" != name {
+                unmodeledRules = append(unmodeledRules, name)
+            }
         case "email":
             if 0 != len(params) {
                 /* parameters a non-parameterizable constraint cannot consume fail the rule closed in the validator */
@@ -1280,6 +1287,15 @@ func applyValidation(schema *Schema, validateTag string, components map[string]*
                 rejectsAll = true
             }
         }
+    }
+
+    if 0 < len(unmodeledRules) {
+        note := "the validator also applies `" + strings.Join(unmodeledRules, "`, `") + "`, which this document does not model; the server may refuse values the schema admits"
+        if "" != schema.Description {
+            note = schema.Description + "; " + note
+        }
+
+        schema.Description = note
     }
 
     if 1 == len(patterns) {
