@@ -330,12 +330,17 @@ func (instance *MiddlewareCommand) runBuildProviderRecovered() (middlewares []ht
             return
         }
 
+        /* a factory ending the command with an exit code is the exit owner's, re-raised whole */
+        if exitErr, isExitError := recovered.(*exception.ExitError); true == isExitError && nil != exitErr {
+            panic(exitErr)
+        }
+
         middlewares = nil
-        /* the recovered value travels in the message, which is what the envelope cause renders */
+        /* the recovered value travels in the message, which is what the envelope cause renders, and an error-shaped one as the cause */
         buildErr = exception.NewError(
             fmt.Sprintf("middleware build panicked: %v", recovered),
             nil,
-            nil,
+            exception.PanicCause(recovered),
         )
     }()
 

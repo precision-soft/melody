@@ -215,7 +215,7 @@ func (instance *Application) runCli() error {
         cli.Register(rootCli, command, runtimeInstance)
     }
 
-    normalizedArguments := normalizeCliVerbosityArguments(os.Args)
+    normalizedArguments := cli.NormalizeVerbosityArguments(os.Args)
 
     suggestCliCommandErr := suggestCliCommand(normalizedArguments, availableCommands, kernelInstance.Clock())
     if nil != suggestCliCommandErr {
@@ -223,67 +223,6 @@ func (instance *Application) runCli() error {
     }
 
     return rootCli.Run(instance.ctx, normalizedArguments)
-}
-
-func normalizeCliVerbosityArguments(arguments []string) []string {
-    if 0 == len(arguments) {
-        return arguments
-    }
-
-    normalized := make([]string, 0, len(arguments))
-    stopNormalization := false
-
-    for _, argument := range arguments {
-        if true == stopNormalization {
-            normalized = append(normalized, argument)
-            continue
-        }
-
-        if "--" == argument {
-            stopNormalization = true
-            normalized = append(normalized, argument)
-            continue
-        }
-
-        if true == strings.HasPrefix(argument, "-") && false == strings.HasPrefix(argument, "--") {
-            isVerbosityShortFlag := true
-
-            if 2 > len(argument) {
-                isVerbosityShortFlag = false
-            }
-
-            if true == isVerbosityShortFlag && false == strings.HasPrefix(argument, "-v") {
-                isVerbosityShortFlag = false
-            }
-
-            if true == isVerbosityShortFlag {
-                for _, runeValue := range argument[2:] {
-                    if 'v' != runeValue {
-                        isVerbosityShortFlag = false
-                        break
-                    }
-                }
-            }
-
-            if true == isVerbosityShortFlag {
-                verbosityLevel := len(argument) - 1
-                normalized = append(
-                    normalized,
-                    fmt.Sprintf(
-                        "--%s=%d",
-                        output.FlagNameVerbosity,
-                        verbosityLevel,
-                    ),
-                )
-
-                continue
-            }
-        }
-
-        normalized = append(normalized, argument)
-    }
-
-    return normalized
 }
 
 func suggestCliCommand(

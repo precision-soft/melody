@@ -56,9 +56,11 @@ func DispatchCommand(
         Action: func(actionContext context.Context, actionCommand *urfavecli.Command) error {
             return normalizeCliError(command.Run(runtimeInstance, newEngineContext(actionCommand)))
         },
+        /* as in Register: a positional "help" or "h" reaches the command */
+        HideHelpCommand: true,
         /* as in NewRoot: the engine's default would end the process on any error the command returns */
         ExitErrHandler: inertExitHandler,
     }
 
-    return engineCommand.Run(ctx, arguments)
+    return engineCommand.Run(ctx, NormalizeVerbosityArguments(arguments))
 }

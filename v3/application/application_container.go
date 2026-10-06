@@ -168,7 +168,7 @@ func (instance *Application) bootContainer() {
                     configuration.Kernel().LogLevel(),
                     instance.moduleConfigurations,
                     kernelInstance.Clock(),
-                    config.ModeHttp == instance.runtimeFlags.Mode(),
+                    true,
                 ), nil
             },
         )
@@ -283,7 +283,7 @@ func (instance *Application) bootContainer() {
     }
 }
 
-/* newContainerLogger builds the logger the container serves. The module configuration is read before the descriptor is opened, because it panics on a configuration of the wrong type and a file opened before it would have no owner. The file journal is armed for reopening on SIGHUP in the serving process only: the exit-path logger belongs to a dying process, and in a cli process signal.Notify would take SIGHUP's terminating disposition away from a command whose terminal hung up. */
+/* newContainerLogger builds the logger the container serves. The module configuration is read before the descriptor is opened, because it panics on a configuration of the wrong type and a file opened before it would have no owner. The container arms the file journal for reopening on SIGHUP in every process, a console worker included, so a postrotate SIGHUP rotates its journal too, at the price that SIGHUP does not terminate a command whose terminal hung up; the exit-path logger belongs to a dying process and is not armed. */
 func newContainerLogger(
     logPath string,
     logLevel loggingcontract.Level,
@@ -457,12 +457,33 @@ func (instance *Application) registerSecurity() error {
     return nil
 }
 
-/* buildMessageBusTransportsCloser builds the closer that joins the registered message bus transports to the container's ordered teardown, for every process that never resolves the transports map itself, an http process routing through transport values among them. Built this early, it is closed after every service that could still publish through a transport. A failure is a warning: the transports are optional and the name is the framework's own. */
+/* buildMessageBusTransportsCloser builds the closer that joins the registered message bus transports to the container's ordered teardown, for every process that never resolves the transports map itself, an http process routing through transport values among them, and declares it a teardown dependency of the buses the application registered: a bus routes through transport values its module captured, which no resolution records, so the edge is declared. Every service that publishes through a bus resolves it and closes before it, the bus before the transports, under the sequential and the parallel teardown alike. A failure is a warning: the transports are optional and the names are the framework's own. */
 func (instance *Application) buildMessageBusTransportsCloser() {
     serviceContainer := instance.kernel.ServiceContainer()
 
     if false == serviceContainer.Has(messagebus.ServiceTransportsCloser) {
         return
+    }
+
+    if declarer, declares := serviceContainer.(interface {
+        DeclareTeardownDependency(serviceName string, dependencyNames ...string) error
+    }); true == declares {
+        for _, busName := range []string{messagebus.ServiceBus, messagebus.ServiceConsumeBus} {
+            if false == serviceContainer.Has(busName) {
+                continue
+            }
+
+            declareErr := declarer.DeclareTeardownDependency(busName, messagebus.ServiceTransportsCloser)
+            if nil != declareErr {
+                instance.bootLogger().Warning(
+                    "could not order the message bus before its transports; the transports may close while the bus still routes to them",
+                    exceptioncontract.Context{
+                        "serviceName": busName,
+                        "error":       declareErr.Error(),
+                    },
+                )
+            }
+        }
     }
 
     _, closerErr := container.FromResolver[*messagebus.TransportsCloser](

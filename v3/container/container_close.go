@@ -1680,3 +1680,45 @@ func stronglyConnectedRings(nodes map[string]struct{}, adjacency map[string]map[
 
     return rings
 }
+
+/* DeclareTeardownDependency declares, after the registration, that a registered service closes before the named container services: WithTeardownDependency for a registration whose author is not the one who knows the edge, such as the framework joining a service the application registered to one of its own. The rules of the option hold: the declaring service is a container registration, an empty name and its own name are refused, and under ArmParallelTeardown a name nothing registered is refused. A closed container refuses it. */
+func (instance *container) DeclareTeardownDependency(serviceName string, dependencyNames ...string) error {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    if true == instance.isClosed {
+        return exception.NewError("container is closed", exceptioncontract.Context{"door": "DeclareTeardownDependency"}, ErrContainerClosed)
+    }
+
+    if _, registered := instance.providers[serviceName]; false == registered {
+        return exception.NewError(
+            "the service declaring a teardown dependency is not registered in the container",
+            exceptioncontract.Context{
+                "serviceName": serviceName,
+            },
+            ErrTeardownDependencyWasNeverRegistered,
+        )
+    }
+
+    for _, dependencyName := range dependencyNames {
+        if "" == dependencyName {
+            return exception.NewError("a teardown dependency name is required", exceptioncontract.Context{"serviceName": serviceName}, ErrTeardownDependencyNameIsRequired)
+        }
+
+        if serviceName == dependencyName {
+            return exception.NewError("a service cannot declare a teardown dependency on itself", exceptioncontract.Context{"serviceName": serviceName}, ErrTeardownDependencyIsSelf)
+        }
+
+        if true == instance.teardownInWaves {
+            if refusalErr := instance.refuseDeclaredTeardownEdgeLocked(declaredNameEdge(serviceName, dependencyName)); nil != refusalErr {
+                return refusalErr
+            }
+        }
+    }
+
+    for _, dependencyName := range dependencyNames {
+        instance.recordDeclaredTeardownEdgeLocked(declaredNameEdge(serviceName, dependencyName))
+    }
+
+    return nil
+}

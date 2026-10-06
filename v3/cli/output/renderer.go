@@ -21,6 +21,21 @@ func Render(
             return printErr
         }
 
+        /* the exit path journals the outermost exit error's own value, so the print failure becomes that value and the envelope's failure its cause, under the envelope's exit code */
+        reportedExitErr, isExitError := reportedErr.(*exception.ExitError)
+        if true == isExitError && nil != reportedExitErr {
+            return exception.NewExitError(
+                reportedExitErr.ExitCode(),
+                exception.NewError(
+                    "failed to print the command result that reports a failure",
+                    map[string]any{
+                        "printError": printErr.Error(),
+                    },
+                    reportedExitErr.ErrorValue(),
+                ),
+            )
+        }
+
         return exception.NewError(
             "failed to print the command result that reports a failure",
             map[string]any{

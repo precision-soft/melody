@@ -1,6 +1,8 @@
 package config
 
 import (
+    "slices"
+
     configcontract "github.com/precision-soft/melody/v3/config/contract"
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/internal"
@@ -63,7 +65,13 @@ const (
 )
 
 type Environment struct {
-    values map[string]string
+    values        map[string]string
+    assembledFrom map[string][]string
+}
+
+/* dotEnvProvenanceReader is the source that knows which keys each .env value was assembled from */
+type dotEnvProvenanceReader interface {
+    dotEnvAssembledFrom() map[string][]string
 }
 
 func NewEnvironment(source configcontract.EnvironmentSource) (*Environment, error) {
@@ -76,9 +84,31 @@ func NewEnvironment(source configcontract.EnvironmentSource) (*Environment, erro
         return nil, loadErr
     }
 
+    assembledFrom := map[string][]string(nil)
+    if reader, readsProvenance := source.(dotEnvProvenanceReader); true == readsProvenance {
+        assembledFrom = reader.dotEnvAssembledFrom()
+    }
+
     return &Environment{
-        values: values,
+        values:        values,
+        assembledFrom: assembledFrom,
     }, nil
+}
+
+/* keysAssembledFrom answers the .env keys whose value was assembled from name through ${name} */
+func (instance *Environment) keysAssembledFrom(name string) []string {
+    if nil == instance {
+        return nil
+    }
+
+    keys := make([]string, 0)
+    for key, referencedKeys := range instance.assembledFrom {
+        if true == slices.Contains(referencedKeys, name) {
+            keys = append(keys, key)
+        }
+    }
+
+    return keys
 }
 
 func (instance *Environment) All() map[string]string {

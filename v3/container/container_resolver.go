@@ -2,6 +2,7 @@ package container
 
 import (
     "context"
+    "errors"
     "fmt"
     "reflect"
     "runtime"
@@ -294,28 +295,29 @@ func (instance *container) serviceWithCreationGuardLocked(
     /* the closer the registration declared, read under the lock for the best-effort closes below */
     createdCloser := instance.closerByNodeKey[creation.ownerNodeKey]
 
-    /* a value created while Close ran would never be closed, so it is closed best-effort and the resolution fails */
+    /* a value created while Close ran would never be closed, so it is closed best-effort and the resolution fails, carrying the failure of that close */
     if nil == err && true == instance.isClosed {
         instance.mutex.Unlock()
-        closeValueAfterContainerClose(createdValue, createdCloser)
+        closeErr := closeValueAfterContainerClose(createdValue, createdCloser)
         instance.mutex.Lock()
 
-        err = newContainerClosedError(creatingKey)
+        err = errors.Join(newContainerClosedError(creatingKey), closeErr)
     }
 
     if nil == err {
         keptValue, overrideWins, keepErr := creation.store.keep(createdValue)
 
         if nil != keepErr {
-            /* the scope this value was built for closed while the provider ran, so it is closed best-effort and the resolution fails */
+            /* the scope this value was built for closed while the provider ran, so it is closed best-effort and the resolution fails, carrying the failure of that close */
             instance.mutex.Unlock()
-            closeValueAfterContainerClose(createdValue, createdCloser)
+            closeErr := closeValueAfterContainerClose(createdValue, createdCloser)
             instance.mutex.Lock()
 
-            err = keepErr
+            err = errors.Join(keepErr, closeErr)
         } else if true == overrideWins {
             instance.mutex.Unlock()
-            closeValueAfterContainerClose(createdValue, createdCloser)
+            /* the resolution answers the override, so a failure closing the discarded value has no carrier */
+            _ = closeValueAfterContainerClose(createdValue, createdCloser)
             instance.mutex.Lock()
 
             createdValue = keptValue
@@ -350,18 +352,14 @@ func newContainerClosedError(creatingKey string) error {
 }
 
 /* closeValueAfterContainerClose closes a value no holder will ever close through the door the teardown would have used, the context-taking one and a registration's closer included, under the background context a plain Close hands the teardown. */
-func closeValueAfterContainerClose(value any, closer *declaredCloser) {
+func closeValueAfterContainerClose(value any, closer *declaredCloser) error {
     closeable, contextCloseable, carriesADoor := closeDoorsOfWithCloser(value, closer)
     if false == carriesADoor {
-        return
+        return nil
     }
 
-    /* runs with the mutex unlocked under a deferred unlock, so a panicking Close is contained here */
-    defer func() {
-        _ = recover()
-    }()
-
-    _ = closeServiceValueWithin(context.Background(), closeable, contextCloseable)
+    /* both doors contain a panicking close as a recorded failure */
+    return closeServiceValueWithin(context.Background(), closeable, contextCloseable)
 }
 
 func (instance *container) registerResolverWaitLocked(

@@ -5,8 +5,10 @@ import (
     "errors"
     "os"
     "path/filepath"
+    "slices"
     "strings"
     "sync/atomic"
+    "syscall"
     "testing"
     "time"
 
@@ -924,5 +926,101 @@ func TestBoot_NoTransportsRegisteredBuildsNoCloser(t *testing.T) {
 
     if true == kernelInstance.ServiceContainer().Has(messagebus.ServiceTransportsCloser) {
         t.Fatalf("expected no transports closer where no transports were registered")
+    }
+}
+
+func TestBootContainer_TheJournalOfAConsoleProcessReopensOnSighup(t *testing.T) {
+    directory := t.TempDir()
+    logPath := filepath.Join(directory, "application.log")
+    rotatedPath := filepath.Join(directory, "application.log.1")
+
+    applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{config.EnvKey: "dev", config.LogPathKey: logPath})
+    applicationInstance.bootContainer()
+
+    logger, resolveErr := logging.LoggerFromContainer(applicationInstance.kernel.ServiceContainer())
+    if nil != resolveErr {
+        t.Fatalf("unexpected resolve error: %v", resolveErr)
+    }
+    defer func() { _ = applicationInstance.kernel.ServiceContainer().Close() }()
+
+    logger.Emergency("before rotation", nil)
+
+    renameErr := os.Rename(logPath, rotatedPath)
+    if nil != renameErr {
+        t.Fatalf("unexpected rename error: %v", renameErr)
+    }
+
+    killErr := syscall.Kill(os.Getpid(), syscall.SIGHUP)
+    if nil != killErr {
+        t.Fatalf("unexpected kill error: %v", killErr)
+    }
+
+    deadline := time.Now().Add(5 * time.Second)
+    for {
+        logger.Emergency("after rotation", nil)
+
+        content, readErr := os.ReadFile(logPath)
+        if nil == readErr && true == strings.Contains(string(content), "after rotation") {
+            return
+        }
+
+        if true == time.Now().After(deadline) {
+            t.Fatalf("the console journal was not reopened after the signal; the path answered %v", readErr)
+        }
+
+        time.Sleep(10 * time.Millisecond)
+    }
+}
+
+type teardownOrderProbeBus struct{}
+
+func (instance *teardownOrderProbeBus) Dispatch(runtimeInstance runtimecontract.Runtime, message any, stamps ...messagebuscontract.Stamp) (messagebuscontract.Envelope, error) {
+    return nil, nil
+}
+
+func TestBoot_TheRegisteredBusesCloseBeforeTheTransportsTheyRouteTo(t *testing.T) {
+    applicationInstance := NewApplication(
+        context.Background(),
+        testhelper.NewEmbeddedEnvFs(),
+        testhelper.NewEmbeddedStaticFs(),
+    )
+
+    messagebus.RegisterTransports(
+        applicationInstance,
+        map[string]messagebuscontract.Transport{"async": &recordingCloseTransport{}},
+    )
+
+    for _, busName := range []string{messagebus.ServiceBus, messagebus.ServiceConsumeBus} {
+        applicationInstance.RegisterService(
+            busName,
+            func(resolver containercontract.Resolver) (messagebuscontract.Bus, error) {
+                return &teardownOrderProbeBus{}, nil
+            },
+            container.WithoutTypeRegistration(),
+        )
+    }
+
+    serviceContainer := applicationInstance.Boot().ServiceContainer()
+    defer func() { _ = serviceContainer.Close() }()
+
+    for _, busName := range []string{messagebus.ServiceBus, messagebus.ServiceConsumeBus} {
+        _ = container.MustFromResolver[messagebuscontract.Bus](serviceContainer, busName)
+    }
+
+    plan := serviceContainer.(interface {
+        TeardownPlan() []containercontract.TeardownPlanEntry
+    }).TeardownPlan()
+
+    for _, busName := range []string{messagebus.ServiceBus, messagebus.ServiceConsumeBus} {
+        ordered := false
+        for _, entry := range plan {
+            if "service:"+busName == entry.NodeKey && true == slices.Contains(entry.Dependencies, "service:"+messagebus.ServiceTransportsCloser) {
+                ordered = true
+            }
+        }
+
+        if false == ordered {
+            t.Fatalf("expected %s ordered before the transports closer, got %+v", busName, plan)
+        }
     }
 }

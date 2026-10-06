@@ -62,12 +62,16 @@ func (instance *container) TeardownDeadlineOverrun() exceptioncontract.Context {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
 
-    return instance.teardownDeadline
+    return cloneDeadlineRecord(instance.teardownDeadline)
 }
 
 /* the doors reached through a type assertion on the concrete container, named once so the compiler holds the container to their shapes */
 type parallelTeardownArmer interface {
     ArmParallelTeardown() error
+}
+
+type teardownDependencyDeclarer interface {
+    DeclareTeardownDependency(serviceName string, dependencyNames ...string) error
 }
 
 type teardownPlanner interface {

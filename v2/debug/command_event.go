@@ -109,7 +109,7 @@ func (instance *EventCommand) Run(
     listenerTotal := 0
     fromSubscriberTotal := 0
 
-    /* the total counts distinct subscribers across the dispatcher, not per event */
+    /* the total counts distinct subscriber types across the dispatcher, not installations and not per event */
     subscriberOwnerGlobalSet := make(map[string]struct{})
 
     for _, registeredEvent := range registeredEvents {
@@ -184,7 +184,7 @@ func (instance *EventCommand) Run(
 
         block := builder.AddBlock(
             "EVENTS",
-            []string{"event", "listeners", "from subscribers", "subscribers", "priorities"},
+            []string{"event", "listeners", "from subscribers", "subscriber types", "priorities"},
         )
 
         for _, item := range items {

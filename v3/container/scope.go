@@ -814,7 +814,7 @@ func (instance *scope) TypesImplementing(interfaceType reflect.Type) []reflect.T
     }
 
     sort.Slice(matches, func(first int, second int) bool {
-        return matches[first].String() < matches[second].String()
+        return lessByTypeIdentity(matches[first], matches[second])
     })
 
     return matches

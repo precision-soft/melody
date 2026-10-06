@@ -115,3 +115,14 @@ func isAnyType(targetType reflect.Type) bool {
 
     return 0 == targetType.NumMethod()
 }
+
+/* lessByTypeIdentity orders two types by String() and breaks a tie on the identity key, so two packages' same-spelled types keep one order from run to run */
+func lessByTypeIdentity(first reflect.Type, second reflect.Type) bool {
+    firstString := first.String()
+    secondString := second.String()
+    if firstString != secondString {
+        return firstString < secondString
+    }
+
+    return typeIdentityKey(first) < typeIdentityKey(second)
+}

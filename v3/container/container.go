@@ -831,6 +831,7 @@ var (
     _ containercontract.Container       = (*container)(nil)
     _ containercontract.ScopedRegistrar = (*container)(nil)
     _ parallelTeardownArmer             = (*container)(nil)
+    _ teardownDependencyDeclarer        = (*container)(nil)
     _ teardownPlanner                   = (*container)(nil)
     _ containercontract.ContextCloser   = (*container)(nil)
     _ closedContainerChecker            = (*container)(nil)

@@ -86,8 +86,8 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
                     resolutionContext := exception.LogContext(
                         resolveErr,
                         exceptioncontract.Context{
-                            "method": method,
-                            "path":   path,
+                            "method": internal.BoundDiagnosticText(method),
+                            "path":   internal.BoundDiagnosticText(path),
                         },
                     )
 

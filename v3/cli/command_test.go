@@ -6,6 +6,7 @@ import (
     "encoding/json"
     "errors"
     "fmt"
+    "io"
     "strings"
     "testing"
     "time"
@@ -1088,4 +1089,66 @@ func TestNewEngineFlags_RefusesAnEmptyAlias(t *testing.T) {
     requireSpellingRefusal(t, []clicontract.Flag{
         &clicontract.StringFlag{Name: "alpha", Aliases: []string{""}},
     }, "cli flag alias is empty", "")
+}
+
+func TestRegister_APositionalHelpReachesTheCommand(t *testing.T) {
+    for _, positional := range []string{"h", "help"} {
+        observedArguments := []string(nil)
+
+        rootCommand := NewRoot("app", "desc")
+
+        command := &testCommand{
+            nameValue:        "hello",
+            descriptionValue: "hello command",
+            runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+                observedArguments = commandContext.Arguments()
+
+                return nil
+            },
+        }
+
+        Register(rootCommand, command, newTestRuntime(t))
+        rootCommand.SetWriter(io.Discard)
+        rootCommand.SetErrorWriter(io.Discard)
+
+        runErr := rootCommand.Run(context.Background(), []string{"app", "hello", positional})
+        if nil != runErr {
+            t.Fatalf("expected %q run, got %v", positional, runErr)
+        }
+
+        if 1 != len(observedArguments) || positional != observedArguments[0] {
+            t.Fatalf("expected %q handed to the command, got %v", positional, observedArguments)
+        }
+    }
+}
+
+func TestRegister_AFailingCommandWritesNoErrorLineUnderQuiet(t *testing.T) {
+    for _, quietArgument := range []string{"--quiet=true", "--quiet=false"} {
+        buffer := &bytes.Buffer{}
+
+        rootCommand := NewRoot("app", "desc")
+
+        command := &testCommand{
+            nameValue:        "hello",
+            descriptionValue: "hello command",
+            flagsValue:       output.StandardFlags(),
+            runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+                return errors.New("the command failed")
+            },
+        }
+
+        Register(rootCommand, command, newTestRuntime(t))
+        rootCommand.SetWriter(buffer)
+        rootCommand.SetErrorWriter(buffer)
+
+        _ = rootCommand.Run(context.Background(), []string{"app", "hello", "--no-color", quietArgument})
+
+        if "--quiet=true" == quietArgument && true == strings.Contains(buffer.String(), "[error]") {
+            t.Fatalf("expected no error line under quiet, got %q", buffer.String())
+        }
+
+        if "--quiet=false" == quietArgument && false == strings.Contains(buffer.String(), "[error] the command failed") {
+            t.Fatalf("expected the error line without quiet, got %q", buffer.String())
+        }
+    }
 }

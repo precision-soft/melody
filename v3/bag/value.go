@@ -64,7 +64,7 @@ func Int(parameterBag bagcontract.ParameterBag, name string) (int64, bool, error
         return 0, false, nil
     }
 
-    return internal.Int(value, name)
+    return internal.Int(scalarValue(value), name)
 }
 
 func Bool(parameterBag bagcontract.ParameterBag, name string) (bool, bool, error) {
@@ -73,7 +73,7 @@ func Bool(parameterBag bagcontract.ParameterBag, name string) (bool, bool, error
         return false, false, nil
     }
 
-    return internal.Bool(value, name)
+    return internal.Bool(scalarValue(value), name)
 }
 
 func Float64(parameterBag bagcontract.ParameterBag, name string) (float64, bool, error) {
@@ -82,5 +82,18 @@ func Float64(parameterBag bagcontract.ParameterBag, name string) (float64, bool,
         return 0, false, nil
     }
 
-    return internal.Float64(value, name)
+    return internal.Float64(scalarValue(value), name)
+}
+
+/* scalarValue reads a repeated request key, a []string, as its first value for the typed doors, as String reads it; an empty list reads as unset */
+func scalarValue(value any) any {
+    if sliceValue, isSlice := value.([]string); true == isSlice {
+        if 0 == len(sliceValue) {
+            return nil
+        }
+
+        return sliceValue[0]
+    }
+
+    return value
 }

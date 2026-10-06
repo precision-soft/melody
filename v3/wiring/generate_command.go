@@ -182,6 +182,7 @@ func (instance *GenerateCommand) Run(
         outputPath = filepath.Join(projectDirectory, outputPath)
     }
 
+    /* the scan walks what a symlink resolves to, so containment is read on the resolved paths: an --out reaching a scanned directory through a link, or a scanned directory named through one, is still inside it */
     /* a generated file inside a scanned directory would be read back by the next scan with a package clause the sources there do not carry, and the package would stop compiling, so the output must not be inside a scanned directory. Containment is read on path components, as the static file server reads it, and a relative path the two cannot be related on is refused. */
     for _, packageBinding := range instance.bindSet.Packages() {
         scannedDirectory := packageBinding.Directory()
@@ -189,7 +190,7 @@ func (instance *GenerateCommand) Run(
             scannedDirectory = filepath.Join(projectDirectory, scannedDirectory)
         }
 
-        relativePath, relativeErr := filepath.Rel(scannedDirectory, outputPath)
+        relativePath, relativeErr := filepath.Rel(resolvedForContainment(scannedDirectory), resolvedForContainment(outputPath))
         if nil != relativeErr {
             return exception.NewError(
                 "the output path cannot be related to a scanned package directory",
@@ -490,3 +491,17 @@ func isBuildTagIdentifier(tag string) bool {
 }
 
 var _ clicontract.Command = (*GenerateCommand)(nil)
+
+/* resolvedForContainment resolves the symlinks of a path, the file itself excepted since it may not exist yet, and answers the path as written when it cannot be resolved */
+func resolvedForContainment(path string) string {
+    if resolvedPath, resolveErr := filepath.EvalSymlinks(path); nil == resolveErr {
+        return resolvedPath
+    }
+
+    resolvedDirectory, resolveErr := filepath.EvalSymlinks(filepath.Dir(path))
+    if nil != resolveErr {
+        return path
+    }
+
+    return filepath.Join(resolvedDirectory, filepath.Base(path))
+}

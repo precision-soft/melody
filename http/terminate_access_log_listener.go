@@ -108,11 +108,11 @@ func RegisterKernelTerminateAccessLogListener(eventDispatcher eventcontract.Even
                 "request completed",
                 loggingcontract.Context{
                     "requestId":    requestId,
-                    "method":       method,
+                    "method":       internal.BoundDiagnosticText(method),
                     "path":         internal.BoundDiagnosticText(path),
                     "query":        internal.BoundDiagnosticText(queryString),
                     "scheme":       scheme,
-                    "host":         host,
+                    "host":         internal.BoundDiagnosticText(host),
                     "remoteAddr":   remoteAddr,
                     "userAgent":    internal.BoundDiagnosticText(userAgent),
                     "referer":      internal.BoundDiagnosticText(referer),

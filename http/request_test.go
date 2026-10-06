@@ -10,6 +10,7 @@ import (
 
     "github.com/precision-soft/melody/bag"
     "github.com/precision-soft/melody/config"
+    "github.com/precision-soft/melody/exception"
     httpcontract "github.com/precision-soft/melody/http/contract"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
     "github.com/precision-soft/melody/session"
@@ -429,6 +430,23 @@ func TestNewRequest_UnparsableFormIsRecordedForRefusal(t *testing.T) {
 
     if true == request.Post().Has("csrf") {
         t.Fatalf("expected no half-parsed form to reach the handler")
+    }
+}
+
+func TestNewRequest_AnUnparsableFormRefusalBoundsThePathItCarries(t *testing.T) {
+    postRequest := httptest.NewRequest("POST", "/"+strings.Repeat("a", 600*1024), strings.NewReader("a=%zz"))
+    postRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+    request := NewRequest(postRequest, nil, nil, nil)
+
+    refusal, isExceptionError := request.bodyReadErr.(*exception.Error)
+    if false == isExceptionError {
+        t.Fatalf("expected the refusal as an exception error, got %T", request.bodyReadErr)
+    }
+
+    path, _ := refusal.Context()["path"].(string)
+    if 600 < len(path) || false == strings.Contains(path, "...(truncated ") {
+        t.Fatalf("expected the refusal's path bounded, got %d bytes", len(path))
     }
 }
 

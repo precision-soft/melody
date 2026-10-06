@@ -2,6 +2,7 @@ package config
 
 import (
     "regexp"
+    "slices"
     "sort"
     "strings"
     "sync"
@@ -18,8 +19,6 @@ import (
 var (
     /* the optional "default:<fallback>:" prefix marks an environment key whose absence is tolerated: "%env(default::KEY)%" falls back to the empty string and "%env(default:some.parameter:KEY)%" falls back to another parameter. Without the prefix an undefined key stays a hard error, so a plain "%env(KEY)%" never silently degrades to empty. */
     envPlaceholderPattern = regexp.MustCompile(`%env\((default:([A-Za-z_][A-Za-z0-9_.]*)?:)?([A-Za-z_][A-Za-z0-9_]*)\)%`)
-    /* a single-character name is a valid reference, since the default processor's fallback group accepts one; otherwise %a% would survive as literal text */
-    parameterPlaceholderPattern = regexp.MustCompile(`%([A-Za-z_][A-Za-z0-9_.]*)%`)
 )
 
 func NewConfiguration(
@@ -305,23 +304,90 @@ func (instance *Configuration) propagateSecretMarkLocked(markedName string) {
                 markedNames = append(markedNames, aliasesOfName(name)...)
             }
         }
+
+        /* a .env value assembled from ${NAME} carries NAME's credential although no template names it */
+        for _, assembledKey := range instance.environment.keysAssembledFrom(currentName) {
+            assembledParameter := instance.getInternalParameter(assembledKey)
+            if nil != assembledParameter && true == assembledParameter.isSecret.Load() {
+                continue
+            }
+
+            if nil != assembledParameter {
+                assembledParameter.isSecret.Store(true)
+            }
+
+            markedNames = append(markedNames, aliasesOfName(assembledKey)...)
+        }
     }
 }
 
+/* templateReferencedNames lists the environment keys, the fallback parameters and the parameters a template reads, scanned as scanTemplate scans it: a doubled percent is a literal, so "a%%%db.pass%" reads db.pass and "a%%db.pass%%" reads nothing */
+func templateReferencedNames(template string) []string {
+    names := make([]string, 0)
+
+    index := 0
+    for index < len(template) {
+        if '%' != template[index] {
+            index = index + 1
+
+            continue
+        }
+
+        if index+1 < len(template) && '%' == template[index+1] {
+            index = index + 2
+
+            continue
+        }
+
+        fragment := template[index:]
+
+        if true == strings.HasPrefix(fragment, "%env(") {
+            innerEnd := len("%env(")
+            for innerEnd < len(fragment) && '%' != fragment[innerEnd] {
+                if ')' == fragment[innerEnd] && innerEnd+1 < len(fragment) && '%' == fragment[innerEnd+1] {
+                    break
+                }
+
+                innerEnd = innerEnd + 1
+            }
+
+            if innerEnd < len(fragment) && '%' != fragment[innerEnd] {
+                candidate := fragment[:innerEnd+2]
+
+                submatches := envPlaceholderPattern.FindStringSubmatch(candidate)
+                if nil != submatches && candidate == submatches[0] {
+                    names = append(names, submatches[3])
+                    if "" != submatches[2] {
+                        names = append(names, submatches[2])
+                    }
+
+                    index = index + len(candidate)
+
+                    continue
+                }
+            }
+
+            index = index + 1
+
+            continue
+        }
+
+        parameterKey, consumedLength, _ := parseParameterPlaceholder(fragment)
+        if 0 < consumedLength {
+            names = append(names, parameterKey)
+            index = index + consumedLength
+
+            continue
+        }
+
+        index = index + 1
+    }
+
+    return names
+}
+
 func templateReadsName(template string, name string) bool {
-    for _, submatches := range envPlaceholderPattern.FindAllStringSubmatch(template, -1) {
-        if name == submatches[3] || name == submatches[2] {
-            return true
-        }
-    }
-
-    for _, submatches := range parameterPlaceholderPattern.FindAllStringSubmatch(template, -1) {
-        if name == submatches[1] {
-            return true
-        }
-    }
-
-    return false
+    return slices.Contains(templateReferencedNames(template), name)
 }
 
 func (instance *Configuration) Names() []string {

@@ -436,8 +436,8 @@ func writeResponse(
         if nil != logger {
             writeLogContext := exceptioncontract.Context{}
             if false == internal.IsNilInterface(request) && nil != request.HttpRequest() {
-                writeLogContext["method"] = request.HttpRequest().Method
-                writeLogContext["path"] = request.HttpRequest().URL.Path
+                writeLogContext["method"] = internal.BoundDiagnosticText(request.HttpRequest().Method)
+                writeLogContext["path"] = internal.BoundDiagnosticText(request.HttpRequest().URL.Path)
             }
 
             if true == isClientAbortWriteError(request, err) {
@@ -637,8 +637,8 @@ func logSessionPersistenceEvent(
     }
 
     if false == internal.IsNilInterface(request) && nil != request.HttpRequest() {
-        recordContext["method"] = request.HttpRequest().Method
-        recordContext["path"] = request.HttpRequest().URL.Path
+        recordContext["method"] = internal.BoundDiagnosticText(request.HttpRequest().Method)
+        recordContext["path"] = internal.BoundDiagnosticText(request.HttpRequest().URL.Path)
     }
 
     if loggingcontract.LevelWarning == level {

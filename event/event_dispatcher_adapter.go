@@ -325,14 +325,10 @@ func (instance *EventDispatcherAdapter) addListenerRegistration(
 ) eventcontract.ListenerRegistration {
     listenerProgramCounter := reflect.ValueOf(listener).Pointer()
 
-    /* the listener receives the dispatched event itself, as from the plain dispatcher, so a custom event type stays type-assertable and a field a listener writes reaches the caller; the wrapper only carries the inspection metadata */
-    wrappedListener := func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
-        return listener(runtimeInstance, eventValue)
-    }
-
+    /* the listener itself is registered, so the dispatcher's records name its function and it receives the dispatched event as from the plain dispatcher; the adapter keeps the inspection metadata beside it */
     registration := instance.eventDispatcher.AddListener(
         eventName,
-        wrappedListener,
+        listener,
         priority,
     )
 

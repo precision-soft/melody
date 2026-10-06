@@ -7,6 +7,7 @@ import (
     "log"
     "os"
     "path/filepath"
+    "slices"
     "strings"
     "sync"
     "testing"
@@ -414,14 +415,14 @@ func TestEnvPlaceholderPattern_AcceptsIdentifiersStartingWithLetterOrUnderscore(
     }
 }
 
-func TestParameterPlaceholderPattern_RejectsIdentifiersStartingWithDigit(t *testing.T) {
-    if true == parameterPlaceholderPattern.MatchString("%1invalid%") {
+func TestTemplateReferencedNames_RejectsIdentifiersStartingWithDigit(t *testing.T) {
+    if 0 != len(templateReferencedNames("%1invalid%")) {
         t.Fatalf("expected pattern to reject identifier starting with digit")
     }
 }
 
-func TestParameterPlaceholderPattern_AcceptsDottedIdentifiers(t *testing.T) {
-    if false == parameterPlaceholderPattern.MatchString("%kernel.project_dir%") {
+func TestTemplateReferencedNames_AcceptsDottedAndSingleCharacterIdentifiers(t *testing.T) {
+    if false == slices.Equal([]string{"kernel.project_dir", "a"}, templateReferencedNames("%kernel.project_dir%%a%")) {
         t.Fatalf("expected pattern to accept dotted identifier")
     }
 }
@@ -614,6 +615,33 @@ func TestMarkSecret_PropagatesRetroactivelyToDirectReaders(t *testing.T) {
 
     if false == configuration.MustGet("database.dsn").IsSecret() {
         t.Fatalf("expected the late marking to travel to the parameter assembled from the key")
+    }
+}
+
+func TestMarkSecret_ReadsAReferenceBehindAnEscapedPercent(t *testing.T) {
+    configuration, err := NewConfiguration(&Environment{values: map[string]string{}}, "/tmp/melody")
+    if nil != err {
+        t.Fatalf("configuration error: %v", err)
+    }
+
+    configuration.RegisterRuntime("db.pass", "hunter2")
+    configuration.RegisterRuntime("app.reader", "a%%%db.pass%")
+    configuration.RegisterRuntime("app.literal", "a%%db.pass%%")
+
+    if resolveErr := configuration.Resolve(); nil != resolveErr {
+        t.Fatalf("resolve error: %v", resolveErr)
+    }
+
+    if false == configuration.MarkSecret("db.pass") {
+        t.Fatalf("expected the marking to land")
+    }
+
+    if false == configuration.MustGet("app.reader").IsSecret() {
+        t.Fatalf("expected the reader behind an escaped percent marked")
+    }
+
+    if true == configuration.MustGet("app.literal").IsSecret() {
+        t.Fatalf("expected a doubled percent around the name read as a literal, not a reference")
     }
 }
 

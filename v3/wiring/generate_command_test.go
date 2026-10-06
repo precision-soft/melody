@@ -836,3 +836,33 @@ func TestJournalLineWriter_TheReachOfEveryGlobalBindIsOneWarningNotOnePerBind(t 
         }
     }
 }
+
+func TestGenerateCommand_ReadsTheContainmentThroughSymlinks(t *testing.T) {
+    linkedOutProject := newCommandFixtureProject(t)
+    if linkErr := os.Symlink(filepath.Join(linkedOutProject, "app"), filepath.Join(linkedOutProject, "generated")); nil != linkErr {
+        t.Fatalf("symlink: %v", linkErr)
+    }
+
+    _, runErr := runGenerateCommand(t, linkedOutProject, appBindSet(), "--out", filepath.Join("generated", "wiring_gen.go"))
+    if nil == runErr || false == strings.Contains(runErr.Error(), "the output path lies inside a scanned package directory") {
+        t.Fatalf("expected an out path reaching the scanned directory through a link refused, got %v", runErr)
+    }
+
+    linkedScanProject := newCommandFixtureProject(t)
+    if linkErr := os.Symlink(filepath.Join(linkedScanProject, "app"), filepath.Join(linkedScanProject, "applink")); nil != linkErr {
+        t.Fatalf("symlink: %v", linkErr)
+    }
+
+    linkedBindSet := NewBindSet()
+    linkedBindSet.Package(commandFixtureImportPath, "applink")
+
+    _, runErr = runGenerateCommand(t, linkedScanProject, linkedBindSet, "--out", filepath.Join("app", "wiring_gen.go"))
+    if nil == runErr || false == strings.Contains(runErr.Error(), "the output path lies inside a scanned package directory") {
+        t.Fatalf("expected an out path inside a directory scanned through a link refused, got %v", runErr)
+    }
+
+    siblingProject := newCommandFixtureProject(t)
+    if _, runErr = runGenerateCommand(t, siblingProject, appBindSet(), "--out", filepath.Join("wiring", "wiring_gen.go")); nil != runErr && true == strings.Contains(runErr.Error(), "lies inside a scanned package directory") {
+        t.Fatalf("expected an out path beside the scanned directory accepted, got %v", runErr)
+    }
+}

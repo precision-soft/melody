@@ -1,11 +1,14 @@
 package event
 
 import (
+    "strings"
+    "errors"
     "fmt"
     "sync"
     "testing"
 
     eventcontract "github.com/precision-soft/melody/v2/event/contract"
+    "github.com/precision-soft/melody/v2/exception"
     "github.com/precision-soft/melody/v2/internal/testhelper"
     runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
 )
@@ -739,5 +742,29 @@ func TestEventDispatcherAdapter_HandsListenersTheOriginalEvent(t *testing.T) {
 
     if 42 != seenMarker {
         t.Fatalf("expected the adapter to hand the listener the original custom event (marker 42), got %d", seenMarker)
+    }
+}
+
+var errEventDispatcherAdapterListenerFailed = errors.New("the listener failed")
+
+func eventDispatcherAdapterFailingListener(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+    return errEventDispatcherAdapterListenerFailed
+}
+
+func TestEventDispatcherAdapter_AFailingListenerIsNamedByItsOwnFunction(t *testing.T) {
+    dispatcher, clockInstance := testNewEventDispatcher()
+    adapter := NewEventDispatcherAdapter(dispatcher)
+    _ = adapter.AddListener("e", eventDispatcherAdapterFailingListener, 0)
+
+    _, err := adapter.Dispatch(newEventDispatcherAdapterTestRuntime(t), NewEvent("e", nil, clockInstance))
+
+    var listenerFailure *exception.Error
+    if false == errors.As(err, &listenerFailure) {
+        t.Fatalf("expected the listener failure, got %v", err)
+    }
+
+    listenerName, _ := listenerFailure.Context()["listenerName"].(string)
+    if false == strings.HasSuffix(listenerName, ".eventDispatcherAdapterFailingListener") {
+        t.Fatalf("expected the failing listener named by its own function, got %q", listenerName)
     }
 }

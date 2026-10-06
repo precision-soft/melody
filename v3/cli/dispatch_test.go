@@ -8,6 +8,7 @@ import (
     "testing"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
+    "github.com/precision-soft/melody/v3/cli/output"
     "github.com/precision-soft/melody/v3/container"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/internal/testhelper"
@@ -236,5 +237,72 @@ func TestDispatchCommand_ATypedNilWriterDiscardsRatherThanPanicking(t *testing.T
 
     if nil == runErr {
         t.Fatalf("expected the refused flag to be answered as an error")
+    }
+}
+
+func TestDispatchCommand_RewritesTheRepeatedVerbosityFlag(t *testing.T) {
+    observedVerbosity := -1
+
+    command := &testCommand{
+        nameValue:        "probe",
+        descriptionValue: "probe",
+        flagsValue:       output.StandardFlags(),
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+            observedVerbosity = commandContext.Int(output.FlagNameVerbosity)
+
+            return nil
+        },
+    }
+
+    runErr := DispatchCommand(context.Background(), command, newTestRuntime(t), []string{"probe", "-vv"}, nil)
+    if nil != runErr {
+        t.Fatalf("expected -vv accepted, got %v", runErr)
+    }
+
+    if 2 != observedVerbosity {
+        t.Fatalf("expected verbosity level 2, got %d", observedVerbosity)
+    }
+}
+
+func TestDispatchCommand_APositionalHelpReachesTheCommandAndTheHelpFlagPrintsTheUsage(t *testing.T) {
+    for _, positional := range []string{"h", "help"} {
+        observedArguments := []string(nil)
+
+        command := &testCommand{
+            nameValue:        "probe",
+            descriptionValue: "probe",
+            runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+                observedArguments = commandContext.Arguments()
+
+                return nil
+            },
+        }
+
+        runErr := DispatchCommand(context.Background(), command, newTestRuntime(t), []string{"probe", positional}, nil)
+        if nil != runErr {
+            t.Fatalf("expected %q dispatched, got %v", positional, runErr)
+        }
+
+        if 1 != len(observedArguments) || positional != observedArguments[0] {
+            t.Fatalf("expected %q handed to the command, got %v", positional, observedArguments)
+        }
+    }
+
+    ran := false
+    command := &testCommand{
+        nameValue:        "probe",
+        descriptionValue: "probe description",
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+            ran = true
+
+            return nil
+        },
+    }
+
+    buffer := &bytes.Buffer{}
+    _ = DispatchCommand(context.Background(), command, newTestRuntime(t), []string{"probe", "--help"}, buffer)
+
+    if true == ran || false == strings.Contains(buffer.String(), "probe description") {
+        t.Fatalf("expected --help to print the usage without running, ran=%v output=%q", ran, buffer.String())
     }
 }

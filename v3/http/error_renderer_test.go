@@ -382,6 +382,64 @@ func TestRenderErrorResponse_ASelfReferencingMapIsCutAtTheDepthBound(t *testing.
     }
 }
 
+type errorRendererCycleHolder struct {
+    Name  string
+    Cycle map[string]any
+}
+
+func TestRenderErrorResponse_ACycleThroughASliceAStructOrAnIntegerKeyedMapIsCutAtTheDepthBound(t *testing.T) {
+    throughSlice := map[string]any{"name": "loop"}
+    throughSlice["self"] = []any{throughSlice}
+
+    throughStruct := map[string]any{"name": "loop"}
+    throughStruct["self"] = errorRendererCycleHolder{Name: "holder", Cycle: throughStruct}
+
+    throughIntegerKeys := map[int]any{}
+    throughIntegerKeys[1] = throughIntegerKeys
+
+    payloads := map[string]any{
+        "slice":       throughSlice,
+        "struct":      throughStruct,
+        "integerKeys": throughIntegerKeys,
+    }
+
+    for name, payload := range payloads {
+        request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/fail", "text/plain")
+
+        rendered := make(chan string, 1)
+        go func() {
+            response := renderErrorResponse(newErrorRendererTextAndJsonRuntime(), request, nethttp.StatusBadRequest, "bad request", map[string]any{"context": payload})
+            rendered <- readResponseBody(t, response)
+        }()
+
+        select {
+        case body := <-rendered:
+            if false == strings.Contains(body, "...") || 40 < strings.Count(body, "\n") {
+                t.Fatalf("%s: expected the walk cut at the depth bound, got %q", name, body)
+            }
+        case <-time.After(5 * time.Second):
+            t.Fatalf("%s: expected the cycle rendered within the bound", name)
+        }
+    }
+}
+
+func TestRenderErrorResponse_SpellsTheMembersOfAListItemAndAStruct(t *testing.T) {
+    request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/fail", "text/plain")
+
+    payload := map[string]any{
+        "items":  []any{map[string]any{"field": "email", "rule": "required"}, 7},
+        "holder": errorRendererCycleHolder{Name: "holder"},
+    }
+
+    body := readResponseBody(t, renderErrorResponse(newErrorRendererTextAndJsonRuntime(), request, nethttp.StatusBadRequest, "bad request", payload))
+
+    for _, expected := range []string{"- map[field:email rule:required]", "- 7", "{Name:holder Cycle:map[]}"} {
+        if false == strings.Contains(body, expected) {
+            t.Fatalf("expected %q in the body, got %q", expected, body)
+        }
+    }
+}
+
 func TestRenderErrorResponse_ALongListIsCutAtTheLineBound(t *testing.T) {
     items := make([]string, 5000)
     for index := range items {

@@ -73,6 +73,8 @@ func Register(root *Root, command clicontract.Command, runtimeInstance runtimeco
             Name:  normalizedCommandName,
             Usage: copied.Description(),
             Flags: newEngineFlags(copied.Flags()),
+            /* a positional "help" or "h" is the command's own argument, the --help flag still prints the usage */
+            HideHelpCommand: true,
             /* the tree's streams travel with the registration, since the engine defaults each command's own separately */
             Writer:    root.writer,
             ErrWriter: root.errorWriter,
@@ -189,7 +191,10 @@ func runCommandAction(
     aggregatedErr := aggregateCliErrors(runErr, closeErrorByName)
     if nil != aggregatedErr {
         commandErr = aggregatedErr
-        banner.printStatusLine(AnsiBackgroundRed, fmt.Sprintf("[error] %s", aggregatedErr.Error()))
+        /* the error line is a banner frame, which quiet governs like the others; the error itself still returns to the exit path */
+        if false == quiet {
+            banner.printStatusLine(AnsiBackgroundRed, fmt.Sprintf("[error] %s", aggregatedErr.Error()))
+        }
         return aggregatedErr
     }
 

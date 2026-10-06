@@ -100,6 +100,53 @@ func TestResolveTemplate_UndefinedParameterKeyErrorOmitsRawValue(t *testing.T) {
     }
 }
 
+func TestResolveTemplate_AnUndefinedReferenceInsideASecretParameterIsLocatedNotSpelled(t *testing.T) {
+    passwordParameter := NewParameter("APP_PASSWORD", "pa%ss%word", "pa%ss%word", false)
+    passwordParameter.isSecret.Store(true)
+
+    configuration := &Configuration{
+        environment: &Environment{values: map[string]string{}},
+        parameters:  ParameterMap{"app.password": passwordParameter},
+    }
+
+    _, err := configuration.resolveTemplate("pa%ss%word", "app.password", make(map[string]bool), make(map[string]bool))
+    if nil == err {
+        t.Fatalf("expected an undefined parameter key error")
+    }
+
+    context := contextOfError(t, err)
+
+    if _, spelled := context["parameterKey"]; true == spelled {
+        t.Fatalf("expected the reference of a secret value withheld, got %v", context)
+    }
+
+    if 2 != context["offset"] || 2 != context["parameterKeyLength"] {
+        t.Fatalf("expected the reference located by offset and length, got %v", context)
+    }
+}
+
+func TestResolveTemplate_AnUndefinedReferenceInsideAnEnvironmentValueIsLocatedNotSpelled(t *testing.T) {
+    configuration := &Configuration{
+        environment: &Environment{values: map[string]string{"DB_PASSWORD": "pa%ss%word"}},
+        parameters:  ParameterMap{},
+    }
+
+    _, err := configuration.resolveTemplate("%env(DB_PASSWORD)%", "app.database.password", make(map[string]bool), make(map[string]bool))
+    if nil == err {
+        t.Fatalf("expected an undefined parameter key error")
+    }
+
+    context := contextOfError(t, err)
+
+    if _, spelled := context["parameterKey"]; true == spelled {
+        t.Fatalf("expected the reference of an environment value withheld, got %v", context)
+    }
+
+    if "DB_PASSWORD" != context["environmentKey"] || 2 != context["offset"] {
+        t.Fatalf("expected the reference located in its environment value, got %v", context)
+    }
+}
+
 func contextOfError(t *testing.T, err error) map[string]any {
     t.Helper()
 

@@ -5,6 +5,8 @@ import (
     "testing"
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
+    collisionalpha "github.com/precision-soft/melody/v3/container/internal/collisionalpha/contract"
+    collisionbeta "github.com/precision-soft/melody/v3/container/internal/collisionbeta/contract"
 )
 
 /* the two listers are what a collection is gathered through, and both must refuse anything that is not an interface: a concrete type reaches Implements() as a question with no answer, and a nil one would panic on the first Kind() call */
@@ -96,5 +98,41 @@ func TestSortServiceReferences_AnswersAnEmptySliceForNoReferences(t *testing.T) 
     sorted := sortServiceReferences(nil)
     if nil == sorted || 0 != len(sorted) {
         t.Fatalf("expected an empty slice rather than nil, got %v", sorted)
+    }
+}
+
+func TestTypesImplementing_OrdersSameSpelledTypesOfTwoPackagesStably(t *testing.T) {
+    firstOrder := ""
+
+    for attempt := 0; attempt < 50; attempt++ {
+        serviceContainer := NewContainer()
+
+        MustRegister[collisionalpha.Bus](serviceContainer, "bus.alpha", func(resolver containercontract.Resolver) (collisionalpha.Bus, error) {
+            return collisionalpha.Bus{}, nil
+        })
+        MustRegister[collisionbeta.Bus](serviceContainer, "bus.beta", func(resolver containercontract.Resolver) (collisionbeta.Bus, error) {
+            return collisionbeta.Bus{}, nil
+        })
+
+        types := serviceContainer.(*container).TypesImplementing(reflect.TypeOf((*any)(nil)).Elem())
+        order := ""
+        for _, implementingType := range types {
+            order += typeIdentityKey(implementingType) + "|"
+        }
+
+        scopeTypes := serviceContainer.NewScope().(*scope).TypesImplementing(reflect.TypeOf((*any)(nil)).Elem())
+        order += "scope:"
+        for _, implementingType := range scopeTypes {
+            order += typeIdentityKey(implementingType) + "|"
+        }
+
+        if 0 == attempt {
+            firstOrder = order
+            continue
+        }
+
+        if firstOrder != order {
+            t.Fatalf("expected one order across containers, got %q then %q", firstOrder, order)
+        }
     }
 }

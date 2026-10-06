@@ -595,6 +595,24 @@ func TestRefuseHttpBootWithoutEnvironment_LeavesTheCliPermissive(t *testing.T) {
     applicationInstance.refuseHttpBootWithoutEnvironment()
 }
 
+func TestEnvironmentDefaultedBootWarnings_NamesAnHttpBootWhoseEnvironmentNameWasDefaulted(t *testing.T) {
+    defaulted := newEnvironmentRefusalApplication(t, config.ModeHttp, map[string]string{"APP_NAME": "shop"})
+
+    warnings := environmentDefaultedBootWarnings(config.ModeHttp, defaulted.configuration)
+    if 1 != len(warnings) || "application.environment.defaulted" != warnings[0].Name {
+        t.Fatalf("expected the defaulted environment named once, got %v", warnings)
+    }
+
+    explicit := newEnvironmentRefusalApplication(t, config.ModeHttp, map[string]string{config.EnvKey: "dev"})
+    if 0 != len(environmentDefaultedBootWarnings(config.ModeHttp, explicit.configuration)) {
+        t.Fatalf("expected an explicit MELODY_ENV=dev to raise no warning")
+    }
+
+    if 0 != len(environmentDefaultedBootWarnings(config.ModeCli, defaulted.configuration)) {
+        t.Fatalf("expected a console process to raise no warning")
+    }
+}
+
 /* the configuration registry accepts exactly one name in this major; any other name is unreadable by construction, so storing it would tell the operator a configuration is active while nothing can ever consult it. */
 func TestRegisterConfiguration_RefusesANameNothingConsumes(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)

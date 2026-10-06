@@ -85,6 +85,8 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
             Name:  normalizedCommandName,
             Usage: copied.Description(),
             Flags: copied.Flags(),
+            /* a positional "help" or "h" is the command's own argument, the --help flag still prints the usage */
+            HideHelpCommand: true,
             Action: func(ctx context.Context, commandContext *clicontract.CommandContext) error {
                 writer := commandContext.Writer
                 if nil == writer {
@@ -273,7 +275,10 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
                 aggregatedErr := aggregateCliErrors(runErr, closeErrorByName)
                 if nil != aggregatedErr {
                     commandErr = aggregatedErr
-                    printRedStatusLine(writer, fmt.Sprintf("[error] %s", aggregatedErr.Error()))
+                    /* the error line is a banner frame, which quiet governs like the others; the error itself still returns to the exit path */
+                    if false == quiet {
+                        printRedStatusLine(writer, fmt.Sprintf("[error] %s", aggregatedErr.Error()))
+                    }
                     return aggregatedErr
                 }
 

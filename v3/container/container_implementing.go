@@ -29,7 +29,7 @@ func (instance *container) TypesImplementing(interfaceType reflect.Type) []refle
 
     /* sorted, so a collection never reorders between runs */
     sort.Slice(matches, func(first int, second int) bool {
-        return matches[first].String() < matches[second].String()
+        return lessByTypeIdentity(matches[first], matches[second])
     })
 
     return matches

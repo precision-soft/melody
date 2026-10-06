@@ -93,6 +93,7 @@ func (instance *Application) Boot() kernelcontract.Kernel {
     }
 
     instance.refuseHttpBootWithoutEnvironment()
+    instance.bootWarnings = append(instance.bootWarnings, environmentDefaultedBootWarnings(instance.runtimeFlags.Mode(), instance.configuration)...)
 
     instance.ensureRuntimeDirectories()
 
@@ -470,6 +471,29 @@ func (instance *Application) teardownTimeout() (teardownTimeout time.Duration) {
 }
 
 /* refuseHttpBootWithoutEnvironment fails the boot of an http process whose .env artifacts contributed no keys: every built-in parameter has a development default, so such a binary would serve in the dev environment with debug tooling on. A cli process stays permissive, since development commands run without an environment file. */
+/* environmentDefaultedBootWarnings names an http process whose environment name no artifact set: the kernel reads it as dev, so the process serves with debug tooling on */
+func environmentDefaultedBootWarnings(mode string, configuration configcontract.Configuration) []internal.BootWarning {
+    if config.ModeHttp != mode {
+        return nil
+    }
+
+    environmentParameter := configuration.Get(config.EnvKey)
+    if nil != environmentParameter && false == environmentParameter.IsDefault() {
+        return nil
+    }
+
+    return []internal.BootWarning{
+        {
+            Name:    "application.environment.defaulted",
+            Message: "MELODY_ENV is not set, so the http process boots as dev with debug tooling on; set MELODY_ENV explicitly",
+            Context: loggingcontract.Context{
+                "environmentKey": config.EnvKey,
+                "environment":    config.EnvDevelopment,
+            },
+        },
+    }
+}
+
 func (instance *Application) refuseHttpBootWithoutEnvironment() {
     if config.ModeHttp != instance.runtimeFlags.Mode() {
         return

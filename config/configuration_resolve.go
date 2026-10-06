@@ -207,6 +207,8 @@ func (instance *Configuration) scanTemplate(
             resolvingEnvironmentKeys,
         )
         if nil != parameterErr {
+            instance.locateUndefinedReference(parameterErr, currentKey, index)
+
             return "", parameterErr
         }
 
@@ -238,6 +240,50 @@ func nameEnvironmentValueRefusal(refusalErr error, environmentKey string, readin
     }
 
     refusal.SetContextValue("environmentKey", environmentKey)
+
+    /* the refusal was raised inside an environment value, which commonly holds a credential */
+    withholdReferenceName(refusal)
+}
+
+/* locateUndefinedReference adds the offset of an undefined reference to the refusal raised for the value being scanned, and withholds the name it spelled when the reading parameter holds a credential, since the run between two percents of such a value is a slice of it */
+func (instance *Configuration) locateUndefinedReference(refusalErr error, currentKey string, offset int) {
+    var refusal *exception.Error
+    if false == errors.As(refusalErr, &refusal) || nil == refusal || false == errors.Is(refusalErr, errUndefinedParameterReference) {
+        return
+    }
+
+    refusalContext := refusal.Context()
+    if currentKey != refusalContext["parameter"] {
+        return
+    }
+
+    if _, located := refusalContext["offset"]; true == located {
+        return
+    }
+
+    refusal.SetContextValue("offset", offset)
+
+    currentParameter := instance.getInternalParameter(currentKey)
+    if nil != currentParameter && true == currentParameter.isSecret.Load() {
+        withholdReferenceName(refusal)
+    }
+}
+
+/* withholdReferenceName replaces the name an undefined reference spelled by its length */
+func withholdReferenceName(refusal *exception.Error) {
+    if false == errors.Is(refusal, errUndefinedParameterReference) {
+        return
+    }
+
+    refusalContext := refusal.Context()
+    parameterKey, named := refusalContext["parameterKey"].(string)
+    if false == named {
+        return
+    }
+
+    delete(refusalContext, "parameterKey")
+    refusalContext["parameterKeyLength"] = len(parameterKey)
+    refusal.SetContext(refusalContext)
 }
 
 /* resolveEnvironmentPlaceholder resolves one %env(...)% construct at the start of the fragment. A candidate interrupted by another percent before any ")%" consumes nothing and the percent is data; a fragment with no closer, and a closed fragment that is not well-formed, are errors, carrying the offset of the opening percent in place of the text. */

@@ -294,3 +294,32 @@ func TestBagString_NonStringScalarReportsAbsentAndFallsBackToDefault(t *testing.
         t.Fatalf("expected HasNonEmptyString to report false for a non-string value")
     }
 }
+
+func TestTypedDoors_ReadARepeatedKeyAsItsFirstValue(t *testing.T) {
+    parameterBag := NewParameterBag()
+    parameterBag.Set("count", []string{"7", "9"})
+    parameterBag.Set("flag", []string{"true", "false"})
+    parameterBag.Set("ratio", []string{"0.5"})
+    parameterBag.Set("empty", []string{})
+    parameterBag.Set("single", "7")
+
+    if value, exists, err := Int(parameterBag, "count"); nil != err || false == exists || 7 != value {
+        t.Fatalf("expected the first value of a repeated key, got %d %v %v", value, exists, err)
+    }
+
+    if value, exists, err := Bool(parameterBag, "flag"); nil != err || false == exists || true != value {
+        t.Fatalf("expected the first value of a repeated key, got %v %v %v", value, exists, err)
+    }
+
+    if value, exists, err := Float64(parameterBag, "ratio"); nil != err || false == exists || 0.5 != value {
+        t.Fatalf("expected the first value of a repeated key, got %v %v %v", value, exists, err)
+    }
+
+    if _, exists, err := Int(parameterBag, "empty"); nil != err || true == exists {
+        t.Fatalf("expected an empty list read as unset, got %v %v", exists, err)
+    }
+
+    if value, exists, err := Int(parameterBag, "single"); nil != err || false == exists || 7 != value {
+        t.Fatalf("expected the single value read as before, got %d %v %v", value, exists, err)
+    }
+}

@@ -359,6 +359,8 @@ func TestRegisterKernelTerminateAccessLogListener_BoundsEveryRequestSuppliedFiel
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/"+longText+"?"+longText+"=1", nil)
     httpRequest.Header.Set("User-Agent", longText)
     httpRequest.Header.Set("Referer", "https://example.com/"+longText)
+    httpRequest.Host = longText
+    httpRequest.Method = strings.Repeat("M", 4096)
 
     terminateEvent := NewKernelTerminateEvent(
         runtimeInstance,
@@ -376,7 +378,7 @@ func TestRegisterKernelTerminateAccessLogListener_BoundsEveryRequestSuppliedFiel
         t.Fatalf("expected the access log record to be written")
     }
 
-    for _, key := range []string{"path", "query", "userAgent", "referer"} {
+    for _, key := range []string{"method", "path", "query", "host", "userAgent", "referer"} {
         value, _ := loggedContext[key].(string)
         if 600 < len(value) || false == strings.Contains(value, "...(truncated ") {
             t.Fatalf("expected %s bounded, got %d bytes", key, len(value))

@@ -636,3 +636,29 @@ type Repository struct {
         }
     }
 }
+
+func TestScan_RefusesADirectiveWrittenWithABlankAfterTheSlashes(t *testing.T) {
+    for spelling, expected := range map[string]string{
+        "// melody:ignore":                 "//melody:ignore",
+        "//  melody:scoped":                "//melody:scoped",
+        "//\tmelody:service app.service": "//melody:service",
+    } {
+        projectDirectory := t.TempDir()
+
+        writeFixtureFile(t, projectDirectory, "domain/service.go", "package domain\n\n"+spelling+"\nfunc NewSpaced() *Spaced {\n    return &Spaced{}\n}\n\ntype Spaced struct {\n}\n")
+
+        _, scanErr := Scan(projectDirectory, NewBindSet().Package("github.com/acme/app/domain", "domain"), nil)
+
+        var directiveErr *exception.Error
+        if false == errors.As(errors.Unwrap(scanErr), &directiveErr) || false == strings.Contains(directiveErr.Error(), "no blank after the slashes") || expected != directiveErr.Context()["expected"] {
+            t.Fatalf("expected %q refused naming %q, got %v", spelling, expected, scanErr)
+        }
+    }
+
+    projectDirectory := t.TempDir()
+    writeFixtureFile(t, projectDirectory, "domain/service.go", "package domain\n\n//melody:ignore not a service\nfunc NewIgnored() *Ignored {\n    return &Ignored{}\n}\n\ntype Ignored struct {\n}\n")
+
+    if _, scanErr := Scan(projectDirectory, NewBindSet().Package("github.com/acme/app/domain", "domain"), nil); nil != scanErr {
+        t.Fatalf("expected the directive written without a blank accepted, got %v", scanErr)
+    }
+}

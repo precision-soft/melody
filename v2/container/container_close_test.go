@@ -1596,6 +1596,41 @@ func TestContainer_Get_RefusesAfterTheTeardownFinished(t *testing.T) {
     }
 }
 
+func TestContainer_GetByType_RefusesAfterTheTeardownFinished(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    closed := false
+
+    if registerErr := serviceContainer.Register(
+        "service.probe",
+        func(resolver containercontract.Resolver) (*probeClosableService, error) {
+            return &probeClosableService{closed: &closed}, nil
+        },
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    probeType := reflect.TypeOf((*probeClosableService)(nil))
+
+    if _, getErr := serviceContainer.GetByType(probeType); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    lateValue, lateErr := serviceContainer.GetByType(probeType)
+
+    if nil == lateErr || false == strings.Contains(lateErr.Error(), "container is closed") {
+        t.Fatalf("expected the closed-container refusal, got %v and %v", lateValue, lateErr)
+    }
+
+    if nil != lateValue {
+        t.Fatalf("expected no value beside the refusal, got %v", lateValue)
+    }
+}
+
 type probeClosableService struct {
     closed *bool
 }

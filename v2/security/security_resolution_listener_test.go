@@ -3,6 +3,7 @@ package security
 import (
     "context"
     "errors"
+    "strings"
     "testing"
 
     "github.com/precision-soft/melody/v2/container"
@@ -642,6 +643,12 @@ func TestSecurityResolutionListener_ResolveFailureIsRecordedOnceWithTheRequestCo
 func dispatchResolutionFailureWithSource(t *testing.T, tokenSourceErr error) *resolutionListenerCaptureLogger {
     t.Helper()
 
+    return dispatchResolutionFailureWithSourceAtPath(t, tokenSourceErr, "/admin")
+}
+
+func dispatchResolutionFailureWithSourceAtPath(t *testing.T, tokenSourceErr error, path string) *resolutionListenerCaptureLogger {
+    t.Helper()
+
     kernel := newTestKernel()
     capture := &resolutionListenerCaptureLogger{}
     runtimeInstance := newResolutionListenerTestRuntimeWithLogger(capture)
@@ -686,7 +693,7 @@ func dispatchResolutionFailureWithSource(t *testing.T, tokenSourceErr error) *re
     httpPkg.RegisterKernelExceptionListener(kernel.EventDispatcher(), false)
     RegisterKernelSecurityResolutionListener(kernel, registry)
 
-    request := newSecurityTestRequest("GET", "/admin", nil, runtimeInstance)
+    request := newSecurityTestRequest("GET", path, nil, runtimeInstance)
     requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, request)
 
     _, err := kernel.EventDispatcher().DispatchName(
@@ -699,6 +706,15 @@ func dispatchResolutionFailureWithSource(t *testing.T, tokenSourceErr error) *re
     }
 
     return capture
+}
+
+func TestSecurityResolutionListener_TheResolutionFailureRecordBoundsTheMethodAndThePath(t *testing.T) {
+    capture := dispatchResolutionFailureWithSourceAtPath(t, errors.New("token backend down"), "/admin/"+strings.Repeat("a", 600*1024))
+
+    path, _ := capture.lastContext["path"].(string)
+    if 600 < len(path) || false == strings.Contains(path, "...(truncated ") {
+        t.Fatalf("expected the record's path bounded, got %d bytes", len(path))
+    }
 }
 
 func TestSecurityResolutionListener_AClientTokenRefusalIsRecordedAtWarning(t *testing.T) {

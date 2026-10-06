@@ -613,6 +613,11 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
 
         serviceName := registeredServiceNames[0]
 
+        /* the memoized read answers without the creation guard, so it refuses a finished teardown itself, as the fast path of Get does */
+        if true == instance.containerInstance.teardownFinished {
+            return nil, newContainerClosedError(serviceName)
+        }
+
         value, valueExists := instance.containerInstance.instances[serviceName]
         if true == valueExists {
             instance.containerInstance.typeInstances[canonicalTargetType] = value

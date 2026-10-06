@@ -11,6 +11,7 @@ import (
     bagcontract "github.com/precision-soft/melody/bag/contract"
     "github.com/precision-soft/melody/exception"
     httpcontract "github.com/precision-soft/melody/http/contract"
+    "github.com/precision-soft/melody/internal"
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
@@ -77,8 +78,8 @@ func NewRequest(
                 bodyReadErr = exception.NewError(
                     "failed to parse form data",
                     map[string]any{
-                        "method": httpRequest.Method,
-                        "path":   httpRequest.URL.Path,
+                        "method": internal.BoundDiagnosticText(httpRequest.Method),
+                        "path":   internal.BoundDiagnosticText(httpRequest.URL.Path),
                     },
                     bodyParseErr,
                 )
@@ -87,8 +88,8 @@ func NewRequest(
                 bodyReadErr = exception.NewError(
                     "the urlencoded body exceeds the 10 MiB net/http parses, which the configured body limit does not raise",
                     map[string]any{
-                        "method":       httpRequest.Method,
-                        "path":         httpRequest.URL.Path,
+                        "method":       internal.BoundDiagnosticText(httpRequest.Method),
+                        "path":         internal.BoundDiagnosticText(httpRequest.URL.Path),
                         "bodyBytes":    len(rawBody),
                         "ceilingBytes": netHttpUrlEncodedFormCeiling,
                     },

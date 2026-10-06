@@ -11,6 +11,7 @@ import (
     bagcontract "github.com/precision-soft/melody/v3/bag/contract"
     "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
@@ -84,8 +85,8 @@ func NewRequest(
                 bodyReadErr = exception.NewError(
                     "failed to parse form data",
                     map[string]any{
-                        "method": httpRequest.Method,
-                        "path":   httpRequest.URL.Path,
+                        "method": internal.BoundDiagnosticText(httpRequest.Method),
+                        "path":   internal.BoundDiagnosticText(httpRequest.URL.Path),
                     },
                     bodyParseErr,
                 )

@@ -1,6 +1,7 @@
 package container
 
 import (
+    "errors"
     "fmt"
     "reflect"
     "runtime"
@@ -284,10 +285,10 @@ func (instance *container) serviceWithCreationGuardLocked(
     /* a value created while Close() ran would be stored after the close snapshot and leak un-closed; close it best-effort instead of storing it and fail the resolution. */
     if nil == err && true == instance.isClosed {
         instance.mutex.Unlock()
-        closeValueAfterContainerClose(createdValue)
+        closeErr := closeValueAfterContainerClose(createdValue)
         instance.mutex.Lock()
 
-        err = newContainerClosedError(creatingKey)
+        err = errors.Join(newContainerClosedError(creatingKey), closeErr)
     }
 
     if nil == err {
@@ -296,13 +297,14 @@ func (instance *container) serviceWithCreationGuardLocked(
         if nil != keepErr {
             /* the store refusing — the scope this value was built for closed while the provider ran — is the scope-side twin of the container-close race above, and it drops the value on the same floor: nothing else holds it, so it is closed best-effort before the resolution fails. */
             instance.mutex.Unlock()
-            closeValueAfterContainerClose(createdValue)
+            closeErr := closeValueAfterContainerClose(createdValue)
             instance.mutex.Lock()
 
-            err = keepErr
+            err = errors.Join(keepErr, closeErr)
         } else if true == overrideWins {
             instance.mutex.Unlock()
-            closeValueAfterContainerClose(createdValue)
+            /* the resolution answers the override, so a failure closing the discarded value has no carrier */
+            _ = closeValueAfterContainerClose(createdValue)
             instance.mutex.Lock()
 
             createdValue = keptValue
@@ -336,18 +338,20 @@ func newContainerClosedError(creatingKey string) error {
     )
 }
 
-func closeValueAfterContainerClose(value any) {
+func closeValueAfterContainerClose(value any) (closeErr error) {
     closeable, isCloseable := value.(interface{ Close() error })
     if false == isCloseable {
-        return
+        return nil
     }
 
     /* the caller runs this with the container mutex unlocked and unwinds through a deferred unlock; a panicking Close() would otherwise abort the process on an unlocked mutex. */
     defer func() {
-        _ = recover()
+        if recoveredValue := recover(); nil != recoveredValue {
+            closeErr = newValueBuiltDuringTeardownPanickedError(recoveredValue)
+        }
     }()
 
-    _ = closeable.Close()
+    return closeable.Close()
 }
 
 func (instance *container) registerResolverWaitLocked(
@@ -488,4 +492,14 @@ func (instance *container) hasResolverPathLocked(
     }
 
     return false
+}
+
+func newValueBuiltDuringTeardownPanickedError(recoveredValue any) error {
+    return exception.NewError(
+        "the close of a value built during the teardown panicked",
+        map[string]any{
+            "panicValueType": fmt.Sprintf("%T", recoveredValue),
+        },
+        exception.PanicCause(recoveredValue),
+    )
 }

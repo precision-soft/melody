@@ -588,3 +588,39 @@ func TestMiddlewareCommand_TheReasonKeyIsPresentOnEveryRow(t *testing.T) {
         t.Fatalf("expected an empty reason on an active row, got %#v", reasonValue)
     }
 }
+
+var errMiddlewareFactoryPanicked = errors.New("the middleware factory panicked")
+
+func newPanickingBuildMiddlewareCommand(recoveredValue any) *MiddlewareCommand {
+    return NewMiddlewareCommand(
+        func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
+            return nil, nil, nil
+        },
+        func() ([]httpcontract.Middleware, error) {
+            panic(recoveredValue)
+        },
+    )
+}
+
+func TestMiddlewareCommand_ABuildPanicKeepsAnErrorPanicValueAsItsCause(t *testing.T) {
+    _, buildErr := newPanickingBuildMiddlewareCommand(errMiddlewareFactoryPanicked).runBuildProviderRecovered()
+
+    if false == errors.Is(buildErr, errMiddlewareFactoryPanicked) || false == strings.Contains(buildErr.Error(), "middleware build panicked") {
+        t.Fatalf("expected the panic value as the cause of the build failure, got %v", buildErr)
+    }
+}
+
+func TestMiddlewareCommand_ABuildPanicCarryingAnExitErrorIsReRaised(t *testing.T) {
+    exitErr := exception.NewExitError(3, exception.NewError("the factory ended the command", nil, nil))
+
+    defer func() {
+        recovered := recover()
+        if exitErr != recovered {
+            t.Fatalf("expected the exit error re-raised whole, got %v", recovered)
+        }
+    }()
+
+    _, _ = newPanickingBuildMiddlewareCommand(exitErr).runBuildProviderRecovered()
+
+    t.Fatalf("expected the exit error re-raised")
+}

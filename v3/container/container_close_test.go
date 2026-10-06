@@ -1869,6 +1869,41 @@ func TestContainer_Get_RefusesAfterTheTeardownFinished(t *testing.T) {
     }
 }
 
+func TestContainer_GetByType_RefusesAfterTheTeardownFinished(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    closed := false
+
+    if registerErr := serviceContainer.Register(
+        "service.probe",
+        func(resolver containercontract.Resolver) (*probeClosableService, error) {
+            return &probeClosableService{closed: &closed}, nil
+        },
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    probeType := reflect.TypeOf((*probeClosableService)(nil))
+
+    if _, getErr := serviceContainer.GetByType(probeType); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    lateValue, lateErr := serviceContainer.GetByType(probeType)
+
+    if nil == lateErr || false == strings.Contains(lateErr.Error(), "container is closed") {
+        t.Fatalf("expected the closed-container refusal, got %v and %v", lateValue, lateErr)
+    }
+
+    if nil != lateValue {
+        t.Fatalf("expected no value beside the refusal, got %v", lateValue)
+    }
+}
+
 type probeClosableService struct {
     closed *bool
 }
@@ -3657,6 +3692,11 @@ func TestContainer_TeardownDeadlineOverrunAnswersItsOwnCopyOfTheRecord(t *testin
     if starved, _ := errorRecord["starved"].([]string); 0 != len(starved) {
         t.Fatalf("expected the error's starved list untouched by an edit of what the door answered, got %v", starved)
     }
+
+    secondRecord := teardownDeadlineOverrunOf(t, serviceContainer)
+    if _, named := namedDurations(t, secondRecord, "spentBy")["service:app.slow"]; false == named {
+        t.Fatalf("expected a second reader of the door untouched by the first reader's edit, got %v", secondRecord)
+    }
 }
 
 /* the fast service is registered FIRST, so the eater built after it closes before it — latest created, first closed — and the fast one is reached with the deadline already gone: starved, and named as such, while the eater is named as the one that spent it */
@@ -4326,5 +4366,71 @@ func TestContainer_Close_ALazyEdgeThatClosesNoRingStillOrders(t *testing.T) {
 
     if 2 != len(closeSequence) || "holder" != closeSequence[0] || "partner" != closeSequence[1] {
         t.Fatalf("expected the holder closed before the partner its handle resolved, got %v", closeSequence)
+    }
+}
+
+func TestContainer_DeclareTeardownDependency_OrdersAServiceAgainstOneItCaptured(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{mutex: &mutex, closeSequence: &closeSequence}
+
+    serviceContainer.MustRegister("app.bus", func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{recorder: recorder}, nil })
+    serviceContainer.MustRegister("app.transports", func(_ containercontract.Resolver) (*closeOrderServiceB, error) { return &closeOrderServiceB{recorder: recorder}, nil })
+
+    /* the bus is built first, so creation order alone would close the transports before it */
+    MustFromResolver[*closeOrderServiceA](serviceContainer, "app.bus")
+    MustFromResolver[*closeOrderServiceB](serviceContainer, "app.transports")
+
+    if declareErr := serviceContainer.(teardownDependencyDeclarer).DeclareTeardownDependency("app.bus", "app.transports"); nil != declareErr {
+        t.Fatalf("unexpected declare error: %v", declareErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 2 != len(closeSequence) || "a" != closeSequence[0] || "b" != closeSequence[1] {
+        t.Fatalf("expected the declaring service closed before its dependency, got %v", closeSequence)
+    }
+}
+
+func TestContainer_DeclareTeardownDependency_RefusesWhatTheOptionRefuses(t *testing.T) {
+    serviceContainer := NewContainer()
+    serviceContainer.MustRegister("app.bus", func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{}, nil })
+
+    declarer := serviceContainer.(teardownDependencyDeclarer)
+
+    cases := []struct {
+        serviceName    string
+        dependencyName string
+        cause          error
+    }{
+        {serviceName: "app.unknown", dependencyName: "app.bus", cause: ErrTeardownDependencyWasNeverRegistered},
+        {serviceName: "app.bus", dependencyName: "", cause: ErrTeardownDependencyNameIsRequired},
+        {serviceName: "app.bus", dependencyName: "app.bus", cause: ErrTeardownDependencyIsSelf},
+    }
+
+    for _, testCase := range cases {
+        if declareErr := declarer.DeclareTeardownDependency(testCase.serviceName, testCase.dependencyName); false == errors.Is(declareErr, testCase.cause) {
+            t.Fatalf("expected %v for %q -> %q, got %v", testCase.cause, testCase.serviceName, testCase.dependencyName, declareErr)
+        }
+    }
+
+    if armErr := serviceContainer.(parallelTeardownArmer).ArmParallelTeardown(); nil != armErr {
+        t.Fatalf("unexpected arm error: %v", armErr)
+    }
+
+    if declareErr := declarer.DeclareTeardownDependency("app.bus", "app.never"); false == errors.Is(declareErr, ErrTeardownDependencyWasNeverRegistered) {
+        t.Fatalf("expected the armed teardown to refuse a dependency nothing registered, got %v", declareErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if declareErr := declarer.DeclareTeardownDependency("app.bus", "app.other"); false == errors.Is(declareErr, ErrContainerClosed) {
+        t.Fatalf("expected a closed container to refuse the declaration, got %v", declareErr)
     }
 }

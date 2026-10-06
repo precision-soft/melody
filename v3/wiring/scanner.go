@@ -467,6 +467,21 @@ func parseDirectives(
             continue
         }
 
+        /* a directive written with a blank after the slashes reads as prose and fails open as a typo does, so the scan names the spelling it expected */
+        if spelled, isSpaced := spacedDirective(text); true == isSpaced {
+            return nil, exception.NewError(
+                "a melody directive is written with no blank after the slashes",
+                map[string]any{
+                    "directive":   text,
+                    "expected":    spelled,
+                    "constructor": functionDeclaration.Name.Name,
+                    "file":        currentPath,
+                    "line":        fileSet.Position(comment.Pos()).Line,
+                },
+                nil,
+            )
+        }
+
         /* any other spelling under the directive prefix is a typo of one of the four directives, and each fails open when dropped: a mistyped scoped makes a singleton, a mistyped ignore registers the constructor */
         if true == strings.HasPrefix(text, directivePrefix) {
             return nil, exception.NewError(
@@ -483,6 +498,26 @@ func parseDirectives(
     }
 
     return directives, nil
+}
+
+/* spacedDirective answers the directive a line comment spells with blanks after its slashes, "// melody:ignore" for //melody:ignore, and whether it does */
+func spacedDirective(text string) (string, bool) {
+    if false == strings.HasPrefix(text, "//") || true == strings.HasPrefix(text, directivePrefix) {
+        return "", false
+    }
+
+    unspaced := "//" + strings.TrimLeft(strings.TrimPrefix(text, "//"), " \t")
+    if unspaced == text {
+        return "", false
+    }
+
+    for _, directive := range []string{bindDirective, ignoreDirective, serviceDirective, scopedDirective} {
+        if _, matches := directiveRemainder(unspaced, directive); true == matches {
+            return directive, true
+        }
+    }
+
+    return "", false
 }
 
 /* directiveRemainder matches a directive exactly or followed by whitespace, so //melody:serviceFoo is not the service directive. */

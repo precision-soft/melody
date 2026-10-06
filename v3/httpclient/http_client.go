@@ -194,12 +194,12 @@ func sanitizeUrlForDiagnostics(urlString string) string {
         return sanitizeUrlTextually(urlString)
     }
 
-    if nil != parsed.User {
-        /* a password holding "/" ends the authority inside it, so net/url reads the password's head as the userinfo and its tail as the path: an "@" in the path of a url that carries a userinfo leaves no trustworthy end to the credential, and the url keeps only its scheme */
-        if true == strings.Contains(parsed.Path, "@") {
-            return parsed.Scheme + "://" + internal.RedactedQueryValue
-        }
+    /* a password holding "/" or "?" ends the authority inside it, so net/url reads its head as the userinfo, or as a host and port when no "@" precedes the cut, and its tail as the path or a query name: such a url keeps only its scheme */
+    if true == misreadCredentialTail(parsed) {
+        return parsed.Scheme + "://" + internal.RedactedQueryValue
+    }
 
+    if nil != parsed.User {
         parsed.User = url.UserPassword(internal.RedactedQueryValue, internal.RedactedQueryValue)
     }
 
@@ -216,6 +216,54 @@ func sanitizeUrlForDiagnostics(urlString string) string {
     parsed.RawFragment = ""
 
     return parsed.String()
+}
+
+/* mergeQueryOptions sets the option pairs on a raw query: a pair of the url naming an option key is replaced, every other pair is kept byte for byte, since a round trip through url.Values drops a pair net/url refuses, a bare ";" or a bad escape, and re-encodes the rest */
+func mergeQueryOptions(rawQuery string, query map[string]string) string {
+    options := url.Values{}
+    for key, value := range query {
+        options.Set(key, value)
+    }
+
+    pairs := make([]string, 0)
+    for _, pair := range strings.Split(rawQuery, "&") {
+        if "" == pair {
+            continue
+        }
+
+        name, _, _ := strings.Cut(pair, "=")
+        if decodedName, decodeErr := url.QueryUnescape(name); nil == decodeErr {
+            if _, replaced := options[decodedName]; true == replaced {
+                continue
+            }
+        }
+
+        pairs = append(pairs, pair)
+    }
+
+    pairs = append(pairs, options.Encode())
+
+    return strings.Join(pairs, "&")
+}
+
+/* misreadCredentialTail reports an "@" in the path or in a query name of a url whose authority net/url split at a ":", a userinfo or a host and port. A query value may carry an "@" of its own; a url with a port and an "@" in its path loses its diagnostics with the rest, the price of failing closed. */
+func misreadCredentialTail(parsed *url.URL) bool {
+    if nil == parsed.User && false == strings.Contains(parsed.Host, ":") {
+        return false
+    }
+
+    if true == strings.Contains(parsed.Path, "@") {
+        return true
+    }
+
+    for _, pair := range strings.Split(parsed.RawQuery, "&") {
+        name, _, _ := strings.Cut(pair, "=")
+        if true == strings.Contains(name, "@") {
+            return true
+        }
+    }
+
+    return false
 }
 
 /* sanitizeUrlTextually removes the userinfo, the whole query and the fragment from a url net/url refused to parse. The userinfo is cut wherever the reference can carry one, since "//user:secret@host:notaport/path" reaches here with no "://". An "@" past the first "/", "?" or "#" of the authority leaves no trustworthy end to it, a password holding one of the three being the usual cause, so such a url keeps only what precedes its authority. */
@@ -734,12 +782,7 @@ func (instance *HttpClient) buildUrl(urlString string, query map[string]string) 
     }
 
     if 0 < len(query) {
-        queryValues := resolvedUrl.Query()
-        for key, value := range query {
-            queryValues.Set(key, value)
-        }
-
-        resolvedUrl.RawQuery = queryValues.Encode()
+        resolvedUrl.RawQuery = mergeQueryOptions(resolvedUrl.RawQuery, query)
     }
 
     return resolvedUrl.String(), nil

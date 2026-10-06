@@ -6,6 +6,7 @@ import (
     "encoding/json"
     "errors"
     "fmt"
+    "io"
     "strings"
     "testing"
     "time"
@@ -1122,5 +1123,73 @@ func TestRegister_ActionPrintsThePlainFailedVerdictUnderNoColor(t *testing.T) {
 
     if false == strings.Contains(written, "[boom] [finished] [failed] [") || true == strings.Contains(written, "\x1b[") {
         t.Fatalf("expected the plain failed verdict and no escape sequence, got %q", written)
+    }
+}
+
+func TestRegister_APositionalHelpReachesTheCommand(t *testing.T) {
+    for _, positional := range []string{"h", "help"} {
+        observedArguments := []string(nil)
+
+        rootCommand := NewCommandContext("app", "desc")
+        rootCommand.ExitErrHandler = func(handlerContext context.Context, handlerCommandContext *clicontract.CommandContext, handlerErr error) {}
+
+        command := &testCommand{
+            nameValue:        "hello",
+            descriptionValue: "hello command",
+            runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+                observedArguments = commandContext.Args().Slice()
+
+                return nil
+            },
+        }
+
+        Register(rootCommand, command, newTestRuntime(t))
+
+        rootCommand.Writer = io.Discard
+        rootCommand.Commands[0].Writer = io.Discard
+
+        runErr := rootCommand.Run(context.Background(), []string{"app", "hello", positional})
+        if nil != runErr {
+            t.Fatalf("expected %q run, got %v", positional, runErr)
+        }
+
+        if 1 != len(observedArguments) || positional != observedArguments[0] {
+            t.Fatalf("expected %q handed to the command, got %v", positional, observedArguments)
+        }
+    }
+}
+
+func TestRegister_AFailingCommandWritesNoErrorLineUnderQuiet(t *testing.T) {
+    for _, quietArgument := range []string{"--quiet=true", "--quiet=false"} {
+        buffer := &bytes.Buffer{}
+
+        rootCommand := NewCommandContext("app", "desc")
+        rootCommand.ExitErrHandler = func(handlerContext context.Context, handlerCommandContext *clicontract.CommandContext, handlerErr error) {}
+
+        command := &testCommand{
+            nameValue:        "hello",
+            descriptionValue: "hello command",
+            flagsValue:       output.StandardFlags(),
+            runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+                return errors.New("the command failed")
+            },
+        }
+
+        Register(rootCommand, command, newTestRuntime(t))
+
+        rootCommand.Writer = buffer
+        rootCommand.ErrWriter = buffer
+        rootCommand.Commands[0].Writer = buffer
+        rootCommand.Commands[0].ErrWriter = buffer
+
+        _ = rootCommand.Run(context.Background(), []string{"app", "hello", "--no-color", quietArgument})
+
+        if "--quiet=true" == quietArgument && true == strings.Contains(buffer.String(), "[error]") {
+            t.Fatalf("expected no error line under quiet, got %q", buffer.String())
+        }
+
+        if "--quiet=false" == quietArgument && false == strings.Contains(buffer.String(), "[error] the command failed") {
+            t.Fatalf("expected the error line without quiet, got %q", buffer.String())
+        }
     }
 }

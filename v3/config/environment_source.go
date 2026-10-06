@@ -34,6 +34,12 @@ func NewEnvironmentSource(
 type EnvironmentSource struct {
     fileSystem fs.FS
     baseDir    string
+    /* the keys each .env value was assembled from through ${KEY}, filled by Load, so a secret marking reaches a value no template names; held behind a pointer so the source stays comparable */
+    provenance *dotEnvProvenance
+}
+
+type dotEnvProvenance struct {
+    assembledFrom map[string][]string
 }
 
 func (instance *EnvironmentSource) Load() (map[string]string, error) {
@@ -49,10 +55,12 @@ func (instance *EnvironmentSource) Load() (map[string]string, error) {
         return nil, loadDotEnvEnvironmentFilesErr
     }
 
-    expandDotEnvReferencesErr := expandDotEnvReferences(values)
+    assembledFrom, expandDotEnvReferencesErr := expandDotEnvReferences(values)
     if nil != expandDotEnvReferencesErr {
         return nil, expandDotEnvReferencesErr
     }
+
+    instance.provenance = &dotEnvProvenance{assembledFrom: assembledFrom}
 
     return values, nil
 }
@@ -81,6 +89,7 @@ func (instance *EnvironmentSource) loadDotEnvFiles(values map[string]string) (st
         values,
         make(map[string]string, 1),
         make(map[string]bool, 1),
+        nil,
     )
     if nil != expandErr {
         /* a reference in MELODY_ENV can see only .env and .env.local, since the value picks which .env.<name> files load next; the error says so */
@@ -202,8 +211,17 @@ func sanitizeDotEnvParseFailure(parseErr error) string {
     return "env file content did not parse"
 }
 
+func (instance *EnvironmentSource) dotEnvAssembledFrom() map[string][]string {
+    if nil == instance.provenance {
+        return nil
+    }
+
+    return instance.provenance.assembledFrom
+}
+
 /* expandDotEnvReferences resolves the ${KEY} and $KEY references of every loaded .env artifact over the merged set, since the parser alone resolves them per file and a reference across files would become the empty string. A reference that names no key fails the boot, as %env(KEY)% does; a dollar escaped with a backslash is data. */
-func expandDotEnvReferences(values map[string]string) error {
+func expandDotEnvReferences(values map[string]string) (map[string][]string, error) {
+    assembledFrom := make(map[string][]string)
     resolved := make(map[string]string, len(values))
     resolving := make(map[string]bool, len(values))
 
@@ -216,9 +234,9 @@ func expandDotEnvReferences(values map[string]string) error {
     sort.Strings(keys)
 
     for _, key := range keys {
-        _, expandErr := expandDotEnvValue(key, values, resolved, resolving)
+        _, expandErr := expandDotEnvValue(key, values, resolved, resolving, assembledFrom)
         if nil != expandErr {
-            return expandErr
+            return nil, expandErr
         }
     }
 
@@ -226,7 +244,7 @@ func expandDotEnvReferences(values map[string]string) error {
         values[key] = value
     }
 
-    return nil
+    return assembledFrom, nil
 }
 
 /* expandDotEnvValue resolves one key's references and memoizes the result. A referenced value is spliced in as data, never rescanned, so a password holding a dollar survives. The resolving set turns a key that reads itself, or a ring of keys, into a named error. */
@@ -235,6 +253,7 @@ func expandDotEnvValue(
     values map[string]string,
     resolved map[string]string,
     resolving map[string]bool,
+    assembledFrom map[string][]string,
 ) (string, error) {
     if value, exists := resolved[key]; true == exists {
         return value, nil
@@ -334,9 +353,13 @@ func expandDotEnvValue(
             )
         }
 
-        referencedValue, referencedErr := expandDotEnvValue(referencedKey, values, resolved, resolving)
+        referencedValue, referencedErr := expandDotEnvValue(referencedKey, values, resolved, resolving, assembledFrom)
         if nil != referencedErr {
             return "", referencedErr
+        }
+
+        if nil != assembledFrom {
+            assembledFrom[key] = append(assembledFrom[key], referencedKey)
         }
 
         builder.WriteString(referencedValue)

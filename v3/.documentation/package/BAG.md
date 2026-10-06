@@ -115,7 +115,7 @@ func readRequestParameters(
 
 ## Footguns & caveats
 
-- `String` answers `("", false)` for non-string scalar stored types, as for a missing key — a `[]string` value answers its first value and is read whole with `StringSlice`; use `StringStrict` to detect type mismatches.
+- `String` answers `("", false)` for non-string scalar stored types, as for a missing key — a `[]string` value answers its first value and is read whole with `StringSlice`; use `StringStrict` to detect type mismatches. The typed doors `Int`, `Bool` and `Float64` read a repeated key the same way, its first value converted, an empty list as unset.
 - `StringSlice` and `StringSliceStrict` accept both `[]string` and `string` (single value), returning a slice in both cases.
 - A key present with a `nil` value reports as **unset** from `String`, `StringSlice`, `Int`, `Bool`, `Float64` and `Duration`, so `Has` and those accessors disagree for that state: `Has` reports the key, the accessor reports absence. The strict variants (`StringStrict`, `StringSliceStrict`) report it as absent as well.
 - `ParameterBag.All()` returns a copy of the internal map, deep for the shapes the bag's own writers produce (`[]string`, `map[string]string`); other value types come back as stored.

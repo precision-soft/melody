@@ -3556,3 +3556,29 @@ func TestKernel_AnUnroutedLongPathLeavesABoundedNoRouteRecord(t *testing.T) {
         t.Fatalf("expected the no-route record's path bounded, got %d bytes", len(path))
     }
 }
+
+func TestKernel_AnUnroutedRequestBoundsItsMethodAndHostInTheNoRouteRecord(t *testing.T) {
+    recordingLogger := &warningRecordingLogger{}
+
+    serviceContainer := newHttpTestContainer()
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger)
+
+    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/missing", nil)
+    httpRequest.Method = strings.Repeat("M", 600*1024)
+    httpRequest.Host = strings.Repeat("h", 600*1024)
+
+    recorder := httptest.NewRecorder()
+    NewKernel(NewRouter()).ServeHttp(serviceContainer).ServeHTTP(recorder, httpRequest)
+
+    warningContext, logged := recordingLogger.warningContextFor("no route matched")
+    if false == logged {
+        t.Fatalf("expected the no-route record, got %v", recordingLogger.warningMessages)
+    }
+
+    for _, key := range []string{"method", "host"} {
+        value, _ := warningContext[key].(string)
+        if 600 < len(value) || false == strings.Contains(value, "...(truncated ") {
+            t.Fatalf("expected the no-route record's %s bounded, got %d bytes", key, len(value))
+        }
+    }
+}

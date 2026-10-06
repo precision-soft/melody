@@ -60,7 +60,7 @@ func RegisterKernelExceptionListener(eventDispatcher eventcontract.EventDispatch
                     }
 
                     if false == internal.IsNilInterface(exceptionEvent.Request()) && nil != exceptionEvent.Request().HttpRequest() {
-                        method = exceptionEvent.Request().HttpRequest().Method
+                        method = internal.BoundDiagnosticText(exceptionEvent.Request().HttpRequest().Method)
                         if nil != exceptionEvent.Request().HttpRequest().URL {
                             path = internal.BoundDiagnosticText(exceptionEvent.Request().HttpRequest().URL.Path)
                         }

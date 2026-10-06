@@ -2,6 +2,7 @@ package container
 
 import (
     "errors"
+    "io"
     "strings"
     "sync"
     "testing"
@@ -279,6 +280,59 @@ func TestResolve_DuringCloseContainsAPanickingCloseOfTheDiscardedValue(t *testin
     getErr := <-resultChannel
     if nil == getErr {
         t.Fatalf("expected the resolution that finished after Close to fail")
+    }
+}
+
+var errDiscardedValueClose = errors.New("the discarded value refused its close")
+
+type refusingDiscardedCloser struct{}
+
+func (instance *refusingDiscardedCloser) Close() error {
+    return errDiscardedValueClose
+}
+
+func TestResolve_DuringCloseCarriesTheFailedCloseOfTheDiscardedValueOnTheRefusal(t *testing.T) {
+    for index, provide := range []func() io.Closer{
+        func() io.Closer { return &refusingDiscardedCloser{} },
+        func() io.Closer { return &panickingCloser{} },
+    } {
+        serviceContainer := NewContainer()
+
+        providerStarted := make(chan struct{})
+        providerRelease := make(chan struct{})
+
+        serviceContainer.MustRegister(
+            "discarded.close.race",
+            func(resolver containercontract.Resolver) (io.Closer, error) {
+                close(providerStarted)
+                <-providerRelease
+
+                return provide(), nil
+            },
+        )
+
+        resultChannel := make(chan error, 1)
+        go func() {
+            _, getErr := serviceContainer.Get("discarded.close.race")
+            resultChannel <- getErr
+        }()
+
+        <-providerStarted
+
+        if closeErr := serviceContainer.Close(); nil != closeErr {
+            t.Fatalf("close: %v", closeErr)
+        }
+
+        close(providerRelease)
+
+        getErr := <-resultChannel
+        if nil == getErr || false == strings.Contains(getErr.Error(), "container is closed") {
+            t.Fatalf("%d: expected the closed-container refusal first, got %v", index, getErr)
+        }
+
+        if false == errors.Is(getErr, errDiscardedValueClose) && false == strings.Contains(getErr.Error(), "panicked") {
+            t.Fatalf("%d: expected the failed close of the discarded value beside the refusal, got %v", index, getErr)
+        }
     }
 }
 

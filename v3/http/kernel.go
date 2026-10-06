@@ -237,7 +237,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                         exceptioncontract.Context{
                             /* named explicitly: the emergency logger this falls back to does not inject it */
                             "requestId":  requestId,
-                            "method":     request.Method,
+                            "method":     internal.BoundDiagnosticText(request.Method),
                             "path":       internal.BoundDiagnosticText(request.URL.Path),
                             "panicStack": string(debug.Stack()),
                         },
@@ -370,7 +370,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             requestLogger.Info(
                 "route matched",
                 loggingcontract.Context{
-                    "method":    request.Method,
+                    "method":    internal.BoundDiagnosticText(request.Method),
                     "path":      internal.BoundDiagnosticText(request.URL.Path),
                     "routeName": routeName,
                 },
@@ -385,11 +385,11 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                         requestLogger.Debug(
                             "automatic options answered",
                             loggingcontract.Context{
-                                "method":         request.Method,
+                                "method":         internal.BoundDiagnosticText(request.Method),
                                 "path":           internal.BoundDiagnosticText(request.URL.Path),
                                 "query":          internal.BoundDiagnosticText(internal.RedactQueryValuesForDiagnostics(request.URL.RawQuery)),
                                 "scheme":         scheme,
-                                "host":           request.Host,
+                                "host":           internal.BoundDiagnosticText(request.Host),
                                 "allowedMethods": allowedMethods,
                             },
                         )
@@ -397,11 +397,11 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                         requestLogger.Warning(
                             "method not allowed",
                             loggingcontract.Context{
-                                "method":         request.Method,
+                                "method":         internal.BoundDiagnosticText(request.Method),
                                 "path":           internal.BoundDiagnosticText(request.URL.Path),
                                 "query":          internal.BoundDiagnosticText(internal.RedactQueryValuesForDiagnostics(request.URL.RawQuery)),
                                 "scheme":         scheme,
-                                "host":           request.Host,
+                                "host":           internal.BoundDiagnosticText(request.Host),
                                 "allowedMethods": allowedMethods,
                             },
                         )
@@ -410,11 +410,11 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                     requestLogger.Warning(
                         "no route matched",
                         loggingcontract.Context{
-                            "method": request.Method,
+                            "method": internal.BoundDiagnosticText(request.Method),
                             "path":   internal.BoundDiagnosticText(request.URL.Path),
                             "query":  internal.BoundDiagnosticText(internal.RedactQueryValuesForDiagnostics(request.URL.RawQuery)),
                             "scheme": scheme,
-                            "host":   request.Host,
+                            "host":   internal.BoundDiagnosticText(request.Host),
                         },
                     )
                 }
@@ -422,11 +422,11 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 requestLogger.Warning(
                     "no route matched",
                     loggingcontract.Context{
-                        "method": request.Method,
+                        "method": internal.BoundDiagnosticText(request.Method),
                         "path":   internal.BoundDiagnosticText(request.URL.Path),
                         "query":  internal.BoundDiagnosticText(internal.RedactQueryValuesForDiagnostics(request.URL.RawQuery)),
                         "scheme": scheme,
-                        "host":   request.Host,
+                        "host":   internal.BoundDiagnosticText(request.Host),
                     },
                 )
             }
@@ -500,7 +500,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                     exception.LogContext(
                         recoveredErr,
                         exceptioncontract.Context{
-                            "method":     melodyRequest.HttpRequest().Method,
+                            "method":     internal.BoundDiagnosticText(melodyRequest.HttpRequest().Method),
                             "path":       internal.BoundDiagnosticText(melodyRequest.HttpRequest().URL.Path),
                             "routeName":  routeName,
                             "durationMs": durationMs,
@@ -563,7 +563,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             requestLogger.Warning(
                 "request path refused before the handler",
                 loggingcontract.Context{
-                    "method":  request.Method,
+                    "method":  internal.BoundDiagnosticText(request.Method),
                     "path":    internal.BoundDiagnosticText(request.URL.Path),
                     "rawPath": internal.BoundDiagnosticText(request.URL.RawPath),
                 },
@@ -583,7 +583,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 exception.LogContext(
                     melodyRequest.bodyReadErr,
                     exceptioncontract.Context{
-                        "method": request.Method,
+                        "method": internal.BoundDiagnosticText(request.Method),
                         "path":   internal.BoundDiagnosticText(request.URL.Path),
                     },
                 ),
@@ -987,7 +987,7 @@ func logHandlerError(requestLogger loggingcontract.Logger, message string, handl
     logContext := exception.LogContext(
         handlerErr,
         exceptioncontract.Context{
-            "method": method,
+            "method": internal.BoundDiagnosticText(method),
             "path":   internal.BoundDiagnosticText(path),
         },
     )

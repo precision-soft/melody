@@ -298,13 +298,13 @@ func appendPlainTextEntry(lines []string, indent string, key string, value any, 
 
         lines = append(lines, label)
         for index := 0; index < reflected.Len() && maxPlainTextLines >= len(lines); index++ {
-            lines = append(lines, indent+"  - "+plainTextItem(reflected.Index(index).Interface()))
+            lines = append(lines, indent+"  - "+plainTextValue(reflected.Index(index), depth+1))
         }
 
         return lines
     }
 
-    return append(lines, labelled(label, fmt.Sprint(value)))
+    return append(lines, labelled(label, plainTextValue(reflected, depth)))
 }
 
 /* labelled writes an entry on its label's line, the bare label when the value is empty */
@@ -316,17 +316,86 @@ func labelled(label string, text string) string {
     return label + " " + text
 }
 
-func plainTextItem(value any) string {
-    switch typedValue := value.(type) {
-    case string:
-        return typedValue
-    case error:
-        return typedValue.Error()
-    case fmt.Stringer:
-        return typedValue.String()
+/* plainTextValue spells a value the walk does not lay out as entries. It descends maps, slices, arrays, structs, pointers and interfaces itself, to maxPlainTextDepth and maxPlainTextLines members each, because fmt has no cycle detection: a value that reaches itself through a slice or a struct would overflow the stack, which no recover catches. */
+func plainTextValue(reflected reflect.Value, depth int) string {
+    if false == reflected.IsValid() {
+        return "<nil>"
     }
 
-    return fmt.Sprint(value)
+    if true == reflected.CanInterface() {
+        switch typedValue := reflected.Interface().(type) {
+        case string:
+            return typedValue
+        case error:
+            return typedValue.Error()
+        case fmt.Stringer:
+            return typedValue.String()
+        }
+    }
+
+    switch reflected.Kind() {
+    case reflect.Map, reflect.Slice, reflect.Array, reflect.Struct, reflect.Pointer, reflect.Interface:
+        if maxPlainTextDepth <= depth {
+            return "..."
+        }
+    }
+
+    switch reflected.Kind() {
+    case reflect.Pointer, reflect.Interface:
+        if true == reflected.IsNil() {
+            return "<nil>"
+        }
+
+        prefix := ""
+        if reflect.Pointer == reflected.Kind() {
+            prefix = "&"
+        }
+
+        return prefix + plainTextValue(reflected.Elem(), depth+1)
+    case reflect.Map:
+        members := make([]string, 0, reflected.Len())
+        iterator := reflected.MapRange()
+        for iterator.Next() {
+            if maxPlainTextLines <= len(members) {
+                break
+            }
+
+            members = append(members, plainTextValue(iterator.Key(), depth+1)+":"+plainTextValue(iterator.Value(), depth+1))
+        }
+        sort.Strings(members)
+
+        if len(members) < reflected.Len() {
+            members = append(members, "...")
+        }
+
+        return "map[" + strings.Join(members, " ") + "]"
+    case reflect.Slice, reflect.Array:
+        if reflect.Uint8 == reflected.Type().Elem().Kind() {
+            break
+        }
+
+        members := make([]string, 0, min(reflected.Len(), maxPlainTextLines+1))
+        for index := 0; index < reflected.Len(); index++ {
+            if maxPlainTextLines <= index {
+                members = append(members, "...")
+                break
+            }
+
+            members = append(members, plainTextValue(reflected.Index(index), depth+1))
+        }
+
+        return "[" + strings.Join(members, " ") + "]"
+    case reflect.Struct:
+        members := make([]string, 0, reflected.NumField())
+        for index := 0; index < reflected.NumField(); index++ {
+            members = append(members, reflected.Type().Field(index).Name+":"+plainTextValue(reflected.Field(index), depth+1))
+        }
+
+        return "{" + strings.Join(members, " ") + "}"
+    }
+
+    /* every kind left is a scalar, a channel, a func or a byte sequence, none of which can reach another value */
+    return fmt.Sprint(reflected)
 }
 
 /* plainTextLabel spells a camel-cased envelope key as words: requestId reads request id. */

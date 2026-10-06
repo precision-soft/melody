@@ -1532,7 +1532,7 @@ The module supplies no default of its own on purpose: the only thing that reaps 
 
 **What changed.** A `.env` line is preprocessed byte by byte rather than through runes, so a file saved as anything other than UTF-8 keeps its bytes — a rune round-trip re-encoded them, rewriting values, a password among them, where godotenv alone passes a quoted value through untouched. The comment cut now matches godotenv's own: a `#` opening before the key separator comments the whole line out, while a `#` after it stays in the produced line once the value has begun and godotenv's countback decides where the value ends, which stops the double cut that read `hello # world # x` as `hello` where godotenv reads `hello # world`. The one comment the countback cannot reach — the `#` that opens before any value byte, `APP_SECRET= # fill this in`, which sits at index zero of the trimmed value — is cut by the preprocessor under the same space-before rule, so the value reads as empty; `KEY=#glued` stays data. And a `${...}` reference whose closing brace arrived over a name outside the key grammar is refused rather than surviving as literal text — nobody types `${...}` into a password by accident — while an unclosed brace stays data, like the bare dollar it is.
 
-**Symptom.** A non-empty value carrying a hash after the separator keeps more of itself than it used to, and an empty one followed by a comment reads as empty rather than as the comment; a non-UTF-8 file stops being rewritten; a `.env` holding a malformed `${...}` fails the boot naming the enclosing key, where it used to load the braces as text, and so does an undefined, self- or mutually-referencing `${X}`, which used to expand to an empty string.
+**Symptom.** A non-empty value carrying a hash after the separator keeps more of itself than it used to, and an empty one followed by a comment reads as empty rather than as the comment; a non-UTF-8 file stops being rewritten for its quoted values, while an unquoted value is still re-encoded to U+FFFD by godotenv itself; a `.env` holding a malformed `${...}` fails the boot naming the enclosing key, where it used to load the braces as text, and so does an undefined, self- or mutually-referencing `${X}`, which used to expand to an empty string.
 
 **Remedy.** Correct the malformed reference, or escape a literal dollar as `\$`. For the comment cut and the encoding there is nothing to do: both moves take the reading onto what godotenv itself does, which is what the surrounding contract always promised.
 
@@ -1935,11 +1935,11 @@ func (instance *CustomHttpConfiguration) SessionTtl() time.Duration {
 
 **Remedy.** Use an absolute `MELODY_LOG_PATH` to pin another location.
 
-### Logging: the serving process reopens its journal on `SIGHUP`
+### Logging: every process reopens its journal on `SIGHUP`
 
-**What changed.** The container-built logger of the serving process opens its file journal through `NewReopenableFileWriter` and reopens it on `SIGHUP`, the signal logrotate sends. A cli process is not armed.
+**What changed.** The container-built logger opens its file journal through `NewReopenableFileWriter` and reopens it on `SIGHUP`, the signal logrotate sends, in every process: the http process and the console commands, a long-running worker included.
 
-**Symptom.** `SIGHUP` no longer terminates the http process. It reopens the journal.
+**Symptom.** `SIGHUP` no longer terminates the process; it reopens the journal. A console worker that relied on `SIGHUP` to stop, or a command whose terminal hung up, keeps running.
 
 **Remedy.** Stop the process with `SIGTERM` or `SIGINT`. Point logrotate's `postrotate` at `SIGHUP` instead of `copytruncate`.
 

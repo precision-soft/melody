@@ -2549,6 +2549,30 @@ func TestSanitizeUrlForDiagnostics_AParsedUrlWithAUserinfoAndAnAtSignInItsQueryK
     }
 }
 
+func TestSanitizeUrlForDiagnostics_APasswordReadAsAPortWithAnAtSignPastItKeepsOnlyItsScheme(t *testing.T) {
+    for _, rawUrl := range []string{
+        "http://user:123/rest@host/",
+        "http://user:/rest@host/",
+        "http://user:123?rest@host",
+        "https://user:p@ss?word@host",
+    } {
+        sanitized := sanitizeUrlForDiagnostics(rawUrl)
+        if "http://"+internal.RedactedQueryValue != sanitized && "https://"+internal.RedactedQueryValue != sanitized {
+            t.Fatalf("expected only the scheme kept for %q, got %q", rawUrl, sanitized)
+        }
+    }
+}
+
+func TestSanitizeUrlForDiagnostics_AnAtSignInTheQueryValueOrInThePathOfAUrlWithoutAPortIsKept(t *testing.T) {
+    if "http://host/users/@me" != sanitizeUrlForDiagnostics("http://host/users/@me") {
+        t.Fatalf("expected the path kept, got %q", sanitizeUrlForDiagnostics("http://host/users/@me"))
+    }
+
+    if "http://host:8080/path?email="+internal.RedactedQueryValue != sanitizeUrlForDiagnostics("http://host:8080/path?email=a@b.example") {
+        t.Fatalf("expected the query value redacted and the path kept, got %q", sanitizeUrlForDiagnostics("http://host:8080/path?email=a@b.example"))
+    }
+}
+
 func TestRedactQuotedSpans_AnUnclosedQuoteLosesItsTail(t *testing.T) {
     if `a "`+internal.RedactedQueryValue+`" b "`+internal.RedactedQueryValue != redactQuotedSpans(`a "x" b "tail`) {
         t.Fatalf("unexpected redaction: %q", redactQuotedSpans(`a "x" b "tail`))
@@ -2567,5 +2591,44 @@ func TestHttpClient_AGetOfAMisparsedUrlJournalsNeitherThePasswordNorItsHead(t *t
     rendered := renderErrorForLog(t, requestErr)
     if true == strings.Contains(rendered, "pa/ss") || true == strings.Contains(rendered, ":pa") {
         t.Fatalf("the password reached the report: %s", rendered)
+    }
+}
+
+func TestMergeQueryOptions_KeepsTheUrlPairsByteForByteAndReplacesAnOptionKey(t *testing.T) {
+    cases := []struct {
+        rawQuery string
+        options  map[string]string
+        expected string
+    }{
+        {rawQuery: "a=%zz&b=1", options: map[string]string{"c": "2"}, expected: "a=%zz&b=1&c=2"},
+        {rawQuery: "a=%zz&b=1", options: map[string]string{"b": "3"}, expected: "a=%zz&b=3"},
+        {rawQuery: "x=1;y=2&b=1", options: map[string]string{"b": "a b"}, expected: "x=1;y=2&b=a+b"},
+        {rawQuery: "", options: map[string]string{"b": "1"}, expected: "b=1"},
+    }
+
+    for _, testCase := range cases {
+        if merged := mergeQueryOptions(testCase.rawQuery, testCase.options); testCase.expected != merged {
+            t.Fatalf("expected %q for %q with %v, got %q", testCase.expected, testCase.rawQuery, testCase.options, merged)
+        }
+    }
+}
+
+func TestHttpClient_BuildUrlKeepsTheRawQueryOfTheUrlWithOrWithoutOptions(t *testing.T) {
+    client := NewDefaultHttpClient()
+    defer client.Close()
+
+    cases := []struct {
+        options  map[string]string
+        expected string
+    }{
+        {options: nil, expected: "http://host/path?a=%zz&b=1"},
+        {options: map[string]string{"c": "2"}, expected: "http://host/path?a=%zz&b=1&c=2"},
+    }
+
+    for _, testCase := range cases {
+        built, buildErr := client.buildUrl("http://host/path?a=%zz&b=1", testCase.options)
+        if nil != buildErr || testCase.expected != built {
+            t.Fatalf("expected %q, got %q and %v", testCase.expected, built, buildErr)
+        }
     }
 }

@@ -563,3 +563,41 @@ func (instance *testEnvironmentSource) Load() (map[string]string, error) {
 
     return copied, nil
 }
+
+func TestMarkSecret_ReachesADotEnvValueAssembledFromTheMarkedKey(t *testing.T) {
+    source := writeDotEnvFiles(t, map[string]string{
+        ".env": "DB_PASSWORD=hunter2\nDB_HOST=db\nDSN=mysql://app:${DB_PASSWORD}@${DB_HOST}/app\nDSN_COPY=${DSN}\nOTHER=plain\n",
+    })
+
+    environment, environmentErr := NewEnvironment(source)
+    if nil != environmentErr {
+        t.Fatalf("environment error: %v", environmentErr)
+    }
+
+    configuration, configurationErr := NewConfiguration(environment, t.TempDir())
+    if nil != configurationErr {
+        t.Fatalf("configuration error: %v", configurationErr)
+    }
+
+    configuration.RegisterRuntime("database.dsn", "%env(DSN_COPY)%")
+
+    if resolveErr := configuration.Resolve(); nil != resolveErr {
+        t.Fatalf("resolve error: %v", resolveErr)
+    }
+
+    if false == configuration.MarkSecret("DB_PASSWORD") {
+        t.Fatalf("expected the marking to land")
+    }
+
+    for _, name := range []string{"DSN", "DSN_COPY", "database.dsn"} {
+        if false == configuration.MustGet(name).IsSecret() {
+            t.Fatalf("expected %s, assembled from the marked key, marked", name)
+        }
+    }
+
+    for _, name := range []string{"DB_HOST", "OTHER"} {
+        if true == configuration.MustGet(name).IsSecret() {
+            t.Fatalf("expected %s, which reads no marked key, unmarked", name)
+        }
+    }
+}

@@ -30,6 +30,8 @@ The `--build` sweep reports its failures on the envelope, so it fails a deployme
 
 `debug:events --format=json --verbose` carries the per-listener detail — priority, source, owner and the required / may-skip marks — under `data.listeners`, beside the event list under `data.events`; without `--verbose` the json `data` stays the plain list payload. The **declaration** of the listeners a serving process wires and this one does not is on `data.servingProcessListeners` at every verbosity, beside the listing rather than instead of it, because it exists so that "is access control wired?" is not answered with an absence meaning "not in this process". `--order` reaches both halves of the document: it orders the events, while inside one event the listener rows keep the dispatch order their `order` field reports. The table summary's `SUBSCRIBERS` total counts distinct subscribers across the whole dispatcher, while the per-event column counts them per event.
 
+The `subscriber types` column, and `subscriberOwnerCount` in the json document, count the distinct subscriber TYPES that contributed listeners, not installations: two instances of one subscriber type count once.
+
 The `debug:container` list summary orders its segments `total | shown | ok | error` when a window is applied: only the windowed services are resolved, so the ok/error split answers the shown rows, not the total.
 
 ## Flags and output
